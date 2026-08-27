@@ -9,6 +9,12 @@
 //! Derived-clock values are refreshed by a dedicated
 //! `derived_clock_eval` ProtoStatements chunk (dependency closure only),
 //! JIT-compiled separately so the main comb JIT/AOT-C blob is untouched.
+//!
+//! A non-port ASYNC RESET the design produces itself rides the same
+//! machinery: no testbench drives it, so its assertion is a transition of
+//! an internal net just like a derived clock's rising edge, and firing
+//! `Event::Reset(VarId)` there is what keeps `if_reset` from waiting for
+//! the next clock edge.
 
 use crate::HashMap;
 use crate::HashSet;
@@ -30,9 +36,26 @@ pub struct DerivedClock {
     pub master_gated: bool,
 }
 
+/// An internally produced async reset, monitored for its ASSERTION.
+#[derive(Clone, Debug)]
+pub struct DerivedReset {
+    pub var_id: VarId,
+    /// `is_ff()` selects between `ff_values` and `comb_values`.
+    pub current_offset: VarOffset,
+    /// Always 1 for a reset; carried for the `read_native_value` ABI.
+    pub native_bytes: usize,
+    /// The net asserts when it reads 0.
+    pub active_low: bool,
+}
+
+/// A net to monitor: `(var, offset, native bytes, polarity)`, where the
+/// polarity is `None` for a clock and `Some(active_low)` for an async reset.
+pub type EdgeCandidate = (VarId, VarOffset, usize, Option<bool>);
+
 #[derive(Clone, Debug, Default)]
 pub struct DerivedClockSchedule {
     pub clocks: Vec<DerivedClock>,
+    pub resets: Vec<DerivedReset>,
     /// Input clocks toggled 0→1 in `step()` so gated-clock expressions
     /// see a rising edge.  Boundary inputs of the dependency closure
     /// that match a top-module clock-typed variable — either an input
@@ -42,7 +65,7 @@ pub struct DerivedClockSchedule {
 
 impl DerivedClockSchedule {
     pub fn is_empty(&self) -> bool {
-        self.clocks.is_empty()
+        self.clocks.is_empty() && self.resets.is_empty()
     }
 }
 
@@ -50,7 +73,7 @@ impl DerivedClockSchedule {
 /// dependency-closure stmt indices into `pre_jit_stmts` (already
 /// topo-sorted by `analyze_dependency`).
 pub fn build_schedule(
-    derived_clock_vars: &[(VarId, VarOffset, usize)],
+    candidates: &[EdgeCandidate],
     pre_jit_stmts: &[ProtoStatement],
     input_clock_offsets: &HashMap<VarOffset, VarId>,
 ) -> (DerivedClockSchedule, Vec<usize>) {
@@ -70,22 +93,36 @@ pub fn build_schedule(
         }
     }
 
-    let mut clocks: Vec<DerivedClock> = derived_clock_vars
+    // Skip nets with no writer: testbench-driven (e.g. `inst clk:
+    // $tb::clock_gen`, `inst rst: $tb::reset_gen`) nets have their edges
+    // supplied directly by the testbench, so monitoring them would just
+    // push the module onto `step_with_derived_clocks` for nothing.
+    // FF-storage nets always pass; their writer is the always_ff stmt,
+    // which `output_to_writer` doesn't track.
+    let driven = |off: &VarOffset| off.is_ff() || output_to_writer.contains_key(off);
+
+    let mut clocks: Vec<DerivedClock> = candidates
         .iter()
-        .filter(|(_, off, _)| {
-            // Skip clocks with no writer: testbench-driven (e.g. `inst
-            // clk: $tb::clock_gen`) clocks have edges supplied directly
-            // by the testbench, so monitoring them would just push the
-            // module onto `step_with_derived_clocks` for nothing.
-            // FF-storage clocks always pass; their writer is the
-            // always_ff stmt, which `output_to_writer` doesn't track.
-            off.is_ff() || output_to_writer.contains_key(off)
-        })
-        .map(|(var_id, off, nb)| DerivedClock {
+        .filter(|(_, off, _, polarity)| polarity.is_none() && driven(off))
+        .map(|(var_id, off, nb, _)| DerivedClock {
             var_id: *var_id,
             current_offset: *off,
             native_bytes: *nb,
             master_gated: false,
+        })
+        .collect();
+
+    let resets: Vec<DerivedReset> = candidates
+        .iter()
+        .filter_map(|(var_id, off, nb, polarity)| {
+            polarity
+                .filter(|_| driven(off))
+                .map(|active_low| DerivedReset {
+                    var_id: *var_id,
+                    current_offset: *off,
+                    native_bytes: *nb,
+                    active_low,
+                })
         })
         .collect();
 
@@ -125,6 +162,25 @@ pub fn build_schedule(
         dep_set.extend(local_dep);
         master_set.extend(local_master);
     }
+    for rst in &resets {
+        if rst.current_offset.is_ff() {
+            continue;
+        }
+        // Same closure, for `partial_settle` only: a reset has no ICG
+        // reading, so its master inputs stay out of `master_input_clocks`
+        // (toggling one would fabricate a clock edge nothing asked for).
+        let mut local_dep: HashSet<usize> = HashSet::default();
+        let mut local_master: HashSet<VarId> = HashSet::default();
+        collect_comb_closure(
+            rst.current_offset,
+            pre_jit_stmts,
+            &output_to_writer,
+            input_clock_offsets,
+            &mut local_dep,
+            &mut local_master,
+        );
+        dep_set.extend(local_dep);
+    }
 
     // Sort by pre_jit_stmts index so partial_settle runs deps first.
     let mut eval_indices: Vec<usize> = dep_set.into_iter().collect();
@@ -138,6 +194,7 @@ pub fn build_schedule(
     (
         DerivedClockSchedule {
             clocks,
+            resets,
             master_input_clocks,
         },
         eval_indices,

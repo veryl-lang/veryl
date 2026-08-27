@@ -2,6 +2,7 @@ use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
+use crate::conv::checker::portability::check_initial_assign;
 use crate::conv::utils::eval_width_select;
 use crate::ir::{
     AssignDestination, Comptime, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind,
@@ -48,6 +49,8 @@ impl VarPathSelect {
         ignore_error: bool,
     ) -> Option<AssignDestination> {
         let (path, mut select, token) = self.into();
+
+        check_initial_assign(context, &path, &token);
 
         if let Some((id, mut comptime)) = context.find_path(&path) {
             if let Some(part_select) = &comptime.part_select {
@@ -147,6 +150,8 @@ impl VarPathSelect {
         let ignore_error = ignore_error || context.in_generic;
 
         let (path, select, token) = self.clone().into();
+
+        check_initial_assign(context, &path, &token);
 
         let Some((id, mut base_comptime)) = context.find_path(&path) else {
             return self

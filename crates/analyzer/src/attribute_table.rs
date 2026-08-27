@@ -1,17 +1,37 @@
 use crate::attribute::{AlignItem, Attribute, ExpandItem, FormatItem, IfdefCondition};
 use crate::range_table::RangeTable;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use veryl_parser::resource_table::PathId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_token::Token;
 
 thread_local!(static ATTRIBUTE_TABLE: RefCell<RangeTable<Attribute>> = RefCell::new(RangeTable::default()));
 
+// Lets the emitter skip its `always_ff` scan in a project that uses none.
+// `drop` leaves it set: a stale `true` only costs a scan that finds nothing.
+thread_local!(static NON_PORTABLE_ALLOW: Cell<bool> = const { Cell::new(false) });
+
+fn note_non_portable(value: &Attribute) {
+    if let Attribute::Allow(x) = value
+        && x.is_non_portable()
+    {
+        NON_PORTABLE_ALLOW.set(true);
+    }
+}
+
+pub fn has_non_portable_allow() -> bool {
+    NON_PORTABLE_ALLOW.get()
+}
+
 pub fn insert(range: TokenRange, value: Attribute) {
+    note_non_portable(&value);
     ATTRIBUTE_TABLE.with(|f| f.borrow_mut().insert(range, value))
 }
 
 pub fn begin(token: Token, value: Option<Attribute>) {
+    if let Some(x) = &value {
+        note_non_portable(x);
+    }
     ATTRIBUTE_TABLE.with(|f| f.borrow_mut().begin(token, value))
 }
 
@@ -63,6 +83,7 @@ pub fn export_by_path(path: PathId) -> Vec<(TokenRange, Attribute)> {
 }
 
 pub fn clear() {
+    NON_PORTABLE_ALLOW.set(false);
     ATTRIBUTE_TABLE.with(|f| f.borrow_mut().clear())
 }
 

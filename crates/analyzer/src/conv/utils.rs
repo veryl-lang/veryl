@@ -5,6 +5,7 @@ use crate::analyzer_error::{
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
+use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
@@ -925,6 +926,15 @@ pub fn eval_const_assign(
     expr: &mut (ir::Comptime, ir::Expression),
 ) -> IrResult<()> {
     let (comptime, expr) = expr;
+    // Same unfolded form `get_overridden_params` handles: an indexed read of
+    // an unpacked-array const arrives const but valueless, and left alone the
+    // const stays unresolved.  An array literal keeps its own path.
+    if comptime.value.is_unknown()
+        && comptime.is_const
+        && let Some(value) = expr.eval_value(context)
+    {
+        comptime.value = ValueVariant::Numeric(value);
+    }
     let comptime = comptime.clone();
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
@@ -1994,6 +2004,7 @@ pub fn eval_function_call(
             SymbolKind::SystemFunction(_) => {
                 let name = symbol.found.token.text;
                 let args = args.to_system_function_args(context, &symbol.found);
+                check_initial_assign_system_function_args(context, &symbol.found, &args);
                 let ret = ir::SystemFunctionCall::new(context, name, args, token)?;
                 Ok(ir::Expression::Term(Box::new(
                     ir::Factor::SystemFunctionCall(ret),
@@ -3594,6 +3605,16 @@ pub fn get_overridden_params(
             && let Some(values) = resolve_array_value(context, r#type, &expr.1)
         {
             expr.0.value = ValueVariant::NumericArray(values);
+        }
+
+        // An element of an unpacked-array parameter arrives const but
+        // unfolded, so no instance is specialised and a width derived from it
+        // stays symbolic — which the simulator cannot elaborate.
+        if expr.0.value.is_unknown()
+            && expr.0.is_const
+            && let Some(value) = expr.1.eval_value(context)
+        {
+            expr.0.value = ValueVariant::Numeric(value);
         }
 
         let is_type_param = matches!(

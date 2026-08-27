@@ -77,6 +77,12 @@ pub struct Context {
     /// complete via `set_instance_history`, which functions never call, so it
     /// would stay wedged as "active" forever.
     pub function_call_stack: Vec<Signature>,
+    /// Return variable of the function currently being constant-evaluated, and
+    /// whether one of its `return` statements has already run. A `return` is
+    /// lowered to an assignment to that variable, so without this the
+    /// evaluator walks straight past it and the LAST `return` wins.
+    pub function_ret_var: Option<VarId>,
+    pub function_returned: bool,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -90,6 +96,10 @@ pub struct Context {
     pub in_if_reset: bool,
     /// Inside an initial/final block (testbench statement context).
     pub in_tb_block: bool,
+    /// Inside an `initial` block, holding the next `VarId` at its entry so the
+    /// block's own procedural locals can be told from the module's state.
+    /// `in_tb_block` is unusable here: it also covers `final` and connections.
+    pub in_initial: Option<VarId>,
     /// Sink for component method calls hoisted out of the current
     /// testbench statement's expressions; `Some` only while initial/final
     /// statements convert. Each hoisted call runs as its own zero-time

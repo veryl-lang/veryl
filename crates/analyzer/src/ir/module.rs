@@ -73,6 +73,9 @@ impl Module {
         for (i, x) in self.declarations.iter().enumerate() {
             let mut new_table = AssignTable::new(context);
             x.eval_assign(context, &mut new_table);
+            if matches!(x, Declaration::Initial(_)) {
+                new_table.exempt_initial_writes(context);
+            }
             // Snapshot per-decl reference masks before `new_table` is dropped.
             // `Declaration::eval_assign` no longer clears `refernced`, so the
             // accumulated reads/writes are still in place here.

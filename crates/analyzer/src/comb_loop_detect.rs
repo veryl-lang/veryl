@@ -1306,7 +1306,6 @@ fn add_inst_feedthrough_edges<'a>(
                 inst,
                 child,
                 *child_destination,
-                *dependency,
                 Direction::Output,
                 output_dsts.get(&child_destination.id).map(Vec::as_slice),
                 bit_part,
@@ -1422,7 +1421,6 @@ fn map_instance_source_region<'a>(
         inst,
         child,
         region,
-        dependency,
         Direction::Input,
         allowed,
         bit_part,
@@ -1573,7 +1571,6 @@ fn instance_region_mapping(
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
-    dependency: BitDependency,
     direction: Direction,
     fallback: Option<&[NodeKey]>,
     bit_part: &BitPartition,
@@ -1584,7 +1581,6 @@ fn instance_region_mapping(
         .get(&region.id)
         .or_else(|| child.interface_members.get(&region.id));
     if let Some(variable) = variable
-        && (direction == Direction::Input || dependency.has_position())
         && let Some((parent, index, select)) =
             instance_port_region_actual(inst, region.id, direction)
     {

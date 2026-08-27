@@ -127,6 +127,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(cyclic_file_dependency),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("Cyclic dependency between \"{start}\" and \"{end}\"")]
+    CyclicFileDependency {
+        start: String,
+        end: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(duplicate_argument),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -755,6 +772,39 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_initial_assign),
+        help("add `#[allow(initial_assign)]` to the declaration of \"{identifier}\" if the target device initializes it at configuration time"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" is assigned in an initial block")]
+    InvalidInitialAssign {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(non_portable_dependency),
+        help("add \"{item}\" to `lint.portability.allow_in_dependencies` in Veryl.toml to accept it"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("non-portable `#[allow({item})]` is used in dependency \"{project}\"")]
+    NonPortableDependency {
+        item: String,
+        project: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_for_range),
         help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1359,7 +1409,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(multiple_assignment),
-        help(""),
+        help("add `#[allow(multiple_assign)]` to the declaration of \"{identifier}\" if it is intentional"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{identifier}\" is assigned in multiple procedural blocks or assignment statements")]
@@ -2080,6 +2130,7 @@ impl AnalyzerError {
             AnalyzerError::CombinationalLoop { input, .. } => input,
             AnalyzerError::CombinationalLoopPositionOverflow { input, .. } => input,
             AnalyzerError::CyclicTypeDependency { input, .. } => input,
+            AnalyzerError::CyclicFileDependency { input, .. } => input,
             AnalyzerError::DuplicateArgument { input, .. } => input,
             AnalyzerError::DuplicatedIdentifier { input, .. } => input,
             AnalyzerError::DuplicateEnumVariant { input, .. } => input,
@@ -2121,6 +2172,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidSelect { input, .. } => input,
             AnalyzerError::InvalidSizeType { input, .. } => input,
             AnalyzerError::InvalidStatement { input, .. } => input,
+            AnalyzerError::InvalidInitialAssign { input, .. } => input,
             AnalyzerError::InvalidTbUsage { input, .. } => input,
             AnalyzerError::InvalidTest { input, .. } => input,
             AnalyzerError::InvalidTypeDeclaration { input, .. } => input,
@@ -2152,6 +2204,7 @@ impl AnalyzerError {
             AnalyzerError::MultipleDefault { input, .. } => input,
             AnalyzerError::NonConstantSelectWidth { input, .. } => input,
             AnalyzerError::NonPositiveValue { input, .. } => input,
+            AnalyzerError::NonPortableDependency { input, .. } => input,
             AnalyzerError::PrivateMember { input, .. } => input,
             AnalyzerError::PrivateNamespace { input, .. } => input,
             AnalyzerError::ReferringBeforeDefinition { input, .. } => input,
@@ -2199,6 +2252,7 @@ impl AnalyzerError {
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoopPositionOverflow { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
+            AnalyzerError::CyclicFileDependency { token_source, .. } => *token_source,
             AnalyzerError::DuplicateArgument { token_source, .. } => *token_source,
             AnalyzerError::DuplicateEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
@@ -2238,6 +2292,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
+            AnalyzerError::InvalidInitialAssign { token_source, .. } => *token_source,
             AnalyzerError::InvalidForRange { token_source, .. } => *token_source,
             AnalyzerError::InvalidForStep { token_source, .. } => *token_source,
             AnalyzerError::InvalidTbUsage { token_source, .. } => *token_source,
@@ -2254,6 +2309,7 @@ impl AnalyzerError {
             AnalyzerError::ImplicitClockConversion { token_source, .. } => *token_source,
             AnalyzerError::InvalidClockAssignment { token_source, .. } => *token_source,
             AnalyzerError::NonPositiveValue { token_source, .. } => *token_source,
+            AnalyzerError::NonPortableDependency { token_source, .. } => *token_source,
             AnalyzerError::MismatchAttributeArgs { token_source, .. } => *token_source,
             AnalyzerError::MismatchClockDomain { token_source, .. } => *token_source,
             AnalyzerError::MismatchFunctionArg { token_source, .. } => *token_source,
@@ -2365,6 +2421,15 @@ impl AnalyzerError {
     }
     pub fn cyclic_type_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
         AnalyzerError::CyclicTypeDependency {
+            start: start.into(),
+            end: end.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn cyclic_file_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
+        AnalyzerError::CyclicFileDependency {
             start: start.into(),
             end: end.into(),
             input: source(token),
@@ -2714,6 +2779,23 @@ impl AnalyzerError {
     pub fn invalid_statement(kind: &str, token: &TokenRange) -> Self {
         AnalyzerError::InvalidStatement {
             kind: kind.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn invalid_initial_assign(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidInitialAssign {
+            identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn non_portable_dependency(item: &str, project: &str, token: &TokenRange) -> Self {
+        AnalyzerError::NonPortableDependency {
+            item: item.to_string(),
+            project: project.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

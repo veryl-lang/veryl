@@ -2821,6 +2821,73 @@ endpackage
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+proto package a_proto_pkg {
+    type addr_t;
+    type data_t;
+}
+package a_pkg::<AW: u32, DW: u32> for a_proto_pkg {
+    type addr_t = logic<AW>;
+    type data_t = logic<DW>;
+}
+interface b_if::<PKG: a_proto_pkg> {
+    import PKG::*;
+    var addr: addr_t;
+    var data: data_t;
+    modport mp {
+        ..input
+    }
+}
+package c_pkg {
+    const ADDR_WIDTH: u32 = 16;
+    const DATA_WIDTH: u32 = 32;
+    alias package a_16_32_pkg = a_pkg::<ADDR_WIDTH, DATA_WIDTH>;
+}
+module d_module (
+    a: modport b_if::<a_16_32_pkg>::mp,
+) {
+    import c_pkg::a_16_32_pkg;
+}
+"#;
+
+    let expect = r#"
+
+package prj___a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH;
+    typedef logic [prj_c_pkg::ADDR_WIDTH-1:0] addr_t;
+    typedef logic [prj_c_pkg::DATA_WIDTH-1:0] data_t;
+endpackage
+interface prj___b_if____a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH;
+    import prj___a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH::*;
+    prj___a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH::addr_t addr;
+    prj___a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH::data_t data;
+    modport mp (
+        input addr,
+        input data
+    );
+endinterface
+package prj_c_pkg;
+    localparam int unsigned ADDR_WIDTH = 16;
+    localparam int unsigned DATA_WIDTH = 32;
+
+
+endpackage
+module prj_d_module
+
+(
+    prj___b_if____a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH.mp a
+);
+
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]
@@ -3765,6 +3832,32 @@ endmodule
 fn emit_with_default(code: &str) -> String {
     let metadata = Metadata::create_default("prj").unwrap();
     emit(&metadata, code)
+}
+
+#[test]
+fn proto_package_import_suppressed() {
+    // A proto package import is a bare component import; it has no
+    // SystemVerilog form and references through it are emitted as fully
+    // qualified paths.
+    let code = r#"
+proto package ProtoPkg {
+    const WIDTH: u32;
+}
+package Impl for ProtoPkg {
+    const WIDTH: u32 = 8;
+}
+module top {
+    import prj::ProtoPkg;
+    var x: logic<Impl::WIDTH>;
+    assign x = 0;
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        !ret.contains("import prj_ProtoPkg;"),
+        "proto package import must not be emitted: {ret}"
+    );
 }
 
 #[test]
@@ -4840,4 +4933,52 @@ fn struct_member_ifdef_keeps_semicolon_inside_guard() {
         !ret.contains("`endif;"),
         "no stray ';' after `endif:\n{ret}"
     );
+}
+
+#[test]
+fn non_portable_variable_lowers_always_ff_to_always() {
+    // SystemVerilog forbids another process from writing a variable an
+    // `always_ff` writes, so the opt-in has to drop the `_ff`.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M (
+    clk0: input clock,
+    clk1: input clock,
+    en0 : input logic,
+    en1 : input logic,
+) {
+    #[allow(multiple_assign)]
+    var ram: logic<32> [32];
+    var other: logic;
+
+    always_ff (clk0) {
+        if en0 {
+            ram[0] = 0;
+        }
+    }
+    always_ff (clk1) {
+        if en1 {
+            ram[1] = 1;
+        }
+    }
+    always_ff (clk0) {
+        other = ram[0];
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert_eq!(
+        ret.matches("always @").count(),
+        2,
+        "both writers must be plain always:\n{ret}"
+    );
+    assert_eq!(
+        ret.matches("always_ff @").count(),
+        1,
+        "a reader-only block keeps always_ff:\n{ret}"
+    );
+
+    let code = code.replace("    #[allow(multiple_assign)]\n", "");
+    let ret = emit(&metadata, &code);
+    assert_eq!(ret.matches("always_ff @").count(), 3, "{ret}");
 }

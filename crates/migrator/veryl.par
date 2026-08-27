@@ -50,7 +50,7 @@
 // Longest match should be first
 
 CommentsTerm          : <INITIAL, Generic, EmbedHeader,                            Attr>"(?:(?:(?://.*(?:\r\n|\r|\n))|(?:/\*(?:[^*]|\*+[^*/])*\*+/))\s*)+"                    : Token;
-StringLiteralTerm     : <INITIAL         ,                                         Attr>"\u{0022}(?:\\[\u{0022}\\/bfnrt]|u[0-9a-fA-F]{4}|[^\u{0022}\\\u0000-\u001F])*\u{0022}": Token;
+StringLiteralTerm     : <INITIAL         ,                                         Attr>"\u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}"                   : Token;
 ExponentTerm          : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
 BasedTerm             : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/              : Token;
@@ -148,6 +148,7 @@ InTerm                : <INITIAL, Generic                                       
 LetTerm               : <INITIAL, Generic                                             >'let'                                                                                 : Token; // Keyword: Statement
 LogicTerm             : <INITIAL, Generic                                             >'logic'                                                                               : Token; // Keyword: Type
 LsbTerm               : <INITIAL, Generic                                             >'lsb'                                                                                 : Token; // Keyword: Literal
+MixinTerm             : <INITIAL, Generic                                             >'mixin'                                                                               : Token; // Keyword: Statement
 ModportTerm           : <INITIAL, Generic                                             >'modport'                                                                             : Token; // Keyword: Structure
 ModuleTerm            : <INITIAL, Generic                                             >'module'                                                                              : Token; // Keyword: Structure
 MsbTerm               : <INITIAL, Generic                                             >'msb'                                                                                 : Token; // Keyword: Literal
@@ -298,6 +299,7 @@ InToken            : InTerm            : Token Comments;
 LetToken           : LetTerm           : Token Comments;
 LogicToken         : LogicTerm         : Token Comments;
 LsbToken           : LsbTerm           : Token Comments;
+MixinToken         : MixinTerm         : Token Comments;
 ModportToken       : ModportTerm       : Token Comments;
 ModuleToken        : ModuleTerm        : Token Comments;
 MsbToken           : MsbTerm           : Token Comments;
@@ -455,6 +457,7 @@ Interface     : InterfaceToken     : VerylToken;
 Let           : LetToken           : VerylToken;
 Logic         : LogicToken         : VerylToken;
 Lsb           : LsbToken           : VerylToken;
+Mixin         : MixinToken         : VerylToken;
 Modport       : ModportToken       : VerylToken;
 Module        : ModuleToken        : VerylToken;
 Msb           : MsbToken           : VerylToken;
@@ -705,7 +708,7 @@ Statement: IdentifierStatement
          | SwitchStatement
          ;
 
-LetStatement: Let Identifier Colon [ ClockDomain ] ArrayType Equ Expression Semicolon;
+LetStatement: Let Identifier [ Colon [ ClockDomain ] ArrayType ] Equ Expression Semicolon;
 
 IdentifierStatement: ExpressionIdentifier ( FunctionCall | Assignment ) Semicolon;
 
@@ -721,7 +724,7 @@ ReturnStatement: Return Expression Semicolon;
 
 BreakStatement: Break Semicolon;
 
-ForStatement: For Identifier Colon ScalarType In [ Rev ] Range [ Step AssignmentOperator Expression ] StatementBlock;
+ForStatement: For Identifier In [ Rev ] Range [ Step AssignmentOperator Expression ] StatementBlock;
 
 CaseStatement: Case Expression LBrace { CaseItem } RBrace;
 
@@ -751,11 +754,11 @@ AttributeItem: Identifier
 // Declaration
 // ----------------------------------------------------------------------------
 
-LetDeclaration: Let Identifier Colon [ ClockDomain ] ArrayType Equ Expression Semicolon;
+LetDeclaration: Let Identifier [ Colon [ ClockDomain ] ArrayType ] Equ Expression Semicolon;
 
-VarDeclaration: Var Identifier Colon [ ClockDomain ] ArrayType Semicolon;
+VarDeclaration: Var Identifier [ Colon [ ClockDomain ] ArrayType ] Semicolon;
 
-ConstDeclaration: Const Identifier Colon ( ArrayType | Type ) Equ Expression Semicolon;
+ConstDeclaration: Const Identifier [ Colon ( ArrayType | Type ) ] Equ Expression Semicolon;
 
 GenDeclaration: Gen Identifier Colon ( GenericProtoBound | Type ) Equ Expression Semicolon;
 
@@ -922,7 +925,17 @@ FunctionDeclaration: Function Identifier [ WithGenericParameter ] [ PortDeclarat
 // Import
 // ----------------------------------------------------------------------------
 
-ImportDeclaration: Import ScopedIdentifier [ ColonColon Star ] Semicolon;
+ImportDeclaration: Import ScopedIdentifier [ ColonColon ( Star | MultipleImportList )] Semicolon;
+
+MultipleImportList: LBrace MultipleImportItem { Comma MultipleImportItem } [ Comma ] RBrace;
+
+MultipleImportItem: Identifier;
+
+// ----------------------------------------------------------------------------
+// Mixin
+// ----------------------------------------------------------------------------
+
+MixinDeclaration: Mixin ScopedIdentifier Semicolon;
 
 // ----------------------------------------------------------------------------
 // Unsafe
@@ -944,7 +957,7 @@ InterfaceDeclaration: Interface Identifier [ WithGenericParameter ] [ For Scoped
 
 InterfaceGroup: { Attribute } ( LBrace { InterfaceGroup } RBrace | InterfaceItem );
 
-InterfaceItem: GenerateItem | ModportDeclaration;
+InterfaceItem: GenerateItem | MixinDeclaration | ModportDeclaration;
 
 GenerateIfDeclaration: If Expression GenerateNamedBlock { Else If Expression GenerateOptionalNamedBlock } [ Else GenerateOptionalNamedBlock ];
 

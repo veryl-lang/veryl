@@ -7,6 +7,36 @@ use std::fmt;
 pub struct Lint {
     #[serde(default)]
     pub naming: LintNaming,
+    #[serde(default)]
+    pub portability: LintPortability,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LintPortability {
+    /// `#[allow]` in the project's own code is always honored; a dependency
+    /// needs the consumer's permission, so an ASIC project can't absorb an
+    /// FPGA-only library without noticing.
+    #[serde(default)]
+    pub allow_in_dependencies: Vec<NonPortableItem>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NonPortableItem {
+    #[serde(rename = "initial_assign")]
+    InitialAssign,
+    #[serde(rename = "multiple_assign")]
+    MultipleAssign,
+}
+
+impl fmt::Display for NonPortableItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            NonPortableItem::InitialAssign => "initial_assign",
+            NonPortableItem::MultipleAssign => "multiple_assign",
+        };
+        text.fmt(f)
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

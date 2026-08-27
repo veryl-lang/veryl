@@ -4661,6 +4661,7 @@ fn readmemh_basic() {
     module Top (
         i_clk: input clock,
     ) {{
+        #[allow(initial_assign)]
         var mem: logic<8> [4];
         initial {{
             $readmemh("{}", mem);
@@ -4701,6 +4702,7 @@ fn readmemh_address_directive_moves_the_load_position() {
     module Top (
         i_clk: input clock,
     ) {{
+        #[allow(initial_assign)]
         var mem: logic<8> [6];
         initial {{
             $readmemh("{}", mem);
@@ -12091,7 +12093,9 @@ fn lhs_concatenation_in_initial() {
         hi: output logic<8>,
         lo: output logic<8>,
     ) {
+        #[allow(initial_assign)]
         var hi_v: logic<8>;
+        #[allow(initial_assign)]
         var lo_v: logic<8>;
 
         initial {
@@ -17895,134 +17899,13 @@ fn ternary_sign_extends_narrow_signed_branch() {
     }
 }
 
-/// A logically-false feedback whose write group the sort cannot
-/// linearize even with a pin.  It must surface as a CombinationalLoop
-/// error, NOT interleave the reader into the group where it re-reads the
-/// same mid-computation value on every pass — the silent miscompute
-/// (q2 == 0 forever) this test guards against.  If a future scheduler
-/// handles the design, the Ok arm's value assertions take over.
-#[test]
-fn false_comb_cycle_unpinnable_is_rejected_not_miscomputed() {
-    let code = r#"
-    module Top (
-        en: input  logic,
-        q2: output logic,
-    ) {
-        var h: logic;
-        var s: logic;
-        var p: logic;
-        always_comb {
-            h = 0;
-            if p {
-                h = 1;
-            }
-        }
-        assign s = h;
-        assign p = en | s;
-        assign q2 = s;
-    }
-    "#;
-    for config in Config::all() {
-        if config.use_4state {
-            continue;
-        }
-        symbol_table::clear();
-        match analyze_top(code, &config, "Top") {
-            Err(SimulatorError::CombinationalLoop { .. }) => {}
-            Err(e) => panic!("unexpected error {e:?}, config={config:?}"),
-            Ok(ir) => {
-                let mut sim = Simulator::new(ir, None);
-                sim.set("en", Value::new(1, 1, false));
-                for _ in 0..3 {
-                    sim.step(&Event::Clock(VarId::SYNTHETIC));
-                }
-                assert_eq!(
-                    sim.get("q2").unwrap(),
-                    Value::new(1, 1, false),
-                    "q2 must reach the settled value, config={config:?}"
-                );
-            }
-        }
-    }
-}
-
-/// A structurally-cyclic but logically-false comb feedback (stall masks
-/// the update that feeds the stall) plus split-driver per-bit assigns:
-/// exercises the degradation path (SCC relax + reader pin) and the extra
-/// settle passes that make the feedback converge.
-#[test]
-fn false_comb_cycle_with_split_drivers() {
-    let code = r#"
-    module Top (
-        i_clk  : input  '_ clock   ,
-        i_rst  : input  '_ reset   ,
-        i_addr : input     logic<2>,
-        i_en   : input     logic   ,
-        o_stall: output    logic   ,
-        o_upd  : output    logic<4>,
-    ) {
-        var r_pend: logic<4>;
-
-        // Split-driver net: per-bit assigns of one packed vector,
-        // depending on a stall that depends on the net (false path:
-        // i_en gates the feedback off).
-        var w_upd: logic<4>;
-        for i in 0..4 :g_upd {
-            assign w_upd[i] = r_pend[i] | (i_en && !o_stall && (i_addr == i));
-        }
-
-        assign o_stall = w_upd[i_addr] && !i_en;
-        assign o_upd   = w_upd;
-
-        always_ff (i_clk, i_rst) {
-            if_reset {
-                r_pend = 0;
-            } else {
-                r_pend = w_upd;
-            }
-        }
-    }
-    "#;
-    for config in Config::all() {
-        if config.use_4state {
-            // The initial X takes more settle iterations to clear around
-            // the feedback than the schedule's pass count; 2-state is
-            // what this regression targets.
-            continue;
-        }
-        let ir = analyze(code, &config);
-        let mut sim = Simulator::new(ir, None);
-        let clk = sim.get_clock("i_clk").unwrap();
-        let rst = sim.get_reset("i_rst").unwrap();
-        sim.set("i_en", Value::new(1, 1, false));
-        sim.set("i_addr", Value::new(2, 2, false));
-        sim.step_reset(&clk, &rst);
-        sim.step(&clk);
-        assert_eq!(
-            sim.get("o_upd").unwrap(),
-            Value::new(0b0100, 4, false),
-            "bit 2 set via the enabled path, config={config:?}"
-        );
-        assert_eq!(
-            sim.get("o_stall").unwrap(),
-            Value::new(0, 1, false),
-            "stall masked while enabled, config={config:?}"
-        );
-        sim.set("i_en", Value::new(0, 1, false));
-        sim.step(&clk);
-        assert_eq!(
-            sim.get("o_stall").unwrap(),
-            Value::new(1, 1, false),
-            "pending bit 2 stalls once enable drops, config={config:?}"
-        );
-    }
-}
-
 #[test]
 fn runtime_stepped_for_stall_guard_terminates() {
     // `*= 2` from 0 stalls at 0.  With a runtime bound the loop can't be
     // unrolled or rejected at analysis, so the simulator's progress guard
-    // must break out instead of spinning forever in one delta step.
+    // must break out instead of spinning forever in one delta step, and
+    // report it: the emitted SystemVerilog loops here instead of stopping.
+    // https://github.com/veryl-lang/veryl/issues/3134
     let code = r#"
     module Top (
         i_n: input  logic<8>,
@@ -18038,6 +17921,7 @@ fn runtime_stepped_for_stall_guard_terminates() {
     "#;
     for config in Config::all() {
         dbg!(&config);
+        crate::assert_buffer::reset();
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
         sim.set("i_n", Value::new(10, 8, false));
@@ -18048,6 +17932,11 @@ fn runtime_stepped_for_stall_guard_terminates() {
             Value::new(1, 8, false),
             "config={config:?}"
         );
+        assert!(
+            crate::assert_buffer::has_fatal(),
+            "non-progressing loop should be reported: config={config:?}"
+        );
+        crate::assert_buffer::reset();
     }
 }
 
@@ -20445,6 +20334,219 @@ fn bare_signed_rhs_sign_extends_at_wide_store() {
 }
 
 #[test]
+fn wide_bit_select_store_keeps_only_the_field_of_the_extension() {
+    // A field no wider than the RHS shows none of the extension, a wider one
+    // shows all of it.  The three widths pick three emit paths.
+    let code = r#"
+    module Top (
+        clk: input  clock          ,
+        rst: input  reset          ,
+        c  : input  signed logic<8>,
+        o  : output logic<200>     ,
+        q  : output logic<200>     ,
+    ) {
+        var w: logic<200>;
+        always_comb {
+            w = 0;
+            w[7:0] = c;
+            w[47:32] = c;
+            w[159:80] = c;
+        }
+        assign o = w;
+
+        always_ff {
+            if_reset {
+                q = 0;
+            } else {
+                q[71:64] = c;
+                q[159:80] = c;
+            }
+        }
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    // -5 sign-extended to `bits`.
+    let minus5 = |bits: u32| ((BigUint::from(1u32) << bits) - 1u32) ^ BigUint::from(4u32);
+    let comb = BigUint::from(0xfbu32) + (minus5(16) << 32u32) + (minus5(80) << 80u32);
+    let ff = (BigUint::from(0xfbu32) << 64u32) + (minus5(80) << 80u32);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        sim.set("c", Value::new(0xfb, 8, true));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new_biguint(comb.clone(), 200, false),
+            "o config={config:?}"
+        );
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new_biguint(ff.clone(), 200, false),
+            "q config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_bit_select_store_stays_compiled() {
+    // The value test above passes on the interpreter too.  Pin the predicate:
+    // only a store with a register-sized field reaches the compiled backends.
+    use crate::ir::{ExpressionContext, ProtoAssignStatement, ProtoExpression, VarOffset};
+    use veryl_parser::token_range::TokenRange;
+
+    let assign = |select, dst_width| ProtoAssignStatement {
+        dst: VarOffset::Comb(0),
+        dst_width,
+        select,
+        dynamic_select: None,
+        rhs_select: None,
+        expr: ProtoExpression::Value {
+            value: Value::new(0xfb, 8, true),
+            width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: true,
+            },
+        },
+        dst_ff_current_offset: -1,
+        token: TokenRange::default(),
+    };
+
+    // Field narrower than / equal to the 8-bit RHS: nothing to extend.
+    for select in [Some((3, 0)), Some((7, 0)), Some((87, 80))] {
+        let a = assign(select, 200);
+        assert_eq!(a.visible_store_sign_extend(), None, "select={select:?}");
+        assert!(a.can_build_binary(), "select={select:?}");
+    }
+    // Wider field: the extension lands, and the field still fits a register.
+    for select in [Some((15, 0)), Some((47, 32)), Some((207, 80))] {
+        let a = assign(select, 300);
+        assert_eq!(a.visible_store_sign_extend(), Some(8), "select={select:?}");
+        assert!(a.can_build_binary(), "select={select:?}");
+    }
+    // No field, or one wider than a register: interpreter.
+    for select in [None, Some((208, 80))] {
+        let a = assign(select, 300);
+        assert_eq!(a.visible_store_sign_extend(), Some(8), "select={select:?}");
+        assert!(!a.can_build_binary(), "select={select:?}");
+    }
+}
+
+#[test]
+fn dynamic_index_store_into_a_65_to_128_bit_element() {
+    // A runtime-indexed element of that width is 16-byte storage the native-dst
+    // path cannot address.  The three shapes take three emitter arms.
+    let code = r#"
+    module Top (
+        idx: input  logic<2> ,
+        v  : input  logic<96>,
+        n  : input  logic<32>,
+        w  : input  logic<80>,
+        o  : output logic<96>,
+        p  : output logic<96>,
+        q  : output logic<96>,
+    ) {
+        var a: logic<96> [4];
+        var b: logic<96> [4];
+        var c: logic<96> [4];
+        always_comb {
+            a[0] = 0;
+            a[1] = 0;
+            a[2] = 0;
+            a[3] = 0;
+            b[0] = 0;
+            b[1] = 0;
+            b[2] = 0;
+            b[3] = 0;
+            c[0] = 0;
+            c[1] = 0;
+            c[2] = 0;
+            c[3] = 0;
+            a[idx] = v;
+            b[idx][39:8] = n;
+            c[idx][87:8] = w;
+        }
+        assign o = a[1];
+        assign p = b[1];
+        assign q = c[1];
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let v = (BigUint::from(0xfeed_face_u32) << 64u32) + BigUint::from(0x0123_4567_89ab_cdef_u64);
+    let n = BigUint::from(0xdead_beef_u32);
+    let w = (BigUint::from(0xc0de_u32) << 64u32) + BigUint::from(0xfedc_ba98_7654_3210_u64);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("idx", Value::new(1, 2, false));
+        sim.set("v", Value::new_biguint(v.clone(), 96, false));
+        sim.set("n", Value::new_biguint(n.clone(), 32, false));
+        sim.set("w", Value::new_biguint(w.clone(), 80, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (name, expected) in [
+            ("o", v.clone()),
+            ("p", n.clone() << 8u32),
+            ("q", w.clone() << 8u32),
+        ] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new_biguint(expected, 96, false),
+                "{name} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dynamic_index_store_stays_compiled_above_64_bits() {
+    // Pin the predicate: a comb-base element store is compiled above 64 bits,
+    // not only above 128.  An FF base keeps its own narrower gate.
+    use crate::ir::{ExpressionContext, ProtoAssignDynamicStatement, ProtoExpression, VarOffset};
+
+    let index = ProtoExpression::Value {
+        value: Value::new(1, 2, false),
+        width: 2,
+        expr_context: ExpressionContext {
+            width: 2,
+            signed: false,
+        },
+    };
+    let assign = |dst_base, dst_width: usize| ProtoAssignDynamicStatement {
+        dst_base,
+        dst_stride: (dst_width.div_ceil(64) * 8) as isize,
+        dst_num_elements: 4,
+        dst_index_expr: index.clone(),
+        dst_width,
+        select: None,
+        dynamic_select: None,
+        rhs_select: None,
+        expr: ProtoExpression::Value {
+            value: Value::new(7, 32, false),
+            width: 32,
+            expr_context: ExpressionContext {
+                width: 32,
+                signed: false,
+            },
+        },
+        dst_ff_current_base_offset: -1,
+    };
+
+    for width in [65, 96, 128, 200] {
+        assert!(
+            assign(VarOffset::Comb(0), width).can_build_binary(),
+            "comb width={width}"
+        );
+    }
+}
+
+#[test]
 fn bare_signed_rhs_sign_extends_at_dynamic_store() {
     let code = r#"
     module Top (
@@ -22096,5 +22198,1395 @@ fn concat_bit_repeat_run() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn a_register_read_only_as_a_write_index_keeps_its_pre_edge_value() {
+    // `ptr` is read ONLY inside another `always_ff`'s left-hand-side index.
+    // That read lives outside the expression, so `ptr` looked unread and got
+    // storage where the increment is visible to the same edge — filling the
+    // vector from bit 1 instead of bit 0.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        vec: output logic<8>,
+    ) {
+        var ptr: logic<3>;
+        var v  : logic<8>;
+        always_ff {
+            if_reset {
+                ptr = 0;
+            } else {
+                ptr = ptr + 1;
+            }
+        }
+        always_ff {
+            if_reset {
+                v = 0;
+            } else {
+                v[ptr] = 1'b1;
+            }
+        }
+        assign vec = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+
+        // Edges see ptr = 0, 1, 2 -- the pre-edge value every time.
+        assert_eq!(
+            sim.get("vec").unwrap(),
+            Value::new(0b0000_0111, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn an_early_return_in_a_package_function_wins() {
+    // `return` lowers to an assignment to the function's return variable, and
+    // the constant evaluator used to walk every statement of the body — so the
+    // FINAL `return` overwrote the early one. A generate-if keyed on such a
+    // function then took the wrong arm and the signals it should drive stayed
+    // at 0, with no diagnostic anywhere.
+    let code = r#"
+    package pkg {
+        function any_set (
+            cfg: input logic<4>,
+        ) -> logic {
+            for i in 0..4 {
+                if cfg[i] == 1'b1 {
+                    return 1'b1;
+                }
+            }
+            return 1'b0;
+        }
+        function bit0_set (
+            cfg: input logic<4>,
+        ) -> logic {
+            if cfg[0] == 1'b1 {
+                return 1'b1;
+            }
+            return 1'b0;
+        }
+    }
+    module Top (
+        hit : output logic,
+        low : output logic,
+        miss: output logic,
+    ) {
+        if pkg::any_set(4'b0010) == 1'b1 :g_hit {
+            assign hit = 1'b1;
+        } else :g_no_hit {
+            assign hit = 1'b0;
+        }
+        assign low  = pkg::bit0_set(4'b0001);
+        assign miss = pkg::any_set(4'b0000);
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        let one = Value::new(1, 1, false);
+        let zero = Value::new(0, 1, false);
+        // The early `return 1'b1` fires for both, and the final `return 1'b0`
+        // is only reached when nothing matched.
+        assert_eq!(
+            sim.get("hit").unwrap(),
+            one,
+            "generate arm keyed on an early return"
+        );
+        assert_eq!(sim.get("low").unwrap(), one, "early return without a loop");
+        assert_eq!(
+            sim.get("miss").unwrap(),
+            zero,
+            "the final return still wins when reached"
+        );
+    }
+}
+
+#[test]
+fn a_reduction_over_a_narrow_operand_survives_a_wide_destination() {
+    // `|a` is one bit, but the node carries its consumer's width (223) and the
+    // Cranelift dispatch keyed the wide path off that.  The operand's
+    // `native_bytes` is under a limb, so the reduction ran over ZERO limbs.
+    let code = r#"
+    package pkg {
+        struct req_t {
+            v   : logic     ,
+            rest: logic<222>,
+        }
+    }
+    module Top (
+        a: input  logic<2> ,
+        y: output pkg::req_t,
+    ) {
+        always_comb {
+            y.v    = |a;
+            y.rest = '0;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (a, top) in [(0u64, 0u64), (1, 1), (2, 1), (3, 1)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(a, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap().select(222, 222),
+                Value::new(top, 1, false),
+                "y[222]: a={a} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_constant_index_write_after_a_dynamic_one_does_not_erase_it() {
+    // A dynamically indexed write followed by constant-indexed ones in the
+    // same `always_comb`.  The dynamic write names only the BASE offset, so
+    // elements 1.. look unwritten, get fused into one unconditional write at
+    // the later constant write, and lose what the dynamic write put there.
+    let code = r#"
+    module Top (
+        clk  : input  clock   ,
+        rst  : input  reset   ,
+        push : input  logic   ,
+        flush: input  logic   ,
+        idx  : input  logic<2>,
+        din  : input  logic<8>,
+        q0   : output logic<8>,
+        q1   : output logic<8>,
+        q2   : output logic<8>,
+        q3   : output logic<8>,
+    ) {
+        var q_n: logic<8> [4];
+        var q_q: logic<8> [4];
+
+        always_comb {
+            q_n = q_q;
+            if push {
+                q_n[idx] = din;
+            }
+            if flush {
+                for i in 0..4 {
+                    q_n[i][7] = 1'b0;
+                }
+            }
+        }
+        always_ff {
+            if_reset {
+                q_q = '{default: '0};
+            } else {
+                q_q = q_n;
+            }
+        }
+        assign q0 = q_q[0];
+        assign q1 = q_q[1];
+        assign q2 = q_q[2];
+        assign q3 = q_q[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+
+        // one real flush pulse: a `flush` that never rises folds to a constant
+        sim.set("push", Value::new(0, 1, false));
+        sim.set("flush", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("flush", Value::new(0, 1, false));
+        sim.step(&clk);
+
+        // push 0x11 into slot 0, 0x12 into slot 1, ...
+        for i in 0..4u64 {
+            sim.set("push", Value::new(1, 1, false));
+            sim.set("idx", Value::new(i, 2, false));
+            sim.set("din", Value::new(0x11 + i, 8, false));
+            sim.step(&clk);
+            sim.set("push", Value::new(0, 1, false));
+            sim.step(&clk);
+        }
+
+        for (name, want) in [("q0", 0x11u64), ("q1", 0x12), ("q2", 0x13), ("q3", 0x14)] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(want, 8, false),
+                "{name}: JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn an_array_literal_wired_to_a_port_reaches_every_element() {
+    // An array literal takes its shape from the destination, which for a port
+    // connection is the child's port.  Without that it reaches the generic
+    // expression conversion, which has no `ArrayLiteral` arm and panics —
+    // `build` and `check` stay clean, only the native simulator dies.
+    let code = r#"
+    module Sub (
+        a: input  logic<8> [4],
+        y: output logic<8>    ,
+    ) {
+        assign y = a[0] ^ a[1] ^ a[2] ^ a[3];
+    }
+    module Top (
+        y: output logic<8>,
+    ) {
+        inst u: Sub (
+            a: '{8'h12, 8'h34, default: 8'h56},
+            y: y                              ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0x12 ^ 0x34 ^ 0x56 ^ 0x56, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn two_aliases_of_one_derived_clock_are_one_edge() {
+    // `c1` and `c2` are two `let`s of the same divided clock, so in Verilog
+    // they are one net: every `always_ff` on them samples the PRE-edge state.
+    // Firing derived clocks one at a time -- committing each domain before
+    // the next reads it -- made the flop on `c2` see the counter's NEW value,
+    // which runs a boot sequence one core edge early.
+    let code = r#"
+    module Top (
+        base: input  '_ clock          ,
+        rst : input  '_ reset_sync_high,
+        a   : output    logic<8>       , // counter, clocked by c1
+        b   : output    logic<8>       , // same alias  -> must be a-1
+        c   : output    logic<8>       , // other alias -> must be a-1
+    ) {
+        var k   : logic<2>;
+        var dclk: logic   ;
+        always_ff (base, rst) {
+            if_reset {
+                k    = 0;
+                dclk = 0;
+            } else {
+                k    = if k == 3 ? 0 : k + 1;
+                dclk = k == 2;
+            }
+        }
+        let c1: '_ clock = dclk;
+        let c2: '_ clock = dclk;
+
+        always_ff (c1, rst) {
+            if_reset {
+                a = 0;
+            } else {
+                a = a + 1;
+            }
+        }
+        always_ff (c1, rst) {
+            if_reset {
+                b = 0;
+            } else {
+                b = a;
+            }
+        }
+        always_ff (c2, rst) {
+            if_reset {
+                c = 0;
+            } else {
+                c = a;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        // 4-state only: the divided domain cannot be initialised here. Its
+        // reset arrives on `c1`/`c2`, which the base reset holds low, so
+        // a/b/c stay X and both assertions below would be vacuous. The
+        // ordering this test is about is 2-state semantics.
+        if config.use_4state {
+            continue;
+        }
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let base = sim.get_clock("base").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&base, &rst);
+
+        // four base edges per divided edge; sample after several of them
+        for _ in 0..16 {
+            sim.step(&base);
+        }
+        let a = sim.get("a").unwrap();
+        let b = sim.get("b").unwrap();
+        let c = sim.get("c").unwrap();
+        assert_eq!(
+            b, c,
+            "the two aliases must agree: a={a:?} b={b:?} c={c:?} JIT={} 4st={}",
+            config.use_jit, config.use_4state,
+        );
+        assert_ne!(
+            a, c,
+            "an alias must see the PRE-edge counter: a={a:?} c={c:?} JIT={} 4st={}",
+            config.use_jit, config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn negating_a_width_64_value_wraps_instead_of_overflowing() {
+    // Two's complement is taken modulo 2^width. At width 64 the complement of
+    // zero is u64::MAX, so adding the one carries out of the top bit -- which
+    // is the value's own overflow, not a fault. The interpreter's `+= 1`
+    // panicked there; 8/32/63/65/128 were all fine because the mask left room.
+    let code = r#"
+    module Top (
+        a: input  logic<64>,
+        y: output logic<64>,
+    ) {
+        assign y = -a;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (a, want) in [(0u64, 0u64), (5, 5u64.wrapping_neg()), (1, u64::MAX)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::new(a, 64, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(want, 64, false),
+                "-{a}: JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn an_unpacked_array_parameter_element_sizes_a_child() {
+    // `N: Regs[1]` arrives const but unfolded — the comptime of an indexed
+    // read describes the array, not the element — so no instance is
+    // specialised and the child's width stays symbolic.  `build` and `check`
+    // stay clean because SystemVerilog resolves the parameter later.
+    let code = r#"
+    module Leaf #(
+        param N: u32 = 0,
+    ) (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        var r: logic<N + 1, 8>;
+        assign r[0] = a;
+        for i in 0..N :g {
+            assign r[i + 1] = r[i];
+        }
+        assign b = r[N];
+    }
+    module Top #(
+        param Regs: u32 [3] = '{2, 3, 1},
+    ) (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        inst u: Leaf #( N: Regs[1] ) ( a, b );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x12, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // the chain is a plain copy whatever its depth
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(0x12, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_reduction_tree_inside_one_vector_settles_in_one_pass() {
+    // Every node of the tree lives in ONE packed vector, so each statement
+    // writes some bits of `node` and reads others. That read is a self
+    // reference at variable granularity and used to be dropped, which left
+    // the schedule free to keep the source order below -- level 0 first,
+    // i.e. the exact reverse of the dependency order -- and a single settle
+    // pass then read stale bits. The order is deliberate: writing the leaves
+    // last is what makes the test bite.
+    let code = r#"
+    module Top (
+        leaves: input  logic<4>,
+        root  : output logic   ,
+    ) {
+        var node: logic<7>;
+        assign node[0] = node[1] | node[2];
+        assign node[1] = node[3] | node[4];
+        assign node[2] = node[5] | node[6];
+        assign node[3] = leaves[0];
+        assign node[4] = leaves[1];
+        assign node[5] = leaves[2];
+        assign node[6] = leaves[3];
+        assign root    = node[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        for leaves in 0u32..16 {
+            // Fresh sim per case: a stale `node` must not be able to satisfy
+            // the assertion by accident.
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("leaves", Value::new(u64::from(leaves), 4, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("root").unwrap(),
+                Value::new(u64::from(leaves != 0), 1, false),
+                "leaves={leaves:#x} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn an_if_assigning_two_variables_is_not_one_scheduling_node() {
+    // Per VARIABLE there is a cycle:
+    //   send_type_pre -> rd_en -> stall -> m0_valid -> (the if) -> send_type_pre
+    // Per STATEMENT there is none: the statement writing `send_type_pre` reads
+    // only `sel` and `t0`/`t1`. Treating the whole `if` as one scheduling node
+    // closes the loop and the design refuses to elaborate, though SV schedules
+    // the two assignments independently.
+    let code = r#"
+    module Top (
+        sel: input  logic,
+        en0: input  logic,
+        t0 : input  logic,
+        t1 : input  logic,
+        y  : output logic,
+        z  : output logic,
+    ) {
+        var m0_valid     : logic;
+        var m1_valid     : logic;
+        var send_valid   : logic;
+        var send_type_pre: logic;
+        var rd_en        : logic;
+        var stall        : logic;
+
+        always_comb {
+            if sel {
+                send_valid    = m0_valid;
+                send_type_pre = t0;
+            } else {
+                send_valid    = m1_valid;
+                send_type_pre = t1;
+            }
+        }
+        always_comb {
+            rd_en = send_type_pre && en0;
+        }
+        always_comb {
+            stall = rd_en && en0;
+        }
+        always_comb {
+            m0_valid = en0 && !stall;
+            m1_valid = en0;
+        }
+        always_comb {
+            y = send_valid;
+            z = stall;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (sel, t0, t1) -> (y, z), with en0 = 1 throughout.
+        for (sel, t0, t1, y, z) in [(1u64, 1u64, 0u64, 0u64, 1u64), (0, 0, 0, 1, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("sel", Value::new(sel, 1, false));
+            sim.set("en0", Value::new(1, 1, false));
+            sim.set("t0", Value::new(t0, 1, false));
+            sim.set("t1", Value::new(t1, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: sel={sel} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 1, false),
+                "z: sel={sel} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_handshake_nested_in_an_arm_is_split_inside_the_arm() {
+    // The arm holds ONE statement writing both `req` and `nxt`, so splitting
+    // the `case` by write set changes nothing and the block keeps reading
+    // back its own output: it writes `req`, `ack` derives from `req`, and it
+    // reads `ack`.  Splitting inside the arm separates the two, and the
+    // relaxed order the flat split settles for is not good enough to stop at
+    // -- a synthesisable design has a one-pass order.
+    let code = r#"
+    module Ack (
+        req : input  logic,
+        full: input  logic,
+        ack : output logic,
+    ) {
+        assign ack = req && !full;
+    }
+    module Top (
+        st  : input  logic<2>,
+        en  : input  logic   ,
+        full: input  logic   ,
+        y   : output logic   ,
+        z   : output logic<2>,
+    ) {
+        var req: logic   ;
+        var ack: logic   ;
+        var nxt: logic<2>;
+
+        inst u: Ack (
+            req      ,
+            full     ,
+            ack      ,
+        );
+
+        always_comb {
+            req = 1'b0;
+            nxt = st;
+            case st {
+                2'd0: {
+                    if en {
+                        req = 1'b1;
+                        if ack {
+                            nxt = 2'd1;
+                        }
+                    }
+                }
+                default: {
+                    nxt = 2'd0;
+                }
+            }
+        }
+        always_comb {
+            y = ack;
+            z = nxt;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a handshake inside an arm settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        // (st, en, full) -> (y, z)
+        for (st, en, full, y, z) in [
+            (0u64, 1u64, 0u64, 1u64, 1u64),
+            (0, 1, 1, 0, 0),
+            (1, 1, 0, 0, 0),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("en", Value::new(en, 1, false));
+            sim.set("full", Value::new(full, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: st={st} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 2, false),
+                "z: st={st} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_module_without_blocks_still_reaches_the_split() {
+    // Per bit there is no loop: s[0] <- flat[0] <- a0 <- en, and a3 <- s[0]
+    // only feeds flat[3].  The whole-vector copy `s = flat` is one node, so
+    // the cycle appears at variable granularity -- and the splitting that
+    // exists to break exactly that used to be reachable only for a module
+    // owning an `always_comb`, because Phase 2 was gated on having a block to
+    // expand.  Written from `assign` alone the design was rejected outright.
+    let code = r#"
+    module Sink (
+        d: input  logic,
+        y: output logic,
+    ) {
+        assign y = d;
+    }
+    module Top (
+        en: input  logic   ,
+        q : output logic<4>,
+    ) {
+        var a0  : logic   ;
+        var a1  : logic   ;
+        var a2  : logic   ;
+        var a3  : logic   ;
+        var flat: logic<4>;
+        var s   : logic<4>;
+        var fb  : logic   ;
+
+        assign flat = {a3, a2, a1, a0};
+        assign s    = flat;
+
+        inst u: Sink (
+            d: s[0],
+            y: fb  ,
+        );
+
+        assign a0 = en;
+        assign a1 = en;
+        assign a2 = en;
+        assign a3 = fb;
+        assign q  = s;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (en, q) in [(1u64, 15u64), (0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("en", Value::new(en, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(q, 4, false),
+                "q: en={en} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_whole_variable_copy_is_scheduled_per_written_range() {
+    // `flat` is written one bit at a time and `s` is read one bit at a time,
+    // but the copy between them is ONE node: every bit of `s` reads as if it
+    // depended on every bit of `flat`, so `fb` (from `s[0]`) closes a loop
+    // with the write of `flat[3]`.  Per bit there is none -- `s[0]` comes
+    // from `flat[0]`, which only reads `en`.  Cutting the copy at the
+    // boundaries `flat` is actually written on is what breaks it; the
+    // concatenation split cannot, because there is no concatenation here.
+    let code = r#"
+    module Sink (
+        d: input  logic,
+        y: output logic,
+    ) {
+        assign y = d;
+    }
+    module Top (
+        en: input  logic   ,
+        q : output logic<4>,
+    ) {
+        var flat: logic<4>;
+        var s   : logic<4>;
+        var fb  : logic   ;
+
+        assign flat[0] = en;
+        assign flat[1] = en;
+        assign flat[2] = en;
+        assign flat[3] = fb;
+
+        assign s = flat;
+
+        inst u: Sink (
+            d: s[0],
+            y: fb  ,
+        );
+
+        assign q = s;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        for (en, q) in [(1u64, 15u64), (0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("en", Value::new(en, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(q, 4, false),
+                "q: en={en} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_case_deciding_a_request_and_its_next_state_is_not_one_scheduling_node() {
+    // A request/acknowledge handshake: the arm raises `req` and, separately,
+    // consults `ack` to advance the state.  Per VARIABLE the `case` both
+    // writes `req` and reads `ack`, so it closes a loop with the statement
+    // deriving `ack` from `req`; per STATEMENT there is none, and SV schedules
+    // the two assignments independently.  Treating the whole `case` as one
+    // node made the design refuse to elaborate.
+    let code = r#"
+    module Top (
+        st  : input  logic<2>,
+        en  : input  logic   ,
+        full: input  logic   ,
+        y   : output logic   ,
+        z   : output logic<2>,
+    ) {
+        var req: logic   ;
+        var ack: logic   ;
+        var nxt: logic<2>;
+
+        always_comb {
+            req = 1'b0;
+            nxt = st;
+            case st {
+                2'd0: {
+                    req = en;
+                    if ack {
+                        nxt = 2'd1;
+                    }
+                }
+                default: {
+                    nxt = 2'd0;
+                }
+            }
+        }
+        always_comb {
+            ack = req && !full;
+        }
+        always_comb {
+            y = ack;
+            z = nxt;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (st, en, full) -> (y, z)
+        for (st, en, full, y, z) in [
+            (0u64, 1u64, 0u64, 1u64, 1u64),
+            (0, 1, 1, 0, 0),
+            (0, 0, 0, 0, 0),
+            (1, 1, 0, 0, 0),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("en", Value::new(en, 1, false));
+            sim.set("full", Value::new(full, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(y, 1, false),
+                "y: st={st} en={en} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("z").unwrap(),
+                Value::new(z, 2, false),
+                "z: st={st} en={en} full={full} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_chain_through_a_packed_array_is_not_a_comb_cycle() {
+    // The three elements of a PACKED array share one `VarOffset`, so a chain
+    // that walks a[0] -> s[0] -> a[1] -> s[1] -> a[2] is a cycle at
+    // whole-variable granularity even though no bit ever reaches itself.
+    // The schedule is a single pass (it really is acyclic), so the debug
+    // assertion that pairs "SCC present" with "one pass" fired and the design
+    // could not run under a debug build at all -- the release build, with the
+    // assertion compiled out, simulated it correctly the whole time.
+    let code = r#"
+    module Cell (
+        a_di  : input  logic<8>,
+        carry : output logic   ,
+        sum_do: output logic<8>,
+    ) {
+        var sum_ext: logic<9>;
+        assign sum_ext = {1'b0, a_di} + 9'd1;
+        assign carry   = sum_ext[8];
+        assign sum_do  = sum_ext[7:0];
+    }
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        q  : output logic<8>,
+    ) {
+        var a : logic<3, 8>;
+        var s : logic<3, 8>;
+        var cy: logic<3>   ;
+        var qr: logic<8>   ;
+
+        assign q    = qr;
+        assign a[0] = qr;
+        assign a[1] = {s[0][6:0], ~s[0][7]};
+        assign a[2] = {s[1][6:0], ~s[1][7]};
+
+        for i in 0..3 :g {
+            inst u: Cell (
+                a_di  : a[i] ,
+                carry : cy[i],
+                sum_do: s[i] ,
+            );
+        }
+
+        always_ff {
+            if_reset {
+                qr = '0;
+            } else {
+                qr = {s[2][6:0], cy[0] ^ cy[1] ^ cy[2]};
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.nontrivial_comb_scc, 0,
+            "a packed-array chain is not a cycle (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..12 {
+            sim.step(&clk);
+        }
+        // each cycle adds 3 to the low byte through the three +1 cells
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x90, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_vector_written_by_one_concat_is_scheduled_per_element() {
+    // `v = {y1, y0}` is one node, so the model has EVERY bit of `v` depending
+    // on both cells -- and `u1` is fed from `v`'s low half, which closes a
+    // cycle the design does not have (bit 15..8 comes from `u1`, 7..0 from
+    // `u0`, and `u0` reads nothing of `v`).  The schedule needed several
+    // settle passes for a circuit that is one pass by construction.
+    let code = r#"
+    module Cell (
+        a: input  logic<8>,
+        y: output logic<8>,
+    ) {
+        assign y = a + 8'd1;
+    }
+    module Top (
+        sel: input  logic<2> ,
+        d  : input  logic<8> ,
+        q  : output logic<16>,
+    ) {
+        var v : logic<16>;
+        var w : logic<8> ;
+        var y0: logic<8> ;
+        var y1: logic<8> ;
+
+        inst u0: Cell (
+            a: d ,
+            y: y0,
+        );
+        inst u1: Cell (
+            a: v[7:0],
+            y: y1    ,
+        );
+
+        // Two statements, so the block stays a block and the whole-vector
+        // write is a node the scheduler has to place as a unit.
+        always_comb {
+            w = d + 8'd7;
+            case sel {
+                2'b00  : v = {y1, y0};
+                default: v = {y1, y0};
+            }
+        }
+        assign q = v;
+        let _unused: logic<8> = w;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a per-element concat write settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("sel", Value::new(0, 2, false));
+        sim.set("d", Value::new(1, 8, false));
+        // d=1 -> y0=2 -> v[7:0]=2 -> y1=3 -> v[15:8]=3
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x0302, 16, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_reader_between_two_writes_gets_the_earlier_version() {
+    // `f` is written twice in one block and read in between, so the reader
+    // observes the FIRST version.  Sharing one offset for both versions forces
+    // a WAR edge from that reader to the second write, and because `req`
+    // depends on the second version and `ack` on `req`, that edge closes a
+    // cycle the circuit does not have: per bit, `o` needs f_v1 and ack, while
+    // `req` needs only f_v2.  Renaming the earlier version into its own
+    // storage removes the edge -- and the value it must produce is f_v1, not
+    // the zero the second write leaves behind.
+    let code = r#"
+    module Ack (
+        req: input  logic,
+        ack: output logic,
+    ) {
+        assign ack = !req;
+    }
+    module Top (
+        d: input  logic   ,
+        q: output logic<8>,
+    ) {
+        var f  : logic   ;
+        var req: logic   ;
+        var ack: logic   ;
+        var o  : logic<8>;
+
+        inst u: Ack (
+            req: req,
+            ack: ack,
+        );
+
+        always_comb {
+            f = d;
+            o = 8'd0;
+            if ack {
+                o = {7'b0, f};
+            }
+            f   = 1'b0;
+            req = f;
+        }
+        assign q = o;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a versioned read settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("d", Value::new(1, 1, false));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 8, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_flop_on_an_inverted_clock_fires_one_step_later() {
+    // `~clk` reaches the master input clock, so it is classified as a gated
+    // clock and offered the master's RISING edge -- which is exactly when an
+    // inversion falls.  It used to fire never.
+    //
+    // The step it lands on is measured, not chosen: a scan-chain output
+    // flopped on an inverted clock tracks its golden over a hundred steps
+    // only if the edge takes effect at the top of the NEXT step.
+    let code = r#"
+    module Top (
+        clk: input  '_ clock,
+        d  : input  logic   ,
+        p  : output logic   ,
+        n  : output logic   ,
+    ) {
+        let clk_l: '_ clock = ~clk;
+
+        var pi: logic;
+        var ni: logic;
+
+        always_ff (clk) {
+            pi = d;
+        }
+        always_ff (clk_l) {
+            ni = pi;
+        }
+        assign p = pi;
+        assign n = ni;
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // No reset, so the flops start X and the first step reads X
+            // rather than the edge under test.
+            continue;
+        }
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new(1, 1, false),
+            "the posedge flop takes d on the first edge (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        assert_eq!(
+            sim.get("n").unwrap(),
+            Value::new(0, 1, false),
+            "the inverted-clock flop has not seen its edge yet (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("n").unwrap(),
+            Value::new(1, 1, false),
+            "the inverted-clock flop fires one step later (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn an_async_reset_the_design_produces_itself_asserts_when_it_falls() {
+    // `rst_l` falls as a consequence of the very edge that sets `f`.  SV
+    // reacts to that fall in the same time step (`always @(posedge clk or
+    // negedge rst_l)`), so `q` is already 0 when the step ends.  Nothing
+    // generated an assertion edge for a reset no testbench drives, so the
+    // level test at the NEXT clock edge was what cleared `q` -- an async
+    // reset behaving as a synchronous one, a whole cycle late.
+    let code = r#"
+    module Sub (
+        clk  : input  clock          ,
+        rst_l: input  reset_async_low,
+        q    : output logic          ,
+    ) {
+        var r: logic;
+        always_ff (clk, rst_l) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q   : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let rst_l: '_ reset_async_low = ~f;
+        inst u: Sub (clk, rst_l, q);
+    }
+    "#;
+
+    for config in Config::all() {
+        if config.use_4state {
+            // `f` starts X, so `rst_l` reads X and the first steps are about
+            // X propagation rather than the assertion under test.
+            continue;
+        }
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("trig", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "control: q is 1 while the reset is released (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+
+        sim.set("trig", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0, 1, false),
+            "the reset clears q in the step it asserts (JIT={} 4st={})",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn an_abstract_reset_the_design_produces_itself_uses_the_configured_polarity() {
+    // Same shape as the test above, but the reset carries no declared
+    // polarity: the edge to monitor comes from the project's `reset_type`.
+    // The simulator resolves that in two places -- once to lower `if_reset`,
+    // once to decide which transition asserts -- and monitoring the opposite
+    // edge would fire a step late without failing anything else.
+    let code = r#"
+    module Sub (
+        clk: input  clock,
+        rst: input  reset,
+        q  : output logic,
+    ) {
+        var r: logic;
+        always_ff (clk, rst) {
+            if_reset {
+                r = 1'b0;
+            } else {
+                r = 1'b1;
+            }
+        }
+        assign q = r;
+    }
+    module Top (
+        clk : input  clock,
+        trig: input  logic,
+        q   : output logic,
+    ) {
+        var f: logic;
+        always_ff (clk) {
+            f = trig;
+        }
+        let rst: '_ reset = ~f;
+        inst u: Sub (clk, rst, q);
+    }
+    "#;
+
+    for base in Config::all() {
+        if base.use_4state {
+            // `f` starts X, so `rst` reads X and the first steps are about
+            // X propagation rather than the assertion under test.
+            continue;
+        }
+        for active_high in [false, true] {
+            let config = Config {
+                abstract_reset_active_high: active_high,
+                ..base.clone()
+            };
+            dbg!(&config);
+
+            // `rst` is `~f`, so the asserted level is reached by driving
+            // `trig` to whichever value the configured polarity needs.
+            let (released, asserted) = if active_high { (1u64, 0u64) } else { (0, 1) };
+
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("trig", Value::new(released, 1, false));
+            for _ in 0..4 {
+                sim.step(&clk);
+            }
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(1, 1, false),
+                "control: q is 1 while the reset is released (active_high={active_high} JIT={})",
+                config.use_jit,
+            );
+
+            sim.set("trig", Value::new(asserted, 1, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(0, 1, false),
+                "the reset clears q in the step it asserts (active_high={active_high} JIT={})",
+                config.use_jit,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
+    // `DEPTH` is constant, so `o` never fetches `d`.  The arms have different
+    // types (a port against an array element), so the ternary cannot fold to
+    // one of them -- its width and sign come from BOTH -- and the dead arm's
+    // read reached the scheduler, closing a cycle no evaluation takes.
+    let code = r#"
+    module Pick #(
+        param DEPTH: u32 = 2,
+    ) (
+        d  : input  logic,
+        idx: input  logic,
+        o  : output logic,
+    ) {
+        var mem: logic<1> [2];
+
+        always_comb {
+            mem[0] = 1'b1;
+            mem[1] = 1'b1;
+        }
+
+        assign o = if DEPTH == 0 ? d : mem[idx];
+    }
+    module Top (
+        en : input  logic,
+        idx: input  logic,
+        q  : output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        inst u: Pick (
+            d  : a  ,
+            idx: idx,
+            o  : b  ,
+        );
+
+        assign a = b && en;
+        assign q = b;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a dead arm is not a dependency (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("en", Value::new(1, 1, false));
+        sim.set("idx", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
     }
 }

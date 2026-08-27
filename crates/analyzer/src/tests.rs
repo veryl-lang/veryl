@@ -3,7 +3,7 @@ use crate::ir::Ir;
 use crate::{Analyzer, AnalyzerError, attribute_table, symbol_table};
 use std::collections::HashMap;
 use std::thread;
-use veryl_metadata::{Lint, Metadata, ProjectProperty};
+use veryl_metadata::{Lint, Metadata, NonPortableItem, ProjectProperty};
 use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
 
@@ -1050,22 +1050,6 @@ fn cyclic_type_dependency() {
     ));
 
     let code = r#"
-    package PkgA::<V: u32> {
-        const A: u32 = V;
-    }
-    package PkgB {
-        const B: u32 = 32;
-        alias package PKG = PkgA::<B>;
-    }
-    "#;
-
-    let errors = analyze(code);
-    assert!(matches!(
-        errors[0],
-        AnalyzerError::CyclicTypeDependency { .. }
-    ));
-
-    let code = r#"
     package Pkg::<a: u32, b: u32> {
         const A: u32 = a;
         const B: u32 = b;
@@ -1175,6 +1159,77 @@ fn cyclic_type_dependency() {
     assert!(matches!(
         errors[0],
         AnalyzerError::CyclicTypeDependency { .. }
+    ));
+}
+
+#[test]
+fn cyclic_file_dependency() {
+    let inputs = vec![
+        r#"
+        package a_pkg {
+          const WIDTH: u32 = 8;
+        }
+        alias package pkg = c_pkg::<a_pkg::WIDTH>;
+        module a_module (
+          b: modport b_if::<pkg>::mp,
+        ) {}
+        "#,
+        r#"
+        interface b_if::<PKG: c_prot_pkg> {
+          var b: logic<PKG::WIDTH>;
+          modport mp {
+            b: input,
+          }
+        }
+        "#,
+        r#"
+        proto package c_prot_pkg {
+          const WIDTH: u32;
+        }
+        package c_pkg::<W: u32> for c_prot_pkg {
+          const WIDTH: u32 = W;
+        }
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::CyclicFileDependency { .. }
+    ));
+
+    let inputs = vec![
+        r#"
+        proto package a_prot_pkg {
+          const WIDTH: u32;
+        }
+        package a_pkg::<W: u32> for a_prot_pkg {
+          const WIDTH: u32 = W;
+        }
+        "#,
+        r#"
+        interface b_if::<PKG: a_prot_pkg> {
+          var b: logic<PKG::WIDTH>;
+          modport mp {
+            b: input,
+          }
+        }
+        "#,
+        r#"
+        package c_pkg {
+          const WIDTH: u32 = 8;
+        }
+        alias package pkg = a_pkg::<c_pkg::WIDTH>;
+        module c_module (
+          b: modport b_if::<pkg>::mp,
+        ) {}
+        "#,
+    ];
+
+    let errors = analyze_multiple_inputs(&inputs);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::CyclicFileDependency { .. }
     ));
 }
 
@@ -1664,6 +1719,165 @@ fn multiple_assignment() {
 }
 
 #[test]
+fn allow_initial_assign_is_not_a_driving_process() {
+    // Bitstream initialization is not a driving process, so
+    // `#[allow(multiple_assign)]` is not needed on top.
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(initial_assign)]
+        var count: logic<16>;
+
+        initial {
+            count = '0;
+        }
+
+        always_ff (clk) {
+            count = count + 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+
+    // Two run-time processes still conflict.
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(initial_assign)]
+        var count: logic<16>;
+
+        initial {
+            count = '0;
+        }
+
+        always_ff (clk) {
+            count = count + 1;
+        }
+        always_ff (clk) {
+            count = count + 2;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn allow_multiple_assign() {
+    let code = r#"
+    module ModuleA (
+        clk0: input clock,
+        clk1: input clock,
+        en0 : input logic,
+        en1 : input logic,
+    ) {
+        #[allow(multiple_assign)]
+        var ram: logic<32> [32];
+
+        always_ff (clk0) {
+            if en0 {
+                ram[0] = 0;
+            }
+        }
+        always_ff (clk1) {
+            if en1 {
+                ram[1] = 1;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        #[allow(multiple_assign)]
+        var a: logic;
+
+        assign a = 1;
+        always_comb {
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+
+        assign a = 1;
+        always_comb {
+            a = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+
+    // assignment through a function output argument
+    let code = r#"
+    module ModuleA (
+        clk: input clock,
+    ) {
+        #[allow(multiple_assign)]
+        var a: logic;
+
+        function FuncA(o: output logic) {
+            o = 0;
+        }
+
+        always_ff {
+            FuncA(a);
+            FuncA(a);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn invalid_assignment() {
     let code = r#"
     module ModuleA (
@@ -1988,6 +2202,25 @@ fn invalid_import() {
         "{errors:?}"
     );
 
+    // A proto package can be imported as a namespace so it can be used as
+    // a generic constraint without a fully qualified name.
+    let code = r#"
+    proto package ProtoPkg {
+        const WIDTH: u32;
+    }
+    package Impl for ProtoPkg {
+        const WIDTH: u32 = 8;
+    }
+    import prj::ProtoPkg;
+    module ModuleN::<P: ProtoPkg = Impl> {
+        var x: logic<P::WIDTH>;
+        assign x = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
     let code = r#"
     package a_pkg::<a: u32> {
         const A: u32 = a;
@@ -2128,6 +2361,218 @@ fn invalid_statement() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidStatement { .. }));
+}
+
+#[test]
+fn invalid_initial_assign() {
+    let code = r#"
+    module ModuleA {
+        var regs: logic<16> [8];
+
+        initial {
+            regs[0] = '0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        #[allow(initial_assign)]
+        var regs: logic<16> [8];
+
+        initial {
+            regs[0] = '0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var regs: logic<16> [8];
+
+        initial {
+            regs[0] += 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+        "{errors:?}"
+    );
+
+    // assignment through a system function output argument
+    for func in ["$readmemh", "$readmemb"] {
+        let code = format!(
+            r#"
+    module ModuleA {{
+        var rom: logic<32> [1024];
+
+        initial {{
+            {func}("rom.hex", rom);
+        }}
+    }}
+    "#
+        );
+
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+            "{func}: {errors:?}"
+        );
+
+        let code = format!(
+            r#"
+    module ModuleA {{
+        #[allow(initial_assign)]
+        var rom: logic<32> [1024];
+
+        initial {{
+            {func}("rom.hex", rom);
+        }}
+    }}
+    "#
+        );
+
+        let errors = analyze(&code);
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+            "{func}: {errors:?}"
+        );
+    }
+
+    // assignment through a user function output argument
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+
+        function FuncA(o: output logic) {
+            o = 0;
+        }
+
+        initial {
+            FuncA(a);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        #[allow(initial_assign)]
+        var a: logic;
+
+        function FuncA(o: output logic) {
+            o = 0;
+        }
+
+        initial {
+            FuncA(a);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+        "{errors:?}"
+    );
+
+    // a variable declared inside the block is a procedural local
+    let code = r#"
+    module ModuleA {
+        #[allow(initial_assign)]
+        var rom: logic<32> [1024];
+
+        initial {
+            var path: string;
+
+            if $value$plusargs("FILEPATH=%s", path) {
+                $readmemh(path, rom);
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+        "{errors:?}"
+    );
+
+    // testbench modules are exempt
+    let code = r#"
+    #[test(test_a)]
+    module ModuleA {
+        var a: logic;
+
+        initial {
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidInitialAssign { .. })),
+        "{errors:?}"
+    );
+
+    // final is not covered by the opt-in
+    let code = r#"
+    module ModuleA {
+        #[allow(initial_assign)]
+        var a: logic;
+
+        final {
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidStatement { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -6898,6 +7343,30 @@ fn referring_before_definition() {
         AnalyzerError::ReferringBeforeDefinition { .. }
     ));
 
+    // A generate block converts in source order, so an `initial` block inside
+    // one only sees the declarations above it.
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+    ) {
+        if 1 :g {
+            initial {
+                a = 1;
+            }
+        }
+        var a: logic;
+        always_ff {
+            a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
     let code = r#"
     module ModuleA {
         let a: logic = b + 1;
@@ -8322,6 +8791,7 @@ fn unused_variable() {
 
     let code = r#"
     module ModuleC {
+        #[allow(initial_assign)]
         var memory: logic<32>[32];
         var _d    : logic<32>    ;
 
@@ -10007,6 +10477,85 @@ fn comb_loop_ifstmt_feed_forward_array() {
 }
 
 #[test]
+fn comb_loop_dead_ternary_branch() {
+    // `DEPTH` is constant, so `o` never fetches `d` -- but the dead branch's
+    // read was still counted, and a read that never happens closed a loop.
+    // The `if`-STATEMENT form of the same circuit was already accepted.
+    let code = r#"
+    module Pick (
+        d: input  logic,
+        o: output logic,
+    ) {
+        const DEPTH: u32 = 2;
+        var m: logic;
+        assign m = 1'b1;
+        assign o = if DEPTH == 0 ? d : m;
+    }
+    module Top (
+        en: input  logic,
+        q : output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        inst u: Pick (
+            d: a,
+            o: b,
+        );
+
+        assign a = b && en;
+        assign q = b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn comb_loop_dead_ternary_branch_array_arm() {
+    // Same dead branch, but the live arm is an array element, so the constant
+    // ternary does NOT fold (the arms' types differ) and the read has to be
+    // dropped where the loop graph is built instead.
+    let code = r#"
+    module Pick #(
+        param DEPTH: u32 = 2,
+    ) (
+        d  : input  logic,
+        idx: input  logic,
+        o  : output logic,
+    ) {
+        var mem: logic<1> [2];
+
+        always_comb {
+            mem[0] = 1'b1;
+            mem[1] = 1'b1;
+        }
+
+        assign o = if DEPTH == 0 ? d : mem[idx];
+    }
+    module Top (
+        en : input  logic,
+        idx: input  logic,
+        q  : output logic,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        inst u: Pick (
+            d  : a  ,
+            idx: idx,
+            o  : b  ,
+        );
+
+        assign a = b && en;
+        assign q = b;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
 fn uncovered_branch() {
     let code = r#"
     module ModuleA {
@@ -10196,6 +10745,7 @@ fn uncovered_branch() {
 
     let code = r#"
     module ModuleA {
+        #[allow(initial_assign)]
         var a: logic;
 
         initial {
@@ -17618,6 +18168,86 @@ fn analyze_as_dependency(code: &str) -> Vec<AnalyzerError> {
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
     dbg!(&errors);
     errors
+}
+
+#[track_caller]
+fn analyze_as_dependency_with_lint(code: &str, lint: Lint) -> Vec<AnalyzerError> {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.lint = lint;
+    let parser = Parser::parse(code, &"dep.veryl").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    context.set_project_name("dep");
+    let mut ir = Ir::default();
+
+    let mut errors = vec![];
+    errors.append(&mut analyzer.analyze_pass1("dep", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+    dbg!(&errors);
+    errors
+}
+
+#[test]
+fn non_portable_dependency() {
+    let code = r#"
+    module ModuleA {
+        #[allow(initial_assign)]
+        var a: logic;
+        #[allow(multiple_assign)]
+        var b: logic;
+        #[allow(unused_variable)]
+        let c: logic = 0;
+
+        initial {
+            a = 0;
+        }
+        assign b = 1;
+        always_comb {
+            b = 1;
+        }
+    }
+    "#;
+
+    let items = |errors: &[AnalyzerError]| -> Vec<String> {
+        errors
+            .iter()
+            .filter_map(|e| match e {
+                AnalyzerError::NonPortableDependency { item, project, .. } => {
+                    assert_eq!(project, "dep");
+                    Some(item.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    };
+
+    // Nothing is accepted from a dependency by default.
+    let errors = analyze_as_dependency_with_lint(code, Lint::default());
+    assert_eq!(items(&errors), ["initial_assign", "multiple_assign"]);
+
+    // The consumer opts in per item.
+    let mut lint = Lint::default();
+    lint.portability.allow_in_dependencies = vec![NonPortableItem::InitialAssign];
+    let errors = analyze_as_dependency_with_lint(code, lint);
+    assert_eq!(items(&errors), ["multiple_assign"]);
+
+    let mut lint = Lint::default();
+    lint.portability.allow_in_dependencies = vec![
+        NonPortableItem::InitialAssign,
+        NonPortableItem::MultipleAssign,
+    ];
+    let errors = analyze_as_dependency_with_lint(code, lint);
+    assert!(items(&errors).is_empty(), "{errors:?}");
+
+    // In the project's own code the attribute is always honored.
+    let errors = analyze(code);
+    assert!(items(&errors).is_empty(), "{errors:?}");
 }
 
 #[test]

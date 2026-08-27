@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+invalid_initial_assign (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#invalid_initial_assign)
+
+  × "regs" is assigned in an initial block
+   ╭─[../../testcases/error/invalid_initial_assign.veryl:5:9]
+ 4 │     initial {
+ 5 │         regs[0] = '0;
+   ·         ───┬───
+   ·            ╰── Error location
+ 6 │     }
+   ╰────
+  help: add `#[allow(initial_assign)]` to the declaration of "regs" if the target device initializes it at configuration time
