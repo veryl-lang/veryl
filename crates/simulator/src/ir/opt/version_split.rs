@@ -22,10 +22,11 @@
 //! here is applied to both sides and is therefore invisible to it.  Changes
 //! to this pass must be gated on golden SystemVerilog co-simulation.
 
-use crate::ir::Value;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::expression::{ExpressionContext, ProtoExpression};
 use crate::ir::statement::{ProtoAssignStatement, ProtoIfStatement, ProtoStatement};
 use crate::ir::variable::VarOffset;
+use crate::ir::{Op, Value};
 use crate::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use veryl_parser::token_range::TokenRange;
@@ -58,13 +59,15 @@ pub struct RunStats {
     /// unrolled static for-loop), whose abort-the-rest control flow the
     /// write-position fold cannot model.
     pub skip_break: usize,
+    /// Chains replaced by a table lookup.
+    pub lut_vars: usize,
 }
 
 type Counter = (&'static str, fn(&RunStats) -> usize);
 
 /// Report order.  Pairing each label with its accessor here is what keeps a
 /// counter from being reported under another one's name.
-const COUNTERS: [Counter; 11] = [
+const COUNTERS: [Counter; 12] = [
     ("blocks", |s| s.blocks),
     ("fused_vars", |s| s.fused_vars),
     ("fused_writes", |s| s.fused_writes),
@@ -76,6 +79,7 @@ const COUNTERS: [Counter; 11] = [
     ("skip.fold", |s| s.skip_fold),
     ("skip.budget", |s| s.skip_budget),
     ("skip.break", |s| s.skip_break),
+    ("lut_vars", |s| s.lut_vars),
 ];
 
 /// Process-wide totals: the pass runs per always_comb during conv (including
@@ -240,12 +244,19 @@ struct BlockCol {
     opaque_writes: HashSet<i64>,
     /// Comb offset -> last write position in the block (events + opaque).
     max_write_pos: HashMap<i64, u32>,
+    /// Byte spans a non-eventable statement writes / reads, with the
+    /// statement's position.  The maps above are keyed on the base offset of
+    /// each access, which names a dynamically-indexed array access only by
+    /// its first element even though it reaches every element in its span.
+    /// [`expand_opaque_spans`] folds these back in.
+    opaque_write_spans: Vec<(i64, i64, u32)>,
+    opaque_read_spans: Vec<(i64, i64, u32)>,
     pos: u32,
 }
 
-fn gather_comb_reads(expr: &ProtoExpression, out: &mut Vec<i64>) {
+fn gather_comb_reads(fold: &BigArrayFold, expr: &ProtoExpression, out: &mut Vec<i64>) {
     let mut ins = Vec::new();
-    expr.gather_variable_offsets_expanded(&mut ins);
+    expr.gather_variable_offsets_expanded(fold, &mut ins);
     for off in ins {
         if let VarOffset::Comb(o) = off {
             out.push(o as i64);
@@ -255,18 +266,25 @@ fn gather_comb_reads(expr: &ProtoExpression, out: &mut Vec<i64>) {
 
 /// True when the statement tree consists solely of capturable comb Assigns
 /// under (possibly nested) If statements.
-fn is_eventable_tree(stmt: &ProtoStatement, depth: usize) -> bool {
+fn is_eventable_tree(fold: &BigArrayFold, stmt: &ProtoStatement, depth: usize) -> bool {
     match stmt {
         ProtoStatement::Assign(x) => {
             matches!(x.dst, VarOffset::Comb(_))
                 && x.dynamic_select.is_none()
                 && x.rhs_select.is_none()
+                // `read_pos` / `max_write_pos` are array-wide for a folded
+                // element, too coarse to place this write precisely.
+                && !fold.covers(x.dst)
         }
         ProtoStatement::If(x) => {
             depth < MAX_TREE_DEPTH
                 && x.cond.is_some()
-                && x.true_side.iter().all(|s| is_eventable_tree(s, depth + 1))
-                && x.false_side.iter().all(|s| is_eventable_tree(s, depth + 1))
+                && x.true_side
+                    .iter()
+                    .all(|s| is_eventable_tree(fold, s, depth + 1))
+                && x.false_side
+                    .iter()
+                    .all(|s| is_eventable_tree(fold, s, depth + 1))
         }
         _ => false,
     }
@@ -276,6 +294,7 @@ fn is_eventable_tree(stmt: &ProtoStatement, depth: usize) -> bool {
 /// `tree_reads` accumulates every comb offset read anywhere in the tree
 /// (conds + exprs); the caller attributes it to all dsts written by the tree.
 fn record_tree(
+    fold: &BigArrayFold,
     stmt: &ProtoStatement,
     stmt_idx: usize,
     col: &mut BlockCol,
@@ -291,7 +310,7 @@ fn record_tree(
             col.pos += 1;
             let pos = col.pos;
             let mut reads = Vec::new();
-            gather_comb_reads(&x.expr, &mut reads);
+            gather_comb_reads(fold, &x.expr, &mut reads);
             // Reads of the destination itself (RMW self-reads) are the
             // fold's own business — it substitutes the accumulated value —
             // so they count neither as intermediate readers nor as
@@ -320,7 +339,7 @@ fn record_tree(
         ProtoStatement::If(x) => {
             let cond = x.cond.as_ref().unwrap();
             let mut cond_reads = Vec::new();
-            gather_comb_reads(cond, &mut cond_reads);
+            gather_comb_reads(fold, cond, &mut cond_reads);
             // Position the cond read at the next statement position (the
             // guard is evaluated together with its first guarded write).
             let cpos = col.pos + 1;
@@ -329,7 +348,7 @@ fn record_tree(
             }
             tree_reads.extend(cond_reads);
             for s in x.true_side.iter().chain(&x.false_side) {
-                record_tree(s, stmt_idx, col, tree_reads, tree_dsts);
+                record_tree(fold, s, stmt_idx, col, tree_reads, tree_dsts);
             }
         }
         _ => unreachable!("checked by is_eventable_tree"),
@@ -344,14 +363,61 @@ fn record_opaque(stmt: &ProtoStatement, col: &mut BlockCol) {
     let pos = col.pos;
     for d in &deps.ins {
         if let VarOffset::Comb(o) = d.off {
-            col.read_pos.entry(o as i64).or_default().push(pos);
+            let o = o as i64;
+            col.read_pos.entry(o).or_default().push(pos);
+            if let Some(nb) = d.bytes {
+                col.opaque_read_spans.push((o, o + nb as i64, pos));
+            }
         }
     }
     for d in &deps.outs {
         if let VarOffset::Comb(o) = d.off {
-            col.opaque_writes.insert(o as i64);
-            let e = col.max_write_pos.entry(o as i64).or_insert(0);
+            let o = o as i64;
+            col.opaque_writes.insert(o);
+            let e = col.max_write_pos.entry(o).or_insert(0);
             *e = (*e).max(pos);
+            if let Some(nb) = d.bytes {
+                col.opaque_write_spans.push((o, o + nb as i64, pos));
+            }
+        }
+    }
+}
+
+/// Fold the opaque byte spans back into the offset-keyed maps.  A dynamically
+/// indexed access names only the array's BASE offset, so keying on the offset
+/// alone leaves elements 1.. looking unwritten and unread — and the fused
+/// write then clobbers what the dynamic write put there.
+fn expand_opaque_spans(col: &mut BlockCol, by_dst: &HashMap<i64, Vec<usize>>) {
+    let write_spans = std::mem::take(&mut col.opaque_write_spans);
+    let read_spans = std::mem::take(&mut col.opaque_read_spans);
+    if write_spans.is_empty() && read_spans.is_empty() {
+        return;
+    }
+
+    let mut offs: Vec<i64> = by_dst.keys().copied().collect();
+    for reads in col.ev_reads.values() {
+        offs.extend(reads.iter().copied());
+    }
+    offs.sort_unstable();
+    offs.dedup();
+
+    // The base offset itself is already recorded by `record_opaque`.
+    fn covered(offs: &[i64], start: i64, end: i64) -> &[i64] {
+        let lo = offs.partition_point(|&o| o <= start);
+        let hi = offs.partition_point(|&o| o < end);
+        &offs[lo..hi.max(lo)]
+    }
+
+    for (start, end, pos) in write_spans {
+        for &o in covered(&offs, start, end) {
+            col.opaque_writes.insert(o);
+            let e = col.max_write_pos.entry(o).or_insert(0);
+            *e = (*e).max(pos);
+        }
+    }
+    for (start, end, pos) in read_spans {
+        for &o in covered(&offs, start, end) {
+            col.read_pos.entry(o).or_default().push(pos);
         }
     }
 }
@@ -388,15 +454,16 @@ fn split_block(
         return;
     }
     // Pass 1: classify statements and capture write events.
+    let fold = BigArrayFold::from_statements(body.iter());
     let mut col = BlockCol::default();
     let mut eventable: Vec<bool> = Vec::with_capacity(body.len());
     for (idx, stmt) in body.iter().enumerate() {
-        let ok = is_eventable_tree(stmt, 0);
+        let ok = is_eventable_tree(&fold, stmt, 0);
         eventable.push(ok);
         if ok {
             let mut tree_reads = Vec::new();
             let mut tree_dsts = HashSet::default();
-            record_tree(stmt, idx, &mut col, &mut tree_reads, &mut tree_dsts);
+            record_tree(&fold, stmt, idx, &mut col, &mut tree_reads, &mut tree_dsts);
             // Attribute the tree's reads (conds included) to every dst it
             // writes, for the input-stability check.
             for &dst in &tree_dsts {
@@ -415,6 +482,7 @@ fn split_block(
     for (i, ev) in col.events.iter().enumerate() {
         by_dst.entry(ev.dst).or_default().push(i);
     }
+    expand_opaque_spans(&mut col, &by_dst);
 
     struct Fused {
         last_stmt_idx: usize,
@@ -478,6 +546,24 @@ fn split_block(
         let folded = fold_var(body, &writer_stmts, dst, width, alloc, evs[0].token);
         match folded {
             Some((temps, expr)) => {
+                // The fold's rename temps stay: a surviving leaf expression
+                // may read a snapshot; unreferenced ones are dead stores.
+                let (temps, expr) = if lut_enabled() {
+                    match try_lut_compress(&expr, width, alloc, evs[0].token)
+                        .filter(|_| lut_budget_ok())
+                    {
+                        Some((lut_temps, lut_expr)) => {
+                            stats.lut_vars += 1;
+                            lut_diag(&format!("compressed dst={dst:#x} width={width}"));
+                            let mut t = temps;
+                            t.extend(lut_temps);
+                            (t, lut_expr)
+                        }
+                        None => (temps, expr),
+                    }
+                } else {
+                    (temps, expr)
+                };
                 let cap = max_fused_nodes();
                 if cap != 0 {
                     let mut nodes = expr_nodes_capped(&expr, cap);
@@ -658,6 +744,15 @@ impl Fe {
         }
     }
 
+    /// True when this operand is a bare read of `dst` — the form an interval
+    /// no write covers carries.  A composed value that reads `dst` inside a
+    /// merge is not one: only an unfired guard puts it there, and a variable
+    /// a guard may leave unwritten depends on its own previous value however
+    /// the fold spells it.
+    fn is_self_read(&self, dst: i64) -> bool {
+        matches!(self, Fe::Var { var_offset: VarOffset::Comb(o), .. } if *o as i64 == dst)
+    }
+
     fn to_expr(&self, width: usize) -> Option<ProtoExpression> {
         let ctx = ExpressionContext {
             width,
@@ -716,11 +811,14 @@ struct IMap {
     /// LSB-first, contiguous, covering [0, width).
     iv: Vec<Interval>,
     next_ver: u32,
+    /// The variable being folded; the only offset the map may self-read.
+    dst: i64,
 }
 
 impl IMap {
     fn new(width: usize, dst: i64) -> IMap {
         IMap {
+            dst,
             iv: vec![Interval {
                 hi: width.saturating_sub(1) as u32,
                 lo: 0,
@@ -740,6 +838,11 @@ impl IMap {
     /// self-reads can slice it cheaply.  No-op when the map is already one
     /// full-width variable read (the initial self-read state or a previous
     /// snapshot).  The temp assign lands just before the fused write.
+    ///
+    /// Self-read intervals stay put and the temp holds zero over their bits.
+    /// The fused write is `dst`'s only writer, so a self-read inside the temp
+    /// becomes a read that write answers — turning a self-loop into a
+    /// two-statement cycle the comb scheduler rejects.
     fn snapshot_to_temp(
         &mut self,
         width: usize,
@@ -760,7 +863,21 @@ impl IMap {
         {
             return Some(());
         }
-        let expr = self.to_expr(width)?;
+        let keep: Vec<bool> = self
+            .iv
+            .iter()
+            .map(|iv| iv.fe.is_self_read(self.dst))
+            .collect();
+        if keep.iter().all(|&k| k) {
+            return Some(());
+        }
+        let mut snap = self.clone();
+        for (iv, &k) in snap.iv.iter_mut().zip(&keep) {
+            if k {
+                iv.fe = Fe::Val(Value::new(0, (iv.hi - iv.lo + 1) as usize, false));
+            }
+        }
+        let expr = snap.to_expr(width)?;
         let off = alloc(width);
         temps.push(ProtoAssignStatement {
             dst: VarOffset::Comb(off),
@@ -774,18 +891,73 @@ impl IMap {
         });
         let ver = self.next_ver;
         self.next_ver += 1;
-        self.iv = vec![Interval {
-            hi: width.saturating_sub(1) as u32,
-            lo: 0,
-            fe: Fe::Var {
-                var_offset: VarOffset::Comb(off),
-                var_full_width: width,
-                hi: width.saturating_sub(1) as u32,
-                lo: 0,
-            },
-            ver,
-        }];
+        // Adjacent snapshotted intervals coalesce: the temp holds them at
+        // their own bit positions, so one read spans the whole run — and an
+        // all-snapshotted map collapses back to the single full-width read.
+        let mut iv: Vec<Interval> = Vec::with_capacity(self.iv.len());
+        let mut snapped: Vec<bool> = Vec::with_capacity(self.iv.len());
+        for (old, &k) in self.iv.iter().zip(&keep) {
+            if !k && snapped.last() == Some(&true) {
+                iv.last_mut()?.hi = old.hi;
+                continue;
+            }
+            iv.push(Interval {
+                hi: old.hi,
+                lo: old.lo,
+                fe: old.fe.clone(),
+                ver: if k { old.ver } else { ver },
+            });
+            snapped.push(!k);
+        }
+        for (iv, &s) in iv.iter_mut().zip(&snapped) {
+            if s {
+                iv.fe = Fe::Var {
+                    var_offset: VarOffset::Comb(off),
+                    var_full_width: width,
+                    hi: iv.hi,
+                    lo: iv.lo,
+                };
+            }
+        }
+        self.iv = iv;
         Some(())
+    }
+
+    /// The accumulated value's bits [hi:lo] as one operand: a slice when one
+    /// interval covers the range, a concatenation of the pieces otherwise.
+    fn fe_range(&self, hi: u32, lo: u32) -> Option<Fe> {
+        if hi < lo || hi as usize >= self.total_width() {
+            return None;
+        }
+        let slice = |iv: &Interval, hi: u32, lo: u32| -> Option<Fe> {
+            if iv.lo == lo && iv.hi == hi {
+                Some(iv.fe.clone())
+            } else {
+                iv.fe.split(hi - iv.lo, lo - iv.lo)
+            }
+        };
+        if let Some(iv) = self.iv.iter().find(|iv| iv.lo <= lo && hi <= iv.hi) {
+            return slice(iv, hi, lo);
+        }
+        let width = (hi - lo + 1) as usize;
+        // MSB-first concatenation, matching `to_expr`.
+        let mut elements = Vec::new();
+        for iv in self.iv.iter().rev() {
+            if iv.hi < lo || iv.lo > hi {
+                continue;
+            }
+            let (phi, plo) = (iv.hi.min(hi), iv.lo.max(lo));
+            let w = (phi - plo + 1) as usize;
+            elements.push((Box::new(slice(iv, phi, plo)?.to_expr(w)?), 1usize, w));
+        }
+        Some(Fe::Op(ProtoExpression::Concatenation {
+            elements,
+            width,
+            expr_context: ExpressionContext {
+                width,
+                signed: false,
+            },
+        }))
     }
 
     fn total_width(&self) -> usize {
@@ -927,10 +1099,422 @@ fn fold_var(
     Some((temps, expr))
 }
 
-/// Replace plain / statically-selected reads of `dst` with reads of the
-/// materialized snapshot `base` (a full-width `Fe::Var`).  Dynamic selects
-/// on the destination are unsupported (None).
-fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &Fe) -> Option<()> {
+// ---------------------------------------------------------------------------
+// Selector-table compression
+// ---------------------------------------------------------------------------
+//
+// An instruction decoder writes each of its outputs from ONE priority chain
+// over a shared narrow selector (`casez ({inst[31:26], inst[14:12]})` …), and
+// the per-variable fold above replicates the WHOLE chain of arm conditions
+// into every output's RHS — hundreds of compares re-evaluated per output per
+// settle.  When every arm condition is a masked equality on one common
+// selector expression, the chain IS a function of the selector alone:
+// evaluate it per selector value at build time and replace the RHS with a
+// table lookup (constant words + shift).
+
+fn lut_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_VSPLIT_LUT").as_deref() != Ok("0"))
+}
+
+/// Bisection knob: stop compressing after N chains.
+fn lut_budget_ok() -> bool {
+    static MAX: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    static USED: AtomicUsize = AtomicUsize::new(0);
+    match MAX.get_or_init(|| {
+        std::env::var("VERYL_VSPLIT_LUT_MAX")
+            .ok()
+            .and_then(|s| s.parse().ok())
+    }) {
+        None => true,
+        Some(n) => USED.fetch_add(1, Relaxed) < *n,
+    }
+}
+
+/// Table size cap in bits: at most 64 constant 64-bit words materialized
+/// as a balanced mux.
+const LUT_MAX_TABLE_BITS: usize = 4096;
+/// Chains shorter than this stay as compares — the win is not worth churn.
+const LUT_MIN_ARMS: usize = 8;
+/// Because the table stores an INDEX, a handful of non-constant leaves (an
+/// `!inst[25]` among hundreds of constant arms) still compresses.  Every
+/// leaf is then evaluated unconditionally, so each must stay small.
+const LUT_MAX_LEAVES: usize = 8;
+/// Emit-weighted size cap per non-constant leaf.
+const LUT_MAX_LEAF_NODES: usize = 16;
+
+fn ctx_of(width: usize) -> ExpressionContext {
+    ExpressionContext {
+        width,
+        signed: false,
+    }
+}
+
+fn lut_const_u64(e: &ProtoExpression) -> Option<u64> {
+    if let ProtoExpression::Value {
+        value: Value::U64(v),
+        ..
+    } = e
+        && v.mask_xz == 0
+    {
+        Some(v.payload)
+    } else {
+        None
+    }
+}
+
+/// Match a chain condition against `sel == k`, `(sel & m) == k`, or the
+/// wildcard forms (a `==?` constant's mask_xz bits are don't-cares).
+/// Returns the selector expression with the effective mask and value.
+fn lut_cond(e: &ProtoExpression) -> Option<(&ProtoExpression, u64, u64)> {
+    use ProtoExpression as PE;
+    let PE::Binary { x, op, y, .. } = e else {
+        return None;
+    };
+    let wild = match op {
+        Op::Eq => false,
+        Op::EqWildcard => true,
+        _ => return None,
+    };
+    let PE::Value {
+        value: Value::U64(k),
+        ..
+    } = y.as_ref()
+    else {
+        return None;
+    };
+    if k.signed || (k.mask_xz != 0 && !wild) {
+        return None;
+    }
+    let kw = k.width.min(64);
+    let width_mask = if kw >= 64 { !0u64 } else { (1u64 << kw) - 1 };
+    let mut mask = width_mask & !k.mask_xz;
+    let sel = match x.as_ref() {
+        PE::Binary {
+            x: ax,
+            op: Op::BitAnd,
+            y: ay,
+            ..
+        } => {
+            let m = lut_const_u64(ay)?;
+            mask &= m;
+            ax.as_ref()
+        }
+        other => other,
+    };
+    // The compare must see the selector bits unmodified: a selector wider
+    // than the compare would truncate, a narrower one zero-extends (fine).
+    if sel_width(sel)? > k.width as usize {
+        return None;
+    }
+    Some((sel, mask, k.payload & mask))
+}
+
+fn sel_width(e: &ProtoExpression) -> Option<usize> {
+    use ProtoExpression as PE;
+    Some(match e {
+        PE::Variable { width, .. }
+        | PE::Value { width, .. }
+        | PE::Unary { width, .. }
+        | PE::Binary { width, .. }
+        | PE::Concatenation { width, .. }
+        | PE::Ternary { width, .. }
+        | PE::DynamicVariable { width, .. } => *width,
+        PE::HierVariable(_) => return None,
+    })
+}
+
+/// A folded priority chain `c1 ? l1 : c2 ? l2 : … : ldef` reduced to
+/// `(selector, (mask, value, leaf index) per arm, default leaf, leaves)`.
+/// Arm values are deduplicated into the leaf list, so the arms carry indices
+/// rather than the values themselves.
+type LutChain<'a> = (
+    &'a ProtoExpression,
+    Vec<(u64, u64, usize)>,
+    usize,
+    Vec<&'a ProtoExpression>,
+);
+
+fn lut_chain<'a>(mut e: &'a ProtoExpression, width: usize) -> Option<LutChain<'a>> {
+    use ProtoExpression as PE;
+    // A one-element concatenation wraps a chain without changing it.
+    while let PE::Concatenation { elements, .. } = e {
+        let [(inner, 1, _)] = elements.as_slice() else {
+            return None;
+        };
+        e = inner.as_ref();
+    }
+    if width > 64 || !width.is_power_of_two() {
+        return None;
+    }
+    let mut sel: Option<(&ProtoExpression, String)> = None;
+    let mut arms: Vec<(u64, u64, usize)> = Vec::new();
+    let mut leaves: Vec<&'a ProtoExpression> = Vec::new();
+    let mut leaf_keys: Vec<String> = Vec::new();
+    let leaf_of = |leaves: &mut Vec<&'a ProtoExpression>,
+                   keys: &mut Vec<String>,
+                   e: &'a ProtoExpression|
+     -> Option<usize> {
+        let key = format!("{e:?}");
+        if let Some(i) = keys.iter().position(|k| *k == key) {
+            return Some(i);
+        }
+        if leaves.len() >= LUT_MAX_LEAVES {
+            lut_diag(&format!("too many leaves: {key:.200}"));
+            return None;
+        }
+        if lut_const_u64(e).is_none()
+            && expr_nodes_capped(e, LUT_MAX_LEAF_NODES) > LUT_MAX_LEAF_NODES
+        {
+            lut_diag(&format!("big leaf: {key:.200}"));
+            return None;
+        }
+        leaves.push(e);
+        keys.push(key);
+        Some(leaves.len() - 1)
+    };
+    loop {
+        match e {
+            PE::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                let Some((s, m, k)) = lut_cond(cond) else {
+                    lut_diag(&format!(
+                        "cond mismatch after {} arms: {:.200}",
+                        arms.len(),
+                        format!("{cond:?}")
+                    ));
+                    return None;
+                };
+                let li = leaf_of(&mut leaves, &mut leaf_keys, true_expr)?;
+                match &sel {
+                    None => sel = Some((s, format!("{s:?}"))),
+                    Some((_, d)) => {
+                        if format!("{s:?}") != *d {
+                            lut_diag(&format!(
+                                "selector change after {} arms: {:.200}",
+                                arms.len(),
+                                format!("{s:?}")
+                            ));
+                            return None;
+                        }
+                    }
+                }
+                arms.push((m, k, li));
+                e = false_expr;
+            }
+            _ => {
+                let def = leaf_of(&mut leaves, &mut leaf_keys, e)?;
+                let (sel, _) = sel?;
+                if arms.len() < LUT_MIN_ARMS {
+                    return None;
+                }
+                return Some((sel, arms, def, leaves));
+            }
+        }
+    }
+}
+
+/// Diagnostic: why a chain refused to compress.
+fn lut_diag(msg: &str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var("VERYL_VSPLIT_LUT_DIAG").as_deref() == Ok("1")) {
+        eprintln!("[vsplit_lut] {msg}");
+    }
+}
+
+/// Try to replace a folded chain with a selector-table lookup, returning the
+/// rename temps to place ahead of the fused write and the new RHS.
+fn try_lut_compress(
+    expr: &ProtoExpression,
+    width: usize,
+    alloc: &mut dyn FnMut(usize) -> isize,
+    token: TokenRange,
+) -> Option<(Vec<ProtoAssignStatement>, ProtoExpression)> {
+    use ProtoExpression as PE;
+    let (sel, arms, def, leaves) = lut_chain(expr, width)?;
+    let selw = sel_width(sel)?;
+    // `VERYL_VSPLIT_LUT_DUMP=1`: dump every accepted chain's ingredients.
+    static DUMP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *DUMP.get_or_init(|| std::env::var("VERYL_VSPLIT_LUT_DUMP").as_deref() == Ok("1")) {
+        eprintln!(
+            "[lut_dump] width={width} selw={selw} arms={:x?}\n  sel={:.400}\n  def={def} leaves={:.600}",
+            arms,
+            format!("{sel:?}"),
+            format!("{leaves:?}"),
+        );
+    }
+    // The table stores leaf INDICES, so a lookup is followed by a leaf
+    // select.  A narrow all-constant chain instead stores the values
+    // themselves and drops the select.
+    let const_leaves: Option<Vec<u64>> = leaves.iter().map(|l| lut_const_u64(l)).collect();
+    let direct = const_leaves
+        .as_ref()
+        .filter(|vs| width <= 2 && vs.iter().all(|&v| v < (1 << width)))
+        .is_some();
+    let ew = if direct {
+        width
+    } else if leaves.len() <= 4 {
+        2
+    } else {
+        4
+    };
+    if selw == 0 || selw > 12 || (1usize << selw) * ew > LUT_MAX_TABLE_BITS {
+        return None;
+    }
+    // Bake the table: for each selector value, the FIRST matching arm wins.
+    let n = 1usize << selw;
+    let entries_per_word = 64 / ew;
+    let mut words = vec![0u64; n.div_ceil(entries_per_word)];
+    let emask = if ew >= 64 { !0u64 } else { (1u64 << ew) - 1 };
+    for s in 0..n {
+        let sv = s as u64;
+        let li = arms
+            .iter()
+            .find(|&&(m, k, _)| sv & m == k)
+            .map_or(def, |&(_, _, li)| li);
+        let entry = if direct {
+            const_leaves.as_ref().unwrap()[li]
+        } else {
+            li as u64
+        };
+        words[s / entries_per_word] |= (entry & emask) << ((s % entries_per_word) * ew);
+    }
+    // Materialize the selector.  Each output gets its OWN temp even when
+    // siblings share the selector expression: every fused assign lands at
+    // its variable's last-write position, and a temp shared across
+    // positions would be read before it is written by the earlier ones.
+    let mut temps: Vec<ProtoAssignStatement> = Vec::new();
+    let sel_off = {
+        let off = alloc(selw);
+        temps.push(ProtoAssignStatement {
+            dst: VarOffset::Comb(off),
+            dst_width: selw,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: sel.clone(),
+            dst_ff_current_offset: 0,
+            token,
+        });
+        off
+    };
+    let sel_var = |w: usize| PE::Variable {
+        var_offset: VarOffset::Comb(sel_off),
+        select: None,
+        dynamic_select: None,
+        width: w,
+        var_full_width: selw,
+        expr_context: ctx_of(w),
+    };
+    let val = |v: u64, w: usize| PE::Value {
+        value: Value::U64(veryl_analyzer::value::ValueU64 {
+            payload: v,
+            mask_xz: 0,
+            width: w as u32,
+            signed: false,
+        }),
+        width: w,
+        expr_context: ctx_of(w),
+    };
+    let bin = |x: PE, op: Op, y: PE, w: usize| PE::Binary {
+        x: Box::new(x),
+        op,
+        y: Box::new(y),
+        width: w,
+        expr_context: ctx_of(w),
+    };
+    // Balanced constant mux over the table words, indexed by the selector's
+    // upper bits.
+    fn word_mux(
+        words: &[u64],
+        lo: usize,
+        hi: usize,
+        idx: &dyn Fn(usize) -> ProtoExpression,
+        val: &dyn Fn(u64, usize) -> ProtoExpression,
+    ) -> ProtoExpression {
+        if hi - lo == 1 {
+            return val(words[lo], 64);
+        }
+        let mid = lo + (hi - lo) / 2;
+        ProtoExpression::Ternary {
+            cond: Box::new(idx(mid)),
+            true_expr: Box::new(word_mux(words, mid, hi, idx, val)),
+            false_expr: Box::new(word_mux(words, lo, mid, idx, val)),
+            width: 64,
+            expr_context: ctx_of(64),
+        }
+    }
+    let word = if words.len() == 1 {
+        val(words[0], 64)
+    } else {
+        // idx(mid) = (sel >> log2(entries_per_word)) >= mid
+        let epw_shift = entries_per_word.trailing_zeros() as u64;
+        let idx = |mid: usize| {
+            bin(
+                bin(sel_var(selw), Op::LogicShiftR, val(epw_shift, selw), selw),
+                Op::GreaterEq,
+                val(mid as u64, selw),
+                1,
+            )
+        };
+        word_mux(&words, 0, words.len(), &idx, &val)
+    };
+    // shift = (sel % entries_per_word) * ew, both powers of two.
+    let shift = if entries_per_word == 1 {
+        val(0, 6)
+    } else {
+        let within = bin(
+            sel_var(selw),
+            Op::BitAnd,
+            val((entries_per_word - 1) as u64, selw),
+            selw,
+        );
+        if ew == 1 {
+            within
+        } else {
+            bin(
+                within,
+                Op::LogicShiftL,
+                val(ew.trailing_zeros() as u64, selw),
+                12,
+            )
+        }
+    };
+    let entry = bin(
+        bin(word, Op::LogicShiftR, shift, 64),
+        Op::BitAnd,
+        val(emask, ew),
+        ew,
+    );
+    if direct {
+        return Some((temps, entry));
+    }
+    // Leaf select: `idx == n ? leaf_n : …`, the chain's default innermost.
+    let mut out = leaves[def].clone();
+    for (li, leaf) in leaves.iter().enumerate() {
+        if li == def {
+            continue;
+        }
+        out = PE::Ternary {
+            cond: Box::new(bin(entry.clone(), Op::Eq, val(li as u64, ew), 1)),
+            true_expr: Box::new((*leaf).clone()),
+            false_expr: Box::new(out),
+            width,
+            expr_context: ctx_of(width),
+        };
+    }
+    Some((temps, out))
+}
+
+/// Replace plain / statically-selected reads of `dst` with the value `base`
+/// has accumulated over the same bits — a snapshot read for bits a write
+/// covers, `dst` itself for bits none does.  Dynamic selects on the
+/// destination are unsupported (None).
+fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &IMap) -> Option<()> {
     use ProtoExpression as PE;
     if let PE::Variable {
         var_offset,
@@ -946,14 +1530,11 @@ fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &Fe) -> Option<()>
             return None;
         }
         let w = *width;
-        let sub = match select {
-            None => base.clone(),
-            Some((a, b)) => {
-                let (hi, lo) = ((*a).max(*b) as u32, (*a).min(*b) as u32);
-                base.split(hi, lo)?
-            }
+        let (hi, lo) = match select {
+            None => (w.saturating_sub(1) as u32, 0),
+            Some((a, b)) => ((*a).max(*b) as u32, (*a).min(*b) as u32),
         };
-        *e = sub.to_expr(w)?;
+        *e = base.fe_range(hi, lo)?.to_expr(w)?;
         return Some(());
     }
     match e {
@@ -1064,10 +1645,7 @@ fn duplicates_entry(x: &ProtoIfStatement, dst: i64, width: usize) -> bool {
 }
 
 fn expr_reads_dst(e: &ProtoExpression, dst: i64) -> bool {
-    let mut ins = Vec::new();
-    e.gather_variable_offsets_expanded(&mut ins);
-    ins.iter()
-        .any(|off| matches!(off, VarOffset::Comb(o) if *o as i64 == dst))
+    e.reads_offset(VarOffset::Comb(dst as isize))
 }
 
 fn fold_stmt(
@@ -1133,8 +1711,7 @@ fn fold_stmt(
             // self-read would see the previous pass.
             if expr_reads_dst(&expr, dst) {
                 map.snapshot_to_temp(x.dst_width, temps, alloc, x.token)?;
-                let base = map.iv[0].fe.clone();
-                replace_dst_reads(&mut expr, dst, &base)?;
+                replace_dst_reads(&mut expr, dst, map)?;
             }
             map.write(hi, lo, Fe::from_expr(expr))
         }
@@ -1299,6 +1876,36 @@ mod tests {
         })
     }
 
+    fn assign_bits(
+        dst: isize,
+        w: usize,
+        hi: usize,
+        lo: usize,
+        expr: ProtoExpression,
+    ) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: w,
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            token: TokenRange::default(),
+        })
+    }
+
+    fn cvar_bits(off: isize, full_w: usize, hi: usize, lo: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            width: hi - lo + 1,
+            var_full_width: full_w,
+            expr_context: ctx(hi - lo + 1),
+        }
+    }
+
     fn cond_write(cond_off: isize, dst: isize, w: usize, val: u64) -> ProtoStatement {
         ProtoStatement::If(ProtoIfStatement {
             cond: Some(cvar(cond_off, 1)),
@@ -1418,6 +2025,50 @@ mod tests {
         assert_eq!(stats.skip_budget, 0);
         assert_eq!(stats.fused_vars, 1, "a large cap must still fuse");
         TEST_MAX_NODES.with(|c| c.set(None));
+    }
+
+    #[test]
+    fn a_field_chain_reading_an_earlier_field_leaves_no_read_of_its_own_destination() {
+        // `v[2:0] = a; v[5:3] = v[2:0] + 1` writes every bit of `v` and the
+        // self-read names bits an earlier write covers, so the pair is
+        // acyclic.  The rename temp must not read `v`: the fused write is
+        // `v`'s only writer, so a read there closes a two-statement cycle
+        // and the comb scheduler refuses to elaborate the design.
+        let mut body = vec![
+            assign_bits(0x0, 6, 2, 0, cvar(0x100, 3)),
+            assign_bits(
+                0x0,
+                6,
+                5,
+                3,
+                ProtoExpression::Binary {
+                    x: Box::new(cvar_bits(0x0, 6, 2, 0)),
+                    op: Op::Add,
+                    y: Box::new(lit(1, 3)),
+                    width: 3,
+                    expr_context: ctx(3),
+                },
+            ),
+        ];
+        let mut alloc_at = 0x1000isize;
+        let mut alloc = |w: usize| -> isize {
+            let off = alloc_at;
+            alloc_at += crate::ir::variable::native_bytes(w) as isize;
+            off
+        };
+        let mut stats = RunStats::default();
+        split_block(&mut body, &mut stats, &mut alloc);
+
+        assert_eq!(stats.fused_vars, 1, "the chain must fuse");
+        for s in &body {
+            let ProtoStatement::Assign(a) = s else {
+                continue;
+            };
+            assert!(
+                !a.expr.reads_offset(VarOffset::Comb(0x0)),
+                "a fused statement reads the destination the chain fully covers"
+            );
+        }
     }
 
     #[test]

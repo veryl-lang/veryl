@@ -17,6 +17,11 @@ pub struct ScopeContext {
     pub variable_meta: HashMap<VarId, VariableMeta>,
     pub analyzer_context: veryl_analyzer::conv::Context,
     pub ff_table: air::FfTable,
+    /// `(active low, synchronous)` a polarity-agnostic `reset` net of this
+    /// module takes from the instance ports it is wired to.  `None` when
+    /// those ports disagree; absent when none of them declares a polarity,
+    /// which leaves the project's `reset_type` to decide.
+    pub inst_reset_kind: HashMap<VarId, Option<(bool, bool)>>,
     /// Lazily-built reverse index `comb byte offset -> owning VarId` for
     /// variables affiliated with a function body.  Used to relocate the
     /// inlined-function storage per call-site (see the `FunctionCall`
@@ -98,6 +103,11 @@ pub struct Context {
     pub backends: BackendRegistry,
     /// See `alloc_internal_event_id`.
     pub internal_event_ids_allocated: u32,
+    /// Per-call-site copies of a function's comb scratch, as
+    /// `(old_offset, new_offset, bytes)`.  A copy carries no `VariableMeta`,
+    /// so without this record nothing owns it and `cone_gate` pins every
+    /// statement touching it to the root.
+    pub comb_reloc: Vec<(isize, isize, usize)>,
 }
 
 impl Context {

@@ -115,6 +115,11 @@ impl Namespace {
         }
     }
 
+    pub fn from_token(token: Token) -> Option<Self> {
+        crate::scope::token_scope(token.id)
+            .map(|(scope, define_context)| crate::scope::namespace(scope, &define_context))
+    }
+
     pub fn push(&mut self, path: StrId) {
         self.paths.push(resource_table::canonical_str_id(path));
     }

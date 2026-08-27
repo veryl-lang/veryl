@@ -672,7 +672,11 @@ impl Op {
                         } else {
                             let mask = ValueU64::gen_mask(width);
                             ret.payload ^= mask;
-                            ret.payload += 1;
+                            // Two's complement is taken modulo 2^width, and
+                            // at width 64 the complement of zero is u64::MAX,
+                            // so the carry out of the top bit is the value's
+                            // own overflow rather than a fault.
+                            ret.payload = ret.payload.wrapping_add(1);
                             ret.payload &= mask;
                             Value::U64(ret)
                         }

@@ -21,6 +21,29 @@ fn analyze(code: &str, config: &Config) -> Ir {
 
 #[track_caller]
 fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorError> {
+    analyze_top_inner(code, config, top, false)
+}
+
+/// For the ONE test that targets the simulator's own combinational-loop
+/// detector.  The analyzer rejects such a design first, so nothing else may
+/// wave that error through: a test that needs to is testing a design Veryl
+/// does not accept.
+#[track_caller]
+fn analyze_top_allowing_comb_loop(
+    code: &str,
+    config: &Config,
+    top: &str,
+) -> Result<Ir, SimulatorError> {
+    analyze_top_inner(code, config, top, true)
+}
+
+#[track_caller]
+fn analyze_top_inner(
+    code: &str,
+    config: &Config,
+    top: &str,
+    allow_comb_loop: bool,
+) -> Result<Ir, SimulatorError> {
     symbol_table::clear();
 
     let metadata = Metadata::create_default("prj").unwrap();
@@ -43,12 +66,7 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
                 x,
                 AnalyzerError::InvalidLogicalOperand { .. }
                     | AnalyzerError::UnsignedArithShift { .. }
-                    // Let simulator's analyze_dependency report combinational
-                    // loops here -- the analyzer-side check at post_pass2 is
-                    // an additional safety net but these tests target the
-                    // simulator's own detector.
-                    | AnalyzerError::CombinationalLoop { .. }
-            )
+            ) && !(allow_comb_loop && matches!(x, AnalyzerError::CombinationalLoop { .. }))
         })
         .collect();
     assert!(errors.is_empty());
@@ -231,8 +249,17 @@ impl DualSimulator {
 
     #[track_caller]
     fn step(&mut self, jit_event: &Event, interp_event: &Event) {
-        self.jit.step(jit_event);
-        self.interp.step(interp_event);
+        // A reset step is a clock edge with the net asserted; these fixtures
+        // have one clock, so call sites keep passing just the reset event.
+        if matches!(jit_event, Event::Reset(_)) {
+            let jit_clock = sole_clock_event(&self.jit);
+            let interp_clock = sole_clock_event(&self.interp);
+            self.jit.step_reset(&jit_clock, jit_event);
+            self.interp.step_reset(&interp_clock, interp_event);
+        } else {
+            self.jit.step(jit_event);
+            self.interp.step(interp_event);
+        }
         self.cycle += 1;
 
         // Ensure comb is settled on both
@@ -411,6 +438,21 @@ impl DualSimulator {
     fn get(&mut self, port: &str) -> Option<Value> {
         self.jit.get(port)
     }
+}
+
+/// The clock event of a single-clock fixture.  Lowest VarId wins so a
+/// multi-clock fixture still resolves deterministically.
+fn sole_clock_event(sim: &Simulator) -> Event {
+    sim.ir
+        .event_statements
+        .keys()
+        .filter_map(|x| match x {
+            Event::Clock(id) => Some(*id),
+            _ => None,
+        })
+        .min()
+        .map(Event::Clock)
+        .expect("fixture has no clock event to take the reset step on")
 }
 
 /// Run a test with DualSimulator for both use_4state=false and use_4state=true.

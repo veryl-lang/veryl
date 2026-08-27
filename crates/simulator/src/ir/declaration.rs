@@ -2,6 +2,7 @@ use crate::backend::inst::{
     ReuseOutcome, port_alias_enabled, try_compile_inst_chunks, try_reuse_or_claim,
 };
 use crate::ir::context::{Context, Conv, ScopeContext};
+use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
@@ -10,7 +11,8 @@ use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::statement::{
-    ProtoAssignStatement, const_array_element_exprs, msb_first_window, size_literal_rhs,
+    ProtoAssignStatement, array_literal_element_exprs, const_array_element_exprs, msb_first_window,
+    size_literal_rhs,
 };
 use crate::ir::variable::{
     ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
@@ -22,6 +24,74 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::token_range::TokenRange;
+
+/// Read of an `always_ff` reset net, as the `if_reset` condition.  Built as a
+/// plain factor so port aliasing and selects are applied like any other read.
+fn build_reset_condition(
+    context: &mut Context,
+    reset: &air::FfReset,
+) -> Result<ProtoExpression, SimulatorError> {
+    let factor = air::Factor::Variable(
+        reset.id,
+        reset.index.clone(),
+        reset.select.clone(),
+        reset.comptime.clone(),
+    );
+    Conv::conv(context, &air::Expression::Term(Box::new(factor)))
+}
+
+/// The declared type kind of a reset net.
+fn reset_kind(context: &mut Context, id: air::VarId) -> Option<air::TypeKind> {
+    context
+        .scope()
+        .analyzer_context
+        .variables
+        .get(&id)
+        .map(|x| x.r#type.kind.clone())
+}
+
+/// `(active low, synchronous)` a polarity-agnostic `reset` net takes from the
+/// instance ports it is wired to.
+///
+/// Those ports were lowered against their own declarations, so a block reading
+/// the same net has to match them or the two ends of one wire run at opposite
+/// polarities.  A port of THIS module is excluded: the emitted SystemVerilog
+/// resolves it from `reset_type`, and so must the simulator.
+fn inst_declared_reset_kind(context: &mut Context, id: air::VarId) -> Option<(bool, bool)> {
+    let scope = context.scope();
+    let is_port = scope
+        .analyzer_context
+        .variables
+        .get(&id)
+        .is_some_and(|v| scope.analyzer_context.port_types.contains_key(&v.path));
+    if is_port {
+        return None;
+    }
+    scope.inst_reset_kind.get(&id).copied().flatten()
+}
+
+/// True when the reset net asserts LOW.
+fn reset_active_low(context: &mut Context, id: air::VarId) -> bool {
+    match reset_kind(context, id) {
+        Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetSyncHigh) => false,
+        Some(air::TypeKind::ResetAsyncLow) | Some(air::TypeKind::ResetSyncLow) => true,
+        _ => inst_declared_reset_kind(context, id)
+            .map(|(active_low, _)| active_low)
+            .unwrap_or(!context.config.abstract_reset_active_high),
+    }
+}
+
+/// True when the reset asserts as an event of its own rather than being
+/// sampled at a clock edge.
+fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
+    match reset_kind(context, id) {
+        Some(air::TypeKind::ResetAsyncHigh) | Some(air::TypeKind::ResetAsyncLow) => true,
+        Some(air::TypeKind::ResetSyncHigh) | Some(air::TypeKind::ResetSyncLow) => false,
+        _ => inst_declared_reset_kind(context, id)
+            .map(|(_, sync)| !sync)
+            .unwrap_or(!context.config.abstract_reset_sync),
+    }
+}
 
 /// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
 ///
@@ -36,14 +106,12 @@ use veryl_parser::token_range::TokenRange;
 ///   one pass.
 ///
 /// Offset- and statement-granularity conflation (whole `if` statements,
-/// dynamic indices, shared inlined-function scratch) can fabricate cycles
-/// out of best-effort edges, so the sort degrades gracefully: inside each
-/// cycle (SCC) those edges are dropped and the affected readers are PINNED
-/// before their write group, reading the previous pass's settled value
-/// (interleaving INTO the group would re-read the same mid-computation
-/// value on every pass, never settling).  If even the pin would close a
-/// cycle, the sort falls back to source order and the caller reports a
-/// combinational loop.
+/// dynamic indices, shared inlined-function scratch) can fabricate a cycle
+/// out of edges no wire of the circuit closes.  The sort does NOT answer
+/// one by dropping edges: a synthesisable design has an order that needs a
+/// single settle pass, so a cycle here means the statements are tracked
+/// more coarsely than the circuit, and the cure is to split them.  The
+/// cycle is reported to the caller, which splits and asks again.
 pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     stable_topo_sort_impl(statements, None).0
 }
@@ -122,12 +190,16 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
         let Some(ranges) = writer_ranges.get(key) else {
             continue;
         };
-        for (i, (_, a)) in ranges.iter().enumerate() {
+        // Only writes from DIFFERENT statements can clobber each other.  One
+        // statement can name the same range more than once — the gather
+        // reports it per branch it writes it in — and comparing those against
+        // each other would read a single driver as several.
+        for (i, (pa, a)) in ranges.iter().enumerate() {
             if a.is_none() {
                 continue 'next_var;
             }
-            for (_, b) in ranges.iter().skip(i + 1) {
-                if ranges_overlap(*a, *b) {
+            for (pb, b) in ranges.iter().skip(i + 1) {
+                if pa != pb && ranges_overlap(*a, *b) {
                     continue 'next_var;
                 }
             }
@@ -138,11 +210,20 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
     // --- Edge construction ---------------------------------------------
     let mut adj_sem: Vec<HashSet<usize>> = vec![HashSet::default(); n];
     let mut adj_opt: Vec<HashSet<usize>> = vec![HashSet::default(); n];
-    // Settled-value reads (reader, var, read range): if degradation drops
-    // their group edges, the reader is pinned before the group instead.
-    let mut opt_groups: Vec<(usize, VarOffset, BitRange)> = Vec::new();
-    // Cross-block prior bindings (indistinguishable without block
-    // identity) and any degradation void the one-pass hint.
+    // Why each edge exists.  Only populated under `VERYL_PASS_DIAG`: reading a
+    // cycle without it means cross-referencing a second dump in a different
+    // numbering space.
+    let diag = std::env::var("VERYL_PASS_DIAG").is_ok();
+    let mut edge_cause: HashMap<(usize, usize), &'static str> = HashMap::default();
+    macro_rules! cause {
+        ($from:expr, $to:expr, $why:expr) => {
+            if diag {
+                edge_cause.entry(($from, $to)).or_insert($why);
+            }
+        };
+    }
+    // Cross-block prior bindings are indistinguishable without block
+    // identity, and void the one-pass hint.
     let mut hint_blocked = blocks.is_none();
 
     // Without block info every prior writer binds, as before.
@@ -292,12 +373,12 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                     || writers.get(key).is_some_and(|ws| ws.len() == 1)
                 {
                     adj_sem[writer_idx].insert(reader_idx);
+                    cause!(writer_idx, reader_idx, "raw");
                 } else {
                     // Sole overlapping writer comes later: a settled-value
-                    // read, droppable so a fabricated cycle degrades
-                    // instead of collapsing to source order.
+                    // read, so the edge is best-effort rather than semantic.
                     adj_opt[writer_idx].insert(reader_idx);
-                    opt_groups.push((reader_idx, *key, *rr));
+                    cause!(writer_idx, reader_idx, "raw-settled");
                 }
             } else if relevant.binary_search(&reader_idx).is_ok() {
                 // The reader itself writes overlapping bits (shared inlined
@@ -317,6 +398,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 .flatten()
             {
                 adj_sem[writer_idx].insert(reader_idx);
+                cause!(writer_idx, reader_idx, "prior-binding");
                 if relevant.last().is_some_and(|&w| w > reader_idx)
                     && !prior_unconditional_cover(reader_idx, key, *rr)
                 {
@@ -333,8 +415,8 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 // the read sees settled values.
                 for &writer_idx in &relevant {
                     adj_opt[writer_idx].insert(reader_idx);
+                    cause!(writer_idx, reader_idx, "settled-group");
                 }
-                opt_groups.push((reader_idx, *key, *rr));
             }
         }
     }
@@ -363,15 +445,15 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 .find(|(p, wr)| *p > reader_idx && ranges_overlap(*wr, *rr))
             {
                 adj_sem[reader_idx].insert(next_writer);
+                cause!(reader_idx, next_writer, "war");
             }
         }
     }
 
     // WAW: chain consecutive writers of a reassigned var so overlapping
     // writes keep source order.  Skip only when next reaches prev over
-    // SEMANTIC edges (a genuine cycle); best-effort reachability does not
-    // skip — that cycle degrades by dropping the best-effort edges,
-    // keeping write order instead of silently inverting it.
+    // SEMANTIC edges (a genuine cycle); a best-effort path does not skip, so
+    // write order is kept instead of being silently inverted.
     {
         let mut stack: Vec<usize> = Vec::new();
         let mut visited: HashSet<usize> = HashSet::default();
@@ -396,6 +478,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                 }
                 if !reachable {
                     adj_sem[prev].insert(next);
+                    cause!(prev, next, "waw");
                 } else {
                     // Two overlapping writes whose order the sort cannot
                     // guarantee: never claim an exact one-pass schedule.
@@ -419,27 +502,23 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
         }
     }
 
-    // --- Kahn with graceful degradation ---------------------------------
-    // Adjacency lists are passed per call because the degradation rung
-    // below inserts pin edges between attempts.
-    let kahn = |adj_sem: &[HashSet<usize>],
-                adj_opt: &[HashSet<usize>],
-                opt_filter: &dyn Fn(usize, usize) -> bool|
-     -> Option<Vec<usize>> {
+    // --- Kahn ------------------------------------------------------------
+    // ONE attempt, and every edge constrains it: a graph that does not
+    // linearize means the statements are tracked more coarsely than the
+    // circuit wires them, and the caller answers that by splitting them
+    // finer -- not by dropping edges for an order that needs extra passes.
+    let order = {
         let mut in_degree: Vec<usize> = vec![0; n];
         for succs in adj_sem.iter() {
             for &v in succs {
                 in_degree[v] += 1;
             }
         }
-        for (u, succs) in adj_opt.iter().enumerate() {
+        for succs in adj_opt.iter() {
             for &v in succs {
-                if opt_filter(u, v) {
-                    in_degree[v] += 1;
-                }
+                in_degree[v] += 1;
             }
         }
-
         let mut queue: VecDeque<usize> = VecDeque::new();
         for (i, &deg) in in_degree.iter().enumerate() {
             if deg == 0 {
@@ -452,7 +531,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
             sorted_indices.push(idx);
             successors.clear();
             successors.extend(adj_sem[idx].iter().copied());
-            successors.extend(adj_opt[idx].iter().copied().filter(|&v| opt_filter(idx, v)));
+            successors.extend(adj_opt[idx].iter().copied());
             // Index order for determinism.
             successors.sort_unstable();
             successors.dedup();
@@ -466,105 +545,38 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
         (sorted_indices.len() == n).then_some(sorted_indices)
     };
 
-    let mut order = kahn(&adj_sem, &adj_opt, &|_, _| true);
-    if order.is_none() {
-        hint_blocked = true;
-    }
-
-    if order.is_none() {
-        // Drop the best-effort edges inside each SCC of the full graph and
-        // pin the affected readers before their write groups (see the
-        // function doc); everything outside keeps its one-pass order.
-        use daggy::petgraph::Graph;
-        use daggy::petgraph::algo::tarjan_scc;
-        let mut g: Graph<(), ()> = Graph::new();
-        let nodes: Vec<_> = (0..n).map(|_| g.add_node(())).collect();
-        for (u, succs) in adj_sem.iter().enumerate() {
-            for &v in succs {
-                g.add_edge(nodes[u], nodes[v], ());
-            }
-        }
-        for (u, succs) in adj_opt.iter().enumerate() {
-            for &v in succs {
-                g.add_edge(nodes[u], nodes[v], ());
-            }
-        }
-        let mut scc_id: Vec<usize> = vec![usize::MAX; n];
-        let mut nontrivial = 0usize;
-        for (i, scc) in tarjan_scc(&g).into_iter().enumerate() {
-            if scc.len() > 1 {
-                nontrivial += 1;
-                for node in scc {
-                    scc_id[node.index()] = i;
-                }
-            }
-        }
-        if std::env::var("VERYL_PASS_DIAG").is_ok() {
-            log::info!(
-                "pass_diag: stable_topo_sort n={n}: cycle; relaxing best-effort edges in {nontrivial} SCC(s)",
-            );
-            trace_first_scc_cycle(&statements, &adj_sem, &adj_opt, &scc_id);
-        }
-        let opt_live = |u: usize, v: usize| scc_id[u] == usize::MAX || scc_id[u] != scc_id[v];
-
-        // A pin that would itself close a cycle in the live graph means
-        // even previous-pass semantics cannot linearize the group — bail
-        // to source order and let the caller report the loop.
-        let mut pinned: HashSet<(usize, usize)> = HashSet::default();
-        let mut stack: Vec<usize> = Vec::new();
-        let mut visited: HashSet<usize> = HashSet::default();
-        for (reader, key, rr) in &opt_groups {
-            let reader = *reader;
-            if scc_id[reader] == usize::MAX {
-                continue;
-            }
-            let mut first: Option<usize> = None;
-            let mut dropped = false;
-            for (p, wr) in &writer_ranges[key] {
-                if *p == reader || !ranges_overlap(*wr, *rr) {
-                    continue;
-                }
-                if first.is_none() {
-                    first = Some(*p);
-                }
-                if scc_id[*p] != usize::MAX && scc_id[*p] == scc_id[reader] {
-                    dropped = true;
-                }
-            }
-            let Some(first) = first else {
-                continue;
-            };
-            if !dropped || !pinned.insert((reader, first)) {
-                continue;
-            }
-            stack.clear();
-            stack.push(first);
-            visited.clear();
-            let mut reach = false;
-            while let Some(u) = stack.pop() {
-                if u == reader {
-                    reach = true;
-                    break;
-                }
-                if visited.insert(u) {
-                    stack.extend(adj_sem[u].iter().copied());
-                    stack.extend(adj_opt[u].iter().copied().filter(|&v| opt_live(u, v)));
-                }
-            }
-            if reach {
-                return (statements, None, true);
-            }
-            adj_sem[reader].insert(first);
-        }
-
-        order = kahn(&adj_sem, &adj_opt, &opt_live);
-    }
-
     let Some(sorted_indices) = order else {
-        // Any cycle surviving the relaxation is semantic-only (a cycle lies
-        // inside one SCC whose best-effort edges were just dropped, and
-        // pins are insertion-guarded), so dropping more best-effort edges
-        // cannot help — fall back to source order.
+        if std::env::var("VERYL_PASS_DIAG").is_ok() {
+            use daggy::petgraph::Graph;
+            use daggy::petgraph::algo::tarjan_scc;
+            let mut g: Graph<(), ()> = Graph::new();
+            let nodes: Vec<_> = (0..n).map(|_| g.add_node(())).collect();
+            for (u, succs) in adj_sem.iter().enumerate() {
+                for &v in succs {
+                    g.add_edge(nodes[u], nodes[v], ());
+                }
+            }
+            for (u, succs) in adj_opt.iter().enumerate() {
+                for &v in succs {
+                    g.add_edge(nodes[u], nodes[v], ());
+                }
+            }
+            let mut scc_id: Vec<usize> = vec![usize::MAX; n];
+            let mut nontrivial = 0usize;
+            for (i, scc) in tarjan_scc(&g).into_iter().enumerate() {
+                if scc.len() > 1 {
+                    nontrivial += 1;
+                    for node in scc {
+                        scc_id[node.index()] = i;
+                    }
+                }
+            }
+            log::info!(
+                "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
+                 reporting it for the caller to split",
+            );
+            trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+        }
         return (statements, None, true);
     };
 
@@ -577,78 +589,167 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
     (sorted, (!hint_blocked).then_some(1), false)
 }
 
-/// `VERYL_PASS_DIAG=1` diagnostic: BFS one shortest cycle inside the
-/// first nontrivial SCC and print it with source locations, edge class
-/// and connecting variable offsets.
-fn trace_first_scc_cycle(
+/// `VERYL_PASS_DIAG=1` diagnostic: BFS one shortest cycle per nontrivial
+/// SCC and print it with source locations, edge class and cause, and the
+/// variable ranges that connect each step.
+fn trace_sort_cycles(
     statements: &[ProtoStatement],
     adj_sem: &[HashSet<usize>],
     adj_opt: &[HashSet<usize>],
     scc_id: &[usize],
+    edge_cause: &HashMap<(usize, usize), &'static str>,
 ) {
     let n = statements.len();
-    let Some(first_id) = scc_id.iter().copied().find(|&x| x != usize::MAX) else {
-        return;
-    };
-    let members: Vec<usize> = (0..n).filter(|&i| scc_id[i] == first_id).collect();
-    log::info!("pass_diag: first SCC has {} members", members.len());
-    let mset: HashSet<usize> = members.iter().cloned().collect();
-    let start = members[0];
-    let mut parent: HashMap<usize, usize> = HashMap::default();
-    let mut bfsq: VecDeque<usize> = VecDeque::new();
-    bfsq.push_back(start);
-    let mut closer: Option<usize> = None;
-    'bfs: while let Some(u) = bfsq.pop_front() {
-        for &v in adj_sem[u].iter().chain(adj_opt[u].iter()) {
-            if !mset.contains(&v) {
-                continue;
-            }
-            if v == start {
-                closer = Some(u);
-                break 'bfs;
-            }
-            if let std::collections::hash_map::Entry::Vacant(e) = parent.entry(v) {
-                e.insert(u);
-                bfsq.push_back(v);
-            }
+    // Every nontrivial SCC, not just the first: on a design with several, the
+    // one that costs a settle pass is rarely the one that happens to come
+    // first in statement order.
+    let mut ids: Vec<usize> = Vec::new();
+    for &id in scc_id.iter() {
+        if id != usize::MAX && !ids.contains(&id) {
+            ids.push(id);
         }
     }
-    let Some(last) = closer else {
+    if ids.is_empty() {
         return;
-    };
-    let mut path = vec![start];
-    let mut cur = last;
-    let mut rev = vec![];
-    while cur != start {
-        rev.push(cur);
-        cur = parent[&cur];
     }
-    rev.reverse();
-    path.extend(rev);
-    for (i, &m) in path.iter().enumerate() {
-        let nxt = path.get(i + 1).copied().unwrap_or(start);
-        let kind = if adj_sem[m].contains(&nxt) {
-            "sem"
-        } else {
-            "opt"
-        };
-        let desc = match statements[m].token() {
-            Some(t) => {
-                let src = t.beg.source.to_string();
-                let file = src.rsplit('/').next().unwrap_or(&src).to_string();
-                format!("{file}:{}", t.beg.line)
+    for (k, id) in ids.iter().enumerate() {
+        log::info!(
+            "pass_diag: SCC {k} (id {id}) has {} members",
+            scc_id.iter().filter(|&&x| x == *id).count()
+        );
+    }
+
+    const MAX_TRACED: usize = 4;
+    for (k, id) in ids.iter().enumerate().take(MAX_TRACED) {
+        let members: Vec<usize> = (0..n).filter(|&i| scc_id[i] == *id).collect();
+        log::info!("pass_diag: cycle inside SCC {k}:");
+        let mset: HashSet<usize> = members.iter().cloned().collect();
+        let start = members[0];
+        let mut parent: HashMap<usize, usize> = HashMap::default();
+        let mut bfsq: VecDeque<usize> = VecDeque::new();
+        bfsq.push_back(start);
+        let mut closer: Option<usize> = None;
+        'bfs: while let Some(u) = bfsq.pop_front() {
+            for &v in adj_sem[u].iter().chain(adj_opt[u].iter()) {
+                if !mset.contains(&v) {
+                    continue;
+                }
+                if v == start {
+                    closer = Some(u);
+                    break 'bfs;
+                }
+                if let std::collections::hash_map::Entry::Vacant(e) = parent.entry(v) {
+                    e.insert(u);
+                    bfsq.push_back(v);
+                }
             }
-            None => "generated".to_string(),
+        }
+        let Some(last) = closer else {
+            return;
         };
-        let mut ins = vec![];
-        let mut outs = vec![];
-        statements[m].gather_variable_offsets(&mut ins, &mut outs);
-        let outs: HashSet<VarOffset> = outs.into_iter().collect();
-        ins.clear();
-        let mut nxt_outs = vec![];
-        statements[nxt].gather_variable_offsets(&mut ins, &mut nxt_outs);
-        let via: Vec<VarOffset> = ins.into_iter().filter(|o| outs.contains(o)).collect();
-        log::info!("  cycle[{i}] #{m} {desc} -[{kind}]-> #{nxt} via {via:?}");
+        let mut path = vec![start];
+        let mut cur = last;
+        let mut rev = vec![];
+        while cur != start {
+            rev.push(cur);
+            cur = parent[&cur];
+        }
+        rev.reverse();
+        path.extend(rev);
+        for (i, &m) in path.iter().enumerate() {
+            let nxt = path.get(i + 1).copied().unwrap_or(start);
+            let kind = if adj_sem[m].contains(&nxt) {
+                "sem"
+            } else {
+                "opt"
+            };
+            let kind_of = |st: &ProtoStatement| match st {
+                ProtoStatement::Assign(_) => "Assign",
+                ProtoStatement::AssignDynamic(_) => "AssignDynamic",
+                ProtoStatement::If(_) => "If",
+                ProtoStatement::Case(_) => "Case",
+                ProtoStatement::For(_) => "For",
+                ProtoStatement::SequentialBlock(_) => "SeqBlock",
+                ProtoStatement::CompiledBlock(_) => "CompiledBlock",
+                ProtoStatement::SystemFunctionCall(_) => "SysFn",
+                _ => "?",
+            };
+            let desc = match statements[m].token() {
+                Some(t) => {
+                    let src = t.beg.source.to_string();
+                    let file = src.rsplit('/').next().unwrap_or(&src).to_string();
+                    format!("{}@{file}:{}", kind_of(&statements[m]), t.beg.line)
+                }
+                None => format!("{}@generated", kind_of(&statements[m])),
+            };
+            // The pair of RANGES is what decides whether the edge is real: the
+            // writer's bits on `m` against the reader's bits on `nxt`.
+            let mut w_bits = vec![];
+            gather_bit_aware_outputs(&statements[m], &mut w_bits);
+            let mut r_bits = vec![];
+            statements[nxt].gather_reads_with_ranges(&mut r_bits);
+            let mut via: Vec<String> = Vec::new();
+            for (woff, wr) in &w_bits {
+                for (roff, rr) in &r_bits {
+                    if woff == roff && ranges_overlap(*wr, *rr) {
+                        let e = format!("{woff:?} w{wr:?} r{rr:?}");
+                        if !via.contains(&e) {
+                            via.push(e);
+                        }
+                    }
+                }
+            }
+            log::info!(
+                "  cycle[{i}] #{m} {desc} -[{kind}/{}]-> #{nxt} via {}",
+                edge_cause.get(&(m, nxt)).copied().unwrap_or("?"),
+                via.join(", ")
+            );
+            // The node's OWN reads, so a cycle is readable without a second
+            // dump in a different numbering space.
+            {
+                let mut r = vec![];
+                statements[m].gather_reads_with_ranges(&mut r);
+                r.sort_unstable_by_key(|(o, br)| (o.is_ff(), o.raw(), *br));
+                r.dedup();
+                let mut w = vec![];
+                gather_bit_aware_outputs(&statements[m], &mut w);
+                w.sort_unstable_by_key(|(o, br)| (o.is_ff(), o.raw(), *br));
+                w.dedup();
+                let fmt = |v: &[(VarOffset, BitRange)]| -> String {
+                    v.iter()
+                        .take(12)
+                        .map(|(o, br)| match br {
+                            Some((hi, lo)) => format!("{o:?}[{hi}:{lo}]"),
+                            None => format!("{o:?}"),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                log::info!(
+                    "        #{m} writes {} | reads {}{}",
+                    fmt(&w),
+                    fmt(&r),
+                    if r.len() > 12 { " ..." } else { "" }
+                );
+                // Per-arm reads: a node that writes ONE variable from many
+                // arms carries the UNION of the arms' reads, and a cycle
+                // through that union is false whenever no single arm closes it.
+                if let ProtoStatement::Case(c) = &statements[m] {
+                    for (a, arm) in c.arms.iter().enumerate() {
+                        let mut ar = vec![];
+                        arm.cond.gather_variable_offsets(&mut ar);
+                        let mut reads: Vec<(VarOffset, BitRange)> =
+                            ar.into_iter().map(|o| (o, None)).collect();
+                        for st in &arm.body {
+                            st.gather_reads_with_ranges(&mut reads);
+                        }
+                        reads.sort_unstable_by_key(|(o, br)| (o.is_ff(), o.raw(), *br));
+                        reads.dedup();
+                        log::info!("          arm{a} reads {}", fmt(&reads));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -658,10 +759,11 @@ pub struct ProtoDeclaration {
     /// Post-comb functions: child comb-only JIT functions for pre-event eval.
     pub post_comb_fns: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
-    /// Clock-typed non-port variables discovered inside child instances.
-    /// Bubbled up through `Inst` declarations so the top module sees every
-    /// derived clock across the hierarchy, not just its own locals.
-    pub derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)>,
+    /// Clock-typed and async-reset-typed non-port variables discovered
+    /// inside child instances.  Bubbled up through `Inst` declarations so
+    /// the top module sees every derived clock and internally produced
+    /// reset across the hierarchy, not just its own locals.
+    pub derived_clock_candidates: Vec<EdgeCandidate>,
     /// User-defined component instances declared at this level.
     pub external_components: Vec<ProtoExternalComponent>,
 }
@@ -715,6 +817,18 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 })
             }
             air::Declaration::Ff(x) => {
+                // Converted before the body so statements its own conversion
+                // defers (an inlined function inside an index) stay separable
+                // from the body's.
+                let reset_cond = match &x.reset {
+                    Some(reset) => {
+                        let cond = build_reset_condition(context, reset)?;
+                        let pending = std::mem::take(&mut context.pending_statements);
+                        Some((cond, pending))
+                    }
+                    None => None,
+                };
+
                 let mut statements = vec![];
                 for stmt in &x.statements {
                     let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
@@ -725,15 +839,41 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                 let mut event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
 
                 if let Some(reset) = &x.reset {
-                    let reset_event = Event::Reset(reset.id);
+                    let (cond, mut clock_stmts) = reset_cond.unwrap();
                     let head = statements.remove(0);
                     let (mut true_side, mut false_side) = head.split_if_reset().unwrap();
                     // Statements after `if_reset` run on both reset and clock
                     // edges, so append to both branches instead of dropping them.
                     true_side.extend(statements.iter().cloned());
                     false_side.extend(statements);
-                    event_statements.insert(reset_event, true_side);
-                    event_statements.insert(clock_event, false_side);
+
+                    // The `negedge rst_n` arm of the sensitivity list: an async
+                    // reset must also reach a block whose clock is stopped, and
+                    // no clock-edge test can express that.  Reaching a block
+                    // through both arms in one step runs its reset branch twice,
+                    // as it does in SystemVerilog.  A sync reset has no such arm.
+                    if reset_is_async(context, reset.id) {
+                        event_statements.insert(Event::Reset(reset.id), true_side.clone());
+                    }
+
+                    // The `if (rst)` of the emitted body: a reset produced by
+                    // `assign`, by a cast, or by another `always_ff` has no
+                    // assertion event and is reached only this way.
+                    //
+                    // Polarity rides in the branch ORDER so the condition stays
+                    // a bare 1-bit read: active-low takes the clock branch when
+                    // the net reads 1.
+                    let (true_side, false_side) = if reset_active_low(context, reset.id) {
+                        (false_side, true_side)
+                    } else {
+                        (true_side, false_side)
+                    };
+                    clock_stmts.push(ProtoStatement::If(crate::ir::ProtoIfStatement {
+                        cond: Some(cond),
+                        true_side,
+                        false_side,
+                    }));
+                    event_statements.insert(clock_event, clock_stmts);
                 } else {
                     event_statements.insert(clock_event, statements);
                 }
@@ -1069,7 +1209,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
-        let mut all_derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)> = vec![];
+        let mut all_derived_clock_candidates: Vec<EdgeCandidate> = vec![];
 
         // Cross-test DUT reuse: if this component was already converted (earlier
         // test/instance), restore its subtree relocated to this instance's
@@ -1104,7 +1244,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     intern(*v, context);
                 }
             }
-            for (v, _, _) in &reuse.derived_clock_candidates {
+            for (v, _, _, _) in &reuse.derived_clock_candidates {
                 intern(*v, context);
             }
             let rekey = |ev: Event| -> Event {
@@ -1125,7 +1265,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             all_derived_clock_candidates = reuse
                 .derived_clock_candidates
                 .into_iter()
-                .map(|(v, off, nb)| (id_map.get(&v).copied().unwrap_or(v), off, nb))
+                .map(|(v, off, nb, pol)| (id_map.get(&v).copied().unwrap_or(v), off, nb, pol))
                 .collect();
             // Reserve the full region the reference conv consumed (declared
             // vars + function-local / temporary allocations + the whole nested
@@ -1139,6 +1279,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 variable_meta: child_variable_meta.clone(),
                 analyzer_context: child_analyzer_context,
                 ff_table: child_ff_table.clone(),
+                inst_reset_kind: crate::ir::module::collect_inst_reset_kinds(
+                    &child_module.declarations,
+                ),
                 func_offset_index: None,
             };
             context.scope_contexts.push(child_scope);
@@ -1246,6 +1389,29 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
             if let Some(exprs) = const_array_element_exprs(input_expr, child_meta.elements.len()) {
                 for (child_element, expr) in child_meta.elements.iter().zip(exprs) {
+                    all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: child_element.current,
+                        dst_width: child_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0, // not FF
+                        token: TokenRange::default(),
+                    }));
+                }
+                continue;
+            }
+
+            // Array port fed by an array literal (`inst u: Sub (p: '{default: '0})`).
+            if let Some(exprs) = array_literal_element_exprs(
+                context,
+                input_expr,
+                &child_meta.r#type,
+                child_meta.elements.len(),
+            ) {
+                for (child_element, mut expr) in child_meta.elements.iter().zip(exprs) {
+                    size_literal_rhs(&mut expr, None, None, child_meta.width);
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: child_element.current,
                         dst_width: child_meta.width,
@@ -1577,12 +1743,16 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // here, where the owner scope closes: VarIds are per-module-scope,
         // so a nested id can numerically equal an ancestor's input-port
         // id, and the event remap at that boundary would hijack the key
-        // onto an unrelated clock.  Reset-typed internal vars get the
-        // same re-key for `Event::Reset`, but no schedule candidate —
-        // there is no derived-reset edge detection, so a re-keyed reset
-        // event simply never fires.
+        // onto an unrelated clock.
+        //
+        // An ASYNC reset-typed internal var is a candidate too: no
+        // testbench drives it, so without one its `Event::Reset` never
+        // fires and `if_reset` waits for the next clock edge instead of
+        // asserting when the net does.  Its kind is read from the child's
+        // own declarations because this runs after the child scope closed.
         let child_port_var_set: HashSet<air::VarId> =
             child_module.ports.values().copied().collect();
+        let mut child_inst_reset_kinds = None;
         for (vid, var) in &child_module.variables {
             let is_clock = var.r#type.is_clock();
             let is_reset = var.r#type.is_reset();
@@ -1596,6 +1766,25 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(stmts) = remapped_events.remove(&Event::Reset(*vid)) {
                     let unique_id = context.alloc_internal_event_id();
                     remapped_events.insert(Event::Reset(unique_id), stmts);
+                    let inst_kinds = child_inst_reset_kinds.get_or_insert_with(|| {
+                        crate::ir::module::collect_inst_reset_kinds(&child_module.declarations)
+                    });
+                    let (active_low, is_async) = crate::ir::module::resolved_reset_kind(
+                        &var.r#type.kind,
+                        inst_kinds.get(vid).copied().flatten(),
+                        &context.config,
+                    );
+                    if is_async
+                        && let Some(meta) = child_variable_meta.get(vid)
+                        && let Some(elem) = meta.elements.first()
+                    {
+                        all_derived_clock_candidates.push((
+                            unique_id,
+                            elem.current,
+                            elem.native_bytes,
+                            Some(active_low),
+                        ));
+                    }
                 }
                 continue;
             }
@@ -1606,7 +1795,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid)) {
                     remapped_events.insert(Event::Clock(unique_id), stmts);
                 }
-                all_derived_clock_candidates.push((unique_id, elem.current, elem.native_bytes));
+                all_derived_clock_candidates.push((
+                    unique_id,
+                    elem.current,
+                    elem.native_bytes,
+                    None,
+                ));
             }
         }
 

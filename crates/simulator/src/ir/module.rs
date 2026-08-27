@@ -1,35 +1,42 @@
 use crate::backend::inst::next_test_top_id;
 use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole, whole};
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
-use crate::ir::declaration::{stable_topo_sort, stable_topo_sort_with_blocks};
+use crate::ir::declaration::stable_topo_sort_with_blocks;
 use crate::ir::derived_clock::{
     DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
 };
 use crate::ir::external::{ExternalComponentInst, ProtoExternalComponent};
 use crate::ir::inst_layout::InstLayout;
 use crate::ir::opt::comb_fusion;
+use crate::ir::opt::cone_gate;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
+#[cfg(not(target_family = "wasm"))]
+use crate::ir::statement::CompiledBlockStatement;
+use crate::ir::statement::ProtoAssignStatement;
 use crate::ir::variable::{
-    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, align_up_64, create_variable_meta,
-    ff_cacheline_pad_enabled, value_size, write_native_value,
+    ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableMeta, align_up_64,
+    create_variable_meta, ff_cacheline_pad_enabled, value_size, write_native_value,
 };
 use crate::ir::{
-    CompiledBatchStmt, Event, ProtoDeclaration, ProtoStatement, ProtoStatementBlock,
-    ProtoStatements, Statement, VarId, VarPath,
+    CompiledBatchStmt, Event, ProtoCaseArm, ProtoCaseStatement, ProtoDeclaration, ProtoExpression,
+    ProtoIfStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement, VarId,
+    VarPath,
 };
 use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
 use daggy::Dag;
 use daggy::petgraph::Direction::Outgoing;
 use daggy::petgraph::algo;
-use std::collections::VecDeque;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, VecDeque};
 use std::sync::Arc;
 use veryl_analyzer::ir as air;
 use veryl_parser::resource_table::StrId;
@@ -84,6 +91,12 @@ pub struct Module {
     /// (`VERYL_COMB_FUSION`): their storage is never written, so raw-buffer
     /// comparisons (the dual-run checker) must skip them.  Diagnostic only.
     pub fused_comb_offsets: Vec<isize>,
+    /// Superset of every variable offset the comb list can touch
+    /// (`collect_comb_touched_offsets`).  `Arc` so instantiating a `Module`
+    /// per test does not deep-clone the whole set.  The testbench uses it to
+    /// decide which of its own statements really invalidate the comb.
+    pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
+    pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
 }
 
 pub struct ProtoModule {
@@ -122,6 +135,12 @@ pub struct ProtoModule {
     pub rtl_driven: crate::HashSet<air::VarId>,
     /// See `Module::fused_comb_offsets`.
     pub fused_comb_offsets: Vec<isize>,
+    /// See `Module::comb_touched_offsets`.
+    pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// Cone-gate segments in BLOCK space (`comb_statements.0` indices) with
+    /// their state offsets assigned; `instantiate` maps them to the flat
+    /// statement space.
+    pub cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment>,
 }
 
 fn create_buffers(
@@ -349,7 +368,47 @@ impl ProtoModule {
         let comb_flat =
             self.comb_statements
                 .to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
-        let comb_statements = batch_compiled_statements(comb_flat);
+        // Cone-gate segments: map BLOCK ranges to FLAT statement ranges
+        // (an Interpreted block flattens to its statement count, a Compiled
+        // block to one entry).  Requires the unbatched flat list below.
+        let cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment> =
+            if self.cone_segments.is_empty() {
+                Vec::new()
+            } else {
+                let mut flat_at: Vec<usize> = Vec::with_capacity(self.comb_statements.0.len() + 1);
+                let mut pos = 0usize;
+                for b in &self.comb_statements.0 {
+                    flat_at.push(pos);
+                    pos += match b {
+                        ProtoStatementBlock::Interpreted(v) => v.len(),
+                        ProtoStatementBlock::Compiled(_) => 1,
+                    };
+                }
+                flat_at.push(pos);
+                self.cone_segments
+                    .iter()
+                    .filter(|s| s.block_lo < s.block_hi && s.block_hi < flat_at.len())
+                    .map(|s| crate::ir::opt::cone_gate::RtSegment {
+                        lo: flat_at[s.block_lo],
+                        hi: flat_at[s.block_hi],
+                        compare: s.compare.clone(),
+                        backedge: s.backedge.clone(),
+                        compare_pre: s.compare_pre.clone(),
+                        replay: s.replay.clone(),
+                        off_decay: s.off_decay,
+                        cone: s.cone.clone(),
+                    })
+                    .collect()
+            };
+        // Batching merges consecutive same-artifact chunks into one statement,
+        // which would break the 1:1 alignment gating needs — and a batched
+        // chunk could not be skipped per instance anyway.  The cone gate needs
+        // its segment edges intact for the same reason.
+        let comb_statements = if cone_segments.is_empty() {
+            batch_compiled_statements(comb_flat)
+        } else {
+            comb_flat
+        };
 
         let derived_clock_eval_stmts = if self.derived_clock_eval.0.is_empty() {
             Vec::new()
@@ -392,6 +451,8 @@ impl ProtoModule {
                 .collect(),
             rtl_driven: self.rtl_driven.clone(),
             fused_comb_offsets: self.fused_comb_offsets.clone(),
+            comb_touched_offsets: Arc::clone(&self.comb_touched_offsets),
+            cone_segments,
         }
     }
 
@@ -512,15 +573,242 @@ fn jit_chunk_size() -> usize {
 }
 
 /// Per-event JIT path: load_cache CSE enabled, no nested CompiledBlocks
-/// expected.
+/// expected.  `VERYL_EVENT_CHUNK_SIZE=N` is diagnostic: splitting here gives
+/// each chunk its own perf-map entry, attributing event-side samples per
+/// module, and leaves the comb side's chunking alone.
 fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
+    let event_split: Option<usize> = std::env::var("VERYL_EVENT_CHUNK_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    if let Some(n) = event_split.filter(|&n| n > 0 && n < proto.len()) {
+        let mut blocks = Vec::new();
+        for piece in proto.chunks(n) {
+            blocks.extend(build_chunked_via_registry(context, piece.to_vec(), false).0);
+        }
+        return ProtoStatements(blocks);
+    }
     build_chunked_via_registry(context, proto, /* contains_compiled_block= */ false)
+}
+
+/// Offsets a testbench-body chunk may write: those of the testbench's own
+/// variables that the design's comb does not read.  A comb-touched element
+/// disqualifies its whole variable, which is the granularity `tb_dirty`'s
+/// spans use; this test has to be at least as strict as that filter, since
+/// the filter only gets to judge the chunk once it exists.
+#[cfg(not(target_family = "wasm"))]
+fn tb_private_offsets(
+    variable_meta: &HashMap<VarId, VariableMeta>,
+    comb_touched: &HashSet<VarOffset>,
+) -> HashSet<VarOffset> {
+    let mut private = HashSet::default();
+    for meta in variable_meta.values() {
+        let offsets: Vec<VarOffset> = meta
+            .elements
+            .iter()
+            .flat_map(|e| {
+                let next = e.is_ff().then_some(VarOffset::Ff(e.next_offset));
+                std::iter::once(e.current).chain(next)
+            })
+            .collect();
+        if !offsets.iter().any(|o| comb_touched.contains(o)) {
+            private.extend(offsets);
+        }
+    }
+    private
+}
+
+/// A statement a testbench-body chunk may contain: buildable by the chunk
+/// backends, writes comb storage only (an FF write would push the write log,
+/// whose pointer testbench statements do not carry), and free of control the
+/// testbench runner must interpret (`$tb` method calls advance simulation,
+/// system calls buffer output, `break` exits the testbench loop).
+///
+/// It must also write nothing the design's comb reads.  The runner settles
+/// comb before EVERY testbench statement and a chunk collapses those into one
+/// settle ahead of the run, so a write the design can see would leave a later
+/// statement in the same run reading a stale comb value.
+#[cfg(not(target_family = "wasm"))]
+fn tb_chunkable(s: &ProtoStatement, private: &HashSet<VarOffset>) -> bool {
+    fn pure(s: &ProtoStatement) -> bool {
+        match s {
+            ProtoStatement::Assign(a) => !a.dst.is_ff(),
+            ProtoStatement::AssignDynamic(a) => !a.dst_base.is_ff(),
+            ProtoStatement::If(x) => x.true_side.iter().all(pure) && x.false_side.iter().all(pure),
+            ProtoStatement::Case(c) => {
+                c.arms.iter().all(|a| a.body.iter().all(pure)) && c.default.iter().all(pure)
+            }
+            ProtoStatement::For(f) => !f.var_offset.is_ff() && f.body.iter().all(pure),
+            ProtoStatement::SequentialBlock(b) => b.iter().all(pure),
+            _ => false,
+        }
+    }
+    if !pure(s) || !s.can_build_binary() {
+        return false;
+    }
+    let (mut ins, mut outs) = (Vec::new(), Vec::new());
+    // `private` is keyed on unfolded offsets, so this side must expand too.
+    s.gather_variable_offsets_expanded(&BigArrayFold::default(), &mut ins, &mut outs);
+    outs.iter().all(|o| private.contains(o))
+}
+
+/// Testbench-body pre-chunking (`Event::Initial` only).  A `#[test]` module's
+/// initial block is a control skeleton — a cycle loop around `$tb` clock
+/// calls — whose bodies the testbench runner walks statement-by-statement
+/// through the interpreter EVERY cycle.  The skeleton cannot compile, but
+/// maximal runs of plain statements inside its `for`/`if` bodies can: each
+/// run becomes one `CompiledBlock` (executed as a single native dispatch),
+/// with its write set recorded so `tb_dirty` can still classify it
+/// comb-clean.  Non-chunkable control statements keep their shape and are
+/// descended into.
+#[cfg(not(target_family = "wasm"))]
+fn precompile_tb_bodies(
+    context: &mut Context,
+    stmts: Vec<ProtoStatement>,
+    private: &HashSet<VarOffset>,
+) -> Vec<ProtoStatement> {
+    fn descend(
+        context: &mut Context,
+        s: ProtoStatement,
+        private: &HashSet<VarOffset>,
+    ) -> ProtoStatement {
+        match s {
+            ProtoStatement::For(mut f) => {
+                f.body = walk(context, std::mem::take(&mut f.body), private);
+                ProtoStatement::For(f)
+            }
+            ProtoStatement::If(mut x) => {
+                x.true_side = walk(context, std::mem::take(&mut x.true_side), private);
+                x.false_side = walk(context, std::mem::take(&mut x.false_side), private);
+                ProtoStatement::If(x)
+            }
+            ProtoStatement::Case(mut c) => {
+                for arm in &mut c.arms {
+                    arm.body = walk(context, std::mem::take(&mut arm.body), private);
+                }
+                c.default = walk(context, std::mem::take(&mut c.default), private);
+                ProtoStatement::Case(c)
+            }
+            ProtoStatement::SequentialBlock(b) => {
+                ProtoStatement::SequentialBlock(walk(context, b, private))
+            }
+            other => other,
+        }
+    }
+    fn flush(context: &mut Context, run: &mut Vec<ProtoStatement>, out: &mut Vec<ProtoStatement>) {
+        if run.is_empty() {
+            return;
+        }
+        // A lone plain assign interprets about as fast as it dispatches.
+        if run.len() == 1 && matches!(run[0], ProtoStatement::Assign(_)) {
+            out.append(run);
+            return;
+        }
+        let originals = std::mem::take(run);
+        let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
+        // The output count below is the expansion itself, so nothing folds.
+        let unfolded = BigArrayFold::default();
+        for s in &originals {
+            s.gather_variable_offsets_expanded(&unfolded, &mut inputs, &mut outputs);
+        }
+        for v in [&mut inputs, &mut outputs] {
+            v.sort_unstable_by_key(|o: &VarOffset| (o.is_ff(), o.raw()));
+            v.dedup();
+        }
+        // A dynamic write into a large array expands to one output per
+        // element; such runs are not worth a chunk's bookkeeping.
+        if outputs.len() > 4096 {
+            out.extend(originals);
+            return;
+        }
+        let blocks = build_chunked_via_registry(context, originals.clone(), false);
+        for block in blocks.0 {
+            match block {
+                ProtoStatementBlock::Compiled(artifact) => {
+                    out.push(ProtoStatement::CompiledBlock(CompiledBlockStatement {
+                        artifact,
+                        ff_delta_bytes: 0,
+                        comb_delta_bytes: 0,
+                        input_offsets: inputs.clone(),
+                        output_offsets: outputs.clone(),
+                        ff_canonical_offsets: Vec::new(),
+                        stmt_deps: Vec::new(),
+                        original_stmts: originals.clone(),
+                    }));
+                }
+                ProtoStatementBlock::Interpreted(stmts) => out.extend(stmts),
+            }
+        }
+    }
+    fn walk(
+        context: &mut Context,
+        body: Vec<ProtoStatement>,
+        private: &HashSet<VarOffset>,
+    ) -> Vec<ProtoStatement> {
+        let mut out = Vec::new();
+        let mut run: Vec<ProtoStatement> = Vec::new();
+        for s in body {
+            if tb_chunkable(&s, private) {
+                run.push(s);
+            } else {
+                flush(context, &mut run, &mut out);
+                out.push(descend(context, s, private));
+            }
+        }
+        flush(context, &mut run, &mut out);
+        out
+    }
+    // Top level stays with `try_jit` (its runs already chunk); only the
+    // bodies of the interpreted control skeleton need this pass.
+    stmts
+        .into_iter()
+        .map(|s| descend(context, s, private))
+        .collect()
 }
 
 /// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
 /// between loads, so load_cache CSE is disabled in the emitted chunks.
 fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
     build_chunked_via_registry(context, proto, /* contains_compiled_block= */ true)
+}
+
+/// `try_jit_no_cache` with chunk splits forced at `boundaries` (sorted pre-JIT
+/// statement indices), so a gated cone segment maps to a whole number of
+/// blocks.  Returns, per boundary-delimited piece, its `[lo, hi)` block range
+/// in the produced `ProtoStatements`.
+fn try_jit_with_boundaries(
+    context: &mut Context,
+    mut proto: Vec<ProtoStatement>,
+    boundaries: &[usize],
+) -> (
+    ProtoStatements,
+    Vec<(usize, usize, usize)>, // (piece_start_stmt, block_lo, block_hi)
+) {
+    let mut blocks: Vec<ProtoStatementBlock> = Vec::new();
+    let mut pieces: Vec<(usize, usize, usize)> = Vec::new();
+    // Split back to front so indices stay valid.
+    let mut cuts: Vec<usize> = boundaries.to_vec();
+    cuts.push(proto.len());
+    cuts.push(0);
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut tails: Vec<(usize, Vec<ProtoStatement>)> = Vec::new();
+    for w in cuts.windows(2).rev() {
+        let (s, e) = (w[0], w[1]);
+        tails.push((s, proto.split_off(s.min(proto.len()))));
+        debug_assert!(e >= s);
+    }
+    tails.reverse();
+    for (start, piece) in tails {
+        if piece.is_empty() {
+            pieces.push((start, blocks.len(), blocks.len()));
+            continue;
+        }
+        let lo = blocks.len();
+        let ps = build_chunked_via_registry(context, piece, true);
+        blocks.extend(ps.0);
+        pieces.push((start, lo, blocks.len()));
+    }
+    (ProtoStatements(blocks), pieces)
 }
 
 /// Shared chunk-building helper.  Asks `context.backends` to group
@@ -552,12 +840,8 @@ fn build_chunked_via_registry(
     let mut blocks = Vec::with_capacity(outputs.len());
     for out in outputs {
         match out {
-            ChunkOutput::Compiled(artifact) => {
-                blocks.push(ProtoStatementBlock::Compiled(artifact));
-            }
-            ChunkOutput::Interpreted(stmts) => {
-                blocks.push(ProtoStatementBlock::Interpreted(stmts));
-            }
+            ChunkOutput::Compiled(artifact) => blocks.push(ProtoStatementBlock::Compiled(artifact)),
+            ChunkOutput::Interpreted(stmts) => blocks.push(ProtoStatementBlock::Interpreted(stmts)),
         }
     }
     ProtoStatements(blocks)
@@ -670,6 +954,10 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
 /// CompiledBlock without original statements, a tb-method call whose
 /// return destination is an unresolved `VarId`) — the caller must not
 /// arm the split then.
+/// Narrowest storage an element can occupy, turning an element count into a
+/// lower bound on the bytes the cone gate's fold weighs.
+const MIN_ELEMENT_BYTES: usize = 4;
+
 fn collect_event_written_comb(
     events: &HashMap<Event, Vec<ProtoStatement>>,
 ) -> Option<HashSet<isize>> {
@@ -684,8 +972,19 @@ fn collect_event_written_comb(
             }
             ProtoStatement::AssignDynamic(a) => {
                 if !a.dst_base.is_ff() && a.dst_stride != 0 {
-                    for k in 0..a.dst_num_elements {
-                        out.insert(a.dst_base.raw() + a.dst_stride * k as isize);
+                    // Past the compare budget the run owns one folded span, so
+                    // its ends reach what the interior would; below it each
+                    // element owns a span and has to be named.  The fold weighs
+                    // elements, not the range they stride over.
+                    let least_bytes = a.dst_num_elements * MIN_ELEMENT_BYTES;
+                    if least_bytes > cone_gate::MAX_ELEMENT_OWNER_BYTES {
+                        let last = a.dst_num_elements.saturating_sub(1) as isize;
+                        out.insert(a.dst_base.raw());
+                        out.insert(a.dst_base.raw() + a.dst_stride * last);
+                    } else {
+                        for k in 0..a.dst_num_elements {
+                            out.insert(a.dst_base.raw() + a.dst_stride * k as isize);
+                        }
                     }
                 }
                 true
@@ -721,11 +1020,24 @@ fn collect_event_written_comb(
                 f.body.iter().all(|s| walk(s, out))
             }
             ProtoStatement::SystemFunctionCall(c) => {
-                // Readmemh writes are boundable: one offset per element.
+                // Readmemh writes are boundable: one offset per element, or
+                // just the ends once the image owns a folded span (see
+                // `AssignDynamic` above).
                 if let crate::ir::ProtoSystemFunctionCall::Readmemh { elements, .. } = c {
-                    for e in elements {
-                        if !e.current.is_ff() {
-                            out.insert(e.current.raw());
+                    let comb = || elements.iter().filter(|e| !e.current.is_ff());
+                    // The elements carry no width, so bound the fold's measure
+                    // by the narrowest element there is.
+                    let least_bytes = comb().count() * MIN_ELEMENT_BYTES;
+                    let lo = comb().map(|e| e.current.raw()).min();
+                    let hi = comb().map(|e| e.current.raw()).max();
+                    if let (Some(lo), Some(hi)) = (lo, hi) {
+                        if least_bytes > cone_gate::MAX_ELEMENT_OWNER_BYTES {
+                            out.insert(lo);
+                            out.insert(hi);
+                        } else {
+                            for e in comb() {
+                                out.insert(e.current.raw());
+                            }
                         }
                     }
                 }
@@ -765,6 +1077,7 @@ fn run_comb_pipeline(
     protect: &HashSet<VarOffset>,
     layout_inputs: Option<&comb_layout::LayoutInputs>,
     fusion_extra: Option<&[VarOffset]>,
+    cone_inputs: Option<&cone_gate::ConeGateInputs>,
     module_name: StrId,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
     dump_stmt_order("conv", module_name, &unified);
@@ -775,8 +1088,10 @@ fn run_comb_pipeline(
 
     // Comb bytes this pass reserves for rename temps; recorded on the
     // pipeline so a cache hit — which skips this whole function — can
-    // reserve the same span (see `CombPipeline::vsplit_temp_bytes`).
-    let mut vsplit_temp_bytes = 0usize;
+    // reserve the same span (see `CombPipeline::vsplit_temp_bytes`, which
+    // covers every comb temp this function allocates, the scheduler's version
+    // renames included).
+    let temps_before = context.comb_total_bytes;
     let unified = {
         let mut unified = unified;
         if version_split::pass_enabled(context.config.use_4state) {
@@ -790,7 +1105,7 @@ fn run_comb_pipeline(
                 off
             };
             let stats = version_split::run(&mut unified, &mut alloc);
-            vsplit_temp_bytes = context.comb_total_bytes - before;
+            let _ = before;
             version_split::accumulate(&stats);
             log::info!(
                 "version_split totals ({module_name}): {}",
@@ -800,7 +1115,18 @@ fn run_comb_pipeline(
         unified
     };
     dump_stmt_order("post-vsplit", module_name, &unified);
-    let (unified_sorted, passes_hint) = analyze_dependency(unified)?;
+    let (unified_sorted, passes_hint) = {
+        let use_4state = context.config.use_4state;
+        let comb_total = &mut context.comb_total_bytes;
+        let mut alloc = |width: usize| -> isize {
+            let nb = crate::ir::variable::native_bytes(width);
+            let off = *comb_total as isize;
+            *comb_total += crate::ir::variable::value_size(nb, use_4state);
+            off
+        };
+        analyze_dependency(unified, &mut alloc)?
+    };
+    let vsplit_temp_bytes = context.comb_total_bytes - temps_before;
     dump_stmt_order("post-topo", module_name, &unified_sorted);
     // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
     // reorder_by_level preserves the sort's dependency relations (readers
@@ -930,6 +1256,40 @@ fn run_comb_pipeline(
         (unified_sorted, Vec::new())
     };
 
+    // Cone scheduling: cluster each qualifying module
+    // subtree into few contiguous segments so the settle can skip them by
+    // one compare each.  The reorder is a legal schedule of the same
+    // dependency graph, so pass counts and the relayout below stay valid.
+    let (unified_sorted, cone_plan) = match cone_inputs {
+        Some(ci) => match cone_gate::plan(&unified_sorted, ci) {
+            Some(plan) => {
+                let mut reordered = Vec::with_capacity(unified_sorted.len());
+                let mut src: Vec<Option<ProtoStatement>> =
+                    unified_sorted.into_iter().map(Some).collect();
+                for &oi in &plan.order {
+                    reordered.push(src[oi as usize].take().expect("permutation is a bijection"));
+                }
+                (reordered, Some(plan))
+            }
+            None => (unified_sorted, None),
+        },
+        None => (unified_sorted, None),
+    };
+    // The clustered order is a different topological order; a settle
+    // back-edge may sit later in it, so the positional pass metric must be
+    // re-taken (never lowered: the hint may be exact for the OLD order only).
+    let required_comb_passes = if cone_plan.is_some() {
+        let repositioned = compute_required_passes(&unified_sorted);
+        if cone_gate::diag() {
+            eprintln!(
+                "[cone_gate] passes: pre-reorder {required_comb_passes} positional {repositioned}"
+            );
+        }
+        required_comb_passes.max(repositioned)
+    } else {
+        required_comb_passes
+    };
+
     // Settle-order relayout (`VERYL_COMB_LAYOUT`): derive the storage
     // permutation from the final execution order and rewrite the comb
     // statements through it before the JIT bakes their offsets in.  The
@@ -956,7 +1316,112 @@ fn run_comb_pipeline(
     // Snapshot before JIT consumes it: the whole-comb backend needs the
     // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
     let pre_jit_stmts = Arc::new(unified_sorted.clone());
-    let comb_statements = try_jit_no_cache(context, unified_sorted);
+    let (comb_statements, cone_segments) = match &cone_plan {
+        Some(plan) => {
+            let mut bounds: Vec<usize> = plan
+                .segments
+                .iter()
+                .flat_map(|s| [s.start, s.end])
+                .collect();
+            bounds.sort_unstable();
+            bounds.dedup();
+            let (ps, pieces) = try_jit_with_boundaries(context, unified_sorted, &bounds);
+            let mut segs: Vec<cone_gate::ConeSegment> = Vec::new();
+            for s in &plan.segments {
+                let Some(&(_, blo, bhi)) = pieces.iter().find(|&&(st, _, _)| st == s.start) else {
+                    continue;
+                };
+                // Bring the compare ranges into the FINAL storage space —
+                // piecewise, because a merged span can straddle relayout
+                // units that land apart.
+                let mut compare: Vec<(bool, u32, u32)> = Vec::new();
+                for &(ff, cs, ce) in &s.compare {
+                    match (ff, layout.as_deref()) {
+                        (false, Some(sched)) => {
+                            for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
+                                compare.push((false, ns as u32, ne as u32));
+                            }
+                        }
+                        _ => compare.push((ff, cs, ce)),
+                    }
+                }
+                compare.sort_unstable();
+                let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
+                    let mut out: Vec<(u32, u32)> = Vec::new();
+                    for &(cs, ce) in v {
+                        match layout.as_deref() {
+                            Some(sched) => {
+                                for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
+                                    out.push((ns as u32, ne as u32));
+                                }
+                            }
+                            None => out.push((cs, ce)),
+                        }
+                    }
+                    out.sort_unstable();
+                    out
+                };
+                // Relayout scatters the whole-variable spans, leaving
+                // thousands of 4-8 byte memcmp/memcpy ranges whose per-span
+                // setup dwarfs the byte traffic.  Fuse ranges across small
+                // gaps: comparing a gap byte is at worst a spurious dirty,
+                // and replaying one is exact because the pre-run compare
+                // (`compare_pre` covers every replay range, gaps included)
+                // just proved it unchanged since the stored run.  The
+                // backedge ranges must stay exact — a gap byte the segment
+                // legitimately rewrites would read as non-convergence.
+                let coalesce = |v: &mut Vec<(u32, u32)>| {
+                    let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
+                    for &(cs, ce) in v.iter() {
+                        match out.last_mut() {
+                            Some(p) if cs <= p.1 + 32 => p.1 = p.1.max(ce),
+                            _ => out.push((cs, ce)),
+                        }
+                    }
+                    *v = out;
+                };
+                {
+                    let mut ffs: Vec<(u32, u32)> = Vec::new();
+                    let mut combs: Vec<(u32, u32)> = Vec::new();
+                    for &(ff, cs, ce) in &compare {
+                        if ff { &mut ffs } else { &mut combs }.push((cs, ce));
+                    }
+                    coalesce(&mut ffs);
+                    coalesce(&mut combs);
+                    compare = combs
+                        .into_iter()
+                        .map(|(cs, ce)| (false, cs, ce))
+                        .chain(ffs.into_iter().map(|(cs, ce)| (true, cs, ce)))
+                        .collect();
+                }
+                let backedge = translate_pairs(&s.backedge);
+                let mut replay = translate_pairs(&s.replay);
+                coalesce(&mut replay);
+                // The plan guarantees `compare_pre == replay`; keep the
+                // fused ranges identical so every replayed byte stays
+                // covered by the pre-run compare.
+                let compare_pre = replay.clone();
+                segs.push(cone_gate::ConeSegment {
+                    block_lo: blo,
+                    block_hi: bhi,
+                    stmt_lo: s.start,
+                    stmt_hi: s.end,
+                    state_off: 0,
+                    compare,
+                    backedge,
+                    compare_pre,
+                    replay,
+                    off_decay: s.off_decay,
+                    cone: s.cone.clone(),
+                });
+            }
+            (ps, segs)
+        }
+        None => {
+            let a = try_jit_no_cache(context, unified_sorted);
+            (a, Vec::new())
+        }
+    };
     Ok(comb_pipeline_cache::CombPipeline {
         pre_jit_stmts,
         required_comb_passes,
@@ -969,6 +1434,7 @@ fn run_comb_pipeline(
             Some(sched) => fused_offsets.iter().map(|&o| sched.translate(o)).collect(),
             None => fused_offsets,
         },
+        cone_segments: Arc::new(cone_segments),
         layout,
         nontrivial_comb_scc,
         vsplit_temp_bytes,
@@ -980,10 +1446,13 @@ fn run_comb_pipeline(
 /// `None` means the caller must fall back to `compute_required_passes`.
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
+    alloc: &mut dyn FnMut(usize) -> isize,
 ) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
-        Var(VarOffset),
+        /// `(variable, bit atom)`. Atom 0 is the whole variable unless
+        /// `self_referenced_bit_atoms` split it.
+        Var(VarOffset, usize),
         Statement(usize),
     }
 
@@ -998,6 +1467,17 @@ pub(crate) fn analyze_dependency(
     // for statements that have no explicit dependency between them.
     let try_topo_sort =
         |table: &HashMap<usize, ProtoStatement>| -> Result<Vec<ProtoStatement>, usize> {
+            // A statement writing some bits of a variable and reading others
+            // has that read dropped as a self-reference below. At variable
+            // granularity there is no alternative — the edge would be a self
+            // loop — but dropping it breaks the very invariant this phase
+            // reports by returning `Some(1)`: nothing orders the reader after
+            // its writer any more, and the schedule silently needs a second
+            // pass. Split exactly those variables at their writers' bit
+            // boundaries, so the dependency survives as an edge between
+            // distinct atoms.
+            let atoms = self_referenced_bit_atoms(table);
+
             let mut dag = Dag::<Node, ()>::new();
             let mut dag_nodes: HashMap<Node, _> = HashMap::default();
 
@@ -1006,6 +1486,12 @@ pub(crate) fn analyze_dependency(
 
             let mut node_to_stmt: HashMap<daggy::NodeIndex, usize> = HashMap::default();
 
+            let mut bit_reads = vec![];
+            let mut bit_writes = vec![];
+            // Insertion-ordered so the emitted DAG stays deterministic; the
+            // set only suppresses the duplicates bit splitting introduces.
+            let mut edges: Vec<(Node, Node)> = vec![];
+            let mut edge_seen: HashSet<(Node, Node)> = HashSet::default();
             for id in &sorted_keys {
                 let x = &table[id];
                 let mut inputs = vec![];
@@ -1017,29 +1503,63 @@ pub(crate) fn analyze_dependency(
                 node_to_stmt.insert(stmt, *id);
 
                 let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
-                let mut ok = true;
-                for var_key in inputs {
-                    if output_set.contains(&var_key) {
+                let split_here = !atoms.is_empty()
+                    && (inputs.iter().any(|key| atoms.contains_key(key))
+                        || output_set.iter().any(|key| atoms.contains_key(key)));
+                bit_reads.clear();
+                bit_writes.clear();
+                if split_here {
+                    x.gather_reads_with_ranges(&mut bit_reads);
+                    gather_bit_aware_outputs(x, &mut bit_writes);
+                }
+
+                edges.clear();
+                edge_seen.clear();
+                let mut push = |edges: &mut Vec<(Node, Node)>, edge: (Node, Node)| {
+                    if edge_seen.insert(edge) {
+                        edges.push(edge);
+                    }
+                };
+                for var_key in &inputs {
+                    let Some(starts) = atoms.get(var_key) else {
+                        if !output_set.contains(var_key) {
+                            push(&mut edges, (Node::Var(*var_key, 0), stmt_node));
+                        }
                         continue;
-                    }
-                    let var_node = Node::Var(var_key);
-                    let var = *dag_nodes
-                        .entry(var_node)
-                        .or_insert_with(|| dag.add_node(var_node));
-                    if dag.add_edge(var, stmt, ()).is_err() {
-                        ok = false;
-                        break;
+                    };
+                    for (read_key, read) in bit_reads.iter().filter(|(k, _)| k == var_key) {
+                        for atom in atom_indices(starts, *read) {
+                            let written = bit_writes
+                                .iter()
+                                .filter(|(k, _)| k == read_key)
+                                .any(|(_, write)| atom_indices(starts, *write).contains(&atom));
+                            if !written {
+                                push(&mut edges, (Node::Var(*read_key, atom), stmt_node));
+                            }
+                        }
                     }
                 }
-                if !ok {
-                    return Err(*id);
+                for var_key in &outputs {
+                    let Some(starts) = atoms.get(var_key) else {
+                        push(&mut edges, (stmt_node, Node::Var(*var_key, 0)));
+                        continue;
+                    };
+                    for (write_key, write) in bit_writes.iter().filter(|(k, _)| k == var_key) {
+                        for atom in atom_indices(starts, *write) {
+                            push(&mut edges, (stmt_node, Node::Var(*write_key, atom)));
+                        }
+                    }
                 }
-                for var_key in outputs {
-                    let var_node = Node::Var(var_key);
-                    let var = *dag_nodes
-                        .entry(var_node)
-                        .or_insert_with(|| dag.add_node(var_node));
-                    if dag.add_edge(stmt, var, ()).is_err() {
+
+                let mut ok = true;
+                for (source, destination) in edges.iter().copied() {
+                    let source = *dag_nodes
+                        .entry(source)
+                        .or_insert_with(|| dag.add_node(source));
+                    let destination = *dag_nodes
+                        .entry(destination)
+                        .or_insert_with(|| dag.add_node(destination));
+                    if dag.add_edge(source, destination, ()).is_err() {
                         ok = false;
                         break;
                     }
@@ -1109,147 +1629,168 @@ pub(crate) fn analyze_dependency(
         return Ok((sorted, Some(1)));
     }
 
-    // Phase 2: Expand CompiledBlocks and SequentialBlocks and retry.
-    // Rebuild the table with fresh sequential IDs so expanded sub-statements
-    // keep their parent's position; Phase 3's fallback sorts by ID and relies
-    // on that ordering for `let x = expr` vs `always_comb { x = expr; }` to
-    // produce equivalent schedules when the block participates in a cycle.
-    let has_expandable = table.values().any(|x| {
-        matches!(x, ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty())
-            || matches!(x, ProtoStatement::SequentialBlock(_))
-    });
-
-    // Flattened stmt id → source block (original table key); set by the
-    // Phase-2 full flatten.
-    let mut block_of: Option<Vec<usize>> = None;
-
-    if has_expandable {
-        // FAST PATH: flatten only blocks WITHOUT an intra-block reorder hazard
-        // (a write to a comb var an earlier statement of the block read or
-        // wrote — WAR/WAW/reassignment); those keep their program order by
-        // staying atomic. A bipartite topological sort then interleaves the
-        // hazard-free statements across blocks into a backward-edge-free order
-        // that settles in ONE comb pass — the common case, where the full
-        // recursive flatten + stable_topo_sort below instead leaves a backward
-        // edge for cross-block no-prior-writer reads that doubles the passes.
-        //
-        // On failure fall through to that full-flatten path: an atomic hazard
-        // block's conflated I/O can form a phantom cross-block cycle that the
-        // bipartite sort rejects but the per-statement flatten resolves.
-        fn block_has_reorder_hazard(stmts: &[ProtoStatement]) -> bool {
-            let mut seen: HashSet<VarOffset> = HashSet::default();
-            for s in stmts {
-                let mut ins = vec![];
-                let mut outs = vec![];
-                s.gather_variable_offsets(&mut ins, &mut outs);
-                ins.retain(|o| !o.is_ff());
-                outs.retain(|o| !o.is_ff());
-                if outs.iter().any(|o| seen.contains(o)) {
-                    return true;
-                }
-                seen.extend(ins);
-                seen.extend(outs);
-            }
-            false
-        }
-        fn hazard_flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
-            match stmt {
-                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-                    if block_has_reorder_hazard(&cb.original_stmts) {
-                        out.push(ProtoStatement::CompiledBlock(cb));
-                    } else {
-                        for sub in cb.original_stmts {
-                            hazard_flatten(sub, out);
-                        }
-                    }
-                }
-                ProtoStatement::SequentialBlock(body) => {
-                    if block_has_reorder_hazard(&body) {
-                        out.push(ProtoStatement::SequentialBlock(body));
-                    } else {
-                        for sub in body {
-                            hazard_flatten(sub, out);
-                        }
-                    }
-                }
-                other => out.push(other),
-            }
-        }
-        let mut keys: Vec<usize> = table.keys().cloned().collect();
-        keys.sort();
-        let mut fast: HashMap<usize, ProtoStatement> = HashMap::default();
-        let mut id = 0usize;
-        for key in &keys {
-            let mut flat = Vec::new();
-            hazard_flatten(table[key].clone(), &mut flat);
-            for sub in flat {
-                fast.insert(id, sub);
-                id += 1;
-            }
-        }
-        if let Ok(sorted) = try_topo_sort(&fast) {
-            pass_diag_phase("phase2-fast: hazard-flatten + bipartite");
-            return Ok((sorted, Some(1)));
-        }
-
-        // Recursive: SequentialBlock's gather conflates per-stmt I/O, so
-        // nested SeqBlocks (e.g. inside a CompiledBlock's original_stmts)
-        // must be unwrapped too or they manufacture phantom edges.
-        fn flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
-            match stmt {
-                ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+    // Phase 1 has already failed, so its cycle is either real or an artefact
+    // of statement granularity.  Nothing below needs a BLOCK to expand — the
+    // deep split reaches a concatenation too, which is all a module written
+    // from `assign` alone has.
+    //
+    // Keeping hazard blocks atomic buys a one-pass order the full flatten
+    // below does not reach for cross-block no-prior-writer reads.  On failure
+    // fall through: an atomic block's conflated I/O can form a phantom cycle
+    // that the per-statement flatten resolves.
+    fn hazard_flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+        match stmt {
+            ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                if block_has_reorder_hazard(&cb.original_stmts) {
+                    out.push(ProtoStatement::CompiledBlock(cb));
+                } else {
                     for sub in cb.original_stmts {
-                        flatten(sub, out);
+                        hazard_flatten(sub, out);
                     }
                 }
-                ProtoStatement::SequentialBlock(body) => {
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                if block_has_reorder_hazard(&body) {
+                    out.push(ProtoStatement::SequentialBlock(body));
+                } else {
                     for sub in body {
-                        flatten(sub, out);
+                        hazard_flatten(sub, out);
                     }
                 }
-                other => out.push(other),
             }
-        }
-
-        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-        sorted_keys.sort();
-
-        let mut new_table: HashMap<usize, ProtoStatement> = HashMap::default();
-        let mut flat_block_of: Vec<usize> = Vec::new();
-        let mut new_id = 0usize;
-        for key in sorted_keys {
-            let stmt = table.remove(&key).unwrap();
-            let mut flat = Vec::new();
-            flatten(stmt, &mut flat);
-            for sub in flat {
-                new_table.insert(new_id, sub);
-                flat_block_of.push(key);
-                new_id += 1;
-            }
-        }
-        table = new_table;
-        block_of = Some(flat_block_of);
-
-        // Sort the flattened (program-order) statements with the block-aware
-        // `stable_topo_sort`, NOT the bipartite `try_topo_sort`: the bipartite
-        // model makes a reader wait for EVERY writer of a var, reordering
-        // sequential reassignment — flattened `x=a; y=x; x=b` would become
-        // `x=a; x=b; y=x`, so `y` wrongly reads `b`. `stable_topo_sort` links
-        // `y` to its most recent PRIOR writer only. (reorder_by_level applies
-        // the matching WAR/WAW leveling downstream.)
-        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-        sorted_keys.sort();
-        let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let blocks: Vec<usize> = sorted_keys
-            .iter()
-            .map(|k| block_of.as_ref().unwrap()[*k])
-            .collect();
-        let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
-        if !fell_back {
-            pass_diag_phase("phase2-full: flatten + stable_topo_sort");
-            return Ok((sorted, passes_hint));
+            other => out.push(other),
         }
     }
+    let mut keys: Vec<usize> = table.keys().cloned().collect();
+    keys.sort();
+    let mut fast: HashMap<usize, ProtoStatement> = HashMap::default();
+    let mut id = 0usize;
+    for key in &keys {
+        let mut flat = Vec::new();
+        hazard_flatten(table[key].clone(), &mut flat);
+        for sub in flat {
+            fast.insert(id, sub);
+            id += 1;
+        }
+    }
+    if let Ok(sorted) = try_topo_sort(&fast) {
+        pass_diag_phase("phase2-fast: hazard-flatten + bipartite");
+        return Ok((sorted, Some(1)));
+    }
+
+    // Recursive: SequentialBlock's gather conflates per-stmt I/O, so
+    // nested SeqBlocks (e.g. inside a CompiledBlock's original_stmts)
+    // must be unwrapped too or they manufacture phantom edges.
+    fn flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+        match stmt {
+            ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+                for sub in cb.original_stmts {
+                    flatten(sub, out);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for sub in body {
+                    flatten(sub, out);
+                }
+            }
+            other => split_nested(other, out, false),
+        }
+    }
+
+    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+    sorted_keys.sort();
+
+    let mut new_table: HashMap<usize, ProtoStatement> = HashMap::default();
+    // Flattened stmt id → source block (original table key).
+    let mut block_of: Vec<usize> = Vec::new();
+    let mut new_id = 0usize;
+    for key in sorted_keys {
+        let stmt = table.remove(&key).unwrap();
+        let mut flat = Vec::new();
+        flatten(stmt, &mut flat);
+        for sub in flat {
+            new_table.insert(new_id, sub);
+            block_of.push(key);
+            new_id += 1;
+        }
+    }
+    table = new_table;
+
+    // Sort the flattened (program-order) statements with the block-aware
+    // `stable_topo_sort`, NOT the bipartite `try_topo_sort`: the bipartite
+    // model makes a reader wait for EVERY writer of a var, reordering
+    // sequential reassignment — flattened `x=a; y=x; x=b` would become
+    // `x=a; x=b; y=x`, so `y` wrongly reads `b`. `stable_topo_sort` links
+    // `y` to its most recent PRIOR writer only. (reorder_by_level applies
+    // the matching WAR/WAW leveling downstream.)
+    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+    sorted_keys.sort();
+    let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
+    let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+    if !fell_back {
+        pass_diag_phase("phase2-full: flatten + stable_topo_sort");
+        return Ok((sorted, passes_hint));
+    }
+    // The sort reports a cycle rather than answering with a degraded order:
+    // a synthesisable design has a one-pass order, so the cycle is in the
+    // SCHEDULE, not in the circuit.  The usual source is a `Case`/`If` kept
+    // whole, whose reads and writes are the union over its arms, so two of
+    // them cross through variables no single arm pairs.  Splitting inside
+    // the arms is exactly what resolves that.
+
+    // Still cyclic: the loop may run through a conditional several levels
+    // down, which the flat split cannot reach.  Splitting in place keeps the
+    // flattened program order, and only a design that would otherwise fail to
+    // schedule pays for the re-evaluated guards.
+    let mut keys: Vec<usize> = table.keys().cloned().collect();
+    keys.sort();
+    let mut deep_stmts: Vec<ProtoStatement> = Vec::new();
+    let mut deep_block_of: Vec<usize> = Vec::new();
+    for key in keys {
+        let mut deep = Vec::new();
+        split_nested(table.remove(&key).unwrap(), &mut deep, true);
+        for sub in deep {
+            deep_stmts.push(sub);
+            deep_block_of.push(block_of[key]);
+        }
+    }
+    split_copies_by_source_writes(&mut deep_stmts, &mut deep_block_of);
+    table = deep_stmts.into_iter().enumerate().collect();
+    // Versions before scheduling: each write is its own statement now, so
+    // a reader between two of them can be given the earlier version's
+    // storage and stop forcing a WAR edge to the later write.
+    {
+        let mut keys: Vec<usize> = table.keys().cloned().collect();
+        keys.sort();
+        let mut flat: Vec<ProtoStatement> = keys.iter().map(|k| table.remove(k).unwrap()).collect();
+        let mut blocks = deep_block_of;
+        let renamed = rename_versions(&mut flat, &mut blocks, alloc);
+        if renamed > 0 {
+            pass_diag_phase(&format!("phase2-deep: {renamed} version(s) renamed"));
+        }
+        table = flat.into_iter().enumerate().collect();
+        block_of = blocks;
+    }
+
+    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
+    sorted_keys.sort();
+    let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
+    let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+    if !fell_back {
+        pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
+        return Ok((sorted, passes_hint));
+    }
+    // Neither granularity linearized it, so no order here honours every edge.
+    // Phase 3 below still produces one, but it is not the one-pass order a
+    // synthesisable design has: say so rather than let the extra settle
+    // passes pass for normal.
+    log::warn!(
+        "the statement order for this scope could not be linearized at either granularity; \
+         simulation stays correct but settles in more than one pass. \
+         Re-run with VERYL_PASS_DIAG=1 to see the cycle."
+    );
 
     // Phase 3: Check for genuine combinational loop vs false positive
     // from non-expandable CompiledBlocks (shared JIT cache).
@@ -1262,17 +1803,13 @@ pub(crate) fn analyze_dependency(
 
     if !has_any_cb || !has_non_expandable_cb {
         // DAG-based sort failed (false cycle from inlined function bodies).
-        // Fall back to direct statement-level sort (block-aware when Phase 2
-        // flattened the table and recorded statement origins).
+        // Fall back to the block-aware statement-level sort over what Phase 2
+        // flattened.
         let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
         sorted_keys.sort();
         let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let (sorted, passes_hint, _) = if let Some(block_of) = &block_of {
-            let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
-            stable_topo_sort_with_blocks(stmts, &blocks)
-        } else {
-            (stable_topo_sort(stmts), None, false)
-        };
+        let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+        let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, &blocks);
         // Verify no genuine combinational loop remains.
         let n = sorted.len();
         let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
@@ -1399,7 +1936,7 @@ pub(crate) fn analyze_dependency(
             if output_set.contains(var_key) {
                 continue;
             }
-            let var_node = Node::Var(*var_key);
+            let var_node = Node::Var(*var_key, 0);
             let var = *dag_nodes_relaxed
                 .entry(var_node)
                 .or_insert_with(|| dag_relaxed.add_node(var_node));
@@ -1421,7 +1958,7 @@ pub(crate) fn analyze_dependency(
             }
         }
         for var_key in &outputs {
-            let var_node = Node::Var(*var_key);
+            let var_node = Node::Var(*var_key, 0);
             let var = *dag_nodes_relaxed
                 .entry(var_node)
                 .or_insert_with(|| dag_relaxed.add_node(var_node));
@@ -1461,6 +1998,615 @@ pub(crate) fn analyze_dependency(
 /// `Assign.select` convention. Overlap: two ranges overlap if their
 /// bit intervals intersect.
 pub(crate) type BitRange = Option<(usize, usize)>;
+
+/// A write to a comb var an earlier statement of the block read or wrote
+/// (WAR/WAW/reassignment): those statements need their program order.
+fn block_has_reorder_hazard(stmts: &[ProtoStatement]) -> bool {
+    let mut seen: HashSet<VarOffset> = HashSet::default();
+    for s in stmts {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        ins.retain(|o| !o.is_ff());
+        outs.retain(|o| !o.is_ff());
+        if outs.iter().any(|o| seen.contains(o)) {
+            return true;
+        }
+        seen.extend(ins);
+        seen.extend(outs);
+    }
+    false
+}
+
+/// Partition guarded statements so any two writing a variable in common stay
+/// together.  Returns each statement's group, numbered in first-appearance
+/// order so the emitted schedule is stable, and the group count.
+fn group_by_write_set<'a>(
+    stmts: impl Iterator<Item = &'a ProtoStatement>,
+    by_range: bool,
+) -> (Vec<usize>, usize) {
+    // Bit ranges, not just variables: two arms of one `case` writing disjoint
+    // slices of the same vector are independent nodes, and welding them makes
+    // every bit of the result depend on every input the block reads.  A write
+    // whose bits are unknown (`None`) still conflicts with every write of that
+    // variable, so the conservative case is unchanged.
+    let mut writes: Vec<Vec<(VarOffset, BitRange)>> = Vec::new();
+    for stmt in stmts {
+        let mut outs = vec![];
+        gather_bit_aware_outputs(stmt, &mut outs);
+        outs.sort_unstable_by_key(|(o, r)| (o.is_ff(), o.raw(), *r));
+        outs.dedup();
+        writes.push(outs);
+    }
+    let n = writes.len();
+    let conflict = |a: &[(VarOffset, BitRange)], b: &[(VarOffset, BitRange)]| {
+        a.iter().any(|(ao, ar)| {
+            b.iter()
+                .any(|(bo, br)| ao == bo && (!by_range || ranges_overlap(*ar, *br)))
+        })
+    };
+
+    // Union statements that write any bit in common.
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if !conflict(&writes[i], &writes[j]) {
+                continue;
+            }
+            let (a, b) = (find(&mut parent, i), find(&mut parent, j));
+            if a != b {
+                parent[a] = b;
+            }
+        }
+    }
+
+    let mut renumber: HashMap<usize, usize> = HashMap::default();
+    let mut ids = Vec::with_capacity(n);
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        let next = renumber.len();
+        ids.push(*renumber.entry(root).or_insert(next));
+    }
+    let count = renumber.len();
+    (ids, count)
+}
+
+/// The order to emit the groups in so every ordering the bodies impose
+/// survives the split, or `None` when no such order exists.
+///
+/// Groups run in emission order, so a RAW pair keeps the writer's group
+/// first and a WAR pair the reader's.  Every group re-evaluates the guard,
+/// so a body writing a variable a guard reads has no valid order at all.
+fn group_emission_order(
+    guards: &[&ProtoExpression],
+    bodies: &[&[ProtoStatement]],
+    ids: &[usize],
+    count: usize,
+) -> Option<Vec<usize>> {
+    let mut guard_reads: HashSet<VarOffset> = HashSet::default();
+    let mut ins = vec![];
+    let mut outs = vec![];
+    for g in guards {
+        ins.clear();
+        g.gather_variable_offsets(&mut ins);
+        guard_reads.extend(ins.iter().copied().filter(|o| !o.is_ff()));
+    }
+
+    let mut succ: Vec<HashSet<usize>> = vec![HashSet::default(); count];
+    let mut i = 0;
+    for body in bodies {
+        // Bodies are mutually exclusive, so each starts with a clean history.
+        let mut last_write: HashMap<VarOffset, usize> = HashMap::default();
+        let mut readers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+        for stmt in *body {
+            ins.clear();
+            outs.clear();
+            stmt.gather_variable_offsets(&mut ins, &mut outs);
+            for o in outs.iter().filter(|o| !o.is_ff()) {
+                if guard_reads.contains(o) {
+                    return None;
+                }
+                for &r in readers.get(o).into_iter().flatten() {
+                    succ[r].insert(ids[i]);
+                }
+            }
+            for o in ins.iter().filter(|o| !o.is_ff()) {
+                if let Some(&w) = last_write.get(o) {
+                    succ[w].insert(ids[i]);
+                }
+            }
+            for o in outs.iter().filter(|o| !o.is_ff()) {
+                last_write.insert(*o, ids[i]);
+            }
+            for o in ins.iter().filter(|o| !o.is_ff()) {
+                readers.entry(*o).or_default().push(ids[i]);
+            }
+            i += 1;
+        }
+    }
+
+    // Kahn over the groups, lowest group id first so the emitted order stays
+    // the statements' own order whenever nothing constrains it.
+    let mut indeg = vec![0usize; count];
+    for (g, ss) in succ.iter().enumerate() {
+        for &s in ss {
+            if s != g {
+                indeg[s] += 1;
+            }
+        }
+    }
+    let mut ready: BinaryHeap<Reverse<usize>> =
+        (0..count).filter(|&g| indeg[g] == 0).map(Reverse).collect();
+    let mut order = Vec::with_capacity(count);
+    while let Some(Reverse(g)) = ready.pop() {
+        order.push(g);
+        for &s in &succ[g] {
+            if s == g {
+                continue;
+            }
+            indeg[s] -= 1;
+            if indeg[s] == 0 {
+                ready.push(Reverse(s));
+            }
+        }
+    }
+    (order.len() == count).then_some(order)
+}
+
+/// Reach a conditional nested inside a body, which the flat split does not.
+///
+/// Off unless the flat split already failed: every group re-evaluates the
+/// guards it sits under, so the extra code is only worth emitting where it
+/// buys a schedule.
+fn split_body(body: Vec<ProtoStatement>, deep: bool) -> Vec<ProtoStatement> {
+    if !deep {
+        return body;
+    }
+    let mut out = Vec::with_capacity(body.len());
+    for stmt in body {
+        split_nested(stmt, &mut out, deep);
+    }
+    out
+}
+
+/// One statement of a body, split by write set when it is a conditional, or
+/// by concatenation element when it is a whole-variable assign.
+fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
+    match stmt {
+        ProtoStatement::If(x) => split_if_by_write_set(x, out, deep),
+        ProtoStatement::Case(x) => split_case_by_write_set(x, out, deep),
+        ProtoStatement::Assign(a) if deep => split_assign_by_concat(a, out),
+        other => out.push(other),
+    }
+}
+
+/// `v = {a, b, c}` is one node, so every bit of `v` reads as depending on all
+/// three — false per element, and enough to weld a control vector to every
+/// producer its block reads.  The per-element values are identical by
+/// construction, so only the dependency model changes.
+///
+/// Only exact covers: the elements must tile `dst_width` with no select in
+/// play, so no extension or truncation rule changes.
+fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>) {
+    /// Bounded because every element becomes a statement that each settle
+    /// evaluates.  Lifting it to 256 — enough for the 109..132-element
+    /// concatenations this declines on real designs — costs 0.2-0.9% of the
+    /// run, and those schedule without the split anyway.
+    const MAX_ELEMENTS: usize = 64;
+    let ProtoExpression::Concatenation { elements, .. } = &a.expr else {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    };
+    let parts: usize = elements.iter().map(|(_, repeat, _)| *repeat).sum();
+    let total: usize = elements
+        .iter()
+        .map(|(_, repeat, width)| repeat * width)
+        .sum();
+    if a.select.is_some()
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+        || total != a.dst_width
+        || !(2..=MAX_ELEMENTS).contains(&parts)
+        || elements.iter().any(|(_, _, width)| *width == 0)
+    {
+        // Say when the bound is what stopped it: a design that needs this
+        // split to schedule would otherwise fail with no trace of why.
+        if parts > MAX_ELEMENTS && std::env::var("VERYL_PASS_DIAG").is_ok() {
+            log::info!(
+                "pass_diag: concatenation of {parts} elements left unsplit (bound {MAX_ELEMENTS})"
+            );
+        }
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    // Elements are most-significant first (the evaluator concatenates left
+    // to right), so walk `hi` downwards.
+    let mut hi = total;
+    for (expr, repeat, width) in elements {
+        for _ in 0..*repeat {
+            let lo = hi - width;
+            out.push(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: a.dst,
+                dst_width: a.dst_width,
+                select: Some((hi - 1, lo)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr: (**expr).clone(),
+                dst_ff_current_offset: a.dst_ff_current_offset,
+                token: a.token,
+            }));
+            hi = lo;
+        }
+    }
+}
+
+/// `dst = src` is one node, so every bit of `dst` reads as depending on every
+/// bit of `src` — enough to weld a vector written field by field on one side
+/// to one read field by field on the other, closing a cycle no bit takes.
+///
+/// Runs after the splits above, so a concatenation already counts per element;
+/// a source written with unknown bits is left alone, no cut being finer.
+fn split_copies_by_source_writes(stmts: &mut Vec<ProtoStatement>, blocks: &mut Vec<usize>) {
+    /// Same trade as `MAX_ELEMENTS`, but no design has reached it: the cut
+    /// count follows the source's write boundaries, which stay far below.
+    const MAX_PARTS: usize = 64;
+
+    let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
+    let mut outs = Vec::new();
+    for stmt in stmts.iter() {
+        outs.clear();
+        gather_bit_aware_outputs(stmt, &mut outs);
+        for (off, range) in outs.iter() {
+            let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
+            match range {
+                Some((hi, lo)) => {
+                    if let Some(cuts) = entry {
+                        cuts.push(*lo);
+                        cuts.push(hi + 1);
+                    }
+                }
+                None => *entry = None,
+            }
+        }
+    }
+
+    let mut out_stmts: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+    let mut out_blocks: Vec<usize> = Vec::with_capacity(blocks.len());
+    for (stmt, block) in std::mem::take(stmts)
+        .into_iter()
+        .zip(blocks.iter().copied())
+    {
+        let before = out_stmts.len();
+        split_one_copy(stmt, &bounds, MAX_PARTS, &mut out_stmts);
+        out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
+    }
+    *stmts = out_stmts;
+    *blocks = out_blocks;
+}
+
+/// One statement, split when it is a whole-variable copy whose source has
+/// known write boundaries.  The parts tile the destination, so the value is
+/// identical by construction.
+fn split_one_copy(
+    stmt: ProtoStatement,
+    bounds: &HashMap<VarOffset, Option<Vec<usize>>>,
+    max_parts: usize,
+    out: &mut Vec<ProtoStatement>,
+) {
+    let ProtoStatement::Assign(a) = stmt else {
+        out.push(stmt);
+        return;
+    };
+    let ProtoExpression::Variable {
+        var_offset,
+        select: None,
+        dynamic_select: None,
+        width,
+        var_full_width,
+        expr_context,
+    } = &a.expr
+    else {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    };
+    if a.select.is_some()
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+        || *width != a.dst_width
+        || *var_full_width != a.dst_width
+    {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    let Some(Some(cuts)) = bounds.get(var_offset) else {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    };
+    let mut cuts: Vec<usize> = cuts
+        .iter()
+        .copied()
+        .chain([0, a.dst_width])
+        .filter(|b| *b <= a.dst_width)
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    if !(3..=max_parts + 1).contains(&cuts.len()) {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    let (var_offset, var_full_width, signed) = (*var_offset, *var_full_width, expr_context.signed);
+    for w in cuts.windows(2) {
+        let (lo, hi) = (w[0], w[1] - 1);
+        out.push(ProtoStatement::Assign(ProtoAssignStatement {
+            dst: a.dst,
+            dst_width: a.dst_width,
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset,
+                select: Some((hi, lo)),
+                dynamic_select: None,
+                width: hi - lo + 1,
+                var_full_width,
+                expr_context: crate::ir::ExpressionContext {
+                    width: hi - lo + 1,
+                    signed,
+                },
+            },
+            dst_ff_current_offset: a.dst_ff_current_offset,
+            token: a.token,
+        }));
+    }
+}
+
+/// Split one `if` into an `if` per independently-written variable set.
+///
+/// One node here, two independently scheduled assignments in SV: a feedback
+/// through either closes a cycle the design does not have.  Write sets that
+/// intersect stay together, and a split a read would be reordered across is
+/// not taken.
+fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
+    let x = ProtoIfStatement {
+        cond: x.cond,
+        true_side: split_body(x.true_side, deep),
+        false_side: split_body(x.false_side, deep),
+    };
+    let arm_count = x.true_side.len() + x.false_side.len();
+    if arm_count < 2 {
+        out.push(ProtoStatement::If(x));
+        return;
+    }
+    let (ids, count) = group_by_write_set(x.true_side.iter().chain(x.false_side.iter()), deep);
+    let guards: Vec<&ProtoExpression> = x.cond.iter().collect();
+    let order = (count > 1)
+        .then(|| group_emission_order(&guards, &[&x.true_side, &x.false_side], &ids, count))
+        .flatten();
+    drop(guards);
+    let Some(order) = order else {
+        // One group: splitting would only duplicate the condition.
+        out.push(ProtoStatement::If(x));
+        return;
+    };
+
+    let mut sides: Vec<(Vec<ProtoStatement>, Vec<ProtoStatement>)> =
+        vec![Default::default(); count];
+    let true_count = x.true_side.len();
+    for (i, stmt) in x.true_side.into_iter().chain(x.false_side).enumerate() {
+        if i < true_count {
+            sides[ids[i]].0.push(stmt);
+        } else {
+            sides[ids[i]].1.push(stmt);
+        }
+    }
+    for g in order {
+        let (true_side, false_side) = std::mem::take(&mut sides[g]);
+        out.push(ProtoStatement::If(ProtoIfStatement {
+            cond: x.cond.clone(),
+            true_side,
+            false_side,
+        }));
+    }
+}
+
+/// `split_if_by_write_set` for a `case`; a whole `always_comb` lowered to one
+/// of these is a single node, so the cycle it closes is per BLOCK.
+///
+/// Only the bodies are partitioned — every group keeps every arm and its
+/// condition — so which arm fires and what an unwritten variable holds are
+/// unchanged.
+fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
+    let x = ProtoCaseStatement {
+        arms: x
+            .arms
+            .into_iter()
+            .map(|a| ProtoCaseArm {
+                cond: a.cond,
+                body: split_body(a.body, deep),
+            })
+            .collect(),
+        default: split_body(x.default, deep),
+    };
+    let stmt_count: usize = x.arms.iter().map(|a| a.body.len()).sum::<usize>() + x.default.len();
+    if stmt_count < 2 {
+        out.push(ProtoStatement::Case(x));
+        return;
+    }
+    let (ids, count) = group_by_write_set(
+        x.arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(x.default.iter()),
+        deep,
+    );
+    let guards: Vec<&ProtoExpression> = x.arms.iter().map(|a| &a.cond).collect();
+    let bodies: Vec<&[ProtoStatement]> = x
+        .arms
+        .iter()
+        .map(|a| a.body.as_slice())
+        .chain(std::iter::once(x.default.as_slice()))
+        .collect();
+    let order = (count > 1)
+        .then(|| group_emission_order(&guards, &bodies, &ids, count))
+        .flatten();
+    drop((guards, bodies));
+    let Some(order) = order else {
+        out.push(ProtoStatement::Case(x));
+        return;
+    };
+
+    let empty_arms: Vec<ProtoCaseArm> = x
+        .arms
+        .iter()
+        .map(|a| ProtoCaseArm {
+            cond: a.cond.clone(),
+            body: Vec::new(),
+        })
+        .collect();
+    let mut split: Vec<ProtoCaseStatement> = (0..count)
+        .map(|_| ProtoCaseStatement {
+            arms: empty_arms.clone(),
+            default: Vec::new(),
+        })
+        .collect();
+    let mut i = 0;
+    for (a, arm) in x.arms.into_iter().enumerate() {
+        for stmt in arm.body {
+            split[ids[i]].arms[a].body.push(stmt);
+            i += 1;
+        }
+    }
+    for stmt in x.default {
+        split[ids[i]].default.push(stmt);
+        i += 1;
+    }
+    for g in order {
+        out.push(ProtoStatement::Case(std::mem::replace(
+            &mut split[g],
+            ProtoCaseStatement {
+                arms: Vec::new(),
+                default: Vec::new(),
+            },
+        )));
+    }
+}
+
+/// Bit boundaries for the variables some single statement both writes and
+/// reads. `starts[i]` opens atom `i`; the last atom is unbounded above, so the
+/// atoms tile the whole variable however wide it turns out to be.
+///
+/// Only those variables are split: everywhere else the variable-granular
+/// bipartite model is already exact, and splitting would cost nodes and edges
+/// for nothing.
+fn self_referenced_bit_atoms(
+    table: &HashMap<usize, ProtoStatement>,
+) -> HashMap<VarOffset, Vec<usize>> {
+    let mut candidates: HashSet<VarOffset> = HashSet::default();
+    let mut inputs = vec![];
+    let mut outputs = vec![];
+    for x in table.values() {
+        inputs.clear();
+        outputs.clear();
+        x.gather_variable_offsets(&mut inputs, &mut outputs);
+        let output_set: HashSet<VarOffset> = outputs.iter().copied().collect();
+        for key in inputs.iter().filter(|key| output_set.contains(key)) {
+            candidates.insert(*key);
+        }
+    }
+    // The overwhelmingly common case: nothing to split, and the bit-level
+    // scans below never run.
+    if candidates.is_empty() {
+        return HashMap::default();
+    }
+
+    // A variable whose writes or reads some statement cannot describe in bits
+    // must stay whole: a missing edge here is a lost ordering constraint.
+    let mut opaque: HashSet<VarOffset> = HashSet::default();
+    let mut bit_reads = vec![];
+    let mut bit_writes = vec![];
+    for x in table.values() {
+        inputs.clear();
+        outputs.clear();
+        x.gather_variable_offsets(&mut inputs, &mut outputs);
+        if !inputs
+            .iter()
+            .chain(outputs.iter())
+            .any(|key| candidates.contains(key))
+        {
+            continue;
+        }
+        bit_reads.clear();
+        bit_writes.clear();
+        x.gather_reads_with_ranges(&mut bit_reads);
+        gather_bit_aware_outputs(x, &mut bit_writes);
+
+        for key in outputs.iter().filter(|key| candidates.contains(key)) {
+            if !bit_writes.iter().any(|(written, _)| written == key) {
+                opaque.insert(*key);
+            }
+        }
+        for key in inputs.iter().filter(|key| candidates.contains(key)) {
+            if !bit_reads.iter().any(|(read, _)| read == key) {
+                opaque.insert(*key);
+            }
+        }
+    }
+
+    let mut bounds: HashMap<VarOffset, HashSet<usize>> = HashMap::default();
+    for x in table.values() {
+        bit_writes.clear();
+        gather_bit_aware_outputs(x, &mut bit_writes);
+        for (key, write) in bit_writes.iter() {
+            if !candidates.contains(key) || opaque.contains(key) {
+                continue;
+            }
+            let entry = bounds.entry(*key).or_default();
+            entry.insert(0);
+            // A full-width write covers every atom, so it adds no boundary.
+            if let Some((high, low)) = write {
+                entry.insert(*low);
+                entry.insert(high + 1);
+            }
+        }
+    }
+
+    bounds
+        .into_iter()
+        .filter_map(|(key, positions)| {
+            // A single atom is the unsplit variable; keep it off the map so
+            // the plain path stays plain.
+            (positions.len() > 1).then(|| {
+                let mut starts: Vec<usize> = positions.into_iter().collect();
+                starts.sort_unstable();
+                (key, starts)
+            })
+        })
+        .collect()
+}
+
+/// Atoms a bit range touches. `None` (full width or runtime-selected) touches
+/// every atom.
+fn atom_indices(starts: &[usize], range: BitRange) -> std::ops::Range<usize> {
+    match range {
+        None => 0..starts.len(),
+        Some((high, low)) => {
+            let first = starts
+                .partition_point(|start| *start <= low)
+                .saturating_sub(1);
+            let last = starts
+                .partition_point(|start| *start <= high)
+                .saturating_sub(1);
+            first..last + 1
+        }
+    }
+}
 
 pub(crate) fn ranges_overlap(a: BitRange, b: BitRange) -> bool {
     match (a, b) {
@@ -1539,6 +2685,148 @@ pub(crate) fn gather_bit_aware_outputs(
     }
 }
 
+/// Union the ranges reported for each offset.  `None` (full width) wins, and
+/// two known ranges merge into the range that bounds them: both directions
+/// keep an edge a finer answer might drop.
+fn union_bit_ranges(items: Vec<(VarOffset, BitRange)>) -> HashMap<VarOffset, BitRange> {
+    let mut out: HashMap<VarOffset, BitRange> = HashMap::default();
+    for (off, br) in items {
+        match out.entry(off) {
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                let merged = match (*e.get(), br) {
+                    (None, _) | (_, None) => None,
+                    (Some((ah, al)), Some((bh, bl))) => Some((ah.max(bh), al.min(bl))),
+                };
+                e.insert(merged);
+            }
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(br);
+            }
+        }
+    }
+    out
+}
+
+/// Collect (offset, bit_range) reads of one expression tree.
+///
+/// The reader side of the SCC graph: without it, the elements of a PACKED
+/// array all share one `VarOffset`, so a chain that walks `a[0] -> a[1] ->
+/// a[2]` reads as a cycle even though no bit ever reaches itself.  A dynamic
+/// bit-select can land anywhere, so it reports full width.
+fn gather_bit_aware_expr_reads(expr: &ProtoExpression, out: &mut Vec<(VarOffset, BitRange)>) {
+    match expr {
+        ProtoExpression::Value { .. } => {}
+        ProtoExpression::HierVariable(_) => {}
+        ProtoExpression::Variable {
+            var_offset,
+            select,
+            dynamic_select,
+            ..
+        } => {
+            if let Some(d) = dynamic_select {
+                out.push((*var_offset, None));
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            } else {
+                out.push((*var_offset, *select));
+            }
+        }
+        ProtoExpression::DynamicVariable {
+            base_offset,
+            stride,
+            num_elements,
+            index_expr,
+            dynamic_select,
+            ..
+        } => {
+            for i in 0..*num_elements {
+                let off = VarOffset::new(
+                    base_offset.is_ff(),
+                    base_offset.raw() + *stride * (i as isize),
+                );
+                out.push((off, None));
+            }
+            gather_bit_aware_expr_reads(index_expr, out);
+            if let Some(d) = dynamic_select {
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            }
+        }
+        ProtoExpression::Unary { x, .. } => gather_bit_aware_expr_reads(x, out),
+        ProtoExpression::Binary { x, y, .. } => {
+            gather_bit_aware_expr_reads(x, out);
+            gather_bit_aware_expr_reads(y, out);
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            gather_bit_aware_expr_reads(cond, out);
+            gather_bit_aware_expr_reads(true_expr, out);
+            gather_bit_aware_expr_reads(false_expr, out);
+        }
+        ProtoExpression::Concatenation { elements, .. } => {
+            for (e, _, _) in elements {
+                gather_bit_aware_expr_reads(e, out);
+            }
+        }
+    }
+}
+
+/// Collect (offset, bit_range) reads for bit-aware SCC analysis.
+///
+/// Only the forms whose range is known precisely are narrowed; everything
+/// else reports full width (`None`), which keeps an edge the precise answer
+/// might have dropped.  Erring that way can only leave a false SCC standing,
+/// never hide a real one.
+pub(crate) fn gather_bit_aware_inputs(stmt: &ProtoStatement, out: &mut Vec<(VarOffset, BitRange)>) {
+    match stmt {
+        ProtoStatement::Assign(x) => {
+            gather_bit_aware_expr_reads(&x.expr, out);
+            if let Some(d) = &x.dynamic_select {
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            }
+        }
+        ProtoStatement::AssignDynamic(x) => {
+            gather_bit_aware_expr_reads(&x.expr, out);
+            gather_bit_aware_expr_reads(&x.dst_index_expr, out);
+            if let Some(d) = &x.dynamic_select {
+                gather_bit_aware_expr_reads(&d.index_expr, out);
+            }
+        }
+        ProtoStatement::If(x) => {
+            if let Some(cond) = &x.cond {
+                gather_bit_aware_expr_reads(cond, out);
+            }
+            for s in x.true_side.iter().chain(&x.false_side) {
+                gather_bit_aware_inputs(s, out);
+            }
+        }
+        ProtoStatement::Case(x) => {
+            for arm in &x.arms {
+                gather_bit_aware_expr_reads(&arm.cond, out);
+                for s in &arm.body {
+                    gather_bit_aware_inputs(s, out);
+                }
+            }
+            for s in &x.default {
+                gather_bit_aware_inputs(s, out);
+            }
+        }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                gather_bit_aware_inputs(s, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                gather_bit_aware_inputs(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Diagnostic: compute strongly-connected components of the stmt-level
 /// dataflow graph (stmt A → stmt B when A writes a variable B reads).
 /// Returns (num_nontrivial_sccs, max_scc_size, total_stmts_in_sccs).
@@ -1549,10 +2837,11 @@ pub(crate) fn gather_bit_aware_outputs(
 /// overlap are filtered out — what remains is scalar comb cycles
 /// that would be flagged by a logic synthesis tool.
 ///
-/// When VERYL_SCC_BITAWARE=1, treats partial-width writes (via
-/// Assign.select bit ranges) as independent edges: a write to x[7:4]
-/// does not create an edge to readers of x[3:0].  This eliminates
-/// SCCs formed only by bit-lane overlap in the VarOffset-level IR.
+/// Edges are bit-aware on both sides: a write to x[7:4] does not reach a
+/// reader of x[3:0].  Without that, the elements of a PACKED array — which
+/// share one `VarOffset` — turn any chain through them into a cycle.  Ranges
+/// are used only where they are known precisely; everything else is full
+/// width, which can leave a false SCC standing but never hides a real one.
 fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
     use daggy::petgraph::Graph;
     use daggy::petgraph::algo::tarjan_scc;
@@ -1565,74 +2854,64 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
     // Gather per-stmt I/O. Expanded by default (captures per-element
     // array deps); narrow mode uses base+last (what synthesis tools see).
     let narrow = std::env::var("VERYL_SCC_NARROW").is_ok();
-    let bitaware = std::env::var("VERYL_SCC_BITAWARE").is_ok();
+    let fold = BigArrayFold::from_statements(sorted.iter());
     let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-    let mut stmt_output_bits: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
+    // offset -> the bits this statement is known to touch, unioned.  The
+    // offset lists above stay the coverage authority: a range appears here
+    // only where it is known precisely, and anything absent is full width.
+    let mut read_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
+    let mut write_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
     for s in sorted {
         let mut ins = vec![];
         let mut outs = vec![];
         if narrow {
             s.gather_variable_offsets(&mut ins, &mut outs);
         } else {
-            s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+            s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
         }
         stmt_inputs.push(ins);
         stmt_outputs.push(outs);
-        if bitaware {
-            let mut bit_outs = vec![];
-            gather_bit_aware_outputs(s, &mut bit_outs);
-            stmt_output_bits.push(bit_outs);
-        } else {
-            stmt_output_bits.push(vec![]);
-        }
+
+        let mut bit_ins = vec![];
+        gather_bit_aware_inputs(s, &mut bit_ins);
+        read_bits.push(union_bit_ranges(bit_ins));
+        let mut bit_outs = vec![];
+        gather_bit_aware_outputs(s, &mut bit_outs);
+        write_bits.push(union_bit_ranges(bit_outs));
     }
 
-    // var → list of (writer stmt index, bit range for bit-aware mode).
-    // In non-bitaware mode, bit_range is always None and overlap is trivial.
+    // var → list of (writer stmt index, the bits it writes there).
     let mut writers: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
-    if bitaware {
-        for (i, outs) in stmt_output_bits.iter().enumerate() {
-            for &(off, br) in outs {
-                if off.is_ff() {
-                    continue;
-                }
-                writers.entry(off).or_default().push((i, br));
+    for (i, outs) in stmt_outputs.iter().enumerate() {
+        for &off in outs {
+            if off.is_ff() {
+                continue;
             }
-        }
-    } else {
-        for (i, outs) in stmt_outputs.iter().enumerate() {
-            for &off in outs {
-                if off.is_ff() {
-                    continue;
-                }
-                writers.entry(off).or_default().push((i, None));
-            }
+            let br = write_bits[i].get(&off).copied().flatten();
+            writers.entry(off).or_default().push((i, br));
         }
     }
 
     let mut graph: Graph<usize, ()> = Graph::new();
     let nodes: Vec<_> = (0..n).map(|i| graph.add_node(i)).collect();
     let mut edge_set: HashSet<(usize, usize)> = HashSet::default();
-    // For bit-aware mode, we need to know the reader's bit range for this
-    // offset. Currently ProtoExpression::Variable reads don't expose
-    // per-field select in gather_variable_offsets, so we conservatively
-    // treat reader ranges as None (= full width).  This still filters
-    // out false cycles that arise from multiple writers on non-overlapping
-    // bit slices, which is the common IR artifact.
+    // A → B only when the bits A writes are bits B reads.  Elements of a
+    // PACKED array share one `VarOffset`, so without the ranges a chain
+    // through `a[0] -> a[1] -> a[2]` closes into a cycle that no bit
+    // actually takes.
     for (reader, ins) in stmt_inputs.iter().enumerate() {
         for &off in ins {
             if off.is_ff() {
                 continue;
             }
+            let rbr = read_bits[reader].get(&off).copied().flatten();
             if let Some(ws) = writers.get(&off) {
                 for &(w, wbr) in ws {
                     if w == reader {
                         continue;
                     }
-                    if bitaware && !ranges_overlap(wbr, None) {
-                        // Reader range is None (full-width) so this should
-                        // never trigger, but kept for structural clarity.
+                    if !ranges_overlap(wbr, rbr) {
                         continue;
                     }
                     if edge_set.insert((w, reader)) {
@@ -1982,6 +3261,7 @@ fn trace_scc_cycles(sorted: &[ProtoStatement], meta: &ModuleVariableMeta) {
                         None,
                         match &sorted[idx] {
                             ProtoStatement::If(_) => "If",
+                            ProtoStatement::Case(_) => "Case",
                             ProtoStatement::AssignDynamic(_) => "AssignDynamic",
                             ProtoStatement::For(_) => "For",
                             ProtoStatement::SequentialBlock(_) => "SeqBlock",
@@ -2271,6 +3551,7 @@ fn dump_backward_edge_chain(
                 None,
                 match &sorted[idx] {
                     ProtoStatement::If(_) => "If",
+                    ProtoStatement::Case(_) => "Case",
                     ProtoStatement::AssignDynamic(_) => "AssignDynamic",
                     ProtoStatement::For(_) => "For",
                     ProtoStatement::SequentialBlock(_) => "SeqBlock",
@@ -2370,12 +3651,13 @@ fn compute_scc_iteration_depth(sorted: &[ProtoStatement]) -> usize {
         return 0;
     }
 
+    let fold = BigArrayFold::from_statements(sorted.iter());
     let mut stmt_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     let mut stmt_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
     for s in sorted {
         let mut ins = vec![];
         let mut outs = vec![];
-        s.gather_variable_offsets_expanded(&mut ins, &mut outs);
+        s.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
         stmt_inputs.push(ins);
         stmt_outputs.push(outs);
     }
@@ -2885,6 +4167,7 @@ impl Conv<&air::Module> for ProtoModule {
             variable_meta: variable_meta.clone(),
             analyzer_context,
             ff_table: ff_table.clone(),
+            inst_reset_kind: collect_inst_reset_kinds(declarations),
             func_offset_index: None,
         };
         context.scope_contexts.push(scope);
@@ -2893,7 +4176,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut all_comb_statements: Vec<ProtoStatement> = vec![];
         let mut all_post_comb_fns: Vec<ProtoStatement> = vec![];
         let mut all_child_modules: Vec<ModuleVariableMeta> = vec![];
-        let mut nested_derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)> = vec![];
+        let mut nested_derived_clock_candidates: Vec<crate::ir::EdgeCandidate> = vec![];
         let mut all_external_components: Vec<ProtoExternalComponent> = vec![];
 
         for decl in declarations {
@@ -2942,8 +4225,8 @@ impl Conv<&air::Module> for ProtoModule {
                 {
                     connect.event_var = nested_derived_clock_candidates
                         .iter()
-                        .find(|(_, offset, _)| offset == var_offset)
-                        .map(|(vid, _, _)| *vid)
+                        .find(|(_, offset, _, _)| offset == var_offset)
+                        .map(|(vid, _, _, _)| *vid)
                         .or_else(|| {
                             context
                                 .scope()
@@ -3008,7 +4291,7 @@ impl Conv<&air::Module> for ProtoModule {
             }
             // Child-instance clock vars: only reader is `always_ff` sensitivity
             // (invisible to DCE); dropping the writer starves partial_settle.
-            for (_, off, _) in &nested_derived_clock_candidates {
+            for (_, off, _, _) in &nested_derived_clock_candidates {
                 protect.insert(*off);
             }
             // Component input connections read these offsets but appear in no
@@ -3037,7 +4320,7 @@ impl Conv<&air::Module> for ProtoModule {
             {
                 let mut extra_offsets: Vec<VarOffset> =
                     Vec::with_capacity(nested_derived_clock_candidates.len());
-                for (_, off, _) in &nested_derived_clock_candidates {
+                for (_, off, _, _) in &nested_derived_clock_candidates {
                     extra_offsets.push(*off);
                 }
                 for external in &all_external_components {
@@ -3082,6 +4365,42 @@ impl Conv<&air::Module> for ProtoModule {
         // Fusion and relayout rewrite offsets, so their inputs must flavor
         // the key: a shared base key would serve cached statements that
         // address a different comb layout.
+        // Cone-gate inputs: node tables from the meta tree plus the
+        // event-writable comb set.  `None` (also when the event writes cannot
+        // be bounded) leaves the pipeline ungated.
+        let cone_inputs: Option<cone_gate::ConeGateInputs> = if cone_gate::enabled() {
+            collect_event_written_comb(&all_event_statements).map(|mut evt| {
+                // External components write their output connects into comb
+                // storage between settles — outside both the comb list and
+                // the event statements.  Add every connect's variable offsets
+                // (conservatively: inputs too) so a component write always
+                // lands in some segment's compare set.
+                let mut ins: Vec<VarOffset> = Vec::new();
+                // The compare set is keyed on unfolded offsets.
+                let unfolded = BigArrayFold::default();
+                for ext in &all_external_components {
+                    for c in &ext.connects {
+                        ins.clear();
+                        c.expr.gather_variable_offsets_expanded(&unfolded, &mut ins);
+                        for o in &ins {
+                            if let VarOffset::Comb(x) = o {
+                                evt.insert(*x);
+                            }
+                        }
+                    }
+                }
+                cone_gate::build_inputs(
+                    &src.name.to_string(),
+                    &variable_meta,
+                    &all_child_modules,
+                    &evt,
+                    &context.comb_reloc,
+                    context.config.use_4state,
+                )
+            })
+        } else {
+            None
+        };
         let key = {
             let base = comb_pipeline_key(
                 context.config.use_4state,
@@ -3089,11 +4408,15 @@ impl Conv<&air::Module> for ProtoModule {
                 &all_event_statements,
                 &dce_protect,
             );
-            if layout_inputs.is_some() || comb_fusion::enabled(context.config.use_4state) {
+            if layout_inputs.is_some()
+                || comb_fusion::enabled(context.config.use_4state)
+                || cone_inputs.is_some()
+            {
                 use std::collections::hash_map::DefaultHasher;
                 use std::hash::{Hash, Hasher};
                 let mut h = DefaultHasher::new();
                 comb_fusion::enabled(context.config.use_4state).hash(&mut h);
+                cone_inputs.is_some().hash(&mut h);
                 if let Some(extra) = &aux_extra_offsets {
                     extra.hash(&mut h);
                 }
@@ -3136,6 +4459,7 @@ impl Conv<&air::Module> for ProtoModule {
                         &dce_protect,
                         layout_inputs.as_ref(),
                         aux_extra_offsets.as_deref(),
+                        cone_inputs.as_ref(),
                         src.name,
                     )?;
                     match other {
@@ -3162,7 +4486,7 @@ impl Conv<&air::Module> for ProtoModule {
             for child in &mut all_child_modules {
                 comb_layout::translate_meta_tree(child, &sched);
             }
-            for (_, off, _) in &mut nested_derived_clock_candidates {
+            for (_, off, _, _) in &mut nested_derived_clock_candidates {
                 *off = sched.translate_off(*off);
             }
             for external in &mut all_external_components {
@@ -3174,6 +4498,26 @@ impl Conv<&air::Module> for ProtoModule {
                 context.comb_total_bytes = sched.buffer_end;
             }
         }
+        // Cone-gate state region: per gated segment, flags + streak (8 bytes)
+        // followed by its prerun/shadow/replay byte areas, appended past every
+        // variable (and past the relayout's buffer_end) so nothing else can
+        // land on it.  Zero-initialised buffers make `primed = 0` the natural
+        // starting state, and per-instance buffers make the state safe under
+        // instance reuse and concurrency.  Offsets are deterministic, so a
+        // pipeline-cache hit recomputes the identical layout.
+        let cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment> = {
+            let mut segs: Vec<_> = cached.cone_segments.as_ref().clone();
+            for s in &mut segs {
+                let prerun: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
+                let pre: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
+                let shadow: usize = s.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
+                let replay: usize = s.replay.iter().map(|&(a, b)| (b - a) as usize).sum();
+                let len = (8 + prerun + pre + shadow + replay).next_multiple_of(8);
+                s.state_off = context.comb_total_bytes as u32;
+                context.comb_total_bytes += len;
+            }
+            segs
+        };
         // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
         // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
         // of compiled chunks).
@@ -3369,7 +4713,7 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                 }
             }
-            for (_, off, _) in &nested_derived_clock_candidates {
+            for (_, off, _, _) in &nested_derived_clock_candidates {
                 block_vo.insert(*off);
             }
             let mut block: HashSet<isize> = HashSet::default();
@@ -3468,6 +4812,26 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
+        // Fuse the per-block `if_reset` dispatches of one reset net, so a
+        // module's clock event pays one test instead of one per `always_ff`.
+        {
+            let mut reset_offsets: crate::HashSet<VarOffset> = crate::HashSet::default();
+            collect_reset_offsets(&variable_meta, &mut reset_offsets);
+            for child in &all_child_modules {
+                collect_reset_offsets_recursive(child, &mut reset_offsets);
+            }
+            if !reset_offsets.is_empty() {
+                // Clock events only: a testbench `initial` may assign a
+                // reset-typed variable, making the condition mutable between
+                // two dispatches.  `always_ff` cannot (`invalid_clock_assignment`).
+                for (event, stmts) in all_event_statements.iter_mut() {
+                    if matches!(event, Event::Clock(_)) {
+                        merge_reset_dispatch(stmts, &reset_offsets);
+                    }
+                }
+            }
+        }
+
         // AOT-C event path: compile each event's FF-next + write-log to C,
         // keyed by Event.  `prepare_event` returns None on any uncovered stmt,
         // so the map holds only fully-emittable events; the rest stay on
@@ -3509,6 +4873,25 @@ impl Conv<&air::Module> for ProtoModule {
                     stmts.len(),
                     whole_events.contains_key(event),
                 );
+                // Census of EVERY uncovered statement, not just the first, so
+                // one fix does not simply surface the next bail.
+                #[cfg(not(target_family = "wasm"))]
+                if !whole_events.contains_key(event) {
+                    let census = crate::backend::aot_c::emit::event_uncovered_census(stmts);
+                    let mut counts: HashMap<String, usize> = Default::default();
+                    for c in census {
+                        *counts.entry(c).or_default() += 1;
+                    }
+                    let mut v: Vec<_> = counts.into_iter().collect();
+                    v.sort_by_key(|x| std::cmp::Reverse(x.1));
+                    eprintln!(
+                        "[aot_event_census] {} distinct uncovered event stmts:",
+                        v.len()
+                    );
+                    for (k, n) in v.iter().take(40) {
+                        eprintln!("  {n:6}x  {k}");
+                    }
+                }
             }
         }
 
@@ -3516,9 +4899,22 @@ impl Conv<&air::Module> for ProtoModule {
         // NBA semantics: reads come from current, writes go to next, then
         // ff_commit copies next → current. Source order must be preserved
         // for sequential writes to the same variable.
+        let comb_touched_offsets = Arc::new(collect_comb_touched_offsets(&pre_jit_stmts));
+        // No chunk backend on wasm, so the pre-chunking below would be an
+        // identity transform.
+        #[cfg(not(target_family = "wasm"))]
+        let tb_private = tb_private_offsets(&variable_meta, &comb_touched_offsets);
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
-            .map(|(event, stmts)| (event, try_jit(context, stmts)))
+            .map(|(event, stmts)| {
+                #[cfg(not(target_family = "wasm"))]
+                let stmts = if event == Event::Initial {
+                    precompile_tb_bodies(context, stmts, &tb_private)
+                } else {
+                    stmts
+                };
+                (event, try_jit(context, stmts))
+            })
             .collect();
 
         // Collect derived clocks + input-clock offsets BEFORE
@@ -3529,32 +4925,61 @@ impl Conv<&air::Module> for ProtoModule {
         // testbench top whose DUT contains the gated clock would have an
         // empty `derived_clock_schedule` and `always_ff(w_gclk, ...)`
         // would never fire.
-        let has_any_clock_var = src.variables.values().any(|v| v.r#type.is_clock())
+        let has_any_edge_var = src
+            .variables
+            .values()
+            .any(|v| v.r#type.is_clock() || v.r#type.is_reset())
             || !nested_derived_clock_candidates.is_empty();
-        let (derived_clock_vars, input_clock_offsets) = if !has_any_clock_var {
+        let (derived_clock_vars, input_clock_offsets) = if !has_any_edge_var {
             (Vec::new(), HashMap::default())
         } else {
             // O(V+P) port lookup via HashSet.
             let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
-            let mut dc_vars: Vec<(VarId, VarOffset, usize)> = src
+            let mut dc_vars: Vec<crate::ir::EdgeCandidate> = src
                 .variables
                 .iter()
                 .filter(|(vid, var)| var.r#type.is_clock() && !port_var_set.contains(*vid))
                 .filter_map(|(vid, _)| {
                     let meta = variable_meta.get(vid)?;
                     let elem = meta.elements.first()?;
-                    Some((*vid, elem.current, elem.native_bytes))
+                    Some((*vid, elem.current, elem.native_bytes, None))
                 })
                 .collect();
+            // The top module's own async resets, for the same reason the
+            // child ones are candidates: nothing else generates their
+            // assertion edge.  Only those an `always_ff` actually resets
+            // on — a reset with no `if_reset` has nothing to fire.
+            let mut top_inst_reset_kinds = None;
+            for (vid, var) in &src.variables {
+                if !var.r#type.is_reset()
+                    || port_var_set.contains(vid)
+                    || !event_statements.contains_key(&Event::Reset(*vid))
+                {
+                    continue;
+                }
+                let inst_kinds = top_inst_reset_kinds
+                    .get_or_insert_with(|| collect_inst_reset_kinds(declarations));
+                let (active_low, is_async) = resolved_reset_kind(
+                    &var.r#type.kind,
+                    inst_kinds.get(vid).copied().flatten(),
+                    &context.config,
+                );
+                if is_async
+                    && let Some(meta) = variable_meta.get(vid)
+                    && let Some(elem) = meta.elements.first()
+                {
+                    dc_vars.push((*vid, elem.current, elem.native_bytes, Some(active_low)));
+                }
+            }
             // Nested candidates already carry absolute (parent-rebased)
             // offsets and exclude child ports.  Dedup by (var_id, offset)
             // so a clock-typed input port re-exported through aliasing
             // can't be added twice.
             let mut seen: crate::HashSet<(VarId, VarOffset)> =
-                dc_vars.iter().map(|(v, o, _)| (*v, *o)).collect();
-            for (vid, off, nb) in nested_derived_clock_candidates.drain(..) {
+                dc_vars.iter().map(|(v, o, _, _)| (*v, *o)).collect();
+            for (vid, off, nb, polarity) in nested_derived_clock_candidates.drain(..) {
                 if seen.insert((vid, off)) {
-                    dc_vars.push((vid, off, nb));
+                    dc_vars.push((vid, off, nb, polarity));
                 }
             }
             // "Input clock" candidates: top-module clock-typed variables
@@ -3648,8 +5073,11 @@ impl Conv<&air::Module> for ProtoModule {
                 key,
                 dut_reuse,
                 &pre_jit_stmts,
-                localize_info.as_ref(),
-                const_unsafe_comb.as_ref(),
+                whole::WholeCombShape {
+                    localize: localize_info.as_ref(),
+                    const_unsafe: const_unsafe_comb.as_ref(),
+                    cone_segments: &cone_segments,
+                },
             )
         };
 
@@ -3710,6 +5138,8 @@ impl Conv<&air::Module> for ProtoModule {
             external_components: all_external_components,
             rtl_driven,
             fused_comb_offsets: cached.fused_offsets.clone(),
+            cone_segments,
+            comb_touched_offsets,
         })
     }
 }
@@ -3781,6 +5211,489 @@ fn collect_max_writes_one(stmt: &ProtoStatement) -> HashMap<u32, u32> {
         _ => {}
     }
     result
+}
+
+/// `(active low, synchronous)` per module-local net, from the instance ports
+/// it is wired to.  `None` records a wire whose ports disagree, which no
+/// single level satisfies.
+pub(crate) fn collect_inst_reset_kinds(
+    declarations: &[air::Declaration],
+) -> HashMap<air::VarId, Option<(bool, bool)>> {
+    let mut out: HashMap<air::VarId, Option<(bool, bool)>> = HashMap::default();
+    for decl in declarations {
+        let air::Declaration::Inst(inst) = decl else {
+            continue;
+        };
+        let air::Component::Module(child) = inst.component.as_ref() else {
+            continue;
+        };
+        for (port_id, expr) in inst
+            .inputs
+            .iter()
+            .filter_map(|x| x.single().map(|e| (x.id, e)))
+        {
+            let Some(kind) = child
+                .variables
+                .get(&port_id)
+                .and_then(|v| declared_reset_kind(&v.r#type.kind))
+            else {
+                continue;
+            };
+            let air::Expression::Term(factor) = expr else {
+                continue;
+            };
+            let air::Factor::Variable(net, idx, sel, _) = factor.as_ref() else {
+                continue;
+            };
+            if !idx.0.is_empty() || !sel.is_empty() {
+                continue;
+            }
+            record(&mut out, *net, kind);
+        }
+        // A reset the child DRIVES (a release synchroniser) decides it too.
+        for output in &inst.outputs {
+            let Some(kind) = child
+                .variables
+                .get(&output.id)
+                .and_then(|v| declared_reset_kind(&v.r#type.kind))
+            else {
+                continue;
+            };
+            for dst in &output.dst {
+                if dst.index.0.is_empty() && dst.select.is_empty() {
+                    record(&mut out, dst.id, kind);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn record(
+    out: &mut HashMap<air::VarId, Option<(bool, bool)>>,
+    net: air::VarId,
+    kind: (bool, bool),
+) {
+    out.entry(net)
+        .and_modify(|e| {
+            if *e != Some(kind) {
+                *e = None;
+            }
+        })
+        .or_insert(Some(kind));
+}
+
+/// `(active low, asynchronous)` of a NON-PORT reset net, resolved exactly as
+/// `declaration.rs` resolves it for the blocks that read it: the declared type
+/// first, then the instance ports the net is wired to, then the project's
+/// `reset_type`.  Disagreeing with that lowering would monitor the opposite
+/// edge, so the two must stay in step.
+pub(crate) fn resolved_reset_kind(
+    kind: &air::TypeKind,
+    inst_kind: Option<(bool, bool)>,
+    config: &crate::ir::Config,
+) -> (bool, bool) {
+    let (active_low, sync) = declared_reset_kind(kind).or(inst_kind).unwrap_or((
+        !config.abstract_reset_active_high,
+        config.abstract_reset_sync,
+    ));
+    (active_low, !sync)
+}
+
+/// `(active low, synchronous)` of a declared reset type.
+fn declared_reset_kind(kind: &air::TypeKind) -> Option<(bool, bool)> {
+    match kind {
+        air::TypeKind::ResetAsyncLow => Some((true, false)),
+        air::TypeKind::ResetAsyncHigh => Some((false, false)),
+        air::TypeKind::ResetSyncLow => Some((true, true)),
+        air::TypeKind::ResetSyncHigh => Some((false, true)),
+        _ => None,
+    }
+}
+
+/// Offsets of the reset-typed variables in one module's meta.
+fn collect_reset_offsets(
+    variable_meta: &HashMap<VarId, VariableMeta>,
+    out: &mut crate::HashSet<VarOffset>,
+) {
+    for meta in variable_meta.values() {
+        if !meta.r#type.is_reset() {
+            continue;
+        }
+        for elem in &meta.elements {
+            out.insert(elem.current);
+        }
+    }
+}
+
+fn collect_reset_offsets_recursive(m: &ModuleVariableMeta, out: &mut crate::HashSet<VarOffset>) {
+    collect_reset_offsets(&m.variable_meta, out);
+    for child in &m.children {
+        collect_reset_offsets_recursive(child, out);
+    }
+}
+
+/// The reset net an `if_reset` dispatch tests, or `None` for any other `if`.
+fn reset_dispatch_key(
+    x: &ProtoIfStatement,
+    reset_offsets: &crate::HashSet<VarOffset>,
+) -> Option<(VarOffset, Option<(usize, usize)>)> {
+    match x.cond.as_ref()? {
+        ProtoExpression::Variable {
+            var_offset,
+            select,
+            dynamic_select: None,
+            ..
+        } if reset_offsets.contains(var_offset) => Some((*var_offset, *select)),
+        _ => None,
+    }
+}
+
+/// Fuse adjacent `if_reset` dispatches on the same reset net.
+///
+/// Sound because the analyzer rejects an `always_ff` that writes a reset-typed
+/// variable, so nothing a clock event evaluates can change the condition
+/// between two dispatches.  Only ADJACENT ones fuse, so nothing is reordered.
+fn merge_reset_dispatch(
+    stmts: &mut Vec<ProtoStatement>,
+    reset_offsets: &crate::HashSet<VarOffset>,
+) {
+    let mut out: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+    let mut last_key: Option<(VarOffset, Option<(usize, usize)>)> = None;
+    for stmt in stmts.drain(..) {
+        let key = match &stmt {
+            ProtoStatement::If(x) => reset_dispatch_key(x, reset_offsets),
+            _ => None,
+        };
+        if key.is_some()
+            && key == last_key
+            && let Some(ProtoStatement::If(prev)) = out.last_mut()
+        {
+            let ProtoStatement::If(cur) = stmt else {
+                unreachable!("key is Some only for If")
+            };
+            prev.true_side.extend(cur.true_side);
+            prev.false_side.extend(cur.false_side);
+            continue;
+        }
+        last_key = key;
+        out.push(stmt);
+    }
+    *stmts = out;
+}
+
+/// Every variable offset the settled comb list can touch, as a SUPERSET.
+///
+/// Consumed by the testbench's comb-dirty filter: a testbench statement that
+/// writes nothing in here cannot change what the next comb evaluation reads,
+/// so it does not have to invalidate the comb.
+///
+/// This deliberately does NOT reuse `ProtoStatement::gather_variable_offsets`
+/// at block level. That one is tuned for dependency analysis and drops a
+/// `CompiledBlock`'s FF offsets, which it is right to drop there and wrong to
+/// drop here. So the walk is done here, unioning inputs and outputs alike —
+/// over-approximating costs only a missed optimization, under-approximating
+/// would silently skip a required settle, leaving a stale comb value to be
+/// read as settled.
+pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<VarOffset> {
+    fn walk(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) {
+        let mut ins: Vec<VarOffset> = Vec::new();
+        let mut outs: Vec<VarOffset> = Vec::new();
+        for s in stmts {
+            match s {
+                ProtoStatement::SequentialBlock(body) => walk(body, acc),
+                ProtoStatement::If(x) => {
+                    if let Some(cond) = &x.cond {
+                        cond.gather_variable_offsets(&mut ins);
+                    }
+                    walk(&x.true_side, acc);
+                    walk(&x.false_side, acc);
+                }
+                ProtoStatement::Case(x) => {
+                    for arm in &x.arms {
+                        arm.cond.gather_variable_offsets(&mut ins);
+                        walk(&arm.body, acc);
+                    }
+                    walk(&x.default, acc);
+                }
+                ProtoStatement::For(x) => {
+                    // Written on every pass, so it belongs in the set even
+                    // when the body does not read it.
+                    acc.insert(x.var_offset);
+                    for e in x.range.dynamic_bounds() {
+                        e.gather_variable_offsets(&mut ins);
+                    }
+                    walk(&x.body, acc);
+                }
+                ProtoStatement::CompiledBlock(x) => {
+                    acc.extend(x.input_offsets.iter().copied());
+                    acc.extend(x.output_offsets.iter().copied());
+                    for (dep_ins, dep_outs) in &x.stmt_deps {
+                        acc.extend(dep_ins.iter().copied());
+                        acc.extend(dep_outs.iter().copied());
+                    }
+                    walk(&x.original_stmts, acc);
+                }
+                other => other.gather_variable_offsets(&mut ins, &mut outs),
+            }
+            acc.extend(ins.drain(..));
+            acc.extend(outs.drain(..));
+        }
+    }
+    let mut acc = HashSet::default();
+    walk(stmts, &mut acc);
+    acc
+}
+
+/// Give the readers that sit BETWEEN two writes of one comb variable their own
+/// storage.
+///
+/// A reader between two versions observes the earlier one, but sharing one
+/// offset forces a WAR edge to the later write, which can close a cycle the
+/// circuit does not have.  Copying the earlier version into a temp right after
+/// its write removes the edge without moving any computation.  Runs on the
+/// DEEP-SPLIT table because only there is each write a separate statement.
+fn rename_versions(
+    stmts: &mut Vec<ProtoStatement>,
+    blocks: &mut Vec<usize>,
+    alloc: &mut dyn FnMut(usize) -> isize,
+) -> usize {
+    // Offsets any dynamic access touches: a temp sized for one variable cannot
+    // stand in for a base that names a whole array.
+    let mut dynamic: HashSet<VarOffset> = HashSet::default();
+    for s in stmts.iter() {
+        collect_dynamic_bases(s, &mut dynamic);
+    }
+
+    let n = stmts.len();
+    let mut writes: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    let mut reads: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    let mut widths: HashMap<VarOffset, usize> = HashMap::default();
+    for (i, s) in stmts.iter().enumerate() {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        for o in outs.iter().filter(|o| !o.is_ff()) {
+            let w = writes.entry(*o).or_default();
+            if w.last() != Some(&i) {
+                w.push(i);
+            }
+            if let Some(width) = assign_width_of(s, *o) {
+                widths.entry(*o).or_insert(width);
+            }
+        }
+        for o in ins.iter().filter(|o| !o.is_ff()) {
+            let r = reads.entry(*o).or_default();
+            if r.last() != Some(&i) {
+                r.push(i);
+            }
+        }
+    }
+
+    struct Plan {
+        after: usize,
+        readers: Vec<usize>,
+        from: VarOffset,
+        to: VarOffset,
+        width: usize,
+    }
+    let mut plans: Vec<Plan> = Vec::new();
+    for (off, ws) in &writes {
+        if ws.len() < 2 || dynamic.contains(off) {
+            continue;
+        }
+        let Some(&width) = widths.get(off) else {
+            continue;
+        };
+        let (first, last) = (ws[0], *ws.last().unwrap());
+        let mids: Vec<usize> = reads
+            .get(off)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&r| r > first && r < last && !ws.contains(&r))
+            .collect();
+        let (Some(&lo), Some(&hi)) = (mids.first(), mids.last()) else {
+            continue;
+        };
+        // One gap only: readers on both sides of a write would need a temp per
+        // gap, and the block they came from must be the producer's.
+        if ws.iter().any(|&w| w > lo && w < hi) {
+            continue;
+        }
+        let Some(&after) = ws.iter().rfind(|&&w| w < lo) else {
+            continue;
+        };
+        if mids.iter().any(|&r| blocks[r] != blocks[after]) {
+            continue;
+        }
+        let to = VarOffset::Comb(alloc(width));
+        plans.push(Plan {
+            after,
+            readers: mids,
+            from: *off,
+            to,
+            width,
+        });
+    }
+    if plans.is_empty() {
+        return 0;
+    }
+    // Deterministic: allocation order already follows `writes`' iteration, so
+    // sort by the position the copy lands at and then by the temp.
+    plans.sort_by_key(|p| (p.after, p.to.raw()));
+
+    let mut insert_at: HashMap<usize, Vec<ProtoStatement>> = HashMap::default();
+    for p in &plans {
+        for &r in &p.readers {
+            let (from, to) = (p.from, p.to);
+            stmts[r].remap_offsets_with(&|o| if o == from { to } else { o });
+        }
+        insert_at
+            .entry(p.after)
+            .or_default()
+            .push(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: p.to,
+                dst_width: p.width,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: ProtoExpression::Variable {
+                    var_offset: p.from,
+                    select: None,
+                    dynamic_select: None,
+                    width: p.width,
+                    var_full_width: p.width,
+                    expr_context: crate::ir::ExpressionContext {
+                        width: p.width,
+                        signed: false,
+                    },
+                },
+                dst_ff_current_offset: 0,
+                token: stmts[p.after].token().unwrap_or_default(),
+            }));
+    }
+
+    let old_stmts = std::mem::take(stmts);
+    let old_blocks = std::mem::take(blocks);
+    for (i, s) in old_stmts.into_iter().enumerate() {
+        stmts.push(s);
+        blocks.push(old_blocks[i]);
+        if let Some(copies) = insert_at.remove(&i) {
+            for c in copies {
+                stmts.push(c);
+                blocks.push(old_blocks[i]);
+            }
+        }
+    }
+    debug_assert_eq!(stmts.len(), blocks.len());
+    let _ = n;
+    plans.len()
+}
+
+/// Width of the variable an `Assign` inside `stmt` writes to `off`.
+fn assign_width_of(stmt: &ProtoStatement, off: VarOffset) -> Option<usize> {
+    match stmt {
+        ProtoStatement::Assign(a) if a.dst == off => Some(a.dst_width),
+        ProtoStatement::If(x) => x
+            .true_side
+            .iter()
+            .chain(&x.false_side)
+            .find_map(|s| assign_width_of(s, off)),
+        ProtoStatement::Case(x) => x
+            .arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(x.default.iter())
+            .find_map(|s| assign_width_of(s, off)),
+        ProtoStatement::For(x) => x.body.iter().find_map(|s| assign_width_of(s, off)),
+        ProtoStatement::SequentialBlock(body) => body.iter().find_map(|s| assign_width_of(s, off)),
+        _ => None,
+    }
+}
+
+/// Offsets reached by a dynamic index, as a write base or inside a read.
+fn collect_dynamic_bases(stmt: &ProtoStatement, out: &mut HashSet<VarOffset>) {
+    fn expr(e: &ProtoExpression, out: &mut HashSet<VarOffset>) {
+        match e {
+            ProtoExpression::Variable {
+                var_offset,
+                dynamic_select: Some(d),
+                ..
+            } => {
+                out.insert(*var_offset);
+                expr(&d.index_expr, out);
+            }
+            ProtoExpression::Variable { .. } | ProtoExpression::HierVariable(_) => {}
+            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Binary { x, y, .. } => {
+                expr(x, out);
+                expr(y, out);
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                expr(cond, out);
+                expr(true_expr, out);
+                expr(false_expr, out);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (e, _, _) in elements {
+                    expr(e, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    match stmt {
+        ProtoStatement::Assign(a) => {
+            if a.dynamic_select.is_some() {
+                out.insert(a.dst);
+            }
+            expr(&a.expr, out);
+        }
+        ProtoStatement::AssignDynamic(d) => {
+            out.insert(d.dst_base);
+            let last = VarOffset::new(
+                d.dst_base.is_ff(),
+                d.dst_base.raw() + d.dst_stride * (d.dst_num_elements as isize - 1),
+            );
+            out.insert(last);
+        }
+        ProtoStatement::If(x) => {
+            if let Some(c) = &x.cond {
+                expr(c, out);
+            }
+            for s in x.true_side.iter().chain(&x.false_side) {
+                collect_dynamic_bases(s, out);
+            }
+        }
+        ProtoStatement::Case(x) => {
+            for a in &x.arms {
+                expr(&a.cond, out);
+                for s in &a.body {
+                    collect_dynamic_bases(s, out);
+                }
+            }
+            for s in &x.default {
+                collect_dynamic_bases(s, out);
+            }
+        }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                collect_dynamic_bases(s, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                collect_dynamic_bases(s, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

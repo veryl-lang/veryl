@@ -15,8 +15,8 @@ mod ssa;
 #[cfg(test)]
 pub(crate) use procedure::{
     function_barrier_evaluation_count, function_evaluation_count,
-    function_result_region_probe_count, function_result_version_count,
-    reset_function_evaluation_count,
+    function_result_region_probe_count, function_result_version_count, module_context_entries,
+    reset_function_evaluation_count, reset_module_context_entries,
 };
 
 use region::{ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, var_reads};
@@ -38,11 +38,16 @@ use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
 use veryl_parser::resource_table::StrId;
 
-/// `feedthrough[child_in_id] = { child_out_ids reachable purely combinationally }`.
-/// Port-level only -- the parent keeps bit precision via `BitPartition`.
+/// Bits of one child port, in the child's own coordinates.
+type PortBits = (VarId, ArraySpan, PackedSpan);
+
+/// `feedthrough[child_in_bits] = { child_out_bits reachable purely
+/// combinationally }`. Bit-precise on both sides: a child carrying some input
+/// bits to some output bits must not read as all-in -> all-out, or a ring that
+/// is acyclic per bit closes in the parent.
 #[derive(Clone, Debug, Default)]
 struct ModuleCombSummary {
-    feedthrough: HashMap<VarId, HashSet<VarId>>,
+    feedthrough: HashMap<PortBits, HashSet<PortBits>>,
 }
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
@@ -57,9 +62,9 @@ pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
             if module.suppress_unassigned {
                 continue;
             }
-            let graph = build_module_graph(module, &summaries);
+            let (graph, bit_part) = build_module_graph(module, &summaries);
             check_graph(module, &graph, &mut errors);
-            let summary = compute_module_summary(module, &graph);
+            let summary = compute_module_summary(module, &graph, &bit_part);
             summaries.insert(module.name, summary);
         }
     }
@@ -200,15 +205,59 @@ fn add_transfer(
     }
 }
 
+/// One variable's outgoing relations, indexed for "which spans contain this
+/// bit position" queries.
+///
+/// A variable copied around a wide datapath collects hundreds of relations
+/// while any one bit position sits inside only a handful of them, so the
+/// traversal below asks instead of scanning.
+#[derive(Default)]
+struct VarEdges {
+    edges: Vec<PackedTransferEdge>,
+    /// `max_end[i]` = the largest span end among `edges[..=i]`.
+    max_end: Vec<usize>,
+}
+
+impl VarEdges {
+    fn finish(&mut self) {
+        self.edges
+            .sort_unstable_by_key(|edge| (edge.source.start, edge.source.end()));
+        self.max_end.clear();
+        self.max_end.reserve(self.edges.len());
+        let mut running = 0usize;
+        for edge in &self.edges {
+            running = running.max(edge.source.end());
+            self.max_end.push(running);
+        }
+    }
+
+    /// Every relation whose source span contains `point`, in no particular
+    /// order.
+    fn containing(&self, point: usize) -> impl Iterator<Item = &PackedTransferEdge> {
+        let upper = self
+            .edges
+            .partition_point(|edge| edge.source.start <= point);
+        self.edges[..upper]
+            .iter()
+            .enumerate()
+            .rev()
+            // No earlier span reaches `point` either, so the walk can stop.
+            .take_while(move |(i, _)| self.max_end[*i] >= point)
+            .map(|(_, edge)| edge)
+            .filter(move |edge| edge.source.end() >= point)
+    }
+}
+
 fn propagate_packed_endpoints(
     accesses: &HashMap<IdxKey, Vec<PackedSpan>>,
     transfers: &[PackedTransfer],
 ) -> HashMap<VarId, HashSet<usize>> {
-    let mut adjacency: HashMap<VarId, Vec<PackedTransferEdge>> = HashMap::default();
+    let mut adjacency: HashMap<VarId, VarEdges> = HashMap::default();
     for (index, transfer) in transfers.iter().enumerate() {
         adjacency
             .entry(transfer.left_id)
             .or_default()
+            .edges
             .push(PackedTransferEdge {
                 index,
                 reverse: false,
@@ -219,6 +268,7 @@ fn propagate_packed_endpoints(
         adjacency
             .entry(transfer.right_id)
             .or_default()
+            .edges
             .push(PackedTransferEdge {
                 index,
                 reverse: true,
@@ -226,6 +276,9 @@ fn propagate_packed_endpoints(
                 destination_id: transfer.left_id,
                 destination: transfer.left,
             });
+    }
+    for edges in adjacency.values_mut() {
+        edges.finish();
     }
 
     let mut seeds = HashSet::default();
@@ -251,24 +304,30 @@ fn propagate_packed_endpoints(
     // paths retain every arrival. Reusing a direction around an offset cycle
     // would materialize periodic repetitions as one boundary per vector bit.
     let mut endpoints: HashMap<VarId, HashSet<usize>> = HashMap::default();
+    // Per-seed state, reused across seeds: a design has tens of thousands of
+    // them, and rebuilding these each time costs more than the traversal.
+    let mut used = vec![false; transfers.len() * 2];
+    let mut used_positions: Vec<usize> = Vec::new();
+    let mut used_this_round: Vec<usize> = Vec::new();
+    let mut visited: HashSet<(VarId, usize)> = HashSet::default();
+    let mut frontier: Vec<(VarId, usize)> = Vec::new();
+    let mut next: Vec<(VarId, usize)> = Vec::new();
     for seed in seeds {
-        let mut frontier = vec![seed];
-        let mut visited = [seed].into_iter().collect::<HashSet<_>>();
-        let mut used_directions = HashSet::default();
+        frontier.clear();
+        frontier.push(seed);
+        visited.clear();
+        visited.insert(seed);
         while !frontier.is_empty() {
-            let mut next = Vec::new();
-            let mut used_this_round = HashSet::default();
-            for (id, point) in frontier {
+            next.clear();
+            used_this_round.clear();
+            for &(id, point) in &frontier {
                 endpoints.entry(id).or_default().insert(point);
                 let Some(edges) = adjacency.get(&id) else {
                     continue;
                 };
-                for edge in edges {
-                    let direction = (edge.index, edge.reverse);
-                    if point < edge.source.start
-                        || point > edge.source.end()
-                        || used_directions.contains(&direction)
-                    {
+                for edge in edges.containing(point) {
+                    let direction = edge.index * 2 + usize::from(edge.reverse);
+                    if used[direction] {
                         continue;
                     }
                     let Some(mapped) = point
@@ -277,20 +336,34 @@ fn propagate_packed_endpoints(
                     else {
                         continue;
                     };
-                    used_this_round.insert(direction);
+                    used_this_round.push(direction);
                     if visited.insert((edge.destination_id, mapped)) {
                         next.push((edge.destination_id, mapped));
                     }
                 }
             }
-            used_directions.extend(used_this_round);
-            frontier = next;
+            for &direction in &used_this_round {
+                if !used[direction] {
+                    used[direction] = true;
+                    used_positions.push(direction);
+                }
+            }
+            std::mem::swap(&mut frontier, &mut next);
+        }
+        for direction in used_positions.drain(..) {
+            used[direction] = false;
         }
     }
+
     endpoints
 }
 
-fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
+fn build_bit_partition(
+    module: &Module,
+    summaries: &HashMap<StrId, ModuleCombSummary>,
+    port_maps: &[PortMaps],
+    ctx: &mut Context,
+) -> BitPartition {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
 
     for declaration in &module.declarations {
@@ -300,7 +373,8 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
     }
 
     // Inst input expressions are not represented by procedure statements.
-    for inst in walk_insts(module) {
+    let mut seeded: HashSet<(IdxKey, PackedSpan)> = HashSet::default();
+    for (inst, maps) in walk_insts(module).zip(port_maps) {
         for inp in &inst.inputs {
             for expr in &inp.exprs {
                 collect_expr_spans(expr, &mut accesses, ctx);
@@ -319,6 +393,28 @@ fn build_bit_partition(module: &Module, ctx: &mut Context) -> BitPartition {
                         ))
                         .or_default()
                         .push(packed);
+                }
+            }
+        }
+
+        // A child's feedthrough names bits, so the parent needs atoms at those
+        // boundaries. Without them one whole-port node absorbs both ends of a
+        // ring that is acyclic per bit.
+        let Component::Module(child) = inst.component.as_ref() else {
+            continue;
+        };
+        let Some(summary) = summaries.get(&child.name) else {
+            continue;
+        };
+        for (input, outputs) in &summary.feedthrough {
+            for (port, key) in std::iter::once((input, &maps.inputs))
+                .chain(outputs.iter().map(|output| (output, &maps.outputs)))
+            {
+                let Some(key) = key.get(&port.0) else {
+                    continue;
+                };
+                if seeded.insert((*key, port.2)) {
+                    accesses.entry(*key).or_default().push(port.2);
                 }
             }
         }
@@ -907,20 +1003,32 @@ fn eval_dst_span(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<StrId, ModuleCombSummary>,
-) -> Graph<NodeKey, ()> {
+) -> (Graph<NodeKey, ()>, BitPartition) {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.functions = module.functions.clone();
-    let bit_part = build_bit_partition(module, &mut ctx);
+    // Both the partition and the edges need each instance's parent wiring, and
+    // `walk_insts` is the shared order the two iterate in.
+    let port_maps: Vec<PortMaps> = walk_insts(module)
+        .map(|inst| match inst.component.as_ref() {
+            Component::Module(child) => plain_port_maps(inst, child, &module.variables),
+            _ => PortMaps::default(),
+        })
+        .collect();
+    let bit_part = build_bit_partition(module, summaries, &port_maps, &mut ctx);
 
     let mut graph: Graph<NodeKey, ()> = Graph::new();
     let mut node_map: HashMap<NodeKey, NodeIndex> = HashMap::default();
+    let mut function_summaries = procedure::FunctionSummaries::new(module, &bit_part);
+    let mut procedure_context = procedure::ProcedureContext::new(module);
 
     for declaration in &module.declarations {
         let Declaration::Comb(comb) = declaration else {
             continue;
         };
-        for (source, destination) in procedure::analyze(module, &bit_part, &comb.statements) {
+        for (source, destination) in
+            procedure::analyze(&bit_part, &comb.statements, &mut procedure_context)
+        {
             if !is_module_scope_var(source.0, &module.variables)
                 || !is_module_scope_var(destination.0, &module.variables)
             {
@@ -932,7 +1040,7 @@ fn build_module_graph(
         }
     }
 
-    for inst in walk_insts(module) {
+    for (inst, maps) in walk_insts(module).zip(&port_maps) {
         match inst.component.as_ref() {
             Component::Module(child) => {
                 let Some(summary) = summaries.get(&child.name) else {
@@ -942,11 +1050,14 @@ fn build_module_graph(
                     inst,
                     child,
                     summary,
+                    maps,
                     &bit_part,
                     &mut graph,
                     &mut node_map,
                     &module.variables,
                     &mut ctx,
+                    &mut procedure_context,
+                    &mut function_summaries,
                 );
             }
             // SV black box: under-detect.
@@ -956,19 +1067,22 @@ fn build_module_graph(
         }
     }
 
-    graph
+    (graph, bit_part)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn add_inst_feedthrough_edges(
+fn add_inst_feedthrough_edges<'a>(
     inst: &InstDeclaration,
     child: &Module,
     summary: &ModuleCombSummary,
-    bit_part: &BitPartition,
+    maps: &PortMaps,
+    bit_part: &'a BitPartition,
     graph: &mut Graph<NodeKey, ()>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
+    procedure_context: &mut procedure::ProcedureContext,
+    function_summaries: &mut procedure::FunctionSummaries<'a>,
 ) {
     add_sparse_whole_port_copy_edges(inst, child, bit_part, graph, node_map, parent_vars);
 
@@ -979,8 +1093,17 @@ fn add_inst_feedthrough_edges(
         }
         let mut reads = Vec::new();
         for expr in &inp.exprs {
-            collect_expr_node_keys(expr, bit_part, &mut reads, ctx);
+            let (sources, dependencies) =
+                analyze_instance_actual(bit_part, expr, ctx, procedure_context, function_summaries);
+            reads.extend(sources);
+            for (source, destination) in dependencies {
+                let source = ensure_node(graph, node_map, source);
+                let destination = ensure_node(graph, node_map, destination);
+                graph.add_edge(source, destination, ());
+            }
         }
+        reads.sort_unstable();
+        reads.dedup();
         if !reads.is_empty() {
             input_reads.insert(inp.id, reads);
         }
@@ -1000,26 +1123,136 @@ fn add_inst_feedthrough_edges(
         }
     }
 
-    for (child_in_id, out_set) in &summary.feedthrough {
-        let Some(parent_reads) = input_reads.get(child_in_id) else {
+    let mut sources: Vec<NodeIndex> = Vec::new();
+    let mut destinations: Vec<NodeIndex> = Vec::new();
+    // One parent node pair is named by many feedthrough entries once both
+    // sides are split into bits; the SCC walk gains nothing from the copies.
+    let mut added: HashSet<(NodeIndex, NodeIndex)> = HashSet::default();
+    for (input, outputs) in &summary.feedthrough {
+        sources.clear();
+        collect_port_nodes(
+            input,
+            &maps.inputs,
+            &input_reads,
+            bit_part,
+            graph,
+            node_map,
+            &mut sources,
+        );
+        if sources.is_empty() {
             continue;
-        };
-        for child_out_id in out_set {
-            let Some(parent_dsts) = output_dsts.get(child_out_id) else {
-                continue;
-            };
-            for r in parent_reads {
-                for d in parent_dsts {
-                    if r == d {
-                        continue;
+        }
+        for output in outputs {
+            destinations.clear();
+            collect_port_nodes(
+                output,
+                &maps.outputs,
+                &output_dsts,
+                bit_part,
+                graph,
+                node_map,
+                &mut destinations,
+            );
+            for s in &sources {
+                for d in &destinations {
+                    if added.insert((*s, *d)) {
+                        graph.add_edge(*s, *d, ());
                     }
-                    let s = ensure_node(graph, node_map, *r);
-                    let t = ensure_node(graph, node_map, *d);
-                    graph.add_edge(s, t, ());
                 }
             }
         }
     }
+}
+
+/// Parent nodes a child port's bits reach. A plain whole-variable connection
+/// carries the bit span across; anything else falls back to every node the
+/// actual reads or the destination writes.
+fn collect_port_nodes(
+    port: &PortBits,
+    maps: &HashMap<VarId, IdxKey>,
+    fallback: &HashMap<VarId, Vec<NodeKey>>,
+    bit_part: &BitPartition,
+    graph: &mut Graph<NodeKey, ()>,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    out: &mut Vec<NodeIndex>,
+) {
+    if let Some(key) = maps.get(&port.0) {
+        for range in bit_part.overlapping(*key, port.2) {
+            out.push(ensure_node(graph, node_map, (key.0, key.1, range)));
+        }
+    } else if let Some(keys) = fallback.get(&port.0) {
+        for key in keys {
+            out.push(ensure_node(graph, node_map, *key));
+        }
+    }
+}
+
+/// Parent variable each child port is wired to, for the connections where bit
+/// `k` of the port is exactly bit `k` of that variable. Ports absent here keep
+/// the conservative whole-actual treatment.
+#[derive(Default)]
+struct PortMaps {
+    inputs: HashMap<VarId, IdxKey>,
+    outputs: HashMap<VarId, IdxKey>,
+}
+
+/// Those connections are the whole-variable actuals: no index, no select, same
+/// shape. Only they let a bit-precise feedthrough entry cross the boundary.
+fn plain_port_maps(
+    inst: &InstDeclaration,
+    child: &Module,
+    parent_vars: &HashMap<VarId, Variable>,
+) -> PortMaps {
+    let whole = ArraySpan {
+        start: 0,
+        length: 1,
+    };
+    let same_shape = |child_id: VarId, parent_id: VarId| -> Option<IdxKey> {
+        let child_var = child.variables.get(&child_id)?;
+        let parent_var = parent_vars.get(&parent_id)?;
+        // An array port would need its element mapping carried too.
+        (child_var.r#type.total_array() == Some(1)
+            && parent_var.r#type.total_array() == Some(1)
+            && child_var.total_width()? == parent_var.total_width()?)
+        .then_some((parent_id, whole))
+    };
+
+    let mut inputs: HashMap<VarId, IdxKey> = HashMap::default();
+    for input in &inst.inputs {
+        if !is_pure_input_or_output(input.id, &child.variables, Direction::Input) {
+            continue;
+        }
+        let Some(Expression::Term(factor)) = input.single() else {
+            continue;
+        };
+        let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+            continue;
+        };
+        if !index.0.is_empty() || !select.is_empty() {
+            continue;
+        }
+        if let Some(key) = same_shape(input.id, *id) {
+            inputs.insert(input.id, key);
+        }
+    }
+
+    let mut outputs: HashMap<VarId, IdxKey> = HashMap::default();
+    for output in &inst.outputs {
+        if !is_pure_input_or_output(output.id, &child.variables, Direction::Output) {
+            continue;
+        }
+        let [dst] = output.dst.as_slice() else {
+            continue;
+        };
+        if !dst.index.0.is_empty() || !dst.select.is_empty() {
+            continue;
+        }
+        if let Some(key) = same_shape(output.id, dst.id) {
+            outputs.insert(output.id, key);
+        }
+    }
+
+    PortMaps { inputs, outputs }
 }
 
 fn add_sparse_whole_port_copy_edges(
@@ -1136,39 +1369,162 @@ fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Dir
     actual == want
 }
 
-fn collect_expr_node_keys(
-    expr: &Expression,
-    bit_part: &BitPartition,
-    out: &mut Vec<NodeKey>,
+fn analyze_instance_actual<'a>(
+    bit_part: &'a BitPartition,
+    expression: &Expression,
     ctx: &mut Context,
-) {
-    match expr {
-        Expression::Term(t) => collect_factor_node_keys(t, bit_part, out, ctx),
-        Expression::Unary(_, e, _) => collect_expr_node_keys(e, bit_part, out, ctx),
-        Expression::Binary(a, _, b, _) => {
-            collect_expr_node_keys(a, bit_part, out, ctx);
-            collect_expr_node_keys(b, bit_part, out, ctx);
+    procedure_context: &mut procedure::ProcedureContext,
+    summaries: &mut procedure::FunctionSummaries<'a>,
+) -> (Vec<NodeKey>, Vec<(NodeKey, NodeKey)>) {
+    let mut analysis = InstanceActualAnalysis {
+        bit_part,
+        ctx,
+        procedure_context,
+        summaries: Some(summaries),
+        procedure: None,
+        reads: Vec::new(),
+        deferred_reads: Vec::new(),
+        defer_direct_reads: 0,
+    };
+    analysis.eval(expression);
+    analysis.reads.sort_unstable();
+    analysis.reads.dedup();
+    let dependencies = if let Some(mut procedure) = analysis.procedure.take() {
+        let dependencies = procedure.dependencies();
+        procedure.restore(analysis.procedure_context);
+        dependencies
+    } else {
+        Vec::new()
+    };
+    (analysis.reads, dependencies)
+}
+
+struct InstanceActualAnalysis<'a, 's, 'c> {
+    bit_part: &'a BitPartition,
+    ctx: &'c mut Context,
+    procedure_context: &'c mut procedure::ProcedureContext,
+    summaries: Option<&'s mut procedure::FunctionSummaries<'a>>,
+    procedure: Option<procedure::ExpressionAnalysis<'a, 's>>,
+    reads: Vec<NodeKey>,
+    deferred_reads: Vec<NodeKey>,
+    defer_direct_reads: usize,
+}
+
+impl InstanceActualAnalysis<'_, '_, '_> {
+    fn eval(&mut self, expression: &Expression) {
+        if let Some(procedure) = &mut self.procedure {
+            self.reads.extend(procedure.eval(expression));
+            return;
         }
-        Expression::Ternary(a, b, c, _) => {
-            collect_expr_node_keys(a, bit_part, out, ctx);
-            collect_expr_node_keys(b, bit_part, out, ctx);
-            collect_expr_node_keys(c, bit_part, out, ctx);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (a, b) in parts {
-                collect_expr_node_keys(a, bit_part, out, ctx);
-                if let Some(b) = b {
-                    collect_expr_node_keys(b, bit_part, out, ctx);
+        match expression {
+            Expression::Term(factor) => match factor.as_ref() {
+                Factor::FunctionCall(_) => {
+                    let summaries = self.summaries.take().expect("initialized once");
+                    let procedure = procedure::ExpressionAnalysis::new(
+                        self.bit_part,
+                        self.procedure_context,
+                        summaries,
+                    );
+                    self.procedure = Some(procedure);
+                    self.eval(expression);
+                }
+                Factor::Variable(_, index, select, _) => {
+                    for expression in index.0.iter().chain(select.0.iter()) {
+                        self.eval(expression);
+                    }
+                    if let Some((_, expression)) = &select.1 {
+                        self.eval(expression);
+                    }
+                    let reads = if self.defer_direct_reads == 0 {
+                        &mut self.reads
+                    } else {
+                        &mut self.deferred_reads
+                    };
+                    collect_factor_node_keys(factor, self.bit_part, reads, self.ctx);
+                }
+                Factor::SystemFunctionCall(call) => match &call.kind {
+                    SystemFunctionKind::Onehot(input)
+                    | SystemFunctionKind::Signed(input)
+                    | SystemFunctionKind::Unsigned(input)
+                    | SystemFunctionKind::Readmemh(input, _) => self.eval(&input.0),
+                    SystemFunctionKind::Bits(_)
+                    | SystemFunctionKind::Size(_)
+                    | SystemFunctionKind::Clog2(_)
+                    | SystemFunctionKind::Display(_)
+                    | SystemFunctionKind::Write(_)
+                    | SystemFunctionKind::Assert { .. }
+                    | SystemFunctionKind::Finish => {}
+                },
+                _ => {}
+            },
+            Expression::Unary(_, operand, _) => self.eval(operand),
+            Expression::Binary(left, op, right, _) => {
+                self.eval(left);
+                let evaluate_right = match op {
+                    Op::LogicAnd => constant_truth(left, self.ctx) != Some(false),
+                    Op::LogicOr => constant_truth(left, self.ctx) != Some(true),
+                    _ => true,
+                };
+                if evaluate_right {
+                    self.eval(right);
+                }
+            }
+            Expression::Ternary(condition, left, right, _) => {
+                self.eval(condition);
+                match constant_truth(condition, self.ctx) {
+                    Some(true) => self.eval(left),
+                    Some(false) => self.eval(right),
+                    None => {
+                        self.eval(left);
+                        self.eval(right);
+                    }
+                }
+            }
+            Expression::Concatenation(parts, _) => {
+                for (part, repeat) in parts {
+                    self.eval(part);
+                    if let Some(repeat) = repeat {
+                        self.eval(repeat);
+                    }
+                }
+            }
+            Expression::ArrayLiteral(items, _) => {
+                let outermost_deferred = self.defer_direct_reads == 0;
+                self.defer_direct_reads += 1;
+                for item in items {
+                    match item {
+                        crate::ir::ArrayLiteralItem::Value(value, repeat) => {
+                            self.eval(value);
+                            if let Some(repeat) = repeat {
+                                self.eval(repeat);
+                            }
+                        }
+                        crate::ir::ArrayLiteralItem::Defaul(value) => self.eval(value),
+                    }
+                }
+                self.defer_direct_reads -= 1;
+                if outermost_deferred {
+                    if self.procedure.is_some() {
+                        self.reads.append(&mut self.deferred_reads);
+                    } else {
+                        self.deferred_reads.clear();
+                    }
+                }
+            }
+            Expression::StructConstructor(_, fields, _) => {
+                for (_, value) in fields {
+                    self.eval(value);
                 }
             }
         }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, e) in fields {
-                collect_expr_node_keys(e, bit_part, out, ctx);
-            }
-        }
-        Expression::ArrayLiteral(_, _) => {}
     }
+}
+
+fn constant_truth(expression: &Expression, ctx: &mut Context) -> Option<bool> {
+    expression
+        .eval_value(ctx)
+        .and_then(|value| value.to_usize())
+        .map(|value| value != 0)
 }
 
 fn collect_factor_node_keys(
@@ -1291,7 +1647,11 @@ fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool 
     }
 }
 
-fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> ModuleCombSummary {
+fn compute_module_summary(
+    module: &Module,
+    graph: &Graph<NodeKey, ()>,
+    bit_part: &BitPartition,
+) -> ModuleCombSummary {
     use crate::ir::VarKind;
 
     let mut input_ids: HashSet<VarId> = HashSet::default();
@@ -1308,14 +1668,32 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
         }
     }
 
-    let mut feedthrough: HashMap<VarId, HashSet<VarId>> = HashMap::default();
+    // The walk below revisits most nodes once per input node, so resolve each
+    // node's port bits up front rather than hashing them on every visit.
+    let node_bits: Vec<Option<PortBits>> = graph
+        .node_indices()
+        .map(|ni| {
+            let key = graph[ni];
+            if !input_ids.contains(&key.0) && !output_ids.contains(&key.0) {
+                return None;
+            }
+            bit_part
+                .ranges_of((key.0, key.1))
+                .get(key.2)
+                .map(|span| (key.0, key.1, *span))
+        })
+        .collect();
+
+    let mut feedthrough: HashMap<PortBits, HashSet<PortBits>> = HashMap::default();
     let mut visited: HashSet<NodeIndex> = HashSet::default();
     let mut stack: Vec<NodeIndex> = Vec::new();
     for ni in graph.node_indices() {
-        let key = graph[ni];
-        if !input_ids.contains(&key.0) {
+        if !input_ids.contains(&graph[ni].0) {
             continue;
         }
+        let Some(input) = node_bits[ni.index()] else {
+            continue;
+        };
         visited.clear();
         stack.clear();
         stack.push(ni);
@@ -1323,9 +1701,10 @@ fn compute_module_summary(module: &Module, graph: &Graph<NodeKey, ()>) -> Module
             if !visited.insert(n) {
                 continue;
             }
-            let nk = graph[n];
-            if output_ids.contains(&nk.0) {
-                feedthrough.entry(key.0).or_default().insert(nk.0);
+            if output_ids.contains(&graph[n].0)
+                && let Some(output) = node_bits[n.index()]
+            {
+                feedthrough.entry(input).or_default().insert(output);
             }
             for e in graph.edges(n) {
                 stack.push(e.target());
@@ -1550,5 +1929,40 @@ mod region_tests {
         let endpoints = propagate_packed_endpoints(&accesses, &transfers);
         let expected = [5, 6, 7].into_iter().collect::<HashSet<_>>();
         assert!(endpoints[&q].is_superset(&expected));
+    }
+
+    #[test]
+    fn point_query_answers_exactly_what_a_full_scan_would() {
+        let id = VarId::from_raw(0);
+        // A long span ahead of short ones: sorting by start alone would stop
+        // the walk before reaching it.
+        let spans = [(0, 64), (8, 4), (16, 4), (16, 32), (60, 8), (100, 4)];
+        let mut edges = VarEdges::default();
+        for (index, (start, length)) in spans.into_iter().enumerate() {
+            edges.edges.push(PackedTransferEdge {
+                index,
+                reverse: false,
+                source: PackedSpan { start, length },
+                destination_id: id,
+                destination: PackedSpan {
+                    start: 0,
+                    length: 1,
+                },
+            });
+        }
+        let scan = edges.edges.clone();
+        edges.finish();
+
+        for point in 0..=120 {
+            let mut indexed: Vec<usize> = edges.containing(point).map(|edge| edge.index).collect();
+            indexed.sort_unstable();
+            let mut scanned: Vec<usize> = scan
+                .iter()
+                .filter(|edge| point >= edge.source.start && point <= edge.source.end())
+                .map(|edge| edge.index)
+                .collect();
+            scanned.sort_unstable();
+            assert_eq!(indexed, scanned, "point {point}");
+        }
     }
 }

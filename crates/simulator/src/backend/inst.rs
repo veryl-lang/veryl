@@ -209,7 +209,7 @@ struct CachedStatements {
     comb_statements: Vec<ProtoStatement>,
     post_comb_fns: Vec<ProtoStatement>,
     child_modules: Vec<ModuleVariableMeta>,
-    derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)>,
+    derived_clock_candidates: Vec<crate::ir::EdgeCandidate>,
 }
 
 /// Single-flight cache slot: one thread `Computing` a component blocks others
@@ -232,7 +232,7 @@ pub struct ReusedStatements {
     pub comb_statements: Vec<ProtoStatement>,
     pub post_comb_fns: Vec<ProtoStatement>,
     pub child_modules: Vec<ModuleVariableMeta>,
-    pub derived_clock_candidates: Vec<(air::VarId, VarOffset, usize)>,
+    pub derived_clock_candidates: Vec<crate::ir::EdgeCandidate>,
     pub ff_size: usize,
     pub comb_size: usize,
 }
@@ -351,7 +351,7 @@ fn relocate_entry(
     let derived_clock_candidates = entry
         .derived_clock_candidates
         .iter()
-        .map(|(id, off, nb)| (*id, off.adjust(ff_delta, comb_delta), *nb))
+        .map(|(id, off, nb, pol)| (*id, off.adjust(ff_delta, comb_delta), *nb, *pol))
         .collect();
     ReusedStatements {
         event_statements,
@@ -396,7 +396,7 @@ impl ClaimGuard {
         comb_statements: &[ProtoStatement],
         post_comb_fns: &[ProtoStatement],
         child_modules: &[ModuleVariableMeta],
-        derived_clock_candidates: &[(air::VarId, VarOffset, usize)],
+        derived_clock_candidates: &[crate::ir::EdgeCandidate],
     ) {
         let entry = Arc::new(CachedStatements {
             ref_ff_start: ff_start,

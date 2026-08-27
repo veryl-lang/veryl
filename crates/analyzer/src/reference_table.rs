@@ -322,14 +322,22 @@ impl ReferenceTable {
                     let n_args = path.paths[i].arguments.len();
 
                     if in_import_declaration
+                        && i + 1 == path.paths.len()
                         && !params.is_empty()
                         && (matches!(
                             symbol.found.kind,
                             SymbolKind::Struct(_) | SymbolKind::Union(_)
-                        ) || matches!(symbol.found.kind, SymbolKind::Function(ref x) if !x.is_proto))
+                        ) || matches!(symbol.found.kind, SymbolKind::Function(ref x) if !x.is_proto)
+                            || (matches!(
+                                symbol.found.kind,
+                                SymbolKind::Package(_)
+                                    | SymbolKind::Module(_)
+                                    | SymbolKind::Interface(_)
+                            ) && n_args == 0))
                     {
-                        // Generic function, struct and union should be imorted as-is
-                        // but not as thier instances.
+                        // A generic definition is imported as-is so the use site
+                        // can instantiate it. An imported instance is rejected by
+                        // the import checker instead.
                         // https://github.com/veryl-lang/veryl/issues/1619
                         if !impoted_path && n_args != 0 {
                             self.errors.push(AnalyzerError::invalid_import(&path.range))
@@ -410,7 +418,7 @@ impl ReferenceTable {
                     // it from the scope cursor only on this generic branch.
                     let namespace = scope::namespace(scope, define_context);
 
-                    let mut args: Vec<_> = path.paths[i].arguments.drain(0..).collect();
+                    let mut args: Vec<_> = std::mem::take(&mut path.paths[i].arguments);
                     for param in params.iter().skip(n_args) {
                         //  apply default value
                         args.push(param.1.default_value.as_ref().unwrap().clone());
@@ -756,7 +764,7 @@ impl ReferenceTable {
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {
         symbol_table::suppress_cache_clear();
-        let candidates: Vec<_> = self.candidates.drain(0..).collect();
+        let candidates: Vec<_> = std::mem::take(&mut self.candidates);
 
         for x in &candidates {
             match x {
@@ -874,7 +882,7 @@ impl ReferenceTable {
         }
 
         symbol_table::resume_cache_clear();
-        self.errors.drain(0..).collect()
+        std::mem::take(&mut self.errors)
     }
 
     fn get_struct_namespace(symbol: &Symbol) -> Namespace {

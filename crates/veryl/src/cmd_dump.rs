@@ -18,7 +18,7 @@ impl CmdDump {
 
         // Debug tool: analyze a broken tree best-effort (`fail_fast: false`).
         let options = AnalyzeOptions {
-            defines: &[],
+            defines: &self.opt.define,
             emit_mode: false,
             incremental: false,
             fail_fast: false,

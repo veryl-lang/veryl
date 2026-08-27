@@ -110,7 +110,7 @@ fn walk_one(
         Statement::For(x) => {
             if let Some(iter) = x.range.eval_iter(context) {
                 for i in iter {
-                    if let Some(var) = context.variables.get_mut(&x.var_id)
+                    if let Some(var) = context.variable_mut(&x.var_id)
                         && let Some(total_width) = x.var_type.total_width()
                     {
                         let val = Value::new(i as u64, total_width, x.var_type.signed);

@@ -1,0 +1,54 @@
+module Module92 (
+    i_clk0 : input  'a clock    ,
+    i_clk1 : input  'b clock    ,
+    i_en0  : input  'a logic    ,
+    i_en1  : input  'b logic    ,
+    i_addr0: input  'a logic<5> ,
+    i_addr1: input  'b logic<5> ,
+    i_data0: input  'a logic<32>,
+    i_data1: input  'b logic<32>,
+    o_data : output 'a logic<32>,
+    o_count: output 'a logic<16>,
+    o_rom  : output 'a logic<32>,
+) {
+    // True dual port SRAM inference on FPGA needs two processes writing one
+    // variable, which SystemVerilog forbids for always_ff, so both are emitted
+    // as plain always.
+    #[allow(multiple_assign)]
+    var ram: 'a logic<32> [32];
+
+    always_ff (i_clk0) {
+        if i_en0 {
+            ram[i_addr0] = i_data0;
+        }
+    }
+
+    unsafe (cdc) {
+        always_ff (i_clk1) {
+            if i_en1 {
+                ram[i_addr1] = i_data1;
+            }
+        }
+    }
+
+    assign o_data = ram[i_addr0];
+
+    // Initialized by the configuration bitstream instead of by a reset.
+    #[allow(initial_assign)]
+    var count: 'a logic<16>;
+
+    #[allow(initial_assign)]
+    var rom: 'a logic<32> [1024];
+
+    initial {
+        count = '0;
+        $readmemh("rom.hex", rom);
+    }
+
+    always_ff (i_clk0) {
+        count = count + 1;
+    }
+
+    assign o_count = count;
+    assign o_rom   = rom[i_addr0];
+}

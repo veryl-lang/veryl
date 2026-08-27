@@ -18,6 +18,8 @@ use std::sync::Arc;
 pub mod aot_c;
 #[cfg(not(target_family = "wasm"))]
 pub mod cranelift;
+#[cfg(not(target_family = "wasm"))]
+pub mod eq_chain;
 pub mod inst;
 pub mod registry;
 pub mod whole;

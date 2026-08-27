@@ -32,7 +32,9 @@ fn combinational_loop() {
     }
     "#;
 
-    let result = analyze_top(code, &Config::default(), "Top");
+    // The analyzer rejects this too; this test is about the simulator's own
+    // detector, which is the safety net for a loop the analyzer misses.
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
     assert!(matches!(
         result,
         Err(SimulatorError::CombinationalLoop { .. })

@@ -8,6 +8,7 @@ pub mod random_table;
 pub mod residency;
 pub mod simulator;
 pub mod simulator_error;
+pub(crate) mod tb_dirty;
 pub mod testbench;
 pub mod wave_dumper;
 pub mod wavedrom;

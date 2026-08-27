@@ -79,7 +79,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 let mut sim = Simulator::new(ir, None);
                 let clk = sim.get_clock("clk").unwrap();
                 let rst = sim.get_reset("rst").unwrap();
-                sim.step(&rst);
+                sim.step_reset(&clk, &rst);
                 for _ in 0..design.cycle {
                     sim.step(&clk);
                 }

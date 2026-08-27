@@ -1,0 +1,16 @@
+interface last_item_with_define_modport_default {
+    var dummy: logic;
+
+    #[ifdef(A)]
+    var trace: logic;
+
+    modport master {
+        #[ifdef(A)]
+        trace: input,
+        dummy: input,
+    }
+
+    modport slave {
+        ..converse(master)
+    }
+}

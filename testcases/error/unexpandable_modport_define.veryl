@@ -1,0 +1,21 @@
+interface unexpandable_modport_define_if {
+    var a: logic;
+    #[ifdef(A)]
+    var b: logic;
+
+    function get () -> logic {
+        return a;
+    }
+
+    modport m {
+        a: input,
+        #[ifdef(A)]
+        b  : input ,
+        get: import,
+    }
+}
+
+#[expand(modport)]
+module unexpandable_modport_define (
+    a: modport unexpandable_modport_define_if::m,
+) {}
