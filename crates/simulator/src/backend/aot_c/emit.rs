@@ -5322,20 +5322,28 @@ const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
 
 /// Lay the dispatcher's top-level units out over one or more functions and
 /// return the C for all of them.
-fn split_entry_function(prologue: &str, units: &[String], cg_dbg: bool) -> String {
+fn split_entry_function(
+    prologue: &str,
+    entry_preamble: &str,
+    units: &[String],
+    cg_dbg: bool,
+) -> String {
     const SIG: &str = "(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, \
                        uint64_t *__restrict__ write_log, intptr_t ff_delta)";
     const ARGS: &str = "(ff_values, comb_values, write_log, ff_delta)";
     let total: usize = units.iter().map(String::len).sum();
     // The debug prologue's counters are function-scope statics that the units
-    // reference, so that build stays whole.
+    // reference, so that build stays whole.  The entry preamble runs once per
+    // eval and so belongs to `veryl_aot_eval` itself in both layouts — never
+    // to a part function.
     // `VERYL_AOT_C_ENTRY_SPLIT=0` keeps one function, for A/B and bisection.
     let split = total > ENTRY_SPLIT_MIN_BYTES
         && !cg_dbg
         && prologue.is_empty()
         && std::env::var("VERYL_AOT_C_ENTRY_SPLIT").as_deref() != Ok("0");
     if !split {
-        let mut out = format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{prologue}");
+        let mut out =
+            format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{entry_preamble}{prologue}");
         for u in units {
             out.push_str(u);
         }
@@ -5359,7 +5367,9 @@ fn split_entry_function(prologue: &str, units: &[String], cg_dbg: bool) -> Strin
             "static __attribute__((noinline)) void veryl_aot_eval_p{k}{SIG} {{\n{part}}}\n\n"
         ));
     }
-    out.push_str(&format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n"));
+    out.push_str(&format!(
+        "{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{entry_preamble}"
+    ));
     for k in 0..parts.len() {
         out.push_str(&format!("    veryl_aot_eval_p{k}{ARGS};\n"));
     }
@@ -6006,7 +6016,48 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             }
             entry_units.push(unit);
         }
-        body.push_str(&split_entry_function(&entry_prologue, &entry_units, cg_dbg));
+        // Epoch re-arm: every 2^20 evals give auto-offed segments one more
+        // try (mirrors ConeGateState::tick_rearm and its rationale).  The
+        // preserved snapshot/replay pair stays coherent across the off
+        // period — off segments never touch their shadows — so clearing the
+        // off flag and streak is sufficient.  VERYL_CONE_GATE_REARM
+        // overrides the interval for calibration; 0 disables.
+        let rearm_mask: u64 = std::env::var("VERYL_CONE_GATE_REARM")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map_or(crate::ir::opt::cone_gate::REARM_EVALS - 1, |v| {
+                if v == 0 {
+                    u64::MAX // disabled
+                } else {
+                    v.next_power_of_two() - 1
+                }
+            });
+        let entry_preamble = if guards.is_empty() || rearm_mask == u64::MAX {
+            String::new()
+        } else {
+            format!(
+                "    {{ static unsigned long long cg_ep;\n\
+                 \x20     if (((++cg_ep) & {rearm_mask:#x}ULL) == 0) {{\n\
+                 \x20       static const unsigned cg_ro[{n}] = {{{offs}}};\n\
+                 \x20       for (unsigned _z = 0; _z < {n}; _z++) {{\n\
+                 \x20         uint8_t *st = comb_values + cg_ro[_z];\n\
+                 \x20         if (st[2]) {{ st[2] = 0; __builtin_memset(st + 4, 0, 4); }}\n\
+                 \x20       }}\n\
+                 \x20     }} }}\n",
+                n = guards.len(),
+                offs = guards
+                    .iter()
+                    .map(|&(_, _, s)| format!("{:#x}", s.state_off))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+        };
+        body.push_str(&split_entry_function(
+            &entry_prologue,
+            &entry_preamble,
+            &entry_units,
+            cg_dbg,
+        ));
     }
     if comb_noslp {
         // The marker line is the cheapest way to carry the verdict to
@@ -13511,14 +13562,14 @@ mod tests {
         let small: Vec<String> = (0..4)
             .map(|i| format!("    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n"))
             .collect();
-        let out = split_entry_function("", &small, false);
+        let out = split_entry_function("", "", &small, false);
         assert_eq!(out.matches("veryl_aot_eval").count(), 1, "{out}");
 
         // Units of ~64 KiB each: enough of them to clear both thresholds.
         let big: Vec<String> = (0..32)
             .map(|i| format!("    /* {i} {} */\n", "x".repeat(64 * 1024)))
             .collect();
-        let out = split_entry_function("", &big, false);
+        let out = split_entry_function("", "", &big, false);
         // Only the definitions carry `void`; the calls do not.
         let parts = out.matches("void veryl_aot_eval_p").count();
         assert!(parts >= 8, "{parts} parts is too few for 2 MB");
@@ -13527,7 +13578,7 @@ mod tests {
         }
         // The debug build keeps its function-scope counters, so it stays whole.
         assert_eq!(
-            split_entry_function("", &big, true)
+            split_entry_function("", "", &big, true)
                 .matches("void veryl_aot_eval_p")
                 .count(),
             0

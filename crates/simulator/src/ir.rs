@@ -612,6 +612,7 @@ impl Ir {
         let state = slot.get_or_insert_with(|| {
             crate::ir::opt::cone_gate::ConeGateState::new(self.cone_segments.len())
         });
+        state.tick_rearm();
         // `VERYL_CONE_GATE_DIAG=1`: periodic segment-dispatch statistics.
         static DIAG: OnceLock<bool> = OnceLock::new();
         let diag = *DIAG.get_or_init(|| env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"));
