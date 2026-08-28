@@ -6876,17 +6876,22 @@ pub fn symbol_string(
                     &symbol.namespace.define_context,
                 )
             };
+            // A global function is copied into the component that references
+            // it, so its emitted name follows that component, not the path the
+            // reference spells; `global_function_identifier_token` names the
+            // definition by the same rule.
             let global_function_visible_local =
                 if let Some(bound_namespace) = &context.bound_namespace {
                     bound_namespace.included(symbol_namespace)
                 } else {
                     namespace.included(symbol_namespace)
                 };
-            let global_function_requires_prefix =
-                symbol.is_global_function() && !global_function_visible_local;
-            if !global_function_requires_prefix
-                && (scope_depth == 1) & (visible_local | is_imported) & !context.in_import
-            {
+            if symbol.is_global_function() {
+                if !global_function_visible_local {
+                    ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
+                }
+                ret.push_str(&token_text);
+            } else if (scope_depth == 1) & (visible_local | is_imported) & !context.in_import {
                 ret.push_str(&token_text);
             } else {
                 ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
@@ -6938,6 +6943,10 @@ pub fn symbol_string(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             );
+            // A generic instance carries its declaring project in the mangled
+            // name, so here the emitting project decides whether the reference
+            // needs the namespace — not the component the definition is copied
+            // into, as it does for a plain global function.
             let global_func = base.namespace.paths[0] != context.project_name.unwrap()
                 && base.is_global_function();
 

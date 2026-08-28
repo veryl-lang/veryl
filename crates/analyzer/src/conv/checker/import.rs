@@ -109,25 +109,20 @@ fn check_import_path(
                 .map(|parent| parent.imported && symbol.found.is_importable(true))
                 .unwrap()
         } else {
-            // The preceding symbol must be a package, an enum, the
-            // project namespace (project-scope items), or a proto-package
-            // referenced through a generic parameter.
-            let parent_is_qualifier = parent_symbol.is_package(false)
-                || matches!(
-                    parent_symbol.kind,
-                    SymbolKind::Enum(_) | SymbolKind::Namespace
-                );
-            let item_importable = if matches!(parent_symbol.kind, SymbolKind::Namespace) {
+            match parent_symbol.kind {
                 // A project-scope function has the project namespace as its
-                // parent, which is not a package. The emitted SystemVerilog
-                // has no package to qualify the import with, so only
-                // functions are accepted here; their import is suppressed
-                // by the emitter.
-                matches!(symbol.found.kind, SymbolKind::Function(_))
-            } else {
-                symbol.found.is_importable(true)
-            };
-            parent_is_qualifier && item_importable
+                // parent, which is not a package. The emitted SystemVerilog has
+                // no package to qualify the import with, so only global
+                // functions are accepted; `should_skip_import` drops their
+                // import on the same condition.
+                SymbolKind::Namespace => {
+                    matches!(symbol.found.kind, SymbolKind::Function(ref x) if x.is_global())
+                }
+                SymbolKind::Enum(_) => symbol.found.is_importable(true),
+                // `is_package` also accepts a proto-package reached through a
+                // generic parameter.
+                _ => parent_symbol.is_package(false) && symbol.found.is_importable(true),
+            }
         }
     } else {
         false

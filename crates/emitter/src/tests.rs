@@ -14,32 +14,35 @@ fn emit_project(metadata: &Metadata, project: &str, code: &str) -> String {
     emit_projects(metadata, &[(project, code)])
 }
 
+/// Analyzes every input, then emits the last one; the preceding inputs stand in
+/// for the dependencies it is built against. One `Analyzer` serves them all, as
+/// in a real build.
 #[track_caller]
 fn emit_projects(metadata: &Metadata, inputs: &[(&str, &str)]) -> String {
     symbol_table::clear();
     attribute_table::clear();
 
+    let analyzer = Analyzer::new(metadata);
     let parsers: Vec<_> = inputs
         .iter()
         .enumerate()
         .map(|(i, (project, input))| {
             let path = format!("test_{i}.veryl");
             let parser = Parser::parse(input, &path).unwrap();
-            let analyzer = Analyzer::new(metadata);
             analyzer.analyze_pass1(project, &parser.veryl);
-            (parser, analyzer)
+            parser
         })
         .collect();
 
     Analyzer::analyze_post_pass1();
 
     let mut context = Context::default();
-    for (parser, analyzer) in &parsers {
+    for parser in &parsers {
         analyzer.analyze_pass2(&parser.veryl, &mut context, None);
     }
 
     let (project, code) = inputs.last().copied().unwrap();
-    let (parser, _) = parsers.last().unwrap();
+    let parser = parsers.last().unwrap();
     let mut emitter = Emitter::new(
         metadata,
         project,
@@ -3907,6 +3910,29 @@ module M {
     assert!(
         ret.contains("__project_func__8"),
         "function must be emitted: {ret}"
+    );
+}
+
+#[test]
+fn project_qualified_global_function_call_matches_definition() {
+    let code = r#"
+function global_func() -> u32 {
+    return 2;
+}
+module M {
+    var value: u32;
+    assign value = prj::global_func();
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        ret.contains("always_comb value = global_func();"),
+        "spelling the own project must not add a prefix: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned global_func()"),
+        "the call and definition must use the same name: {ret}"
     );
 }
 
