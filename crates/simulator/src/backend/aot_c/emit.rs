@@ -4838,6 +4838,14 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     .iter()
     .map(|s| s.to_string())
     .collect();
+    // Without -march, gcc expands the cone gate's shadow save/restore
+    // memcpy as `rep movsq`, whose startup stall dominates at these
+    // sizes.  Guarded: clang rejects the flag, and the failing compile
+    // would silently drop the module to Cranelift.  Name check instead
+    // of a probe — a subprocess here would sit on the async-compile path.
+    if cfg!(all(target_arch = "x86_64", target_os = "linux")) && !cc_name.contains("clang") {
+        flags.push("-mmemcpy-strategy=unrolled_loop:256:noalign,libcall:-1:noalign".to_string());
+    }
     // Optional extra flags via VERYL_AOT_CFLAGS (e.g. PGO sweeps).
     if let Ok(extra) = std::env::var("VERYL_AOT_CFLAGS") {
         flags.extend(extra.split_whitespace().map(str::to_string));
@@ -5819,6 +5827,39 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 (k1 < k2 && k1 >= const_chunks).then_some((k1, k2, s))
             })
             .collect();
+        // Small compare ranges dominate by count, and __memcmp's call +
+        // dispatch overhead there outweighs the scan; past the cutoff
+        // libc's vector loop wins, so large ranges keep the call.
+        const CG_INLINE_CMP_MAX: usize = 256;
+        fn emit_cmp_range(f: &mut String, p: String, q: String, l: usize, on_diff: &str) {
+            if l == 0 {
+                return;
+            }
+            if l > CG_INLINE_CMP_MAX {
+                f.push_str(&format!(
+                    "    if (__builtin_memcmp({p}, {q}, {l})) {on_diff}\n"
+                ));
+                return;
+            }
+            f.push_str("    { uint64_t cg_d = 0;");
+            if l >= 8 {
+                f.push_str(&format!(
+                    " for (unsigned cg_i = 0; cg_i + 8 <= {l}u; cg_i += 8) {{ \
+                     uint64_t cg_x, cg_y; __builtin_memcpy(&cg_x, ({p}) + cg_i, 8); \
+                     __builtin_memcpy(&cg_y, ({q}) + cg_i, 8); cg_d |= cg_x ^ cg_y; }}"
+                ));
+            }
+            let r = l % 8;
+            if r > 0 {
+                f.push_str(&format!(
+                    " {{ uint64_t cg_x = 0, cg_y = 0; \
+                     __builtin_memcpy(&cg_x, ({p}) + {off}u, {r}); \
+                     __builtin_memcpy(&cg_y, ({q}) + {off}u, {r}); cg_d |= cg_x ^ cg_y; }}",
+                    off = l - r,
+                ));
+            }
+            f.push_str(&format!(" if (cg_d) {on_diff} }}\n"));
+        }
         for (gi, &(_, _, s)) in guards.iter().enumerate() {
             let mut f = format!(
                 "static int cg_cmp_{gi}(const uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values) {{\n"
@@ -5830,10 +5871,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             let mut acc = 0usize;
             for &(a, b) in &s.compare_pre {
                 let l = (b - a) as usize;
-                f.push_str(&format!(
-                    "    if (__builtin_memcmp(comb_values + {a:#x}, comb_values + {sh:#x}, {l})) return 0;\n",
-                    sh = pre_shadow_abs + acc,
-                ));
+                emit_cmp_range(
+                    &mut f,
+                    format!("comb_values + {a:#x}"),
+                    format!("comb_values + {sh:#x}", sh = pre_shadow_abs + acc),
+                    l,
+                    "return 0;",
+                );
                 acc += l;
             }
             let mut acc = 0usize;
@@ -5849,10 +5893,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 } else {
                     "return 0;".to_string()
                 };
-                f.push_str(&format!(
-                    "    if (__builtin_memcmp({buf} + {a:#x}, comb_values + {sh:#x}, {l})) {stash}\n",
-                    sh = shadow_abs + acc,
-                ));
+                emit_cmp_range(
+                    &mut f,
+                    format!("{buf} + {a:#x}"),
+                    format!("comb_values + {sh:#x}", sh = shadow_abs + acc),
+                    l,
+                    &stash,
+                );
                 acc += l;
             }
             f.push_str("    return 1;\n}\n\n");

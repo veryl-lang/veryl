@@ -500,6 +500,134 @@ impl Simulator {
             ret.settle_filter = Some(spans);
         }
 
+        // VERYL_CONE_FF_DIAG=1: static breakdown of the cone-gate compare
+        // sets by buffer, to size compare-set optimizations.
+        if env::var("VERYL_CONE_FF_DIAG").as_deref() == Ok("1") && !ret.ir.cone_segments.is_empty()
+        {
+            let (mut ff_total, mut comb_total, mut pre_total) = (0usize, 0usize, 0usize);
+            let mut rows: Vec<(usize, usize, usize, &str)> = Vec::new();
+            for s in &ret.ir.cone_segments {
+                let ff: usize = s
+                    .compare
+                    .iter()
+                    .filter(|r| r.0)
+                    .map(|r| (r.2 - r.1) as usize)
+                    .sum();
+                let comb: usize = s
+                    .compare
+                    .iter()
+                    .filter(|r| !r.0)
+                    .map(|r| (r.2 - r.1) as usize)
+                    .sum();
+                let pre: usize = s.compare_pre.iter().map(|r| (r.1 - r.0) as usize).sum();
+                ff_total += ff;
+                comb_total += comb;
+                pre_total += pre;
+                rows.push((ff, comb, pre, s.cone.as_str()));
+            }
+            let range_count: usize = ret
+                .ir
+                .cone_segments
+                .iter()
+                .map(|s| s.compare.len() + s.compare_pre.len())
+                .sum();
+            let replay_bytes: usize = ret
+                .ir
+                .cone_segments
+                .iter()
+                .flat_map(|s| s.replay.iter())
+                .map(|r| (r.1 - r.0) as usize)
+                .sum();
+            eprintln!(
+                "[cone_ff_diag] module={} segments={} compare bytes: ff={} comb={} pre(comb)={} in {} ranges (avg {:.1} B/range), replay bytes={} — ff share {:.1}%",
+                ret.ir.name,
+                ret.ir.cone_segments.len(),
+                ff_total,
+                comb_total,
+                pre_total,
+                range_count,
+                (ff_total + comb_total + pre_total) as f64 / range_count.max(1) as f64,
+                replay_bytes,
+                100.0 * ff_total as f64 / (ff_total + comb_total + pre_total).max(1) as f64,
+            );
+            rows.sort_by_key(|&(ff, comb, pre, _)| std::cmp::Reverse(ff + comb + pre));
+            for (ff, comb, pre, cone) in rows.iter().take(12) {
+                eprintln!("[cone_ff_diag]   ff={ff:6} comb={comb:6} pre={pre:5}  {cone}");
+            }
+            let mut hist = [0usize; 8];
+            let mut hist_bytes = [0usize; 8];
+            for s in &ret.ir.cone_segments {
+                for len in s
+                    .compare
+                    .iter()
+                    .map(|r| (r.2 - r.1) as usize)
+                    .chain(s.compare_pre.iter().map(|r| (r.1 - r.0) as usize))
+                {
+                    let b = match len {
+                        0..=8 => 0,
+                        9..=32 => 1,
+                        33..=64 => 2,
+                        65..=128 => 3,
+                        129..=256 => 4,
+                        257..=512 => 5,
+                        513..=2048 => 6,
+                        _ => 7,
+                    };
+                    hist[b] += 1;
+                    hist_bytes[b] += len;
+                }
+            }
+            eprintln!(
+                "[cone_ff_diag] range histogram (count/bytes): ≤8:{}/{} ≤32:{}/{} ≤64:{}/{} ≤128:{}/{} ≤256:{}/{} ≤512:{}/{} ≤2K:{}/{} >2K:{}/{}",
+                hist[0],
+                hist_bytes[0],
+                hist[1],
+                hist_bytes[1],
+                hist[2],
+                hist_bytes[2],
+                hist[3],
+                hist_bytes[3],
+                hist[4],
+                hist_bytes[4],
+                hist[5],
+                hist_bytes[5],
+                hist[6],
+                hist_bytes[6],
+                hist[7],
+                hist_bytes[7],
+            );
+            // Overlap: bytes compared by SEVERAL segments — the dedupe
+            // headroom a shared-summary scheme could reclaim.
+            let mut events: Vec<(u32, i32)> = Vec::new();
+            for s in &ret.ir.cone_segments {
+                for r in s.compare.iter().filter(|r| !r.0) {
+                    events.push((r.1, 1));
+                    events.push((r.2, -1));
+                }
+                for r in &s.compare_pre {
+                    events.push((r.0, 1));
+                    events.push((r.1, -1));
+                }
+            }
+            events.sort_unstable();
+            let (mut depth, mut prev, mut uniq, mut multi) = (0i32, 0u32, 0usize, 0usize);
+            for &(x, d) in &events {
+                let span = (x - prev) as usize;
+                if depth >= 1 {
+                    uniq += span;
+                }
+                if depth >= 2 {
+                    multi += span;
+                }
+                depth += d;
+                prev = x;
+            }
+            eprintln!(
+                "[cone_ff_diag] comb compare coverage: unique={uniq} bytes, of which shared(≥2 segs)={multi}; sum-with-multiplicity={}",
+                comb_total + pre_total,
+            );
+        }
+
         // Reset nets start DEASSERTED: zeroed storage reads as ASSERTED on an
         // active-low reset and would hold every `if_reset` block from time 0.
         // A driven net is overwritten by the first comb settle, so this decides
