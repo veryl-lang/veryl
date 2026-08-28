@@ -144,6 +144,14 @@ pub struct Ir {
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
     /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
     pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
+    /// See `Module::event_comb_writes`.  Consumed by the simulator's
+    /// settle filter: a fire of an event whose writes can reach a comb
+    /// read dirties the comb.
+    pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
+    /// See `Module::cone_state_base`.
+    pub cone_state_base: u32,
+    /// See `Module::settle_info`.
+    pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
     /// Cone-gate segments over `comb_statements`; empty when ungated.
     /// Runtime shadows live in `cone_gate_state`.
     pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
@@ -206,6 +214,9 @@ impl Ir {
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
             comb_touched_offsets: module.comb_touched_offsets,
+            event_comb_writes: module.event_comb_writes,
+            cone_state_base: module.cone_state_base,
+            settle_info: module.settle_info,
             cone_segments: module.cone_segments,
             cone_gate_state: std::cell::RefCell::new(None),
             whole_comb_fallback_recorded: Default::default(),
