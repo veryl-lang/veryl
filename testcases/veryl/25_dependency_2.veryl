@@ -226,3 +226,12 @@ module Module25T {
     var _r: u32;
     assign _r = foo_func_2();
 }
+
+module Module25U {
+    // The brace list spells the same import item by item.
+    import veryl_sample4::{foo_func_1, foo_func_2};
+    var _r: u32     ;
+    var _s: logic<8>;
+    assign _r = foo_func_2();
+    assign _s = foo_func_1::<8>(8'd1, 8'd2);
+}
