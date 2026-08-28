@@ -1510,3 +1510,36 @@ fn comb_loop_through_child_without_top_level_component() {
         "loop must be found when the child has no top-level component"
     );
 }
+
+#[test]
+fn comb_loop_generic_specializations_report_one_diagnostic() {
+    // Why this case exists: the body is analyzed once per signature, so one
+    // source location can otherwise produce one diagnostic per specialization.
+    let errors = analyze(
+        r#"
+        module Child #(
+            param W: u32 = 4,
+        ) (
+            o: output logic<W>,
+        ) {
+            var t: logic<W>;
+            always_comb {
+                t = t + 1;
+                o = t;
+            }
+        }
+        module Top (
+            a: output logic<4>,
+            b: output logic<8>,
+        ) {
+            inst u0: Child #(W: 4) (o: a);
+            inst u1: Child #(W: 8) (o: b);
+        }
+        "#,
+    );
+    let loops = errors
+        .iter()
+        .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+        .count();
+    assert_eq!(loops, 1, "{errors:?}");
+}

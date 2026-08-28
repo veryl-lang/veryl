@@ -140,6 +140,9 @@ impl ProcedureContext {
     pub(super) fn new(module: &Module) -> Self {
         let mut ctx = Context::default();
         ctx.variables = module.variables.clone();
+        // A procedure can name an interface member through an imported
+        // modport function, and those live outside `module.variables`.
+        ctx.variables.extend(module.interface_members.clone());
         ctx.functions = module.functions.clone();
         #[cfg(test)]
         MODULE_CONTEXT_ENTRIES
@@ -703,6 +706,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys
     }
 
+    /// Uses the same coordinates as `write_keys`: a modport function body is
+    /// written once but evaluated per receiver.
+    fn destination_array_span(&mut self, destination: &AssignDestination) -> Option<ArraySpan> {
+        let mut destination = destination.clone();
+        destination.index = self.receiver_index(destination.id, &destination.index);
+        dst_writes(&destination, &mut self.ctx)
+            .into_iter()
+            .map(|(array, _)| array)
+            .next()
+    }
+
     fn destination_is_dynamic(&self, destination: &AssignDestination) -> bool {
         let index = self.receiver_index(destination.id, &destination.index);
         !index.is_const() || !destination.select.is_const_with_range()
@@ -797,10 +811,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
-        let destination_array = dst_writes(destination, &mut self.ctx)
-            .into_iter()
-            .map(|(array, _)| array)
-            .next();
+        let destination_array = self.destination_array_span(destination);
         let overflow_before_destination_offset = self.position_overflow;
         let destination_offset = destination_array
             .zip(selected)
@@ -1231,9 +1242,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     };
                     if let Some((_, low)) = selected {
                         let mut reads = Vec::new();
-                        let accesses = var_reads(*id, index, select, &mut self.ctx);
+                        let receiver = self.receiver_index(*id, index);
+                        let accesses = var_reads(*id, &receiver, select, &mut self.ctx);
                         let position_preserving =
-                            index.0.iter().all(|index| index.comptime().is_const)
+                            receiver.0.iter().all(|index| index.comptime().is_const)
                                 && accesses.len() == 1;
                         if let Some(source_span) = requested.translated(0, low) {
                             for (idx, access) in &accesses {
@@ -1461,33 +1473,34 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             length,
                             output_start,
                         } => {
-                            let Some(local) = PackedSpan::new(local_start, length) else {
-                                continue;
-                            };
-                            let mut part = self.eval_expr_bits(part, requested_array, local);
-                            if let Some(output_start) =
-                                self.position(checked_position(output_start))
-                            {
-                                self.translate_sources(
-                                    &mut part,
-                                    PositionRelation {
-                                        array: Some(0),
-                                        packed: Some(output_start),
-                                    },
-                                );
+                            if let Some(local) = PackedSpan::new(local_start, length) {
+                                let mut part = self.eval_expr_bits(part, requested_array, local);
+                                if let Some(output_start) =
+                                    self.position(checked_position(output_start))
+                                {
+                                    self.translate_sources(
+                                        &mut part,
+                                        PositionRelation {
+                                            array: Some(0),
+                                            packed: Some(output_start),
+                                        },
+                                    );
+                                }
+                                reads.extend(part);
                             }
-                            reads.extend(part);
                         }
                         RepeatedProjection::Multiple => {
-                            let Some(local) = PackedSpan::whole(width) else {
+                            if let Some(local) = PackedSpan::whole(width) {
+                                let mut part = self.eval_expr_bits(part, requested_array, local);
+                                part.forget_packed_position();
+                                reads.extend(part);
+                            } else {
                                 reads.whole.extend(self.eval_expr(part));
-                                continue;
-                            };
-                            let mut part = self.eval_expr_bits(part, requested_array, local);
-                            part.forget_packed_position();
-                            reads.extend(part);
+                            }
                         }
                     }
+                    // A part that contributes nothing still has to advance
+                    // `low`: the parts below it are projected relative to it.
                     let Some(part_width) = width.checked_mul(count) else {
                         return ExpressionSources::whole(self.eval_expr(expression));
                     };
@@ -2227,10 +2240,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
-        let destination_array = dst_writes(destination, &mut self.ctx)
-            .into_iter()
-            .map(|(array, _)| array)
-            .next();
+        let destination_array = self.destination_array_span(destination);
         let overflow_before_position_offset = self.position_overflow;
         let position_offset = destination_array
             .zip(selected)

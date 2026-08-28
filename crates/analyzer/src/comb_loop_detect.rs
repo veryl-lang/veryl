@@ -28,9 +28,9 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
-    Ir, Module, Op, Signature, Statement, SystemFunctionKind, VarSelect, Variable,
+    Ir, Module, Op, Signature, Statement, SystemFunctionKind, VarPath, VarSelect, Variable,
 };
-use crate::symbol::{Affiliation, Direction};
+use crate::symbol::{Affiliation, Direction, SymbolId};
 use daggy::petgraph::Graph;
 use daggy::petgraph::algo::kosaraju_scc;
 use daggy::petgraph::graph::NodeIndex;
@@ -113,6 +113,8 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut errors = Vec::new();
     let mut complete = true;
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
+    // Specializations share one declaration; report each of its loops once.
+    let mut reported: HashSet<(SymbolId, Vec<VarPath>)> = HashSet::default();
 
     for module in module_postorder(ir) {
         let (graph, bit_part, module_complete) = match build_module_graph(module, &summaries) {
@@ -124,7 +126,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
                 continue;
             }
         };
-        check_graph(module, &graph, &mut errors);
+        check_graph(module, &graph, &mut errors, &mut reported);
         let mut summary = match compute_module_summary(module, &graph, &bit_part) {
             Ok(summary) => summary,
             Err(ssa::PositionOverflow) => {
@@ -2082,9 +2084,10 @@ fn check_graph(
     module: &Module,
     graph: &Graph<NodeKey, BitDependency>,
     errors: &mut Vec<AnalyzerError>,
+    reported: &mut HashSet<(SymbolId, Vec<VarPath>)>,
 ) {
     let sccs = strongly_connected_components(graph);
-    let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
+    let mut seen: HashSet<Vec<NodeKey>> = HashSet::default();
     for scc in sccs {
         let is_loop = scc.len() > 1 || (scc.len() == 1 && has_self_edge(graph, scc[0]));
         if !is_loop {
@@ -2092,13 +2095,37 @@ fn check_graph(
         }
         let mut keys: Vec<NodeKey> = scc.iter().map(|n| graph[*n]).collect();
         keys.sort();
-        if !reported.insert(keys.clone()) {
+        if !seen.insert(keys.clone()) {
             continue;
         }
-        if let Some(error) = build_error(module, &keys) {
-            errors.push(error);
+        let Some(error) = build_error(module, &keys) else {
+            continue;
+        };
+        // `VarId` is fresh per specialization, so paths are the only stable
+        // name. `assign_tokens` can name an id that is in neither map; such a
+        // cycle has none, so report it rather than collapse it with another.
+        let paths = loop_paths(module, &keys);
+        if !paths.is_empty() && !reported.insert((module.signature.symbol, paths)) {
+            continue;
         }
+        errors.push(error);
     }
+}
+
+fn loop_paths(module: &Module, keys: &[NodeKey]) -> Vec<VarPath> {
+    let mut paths: Vec<VarPath> = keys
+        .iter()
+        .filter_map(|(id, _, _)| {
+            module
+                .variables
+                .get(id)
+                .or_else(|| module.interface_members.get(id))
+                .map(|variable| variable.path.clone())
+        })
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 fn strongly_connected_components(graph: &Graph<NodeKey, BitDependency>) -> Vec<Vec<NodeIndex>> {

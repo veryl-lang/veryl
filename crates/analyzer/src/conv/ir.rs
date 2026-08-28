@@ -160,16 +160,29 @@ fn conv_global_function(context: &mut Context, value: &FunctionDeclaration) {
 }
 
 fn collect_interface_members(context: &Context) -> HashMap<ir::VarId, Variable> {
+    // Rescanning every port per variable path is quadratic, and a module
+    // without modport ports has no interface members at all.
+    let modport_ports: Vec<&VarPath> = context
+        .port_types
+        .iter()
+        .filter(|(_, (r#type, _))| matches!(r#type.kind, ir::TypeKind::Modport(_, _)))
+        .map(|(port, _)| port)
+        .collect();
+    if modport_ports.is_empty() {
+        return HashMap::default();
+    }
+
     context
         .var_paths
         .iter()
         .filter_map(|(path, (id, comptime))| {
-            let belongs_to_modport = context.port_types.iter().any(|(port, (r#type, _))| {
-                matches!(r#type.kind, ir::TypeKind::Modport(_, _))
-                    && path.0.len() > port.0.len()
-                    && path.starts_with(&port.0)
-            });
-            (!context.variables.contains_key(id) && belongs_to_modport).then(|| {
+            if context.variables.contains_key(id) {
+                return None;
+            }
+            let belongs_to_modport = modport_ports
+                .iter()
+                .any(|port| path.0.len() > port.0.len() && path.starts_with(&port.0));
+            belongs_to_modport.then(|| {
                 let variable = Variable::new(
                     *id,
                     path.clone(),

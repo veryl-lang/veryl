@@ -60,7 +60,6 @@ fn imported_interface_read_code(top_assignments: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; imported interface function member read"]
 fn comb_loop_imported_interface_read_detects_member_feedback() {
     assert_interface_function_comb_loop(
         &imported_interface_read_code("assign bus.observed = observed; assign bus.unrelated = 0;"),
@@ -110,7 +109,6 @@ fn imported_interface_write_code(writer_input: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; imported interface function member write"]
 fn comb_loop_imported_interface_write_detects_member_feedback() {
     assert_interface_function_comb_loop(&imported_interface_write_code("bus.written"), true);
 }
@@ -408,7 +406,6 @@ fn comb_loop_external_interface_function_instance_actual_detects_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; modport formal interface function transfer"]
 fn comb_loop_modport_formal_get_to_put_detects_feedback() {
     let code = format!(
         r#"
@@ -610,4 +607,90 @@ fn comb_loop_false_positive_imported_interface_function_widens_output_region() {
         "#,
         false,
     );
+}
+
+#[test]
+fn comb_loop_imported_interface_read_keeps_an_independent_loop_in_the_same_process() {
+    // Why this case exists: if the procedure context cannot resolve the
+    // interface member, the whole comb declaration is dropped -- taking the
+    // unrelated, provable loop written next to it with it.
+    assert_interface_function_comb_loop(
+        r#"
+        interface Bus {
+            var a: logic;
+            function f () -> logic {
+                return a;
+            }
+            modport port {
+                f: import,
+            }
+        }
+        module Sub (
+            bus: modport Bus::port,
+            o  : output logic,
+        ) {
+            var p: logic;
+            var q: logic;
+            always_comb {
+                p = q | bus.f();
+                q = p;
+                o = q;
+            }
+        }
+        module Top {
+            inst bus: Bus;
+            var w: logic;
+            inst sub: Sub (bus: bus, o: w);
+        }
+        "#,
+        true,
+    );
+}
+
+fn interface_array_receiver_code(element: usize) -> String {
+    format!(
+        r#"
+        interface Bus {{
+            var a: logic;
+            var b: logic;
+            function f () {{
+                a = b;
+            }}
+            function g () {{
+                b = a;
+            }}
+            modport port {{
+                f: import,
+                g: import,
+            }}
+        }}
+        module Sub (
+            bus: modport Bus::port[2],
+        ) {{
+            always_comb {{
+                bus[{element}].f();
+            }}
+            always_comb {{
+                bus[{element}].g();
+            }}
+        }}
+        module Top {{
+            inst bus: Bus[2];
+            inst sub: Sub (bus: bus);
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_interface_array_receiver_detects_feedback_in_element_zero() {
+    assert_interface_function_comb_loop(&interface_array_receiver_code(0), true);
+}
+
+#[test]
+fn comb_loop_interface_array_receiver_detects_feedback_in_a_later_element() {
+    // Why this case exists: element zero hides a receiver-index mismatch
+    // between the bit-precise paths and `read_keys`/`write_keys`, because
+    // every coordinate happens to be 0 there.
+    assert_interface_function_comb_loop(&interface_array_receiver_code(1), true);
 }
