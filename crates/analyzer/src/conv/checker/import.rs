@@ -109,10 +109,20 @@ fn check_import_path(
                 .map(|parent| parent.imported && symbol.found.is_importable(true))
                 .unwrap()
         } else {
-            // The preceding symbol must be a package, an enum, or
-            // a proto-package referenced through a generic parameter.
-            (parent_symbol.is_package(false) || matches!(parent_symbol.kind, SymbolKind::Enum(_)))
-                && symbol.found.is_importable(true)
+            match parent_symbol.kind {
+                // A project-scope function has the project namespace as its
+                // parent, which is not a package. The emitted SystemVerilog has
+                // no package to qualify the import with, so only global
+                // functions are accepted; `should_skip_import` drops their
+                // import on the same condition.
+                SymbolKind::Namespace => {
+                    matches!(symbol.found.kind, SymbolKind::Function(ref x) if x.is_global())
+                }
+                SymbolKind::Enum(_) => symbol.found.is_importable(true),
+                // `is_package` also accepts a proto-package reached through a
+                // generic parameter.
+                _ => parent_symbol.is_package(false) && symbol.found.is_importable(true),
+            }
         }
     } else {
         false

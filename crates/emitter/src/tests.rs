@@ -6,20 +6,46 @@ use veryl_parser::Parser;
 
 #[track_caller]
 fn emit(metadata: &Metadata, code: &str) -> String {
+    emit_project(metadata, "prj", code)
+}
+
+#[track_caller]
+fn emit_project(metadata: &Metadata, project: &str, code: &str) -> String {
+    emit_projects(metadata, &[(project, code)])
+}
+
+/// Analyzes every input, then emits the last one; the preceding inputs stand in
+/// for the dependencies it is built against. One `Analyzer` serves them all, as
+/// in a real build.
+#[track_caller]
+fn emit_projects(metadata: &Metadata, inputs: &[(&str, &str)]) -> String {
     symbol_table::clear();
     attribute_table::clear();
 
-    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
-    let mut context = Context::default();
+    let parsers: Vec<_> = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, (project, input))| {
+            let path = format!("test_{i}.veryl");
+            let parser = Parser::parse(input, &path).unwrap();
+            analyzer.analyze_pass1(project, &parser.veryl);
+            parser
+        })
+        .collect();
 
-    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&parser.veryl, &mut context, None);
 
+    let mut context = Context::default();
+    for parser in &parsers {
+        analyzer.analyze_pass2(&parser.veryl, &mut context, None);
+    }
+
+    let (project, code) = inputs.last().copied().unwrap();
+    let parser = parsers.last().unwrap();
     let mut emitter = Emitter::new(
         metadata,
-        "prj",
+        project,
         &PathBuf::from("test.veryl"),
         &PathBuf::from("test.sv"),
         &PathBuf::from("test.sv.map"),
@@ -3857,6 +3883,118 @@ module top {
     assert!(
         !ret.contains("import prj_ProtoPkg;"),
         "proto package import must not be emitted: {ret}"
+    );
+}
+
+#[test]
+fn project_scope_function_import_suppressed() {
+    // SystemVerilog `import` requires a package qualifier. A project-scope
+    // function has no package in its emitted form, so its import is dropped;
+    // the function is already available at the use site.
+    let code = r#"
+function project_func::<W: u32> (value: input logic<W>) -> logic<W> {
+    return value;
+}
+module M {
+    import prj::project_func;
+    var r: logic<8>;
+    assign r = project_func::<8>(8'd1);
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        !ret.contains("import prj_project_func;"),
+        "project-scope function import must not be emitted: {ret}"
+    );
+    assert!(
+        ret.contains("__project_func__8"),
+        "function must be emitted: {ret}"
+    );
+}
+
+#[test]
+fn project_qualified_global_function_call_matches_definition() {
+    let code = r#"
+function global_func() -> u32 {
+    return 2;
+}
+module M {
+    var value: u32;
+    assign value = prj::global_func();
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        ret.contains("always_comb value = global_func();"),
+        "spelling the own project must not add a prefix: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned global_func()"),
+        "the call and definition must use the same name: {ret}"
+    );
+}
+
+#[test]
+fn dependency_global_function_reference_uses_local_name() {
+    let code = r#"
+function global_func() -> u32 {
+    return 2;
+}
+module M {
+    var value: u32;
+    assign value = global_func();
+}
+"#;
+
+    let metadata = Metadata::create_default("root").unwrap();
+    let ret = emit_project(&metadata, "dep", code);
+    assert!(
+        ret.contains("always_comb value = global_func();"),
+        "a dependency must use its local function name: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned global_func()"),
+        "the call and definition must use the same name: {ret}"
+    );
+    assert!(
+        !ret.contains("dep_global_func()"),
+        "a dependency must not qualify its own function: {ret}"
+    );
+}
+
+#[test]
+fn copied_dependency_global_function_qualifies_nested_calls() {
+    let dependency = r#"
+pub function outer_func() -> u32 {
+    return inner_func();
+}
+pub function inner_func() -> u32 {
+    return 2;
+}
+"#;
+    let root = r#"
+module M {
+    import dep::outer_func;
+    var value: u32;
+    assign value = outer_func();
+}
+"#;
+
+    let metadata = Metadata::create_default("root").unwrap();
+    let ret = emit_projects(&metadata, &[("dep", dependency), ("root", root)]);
+    assert!(
+        ret.contains("always_comb value = dep_outer_func();"),
+        "a copied dependency function must be called with its project prefix: {ret}"
+    );
+    assert!(
+        ret.contains("return dep_inner_func();"),
+        "nested dependency calls must match their copied definitions: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned dep_inner_func()"),
+        "the nested function definition must retain its project prefix: {ret}"
     );
 }
 

@@ -14,6 +14,7 @@ use crate::ir::opt::comb_fusion;
 use crate::ir::opt::cone_gate;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
+use crate::ir::opt::field_unfuse;
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
@@ -23,7 +24,7 @@ use crate::ir::statement::CompiledBlockStatement;
 use crate::ir::statement::ProtoAssignStatement;
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableMeta, align_up_64,
-    create_variable_meta, ff_cacheline_pad_enabled, value_size, write_native_value,
+    create_variable_meta, ff_cacheline_pad_enabled, native_bytes, value_size, write_native_value,
 };
 use crate::ir::{
     CompiledBatchStmt, Event, ProtoCaseArm, ProtoCaseStatement, ProtoDeclaration, ProtoExpression,
@@ -97,6 +98,18 @@ pub struct Module {
     /// decide which of its own statements really invalidate the comb.
     pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
     pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
+    /// Per event, the comb byte offsets its statements can write, or `None`
+    /// when unboundable (`event_comb_write_offsets`).  The simulator's
+    /// settle filter dirties the comb on a fire of any event whose writes
+    /// can reach a comb read.
+    pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
+    /// First byte of the cone-gate state region at the comb buffer's tail;
+    /// logic storage ends here.
+    pub cone_state_base: u32,
+    /// Lazily built settle-filter layout info, shared (`Arc::clone`) by
+    /// every `Module`/`Ir` from one `ProtoModule` — the products are
+    /// offset-based and instantiation-invariant.
+    pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
 }
 
 pub struct ProtoModule {
@@ -141,6 +154,12 @@ pub struct ProtoModule {
     /// their state offsets assigned; `instantiate` maps them to the flat
     /// statement space.
     pub cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment>,
+    /// See `Module::event_comb_writes`.
+    pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
+    /// See `Module::cone_state_base`.
+    pub cone_state_base: u32,
+    /// See `Module::settle_info`.
+    pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
 }
 
 fn create_buffers(
@@ -453,6 +472,9 @@ impl ProtoModule {
             fused_comb_offsets: self.fused_comb_offsets.clone(),
             comb_touched_offsets: Arc::clone(&self.comb_touched_offsets),
             cone_segments,
+            event_comb_writes: self.event_comb_writes.clone(),
+            cone_state_base: self.cone_state_base,
+            settle_info: Arc::clone(&self.settle_info),
         }
     }
 
@@ -1064,6 +1086,102 @@ fn collect_event_written_comb(
             }
         }
     }
+    Some(out)
+}
+
+/// Comb byte ranges `(lo, hi)` — element base offsets, `lo == hi` for a
+/// static write, `hi` the last element of a dynamic one — one event's
+/// statements can write, for the settle filter.  `None` when a write
+/// cannot be bounded (`$readmemh` element stores and tb-method returns
+/// land outside the FF write log — an FF destination there bypasses the
+/// value-compared commit too — and a compiled block without originals
+/// hides its interior): the event must then dirty the comb on every fire.
+/// `Some` lets the simulator value-compare exactly the ranges the comb can
+/// read (an always_ff's comb-scoped scratch is invisible to the settle).
+///
+/// Unlike [`collect_event_written_comb`], a zero-stride dynamic write still
+/// records its base — a missed offset here would skip a required settle.
+fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isize)>> {
+    use crate::ir::statement::ProtoTbMethodKind;
+    fn walk(s: &ProtoStatement, out: &mut Vec<(isize, isize)>) -> bool {
+        match s {
+            ProtoStatement::Assign(a) => {
+                if !a.dst.is_ff() {
+                    let w = native_bytes(a.dst_width).max(1) as isize;
+                    out.push((a.dst.raw(), a.dst.raw() + w - 1));
+                }
+                true
+            }
+            ProtoStatement::AssignDynamic(a) => {
+                if !a.dst_base.is_ff() {
+                    let last = a.dst_num_elements.saturating_sub(1) as isize;
+                    let end = a.dst_base.raw() + a.dst_stride * last;
+                    let w = native_bytes(a.dst_width).max(1) as isize;
+                    out.push((a.dst_base.raw().min(end), a.dst_base.raw().max(end) + w - 1));
+                }
+                true
+            }
+            ProtoStatement::If(x) => x
+                .true_side
+                .iter()
+                .chain(x.false_side.iter())
+                .all(|s| walk(s, out)),
+            ProtoStatement::Case(x) => x
+                .arms
+                .iter()
+                .flat_map(|a| a.body.iter())
+                .chain(x.default.iter())
+                .all(|s| walk(s, out)),
+            ProtoStatement::For(f) => {
+                if !f.var_offset.is_ff() {
+                    out.push((f.var_offset.raw(), f.var_offset.raw()));
+                }
+                f.body.iter().all(|s| walk(s, out))
+            }
+            ProtoStatement::SequentialBlock(b) => b.iter().all(|s| walk(s, out)),
+            ProtoStatement::CompiledBlock(cb) => {
+                !cb.original_stmts.is_empty() && cb.original_stmts.iter().all(|s| walk(s, out))
+            }
+            // Positive enumeration on purpose: a future variant must be
+            // classified here or fail to compile — defaulting it to "writes
+            // nothing" would silently skip required settles.
+            ProtoStatement::SystemFunctionCall(c) => {
+                use crate::ir::ProtoSystemFunctionCall as F;
+                match c {
+                    // Readmemh writes elements directly — FF ones bypass
+                    // the log too.
+                    F::Readmemh { .. } => false,
+                    F::Display { .. } | F::Write { .. } | F::Assert { .. } | F::Finish => true,
+                }
+            }
+            // A return value lands via a `VarId` outside the log.
+            ProtoStatement::TbMethodCall { method, .. } => {
+                use ProtoTbMethodKind as K;
+                match method {
+                    K::Component { ret, .. }
+                    | K::RandomGet { ret, .. }
+                    | K::RandomGetRange { ret, .. }
+                    | K::RandomGetSeed { ret } => ret.is_none(),
+                    K::ClockNext { .. }
+                    | K::ResetAssert { .. }
+                    | K::FileOpen { .. }
+                    | K::FileWrite { .. }
+                    | K::FileClose
+                    | K::FileFlush
+                    | K::RandomSeed { .. } => true,
+                }
+            }
+            ProtoStatement::Break => true,
+        }
+    }
+    let mut out = Vec::new();
+    for s in stmts {
+        if !walk(s, &mut out) {
+            return None;
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
     Some(out)
 }
 
@@ -4264,7 +4382,91 @@ impl Conv<&air::Module> for ProtoModule {
                 comb_layout::expand_compiled_blocks(stmts);
             }
         }
-        let unified = unified;
+        // Field unfuse (see `opt::field_unfuse`).  Runs BEFORE the pipeline
+        // key and the cone-gate node tables: the rewritten statements flavor
+        // the key, and the field storage inherits its packed variable's cone
+        // owner through `Context::comb_reloc`.  The allocations sit outside
+        // the memoised pipeline, so a cache hit replays them identically.
+        let mut unfuse_field_offsets: Vec<isize> = Vec::new();
+        let unified = {
+            let mut unified = unified;
+            if field_unfuse::enabled(context.config.use_4state) {
+                // Offsets the statement census cannot see: the testbench-facing
+                // top-level surface (`Simulator::set`/`get`, wavedrom), external
+                // component connects, derived-clock candidates, and storage
+                // whose initial value is not zero (a split field starts at
+                // zero, so a conditionally-written non-zero-initial field
+                // would read differently before its first write).
+                let mut blocklist: HashSet<isize> = HashSet::default();
+                let explain = field_unfuse::explain_offsets();
+                let note_meta = |vars: &HashMap<VarId, VariableMeta>,
+                                 top: bool,
+                                 blocklist: &mut HashSet<isize>| {
+                    for meta in vars.values() {
+                        let nonzero_init = meta.initial_values.iter().any(|v| !v.is_zero());
+                        if !(top || nonzero_init) {
+                            continue;
+                        }
+                        for el in &meta.elements {
+                            if let VarOffset::Comb(o) = el.current {
+                                if explain.contains(&o) {
+                                    eprintln!(
+                                        "[field_unfuse] explain off={o}: blocklisted by meta \
+                                         path={} top={top} nonzero_init={nonzero_init} \
+                                         initial_values={:?}",
+                                        meta.path,
+                                        meta.initial_values.iter().take(4).collect::<Vec<_>>()
+                                    );
+                                }
+                                blocklist.insert(o);
+                            }
+                        }
+                    }
+                };
+                note_meta(&variable_meta, true, &mut blocklist);
+                let mut stack: Vec<&ModuleVariableMeta> = all_child_modules.iter().collect();
+                while let Some(m) = stack.pop() {
+                    note_meta(&m.variable_meta, false, &mut blocklist);
+                    stack.extend(m.children.iter());
+                }
+                for (_, off, _, _) in &nested_derived_clock_candidates {
+                    if let VarOffset::Comb(o) = off {
+                        blocklist.insert(*o);
+                    }
+                }
+                let mut ins = vec![];
+                for external in &all_external_components {
+                    for connect in &external.connects {
+                        connect.expr.gather_variable_offsets(&mut ins);
+                    }
+                }
+                for o in &ins {
+                    if let VarOffset::Comb(x) = o {
+                        blocklist.insert(*x);
+                    }
+                }
+                let use_4state = context.config.use_4state;
+                let context = &mut *context;
+                let comb_total = &mut context.comb_total_bytes;
+                let mut alloc = |width: usize| -> isize {
+                    let nb = crate::ir::variable::native_bytes(width);
+                    let off = *comb_total as isize;
+                    *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                    off
+                };
+                let (stats, field_offsets) = field_unfuse::run(
+                    &mut unified,
+                    &all_event_statements,
+                    &blocklist,
+                    &mut alloc,
+                    &mut context.comb_reloc,
+                    use_4state,
+                );
+                unfuse_field_offsets = field_offsets;
+                log::info!("field_unfuse ({}): {stats:?}", src.name);
+            }
+            unified
+        };
 
         // Dead-var DCE protect set (also folded into the cache key): offsets
         // that must survive DCE.  `comb_to_ff_hoist` only rewrites `VarKind::Let`,
@@ -4327,6 +4529,11 @@ impl Conv<&air::Module> for ProtoModule {
                     for connect in &external.connects {
                         connect.expr.gather_variable_offsets(&mut extra_offsets);
                     }
+                }
+                // Unfused field defs stay materialized by default (see
+                // `field_unfuse::inline_fields`).
+                if !field_unfuse::inline_fields() {
+                    extra_offsets.extend(unfuse_field_offsets.iter().map(|&o| VarOffset::Comb(o)));
                 }
                 Some(extra_offsets)
             } else {
@@ -4505,6 +4712,10 @@ impl Conv<&air::Module> for ProtoModule {
         // starting state, and per-instance buffers make the state safe under
         // instance reuse and concurrency.  Offsets are deterministic, so a
         // pipeline-cache hit recomputes the identical layout.
+        // Everything from here up is logic storage; the state region below
+        // mutates on every settle (streaks, shadows), which the settle
+        // filter's skip oracle must exclude from its no-op comparison.
+        let cone_state_base = context.comb_total_bytes as u32;
         let cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment> = {
             let mut segs: Vec<_> = cached.cone_segments.as_ref().clone();
             for s in &mut segs {
@@ -4904,6 +5115,10 @@ impl Conv<&air::Module> for ProtoModule {
         // identity transform.
         #[cfg(not(target_family = "wasm"))]
         let tb_private = tb_private_offsets(&variable_meta, &comb_touched_offsets);
+        let event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>> = all_event_statements
+            .iter()
+            .map(|(e, stmts)| (e.clone(), event_comb_write_offsets(stmts)))
+            .collect();
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
             .map(|(event, stmts)| {
@@ -5140,6 +5355,9 @@ impl Conv<&air::Module> for ProtoModule {
             fused_comb_offsets: cached.fused_offsets.clone(),
             cone_segments,
             comb_touched_offsets,
+            event_comb_writes,
+            cone_state_base,
+            settle_info: Default::default(),
         })
     }
 }
@@ -5817,6 +6035,78 @@ mod event_written_comb_tests {
         assert!(out.contains(&0x8isize));
         // No originals: the writes are unboundable, the split must disarm.
         assert!(collect_event_written_comb(&events(vec![cb(vec![])])).is_none());
+    }
+
+    #[test]
+    fn settle_filter_event_write_classification() {
+        // FF-only writes ride the value-compared commit; comb writes are
+        // reported by offset for the reach classification.
+        assert_eq!(
+            event_comb_write_offsets(&[cassign(VarOffset::Ff(0x8), 32)]),
+            Some(vec![])
+        );
+        assert_eq!(
+            event_comb_write_offsets(&[cassign(VarOffset::Comb(0x4), 32)]),
+            Some(vec![(0x4, 0x7)])
+        );
+        // A dynamic write reports its whole element range (write width
+        // included); a zero-stride one collapses to its base element.
+        assert_eq!(
+            event_comb_write_offsets(&[cdyn_write(0x10, 0x8, 3)]),
+            Some(vec![(0x10, 0x23)])
+        );
+        assert_eq!(
+            event_comb_write_offsets(&[cdyn_write(0x10, 0, 1)]),
+            Some(vec![(0x10, 0x13)])
+        );
+        assert_eq!(
+            event_comb_write_offsets(&[ProtoStatement::SequentialBlock(vec![
+                cassign(VarOffset::Ff(0x8), 32),
+                cassign(VarOffset::Comb(0x0), 32),
+            ])]),
+            Some(vec![(0x0, 0x3)])
+        );
+        // Readmemh writes elements directly — FF ones bypass the log.
+        assert_eq!(
+            event_comb_write_offsets(&[ProtoStatement::SystemFunctionCall(
+                ProtoSystemFunctionCall::Readmemh {
+                    filename: "x.hex".into(),
+                    elements: vec![ReadmemhElement {
+                        current: VarOffset::Ff(0x8),
+                        next_offset: None,
+                    }],
+                    width: 32,
+                }
+            )]),
+            None
+        );
+        // $display is pure.
+        assert_eq!(
+            event_comb_write_offsets(&[ProtoStatement::SystemFunctionCall(
+                ProtoSystemFunctionCall::Display {
+                    format_str: "x".into(),
+                    args: vec![],
+                }
+            )]),
+            Some(vec![])
+        );
+        // A tb-method return lands via a VarId outside the log.
+        let call = |ret| ProtoStatement::TbMethodCall {
+            inst: StrId::default(),
+            method: ProtoTbMethodKind::RandomGet {
+                width: 32,
+                signed: false,
+                ret,
+            },
+        };
+        assert_eq!(event_comb_write_offsets(&[call(None)]), Some(vec![]));
+        assert_eq!(
+            event_comb_write_offsets(&[call(Some((
+                crate::ir::VarId::SYNTHETIC,
+                crate::ir::statement::RetWidthCheck::Dst,
+            )))]),
+            None
+        );
     }
 
     #[test]

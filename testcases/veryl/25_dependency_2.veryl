@@ -218,3 +218,20 @@ module Module25S {
     inst u0: veryl_sample4::foo_module::<foo_pkg::<3>>;
     inst u1: veryl_sample4::foo_module::<veryl_sample4::foo_pkg::<3>>;
 }
+
+module Module25T {
+    // A non-generic project-scope function is imported by its project-qualified
+    // path and called under the imported name.
+    import veryl_sample4::foo_func_2;
+    var _r: u32;
+    assign _r = foo_func_2();
+}
+
+module Module25U {
+    // The brace list spells the same import item by item.
+    import veryl_sample4::{foo_func_1, foo_func_2};
+    var _r: u32     ;
+    var _s: logic<8>;
+    assign _r = foo_func_2();
+    assign _s = foo_func_1::<8>(8'd1, 8'd2);
+}

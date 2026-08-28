@@ -298,4 +298,43 @@ module veryl_testcase_Module25S;
     veryl_sample4___foo_module__veryl_sample4___foo_pkg__3 u0 ();
     veryl_sample4___foo_module__veryl_sample4___foo_pkg__3 u1 ();
 endmodule
+
+module veryl_testcase_Module25T;
+    // A non-generic project-scope function is imported by its project-qualified
+    // path and called under the imported name.
+
+
+
+
+
+    int unsigned _r;
+    always_comb _r = veryl_sample4_foo_func_2();
+
+    function automatic int unsigned veryl_sample4_foo_func_2() ;
+        return 2;
+    endfunction
+endmodule
+
+module veryl_testcase_Module25U;
+    // The brace list spells the same import item by item.
+
+
+
+
+
+    int unsigned         _r;
+    logic        [8-1:0] _s;
+    always_comb _r = veryl_sample4_foo_func_2();
+    always_comb _s = veryl_sample4___foo_func_1__8(8'd1, 8'd2);
+
+    function automatic int unsigned veryl_sample4_foo_func_2() ;
+        return 2;
+    endfunction
+    function automatic logic [8-1:0] veryl_sample4___foo_func_1__8(
+        input var logic [8-1:0] a,
+        input var logic [8-1:0] b
+    ) ;
+        return a + b + veryl_sample4_foo_func_2();
+    endfunction
+endmodule
 //# sourceMappingURL=../map/25_dependency_2.sv.map
