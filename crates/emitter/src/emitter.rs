@@ -1983,7 +1983,7 @@ impl Emitter {
             &defined_ports,
             &connected_ports,
             &generic_map,
-            &symbol.namespace,
+            &symbol.inner_namespace(),
         );
         self.modport_connections_tables
             .push(modport_connections_table);
@@ -6089,7 +6089,7 @@ impl VerylWalker for Emitter {
                 &ports,
                 &self.get_generic_map(),
                 &arg.identifier.identifier_token,
-                &symbol.found.namespace,
+                &symbol.found.inner_namespace(),
                 false,
                 &self.into(),
             );
