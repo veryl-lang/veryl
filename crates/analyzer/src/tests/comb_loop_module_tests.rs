@@ -1438,3 +1438,75 @@ fn comb_loop_module_boundary_struct_members_of_one_port_are_bit_disjoint() {
         false,
     );
 }
+
+/// An incremental build restores unchanged files from the fragment cache and
+/// skips their pass2, so their modules never reach `ir.components`; the
+/// elaborated body still exists only inside each instantiating parent. A loop
+/// crossing such a child must still be detected.
+#[test]
+fn comb_loop_through_child_without_top_level_component() {
+    let code = r#"
+    module ChildAnd (
+        i_en: input  logic,
+        i_d : input  logic,
+        o_y : output logic,
+    ) {
+        assign o_y = i_en & i_d;
+    }
+    module Top (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        i_d  : input  logic,
+        o_z  : output logic,
+    ) {
+        var q: logic;
+        var y: logic;
+        let eff : logic = q | y;
+        let won : logic = eff & i_d;
+        let hold: logic = q & !won;
+        inst u: ChildAnd (i_en: !hold, i_d, o_y: y);
+        always_ff {
+            if_reset {
+                q = 1'b0;
+            } else {
+                q = y;
+            }
+        }
+        assign o_z = q;
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    assert!(analyzer.analyze_pass1("prj", &parser.veryl).is_empty());
+    assert!(Analyzer::analyze_post_pass1().is_empty());
+    assert!(
+        analyzer
+            .analyze_pass2(&parser.veryl, &mut context, Some(&mut ir))
+            .is_empty()
+    );
+
+    let has_loop = |ir: &Ir| {
+        crate::comb_loop_detect::check(ir)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    };
+    assert!(has_loop(&ir), "loop must be found on the full IR");
+
+    let child = resource_table::insert_str("ChildAnd");
+    ir.components
+        .retain(|c| !matches!(c, crate::ir::Component::Module(m) if m.name == child));
+    assert_eq!(ir.components.len(), 1);
+    assert!(
+        has_loop(&ir),
+        "loop must be found when the child has no top-level component"
+    );
+}
