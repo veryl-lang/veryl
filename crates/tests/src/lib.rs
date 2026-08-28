@@ -7,6 +7,11 @@ const STD_TESTS: [&str; 4] = ["68_std_1", "68_std_2", "68_std_3", "68_std_4"];
 #[cfg(test)]
 const PACKAGE_SELF_REF_TESTS: [&str; 2] = ["84_package_self_ref_1", "84_package_self_ref_2"];
 
+/// Testcases which refer to symbols of dependency projects, but don't need to
+/// be analyzed together with other testcases.
+#[cfg(test)]
+const SUB_PROJECT_TESTS: [&str; 1] = ["81_modport_expansion"];
+
 #[cfg(test)]
 static DEPENDENCY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -41,6 +46,7 @@ fn needs_sub_project(name: &str) -> bool {
     crate::DEPENDENCY_TESTS.contains(&name)
         || crate::STD_TESTS.contains(&name)
         || crate::PACKAGE_SELF_REF_TESTS.contains(&name)
+        || crate::SUB_PROJECT_TESTS.contains(&name)
 }
 
 #[cfg(test)]

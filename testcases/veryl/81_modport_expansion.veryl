@@ -99,3 +99,21 @@ module Module81D {
         m_if: c_if,
     );
 }
+
+alias package baz_16_32_pkg = veryl_sample4::baz_pkg::<16, 32>;
+
+#[expand(modport)]
+module Module81E (
+    baz: modport baz_if::<baz_16_32_pkg>::mp,
+) {
+    import veryl_sample4::baz_if;
+    assign baz.baz_0 = '0;
+    assign baz.baz_1 = '0;
+}
+
+module Module81F {
+    import veryl_sample4::baz_if;
+
+    inst baz: baz_if::<baz_16_32_pkg>;
+    inst u  : Module81E ( baz );
+}
