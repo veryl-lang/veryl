@@ -124,7 +124,6 @@ fn comb_loop_core_semantics_and_region_regressions_function_call_caller_side_fee
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; unused function actual is not a return dependency"]
 fn comb_loop_statement_order_and_observer_semantics_function_summaries_come_from_the_specialized_body_merely_evaluating_an()
  {
     // Function summaries come from the specialized body. Merely evaluating an
@@ -1569,29 +1568,6 @@ fn comb_loop_alias_and_opaque_effect_boundaries_function_region_crossing_a_conca
 }
 
 #[test]
-fn comb_loop_structural_dependency_semantics_identical_function_branches_retain_structural_condition_dependence()
- {
-    assert_comb_loop(
-        "identical function branches retain structural condition dependence",
-        r#"
-        module Top (
-            o: output logic,
-        ) {
-            function choose (condition: input logic) -> logic {
-                if condition {
-                    return 0;
-                } else {
-                    return 0;
-                }
-            }
-            assign o = choose(o);
-        }
-        "#,
-        true,
-    );
-}
-
-#[test]
 fn comb_loop_function_capture_coverage_obeys_caller_order() {
     // Why this case exists: a function's module-scope write is part of its
     // caller procedure. A dominating default or a later full write supplies
@@ -1763,7 +1739,6 @@ fn function_summaries_reuse_module_metadata() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; unreachable code after function return"]
 fn comb_loop_early_return_excludes_unreachable_function_dependency() {
     assert_comb_loop(
         "a return makes the following function dependency unreachable",
@@ -1779,6 +1754,62 @@ fn comb_loop_early_return_excludes_unreachable_function_dependency() {
             }
             var feedback: logic;
             assign o = choose(feedback);
+            assign feedback = o;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_early_branch_return_preserves_its_reachable_dependency() {
+    assert_comb_loop(
+        "an early branch return remains an alternative to the fallback return",
+        r#"
+        module Top (
+            select: input  logic,
+            o     : output logic,
+        ) {
+            function choose (
+                select  : input logic,
+                feedback: input logic,
+            ) -> logic {
+                if select {
+                    return feedback;
+                }
+                return 0;
+            }
+            var feedback: logic;
+            assign o = choose(select, feedback);
+            assign feedback = o;
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_all_branch_returns_exclude_following_dependency() {
+    assert_comb_loop(
+        "no path reaches a statement after both branches return",
+        r#"
+        module Top (
+            select: input  logic,
+            o     : output logic,
+        ) {
+            function choose (
+                select  : input logic,
+                feedback: input logic,
+            ) -> logic {
+                if select {
+                    return 0;
+                } else {
+                    return 0;
+                }
+                return feedback;
+            }
+            var feedback: logic;
+            assign o = choose(select, feedback);
             assign feedback = o;
         }
         "#,

@@ -287,7 +287,6 @@ fn modport_array_code(top_assignments: &str) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; same interface array element feedback"]
 fn comb_loop_modport_array_detects_same_element_feedback() {
     assert_interface_comb_loop(
         &modport_array_code("assign bus[0].request = bus[0].response; assign bus[1].request = 0;"),
@@ -304,7 +303,6 @@ fn comb_loop_modport_array_keeps_one_way_cross_element_flow_loop_free() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; cross-element interface array feedback"]
 fn comb_loop_modport_array_detects_cross_element_feedback() {
     assert_interface_comb_loop(
         &modport_array_code(
@@ -346,7 +344,6 @@ fn specialized_interface_code(width: u32) -> String {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false negative; enabled generic interface feedthrough"]
 fn comb_loop_generic_interface_enabled_specialization_retains_feedthrough() {
     assert_interface_comb_loop(&specialized_interface_code(1), true);
 }
@@ -445,7 +442,6 @@ fn comb_loop_procedural_modport_connect_detects_feedback() {
 }
 
 #[test]
-#[ignore = "comb-loop migration: false positive; procedural modport connect killed by later overrides"]
 fn comb_loop_procedural_modport_connect_overrides_kill_feedback() {
     assert_interface_comb_loop(
         &procedural_modport_connect_code(
