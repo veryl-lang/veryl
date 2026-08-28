@@ -276,6 +276,11 @@ fn should_skip_import(arg: &ScopedIdentifier, import_members: bool) -> bool {
         | SymbolKind::Module(_)
         | SymbolKind::Interface(_)
         | SymbolKind::GenericInstance(_) => !import_members,
+        // A project-scope function is imported by its project-qualified path
+        // (`import dep::func;`), which has no package to qualify the emitted
+        // SystemVerilog import with. The function is already in scope at the
+        // use site, so the import can be dropped.
+        SymbolKind::Function(x) if !import_members && x.is_global() => true,
         _ => false,
     }
 }
@@ -6871,7 +6876,17 @@ pub fn symbol_string(
                     &symbol.namespace.define_context,
                 )
             };
-            if (scope_depth == 1) & (visible_local | is_imported) & !context.in_import {
+            let global_function_visible_local =
+                if let Some(bound_namespace) = &context.bound_namespace {
+                    bound_namespace.included(symbol_namespace)
+                } else {
+                    namespace.included(symbol_namespace)
+                };
+            let global_function_requires_prefix =
+                symbol.is_global_function() && !global_function_visible_local;
+            if !global_function_requires_prefix
+                && (scope_depth == 1) & (visible_local | is_imported) & !context.in_import
+            {
                 ret.push_str(&token_text);
             } else {
                 ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));

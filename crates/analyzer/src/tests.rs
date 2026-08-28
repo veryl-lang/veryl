@@ -2227,6 +2227,37 @@ fn invalid_import() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 
+    // A project-scope function can be imported by its project-qualified path.
+    let code = r#"
+    function project_func::<W: u32> (value: input logic<W>) -> logic<W> {
+        return value;
+    }
+    module ModuleK {
+        import prj::project_func;
+        var r: logic<8>;
+        assign r = project_func::<8>(8'd1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // A non-generic project-scope function can be imported by its
+    // project-qualified path.
+    let code = r#"
+    function project_plain(value: input logic<8>) -> logic<8> {
+        return value;
+    }
+    module ModuleL {
+        import prj::project_plain;
+        var r: logic<8>;
+        assign r = project_plain(8'd1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
     let code = r#"
     package a_pkg::<a: u32> {
         const A: u32 = a;
