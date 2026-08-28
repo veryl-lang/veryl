@@ -321,9 +321,21 @@ impl WriteLogBuffer {
 /// applied first, then wide entries.  Within each pool, entries are processed
 /// in insertion order so multiple writes to the same offset apply
 /// last-write-wins, matching JIT/interpret semantics.
-pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
+///
+/// One body serves both public entry points (the settle filter alternates
+/// between them at runtime on `comb_dirty`), monomorphized so the plain
+/// commit pays nothing for the compare the watched one splices in — a drift
+/// between two hand-kept copies would be a silent filter-on vs filter-off
+/// divergence.
+#[inline(always)]
+fn commit_from_log_impl<const WATCHED: bool>(
+    ff_values: &mut [u8],
+    buffer: &WriteLogBuffer,
+    mut watched: impl FnMut(usize, usize) -> bool,
+) -> bool {
     let len = ff_values.len();
     let dst = ff_values.as_mut_ptr();
+    let mut hit = false;
 
     // Narrow path: single word store per width class.
     let narrow_limit = buffer.narrow_count as usize;
@@ -337,10 +349,32 @@ pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
         unsafe {
             let p = dst.add(offset);
             match nb {
-                8 => (p as *mut u64).write_unaligned(entry.payload),
-                4 => (p as *mut u32).write_unaligned(entry.payload as u32),
-                2 => (p as *mut u16).write_unaligned(entry.payload as u16),
-                1 => *p = entry.payload as u8,
+                8 => {
+                    if WATCHED && !hit && (p as *const u64).read_unaligned() != entry.payload {
+                        hit = watched(offset, nb);
+                    }
+                    (p as *mut u64).write_unaligned(entry.payload);
+                }
+                4 => {
+                    if WATCHED && !hit && (p as *const u32).read_unaligned() != entry.payload as u32
+                    {
+                        hit = watched(offset, nb);
+                    }
+                    (p as *mut u32).write_unaligned(entry.payload as u32);
+                }
+                2 => {
+                    if WATCHED && !hit && (p as *const u16).read_unaligned() != entry.payload as u16
+                    {
+                        hit = watched(offset, nb);
+                    }
+                    (p as *mut u16).write_unaligned(entry.payload as u16);
+                }
+                1 => {
+                    if WATCHED && !hit && *p != entry.payload as u8 {
+                        hit = watched(offset, nb);
+                    }
+                    *p = entry.payload as u8;
+                }
                 _ => {}
             }
         }
@@ -354,8 +388,34 @@ pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
         if nb == 0 || nb > WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES || offset + nb > len {
             continue;
         }
+        if WATCHED && !hit && ff_values[offset..offset + nb] != entry.payload[..nb] {
+            hit = watched(offset, nb);
+        }
         ff_values[offset..offset + nb].copy_from_slice(&entry.payload[..nb]);
     }
+    hit
+}
+
+/// See [`commit_from_log_impl`].
+pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
+    commit_from_log_impl::<false>(ff_values, buffer, |_, _| false);
+}
+
+/// [`commit_from_log_impl`] with a change probe for the settle filter: each
+/// entry's payload is compared against the bytes it overwrites, and the
+/// return value says whether any byte that actually CHANGED lies where
+/// `watched` answers true.  After the first watched change the remaining
+/// entries commit without comparing.
+///
+/// A write that changes bytes and a later same-cycle write that restores
+/// them still reports a watched change — a false positive that only costs
+/// one settle, never a missed one.
+pub fn ff_commit_from_log_watched(
+    ff_values: &mut [u8],
+    buffer: &WriteLogBuffer,
+    watched: &mut dyn FnMut(usize, usize) -> bool,
+) -> bool {
+    commit_from_log_impl::<true>(ff_values, buffer, watched)
 }
 
 use std::cell::Cell;
@@ -643,6 +703,46 @@ mod tests {
         assert_eq!(buf.wide_count, 2);
         assert_eq!(buf.narrow_entries_slice()[1].payload, 2);
         assert_eq!(buf.wide_entries_slice()[1].offset, 16);
+    }
+
+    #[test]
+    fn watched_commit_reports_only_watched_changes() {
+        // Watch the first 16 bytes.
+        let watched = |off: usize, _len: usize| off < 16;
+
+        // Same-value write: committed, not reported.
+        let mut buf = WriteLogBuffer::with_capacity(4, 2);
+        let mut ff = vec![0u8; 64];
+        unsafe { write_log_grow_push_narrow(&mut buf, 0, 0, 8) };
+        assert!(!ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+
+        // Changed but unwatched: committed, not reported.
+        let mut buf = WriteLogBuffer::with_capacity(4, 2);
+        unsafe { write_log_grow_push_narrow(&mut buf, 32, 0x1234, 4) };
+        assert!(!ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+        assert_eq!(ff[32], 0x34);
+
+        // Changed and watched (narrow): reported.
+        let mut buf = WriteLogBuffer::with_capacity(4, 2);
+        unsafe { write_log_grow_push_narrow(&mut buf, 8, 0xff, 1) };
+        assert!(ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+        assert_eq!(ff[8], 0xff);
+
+        // Wide entry: unchanged then changed.
+        let payload = [0xa5u8; 16];
+        let mut buf = WriteLogBuffer::with_capacity(4, 2);
+        unsafe { write_log_grow_push_wide(&mut buf, 0, payload.as_ptr(), 16) };
+        assert!(ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+        assert_eq!(&ff[0..16], &payload);
+        // Re-commit of the same bytes: no report.
+        assert!(!ff_commit_from_log_watched(&mut ff, &buf, &mut { watched }));
+
+        // Out-of-bounds entries are skipped like `ff_commit_from_log`.
+        let mut buf = WriteLogBuffer::with_capacity(4, 2);
+        unsafe { write_log_grow_push_narrow(&mut buf, 63, 0xff, 8) };
+        assert!(!ff_commit_from_log_watched(&mut ff, &buf, &mut {
+            |_, _| true
+        }));
     }
 
     #[test]

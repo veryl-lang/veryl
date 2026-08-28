@@ -20,8 +20,24 @@
 //! dirty.
 
 use crate::HashSet;
-use crate::ir::{Ir, Statement, VarOffset};
+use crate::ir::{Event, Ir, Statement, VarOffset};
 use crate::testbench::TestbenchStatement;
+
+/// Everything the settle filter derives from a module's storage layout and
+/// event classification.  All of it is offset-based, hence identical for
+/// every instantiation of one `ProtoModule` — built once on first use and
+/// cached through `Ir::settle_info` (an SoC-sized build costs tens of ms).
+pub(crate) struct SettleInfo {
+    /// Span table template; re-target per `Ir` with `SpanTable::rebased`.
+    pub(crate) table: SpanTable,
+    pub(crate) clock_toggle_dirties: bool,
+    pub(crate) dirty_events: HashSet<Event>,
+    pub(crate) event_comb_watch: crate::HashMap<Event, (u32, u32)>,
+    pub(crate) watch_pool: Vec<(u32, u32)>,
+    pub(crate) max_watch: usize,
+}
+
+pub(crate) type SettleInfoCache = std::sync::Arc<std::sync::OnceLock<std::sync::Arc<SettleInfo>>>;
 
 /// Half-open byte range `[start, end)` in one value buffer, plus the comb
 /// verdict shared by every variable in the range.
@@ -64,7 +80,12 @@ impl TbDirtyFilter {
         if !enabled() {
             return filter;
         }
-        let spans = SpanTable::build(ir);
+        // Reuse the settle filter's cached table when it armed (the usual
+        // case); a fresh build only on its opt-out path.
+        let spans = match ir.settle_info.get() {
+            Some(info) => info.table.rebased(ir),
+            None => SpanTable::build(ir),
+        };
         let mut clean = HashSet::default();
         collect_clean(stmts, &spans, &mut clean);
         filter.clean = clean;
@@ -93,17 +114,38 @@ impl TbDirtyFilter {
 ///
 /// The buffer bases are captured by address: both are `Box<[u8]>` owned by the
 /// `Ir`, so they stay put for its lifetime.
-struct SpanTable {
-    ff: Vec<Span>,
-    comb: Vec<Span>,
+///
+/// Besides classifying testbench statements, the table backs the simulator's
+/// settle filter, which asks the same question of committed FF writes by
+/// byte offset (`ff_change_may_reach_comb`).
+pub(crate) struct SpanTable {
+    ff: std::sync::Arc<[Span]>,
+    comb: std::sync::Arc<[Span]>,
     ff_base: usize,
     ff_len: usize,
     comb_base: usize,
     comb_len: usize,
+    /// Precomputed `ff_never_reaches_comb` verdict (span layout only).
+    ff_untouched_cover: bool,
 }
 
 impl SpanTable {
-    fn build(ir: &Ir) -> Self {
+    /// The span vectors and verdicts are offset-based, hence identical for
+    /// every instantiation of one `ProtoModule` — only the buffer bases
+    /// change.  `Ir::settle_info` caches a built table; this re-targets it.
+    pub(crate) fn rebased(&self, ir: &Ir) -> Self {
+        SpanTable {
+            ff: std::sync::Arc::clone(&self.ff),
+            comb: std::sync::Arc::clone(&self.comb),
+            ff_base: ir.ff_values.as_ptr() as usize,
+            ff_len: ir.ff_values.len(),
+            comb_base: ir.comb_values.as_ptr() as usize,
+            comb_len: ir.comb_values.len(),
+            ff_untouched_cover: self.ff_untouched_cover,
+        }
+    }
+
+    pub(crate) fn build(ir: &Ir) -> Self {
         let ff_base = ir.ff_values.as_ptr() as usize;
         let ff_end = ff_base + ir.ff_values.len();
         let comb_base = ir.comb_values.as_ptr() as usize;
@@ -200,22 +242,28 @@ impl SpanTable {
                 stack.push(child);
             }
         }
+        let ff = disjoint_cover(ff);
+        let ff_len = ir.ff_values.len();
+        let mut next = 0usize;
+        let ff_untouched_cover = ff.iter().all(|s| {
+            let contiguous = !s.touched && s.start <= next;
+            next = s.end;
+            contiguous
+        }) && next >= ff_len;
         SpanTable {
-            ff: disjoint_cover(ff),
-            comb: disjoint_cover(comb),
+            ff: ff.into(),
+            comb: disjoint_cover(comb).into(),
             ff_base,
-            ff_len: ir.ff_values.len(),
+            ff_len,
             comb_base,
             comb_len: ir.comb_values.len(),
+            ff_untouched_cover,
         }
     }
 
     /// `true` when a write of `len` bytes at `ptr` may reach a comb read.
     /// Unresolvable destinations answer `true` — the caller must stay dirty.
-    ///
-    /// Relies on `disjoint_cover`: the search below binary-searches `end`,
-    /// which only partitions the vector while the spans are disjoint.
-    fn write_may_reach_comb(&self, ptr: *mut u8, len: usize) -> bool {
+    pub(crate) fn write_may_reach_comb(&self, ptr: *mut u8, len: usize) -> bool {
         let p = ptr as usize;
         let (spans, off) = if (self.ff_base..self.ff_base + self.ff_len).contains(&p) {
             (&self.ff, p - self.ff_base)
@@ -224,22 +272,58 @@ impl SpanTable {
         } else {
             return true;
         };
-        let write_end = off.saturating_add(len.max(1));
-        let mut idx = spans.partition_point(|s| s.end <= off);
-        let mut covered = off;
-        while idx < spans.len() && spans[idx].start < write_end {
-            let s = spans[idx];
-            if s.start > covered {
-                return true; // a gap: bytes belonging to no known variable
-            }
-            if s.touched {
-                return true;
-            }
-            covered = covered.max(s.end);
-            idx += 1;
-        }
-        covered < write_end // uncovered bytes past the last known span
+        range_may_reach(spans, off, len)
     }
+
+    /// `write_may_reach_comb` for a committed FF write given by byte offset
+    /// into `ff_values`: `true` when a CHANGE of those bytes may be read by
+    /// the comb (out-of-table bytes answer `true`).
+    pub(crate) fn ff_change_may_reach_comb(&self, off: usize, len: usize) -> bool {
+        if off >= self.ff_len {
+            return true;
+        }
+        range_may_reach(&self.ff, off, len)
+    }
+
+    /// `true` when no committed FF write can ever reach a comb read —
+    /// every byte of `ff_values` lies in a known, untouched span.  The
+    /// commit then skips its per-entry compares outright (a design whose
+    /// comb reads no FF, e.g. a pure-FF benchmark harness).
+    pub(crate) fn ff_never_reaches_comb(&self) -> bool {
+        self.ff_untouched_cover
+    }
+
+    /// Same question for a write into `comb_values` (an event writing comb
+    /// storage directly): `true` when the comb can read those bytes.
+    pub(crate) fn comb_change_may_reach_comb(&self, off: usize, len: usize) -> bool {
+        if off >= self.comb_len {
+            return true;
+        }
+        range_may_reach(&self.comb, off, len)
+    }
+}
+
+/// Shared span walk: `true` unless every byte of `[off, off + len)` lies in
+/// known, untouched spans.
+///
+/// Relies on `disjoint_cover`: the search below binary-searches `end`,
+/// which only partitions the vector while the spans are disjoint.
+fn range_may_reach(spans: &[Span], off: usize, len: usize) -> bool {
+    let write_end = off.saturating_add(len.max(1));
+    let mut idx = spans.partition_point(|s| s.end <= off);
+    let mut covered = off;
+    while idx < spans.len() && spans[idx].start < write_end {
+        let s = spans[idx];
+        if s.start > covered {
+            return true; // a gap: bytes belonging to no known variable
+        }
+        if s.touched {
+            return true;
+        }
+        covered = covered.max(s.end);
+        idx += 1;
+    }
+    covered < write_end // uncovered bytes past the last known span
 }
 
 /// Sort into a disjoint cover, `touched` winning wherever spans overlap.
