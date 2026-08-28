@@ -141,6 +141,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(combinational_loop_position_overflow),
+        help("reduce the flattened width or array size used by this module"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("combinational-loop position exceeds the supported range")]
+    CombinationalLoopPositionOverflow {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(cyclic_type_dependency),
         help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2161,6 +2176,7 @@ impl AnalyzerError {
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { input, .. } => input,
             AnalyzerError::FunctionOutputInAlwaysFf { input, .. } => input,
             AnalyzerError::CombinationalLoop { input, .. } => input,
+            AnalyzerError::CombinationalLoopPositionOverflow { input, .. } => input,
             AnalyzerError::CyclicTypeDependency { input, .. } => input,
             AnalyzerError::CyclicFileDependency { input, .. } => input,
             AnalyzerError::DuplicateArgument { input, .. } => input,
@@ -2284,6 +2300,7 @@ impl AnalyzerError {
             AnalyzerError::SideEffectFunctionCallInAlwaysFf { token_source, .. } => *token_source,
             AnalyzerError::FunctionOutputInAlwaysFf { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
+            AnalyzerError::CombinationalLoopPositionOverflow { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
             AnalyzerError::CyclicFileDependency { token_source, .. } => *token_source,
             AnalyzerError::DuplicateArgument { token_source, .. } => *token_source,
@@ -2491,6 +2508,13 @@ impl AnalyzerError {
             input,
             error_location: token.into(),
             loop_participants,
+            token_source: token.source(),
+        }
+    }
+    pub fn combinational_loop_position_overflow(token: &TokenRange) -> Self {
+        AnalyzerError::CombinationalLoopPositionOverflow {
+            input: source(token),
+            error_location: token.into(),
             token_source: token.source(),
         }
     }

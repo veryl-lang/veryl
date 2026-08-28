@@ -1,0 +1,3 @@
+module combinational_loop_position_overflow {
+    var _value: logic [1048576, 1048576, 1048576, 8];
+}
