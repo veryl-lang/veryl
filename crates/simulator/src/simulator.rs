@@ -684,13 +684,19 @@ impl Simulator {
                 let name = find_var_by_ptr(&ret.ir.module_variables, ptr, "")
                     .unwrap_or_else(|| format!("{:?}@{raw}", clk.var_id));
                 eprintln!(
-                    "[derived_clock] [{i}] {name} is_ff={} has_events={}",
+                    "[derived_clock] [{i}] {name} is_ff={} master_gated={} has_events={}",
                     clk.current_offset.is_ff(),
+                    clk.master_gated,
                     ret.ir
                         .event_statements
                         .contains_key(&Event::Clock(clk.var_id)),
                 );
             }
+            eprintln!(
+                "[derived_clock] eval chunk: {} entries x {} passes",
+                ret.ir.derived_clock_eval_stmts.len(),
+                ret.ir.derived_clock_eval_passes,
+            );
         }
 
         if env::var("VERYL_STEP_WATCH_LIST").as_deref() == Ok("1") {
