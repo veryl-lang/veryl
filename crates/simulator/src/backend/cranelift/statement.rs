@@ -4,6 +4,7 @@
 use super::helpers::*;
 use super::runtime::{
     Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_wide,
+    scratch_mark, scratch_release,
 };
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain};
 use crate::ir::variable::native_bytes as calc_native_bytes;
@@ -905,6 +906,23 @@ impl ProtoStatement {
         }
     }
     pub fn build_binary(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        is_last: bool,
+    ) -> Option<()> {
+        // Wide scratch slots die with the statement that built them; retiring
+        // them here is what keeps the frame bounded by the widest statement
+        // instead of by the whole chunk (see `ScratchPool`).  Compound
+        // statements release only after their bodies, so a condition's scratch
+        // can never be recycled underneath the arms that follow it.
+        let mark = scratch_mark();
+        let result = self.build_binary_body(context, builder, is_last);
+        scratch_release(mark);
+        result
+    }
+
+    fn build_binary_body(
         &self,
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,

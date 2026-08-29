@@ -3618,7 +3618,7 @@ impl ProtoExpression {
 
 #[cfg(test)]
 mod tests {
-    use super::super::runtime::build_binary_no_cache;
+    use super::super::runtime::{LAST_FRAME_SLOTS, build_binary_no_cache};
     use crate::ir::variable::VarOffset;
     use crate::ir::{
         Config, ExpressionContext, Op, ProtoAssignStatement, ProtoExpression, ProtoStatement, Value,
@@ -3701,6 +3701,49 @@ mod tests {
         assert!(
             build_binary_no_cache(&Config::default(), vec![stmt]).is_some(),
             "the concat must compile"
+        );
+    }
+
+    /// Wide scratch must be bounded by the widest STATEMENT, not by the
+    /// chunk's statement count.  One `ExplicitSlot` per emitted temporary put
+    /// a 57k-statement settle body's prologue at ~219 MiB and ran the
+    /// simulation thread off the low end of its 64 MiB stack.
+    #[test]
+    fn wide_scratch_slots_do_not_scale_with_statement_count() {
+        fn slots_for(n: usize) -> usize {
+            let stmts: Vec<ProtoStatement> = (0..n)
+                .map(|i| {
+                    ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: VarOffset::Comb(64 + (i * 32) as isize),
+                        dst_width: 256,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr: ProtoExpression::Binary {
+                            x: Box::new(cvar(0, 256)),
+                            op: Op::BitXor,
+                            y: Box::new(cvar(32, 256)),
+                            width: 256,
+                            expr_context: ctx(256),
+                        },
+                        dst_ff_current_offset: 0,
+                        token: TokenRange::default(),
+                    })
+                })
+                .collect();
+            assert!(
+                build_binary_no_cache(&Config::default(), stmts).is_some(),
+                "the wide chunk must compile"
+            );
+            LAST_FRAME_SLOTS.with(|c| c.get().0)
+        }
+
+        let few = slots_for(4);
+        let many = slots_for(256);
+        assert!(few > 0, "a wide xor is expected to need scratch at all");
+        assert_eq!(
+            few, many,
+            "wide scratch slots must be reused across statements"
         );
     }
 }
