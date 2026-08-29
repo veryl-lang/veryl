@@ -4225,6 +4225,193 @@ fn concatenation_repeat() {
 }
 
 #[test]
+fn concat_element_widening_cast() {
+    // A widening `as` cast lowers to its operand, so in concatenation-element
+    // position the element used to contribute the OPERAND's bits: `{8'hA5, a
+    // as 24, 8'h5A}` collapsed to the 20-bit `{8'hA5, a, 8'h5A}`, shifting
+    // everything below the cast down.  `c1` (narrowing) and `c2` (the cast
+    // hoisted to a variable) were always right and must stay right.
+    let code = r#"
+    module Top (
+        a : input  logic<12>,
+        c0: output logic<40>,
+        c1: output logic<40>,
+        c2: output logic<40>,
+    ) {
+        var w: logic<24>;
+        always_comb {
+            w = a as 24;
+        }
+        assign c0 = {8'hA5, a as 24, 8'h5A};
+        assign c1 = {8'hA5, a as 4, 8'h5A};
+        assign c2 = {8'hA5, w, 8'h5A};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'h85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        for (name, exp) in [
+            ("c0", "40'ha500085b5a"),
+            ("c1", "40'h00000a5b5a"),
+            ("c2", "40'ha500085b5a"),
+        ] {
+            assert_eq!(
+                format!("{:x}", sim.get(name).unwrap()),
+                exp,
+                "{name} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn concat_element_widening_cast_signed() {
+    // SV's `N'(x)` extends by the OPERAND's signedness, so a signed operand
+    // sign-extends into the element (`24'(12'h85b)` is `24'hfff85b`).
+    let code = r#"
+    module Top (
+        a : input  signed logic<12>,
+        c0: output logic<40>       ,
+    ) {
+        assign c0 = {8'hA5, a as 24, 8'h5A};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'sh85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:x}", sim.get("c0").unwrap()),
+            "40'ha5fff85b5a",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn concat_element_widening_cast_repeat_and_wide() {
+    // The same element under a replication (the width multiplies) and at a
+    // width that leaves the u64 concat path: `c1`'s 128-bit element makes the
+    // result 144 bits, so the wide (>128-bit) lowering carries the fix too.
+    let code = r#"
+    module Top (
+        a : input  logic<12> ,
+        c0: output logic<56> ,
+        c1: output logic<144>,
+    ) {
+        assign c0 = {8'hA5, a as 24 repeat 2};
+        assign c1 = {8'hA5, a as 128, 8'h5A};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'h85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:x}", sim.get("c0").unwrap()),
+            "56'ha500085b00085b",
+            "config={config:?}"
+        );
+        assert_eq!(
+            format!("{:x}", sim.get("c1").unwrap()),
+            "144'ha50000000000000000000000000000085b5a",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn concat_element_widening_cast_nested_concat() {
+    // The cast operand is itself a concatenation, whose lowered node is as
+    // narrow as the operand: `({4'h3, a[7:0]}) as 24` is a 24-bit element.
+    let code = r#"
+    module Top (
+        a : input  logic<12>,
+        c0: output logic<40>,
+    ) {
+        assign c0 = {8'hA5, ({4'h3, a[7:0]}) as 24, 8'h5A};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'h85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:x}", sim.get("c0").unwrap()),
+            "40'ha500035b5a",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn struct_literal_field_widening_cast() {
+    // A struct-literal field is joined by the same concatenation lowering, so
+    // a widening cast in a field mis-sized it too: the interpreter joined at
+    // the operand width (the compiled backends shift by the member width and
+    // only lost the sign extension).
+    let code = r#"
+    module Top (
+        a : input  logic<12>       ,
+        b : input  signed logic<12>,
+        c0: output logic<40>       ,
+        c1: output logic<40>       ,
+    ) {
+        struct S {
+            hi : logic<8> ,
+            mid: logic<24>,
+            lo : logic<8> ,
+        }
+        var s0: S;
+        var s1: S;
+        always_comb {
+            s0 = S'{hi: 8'hA5, mid: a as 24, lo: 8'h5A};
+            s1 = S'{hi: 8'hA5, mid: b as 24, lo: 8'h5A};
+        }
+        assign c0 = s0;
+        assign c1 = s1;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'h85b").unwrap());
+        sim.set("b", Value::from_str("12'sh85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:x}", sim.get("c0").unwrap()),
+            "40'ha500085b5a",
+            "config={config:?}"
+        );
+        assert_eq!(
+            format!("{:x}", sim.get("c1").unwrap()),
+            "40'ha5fff85b5a",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn concatenation_4state() {
     // 4-state concatenation with X/Z values
     let code = r#"
