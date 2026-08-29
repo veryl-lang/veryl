@@ -1829,7 +1829,9 @@ pub(crate) fn analyze_dependency(
     let mut block_of: Vec<usize> = Vec::new();
     let mut new_id = 0usize;
     for key in sorted_keys {
-        let stmt = table.remove(&key).unwrap();
+        // The per-branch phase below re-splits from the unsplit blocks, so
+        // copy rather than take; only this already-failing path pays for it.
+        let stmt = table[&key].clone();
         let mut flat = Vec::new();
         flatten(stmt, &mut flat);
         for sub in flat {
@@ -1838,7 +1840,7 @@ pub(crate) fn analyze_dependency(
             new_id += 1;
         }
     }
-    table = new_table;
+    let unsplit = std::mem::replace(&mut table, new_table);
 
     // Sort the flattened (program-order) statements with the block-aware
     // `stable_topo_sort`, NOT the bipartite `try_topo_sort`: the bipartite
@@ -1906,12 +1908,64 @@ pub(crate) fn analyze_dependency(
         pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
         return Ok((sorted, passes_hint));
     }
-    // Neither granularity linearized it, so no order here honours every edge.
+
+    // Phase 2-branch: the splits above keep every branch in every group, so a
+    // group's reads stay the UNION over the branches.  That pairs a read only
+    // one arm makes with a write only another arm makes, and no order over
+    // such nodes exists: one arm reading back a signal another arm drives is
+    // the usual shape.  Giving each branch its own node leaves each read next
+    // to the write that can actually produce it.
+    //
+    // From the UNSPLIT blocks, so one branch's pieces stay together: the sort
+    // binds a read to its textually last prior writer, and a group-major split
+    // puts another arm's write of the same variable between them.
+    {
+        let mut keys: Vec<usize> = unsplit.keys().cloned().collect();
+        keys.sort();
+        let mut branch_stmts: Vec<ProtoStatement> = Vec::new();
+        let mut branch_block_of: Vec<usize> = Vec::new();
+        let mut split_any = false;
+        // A dynamic write reports its first and last element only, so nothing
+        // orders an access to an element between them against it, and this
+        // phase is free to reorder.  Emitting the block that makes the write
+        // whole keeps that order, and an access from elsewhere binds to that
+        // block as a whole; only where neither holds is the scope left alone.
+        // The hazard is one array's, and answering it for the scope turned
+        // this phase off for every block sharing the scope with it.
+        if let Some(whole) = blocks_to_keep_in_source_order(&unsplit, &keys) {
+            for key in keys {
+                if whole.contains(&key) {
+                    branch_stmts.push(unsplit[&key].clone());
+                } else {
+                    let mut flat = Vec::new();
+                    flatten_blocks(unsplit[&key].clone(), &mut flat);
+                    for stmt in flat {
+                        split_any |= split_by_branch(stmt, &mut branch_stmts);
+                    }
+                }
+                branch_block_of.resize(branch_stmts.len(), key);
+            }
+        }
+        if split_any {
+            split_copies_by_source_writes(&mut branch_stmts, &mut branch_block_of);
+            let renamed = rename_versions(&mut branch_stmts, &mut branch_block_of, alloc);
+            let (sorted, passes_hint, fell_back) =
+                stable_topo_sort_with_blocks(branch_stmts, &branch_block_of);
+            if !fell_back {
+                pass_diag_phase(&format!(
+                    "phase2-branch: per-branch split ({renamed} version(s) renamed)"
+                ));
+                return Ok((sorted, passes_hint));
+            }
+        }
+    }
+
+    // No granularity linearized it, so no order here honours every edge.
     // Phase 3 below still produces one, but it is not the one-pass order a
     // synthesisable design has: say so rather than let the extra settle
     // passes pass for normal.
     log::warn!(
-        "the statement order for this scope could not be linearized at either granularity; \
+        "the statement order for this scope could not be linearized at any granularity; \
          simulation stays correct but settles in more than one pass. \
          Re-run with VERYL_PASS_DIAG=1 to see the cycle."
     );
@@ -2619,6 +2673,371 @@ fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>,
                 default: Vec::new(),
             },
         )));
+    }
+}
+
+/// The elements a dynamic write covers but does not name: the dependency
+/// model reports the first and last only, so an access to anything else in
+/// `(lo, hi)` is invisible to every edge rule.
+struct UnmodelledSpan {
+    ff: bool,
+    lo: isize,
+    hi: isize,
+    first: isize,
+    last: isize,
+}
+
+impl UnmodelledSpan {
+    fn covers(&self, key: &VarOffset) -> bool {
+        let raw = key.raw();
+        key.is_ff() == self.ff
+            && self.lo < raw
+            && raw < self.hi
+            && raw != self.first
+            && raw != self.last
+    }
+}
+
+/// Every span in `stmt` a dynamic write covers over more elements than the two
+/// the dependency model names.
+fn unmodelled_spans(stmt: &ProtoStatement, out: &mut Vec<UnmodelledSpan>) {
+    match stmt {
+        ProtoStatement::AssignDynamic(x) if x.dst_num_elements > 2 => {
+            let first = x.dst_base.raw();
+            let last = first + x.dst_stride * (x.dst_num_elements as isize - 1);
+            // The last element reaches past the offset that names it, and a
+            // field inside it is an offset of its own; cover all of it.
+            let width = x.dst_stride.unsigned_abs().max(x.dst_width.div_ceil(8)) as isize;
+            out.push(UnmodelledSpan {
+                ff: x.dst_base.is_ff(),
+                lo: first.min(last),
+                hi: first.max(last) + width,
+                first,
+                last,
+            });
+        }
+        ProtoStatement::If(x) => {
+            for s in x.true_side.iter().chain(&x.false_side) {
+                unmodelled_spans(s, out);
+            }
+        }
+        ProtoStatement::Case(x) => {
+            for s in x
+                .arms
+                .iter()
+                .flat_map(|arm| arm.body.iter())
+                .chain(&x.default)
+            {
+                unmodelled_spans(s, out);
+            }
+        }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                unmodelled_spans(s, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                unmodelled_spans(s, out);
+            }
+        }
+        ProtoStatement::CompiledBlock(cb) => {
+            for s in &cb.original_stmts {
+                unmodelled_spans(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The blocks the per-branch phase must emit whole, or `None` when no set of
+/// blocks covers the hazard and the phase has to decline for the scope.
+///
+/// Keeping the block that makes a dynamic write whole restores the source
+/// order between the write and every access to a covered element inside it,
+/// and an access from ANOTHER block is answered by the edge it already has:
+/// a read binds to the block that writes the element.  A write from another
+/// block has nothing to bind to, and neither has a read of an element the
+/// covering block never writes -- both are `None`.
+fn blocks_to_keep_in_source_order(
+    unsplit: &HashMap<usize, ProtoStatement>,
+    keys: &[usize],
+) -> Option<HashSet<usize>> {
+    // Sorted by `lo` with the running maximum of `hi`, so an offset visits
+    // only the spans that can still reach it: one array with a dynamic write
+    // must not make every offset in the scope walk the whole list.
+    let mut spans: Vec<(usize, UnmodelledSpan)> = Vec::new();
+    for key in keys {
+        let mut found = Vec::new();
+        unmodelled_spans(&unsplit[key], &mut found);
+        spans.extend(found.into_iter().map(|span| (*key, span)));
+    }
+    if spans.is_empty() {
+        return Some(HashSet::default());
+    }
+    spans.sort_unstable_by_key(|(_, span)| span.lo);
+    let mut max_hi: Vec<isize> = Vec::with_capacity(spans.len());
+    let mut running = isize::MIN;
+    for (_, span) in &spans {
+        running = running.max(span.hi);
+        max_hi.push(running);
+    }
+    let covering = |key: &VarOffset, out: &mut Vec<usize>| {
+        out.clear();
+        let raw = key.raw();
+        let mut i = spans.partition_point(|(_, span)| span.lo < raw);
+        while i > 0 && max_hi[i - 1] > raw {
+            i -= 1;
+            if spans[i].1.covers(key) {
+                out.push(i);
+            }
+        }
+    };
+
+    let mut whole: HashSet<usize> = HashSet::default();
+    let mut covered_writes: HashSet<VarOffset> = HashSet::default();
+    let mut inputs = vec![];
+    let mut outputs = vec![];
+    let mut hits = vec![];
+    for key in keys {
+        inputs.clear();
+        outputs.clear();
+        unsplit[key].gather_variable_offsets(&mut inputs, &mut outputs);
+        for off in &outputs {
+            covering(off, &mut hits);
+            for &i in &hits {
+                if spans[i].0 != *key {
+                    pass_diag_unmodelled_decline(off, "written outside the covering block");
+                    return None;
+                }
+                whole.insert(spans[i].0);
+                covered_writes.insert(*off);
+            }
+        }
+    }
+    for key in keys {
+        inputs.clear();
+        outputs.clear();
+        unsplit[key].gather_variable_offsets(&mut inputs, &mut outputs);
+        for off in &inputs {
+            covering(off, &mut hits);
+            for &i in &hits {
+                if spans[i].0 != *key && !covered_writes.contains(off) {
+                    pass_diag_unmodelled_decline(off, "read with no writer to bind to");
+                    return None;
+                }
+                whole.insert(spans[i].0);
+            }
+        }
+    }
+    Some(whole)
+}
+
+fn pass_diag_unmodelled_decline(key: &VarOffset, why: &str) {
+    if std::env::var("VERYL_PASS_DIAG").is_ok() {
+        log::info!(
+            "pass_diag: per-branch split declined: {key:?} sits between the elements a dynamic write names, {why}"
+        );
+    }
+}
+
+/// Unwrap compiled and sequential blocks into their own statements, leaving
+/// the conditionals whole for [`split_by_branch`] to take apart per branch.
+fn flatten_blocks(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+    match stmt {
+        ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+            for sub in cb.original_stmts {
+                flatten_blocks(sub, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for sub in body {
+                flatten_blocks(sub, out);
+            }
+        }
+        other => out.push(other),
+    }
+}
+
+/// One node per BRANCH (and per write set inside it), because the splits above
+/// give every group every branch.
+///
+/// Bodies are all that move: a piece for arm `b` keeps arms `0..=b` with the
+/// earlier ones empty, and an `if` piece keeps its condition and empties the
+/// other side, so which branch fires and what an unwritten variable holds are
+/// unchanged.  Ordering within a branch is the branch's own, from
+/// `group_emission_order`; nothing has to cross branches.
+///
+/// Returns whether anything was split.  Reached only after every earlier split
+/// has failed to schedule: each piece re-evaluates the guards it sits under.
+fn split_by_branch(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) -> bool {
+    /// A piece keeps one guard per arm it sits behind, so the guards copied
+    /// grow with the arm count times the statement count.  Bounded for the
+    /// wide decoders where that product runs away; they schedule without this
+    /// split anyway.
+    const MAX_GUARD_COPIES: usize = 16384;
+
+    // Whether the guards read the same values at every piece.  Unlike
+    // `group_emission_order`'s per-group check this spans every branch at
+    // once: `case s { A: {s = B;} B: {y = 1;} }` runs one branch whole but
+    // both pieces, so it cannot be split at all.
+    fn guards_are_stable(guards: &[&ProtoExpression], bodies: &[&[ProtoStatement]]) -> bool {
+        let mut guard_reads: HashSet<VarOffset> = HashSet::default();
+        let mut ins = vec![];
+        for guard in guards {
+            ins.clear();
+            guard.gather_variable_offsets(&mut ins);
+            guard_reads.extend(ins.iter().copied().filter(|o| !o.is_ff()));
+        }
+        if guard_reads.is_empty() {
+            return true;
+        }
+        let mut outs = vec![];
+        for body in bodies {
+            for stmt in *body {
+                ins.clear();
+                outs.clear();
+                stmt.gather_variable_offsets(&mut ins, &mut outs);
+                if outs.iter().any(|o| !o.is_ff() && guard_reads.contains(o)) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    // `stmts` grouped by write set and ordered by `group_emission_order`, or
+    // `None` when no order over the groups honours the branch's own reads and
+    // writes.
+    fn grouped(
+        guards: &[&ProtoExpression],
+        stmts: &[ProtoStatement],
+    ) -> Option<Vec<Vec<ProtoStatement>>> {
+        let (ids, count) = group_by_write_set(stmts.iter(), true);
+        let order = (count > 1).then(|| group_emission_order(guards, &[stmts], &ids, count))??;
+        let mut groups: Vec<Vec<ProtoStatement>> = vec![Vec::new(); count];
+        for (i, stmt) in stmts.iter().enumerate() {
+            groups[ids[i]].push(stmt.clone());
+        }
+        Some(
+            order
+                .into_iter()
+                .map(|g| std::mem::take(&mut groups[g]))
+                .collect(),
+        )
+    }
+
+    // One branch's statements as the pieces to emit for it: split further
+    // where that is sound, otherwise the branch whole.
+    fn branch_pieces(
+        guards: &[&ProtoExpression],
+        body: &[ProtoStatement],
+    ) -> Vec<Vec<ProtoStatement>> {
+        if body.is_empty() {
+            return Vec::new();
+        }
+        // Nested conditionals are pieces of their own before grouping, so a
+        // loop running through one is reached too.
+        let mut expanded: Vec<ProtoStatement> = Vec::new();
+        for stmt in body {
+            split_by_branch(stmt.clone(), &mut expanded);
+        }
+        grouped(guards, &expanded).unwrap_or_else(|| vec![expanded])
+    }
+
+    match stmt {
+        ProtoStatement::Case(x) => {
+            let guards: Vec<&ProtoExpression> = x.arms.iter().map(|a| &a.cond).collect();
+            let bodies: Vec<&[ProtoStatement]> = x
+                .arms
+                .iter()
+                .map(|a| a.body.as_slice())
+                .chain(std::iter::once(x.default.as_slice()))
+                .collect();
+            if !guards_are_stable(&guards, &bodies) {
+                drop((guards, bodies));
+                out.push(ProtoStatement::Case(x));
+                return false;
+            }
+            drop(bodies);
+            // Branch index `arms.len()` is the default.
+            let pieces: Vec<(usize, Vec<ProtoStatement>)> = x
+                .arms
+                .iter()
+                .map(|a| a.body.as_slice())
+                .chain(std::iter::once(x.default.as_slice()))
+                .enumerate()
+                .flat_map(|(b, body)| {
+                    branch_pieces(&guards, body)
+                        .into_iter()
+                        .map(move |piece| (b, piece))
+                })
+                .collect();
+            drop(guards);
+            let guard_copies: usize = pieces.iter().map(|(b, _)| (*b + 1).min(x.arms.len())).sum();
+            if pieces.len() < 2 || guard_copies > MAX_GUARD_COPIES {
+                if guard_copies > MAX_GUARD_COPIES && std::env::var("VERYL_PASS_DIAG").is_ok() {
+                    log::info!(
+                        "pass_diag: case of {} arms left unsplit ({guard_copies} guard copies, bound {MAX_GUARD_COPIES})",
+                        x.arms.len()
+                    );
+                }
+                out.push(ProtoStatement::Case(x));
+                return false;
+            }
+            for (b, body) in pieces {
+                let is_default = b == x.arms.len();
+                let kept = if is_default { x.arms.len() } else { b + 1 };
+                let mut arms: Vec<ProtoCaseArm> = x.arms[..kept]
+                    .iter()
+                    .map(|a| ProtoCaseArm {
+                        cond: a.cond.clone(),
+                        body: Vec::new(),
+                    })
+                    .collect();
+                let default = if is_default {
+                    body
+                } else {
+                    arms[b].body = body;
+                    Vec::new()
+                };
+                out.push(ProtoStatement::Case(ProtoCaseStatement { arms, default }));
+            }
+            true
+        }
+        ProtoStatement::If(x) if x.cond.is_some() => {
+            let guards: Vec<&ProtoExpression> = x.cond.iter().collect();
+            if !guards_are_stable(&guards, &[&x.true_side, &x.false_side]) {
+                drop(guards);
+                out.push(ProtoStatement::If(x));
+                return false;
+            }
+            let true_pieces = branch_pieces(&guards, &x.true_side);
+            let false_pieces = branch_pieces(&guards, &x.false_side);
+            drop(guards);
+            if true_pieces.len() + false_pieces.len() < 2 {
+                out.push(ProtoStatement::If(x));
+                return false;
+            }
+            for (true_side, false_side) in true_pieces
+                .into_iter()
+                .map(|piece| (piece, Vec::new()))
+                .chain(false_pieces.into_iter().map(|piece| (Vec::new(), piece)))
+            {
+                out.push(ProtoStatement::If(ProtoIfStatement {
+                    cond: x.cond.clone(),
+                    true_side,
+                    false_side,
+                }));
+            }
+            true
+        }
+        // Not a conditional: apply the deep split anyway, since this phase
+        // starts from the unsplit blocks.
+        other => {
+            split_nested(other, out, true);
+            false
+        }
     }
 }
 
