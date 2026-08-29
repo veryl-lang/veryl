@@ -5328,6 +5328,45 @@ const ENTRY_PART_BYTES: usize = 192 * 1024;
 /// calls are free, but the emitted source and the .so both grow a little.
 const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
 
+/// Bytes of bookkeeping a cone-gate guard keeps at `Segment::state_off`,
+/// ahead of its prerun / pre-shadow / shadow / replay storage: `[0]` primed,
+/// `[1]` converged, `[2]` auto-off, `[3]` diagnostic reason, `[4..8)` the
+/// dirty streak as a `u32`.
+const GUARD_STATE_HEADER_BYTES: usize = 8;
+
+/// The dispatcher's epoch re-arm: every `rearm_mask + 1` evals, give
+/// auto-offed segments one more try (mirrors `ConeGateState::tick_rearm`).
+///
+/// An off segment skips the whole maintenance path, so its shadow and replay
+/// bytes are frozen at the eval it expired on and say nothing about the state
+/// an epoch later.  The primed and converged flags must therefore be cleared
+/// with the off flag: left standing, the first check after the re-arm can
+/// match that stale shadow and skip the segment, writing its equally stale
+/// replay bytes over live storage.  Zeroing the whole header forces the
+/// priming run that refreshes them.
+fn cone_gate_rearm_preamble(state_offs: &[u32], rearm_mask: u64) -> String {
+    if state_offs.is_empty() || rearm_mask == u64::MAX {
+        return String::new();
+    }
+    format!(
+        "    {{ static unsigned long long cg_ep;\n\
+         \x20     if (((++cg_ep) & {rearm_mask:#x}ULL) == 0) {{\n\
+         \x20       static const unsigned cg_ro[{n}] = {{{offs}}};\n\
+         \x20       for (unsigned _z = 0; _z < {n}; _z++) {{\n\
+         \x20         uint8_t *st = comb_values + cg_ro[_z];\n\
+         \x20         if (st[2]) {{ __builtin_memset(st, 0, {hdr}); }}\n\
+         \x20       }}\n\
+         \x20     }} }}\n",
+        n = state_offs.len(),
+        hdr = GUARD_STATE_HEADER_BYTES,
+        offs = state_offs
+            .iter()
+            .map(|off| format!("{off:#x}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
 /// Lay the dispatcher's top-level units out over one or more functions and
 /// return the C for all of them.
 fn split_entry_function(
@@ -5866,8 +5905,9 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             );
             let be: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
             let pb: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
-            let pre_shadow_abs = s.state_off as usize + 8 + be;
-            let shadow_abs = s.state_off as usize + 8 + be + pb;
+            let head = s.state_off as usize + GUARD_STATE_HEADER_BYTES;
+            let pre_shadow_abs = head + be;
+            let shadow_abs = head + be + pb;
             let mut acc = 0usize;
             for &(a, b) in &s.compare_pre {
                 let l = (b - a) as usize;
@@ -5941,15 +5981,18 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let be: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
                 let pb: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
                 let cb: usize = s.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
-                let prerun_abs = st + 8;
-                let pre_shadow_abs = st + 8 + be;
-                let shadow_abs = st + 8 + be + pb;
-                let replay_abs = st + 8 + be + pb + cb;
-                // After auto-off the shadows are never consulted again, so
-                // the whole maintenance path (pre-run snapshots, convergence
-                // check, shadow/replay refresh) is skipped too — an off
-                // segment costs exactly the plain chunk calls, mirroring the
-                // Rust-side `before_run`/`refresh` early returns.
+                let prerun_abs = st + GUARD_STATE_HEADER_BYTES;
+                let pre_shadow_abs = prerun_abs + be;
+                let shadow_abs = prerun_abs + be + pb;
+                let replay_abs = prerun_abs + be + pb + cb;
+                // An off segment never consults its shadows, so the whole
+                // maintenance path (pre-run snapshots, convergence check,
+                // shadow/replay refresh) is skipped too — it costs exactly
+                // the plain chunk calls, mirroring the Rust-side
+                // `before_run`/`refresh` early returns.  That leaves the
+                // stored bytes stale, which is why the epoch re-arm clears
+                // the primed flag with the off one (see
+                // `cone_gate_rearm_preamble`).
                 unit.push_str(&format!(
                     "    {{ uint8_t *cgst = comb_values + {st:#x};\n\
                      \x20     int cg_run = 1;\n\
@@ -6063,12 +6106,8 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             }
             entry_units.push(unit);
         }
-        // Epoch re-arm: every 2^20 evals give auto-offed segments one more
-        // try (mirrors ConeGateState::tick_rearm and its rationale).  The
-        // preserved snapshot/replay pair stays coherent across the off
-        // period — off segments never touch their shadows — so clearing the
-        // off flag and streak is sufficient.  VERYL_CONE_GATE_REARM
-        // overrides the interval for calibration; 0 disables.
+        // VERYL_CONE_GATE_REARM overrides the epoch for calibration; 0
+        // disables it.
         let rearm_mask: u64 = std::env::var("VERYL_CONE_GATE_REARM")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -6079,26 +6118,8 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                     v.next_power_of_two() - 1
                 }
             });
-        let entry_preamble = if guards.is_empty() || rearm_mask == u64::MAX {
-            String::new()
-        } else {
-            format!(
-                "    {{ static unsigned long long cg_ep;\n\
-                 \x20     if (((++cg_ep) & {rearm_mask:#x}ULL) == 0) {{\n\
-                 \x20       static const unsigned cg_ro[{n}] = {{{offs}}};\n\
-                 \x20       for (unsigned _z = 0; _z < {n}; _z++) {{\n\
-                 \x20         uint8_t *st = comb_values + cg_ro[_z];\n\
-                 \x20         if (st[2]) {{ st[2] = 0; __builtin_memset(st + 4, 0, 4); }}\n\
-                 \x20       }}\n\
-                 \x20     }} }}\n",
-                n = guards.len(),
-                offs = guards
-                    .iter()
-                    .map(|&(_, _, s)| format!("{:#x}", s.state_off))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            )
-        };
+        let state_offs: Vec<u32> = guards.iter().map(|&(_, _, s)| s.state_off).collect();
+        let entry_preamble = cone_gate_rearm_preamble(&state_offs, rearm_mask);
         body.push_str(&split_entry_function(
             &entry_prologue,
             &entry_preamble,
@@ -9593,6 +9614,32 @@ mod tests {
 
     fn dummy_token() -> TokenRange {
         TokenRange::default()
+    }
+
+    #[test]
+    fn cone_gate_rearm_clears_the_whole_guard_header() {
+        // A re-armed guard must run once before it may skip again: an
+        // auto-offed segment stops maintaining its shadow and replay bytes, so
+        // they are an epoch stale by the time the retry arrives.  Clearing
+        // only the off flag lets the first check match that stale shadow and
+        // skip, replaying dead bytes over live storage.
+        let c =
+            cone_gate_rearm_preamble(&[0x40, 0x1c0], crate::ir::opt::cone_gate::REARM_EVALS - 1);
+        assert!(
+            c.contains(&format!(
+                "__builtin_memset(st, 0, {GUARD_STATE_HEADER_BYTES})"
+            )),
+            "re-arm must zero primed/converged/off/streak, not just off: {c}"
+        );
+        assert!(
+            c.contains("0x40, 0x1c0"),
+            "every guard's state offset is retried: {c}"
+        );
+        // Nothing to retry, or the epoch disabled, emits no preamble.
+        assert!(
+            cone_gate_rearm_preamble(&[], crate::ir::opt::cone_gate::REARM_EVALS - 1).is_empty()
+        );
+        assert!(cone_gate_rearm_preamble(&[0x40], u64::MAX).is_empty());
     }
 
     #[test]
