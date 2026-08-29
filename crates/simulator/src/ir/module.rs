@@ -1989,10 +1989,37 @@ pub(crate) fn analyze_dependency(
         let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
         let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, &blocks);
         // Verify no genuine combinational loop remains.
-        let n = sorted.len();
+        //
+        // One `VarOffset` is a whole struct, so a module driving one member and
+        // reading another back reaches itself at variable granularity though no
+        // bit does.  Key by the bits each side names, and take the offset lists
+        // as the coverage authority: the two range walkers mirror them
+        // statement for statement, and where a form has no range it reports
+        // full width, so no real edge is lost.
+        //
+        // A conditional conflates the same way along a second axis: its reads
+        // and writes are the union over its branches, so a read one branch
+        // makes reaches a write another makes through a node no evaluation
+        // ever walks.  Key by the per-branch pieces the phase above schedules
+        // by -- inside one branch they are what a statement really is, and
+        // across branches nothing flows.  The pieces are the check's own view;
+        // `sorted` is still what runs.
+        let mut pieces: Vec<ProtoStatement> = Vec::new();
+        let mut piece_stmt: Vec<usize> = Vec::new();
+        let mut piece_branch: Vec<usize> = Vec::new();
+        for (si, s) in sorted.iter().enumerate() {
+            let first = pieces.len();
+            split_tagged_by_branch(s, &mut pieces, &mut piece_branch);
+            piece_stmt.resize(pieces.len(), si);
+            debug_assert!(pieces.len() > first);
+        }
+        let n = pieces.len();
         let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
         let mut s_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-        for s in &sorted {
+        let mut read_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
+        let mut write_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
+        let mut bit_ranges = vec![];
+        for s in &pieces {
             let mut ins = vec![];
             let mut outs = vec![];
             s.gather_variable_offsets(&mut ins, &mut outs);
@@ -2003,26 +2030,70 @@ pub(crate) fn analyze_dependency(
             outs.retain(|o| !o.is_ff());
             s_inputs.push(ins);
             s_outputs.push(outs);
+            bit_ranges.clear();
+            s.gather_reads_with_ranges(&mut bit_ranges);
+            read_bits.push(union_bit_ranges(std::mem::take(&mut bit_ranges)));
+            gather_bit_aware_outputs(s, &mut bit_ranges);
+            write_bits.push(union_bit_ranges(std::mem::take(&mut bit_ranges)));
         }
-        let mut w: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+        // Ascending piece order, and pieces of one statement are contiguous:
+        // the rules below read both off the list.
+        let mut w: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
         for (i, outs) in s_outputs.iter().enumerate() {
             for &key in outs {
-                w.entry(key).or_default().push(i);
+                let wbr = write_bits[i].get(&key).copied().flatten();
+                w.entry(key).or_default().push((i, wbr));
             }
         }
         let mut a: Vec<HashSet<usize>> = vec![HashSet::default(); n];
         let mut deg: Vec<usize> = vec![0; n];
+        let mut bound: Vec<usize> = vec![];
         for (ri, ins) in s_inputs.iter().enumerate() {
+            let rs = piece_stmt[ri];
             for key in ins {
-                if let Some(wis) = w.get(key) {
-                    if wis.len() == 1 {
-                        let wi = wis[0];
-                        if wi != ri && a[wi].insert(ri) {
-                            deg[ri] += 1;
-                        }
-                    } else if let Some(&wi) = wis.iter().rev().find(|&&w| w < ri)
-                        && a[wi].insert(ri)
-                    {
+                let Some(wis) = w.get(key) else { continue };
+                let rbr = read_bits[ri].get(key).copied().flatten();
+                bound.clear();
+                // WHICH writer binds stays a statement's decision, as it was
+                // when a statement was one node: pieces of one statement are
+                // alternatives or run together, never overwrites of each
+                // other, so none of them shadows another and the statement
+                // they belong to binds through every piece that overlaps.
+                let sole = piece_stmt[wis[0].0] == piece_stmt[wis[wis.len() - 1].0];
+                let overlapping = |from: Option<usize>, bound: &mut Vec<usize>| {
+                    bound.extend(
+                        wis.iter()
+                            .filter(|&&(p, wbr)| {
+                                from.is_none_or(|s| piece_stmt[p] == s) && ranges_overlap(wbr, rbr)
+                            })
+                            .map(|&(p, _)| p),
+                    )
+                };
+                if sole {
+                    // A sole writer binds the read even when it sits later:
+                    // that backward edge is what a loop looks like here.
+                    overlapping(None, &mut bound);
+                } else if let Some(ws) = wis
+                    .iter()
+                    .rev()
+                    .find(|&&(p, wbr)| piece_stmt[p] < rs && ranges_overlap(wbr, rbr))
+                    .map(|&(p, _)| piece_stmt[p])
+                {
+                    overlapping(Some(ws), &mut bound);
+                } else if wis.iter().any(|&(p, _)| piece_stmt[p] < rs) {
+                    // Something ran before the read but wrote other bits, so
+                    // the value comes from a LATER writer of the bits read.
+                    // Without binding those, a ring closed this way is missed.
+                    overlapping(None, &mut bound);
+                }
+                for &wi in &bound {
+                    // Two pieces of one statement that keep different branches
+                    // never both run, so no value passes from one to the other.
+                    let exclusive = piece_stmt[wi] == rs
+                        && piece_branch[wi] != piece_branch[ri]
+                        && piece_branch[wi] != 0
+                        && piece_branch[ri] != 0;
+                    if wi != ri && !exclusive && a[wi].insert(ri) {
                         deg[ri] += 1;
                     }
                 }
@@ -2063,9 +2134,12 @@ pub(crate) fn analyze_dependency(
             let mut cycle: Vec<usize> = tarjan_scc(&g)
                 .into_iter()
                 .filter(|c| c.len() >= 2)
-                .flat_map(|c| c.into_iter().map(|ni| g[ni]))
+                .flat_map(|c| c.into_iter().map(|ni| piece_stmt[g[ni]]))
                 .collect();
             cycle.sort();
+            // Several pieces of one statement can sit on the cycle; the
+            // diagnostic names source lines, so report each line once.
+            cycle.dedup();
             cycle
         };
         let mut tokens: Vec<_> = cycle_indices
@@ -3038,6 +3112,43 @@ fn split_by_branch(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) -> bool 
             split_nested(other, out, true);
             false
         }
+    }
+}
+
+/// [`split_by_branch`] pieces of `stmt`, each tagged with the branch it keeps.
+/// Two pieces tagged differently can never both run; `0` tags a piece that is
+/// not one branch of a conditional and runs whenever the statement does.
+///
+/// The tag is read back off the piece -- a split conditional keeps exactly the
+/// one branch it was made for -- and only where the split actually took the
+/// statement apart per branch, so pieces the deep split happens to leave
+/// looking like a conditional are not mistaken for alternatives.
+fn split_tagged_by_branch(
+    stmt: &ProtoStatement,
+    out: &mut Vec<ProtoStatement>,
+    tags: &mut Vec<usize>,
+) {
+    let first = out.len();
+    let conditional = match stmt {
+        ProtoStatement::Case(_) => true,
+        ProtoStatement::If(x) => x.cond.is_some(),
+        _ => false,
+    };
+    let split = split_by_branch(stmt.clone(), out);
+    for piece in &out[first..] {
+        tags.push(match piece {
+            _ if !split || !conditional => 0,
+            // Branch `arms.len()` is the default, as in `split_by_branch`.
+            ProtoStatement::Case(x) if !x.default.is_empty() => x.arms.len() + 1,
+            ProtoStatement::Case(x) => x
+                .arms
+                .iter()
+                .position(|arm| !arm.body.is_empty())
+                .map_or(0, |b| b + 1),
+            ProtoStatement::If(x) if !x.true_side.is_empty() => 1,
+            ProtoStatement::If(x) if !x.false_side.is_empty() => 2,
+            _ => 0,
+        });
     }
 }
 
