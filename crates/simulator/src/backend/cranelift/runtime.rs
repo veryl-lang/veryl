@@ -357,18 +357,9 @@ pub fn emit_inline_write_log_push_wide(
 }
 
 /// Pool of wide-value scratch slots for the function under construction.
-///
-/// A wide (>128-bit) temporary lives in a Cranelift `ExplicitSlot`, and
-/// Cranelift never merges slots, so one slot per emitted temporary makes the
-/// frame grow with the chunk's STATEMENT COUNT rather than with any single
-/// statement.  A 57k-statement settle body reached a ~219 MiB prologue, which
-/// walks the simulation thread's stack straight off its guard page.
-///
-/// The lifetime of a wide temporary ends with the statement that built it:
-/// nothing carried across statements holds a slot address (`load_cache` only
-/// ever caches ≤128-bit register values — every wide-pointer path bails out of
-/// it), so a finished statement's slots can be handed out again.  The frame is
-/// then bounded by the widest single statement instead of by the whole chunk.
+/// Cranelift never merges `ExplicitSlot`s, so without reuse the frame grows
+/// with the chunk's statement count.  Safe because no slot address outlives
+/// its statement: `load_cache` never caches a wide pointer.
 #[derive(Default)]
 struct ScratchPool {
     /// Retired slots, keyed by byte size.
@@ -399,10 +390,7 @@ fn scratch_reuse_enabled() -> bool {
 }
 
 /// Refusal point for a chunk's explicit stack slots — an eighth of the
-/// simulation thread's stack, leaving room for the frame's other contents and
-/// for the helpers it calls.  The pool keeps real designs three orders of
-/// magnitude below this; a chunk that still reaches it runs on the interpreter
-/// instead of overrunning the guard page.
+/// simulation thread's stack, leaving room for the frame and its callees.
 const MAX_CHUNK_FRAME_BYTES: u64 = (crate::IR_WALK_STACK_BYTES / 8) as u64;
 
 /// `VERYL_JIT_FRAME_DIAG=1` reports chunks whose stack slots alone exceed a
@@ -413,6 +401,23 @@ fn frame_diag_enabled() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_JIT_FRAME_DIAG").as_deref() == Ok("1"))
 }
 
+thread_local! {
+    /// (sites, scratch bytes not allocated) of static-window wide RMWs merged
+    /// straight into their destination in the function under construction.
+    static WIDE_RMW_INPLACE: std::cell::Cell<(usize, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// One static-window wide RMW landed in place instead of allocating `slots`
+/// `nb`-byte scratch buffers.
+pub(crate) fn note_wide_rmw_inplace(slots: usize, nb: usize) {
+    if frame_diag_enabled() {
+        WIDE_RMW_INPLACE.with(|c| {
+            let (n, b) = c.get();
+            c.set((n + 1, b + (slots * nb) as u64));
+        });
+    }
+}
+
 /// Drop every pooled slot.  MUST run before a new function is built: the
 /// handles index the function they were created in and mean nothing in the
 /// next one, and a chunk that bailed out mid-emit leaves live entries behind.
@@ -421,6 +426,7 @@ fn scratch_reset() {
         p.free.clear();
         p.live.clear();
     });
+    WIDE_RMW_INPLACE.with(|c| c.set((0, 0)));
 }
 
 /// Watermark of the live set, to be handed back to [`scratch_release`].
@@ -720,15 +726,14 @@ fn build_binary_inner(
     builder.seal_all_blocks();
     builder.finalize(isa.frontend_config());
 
-    // Frame budget.  The pool bounds the frame by the widest statement, but a
-    // single statement is still user-authored: rather than let a prologue walk
-    // off the simulation thread's stack (`IR_WALK_STACK_BYTES`), hand such a
-    // chunk to the interpreter, which cannot overflow.  `VERYL_JIT_FRAME_DIAG=1`
-    // reports every chunk over a megabyte, well below the refusal point.
+    // A single statement is still user-authored: over budget, hand the
+    // chunk back rather than let the prologue walk off the stack.
     let slot_bytes: u64 = func.sized_stack_slots.values().map(|d| d.size as u64).sum();
-    if frame_diag_enabled() && slot_bytes > (1 << 20) {
+    let (rmw_sites, rmw_saved) = WIDE_RMW_INPLACE.with(|c| c.get());
+    if frame_diag_enabled() && (slot_bytes > (1 << 20) || rmw_saved > (1 << 20)) {
         eprintln!(
-            "[frame-diag] stmts={} slots={} slot_bytes={slot_bytes}",
+            "[frame-diag] stmts={} slots={} slot_bytes={slot_bytes} \
+             wide_rmw_inplace={rmw_sites} wide_rmw_scratch_avoided={rmw_saved}",
             proto.len(),
             func.sized_stack_slots.len(),
         );

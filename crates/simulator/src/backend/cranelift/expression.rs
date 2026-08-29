@@ -3704,10 +3704,8 @@ mod tests {
         );
     }
 
-    /// Wide scratch must be bounded by the widest STATEMENT, not by the
-    /// chunk's statement count.  One `ExplicitSlot` per emitted temporary put
-    /// a 57k-statement settle body's prologue at ~219 MiB and ran the
-    /// simulation thread off the low end of its 64 MiB stack.
+    /// Wide scratch must be bounded by the widest statement, not by the
+    /// chunk's statement count.
     #[test]
     fn wide_scratch_slots_do_not_scale_with_statement_count() {
         fn slots_for(n: usize) -> usize {
@@ -3745,5 +3743,158 @@ mod tests {
             few, many,
             "wide scratch slots must be reused across statements"
         );
+    }
+
+    /// A static-window wide RMW must merge into the destination instead of
+    /// materialising the whole new value in scratch first.
+    #[test]
+    fn wide_static_window_store_allocates_no_whole_value_scratch() {
+        fn frame_for(
+            dst_width: usize,
+            sel: (usize, usize),
+            rhs: Option<(usize, usize)>,
+        ) -> (usize, u64) {
+            let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0),
+                dst_width,
+                select: Some(sel),
+                dynamic_select: None,
+                rhs_select: rhs,
+                expr: cvar((dst_width / 8) as isize, dst_width),
+                dst_ff_current_offset: 0,
+                token: TokenRange::default(),
+            });
+            assert!(
+                build_binary_no_cache(&Config::default(), vec![stmt]).is_some(),
+                "the wide bit-select store must compile"
+            );
+            LAST_FRAME_SLOTS.with(|c| c.get())
+        }
+
+        // A plain window, and the reported shape: one 736-bit stage of a
+        // 73600-bit shift register moved one stage up.
+        let plain = frame_for(1024, (70, 0), None);
+        let windowed_source = frame_for(73600, (1471, 736), Some((735, 0)));
+        assert_eq!(
+            [plain, windowed_source],
+            [(0, 0), (0, 0)],
+            "a static window, and a windowed source, must need no wide scratch"
+        );
+    }
+    /// Reference bytes for the static-window merge.  The chunk is invoked
+    /// directly: from Veryl source, write-fusion rewrites this into a
+    /// whole-value assign before the backend sees it.
+    #[test]
+    fn wide_static_window_store_lands_the_reference_bytes() {
+        // (dst byte offset, dst_width, (beg, end), rhs_select, src byte offset, src width)
+        #[allow(clippy::type_complexity)]
+        let cases: &[(
+            &str,
+            (
+                usize,
+                usize,
+                (usize, usize),
+                Option<(usize, usize)>,
+                usize,
+                usize,
+            ),
+        )] = &[
+            // Window crossing three words at an unaligned offset.
+            ("unaligned", (0, 600, (306, 107), None, 128, 600)),
+            // Word-aligned window, whole words taken from the source.
+            ("aligned", (0, 600, (319, 192), None, 128, 600)),
+            // The destination width lands mid-word and the window reaches it.
+            ("clamp-in-window", (0, 500, (499, 400), None, 128, 500)),
+            // The destination width lands mid-word and the window does NOT
+            // reach it: the merge must still clear the bits above it.
+            ("clamp-untouched", (0, 500, (199, 100), None, 128, 500)),
+            // A source window narrower than the destination window: the rest
+            // of the window is zeroed, not left holding the old value.
+            (
+                "short-source",
+                (0, 600, (399, 200), Some((149, 0)), 128, 600),
+            ),
+            // Source window at an odd offset, moving down.
+            (
+                "window-down",
+                (0, 600, (199, 60), Some((379, 240)), 128, 600),
+            ),
+            // Source and destination are the SAME variable — a stage move.
+            ("self-alias", (0, 600, (399, 200), Some((199, 0)), 0, 600)),
+            // A source NARROWER than the destination: the window past the
+            // source's own bits reads zero, without widening it first.
+            ("narrow-source", (0, 600, (399, 200), None, 128, 160)),
+            // ...and with a window taken out of that narrow source.
+            (
+                "narrow-source-window",
+                (0, 600, (399, 200), Some((159, 40)), 128, 160),
+            ),
+        ];
+
+        for &(name, (dst_off, dst_width, (beg, end), rhs, src_off, src_width)) in cases {
+            let stmt = ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst_off as isize),
+                dst_width,
+                select: Some((beg, end)),
+                dynamic_select: None,
+                rhs_select: rhs,
+                expr: cvar(src_off as isize, src_width),
+                dst_ff_current_offset: 0,
+                token: TokenRange::default(),
+            });
+            let (func, _mmap) = build_binary_no_cache(&Config::default(), vec![stmt])
+                .unwrap_or_else(|| panic!("{name}: the wide bit-select store must compile"));
+
+            // Dense, word-distinct patterns so a misplaced word shows up.
+            let mut comb = vec![0u64; 128];
+            for (i, w) in comb.iter_mut().enumerate() {
+                *w = 0x0123_4567_89ab_cdefu64.wrapping_mul(i as u64 + 1) ^ ((i as u64) << 40);
+            }
+            let before = comb.clone();
+            let mut ff = vec![0u64; 16];
+            let mut log = vec![0u64; 64];
+            unsafe {
+                func(
+                    ff.as_mut_ptr() as *const u8,
+                    comb.as_mut_ptr() as *const u8,
+                    log.as_mut_ptr() as *mut u8,
+                    0,
+                );
+            }
+
+            // Reference, read from the pre-call bytes so aliasing is covered.
+            let bit = |buf: &[u64], byte_off: usize, i: usize| -> bool {
+                let b = byte_off * 8 + i;
+                buf[b / 64] >> (b % 64) & 1 == 1
+            };
+            let nb = crate::ir::variable::native_bytes(dst_width);
+            // A source narrower than the destination window supplies zeros past
+            // its own BUFFER (whole words, as widening into a zeroed slot did),
+            // not past its declared width.
+            let src_nb_bits = crate::ir::variable::native_bytes(src_width) * 8;
+            let (src_bit, src_bits) = match rhs {
+                Some((rbeg, rend)) => (rend, rbeg - rend + 1),
+                None => (0, beg - end + 1),
+            };
+            let mut want = before.clone();
+            for i in 0..nb * 8 {
+                let v = if i >= dst_width {
+                    false
+                } else if i >= end && i <= beg {
+                    let o = i - end;
+                    o < src_bits && src_bit + o < src_nb_bits && bit(&before, src_off, src_bit + o)
+                } else {
+                    bit(&before, dst_off, i)
+                };
+                let b = dst_off * 8 + i;
+                let m = 1u64 << (b % 64);
+                if v {
+                    want[b / 64] |= m;
+                } else {
+                    want[b / 64] &= !m;
+                }
+            }
+            assert_eq!(comb, want, "{name}: merged bytes differ from the reference");
+        }
     }
 }

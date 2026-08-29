@@ -497,7 +497,28 @@ impl ProtoAssignDynamicStatement {
 
         let addr = self.dynamic_elem_addr(context, builder)?;
 
-        // Wide (>64-bit) bit-select: RMW the [end..=beg] range; else full value.
+        // Wide (>64-bit) bit-select: merge the [end..=beg] range into the
+        // element in place -- no whole-element temporary.
+        if let Some((beg, end)) = self.select
+            && wide_rmw_inplace_on()
+        {
+            // `rhs_select` bailed above, so the source window is the whole
+            // value's low bits.
+            let win = WideWindowStore {
+                end,
+                width: beg - end + 1,
+                src_bit: 0,
+                src_bits: beg - end + 1,
+                nb,
+                src_nb: nb,
+                dst_width: self.dst_width,
+                fused_rhs_select: false,
+            };
+            if win.fits_inline() {
+                emit_wide_select_rmw_store(builder, addr, src_ptr, &win);
+                return Some(());
+            }
+        }
         let store_ptr = if let Some((beg, end)) = self.select {
             emit_wide_select_rmw(context, builder, addr, src_ptr, end, beg - end + 1, nb)
         } else {
@@ -911,11 +932,9 @@ impl ProtoStatement {
         builder: &mut FunctionBuilder,
         is_last: bool,
     ) -> Option<()> {
-        // Wide scratch slots die with the statement that built them; retiring
-        // them here is what keeps the frame bounded by the widest statement
-        // instead of by the whole chunk (see `ScratchPool`).  Compound
-        // statements release only after their bodies, so a condition's scratch
-        // can never be recycled underneath the arms that follow it.
+        // Retire this statement's wide scratch.  Compound statements release
+        // only after their bodies, so an arm can never recycle its
+        // condition's slots.
         let mark = scratch_mark();
         let result = self.build_binary_body(context, builder, is_last);
         scratch_release(mark);
@@ -1739,6 +1758,41 @@ impl ProtoAssignStatement {
         } else {
             nb // force-stored above into an nb-sized zeroed slot
         };
+        // Static window merged straight into the destination.  Excludes a
+        // packed FF, whose direct store is skipped so in-event readers still
+        // see the old value.  Must precede the widen: unbacked window bits
+        // take zero either way.
+        if self.dynamic_select.is_none()
+            && !ff_packed
+            && mask_xz.is_none()
+            && wide_rmw_inplace_on()
+            && let Some((beg, end)) = self.select
+        {
+            let width = beg - end + 1;
+            let (src_bit, src_bits) = match self.rhs_select {
+                Some((rbeg, rend)) => (rend, rbeg - rend + 1),
+                None => (0, width),
+            };
+            let win = WideWindowStore {
+                end,
+                width,
+                src_bit,
+                src_bits,
+                nb,
+                src_nb: src_wide_nb,
+                dst_width: self.dst_width,
+                fused_rhs_select: self.rhs_select.is_some(),
+            };
+            if win.fits_inline() {
+                let dst_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+                emit_wide_select_rmw_store(builder, dst_ptr, src_ptr, &win);
+                if is_ff {
+                    emit_wide_log_chunks(context, builder, dst_ptr, log_current_offset, nb);
+                }
+                return Some(());
+            }
+        }
+
         let src_ptr = super::helpers::widen_wide_ptr(builder, src_ptr, src_wide_nb, nb);
         // `src_nb >= nb` after the widen; a wider source keeps its size so
         // `rhs_select`'s shift can reach the high bits it carries.
@@ -1751,6 +1805,7 @@ impl ProtoAssignStatement {
             use super::helpers::emit_wide_shift_right_mask;
             emit_wide_shift_right_mask(context, builder, ptr, end, beg - end + 1, src_nb)
         };
+
         let src_ptr = if let Some((beg, end)) = self.rhs_select {
             extract_window(context, builder, src_ptr, beg, end)
         } else {

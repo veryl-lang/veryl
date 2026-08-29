@@ -748,6 +748,208 @@ pub(crate) fn emit_wide_shift_right_mask(
     dst
 }
 
+/// `VERYL_WIDE_RMW_INPLACE=0` routes a static-window wide RMW back through
+/// [`emit_wide_select_rmw`] and the full-width copy (one-binary A/B).
+pub(crate) fn wide_rmw_inplace_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_WIDE_RMW_INPLACE").as_deref() != Ok("0"))
+}
+
+/// One static bit-window copy: `dst[end +: width] = src[src_bit +: src_bits]`,
+/// zero-filled where `src_bits < width`.  Every field is a compile-time
+/// constant.
+pub(crate) struct WideWindowStore {
+    /// Low bit of the destination window (the `select`'s `end`).
+    pub end: usize,
+    /// Destination window width.
+    pub width: usize,
+    /// Low bit of the source window — a fused `rhs_select`, or 0 when the
+    /// source IS the value.
+    pub src_bit: usize,
+    /// Source bits available from `src_bit`.  Destination-window bits beyond
+    /// them are written as zero, matching the `rhs_select` temporary's mask.
+    pub src_bits: usize,
+    /// Destination buffer size, `native_bytes(dst_width)`.
+    pub nb: usize,
+    /// Source buffer size; a wide source may be wider than the destination.
+    pub src_nb: usize,
+    /// Declared destination width — bits at or above it are cleared, as
+    /// `emit_wide_apply_mask` would.
+    pub dst_width: usize,
+    /// Whether `src_bit`/`src_bits` came from an `rhs_select` the caller would
+    /// otherwise have extracted into its own slot (diagnostics only).
+    pub fused_rhs_select: bool,
+}
+
+/// Destination words a window may span before the merge falls back to the
+/// temporary form: the unrolled code holds one live value per window word,
+/// and the spill that costs is invisible to `MAX_CHUNK_FRAME_BYTES`.
+const WIDE_WINDOW_INLINE_WORDS: usize = 32;
+
+/// How much wider than the window the destination must be to take the merge
+/// anyway: the temporary form walks the WHOLE value however few bits move.
+const WIDE_WINDOW_INLINE_RATIO: usize = 8;
+
+impl WideWindowStore {
+    /// Whether the in-place merge is the right form for this window.
+    pub(crate) fn fits_inline(&self) -> bool {
+        let n = self.nb / 8;
+        let lo = self.end / 64;
+        if lo >= n {
+            // Entirely past the destination buffer: no source word is read.
+            return true;
+        }
+        let hi = ((self.end + self.width - 1) / 64).min(n - 1);
+        let span = hi - lo + 1;
+        span <= WIDE_WINDOW_INLINE_WORDS || span * WIDE_WINDOW_INLINE_RATIO <= n
+    }
+
+    /// `nb`-byte scratch slots the temporary form would have allocated for
+    /// this store (diagnostics only).
+    fn scratch_slots_avoided(&self) -> usize {
+        let rmw = if self.nb <= WIDE_INLINE_NB && self.nb.is_multiple_of(8) {
+            1
+        } else {
+            3
+        };
+        rmw + usize::from(self.fused_rhs_select)
+    }
+}
+
+/// In-place `dst[end +: width] = src[src_bit +: src_bits]`, 2-state.
+/// Every bound is constant, so each word's mask folds to an immediate, and
+/// all source words load before the first store, so src may alias dst.
+pub(crate) fn emit_wide_select_rmw_store(
+    builder: &mut FunctionBuilder,
+    dst_ptr: CraneliftValue,
+    src_ptr: CraneliftValue,
+    w: &WideWindowStore,
+) {
+    let flags = MemFlagsData::trusted();
+    let n = w.nb / 8;
+    let src_n = (w.src_nb / 8) as isize;
+    // Destination bit → source bit.  Negative when the window moves up.
+    let delta = w.src_bit as isize - w.end as isize;
+    // Bits at or above this in the destination window have no source and are
+    // written as zero (a `rhs_select` narrower than the destination window).
+    let src_hi = w.end + w.src_bits.min(w.width);
+
+    // Bits of word `k` below `bound`.  `bound == 0` yields an empty mask, so a
+    // "no clamp" caller must special-case it (see `clamp_mask`).
+    let below = |k: usize, bound: usize| -> u64 {
+        let word_lo = 64 * k;
+        if bound >= word_lo + 64 {
+            u64::MAX
+        } else if bound <= word_lo {
+            0
+        } else {
+            (1u64 << (bound - word_lo)) - 1
+        }
+    };
+    // The bits of [end, end + width) that fall in word k.
+    let range_mask = |k: usize| -> u64 {
+        let word_lo = 64 * k;
+        let f_lo = w.end.max(word_lo);
+        let f_hi = (w.end + w.width - 1).min(word_lo + 63);
+        if f_lo > f_hi {
+            return 0;
+        }
+        let cnt = f_hi - f_lo + 1;
+        let base = if cnt == 64 {
+            u64::MAX
+        } else {
+            (1u64 << cnt) - 1
+        };
+        base << (f_lo - word_lo)
+    };
+    // `emit_wide_apply_mask(dst_width)` of word k.  `nb` is
+    // `native_bytes(dst_width)`, so at most one word is partially clamped and
+    // none is wholly out of range; a word-aligned width clamps nothing.
+    let clamp_mask = |k: usize| -> u64 {
+        if w.dst_width == 0 {
+            u64::MAX
+        } else {
+            below(k, w.dst_width)
+        }
+    };
+    // Bits of word k the source supplies: in the window, under the width
+    // clamp, and backed by source bits.
+    let emit_mask = |k: usize| -> u64 { range_mask(k) & clamp_mask(k) & below(k, src_hi) };
+
+    // Pass 1: the source words, aligned to the destination, read before any
+    // store can disturb them (source and destination may be the same buffer).
+    let mut aligned = Vec::with_capacity(n);
+    for k in 0..n {
+        if emit_mask(k) == 0 {
+            aligned.push(None);
+            continue;
+        }
+        // Source bits [64k + delta, 64k + delta + 64).  Words outside the
+        // source read as zero: they only ever feed masked-off bits.
+        let sbit = 64 * k as isize + delta;
+        let sw = sbit.div_euclid(64);
+        let sb = sbit.rem_euclid(64) as u32;
+        let (lo, hi) = {
+            let mut word = |j: isize| -> CraneliftValue {
+                if j < 0 || j >= src_n {
+                    builder.ins().iconst(I64, 0)
+                } else {
+                    builder.ins().load(I64, flags, src_ptr, (j * 8) as i32)
+                }
+            };
+            let lo = word(sw);
+            (lo, if sb == 0 { None } else { Some(word(sw + 1)) })
+        };
+        let v = match hi {
+            None => lo,
+            Some(hi) => {
+                let a = builder.ins().ushr_imm_s(lo, sb as i64);
+                let b = builder.ins().ishl_imm_s(hi, (64 - sb) as i64);
+                builder.ins().bor(a, b)
+            }
+        };
+        aligned.push(Some(v));
+    }
+
+    // Pass 2: merge into the destination.  Each word reads only its own old
+    // value, which no other word's store touches, so the order is free.
+    for (k, &src_word) in aligned.iter().enumerate() {
+        let keep = !range_mask(k) & clamp_mask(k);
+        let em = emit_mask(k);
+        let off = (k * 8) as i32;
+        let v = match src_word {
+            None => {
+                // No source bits here; the width clamp and the zero fill above
+                // `src_hi` may still bite.
+                if keep == u64::MAX {
+                    continue;
+                }
+                if keep == 0 {
+                    builder.ins().iconst(I64, 0)
+                } else {
+                    let old = builder.ins().load(I64, flags, dst_ptr, off);
+                    builder.ins().band_imm_s(old, keep as i64)
+                }
+            }
+            Some(sv) if em == u64::MAX => sv,
+            Some(sv) => {
+                let sm = builder.ins().band_imm_s(sv, em as i64);
+                if keep == 0 {
+                    sm
+                } else {
+                    let old = builder.ins().load(I64, flags, dst_ptr, off);
+                    let om = builder.ins().band_imm_s(old, keep as i64);
+                    builder.ins().bor(om, sm)
+                }
+            }
+        };
+        builder.ins().store(flags, v, dst_ptr, off);
+    }
+
+    super::runtime::note_wide_rmw_inplace(w.scratch_slots_avoided(), w.nb);
+}
+
 /// `select` (wide-dst bit-select WRITE / RMW), 2-state:
 /// `new = (old & ~rangemask) | ((src << end) & rangemask)` where `rangemask`
 /// covers bits `[end ..= end + width - 1]`.  Returns a fresh wide slot holding
