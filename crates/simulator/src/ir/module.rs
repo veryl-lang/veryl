@@ -4,7 +4,9 @@ use crate::ir::big_array::BigArrayFold;
 use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
-use crate::ir::declaration::stable_topo_sort_with_blocks;
+use crate::ir::declaration::{
+    branch_tag, stable_topo_sort_with_blocks, stable_topo_sort_with_pieces,
+};
 use crate::ir::derived_clock::{
     DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
 };
@@ -1881,7 +1883,8 @@ pub(crate) fn analyze_dependency(
             deep_block_of.push(block_of[key]);
         }
     }
-    split_copies_by_source_writes(&mut deep_stmts, &mut deep_block_of);
+    let mut deep_group_of = vec![0usize; deep_stmts.len()];
+    split_copies_by_source_writes(&mut deep_stmts, &mut deep_block_of, &mut deep_group_of);
     table = deep_stmts.into_iter().enumerate().collect();
     // Versions before scheduling: each write is its own statement now, so
     // a reader between two of them can be given the earlier version's
@@ -1891,7 +1894,8 @@ pub(crate) fn analyze_dependency(
         keys.sort();
         let mut flat: Vec<ProtoStatement> = keys.iter().map(|k| table.remove(k).unwrap()).collect();
         let mut blocks = deep_block_of;
-        let renamed = rename_versions(&mut flat, &mut blocks, alloc);
+        let mut groups = vec![0usize; flat.len()];
+        let renamed = rename_versions(&mut flat, &mut blocks, &mut groups, alloc);
         if renamed > 0 {
             pass_diag_phase(&format!("phase2-deep: {renamed} version(s) renamed"));
         }
@@ -1932,6 +1936,10 @@ pub(crate) fn analyze_dependency(
         // block as a whole; only where neither holds is the scope left alone.
         // The hazard is one array's, and answering it for the scope turned
         // this phase off for every block sharing the scope with it.
+        // Which conditional each piece came from (`0` = not a piece); see
+        // `branch_tag` for the exclusivity this rests on.
+        let mut branch_group_of: Vec<usize> = Vec::new();
+        let mut group_seq = 0usize;
         if let Some(whole) = blocks_to_keep_in_source_order(&unsplit, &keys) {
             for key in keys {
                 if whole.contains(&key) {
@@ -1940,17 +1948,35 @@ pub(crate) fn analyze_dependency(
                     let mut flat = Vec::new();
                     flatten_blocks(unsplit[&key].clone(), &mut flat);
                     for stmt in flat {
-                        split_any |= split_by_branch(stmt, &mut branch_stmts);
+                        let split = split_by_branch(stmt, &mut branch_stmts);
+                        split_any |= split;
+                        let group = if split {
+                            group_seq += 1;
+                            group_seq
+                        } else {
+                            0
+                        };
+                        branch_group_of.resize(branch_stmts.len(), group);
                     }
                 }
                 branch_block_of.resize(branch_stmts.len(), key);
+                branch_group_of.resize(branch_stmts.len(), 0);
             }
         }
         if split_any {
-            split_copies_by_source_writes(&mut branch_stmts, &mut branch_block_of);
-            let renamed = rename_versions(&mut branch_stmts, &mut branch_block_of, alloc);
+            split_copies_by_source_writes(
+                &mut branch_stmts,
+                &mut branch_block_of,
+                &mut branch_group_of,
+            );
+            let renamed = rename_versions(
+                &mut branch_stmts,
+                &mut branch_block_of,
+                &mut branch_group_of,
+                alloc,
+            );
             let (sorted, passes_hint, fell_back) =
-                stable_topo_sort_with_blocks(branch_stmts, &branch_block_of);
+                stable_topo_sort_with_pieces(branch_stmts, &branch_block_of, &branch_group_of);
             if !fell_back {
                 pass_diag_phase(&format!(
                     "phase2-branch: per-branch split ({renamed} version(s) renamed)"
@@ -2505,7 +2531,11 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
 ///
 /// Runs after the splits above, so a concatenation already counts per element;
 /// a source written with unknown bits is left alone, no cut being finer.
-fn split_copies_by_source_writes(stmts: &mut Vec<ProtoStatement>, blocks: &mut Vec<usize>) {
+fn split_copies_by_source_writes(
+    stmts: &mut Vec<ProtoStatement>,
+    blocks: &mut Vec<usize>,
+    groups: &mut Vec<usize>,
+) {
     /// Same trade as `MAX_ELEMENTS`, but no design has reached it: the cut
     /// count follows the source's write boundaries, which stay far below.
     const MAX_PARTS: usize = 64;
@@ -2538,17 +2568,22 @@ fn split_copies_by_source_writes(stmts: &mut Vec<ProtoStatement>, blocks: &mut V
 
         let mut out_stmts: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
         let mut out_blocks: Vec<usize> = Vec::with_capacity(blocks.len());
-        for (stmt, block) in std::mem::take(stmts)
+        let mut out_groups: Vec<usize> = Vec::with_capacity(groups.len());
+        for ((stmt, block), group) in std::mem::take(stmts)
             .into_iter()
             .zip(blocks.iter().copied())
+            .zip(groups.iter().copied())
         {
             let before = out_stmts.len();
             split_one_copy(stmt, &bounds, MAX_PARTS, &mut out_stmts);
             out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
+            // A part of a split piece is still that piece's branch.
+            out_groups.resize(out_stmts.len(), group);
         }
         let split_any = out_stmts.len() != blocks.len();
         *stmts = out_stmts;
         *blocks = out_blocks;
+        *groups = out_groups;
         if !split_any {
             break;
         }
@@ -6287,6 +6322,7 @@ pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<
 fn rename_versions(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
+    groups: &mut Vec<usize>,
     alloc: &mut dyn FnMut(usize) -> isize,
 ) -> usize {
     // Offsets any dynamic access touches: a temp sized for one variable cannot
@@ -6329,6 +6365,7 @@ fn rename_versions(
         width: usize,
     }
     let mut plans: Vec<Plan> = Vec::new();
+    let mut declined = 0usize;
     for (off, ws) in &writes {
         if ws.len() < 2 || dynamic.contains(off) {
             continue;
@@ -6356,6 +6393,33 @@ fn rename_versions(
             continue;
         };
         if mids.iter().any(|&r| blocks[r] != blocks[after]) {
+            continue;
+        }
+        // A copy earns its place by breaking the WAR edge from a mid-reader to
+        // a later write.  Where every write and every mid-reader is a piece of
+        // ONE conditional and each reader's tag differs from the tags of the
+        // writes after it, that edge is already false -- the sort drops it --
+        // so the copy has nothing to do.  Worse, it is an UNCONDITIONAL read
+        // sitting between mutually exclusive writes, which is exactly the shape
+        // that blocks the one-pass hint.  Decline it.
+        //
+        // Only sound because the sort really does drop that edge; declining
+        // without the exclusivity rule restores the WAR edge and costs the
+        // whole scope its one-pass order.
+        let group = groups[ws[0]];
+        if group != 0
+            && ws.iter().all(|&w| groups[w] == group)
+            && mids.iter().all(|&r| groups[r] == group)
+            && mids.iter().all(|&r| {
+                let tr = branch_tag(&stmts[r]);
+                tr != 0
+                    && ws.iter().filter(|&&w| w > r).all(|&w| {
+                        let tw = branch_tag(&stmts[w]);
+                        tw != 0 && tw != tr
+                    })
+            })
+        {
+            declined += 1;
             continue;
         }
         let to = VarOffset::Comb(alloc(width));
@@ -6407,17 +6471,28 @@ fn rename_versions(
 
     let old_stmts = std::mem::take(stmts);
     let old_blocks = std::mem::take(blocks);
+    let old_groups = std::mem::take(groups);
     for (i, s) in old_stmts.into_iter().enumerate() {
         stmts.push(s);
         blocks.push(old_blocks[i]);
+        groups.push(old_groups[i]);
         if let Some(copies) = insert_at.remove(&i) {
             for c in copies {
                 stmts.push(c);
                 blocks.push(old_blocks[i]);
+                // A copy runs unconditionally, so it is nobody's branch.
+                groups.push(0);
             }
         }
     }
     debug_assert_eq!(stmts.len(), blocks.len());
+    debug_assert_eq!(stmts.len(), groups.len());
+    if declined > 0 && std::env::var("VERYL_PASS_DIAG").is_ok() {
+        log::info!(
+            "pass_diag: {declined} version copy/copies declined: their writes are alternatives \
+             of one conditional, and the WAR edge they would break is false anyway"
+        );
+    }
     let _ = n;
     plans.len()
 }

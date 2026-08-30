@@ -113,7 +113,47 @@ fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
 /// more coarsely than the circuit, and the cure is to split them.  The
 /// cycle is reported to the caller, which splits and asks again.
 pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
-    stable_topo_sort_impl(statements, None).0
+    stable_topo_sort_impl(statements, None, None).0
+}
+
+/// Which branch a piece kept, in `split_tagged_by_branch`'s numbering (1-based,
+/// `0` = not one branch of a conditional).  Read back off the piece, as there:
+/// a piece keeps exactly the branch it was made for.  Only meaningful on a
+/// statement whose group is nonzero -- the group id is what says the split
+/// actually took the statement apart per branch.
+///
+/// EXCLUSIVITY, the property the WAR rule leans on: two pieces of the SAME
+/// group with DIFFERENT nonzero tags never both execute.  `split_by_branch`
+/// returns `true` -- the only thing that mints a group -- for exactly two
+/// constructs, and it holds for both:
+///   * `Case`: the piece for arm `b` keeps `arms[..=b]` with only `arms[b]`'s
+///     body, so it runs that body exactly when arm `b` is the first match; the
+///     default piece keeps every arm empty, so it runs exactly when none
+///     matches.  First-match selection makes those disjoint.
+///   * `If` with a condition: a true-piece runs under `cond`, a false-piece
+///     under `!cond`.
+///
+/// Every other statement reaches `split_nested` and returns `false`, so it
+/// keeps group 0 and is never treated as an alternative.  `guards_are_stable`
+/// is what makes the pieces agree on WHICH branch is selected: the split is
+/// declined outright when a body writes a variable a guard reads, so every
+/// piece of a group evaluates the same guards.
+///
+/// SAME tag is NOT exclusive: one branch yields several pieces (one per
+/// write-set group) and they run TOGETHER.  Any rule here must require the
+/// tags to DIFFER, not merely the group to match.
+pub(crate) fn branch_tag(stmt: &ProtoStatement) -> usize {
+    match stmt {
+        ProtoStatement::Case(x) if !x.default.is_empty() => x.arms.len() + 1,
+        ProtoStatement::Case(x) => x
+            .arms
+            .iter()
+            .position(|arm| !arm.body.is_empty())
+            .map_or(0, |b| b + 1),
+        ProtoStatement::If(x) if !x.true_side.is_empty() => 1,
+        ProtoStatement::If(x) if !x.false_side.is_empty() => 2,
+        _ => 0,
+    }
 }
 
 /// Result of the block-aware sort: the schedule, an exact required-pass
@@ -132,7 +172,19 @@ pub(crate) fn stable_topo_sort_with_blocks(
     statements: Vec<ProtoStatement>,
     blocks: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks))
+    stable_topo_sort_impl(statements, Some(blocks), None)
+}
+
+/// As [`stable_topo_sort_with_blocks`], plus the conditional each statement is
+/// a per-branch piece of (`0` = not a piece).  Two pieces of one group with
+/// different branch tags never both run, so no write of one can clobber a read
+/// of another -- see [`branch_tag`].
+pub(crate) fn stable_topo_sort_with_pieces(
+    statements: Vec<ProtoStatement>,
+    blocks: &[usize],
+    groups: &[usize],
+) -> SortOutcome {
+    stable_topo_sort_impl(statements, Some(blocks), Some(groups))
 }
 
 /// ` @file:line` for a diagnostic, empty when the statement carries no token.
@@ -190,7 +242,11 @@ fn where_branch(stmt: &ProtoStatement) -> String {
     }
 }
 
-fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize]>) -> SortOutcome {
+fn stable_topo_sort_impl(
+    statements: Vec<ProtoStatement>,
+    blocks: Option<&[usize]>,
+    groups: Option<&[usize]>,
+) -> SortOutcome {
     let n = statements.len();
     if n <= 1 {
         return (statements, Some(1), false);
@@ -237,6 +293,24 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
     // pairwise-disjoint ranges (per-bit generate assigns).  A later writer
     // never clobbers an earlier one, so the prior-binding and WAR rules
     // would only manufacture false ordering constraints for them.
+    // Two pieces of ONE conditional keeping DIFFERENT branches never both run,
+    // so nothing one writes can reach the other: no write of it can clobber a
+    // read of the other (the WAR rule), and none of them can leave a value in a
+    // slot the other reads (the one-pass hint).  The tags must DIFFER — one
+    // branch yields several pieces sharing a tag and those DO run together.
+    // [`branch_tag`] carries the whole argument, including why only `Case` and
+    // `If` ever mint a group and what `guards_are_stable` contributes.
+    let exclusive_pieces = |a: usize, b: usize| -> bool {
+        let Some(groups) = groups else {
+            return false;
+        };
+        if groups[a] == 0 || groups[a] != groups[b] {
+            return false;
+        }
+        let (ta, tb) = (branch_tag(&statements[a]), branch_tag(&statements[b]));
+        ta != 0 && tb != 0 && ta != tb
+    };
+
     let mut split_driver: HashSet<VarOffset> = HashSet::default();
     'next_var: for (key, ws) in &writers {
         if ws.len() < 2 {
@@ -387,7 +461,7 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
         }
         let merged = merge_spans(spans);
         for (p, wr) in wranges {
-            if *p <= reader_idx || !ranges_overlap(*wr, rr) {
+            if *p <= reader_idx || !ranges_overlap(*wr, rr) || exclusive_pieces(reader_idx, *p) {
                 continue;
             }
             let (hi, lo) = match wr {
@@ -465,7 +539,9 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
                     adj_sem[w].insert(reader_idx);
                     cause!(w, reader_idx, "prior-binding-earlier");
                 }
-                if relevant.last().is_some_and(|&w| w > reader_idx)
+                if relevant
+                    .iter()
+                    .any(|&w| w > reader_idx && !exclusive_pieces(reader_idx, w))
                     && !prior_unconditional_cover(reader_idx, key, *rr)
                 {
                     if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
@@ -523,6 +599,17 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
     // SAME-block prior (matching the RAW binding) — a cross-block reader
     // orders after every writer, so a WAR edge would only close a false
     // cycle.
+    //
+    // A write cannot clobber a read that never happens in the same execution:
+    // where reader and writer are pieces of ONE conditional keeping DIFFERENT
+    // branches, exactly one of them runs, so the edge is false.  The per-branch
+    // split is what puts them in the same list at all; without this the sort
+    // orders alternatives against each other and a version copy has to be
+    // inserted to break the edge again (see `rename_versions`).
+    //
+    // The tags must DIFFER.  One branch yields several pieces sharing a tag
+    // and those DO run together — see [`branch_tag`], where the whole argument
+    // lives.
     for (reader_idx, reads) in stmt_reads.iter().enumerate() {
         for (key, rr) in reads {
             if split_driver.contains(key) {
@@ -537,10 +624,9 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
             if !has_prior {
                 continue;
             }
-            if let Some(&(next_writer, _)) = wranges
-                .iter()
-                .find(|(p, wr)| *p > reader_idx && ranges_overlap(*wr, *rr))
-            {
+            if let Some(&(next_writer, _)) = wranges.iter().find(|(p, wr)| {
+                *p > reader_idx && ranges_overlap(*wr, *rr) && !exclusive_pieces(reader_idx, *p)
+            }) {
                 adj_sem[reader_idx].insert(next_writer);
                 cause!(reader_idx, next_writer, "war");
             }
