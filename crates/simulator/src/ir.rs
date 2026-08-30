@@ -516,10 +516,9 @@ impl Ir {
     /// construction.  Every side effect of the extra pass is rewound.
     fn check_settled(&self, mask_cache: &mut MaskCache) {
         let before = self.comb_values.clone();
-        // The extra pass is not free of side effects: the is_ff refinement
-        // pushes write-log entries and `$display` writes the output buffer, so
-        // rewind both as `backend::validate` does.  Restoring only the comb
-        // buffer would leave the check perturbing the run it measures.
+        // The extra pass has side effects -- the is_ff refinement pushes
+        // write-log entries and `$display` writes the output buffer -- so
+        // rewind both, as `backend::validate` does.
         let ff_before = self.ff_values.clone();
         let narrow_before = self.write_log_buffer.narrow_count();
         let wide_before = self.write_log_buffer.wide_count();
@@ -547,11 +546,9 @@ impl Ir {
             (*buf).wide_count = wide_before;
         }
         crate::output_buffer::truncate_to(out_mark);
-        // Bytes the whole-comb backend deliberately leaves stale: chunk-local
-        // intermediates it keeps in registers, which the reference dispatch
-        // above writes.  They have no external reader, so a difference there
-        // is this check's own artefact, not a settle that failed to converge
-        // (`backend::validate` skips the same set for the same reason).
+        // Bytes whole-comb leaves deliberately stale (chunk-local, no external
+        // reader), so a difference there is this check's artefact.
+        // `backend::validate` skips the same set.
         let stale = self
             .whole_comb
             .as_ref()

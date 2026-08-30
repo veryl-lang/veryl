@@ -43,10 +43,8 @@ fn combinational_loop() {
 
 #[test]
 fn combinational_loop_through_one_struct_member() {
-    // The counterpart of `struct_members_across_a_boundary_are_not_one_loop`:
-    // there the ring is written at one member and read back at another, here
-    // both ends are `busy`.  Keying by bits must not lose a loop that closes
-    // inside one member.
+    // Both ends of the ring are `busy`: keying by bits must not lose a loop
+    // that closes inside one struct member.
     let code = r#"
     package pkg {
         struct cfg_t {
@@ -126,11 +124,8 @@ fn combinational_loop_through_a_dynamic_bit_write() {
 
 #[test]
 fn combinational_loop_closed_by_a_later_writer_of_the_bits_read() {
-    // `v` has two writers, and the one that produces the bits `z` reads comes
-    // AFTER it.  Binding the read to its last prior writer, as a reassigned
-    // variable is bound, finds a writer of the OTHER half and nothing that
-    // closes the ring -- so the bits read have to reach back for their writer
-    // even when it sits later.
+    // The writer producing the bits `z` reads comes AFTER it, so a read must
+    // reach back for its writer even when that writer sits later.
     let code = r#"
     module Top (
         o: output logic<8>,
@@ -154,12 +149,9 @@ fn combinational_loop_closed_by_a_later_writer_of_the_bits_read() {
 
 #[test]
 fn combinational_loop_closed_inside_one_arm_of_a_case() {
-    // The ring runs through `2'd0` alone -- `a` is `b` there and `b` is `a`
-    // always -- and the other arms are only alternatives to it.  Keying the
-    // check by branch splits the `case` into a piece per arm, so `a` reads as
-    // several writers where it used to read as one: WHICH writer binds has to
-    // stay the statement's answer, or the last prior piece binds, the arm
-    // that closes the ring is never reached, and a real loop goes unreported.
+    // The ring runs through `2'd0` alone.  Per-arm keying makes `a` several
+    // writers where it was one, so WHICH writer binds must stay the
+    // statement's answer.
     let code = r#"
     module Top (
         s: input  logic<2>,

@@ -1386,9 +1386,18 @@ fn run_comb_pipeline(
     // subtree into few contiguous segments so the settle can skip them by
     // one compare each.  The reorder is a legal schedule of the same
     // dependency graph, so pass counts and the relayout below stay valid.
+    // Whether the reorder below kept every dataflow edge pointing the same
+    // way, checked on the permutation itself: that is what decides whether an
+    // exact one-pass hint still describes the order that actually runs.
+    let mut cone_kept_edge_directions = false;
     let (unified_sorted, cone_plan) = match cone_inputs {
         Some(ci) => match cone_gate::plan(&unified_sorted, ci) {
             Some(plan) => {
+                let mut new_of = vec![0usize; plan.order.len()];
+                for (new, &old) in plan.order.iter().enumerate() {
+                    new_of[old as usize] = new;
+                }
+                cone_kept_edge_directions = preserves_edge_directions(&unified_sorted, &new_of);
                 let mut reordered = Vec::with_capacity(unified_sorted.len());
                 let mut src: Vec<Option<ProtoStatement>> =
                     unified_sorted.into_iter().map(Some).collect();
@@ -1401,9 +1410,8 @@ fn run_comb_pipeline(
         },
         None => (unified_sorted, None),
     };
-    // The clustered order is a different topological order; a settle
-    // back-edge may sit later in it, so the positional pass metric must be
-    // re-taken (never lowered: the hint may be exact for the OLD order only).
+    // An exact hint for the OLD order carries only if no edge changed
+    // direction; otherwise re-take the positional metric, never lower.
     let required_comb_passes = if cone_plan.is_some() {
         let repositioned = compute_required_passes("comb-after-cone-reorder", &unified_sorted);
         if cone_gate::diag() {
@@ -1411,7 +1419,18 @@ fn run_comb_pipeline(
                 "[cone_gate] passes: pre-reorder {required_comb_passes} positional {repositioned}"
             );
         }
-        required_comb_passes.max(repositioned)
+        match passes_hint {
+            Some(hint) if cone_kept_edge_directions => {
+                if std::env::var("VERYL_PASS_DIAG").is_ok() {
+                    log::info!(
+                        "pass_diag: reorder preserved every dataflow edge direction; \
+                         keeping the exact hint of {hint} (positional would give {repositioned})"
+                    );
+                }
+                hint
+            }
+            _ => required_comb_passes.max(repositioned),
+        }
     } else {
         required_comb_passes
     };
@@ -1913,31 +1932,18 @@ pub(crate) fn analyze_dependency(
         return Ok((sorted, passes_hint));
     }
 
-    // Phase 2-branch: the splits above keep every branch in every group, so a
-    // group's reads stay the UNION over the branches.  That pairs a read only
-    // one arm makes with a write only another arm makes, and no order over
-    // such nodes exists: one arm reading back a signal another arm drives is
-    // the usual shape.  Giving each branch its own node leaves each read next
-    // to the write that can actually produce it.
-    //
-    // From the UNSPLIT blocks, so one branch's pieces stay together: the sort
-    // binds a read to its textually last prior writer, and a group-major split
-    // puts another arm's write of the same variable between them.
+    // Phase 2-branch: a group's reads are the UNION over its branches, which
+    // pairs one arm's read with another arm's write.  Split from the UNSPLIT
+    // blocks so one branch's pieces stay adjacent.
     {
         let mut keys: Vec<usize> = unsplit.keys().cloned().collect();
         keys.sort();
         let mut branch_stmts: Vec<ProtoStatement> = Vec::new();
         let mut branch_block_of: Vec<usize> = Vec::new();
         let mut split_any = false;
-        // A dynamic write reports its first and last element only, so nothing
-        // orders an access to an element between them against it, and this
-        // phase is free to reorder.  Emitting the block that makes the write
-        // whole keeps that order, and an access from elsewhere binds to that
-        // block as a whole; only where neither holds is the scope left alone.
-        // The hazard is one array's, and answering it for the scope turned
-        // this phase off for every block sharing the scope with it.
-        // Which conditional each piece came from (`0` = not a piece); see
-        // `branch_tag` for the exclusivity this rests on.
+        // A dynamic write names only its first and last element, so this phase
+        // must emit the block that makes such a write whole; the hazard is one
+        // block's, not the scope's.
         let mut branch_group_of: Vec<usize> = Vec::new();
         let mut group_seq = 0usize;
         if let Some(whole) = blocks_to_keep_in_source_order(&unsplit, &keys) {
@@ -2014,22 +2020,9 @@ pub(crate) fn analyze_dependency(
         let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
         let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
         let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, &blocks);
-        // Verify no genuine combinational loop remains.
-        //
-        // One `VarOffset` is a whole struct, so a module driving one member and
-        // reading another back reaches itself at variable granularity though no
-        // bit does.  Key by the bits each side names, and take the offset lists
-        // as the coverage authority: the two range walkers mirror them
-        // statement for statement, and where a form has no range it reports
-        // full width, so no real edge is lost.
-        //
-        // A conditional conflates the same way along a second axis: its reads
-        // and writes are the union over its branches, so a read one branch
-        // makes reaches a write another makes through a node no evaluation
-        // ever walks.  Key by the per-branch pieces the phase above schedules
-        // by -- inside one branch they are what a statement really is, and
-        // across branches nothing flows.  The pieces are the check's own view;
-        // `sorted` is still what runs.
+        // Verify no genuine combinational loop remains.  One `VarOffset` is a
+        // whole struct and a conditional's reads are the union over its
+        // branches, so key by bits AND by per-branch piece; `sorted` still runs.
         let mut pieces: Vec<ProtoStatement> = Vec::new();
         let mut piece_stmt: Vec<usize> = Vec::new();
         let mut piece_branch: Vec<usize> = Vec::new();
@@ -2080,11 +2073,8 @@ pub(crate) fn analyze_dependency(
                 let Some(wis) = w.get(key) else { continue };
                 let rbr = read_bits[ri].get(key).copied().flatten();
                 bound.clear();
-                // WHICH writer binds stays a statement's decision, as it was
-                // when a statement was one node: pieces of one statement are
-                // alternatives or run together, never overwrites of each
-                // other, so none of them shadows another and the statement
-                // they belong to binds through every piece that overlaps.
+                // WHICH writer binds stays a statement's decision: pieces of
+                // one statement never overwrite each other.
                 let sole = piece_stmt[wis[0].0] == piece_stmt[wis[wis.len() - 1].0];
                 let overlapping = |from: Option<usize>, bound: &mut Vec<usize>| {
                     bound.extend(
@@ -2539,11 +2529,9 @@ fn split_copies_by_source_writes(
     /// Same trade as `MAX_ELEMENTS`, but no design has reached it: the cut
     /// count follows the source's write boundaries, which stay far below.
     const MAX_PARTS: usize = 64;
-    /// A buffer chain carries the boundaries one link at a time -- the first
-    /// round splits the link whose source is written per field, the next the
-    /// link that now reads it -- so repeat until nothing more splits. A split
-    /// link names its bits and is never a candidate again, so this terminates
-    /// on its own; the bound only caps the work on a long chain.
+    /// A buffer chain carries boundaries one link per round.  A split link names
+    /// its bits and never splits again, so this terminates; the bound only caps
+    /// long chains.
     const MAX_ROUNDS: usize = 4;
 
     for _ in 0..MAX_ROUNDS {
@@ -2590,12 +2578,9 @@ fn split_copies_by_source_writes(
     }
 }
 
-/// Every variable a bit-parallel expression reads, in source order.  `false`
-/// for any other shape.
-///
-/// A leaf must be the WHOLE variable: the cuts the caller collects are that
-/// variable's own bit positions, and a windowed read would put them in a
-/// different coordinate space from the destination's.
+/// Every variable a bit-parallel expression reads.  A leaf must be the WHOLE
+/// variable, or its cuts land in a different coordinate space from the
+/// destination's.
 fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<VarOffset>) -> bool {
     let width = expr.width();
     match expr {
@@ -2631,17 +2616,9 @@ fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<VarOffset>) -> boo
     }
 }
 
-/// One statement, split when it writes a whole variable from a BIT-PARALLEL
-/// expression -- one whose result bit `i` is a function of bit `i` of each
-/// operand alone -- and some operand has known write boundaries.  The parts
-/// tile the destination and each names the matching window of every operand,
-/// so the value is identical by construction.
-///
-/// The plain copy `dst = src` is the common case; the inverter pair
-/// `inv = ~in; out = ~inv` an anti-optimisation buffer is written as is the
-/// one that matters, because a design that bundles a block's outputs, pushes
-/// the bundle through such a buffer and unbundles it has otherwise welded
-/// every output to every other one.
+/// One statement, split per source write when it copies a whole variable:
+/// the parts tile the destination and each names the matching window of every
+/// operand, so the value is identical.
 fn split_one_copy(
     stmt: ProtoStatement,
     bounds: &HashMap<VarOffset, Option<Vec<usize>>>,
@@ -2911,14 +2888,8 @@ fn unmodelled_spans(stmt: &ProtoStatement, out: &mut Vec<UnmodelledSpan>) {
 }
 
 /// The blocks the per-branch phase must emit whole, or `None` when no set of
-/// blocks covers the hazard and the phase has to decline for the scope.
-///
-/// Keeping the block that makes a dynamic write whole restores the source
-/// order between the write and every access to a covered element inside it,
-/// and an access from ANOTHER block is answered by the edge it already has:
-/// a read binds to the block that writes the element.  A write from another
-/// block has nothing to bind to, and neither has a read of an element the
-/// covering block never writes -- both are `None`.
+/// blocks covers the hazard.  A write from another block has nothing to bind
+/// to -- hence `None`.
 fn blocks_to_keep_in_source_order(
     unsplit: &HashMap<usize, ProtoStatement>,
     keys: &[usize],
@@ -3019,17 +2990,9 @@ fn flatten_blocks(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
     }
 }
 
-/// One node per BRANCH (and per write set inside it), because the splits above
-/// give every group every branch.
-///
-/// Bodies are all that move: a piece for arm `b` keeps arms `0..=b` with the
-/// earlier ones empty, and an `if` piece keeps its condition and empties the
-/// other side, so which branch fires and what an unwritten variable holds are
-/// unchanged.  Ordering within a branch is the branch's own, from
-/// `group_emission_order`; nothing has to cross branches.
-///
-/// Returns whether anything was split.  Reached only after every earlier split
-/// has failed to schedule: each piece re-evaluates the guards it sits under.
+/// One node per branch (and per write set inside it).  Returns whether
+/// anything split.  Each piece re-evaluates the guards it sits under, so
+/// `guards_are_stable` must hold.
 fn split_by_branch(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) -> bool {
     /// A piece keeps one guard per arm it sits behind, so the guards copied
     /// grow with the arm count times the statement count.  Bounded for the
@@ -3037,10 +3000,8 @@ fn split_by_branch(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) -> bool 
     /// split anyway.
     const MAX_GUARD_COPIES: usize = 16384;
 
-    // Whether the guards read the same values at every piece.  Unlike
-    // `group_emission_order`'s per-group check this spans every branch at
-    // once: `case s { A: {s = B;} B: {y = 1;} }` runs one branch whole but
-    // both pieces, so it cannot be split at all.
+    // Whether the guards read the same values at every piece: absence from the
+    // offset lists degrades to full width, so they are the coverage authority.
     fn guards_are_stable(guards: &[&ProtoExpression], bodies: &[&[ProtoStatement]]) -> bool {
         let mut guard_reads: HashSet<VarOffset> = HashSet::default();
         let mut ins = vec![];
@@ -3201,14 +3162,8 @@ fn split_by_branch(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) -> bool 
     }
 }
 
-/// [`split_by_branch`] pieces of `stmt`, each tagged with the branch it keeps.
-/// Two pieces tagged differently can never both run; `0` tags a piece that is
-/// not one branch of a conditional and runs whenever the statement does.
-///
-/// The tag is read back off the piece -- a split conditional keeps exactly the
-/// one branch it was made for -- and only where the split actually took the
-/// statement apart per branch, so pieces the deep split happens to leave
-/// looking like a conditional are not mistaken for alternatives.
+/// [`split_by_branch`] pieces of `stmt`, tagged with the branch each keeps
+/// (`0` = not a branch).  Only tagged where the split really was per-branch.
 fn split_tagged_by_branch(
     stmt: &ProtoStatement,
     out: &mut Vec<ProtoStatement>,
@@ -4071,6 +4026,57 @@ fn trace_scc_cycles(sorted: &[ProtoStatement], meta: &ModuleVariableMeta) {
             break; // Print at most a few SCCs.
         }
     }
+}
+
+/// Does `new_of` keep every overlapping (reader, writer) pair pointing the
+/// same way?  Stronger than `compute_required_passes`' metric -- it skips that
+/// metric's `covered` shortcut -- so passing it carries an exact hint.
+fn preserves_edge_directions(sorted: &[ProtoStatement], new_of: &[usize]) -> bool {
+    let mut writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
+    for (pos, stmt) in sorted.iter().enumerate() {
+        let mut outs = vec![];
+        gather_bit_aware_outputs(stmt, &mut outs);
+        for (key, br) in outs {
+            writer_ranges.entry(key).or_default().push((pos, br));
+        }
+    }
+    let mut ins = vec![];
+    let mut outs = vec![];
+    let mut reads = vec![];
+    let mut output_set: HashSet<VarOffset> = HashSet::default();
+    for (pos, stmt) in sorted.iter().enumerate() {
+        ins.clear();
+        outs.clear();
+        stmt.gather_variable_offsets(&mut ins, &mut outs);
+        output_set.clear();
+        output_set.extend(outs.iter().cloned());
+        reads.clear();
+        stmt.gather_reads_with_ranges(&mut reads);
+        for (key, rr) in &reads {
+            if output_set.contains(key) {
+                continue;
+            }
+            let Some(wranges) = writer_ranges.get(key) else {
+                continue;
+            };
+            for (writer_pos, wr) in wranges {
+                if *writer_pos == pos || !ranges_overlap(*wr, *rr) {
+                    continue;
+                }
+                if (*writer_pos < pos) != (new_of[*writer_pos] < new_of[pos]) {
+                    if std::env::var("VERYL_PASS_DIAG").is_ok() {
+                        log::info!(
+                            "pass_diag: reorder moved a dataflow edge: writer #{writer_pos} -> #{} , reader #{pos} -> #{} on {key:?}",
+                            new_of[*writer_pos],
+                            new_of[pos]
+                        );
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Number of eval_comb passes needed for the comb list to converge.
@@ -6395,17 +6401,8 @@ fn rename_versions(
         if mids.iter().any(|&r| blocks[r] != blocks[after]) {
             continue;
         }
-        // A copy earns its place by breaking the WAR edge from a mid-reader to
-        // a later write.  Where every write and every mid-reader is a piece of
-        // ONE conditional and each reader's tag differs from the tags of the
-        // writes after it, that edge is already false -- the sort drops it --
-        // so the copy has nothing to do.  Worse, it is an UNCONDITIONAL read
-        // sitting between mutually exclusive writes, which is exactly the shape
-        // that blocks the one-pass hint.  Decline it.
-        //
-        // Only sound because the sort really does drop that edge; declining
-        // without the exclusivity rule restores the WAR edge and costs the
-        // whole scope its one-pass order.
+        // The WAR edge this copy breaks is false when every write and
+        // mid-reader is a piece of one conditional with differing tags.
         let group = groups[ws[0]];
         if group != 0
             && ws.iter().all(|&w| groups[w] == group)

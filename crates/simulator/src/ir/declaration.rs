@@ -116,32 +116,9 @@ pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStat
     stable_topo_sort_impl(statements, None, None).0
 }
 
-/// Which branch a piece kept, in `split_tagged_by_branch`'s numbering (1-based,
-/// `0` = not one branch of a conditional).  Read back off the piece, as there:
-/// a piece keeps exactly the branch it was made for.  Only meaningful on a
-/// statement whose group is nonzero -- the group id is what says the split
-/// actually took the statement apart per branch.
-///
-/// EXCLUSIVITY, the property the WAR rule leans on: two pieces of the SAME
-/// group with DIFFERENT nonzero tags never both execute.  `split_by_branch`
-/// returns `true` -- the only thing that mints a group -- for exactly two
-/// constructs, and it holds for both:
-///   * `Case`: the piece for arm `b` keeps `arms[..=b]` with only `arms[b]`'s
-///     body, so it runs that body exactly when arm `b` is the first match; the
-///     default piece keeps every arm empty, so it runs exactly when none
-///     matches.  First-match selection makes those disjoint.
-///   * `If` with a condition: a true-piece runs under `cond`, a false-piece
-///     under `!cond`.
-///
-/// Every other statement reaches `split_nested` and returns `false`, so it
-/// keeps group 0 and is never treated as an alternative.  `guards_are_stable`
-/// is what makes the pieces agree on WHICH branch is selected: the split is
-/// declined outright when a body writes a variable a guard reads, so every
-/// piece of a group evaluates the same guards.
-///
-/// SAME tag is NOT exclusive: one branch yields several pieces (one per
-/// write-set group) and they run TOGETHER.  Any rule here must require the
-/// tags to DIFFER, not merely the group to match.
+/// Which branch a piece kept (1-based; `0` = not a branch of a conditional).
+/// Two pieces of one group with DIFFERENT nonzero tags never both run; the
+/// SAME tag does not imply that -- one branch can yield several pieces.
 pub(crate) fn branch_tag(stmt: &ProtoStatement) -> usize {
     match stmt {
         ProtoStatement::Case(x) if !x.default.is_empty() => x.arms.len() + 1,
@@ -176,9 +153,7 @@ pub(crate) fn stable_topo_sort_with_blocks(
 }
 
 /// As [`stable_topo_sort_with_blocks`], plus the conditional each statement is
-/// a per-branch piece of (`0` = not a piece).  Two pieces of one group with
-/// different branch tags never both run, so no write of one can clobber a read
-/// of another -- see [`branch_tag`].
+/// a per-branch piece of (`0` = not a piece) -- see [`branch_tag`].
 pub(crate) fn stable_topo_sort_with_pieces(
     statements: Vec<ProtoStatement>,
     blocks: &[usize],
@@ -293,13 +268,8 @@ fn stable_topo_sort_impl(
     // pairwise-disjoint ranges (per-bit generate assigns).  A later writer
     // never clobbers an earlier one, so the prior-binding and WAR rules
     // would only manufacture false ordering constraints for them.
-    // Two pieces of ONE conditional keeping DIFFERENT branches never both run,
-    // so nothing one writes can reach the other: no write of it can clobber a
-    // read of the other (the WAR rule), and none of them can leave a value in a
-    // slot the other reads (the one-pass hint).  The tags must DIFFER — one
-    // branch yields several pieces sharing a tag and those DO run together.
-    // [`branch_tag`] carries the whole argument, including why only `Case` and
-    // `If` ever mint a group and what `guards_are_stable` contributes.
+    // Two pieces of ONE conditional keeping DIFFERENT branches never both
+    // run, so no value passes between them.
     let exclusive_pieces = |a: usize, b: usize| -> bool {
         let Some(groups) = groups else {
             return false;
@@ -528,13 +498,9 @@ fn stable_topo_sort_impl(
             {
                 adj_sem[writer_idx].insert(reader_idx);
                 cause!(writer_idx, reader_idx, "prior-binding");
-                // Every EARLIER writer of bits this read names has to run too.
-                // Binding only the most recent one leaned on the WAW chain to
-                // carry the rest, and that chain no longer orders a pair whose
-                // writes cannot clobber each other -- a read would then take
-                // the bits an unordered earlier writer had not produced yet.
-                // Wherever the chain does still run it already implied these,
-                // so they constrain nothing the sort was not honouring.
+                // Every EARLIER writer of the bits read must run too: binding
+                // only the most recent leaned on the WAW chain, which no
+                // longer orders non-clobbering pairs.
                 for &w in relevant.iter().take_while(|&&w| w < writer_idx) {
                     adj_sem[w].insert(reader_idx);
                     cause!(w, reader_idx, "prior-binding-earlier");
@@ -594,22 +560,9 @@ fn stable_topo_sort_impl(
         }
     }
 
-    // WAR: a reader between two overlapping writes must precede the later
-    // write, else the re-write clobbers the value it read.  Scoped to a
-    // SAME-block prior (matching the RAW binding) — a cross-block reader
-    // orders after every writer, so a WAR edge would only close a false
-    // cycle.
-    //
     // A write cannot clobber a read that never happens in the same execution:
-    // where reader and writer are pieces of ONE conditional keeping DIFFERENT
-    // branches, exactly one of them runs, so the edge is false.  The per-branch
-    // split is what puts them in the same list at all; without this the sort
-    // orders alternatives against each other and a version copy has to be
-    // inserted to break the edge again (see `rename_versions`).
-    //
-    // The tags must DIFFER.  One branch yields several pieces sharing a tag
-    // and those DO run together — see [`branch_tag`], where the whole argument
-    // lives.
+    // where reader and writer keep DIFFERENT branches of one conditional, the
+    // edge is false.  Same tag does not qualify -- see [`branch_tag`].
     for (reader_idx, reads) in stmt_reads.iter().enumerate() {
         for (key, rr) in reads {
             if split_driver.contains(key) {
@@ -633,18 +586,9 @@ fn stable_topo_sort_impl(
         }
     }
 
-    // WAW: chain writers of a reassigned var so overlapping writes keep source
-    // order.  Skip only when next reaches prev over SEMANTIC edges (a genuine
-    // cycle); a best-effort path does not skip, so write order is kept instead
-    // of being silently inverted.
-    //
-    // Only writes that can CLOBBER each other need ordering.  `split_driver`
-    // answers the variable whose writers are pairwise disjoint throughout, but
-    // one overlapping pair anywhere disqualifies the whole variable, and the
-    // disjoint pairs then chain for nothing -- a false edge between two fields
-    // of a struct written from different blocks is enough to close a ring no
-    // bit takes.  Bind each writer to its nearest PRECEDING overlapping one
-    // instead, so a pair is ordered exactly when one can overwrite the other.
+    // WAW: order writers that can CLOBBER each other.  `split_driver` is
+    // per-variable, so one overlapping pair anywhere would otherwise make
+    // every disjoint pair chain for nothing.
     {
         let mut stack: Vec<usize> = Vec::new();
         let mut visited: HashSet<usize> = HashSet::default();
@@ -686,11 +630,9 @@ fn stable_topo_sort_impl(
                     Some(per_stmt) => {
                         let window = i.saturating_sub(MAX_LOOKBACK);
                         let next_span = per_stmt.get(&next).copied().flatten();
-                        // EVERY overlapping writer before it, not just the
-                        // nearest: chaining consecutive pairs made the order
-                        // transitive, and one edge does not. A disjoint writer
-                        // between two overlapping ones would sever the chain
-                        // and let the later write be scheduled first.
+                        // EVERY overlapping writer before it: chaining
+                        // consecutive pairs made the order transitive, and one
+                        // edge does not.
                         prevs.extend(writer_indices[window..i].iter().copied().filter(|p| {
                             ranges_overlap(per_stmt.get(p).copied().flatten(), next_span)
                         }));

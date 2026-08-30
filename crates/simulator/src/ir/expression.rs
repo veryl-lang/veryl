@@ -450,13 +450,9 @@ impl ProtoExpression {
         }
     }
 
-    /// Bits `[hi:lo]` of an expression each of whose result bits is a function
-    /// of the SAME bit of every operand, so a window of the result is that
-    /// window of each operand.  `None` for any other shape.
-    ///
-    /// Every level must be exactly as wide as its parent: an operand that gets
-    /// widened or sign-extended is not bit-parallel in the bits above its own
-    /// width, and a window there would name the wrong source bits.
+    /// Bits `[hi:lo]` of a bit-parallel expression, or `None`.  Every level must
+    /// be exactly its parent's width: a widened or sign-extended operand is not
+    /// bit-parallel above its own width.
     pub(crate) fn bit_parallel_window(&self, hi: usize, lo: usize) -> Option<ProtoExpression> {
         let width = self.width();
         if width == 0 || lo > hi || hi >= width {
@@ -519,10 +515,8 @@ impl ProtoExpression {
         }
     }
 
-    /// The reads bits `[hi:lo]` of this expression depend on, when it is
-    /// bit-parallel (see [`bit_parallel_window`](Self::bit_parallel_window)).
-    /// `false` — with `out` left as it was — means the caller must fall back
-    /// to the whole-expression gather.
+    /// Reads of bits `[hi:lo]`, when bit-parallel.  `false` -- with `out`
+    /// untouched -- means fall back to the whole-expression gather.
     pub(crate) fn gather_reads_in_window(
         &self,
         hi: usize,

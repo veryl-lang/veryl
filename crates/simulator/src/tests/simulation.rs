@@ -23682,13 +23682,9 @@ fn a_handshake_nested_in_an_arm_is_split_inside_the_arm() {
 
 #[test]
 fn a_handshake_closed_across_two_arms_is_split_per_arm() {
-    // The two halves of the apparent cycle live in DIFFERENT arms: `2'd2`
-    // reads back `valid`, which the block itself drives, while the arm that
-    // makes `valid_pre` depend on `en` is `2'd1`, where `en` comes from `hold`
-    // alone.  No state closes it, so a one-pass order exists.  Splitting the
-    // `case` by write set does not find it -- every group keeps every arm, so
-    // a group's reads stay the union over them -- and the sort then reports a
-    // cycle for a synthesisable circuit.
+    // The two halves of the apparent cycle live in DIFFERENT `case` arms, so a
+    // one-pass order exists -- but a per-write-set split keeps every arm in
+    // every group.
     let code = r#"
     module Top (
         st   : input  logic<2>,
@@ -23771,12 +23767,8 @@ fn a_handshake_closed_across_two_arms_is_split_per_arm() {
 
 #[test]
 fn an_arm_writing_the_selector_keeps_the_case_whole() {
-    // The same false cycle as above, so the per-arm split is reached and does
-    // linearize -- but the first arm writes the SELECTOR.  One `case` picks a
-    // branch once however often the selector changes inside it, while separate
-    // pieces each pick again: `st == 0` takes the arm that sets `s` to 1, and
-    // the next piece would then take the arm for 1 and drive `en` from `hold`.
-    // The split has to decline here.
+    // The first arm writes the SELECTOR: one `case` picks a branch once,
+    // separate pieces each pick again, so the split has to decline.
     let code = r#"
     module Top (
         st   : input  logic<2>,
@@ -23851,12 +23843,9 @@ fn an_arm_writing_the_selector_keeps_the_case_whole() {
 
 #[test]
 fn a_dynamic_element_write_keeps_the_scope_in_source_order() {
-    // The same false cycle again, so the per-arm split is reached -- but the
-    // scope also writes `arr` at a dynamic index, and a dynamic write reports
-    // its first and last element only.  `arr[1]` and `arr[2]` are therefore
-    // written with nothing to order them against `arr[idx]`, and only source
-    // order keeps the dynamic write last.  A phase free to reorder must leave
-    // the scope alone.
+    // A dynamic write names only its first and last element, so only source
+    // order keeps it after `arr[1]`/`arr[2]`; a phase free to reorder must
+    // leave the scope alone.
     let code = r#"
     module Top (
         st   : input  logic<2>,
@@ -23936,13 +23925,9 @@ fn a_dynamic_element_write_keeps_the_scope_in_source_order() {
 
 #[test]
 fn a_dynamic_element_write_holds_only_its_own_block_in_source_order() {
-    // The handshake closed across two arms again, and the same array written
-    // at a dynamic index -- but in a block of its own.  Program order between
-    // the write and the elements it covers without naming is what the array's
-    // block has to keep, and keeping THAT block whole keeps it; the block
-    // that needs the per-branch split shares nothing with the array and must
-    // still get it.  Answering the hazard for the scope instead turned the
-    // split off for every block in it.
+    // Same handshake, plus a dynamic array write in a block of its OWN:
+    // keeping that block whole must not turn the split off for the block that
+    // needs it.
     let code = r#"
     module Top (
         st   : input  logic<2>,
@@ -24038,13 +24023,8 @@ fn a_dynamic_element_write_holds_only_its_own_block_in_source_order() {
 
 #[test]
 fn a_read_and_a_write_in_different_arms_are_not_a_loop() {
-    // Nothing linearizes this scope -- the second block writes the selector
-    // its own `case` picks on, so no split may take it apart -- and the
-    // genuine-loop check then has to answer for the FIRST one.  There `v` is
-    // one group (an arm writes it whole), so the check sees a node that reads
-    // `z` and writes `v[1]`, which `z` is made from: a ring at statement
-    // granularity.  No evaluation walks it -- `v[1]` is a constant wherever
-    // `z` is read -- and per-branch pieces say so.
+    // Nothing linearizes this scope, so the genuine-loop check answers for the
+    // first block: a statement-granularity ring that no evaluation walks.
     let code = r#"
     module Top (
         s  : input  logic<2>,
@@ -24143,12 +24123,8 @@ fn a_read_and_a_write_in_different_arms_are_not_a_loop() {
 
 #[test]
 fn two_arms_reading_each_other_back_are_not_a_loop() {
-    // `2'd1` makes `p` from `q` and `2'd2` makes `q` from `p`, and the `if` in
-    // `2'd0` welds the two into one group so the whole `case` is one node.
-    // Splitting it per branch is what lets `p` and `q` be seen separately --
-    // and then the two arms appear to feed each other.  They are alternatives:
-    // one `case` picks one, so nothing passes between them and the pieces of
-    // one branch are the only ones that may bind each other.
+    // Splitting per branch is what lets `p` and `q` be seen separately -- and
+    // then the two arms appear to feed each other.  They are alternatives.
     let code = r#"
     module Top (
         s : input  logic<2>,
@@ -24278,18 +24254,9 @@ fn two_arms_reading_each_other_back_are_not_a_loop() {
 
 #[test]
 fn struct_members_across_a_boundary_are_not_one_loop() {
-    // One `VarOffset` is the WHOLE struct, so a child driving one member while
-    // its parent drives another from the first reaches itself at variable
+    // One `VarOffset` is the WHOLE struct: a child driving one member while
+    // the parent drives another from it reaches itself at variable
     // granularity though no bit does.
-    //
-    // The member read back has to stay undriven: a second writer of the struct
-    // would bind the read to its last prior writer instead, which orders
-    // forwards and closes no ring.  `strb` is what keeps `incr` a sub-range
-    // rather than the whole variable.
-    //
-    // The `case` is the shape of `an_arm_writing_the_selector_keeps_the_case_whole`
-    // — an arm writes the SELECTOR, so the per-arm split declines and the
-    // genuine-loop check after the splits is reached at all.
     let code = r#"
     package pkg {
         struct cfg_t {
@@ -24400,10 +24367,8 @@ fn struct_members_across_a_boundary_are_not_one_loop() {
 
 #[test]
 fn disjoint_halves_of_a_vector_are_not_one_loop() {
-    // The same shape without a struct or a module boundary: two vectors, each
-    // written in one half and read in the other.  Members of a struct and bits
-    // of a vector share one `VarOffset` alike, so the check has to key on the
-    // bits either way.  The `case` is again the one no granularity linearizes.
+    // The same shape without a struct or module boundary: struct members and
+    // vector bits share one `VarOffset` alike.
     let code = r#"
     #[allow(unassign_variable)]
     module Top (
@@ -25190,17 +25155,9 @@ fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
 
 #[test]
 fn a_bundle_pushed_through_an_inverter_pair_is_split_per_field() {
-    // The shape a hardened block is written in: its outputs are bundled into
-    // one vector, pushed through an anti-optimisation buffer (a double
-    // inversion, so the tool cannot collapse the redundant copies), and
-    // unbundled on the far side.  `ack` genuinely depends on `req`, and `req`
-    // comes straight back from `en` -- but `en` is a CONSTANT in the arm that
-    // reads `req`, so no bit closes a ring.
-    //
-    // Whole-statement granularity closes one anyway, twice over: the inverter
-    // reads the WHOLE bundle to write the whole bundle, and the destructure
-    // keeps the whole source expression and slices it with `rhs_select`, so
-    // every field is welded to every other one.
+    // Outputs bundled into one vector, pushed through a double inversion and
+    // unbundled on the far side: no bit closes a ring, but whole-statement
+    // granularity does.
     let code = r#"
     module Buf #(
         param Width: u32 = 1,
