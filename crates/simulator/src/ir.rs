@@ -503,6 +503,77 @@ impl Ir {
     /// many passes are needed to settle.  No iteration-to-convergence is
     /// required, and no runtime "did anything change?" check is performed.
     pub fn settle_comb(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
+        self.settle_comb_passes(mask_cache, profile);
+        if settle_converge_check() {
+            self.check_settled(mask_cache);
+        }
+    }
+
+    /// `VERYL_SETTLE_CONVERGE_CHECK=1`: one extra pass must change nothing.
+    ///
+    /// UNGATED on purpose -- the cone gate derives its skip decision from the
+    /// same convergence assumption, so a gated pass would agree by
+    /// construction.  Every side effect of the extra pass is rewound.
+    fn check_settled(&self, mask_cache: &mut MaskCache) {
+        let before = self.comb_values.clone();
+        // The extra pass is not free of side effects: the is_ff refinement
+        // pushes write-log entries and `$display` writes the output buffer, so
+        // rewind both as `backend::validate` does.  Restoring only the comb
+        // buffer would leave the check perturbing the run it measures.
+        let ff_before = self.ff_values.clone();
+        let narrow_before = self.write_log_buffer.narrow_count();
+        let wide_before = self.write_log_buffer.wide_count();
+        let out_mark = crate::output_buffer::mark();
+        for x in &self.comb_statements {
+            dispatch_stmt_fast(x, mask_cache);
+        }
+        let after = self.comb_values.clone();
+        // Restore before reporting, so a run under the check that survives the
+        // first divergence still simulates what it would have without it.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                before.as_ptr(),
+                self.comb_values.as_ptr() as *mut u8,
+                before.len(),
+            );
+            std::ptr::copy_nonoverlapping(
+                ff_before.as_ptr(),
+                self.ff_values.as_ptr() as *mut u8,
+                ff_before.len(),
+            );
+            let buf =
+                (&*self.write_log_buffer) as *const _ as *mut crate::ir::write_log::WriteLogBuffer;
+            (*buf).narrow_count = narrow_before;
+            (*buf).wide_count = wide_before;
+        }
+        crate::output_buffer::truncate_to(out_mark);
+        // Bytes the whole-comb backend deliberately leaves stale: chunk-local
+        // intermediates it keeps in registers, which the reference dispatch
+        // above writes.  They have no external reader, so a difference there
+        // is this check's own artefact, not a settle that failed to converge
+        // (`backend::validate` skips the same set for the same reason).
+        let stale = self
+            .whole_comb
+            .as_ref()
+            .map(|w| w.localized_comb_bytes())
+            .unwrap_or(&[]);
+        let localized = |i: usize| {
+            stale
+                .iter()
+                .any(|&(off, nb)| off >= 0 && i >= off as usize && i < off as usize + nb)
+        };
+        for (i, (a, b)) in before.iter().zip(after.iter()).enumerate() {
+            if a != b && !localized(i) {
+                panic!(
+                    "settle did not converge in {} pass(es) ({}): comb byte {i} changed \
+                     {a:#x} -> {b:#x} on an extra pass -- required_comb_passes is too low",
+                    self.required_comb_passes, self.name,
+                );
+            }
+        }
+    }
+
+    fn settle_comb_passes(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
         #[cfg(feature = "profile")]
         {
             profile.settle_comb_count += 1;
@@ -870,6 +941,13 @@ fn write_log_capacity(site_table: &site_table::SiteTable) -> (usize, usize) {
     let narrow_cap = narrow.max(4096);
     let wide_cap = if any_wide { wide.max(64) } else { 0 };
     (narrow_cap, wide_cap)
+}
+
+/// `VERYL_SETTLE_CONVERGE_CHECK=1` — see [`Ir::check_settled`].  Read once:
+/// `settle_comb` runs every cycle.
+fn settle_converge_check() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| env::var("VERYL_SETTLE_CONVERGE_CHECK").as_deref() == Ok("1"))
 }
 
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
