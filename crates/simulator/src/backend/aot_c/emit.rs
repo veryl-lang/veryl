@@ -5332,18 +5332,11 @@ const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
 /// ahead of its prerun / pre-shadow / shadow / replay storage: `[0]` primed,
 /// `[1]` converged, `[2]` auto-off, `[3]` diagnostic reason, `[4..8)` the
 /// dirty streak as a `u32`.
-const GUARD_STATE_HEADER_BYTES: usize = 8;
+use crate::ir::opt::cone_gate::GUARD_STATE_HEADER_BYTES;
 
-/// The dispatcher's epoch re-arm: every `rearm_mask + 1` evals, give
-/// auto-offed segments one more try (mirrors `ConeGateState::tick_rearm`).
-///
-/// An off segment skips the whole maintenance path, so its shadow and replay
-/// bytes are frozen at the eval it expired on and say nothing about the state
-/// an epoch later.  The primed and converged flags must therefore be cleared
-/// with the off flag: left standing, the first check after the re-arm can
-/// match that stale shadow and skip the segment, writing its equally stale
-/// replay bytes over live storage.  Zeroing the whole header forces the
-/// priming run that refreshes them.
+/// Epoch re-arm: every `rearm_mask + 1` evals, retry the auto-offed segments
+/// (mirrors `ConeGateState::tick_rearm`).  Zero the WHOLE header: an off
+/// segment stopped refreshing shadow/replay, so a stale match could skip.
 fn cone_gate_rearm_preamble(state_offs: &[u32], rearm_mask: u64) -> String {
     if state_offs.is_empty() || rearm_mask == u64::MAX {
         return String::new();
@@ -5986,13 +5979,8 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let shadow_abs = prerun_abs + be + pb;
                 let replay_abs = prerun_abs + be + pb + cb;
                 // An off segment never consults its shadows, so the whole
-                // maintenance path (pre-run snapshots, convergence check,
-                // shadow/replay refresh) is skipped too — it costs exactly
-                // the plain chunk calls, mirroring the Rust-side
-                // `before_run`/`refresh` early returns.  That leaves the
-                // stored bytes stale, which is why the epoch re-arm clears
-                // the primed flag with the off one (see
-                // `cone_gate_rearm_preamble`).
+                // maintenance path is skipped -- mirroring the Rust
+                // `before_run`/`refresh` early returns.
                 unit.push_str(&format!(
                     "    {{ uint8_t *cgst = comb_values + {st:#x};\n\
                      \x20     int cg_run = 1;\n\
@@ -9618,11 +9606,8 @@ mod tests {
 
     #[test]
     fn cone_gate_rearm_clears_the_whole_guard_header() {
-        // A re-armed guard must run once before it may skip again: an
-        // auto-offed segment stops maintaining its shadow and replay bytes, so
-        // they are an epoch stale by the time the retry arrives.  Clearing
-        // only the off flag lets the first check match that stale shadow and
-        // skip, replaying dead bytes over live storage.
+        // A re-armed guard must run once before it may skip again; its shadow
+        // and replay bytes went stale while it was off.
         let c =
             cone_gate_rearm_preamble(&[0x40, 0x1c0], crate::ir::opt::cone_gate::REARM_EVALS - 1);
         assert!(

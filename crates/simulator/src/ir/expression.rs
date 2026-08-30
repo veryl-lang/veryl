@@ -1789,11 +1789,9 @@ fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
     expr_context.width = width;
 }
 
-/// Grow `expr` to `width` bits for a position where the node itself carries
-/// the width -- a concatenation element or a struct-literal field, whose bit
-/// count decides where everything below it lands. A widening `as` cast lowers
-/// to its operand, so the node can be narrower than the width the analyzer
-/// gave it. The extension follows the operand's signedness, like SV's `N'(x)`.
+/// Grow `expr` to `width` bits.  A widening `as` cast lowers to its operand,
+/// so a node can be narrower than its analyzer width; extend by the OPERAND's
+/// signedness, like `N'(x)`.
 fn extend_to_width(mut expr: ProtoExpression, width: usize) -> ProtoExpression {
     if matches!(expr, ProtoExpression::Value { .. }) {
         fit_literal_width(&mut expr, width);
@@ -2683,12 +2681,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let mut elements = Vec::new();
                 for (expr, rep) in items {
                     let mut converted: ProtoExpression = Conv::conv(context, expr)?;
-                    // A concatenation element is self-determined: it must
-                    // contribute its TYPE's width, which is what the analyzer
-                    // summed to size the whole concatenation. A widening `as`
-                    // cast lowers to its operand (only a wider parent context
-                    // re-establishes the width, and an element has none), so
-                    // extend it or everything below it shifts down.
+                    // A concatenation element is self-determined: it
+                    // contributes its own width, so a widening cast must be
+                    // materialised rather than lowered to its operand.
                     if let Some(elem_width) = expr.comptime().r#type.total_width() {
                         converted = extend_to_width(converted, elem_width);
                     }

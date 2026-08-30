@@ -69,23 +69,46 @@ fn mark_seen_and_is_recurring(component_key: *const air::Component, top_id: u64)
     }
 }
 
-/// Whether a child instance's ports alias the parent slot they're wired to.
-/// Aliasing bakes parent offsets into the child's chunk, blocking the single-
-/// delta relocation reuse needs — so de-alias only the DUT boundary (the topmost
-/// component recurring across tests) and keep everything else aliased.
+/// A child instance's alias decision, plus the recurrence the caller needs to
+/// carry down the hierarchy (see `AliasDecision::recurring`).
+pub struct AliasDecision {
+    /// Whether the child's ports alias the parent slot they're wired to.
+    pub alias_enabled: bool,
+    /// Whether this component is instantiated under two or more test tops.
+    /// The caller ANDs it along the instance path so a boundary below an
+    /// unshared ancestor is never de-aliased.  The two early returns below
+    /// report `false`; neither consults the chain.
+    pub recurring: bool,
+}
+
+/// `unshared_ancestor` says an instance between the test top and this one does
+/// NOT recur.  De-aliasing under one replaces shared storage with a
+/// whole-variable copy per port, and such a copy fuses every bit of a packed
+/// struct into one dependency node -- enough to close a ring no bit closes.
+/// Blunt, deliberately: a component recurring only under per-test wrappers
+/// loses reuse it could have had.  The copy's granularity is the real defect.
 pub fn port_alias_enabled(
     component_key: *const air::Component,
     own_ff_bytes: usize,
     own_comb_bytes: usize,
     in_reuse_dut: bool,
+    unshared_ancestor: bool,
     test_top_id: u64,
     dut_reuse: bool,
-) -> bool {
+) -> AliasDecision {
     if std::env::var("VERYL_DISABLE_PORT_ALIAS").as_deref() == Ok("1") {
-        return false; // blunt override: de-alias every boundary (bring-up)
+        // blunt override: de-alias every boundary (bring-up)
+        return AliasDecision {
+            alias_enabled: false,
+            recurring: false,
+        };
     }
     if !dut_reuse {
-        return true; // reuse off: keep all boundaries aliased (no global state touched)
+        // reuse off: keep all boundaries aliased (no global state touched)
+        return AliasDecision {
+            alias_enabled: true,
+            recurring: false,
+        };
     }
     // `mark_seen` is order-dependent (first seer wins): two tests reaching a
     // shared component in different orders leave it in different alias states —
@@ -96,9 +119,14 @@ pub fn port_alias_enabled(
         Some(r) => r,
         None => mark_seen_and_is_recurring(component_key, test_top_id),
     };
-    let is_dut_boundary =
-        recurring && !in_reuse_dut && (own_ff_bytes + own_comb_bytes) >= dut_reuse_min_bytes();
-    !is_dut_boundary
+    let is_dut_boundary = recurring
+        && !unshared_ancestor
+        && !in_reuse_dut
+        && (own_ff_bytes + own_comb_bytes) >= dut_reuse_min_bytes();
+    AliasDecision {
+        alias_enabled: !is_dut_boundary,
+        recurring,
+    }
 }
 
 /// Components (by `Arc` pointer) that recur across >= 2 test tops, precomputed

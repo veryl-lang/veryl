@@ -173,6 +173,11 @@ pub struct RtSegment {
 /// After this many consecutive dirty checks a segment stops being checked:
 /// on a workload where the subtree is genuinely active, even the bounded
 /// compare cost is pure loss, and the streak proves it cannot pay here.
+/// Bytes a guard's runtime state reserves ahead of its shadow/replay bytes:
+/// `primed`, `converged`, `off`, `streak`.  The emitter offsets from it and
+/// the allocator sizes with it, so it lives here rather than in either.
+pub(crate) const GUARD_STATE_HEADER_BYTES: usize = 8;
+
 const AUTO_OFF_STREAK: u32 = 1024;
 
 /// Every this many settle passes, auto-offed segments get re-armed for one

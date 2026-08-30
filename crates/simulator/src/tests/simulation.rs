@@ -4226,11 +4226,9 @@ fn concatenation_repeat() {
 
 #[test]
 fn concat_element_widening_cast() {
-    // A widening `as` cast lowers to its operand, so in concatenation-element
-    // position the element used to contribute the OPERAND's bits: `{8'hA5, a
-    // as 24, 8'h5A}` collapsed to the 20-bit `{8'hA5, a, 8'h5A}`, shifting
-    // everything below the cast down.  `c1` (narrowing) and `c2` (the cast
-    // hoisted to a variable) were always right and must stay right.
+    // A widening `as` cast lowers to its operand, so the element contributed
+    // the OPERAND's bits: `{8'hA5, a as 24, 8'h5A}` collapsed to 28, shifting
+    // `8'h5A` down.
     let code = r#"
     module Top (
         a : input  logic<12>,
@@ -25338,6 +25336,107 @@ fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
             config.use_4state,
         );
     }
+}
+
+/// Enabling reuse must leave a test's own (unshared) design untouched --
+/// de-aliasing below an unshared instance can close a false ring (see
+/// `port_alias_enabled`).
+#[test]
+fn dut_reuse_does_not_dealias_below_an_unshared_instance() {
+    let code = r#"
+    package reuse_pkg {
+        struct Bus {
+            x: logic,
+            y: logic,
+        }
+    }
+
+    // Shared: `ShallowTop` instantiates it directly, `DeepTop` through `Wrap`.
+    // `pad` keeps it over the DUT size floor (VERYL_DUT_REUSE_MIN_BYTES).
+    module Sub (
+        req: input  logic          ,
+        hw : output reuse_pkg::Bus ,
+        pad: output logic<2048>    ,
+    ) {
+        assign hw.x = req;
+        assign hw.y = 1'b1;
+        assign pad  = 2048'd0;
+    }
+
+    // Unshared: only `DeepTop` instantiates it.  `r` reads `w.y` alone, so
+    // `hw.x`'s dependence on `req` closes no real ring.
+    module Wrap (
+        o : output logic      ,
+        op: output logic<2048>,
+    ) {
+        var w: reuse_pkg::Bus;
+        var r: logic         ;
+        inst u: Sub (
+            req: r ,
+            hw : w ,
+            pad: op,
+        );
+        assign r = w.y;
+        assign o = r;
+    }
+
+    module DeepTop (
+        o : output logic      ,
+        op: output logic<2048>,
+    ) {
+        inst d: Wrap (
+            o : o ,
+            op: op,
+        );
+    }
+
+    module ShallowTop (
+        req: input  logic          ,
+        hw : output reuse_pkg::Bus ,
+        pad: output logic<2048>    ,
+    ) {
+        inst u: Sub (
+            req: req,
+            hw : hw ,
+            pad: pad,
+        );
+    }
+    "#;
+
+    let air_ir = analyze_air(code);
+
+    let off = Config {
+        dut_reuse: false,
+        ..Default::default()
+    };
+    let on = Config {
+        dut_reuse: true,
+        ..off.clone()
+    };
+
+    let deep_off = build_ir(&air_ir, "DeepTop".into(), &off).unwrap();
+    let shallow_off = build_ir(&air_ir, "ShallowTop".into(), &off).unwrap();
+
+    crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
+
+    let deep_on = build_ir(&air_ir, "DeepTop".into(), &on).unwrap();
+    assert_eq!(
+        (deep_off.comb_values.len(), deep_off.comb_statements.len()),
+        (deep_on.comb_values.len(), deep_on.comb_statements.len()),
+        "reuse changed a design no other test shares: `Sub` sits under the \
+         unshared `Wrap`, so its ports must stay aliased"
+    );
+
+    // The boundary reuse IS for — the shared component directly under the test
+    // top — must still de-alias, or the check above passes for the wrong reason.
+    let shallow_on = build_ir(&air_ir, "ShallowTop".into(), &on).unwrap();
+    assert!(
+        shallow_on.comb_values.len() > shallow_off.comb_values.len(),
+        "the shared DUT directly under the top must still de-alias \
+         (comb bytes {} -> {})",
+        shallow_off.comb_values.len(),
+        shallow_on.comb_values.len()
+    );
 }
 
 #[test]
