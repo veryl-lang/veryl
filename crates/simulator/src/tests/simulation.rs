@@ -24099,34 +24099,30 @@ fn a_reader_between_two_writes_gets_the_earlier_version() {
 }
 
 #[test]
-fn a_flop_on_an_inverted_clock_fires_one_step_later() {
-    // `~clk` reaches the master input clock, so it is classified as a gated
-    // clock and offered the master's RISING edge -- which is exactly when an
-    // inversion falls.  It used to fire never.
-    //
-    // The step it lands on is measured, not chosen: a scan-chain output
-    // flopped on an inverted clock tracks its golden over a hundred steps
-    // only if the edge takes effect at the top of the NEXT step.
+fn a_falling_edge_flop_fires_inside_the_step_that_contains_the_fall() {
+    // One `step` is a full period with the master's fall inside it (see
+    // `fire_derived_clock_batch`), so a testbench reading between two
+    // `clk.next(1)` calls reads after the fall.  Golden from the emitted SV:
+    // at the end of period k, `cnt`, `seen_n` and `seen_i` all read k.
     let code = r#"
     module Top (
-        clk: input  '_ clock,
-        d  : input  logic   ,
-        p  : output logic   ,
-        n  : output logic   ,
+        clk   : input  '_ clock  ,
+        cnt   : output logic<8>  ,
+        seen_n: output logic<8>  ,
+        seen_i: output logic<8>  ,
     ) {
-        let clk_l: '_ clock = ~clk;
-
-        var pi: logic;
-        var ni: logic;
+        let clk_n: '_ clock_negedge = clk;
+        let clk_i: '_ clock         = ~clk;
 
         always_ff (clk) {
-            pi = d;
+            cnt = cnt + 1;
         }
-        always_ff (clk_l) {
-            ni = pi;
+        always_ff (clk_n) {
+            seen_n = cnt;
         }
-        assign p = pi;
-        assign n = ni;
+        always_ff (clk_i) {
+            seen_i = cnt;
+        }
     }
     "#;
 
@@ -24141,30 +24137,32 @@ fn a_flop_on_an_inverted_clock_fires_one_step_later() {
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
         let clk = sim.get_clock("clk").unwrap();
-        sim.set("d", Value::new(1, 1, false));
-        sim.step(&clk);
-        assert_eq!(
-            sim.get("p").unwrap(),
-            Value::new(1, 1, false),
-            "the posedge flop takes d on the first edge (JIT={} 4st={})",
-            config.use_jit,
-            config.use_4state,
-        );
-        assert_eq!(
-            sim.get("n").unwrap(),
-            Value::new(0, 1, false),
-            "the inverted-clock flop has not seen its edge yet (JIT={} 4st={})",
-            config.use_jit,
-            config.use_4state,
-        );
-        sim.step(&clk);
-        assert_eq!(
-            sim.get("n").unwrap(),
-            Value::new(1, 1, false),
-            "the inverted-clock flop fires one step later (JIT={} 4st={})",
-            config.use_jit,
-            config.use_4state,
-        );
+        for k in 1..=5u64 {
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("cnt").unwrap(),
+                Value::new(k, 8, false),
+                "the posedge counter at step {k} (JIT={} 4st={})",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("seen_n").unwrap(),
+                Value::new(k, 8, false),
+                "the clock_negedge flop samples this step's committed counter \
+                 at step {k} (JIT={} 4st={})",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("seen_i").unwrap(),
+                Value::new(k, 8, false),
+                "the `~clk` flop samples this step's committed counter at \
+                 step {k} (JIT={} 4st={})",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
     }
 }
 

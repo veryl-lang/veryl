@@ -825,12 +825,10 @@ fn gated_clock_closure_order_with_a_backward_edge() {
     );
 }
 
-/// The Caliptra shape: the gate is a cell two levels down, its output leaves
-/// through two module output ports as plain logic, the `clock` object is
-/// formed at the consumer, and it is handed down two more input ports before
-/// it reaches the flop.  `test_caliptra_top_k23` part A covers the cell with
-/// the instance, the `clock` object and the flop all in one module; nothing
-/// covered the ports.
+/// The hardened-cell shape: the gate is a cell two levels down, its output
+/// leaves through two module output ports as plain logic, the `clock` object
+/// is formed at the consumer, and it is handed down two more input ports
+/// before it reaches the flop.  Nothing covered the ports.
 ///
 /// The check is a GATED-EDGE COUNT against a shadow counter on the master
 /// clock, so a gate that opens a cycle early or late fails too; `o_tot`
@@ -958,5 +956,53 @@ fn gated_clock_through_module_ports_at_depth() {
             "gate never opened, {config:?}"
         );
         assert_ne!(gated, total, "gate never closed, {config:?}");
+    }
+}
+
+#[test]
+fn a_clock_chained_off_a_negedge_flop_keeps_running() {
+    // The flop's rise happens inside the end-of-step fall batch.  Nothing
+    // outside that batch can see it: the snapshot taken right after records
+    // the new level, so a rise left unfired there is lost for good and the
+    // whole downstream domain stops.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+        o_hlf: output    logic,
+    ) {
+        let clk_n: '_ clock_negedge = i_clk;
+        var half: logic;
+        always_ff (clk_n, i_rst) {
+            if_reset { half = 0; } else { half = !half; }
+        }
+        let clk_half: '_ clock = half;
+        always_ff (clk_half, i_rst) {
+            if_reset { o_cnt = 0; } else { o_cnt += 1; }
+        }
+        assign o_hlf = half;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for step in 1..=6u64 {
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("o_hlf").unwrap().payload_u128() as u64,
+                step % 2,
+                "the source flop must toggle every step, {config:?}"
+            );
+            assert_eq!(
+                sim.get("o_cnt").unwrap().payload_u128() as u64,
+                step.div_ceil(2),
+                "step {step}: the chained domain must advance on every rise, {config:?}"
+            );
+        }
     }
 }

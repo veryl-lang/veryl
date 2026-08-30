@@ -4349,8 +4349,8 @@ impl Conv<&air::Module> for ProtoModule {
                 {
                     connect.event_var = nested_derived_clock_candidates
                         .iter()
-                        .find(|(_, offset, _, _)| offset == var_offset)
-                        .map(|(vid, _, _, _)| *vid)
+                        .find(|(_, offset, _, _, _)| offset == var_offset)
+                        .map(|(vid, _, _, _, _)| *vid)
                         .or_else(|| {
                             context
                                 .scope()
@@ -4435,7 +4435,7 @@ impl Conv<&air::Module> for ProtoModule {
                     note_meta(&m.variable_meta, false, &mut blocklist);
                     stack.extend(m.children.iter());
                 }
-                for (_, off, _, _) in &nested_derived_clock_candidates {
+                for (_, off, _, _, _) in &nested_derived_clock_candidates {
                     if let VarOffset::Comb(o) = off {
                         blocklist.insert(*o);
                     }
@@ -4499,7 +4499,7 @@ impl Conv<&air::Module> for ProtoModule {
             }
             // Child-instance clock vars: only reader is `always_ff` sensitivity
             // (invisible to DCE); dropping the writer starves partial_settle.
-            for (_, off, _, _) in &nested_derived_clock_candidates {
+            for (_, off, _, _, _) in &nested_derived_clock_candidates {
                 protect.insert(*off);
             }
             // Component input connections read these offsets but appear in no
@@ -4528,7 +4528,7 @@ impl Conv<&air::Module> for ProtoModule {
             {
                 let mut extra_offsets: Vec<VarOffset> =
                     Vec::with_capacity(nested_derived_clock_candidates.len());
-                for (_, off, _, _) in &nested_derived_clock_candidates {
+                for (_, off, _, _, _) in &nested_derived_clock_candidates {
                     extra_offsets.push(*off);
                 }
                 for external in &all_external_components {
@@ -4699,7 +4699,7 @@ impl Conv<&air::Module> for ProtoModule {
             for child in &mut all_child_modules {
                 comb_layout::translate_meta_tree(child, &sched);
             }
-            for (_, off, _, _) in &mut nested_derived_clock_candidates {
+            for (_, off, _, _, _) in &mut nested_derived_clock_candidates {
                 *off = sched.translate_off(*off);
             }
             for external in &mut all_external_components {
@@ -4930,7 +4930,7 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                 }
             }
-            for (_, off, _, _) in &nested_derived_clock_candidates {
+            for (_, off, _, _, _) in &nested_derived_clock_candidates {
                 block_vo.insert(*off);
             }
             let mut block: HashSet<isize> = HashSet::default();
@@ -5160,10 +5160,11 @@ impl Conv<&air::Module> for ProtoModule {
                 .variables
                 .iter()
                 .filter(|(vid, var)| var.r#type.is_clock() && !port_var_set.contains(*vid))
-                .filter_map(|(vid, _)| {
+                .filter_map(|(vid, var)| {
                     let meta = variable_meta.get(vid)?;
                     let elem = meta.elements.first()?;
-                    Some((*vid, elem.current, elem.native_bytes, None))
+                    let negedge = matches!(var.r#type.kind, air::TypeKind::ClockNegedge);
+                    Some((*vid, elem.current, elem.native_bytes, None, negedge))
                 })
                 .collect();
             // The top module's own async resets, for the same reason the
@@ -5189,7 +5190,13 @@ impl Conv<&air::Module> for ProtoModule {
                     && let Some(meta) = variable_meta.get(vid)
                     && let Some(elem) = meta.elements.first()
                 {
-                    dc_vars.push((*vid, elem.current, elem.native_bytes, Some(active_low)));
+                    dc_vars.push((
+                        *vid,
+                        elem.current,
+                        elem.native_bytes,
+                        Some(active_low),
+                        false,
+                    ));
                 }
             }
             // Nested candidates already carry absolute (parent-rebased)
@@ -5197,10 +5204,10 @@ impl Conv<&air::Module> for ProtoModule {
             // so a clock-typed input port re-exported through aliasing
             // can't be added twice.
             let mut seen: crate::HashSet<(VarId, VarOffset)> =
-                dc_vars.iter().map(|(v, o, _, _)| (*v, *o)).collect();
-            for (vid, off, nb, polarity) in nested_derived_clock_candidates.drain(..) {
+                dc_vars.iter().map(|(v, o, _, _, _)| (*v, *o)).collect();
+            for (vid, off, nb, polarity, negedge) in nested_derived_clock_candidates.drain(..) {
                 if seen.insert((vid, off)) {
-                    dc_vars.push((vid, off, nb, polarity));
+                    dc_vars.push((vid, off, nb, polarity, negedge));
                 }
             }
             // "Input clock" candidates: top-module clock-typed variables

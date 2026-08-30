@@ -34,6 +34,9 @@ pub struct DerivedClock {
     /// fires pre-commit with the master edge (ICG semantics) instead of
     /// in the post-commit loop.  See `step_with_derived_clocks`.
     pub master_gated: bool,
+    /// Declared `clock_negedge`: the active edge is the net's FALL, so the
+    /// monitored bit is read inverted and every 0→1 test below means "fell".
+    pub negedge: bool,
 }
 
 /// An internally produced async reset, monitored for its ASSERTION.
@@ -48,9 +51,10 @@ pub struct DerivedReset {
     pub active_low: bool,
 }
 
-/// A net to monitor: `(var, offset, native bytes, polarity)`, where the
-/// polarity is `None` for a clock and `Some(active_low)` for an async reset.
-pub type EdgeCandidate = (VarId, VarOffset, usize, Option<bool>);
+/// A net to monitor: `(var, offset, native bytes, polarity, negedge)`, where
+/// the polarity is `None` for a clock and `Some(active_low)` for an async
+/// reset, and `negedge` marks a `clock_negedge` (meaningless for a reset).
+pub type EdgeCandidate = (VarId, VarOffset, usize, Option<bool>, bool);
 
 #[derive(Clone, Debug, Default)]
 pub struct DerivedClockSchedule {
@@ -103,18 +107,19 @@ pub fn build_schedule(
 
     let mut clocks: Vec<DerivedClock> = candidates
         .iter()
-        .filter(|(_, off, _, polarity)| polarity.is_none() && driven(off))
-        .map(|(var_id, off, nb, _)| DerivedClock {
+        .filter(|(_, off, _, polarity, _)| polarity.is_none() && driven(off))
+        .map(|(var_id, off, nb, _, negedge)| DerivedClock {
             var_id: *var_id,
             current_offset: *off,
             native_bytes: *nb,
             master_gated: false,
+            negedge: *negedge,
         })
         .collect();
 
     let resets: Vec<DerivedReset> = candidates
         .iter()
-        .filter_map(|(var_id, off, nb, polarity)| {
+        .filter_map(|(var_id, off, nb, polarity, _)| {
             polarity
                 .filter(|_| driven(off))
                 .map(|active_low| DerivedReset {

@@ -1244,7 +1244,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     intern(*v, context);
                 }
             }
-            for (v, _, _, _) in &reuse.derived_clock_candidates {
+            for (v, _, _, _, _) in &reuse.derived_clock_candidates {
                 intern(*v, context);
             }
             let rekey = |ev: Event| -> Event {
@@ -1265,7 +1265,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             all_derived_clock_candidates = reuse
                 .derived_clock_candidates
                 .into_iter()
-                .map(|(v, off, nb, pol)| (id_map.get(&v).copied().unwrap_or(v), off, nb, pol))
+                .map(|(v, off, nb, pol, neg)| {
+                    (id_map.get(&v).copied().unwrap_or(v), off, nb, pol, neg)
+                })
                 .collect();
             // Reserve the full region the reference conv consumed (declared
             // vars + function-local / temporary allocations + the whole nested
@@ -1783,6 +1785,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                             elem.current,
                             elem.native_bytes,
                             Some(active_low),
+                            false,
                         ));
                     }
                 }
@@ -1800,6 +1803,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     elem.current,
                     elem.native_bytes,
                     None,
+                    matches!(var.r#type.kind, air::TypeKind::ClockNegedge),
                 ));
             }
         }

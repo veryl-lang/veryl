@@ -103,10 +103,6 @@ pub struct Simulator {
     /// The async-reset assertion edge to evaluate alongside this step's clock
     /// event, taken once.  See `step_in_reset`.
     pending_assertion_edge: Option<Event>,
-    /// Derived clocks that rose when the master fell at the end of the last
-    /// step.  Fired at the top of the next one so the edge lands in the
-    /// period that follows it, the way a negedge flop reads to a sampler.
-    pending_negedge_clocks: SmallVec<[usize; 8]>,
     /// Settle filter (`VERYL_SETTLE_FILTER=0` opts out): variable spans of
     /// FF storage annotated with whether the comb can read them.  With it,
     /// `comb_dirty` is maintained precisely, so a step that changes no comb
@@ -419,7 +415,6 @@ impl Simulator {
             trace_dump_vars: Vec::new(),
             component_event_override: None,
             pending_assertion_edge: None,
-            pending_negedge_clocks: SmallVec::new(),
             settle_filter: None,
             clock_toggle_dirties: true,
             dirty_events: Default::default(),
@@ -769,9 +764,12 @@ impl Simulator {
         ret
     }
 
-    /// LSB of a 1-bit derived clock.  X/Z → 0 (matches posedge SV rule).
+    /// 1 while a derived clock reads its ACTIVE level, so every edge test is
+    /// a 0→1 transition whichever edge the declared type selects.  X/Z → 0
+    /// (matches the posedge SV rule).
     fn read_derived_clock_bit(&self, clk: &crate::ir::DerivedClock) -> u8 {
-        self.read_edge_bit(clk.current_offset, clk.native_bytes)
+        let bit = self.read_edge_bit(clk.current_offset, clk.native_bytes);
+        if clk.negedge { 1 - bit } else { bit }
     }
 
     /// 1 while a derived reset reads its ASSERTED level, so the assertion
@@ -786,6 +784,72 @@ impl Simulator {
         for i in 0..self.ir.derived_clock_schedule.resets.len() {
             let rst = &self.ir.derived_clock_schedule.resets[i];
             self.prev_derived_reset_asserted[i] = self.read_derived_reset_asserted(rst);
+        }
+    }
+
+    /// Fire `Event::Clock` for a batch of derived clocks that reached their
+    /// active level together, as one event region.  The caller must have
+    /// settled first.
+    fn fire_derived_clock_batch(&mut self, batch: &[usize]) {
+        self.fire_derived_clock_batch_once(batch);
+        self.settle_comb_if_stale();
+        // A clock that rose BECAUSE this batch committed reaches its own
+        // blocks here, in the same half period -- the rule the reset chain
+        // below already follows.  It cannot be left to the next step: the
+        // end-of-step snapshot records the new level, so the post-commit
+        // chain loop would see no edge and the domain would never run.
+        let n = self.ir.derived_clock_schedule.clocks.len();
+        for _ in 0..n {
+            let mut chained: SmallVec<[usize; 4]> = SmallVec::new();
+            for i in 0..n {
+                let clk = &self.ir.derived_clock_schedule.clocks[i];
+                // Master-gated combinational clocks are the caller's to fire.
+                if !clk.current_offset.is_ff() && clk.master_gated {
+                    continue;
+                }
+                if self.prev_derived_clock_values[i] == 0 && self.read_derived_clock_bit(clk) == 1 {
+                    chained.push(i);
+                }
+            }
+            if chained.is_empty() {
+                break;
+            }
+            for &i in &chained {
+                self.prev_derived_clock_values[i] = 1;
+            }
+            self.fire_derived_clock_batch_once(&chained);
+            self.settle_comb_if_stale();
+        }
+        // The batch can have asserted an async reset; that reaches its
+        // blocks here, in the same half period.
+        self.fire_asserted_derived_resets();
+    }
+
+    fn fire_derived_clock_batch_once(&mut self, batch: &[usize]) {
+        let watch_enabled = !self.watch_vars.is_empty();
+        let has_components = !self.components.is_empty();
+        for &i in batch {
+            let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+            if has_components {
+                self.stage_components(&Event::Clock(vid));
+            }
+        }
+        if watch_enabled {
+            self.dump_watch("before_negedge_batch");
+        }
+        for &i in batch {
+            let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+            self.eval_event_stmts(&Event::Clock(vid));
+        }
+        self.commit_event_log();
+        if watch_enabled {
+            self.dump_watch("after_negedge_batch");
+        }
+        for &i in batch {
+            let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
+            if has_components {
+                self.fire_components(&Event::Clock(vid));
+            }
         }
     }
 
@@ -1717,40 +1781,6 @@ impl Simulator {
 
         let has_eval_chunk = !self.ir.derived_clock_eval_stmts.is_empty();
 
-        // The negedge the previous step ended on lands here, before this
-        // step's rising edge.
-        if !self.pending_negedge_clocks.is_empty() {
-            let pending = std::mem::take(&mut self.pending_negedge_clocks);
-            let has_components = !self.components.is_empty();
-            for &i in &pending {
-                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
-                if has_components {
-                    self.stage_components(&Event::Clock(vid));
-                }
-            }
-            if watch_enabled {
-                self.dump_watch("before_negedge_batch");
-            }
-            for &i in &pending {
-                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
-                self.eval_event_stmts(&Event::Clock(vid));
-            }
-            self.commit_event_log();
-            if watch_enabled {
-                self.dump_watch("after_negedge_batch");
-            }
-            for &i in &pending {
-                let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
-                if has_components {
-                    self.fire_components(&Event::Clock(vid));
-                }
-            }
-            self.settle_comb_if_stale();
-            // The batch can have asserted an async reset; that reaches its
-            // blocks here, not at the master edge that follows.
-            self.fire_asserted_derived_resets();
-        }
-
         // Master high → gated-clock exprs see the rising edge.
         if let Some(id) = master_id_opt {
             self.set_input_clock_bit(id, 1);
@@ -1968,10 +1998,15 @@ impl Simulator {
             if has_eval_chunk {
                 self.ir.partial_settle(&mut self.mask_cache);
             }
-            // A clock the master inverts rises HERE.  The pre-commit phase
-            // fires on the master's rising edge, where an inversion falls,
-            // and the post-commit loop skips master-gated clocks -- so
-            // without this a `~clk` flop never fires at all.
+            // A clock the master inverts -- `~clk`, or a `clock_negedge`
+            // whose active level `read_derived_clock_bit` inverts -- reaches
+            // its active level HERE.  The pre-commit phase fires on the
+            // master's rising edge, where an inversion falls, and the
+            // post-commit loop skips master-gated clocks, so this is the only
+            // place such a flop can fire.  It fires in place, not next step:
+            // the fall is at `time + high_time`, inside this step, so a
+            // testbench reading between two `clk.next(1)` calls is reading
+            // after it.
             let mut fall: SmallVec<[usize; 8]> = SmallVec::new();
             for (i, high) in high_values.iter().enumerate() {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
@@ -1989,8 +2024,8 @@ impl Simulator {
                     let clk = &self.ir.derived_clock_schedule.clocks[*i];
                     self.read_derived_clock_bit(clk) == 1
                 });
+                self.fire_derived_clock_batch(&fall);
             }
-            self.pending_negedge_clocks = fall;
         }
 
         for i in 0..n {
