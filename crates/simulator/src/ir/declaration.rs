@@ -135,6 +135,61 @@ pub(crate) fn stable_topo_sort_with_blocks(
     stable_topo_sort_impl(statements, Some(blocks))
 }
 
+/// ` @file:line` for a diagnostic, empty when the statement carries no token.
+fn where_stmt(stmt: &ProtoStatement) -> String {
+    match stmt.token() {
+        Some(t) => {
+            let src = t.beg.source.to_string();
+            let file = src.rsplit('/').next().unwrap_or(&src).to_string();
+            format!(" @{file}:{}", t.beg.line)
+        }
+        None => String::new(),
+    }
+}
+
+/// ` [blk @file:line]` for a diagnostic: a generated statement carries no token
+/// of its own, so name the source block it was flattened from through the
+/// nearest sibling that does.
+fn where_block(statements: &[ProtoStatement], blocks: Option<&[usize]>, idx: usize) -> String {
+    let Some(blocks) = blocks else {
+        return String::new();
+    };
+    let block = blocks[idx];
+    let sibling = (0..statements.len())
+        .filter(|i| blocks[*i] == block)
+        .find_map(|i| statements[i].token().filter(|t| *t != Default::default()));
+    match sibling {
+        Some(t) => {
+            let src = t.beg.source.to_string();
+            let file = src.rsplit('/').next().unwrap_or(&src).to_string();
+            format!(" [blk @{file}:{}]", t.beg.line)
+        }
+        None => format!(" [blk {block}]"),
+    }
+}
+
+/// ` <Kind tag=N/M>` for a diagnostic: the branch a per-branch piece kept, read
+/// back off the piece the way [`crate::ir::module::split_tagged_by_branch`]
+/// does, and how many arms it carries.
+fn where_branch(stmt: &ProtoStatement) -> String {
+    match stmt {
+        ProtoStatement::Case(x) if !x.default.is_empty() => {
+            format!(" <Case tag=default/{}>", x.arms.len())
+        }
+        ProtoStatement::Case(x) => format!(
+            " <Case tag={:?}/{}>",
+            x.arms.iter().position(|arm| !arm.body.is_empty()),
+            x.arms.len()
+        ),
+        ProtoStatement::If(x) if !x.true_side.is_empty() => " <If tag=true>".to_string(),
+        ProtoStatement::If(x) if !x.false_side.is_empty() => " <If tag=false>".to_string(),
+        ProtoStatement::If(_) => " <If tag=empty>".to_string(),
+        ProtoStatement::Assign(_) => " <Assign>".to_string(),
+        ProtoStatement::SequentialBlock(_) => " <SeqBlock>".to_string(),
+        _ => String::new(),
+    }
+}
+
 fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize]>) -> SortOutcome {
     let n = statements.len();
     if n <= 1 {
@@ -399,12 +454,54 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
             {
                 adj_sem[writer_idx].insert(reader_idx);
                 cause!(writer_idx, reader_idx, "prior-binding");
+                // Every EARLIER writer of bits this read names has to run too.
+                // Binding only the most recent one leaned on the WAW chain to
+                // carry the rest, and that chain no longer orders a pair whose
+                // writes cannot clobber each other -- a read would then take
+                // the bits an unordered earlier writer had not produced yet.
+                // Wherever the chain does still run it already implied these,
+                // so they constrain nothing the sort was not honouring.
+                for &w in relevant.iter().take_while(|&&w| w < writer_idx) {
+                    adj_sem[w].insert(reader_idx);
+                    cause!(w, reader_idx, "prior-binding-earlier");
+                }
                 if relevant.last().is_some_and(|&w| w > reader_idx)
                     && !prior_unconditional_cover(reader_idx, key, *rr)
                 {
                     if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
+                        let later: Vec<String> = wranges
+                            .iter()
+                            .filter(|(p, wr)| *p > reader_idx && ranges_overlap(*wr, *rr))
+                            .take(4)
+                            .map(|(p, wr)| {
+                                format!(
+                                    "#{p}{}{}{} {wr:?}",
+                                    where_stmt(&statements[*p]),
+                                    where_block(&statements, blocks, *p),
+                                    where_branch(&statements[*p])
+                                )
+                            })
+                            .collect();
+                        let prior: Vec<String> = wranges
+                            .iter()
+                            .filter(|(p, _)| *p < reader_idx && same_block(*p, reader_idx))
+                            .take(6)
+                            .map(|(p, wr)| {
+                                format!(
+                                    "#{p}{}{} {wr:?} guaranteed={:?}",
+                                    where_stmt(&statements[*p]),
+                                    where_branch(&statements[*p]),
+                                    guaranteed_write_spans(&statements[*p], key)
+                                )
+                            })
+                            .collect();
                         log::info!(
-                            "pass_diag: hint blocked: uncovered prior binding reader #{reader_idx} var {key:?} range {rr:?}"
+                            "pass_diag: hint blocked: uncovered prior binding reader #{reader_idx}{}{}{} var {key:?} range {rr:?}, written later by {}; prior same-block writers {}",
+                            where_stmt(&statements[reader_idx]),
+                            where_block(&statements, blocks, reader_idx),
+                            where_branch(&statements[reader_idx]),
+                            later.join(", "),
+                            prior.join(", ")
                         );
                     }
                     hint_blocked = true;
@@ -450,44 +547,106 @@ fn stable_topo_sort_impl(statements: Vec<ProtoStatement>, blocks: Option<&[usize
         }
     }
 
-    // WAW: chain consecutive writers of a reassigned var so overlapping
-    // writes keep source order.  Skip only when next reaches prev over
-    // SEMANTIC edges (a genuine cycle); a best-effort path does not skip, so
-    // write order is kept instead of being silently inverted.
+    // WAW: chain writers of a reassigned var so overlapping writes keep source
+    // order.  Skip only when next reaches prev over SEMANTIC edges (a genuine
+    // cycle); a best-effort path does not skip, so write order is kept instead
+    // of being silently inverted.
+    //
+    // Only writes that can CLOBBER each other need ordering.  `split_driver`
+    // answers the variable whose writers are pairwise disjoint throughout, but
+    // one overlapping pair anywhere disqualifies the whole variable, and the
+    // disjoint pairs then chain for nothing -- a false edge between two fields
+    // of a struct written from different blocks is enough to close a ring no
+    // bit takes.  Bind each writer to its nearest PRECEDING overlapping one
+    // instead, so a pair is ordered exactly when one can overwrite the other.
     {
         let mut stack: Vec<usize> = Vec::new();
         let mut visited: HashSet<usize> = HashSet::default();
+        // Bits each writer names, as one bounding span per statement (`None` =
+        // full width).  Bounding rather than exact: a statement writing two
+        // ranges of one variable keeps a single entry, and answering "can these
+        // two clobber" too generously only keeps an edge.
+        let mut spans: HashMap<VarOffset, HashMap<usize, BitRange>> = HashMap::default();
+        for (key, wranges) in &writer_ranges {
+            let per_stmt = spans.entry(*key).or_default();
+            for (p, wr) in wranges {
+                match per_stmt.entry(*p) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(*wr);
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        let merged = match (*e.get(), *wr) {
+                            (Some((ah, al)), Some((bh, bl))) => Some((ah.max(bh), al.min(bl))),
+                            _ => None,
+                        };
+                        e.insert(merged);
+                    }
+                }
+            }
+        }
+        // How far back a writer looks for one it can clobber.  Past this the
+        // scan falls back to the immediate predecessor -- the previous
+        // behaviour, and conservative, since an extra WAW edge only constrains.
+        const MAX_LOOKBACK: usize = 64;
         for (key, writer_indices) in &writers {
             if split_driver.contains(key) {
                 continue;
             }
-            for pair in writer_indices.windows(2) {
-                let (prev, next) = (pair[0], pair[1]);
-                let mut reachable = false;
-                stack.clear();
-                stack.push(next);
-                visited.clear();
-                while let Some(node) = stack.pop() {
-                    if node == prev {
-                        reachable = true;
-                        break;
+            let per_stmt = spans.get(key);
+            let mut prevs: Vec<usize> = Vec::new();
+            for (i, &next) in writer_indices.iter().enumerate().skip(1) {
+                prevs.clear();
+                match per_stmt {
+                    Some(per_stmt) => {
+                        let window = i.saturating_sub(MAX_LOOKBACK);
+                        let next_span = per_stmt.get(&next).copied().flatten();
+                        // EVERY overlapping writer before it, not just the
+                        // nearest: chaining consecutive pairs made the order
+                        // transitive, and one edge does not. A disjoint writer
+                        // between two overlapping ones would sever the chain
+                        // and let the later write be scheduled first.
+                        prevs.extend(writer_indices[window..i].iter().copied().filter(|p| {
+                            ranges_overlap(per_stmt.get(p).copied().flatten(), next_span)
+                        }));
+                        // Only a truncated scan leaves a pair unordered, so
+                        // keep the old chaining there and nothing at all when
+                        // the whole prefix is disjoint.
+                        if prevs.is_empty() {
+                            if window == 0 {
+                                continue;
+                            }
+                            prevs.push(writer_indices[i - 1]);
+                        }
                     }
-                    if visited.insert(node) {
-                        stack.extend(adj_sem[node].iter().copied());
-                    }
+                    None => prevs.push(writer_indices[i - 1]),
                 }
-                if !reachable {
-                    adj_sem[prev].insert(next);
-                    cause!(prev, next, "waw");
-                } else {
-                    // Two overlapping writes whose order the sort cannot
-                    // guarantee: never claim an exact one-pass schedule.
-                    if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
-                        log::info!(
-                            "pass_diag: hint blocked: WAW skip prev #{prev} next #{next} var {key:?}"
-                        );
+                for &prev in &prevs {
+                    let mut reachable = false;
+                    stack.clear();
+                    stack.push(next);
+                    visited.clear();
+                    while let Some(node) = stack.pop() {
+                        if node == prev {
+                            reachable = true;
+                            break;
+                        }
+                        if visited.insert(node) {
+                            stack.extend(adj_sem[node].iter().copied());
+                        }
                     }
-                    hint_blocked = true;
+                    if !reachable {
+                        adj_sem[prev].insert(next);
+                        cause!(prev, next, "waw");
+                    } else {
+                        // Two overlapping writes whose order the sort cannot
+                        // guarantee: never claim an exact one-pass schedule.
+                        if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
+                            log::info!(
+                                "pass_diag: hint blocked: WAW skip prev #{prev} next #{next} var {key:?}"
+                            );
+                        }
+                        hint_blocked = true;
+                    }
                 }
             }
         }

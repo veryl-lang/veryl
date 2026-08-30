@@ -1590,14 +1590,14 @@ impl ProtoStatement {
     pub fn gather_reads_with_ranges(&self, out: &mut Vec<(VarOffset, Option<(usize, usize)>)>) {
         match self {
             ProtoStatement::Assign(x) => {
-                x.expr.gather_reads_with_ranges(out);
+                gather_assign_rhs_reads(&x.expr, x.rhs_select, out);
                 if let Some(dyn_sel) = &x.dynamic_select {
                     dyn_sel.index_expr.gather_reads_with_ranges(out);
                 }
             }
             ProtoStatement::AssignDynamic(x) => {
                 x.dst_index_expr.gather_reads_with_ranges(out);
-                x.expr.gather_reads_with_ranges(out);
+                gather_assign_rhs_reads(&x.expr, x.rhs_select, out);
                 if let Some(dyn_sel) = &x.dynamic_select {
                     dyn_sel.index_expr.gather_reads_with_ranges(out);
                 }
@@ -4090,6 +4090,29 @@ pub(crate) fn size_literal_rhs(
     *value = value.expand(target, sign_extend).into_owned();
     *width = target;
     expr_context.width = target;
+}
+
+/// The reads of an assignment's right-hand side.
+///
+/// A concat destructure (`{a, b} = v`) lowers to one assignment per target,
+/// each keeping the WHOLE source expression and slicing it with `rhs_select`.
+/// Taking the reads off the expression alone would report every target as
+/// depending on every bit of the source, which welds a vector written field by
+/// field on one side to one read field by field on the other -- the shape of a
+/// bundle pushed through an anti-optimisation buffer. Narrow the reads to the
+/// window where the expression is bit-parallel; elsewhere the whole expression
+/// is what the slice depends on.
+pub(crate) fn gather_assign_rhs_reads(
+    expr: &ProtoExpression,
+    rhs_select: Option<(usize, usize)>,
+    out: &mut Vec<(VarOffset, Option<(usize, usize)>)>,
+) {
+    if let Some((hi, lo)) = rhs_select
+        && expr.gather_reads_in_window(hi, lo, out)
+    {
+        return;
+    }
+    expr.gather_reads_with_ranges(out);
 }
 
 /// MSB-first concat-destructure window: take `elem_width` bits off the

@@ -25187,3 +25187,135 @@ fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
         );
     }
 }
+
+#[test]
+fn a_bundle_pushed_through_an_inverter_pair_is_split_per_field() {
+    // The shape a hardened block is written in: its outputs are bundled into
+    // one vector, pushed through an anti-optimisation buffer (a double
+    // inversion, so the tool cannot collapse the redundant copies), and
+    // unbundled on the far side.  `ack` genuinely depends on `req`, and `req`
+    // comes straight back from `en` -- but `en` is a CONSTANT in the arm that
+    // reads `req`, so no bit closes a ring.
+    //
+    // Whole-statement granularity closes one anyway, twice over: the inverter
+    // reads the WHOLE bundle to write the whole bundle, and the destructure
+    // keeps the whole source expression and slices it with `rhs_select`, so
+    // every field is welded to every other one.
+    let code = r#"
+    module Buf #(
+        param Width: u32 = 1,
+    ) (
+        in_i : input  logic<Width>,
+        out_o: output logic<Width>,
+    ) {
+        let inv: logic<Width> = ~in_i;
+        assign out_o = ~inv;
+    }
+
+    module Fsm (
+        st   : input  logic<2>,
+        req_i: input  logic   ,
+        en_o : output logic   ,
+        ack_o: output logic   ,
+    ) {
+        always_comb {
+            en_o  = 1'b0;
+            ack_o = 1'b0;
+            case st {
+                2'd1: {
+                    en_o = 1'b1;
+                    if req_i {
+                        ack_o = 1'b1;
+                    }
+                }
+                default: {
+                    en_o = 1'b0;
+                }
+            }
+        }
+    }
+
+    module Wrap (
+        st   : input  logic<2>,
+        req_i: input  logic   ,
+        en_o : output logic   ,
+        ack_o: output logic   ,
+    ) {
+        var en   : logic   ;
+        var ack  : logic   ;
+        var o    : logic<2>;
+        var o_buf: logic<2>;
+
+        inst c: Fsm (
+            st        ,
+            req_i     ,
+            en_o : en ,
+            ack_o: ack,
+        );
+
+        assign o = {en, ack};
+
+        inst b: Buf #(
+            Width: 2,
+        ) (
+            in_i : o    ,
+            out_o: o_buf,
+        );
+
+        assign {en_o, ack_o} = o_buf;
+    }
+
+    module Top (
+        st : input  logic<2>,
+        en : output logic   ,
+        ack: output logic   ,
+    ) {
+        var req  : logic;
+        var en_i : logic;
+        var ack_i: logic;
+
+        inst w: Wrap (
+            st          ,
+            req_i: req  ,
+            en_o : en_i ,
+            ack_o: ack_i,
+        );
+
+        assign req = en_i;
+        assign en  = en_i;
+        assign ack = ack_i;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a bundle through an inverter pair settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        for (st, en, ack) in [(0u64, 0u64, 0u64), (1, 1, 1), (2, 0, 0), (3, 0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("en").unwrap(),
+                Value::new(en, 1, false),
+                "en: st={st} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("ack").unwrap(),
+                Value::new(ack, 1, false),
+                "ack: st={st} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}

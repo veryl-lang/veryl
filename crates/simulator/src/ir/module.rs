@@ -27,9 +27,9 @@ use crate::ir::variable::{
     create_variable_meta, ff_cacheline_pad_enabled, native_bytes, value_size, write_native_value,
 };
 use crate::ir::{
-    CompiledBatchStmt, Event, ProtoCaseArm, ProtoCaseStatement, ProtoDeclaration, ProtoExpression,
-    ProtoIfStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement, VarId,
-    VarPath,
+    CompiledBatchStmt, Event, Op, ProtoCaseArm, ProtoCaseStatement, ProtoDeclaration,
+    ProtoExpression, ProtoIfStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements,
+    Statement, VarId, VarPath,
 };
 use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
@@ -1259,12 +1259,12 @@ fn run_comb_pipeline(
     let unified_sorted = reorder_by_level(unified_sorted);
     dump_stmt_order("post-level", module_name, &unified_sorted);
     let required_comb_passes =
-        passes_hint.unwrap_or_else(|| compute_required_passes(&unified_sorted));
+        passes_hint.unwrap_or_else(|| compute_required_passes("comb", &unified_sorted));
     if passes_hint.is_some() && std::env::var("VERYL_PASS_DIAG").is_ok() {
         log::info!(
             "pass_diag: exact hint {} passes (positional metric would give {})",
             required_comb_passes,
-            compute_required_passes(&unified_sorted)
+            compute_required_passes("comb", &unified_sorted)
         );
     }
 
@@ -1403,7 +1403,7 @@ fn run_comb_pipeline(
     // back-edge may sit later in it, so the positional pass metric must be
     // re-taken (never lowered: the hint may be exact for the OLD order only).
     let required_comb_passes = if cone_plan.is_some() {
-        let repositioned = compute_required_passes(&unified_sorted);
+        let repositioned = compute_required_passes("comb-after-cone-reorder", &unified_sorted);
         if cone_gate::diag() {
             eprintln!(
                 "[cone_gate] passes: pre-reorder {required_comb_passes} positional {repositioned}"
@@ -2509,43 +2509,104 @@ fn split_copies_by_source_writes(stmts: &mut Vec<ProtoStatement>, blocks: &mut V
     /// Same trade as `MAX_ELEMENTS`, but no design has reached it: the cut
     /// count follows the source's write boundaries, which stay far below.
     const MAX_PARTS: usize = 64;
+    /// A buffer chain carries the boundaries one link at a time -- the first
+    /// round splits the link whose source is written per field, the next the
+    /// link that now reads it -- so repeat until nothing more splits. A split
+    /// link names its bits and is never a candidate again, so this terminates
+    /// on its own; the bound only caps the work on a long chain.
+    const MAX_ROUNDS: usize = 4;
 
-    let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
-    let mut outs = Vec::new();
-    for stmt in stmts.iter() {
-        outs.clear();
-        gather_bit_aware_outputs(stmt, &mut outs);
-        for (off, range) in outs.iter() {
-            let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
-            match range {
-                Some((hi, lo)) => {
-                    if let Some(cuts) = entry {
-                        cuts.push(*lo);
-                        cuts.push(hi + 1);
+    for _ in 0..MAX_ROUNDS {
+        let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
+        let mut outs = Vec::new();
+        for stmt in stmts.iter() {
+            outs.clear();
+            gather_bit_aware_outputs(stmt, &mut outs);
+            for (off, range) in outs.iter() {
+                let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
+                match range {
+                    Some((hi, lo)) => {
+                        if let Some(cuts) = entry {
+                            cuts.push(*lo);
+                            cuts.push(hi + 1);
+                        }
                     }
+                    None => *entry = None,
                 }
-                None => *entry = None,
             }
         }
-    }
 
-    let mut out_stmts: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
-    let mut out_blocks: Vec<usize> = Vec::with_capacity(blocks.len());
-    for (stmt, block) in std::mem::take(stmts)
-        .into_iter()
-        .zip(blocks.iter().copied())
-    {
-        let before = out_stmts.len();
-        split_one_copy(stmt, &bounds, MAX_PARTS, &mut out_stmts);
-        out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
+        let mut out_stmts: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+        let mut out_blocks: Vec<usize> = Vec::with_capacity(blocks.len());
+        for (stmt, block) in std::mem::take(stmts)
+            .into_iter()
+            .zip(blocks.iter().copied())
+        {
+            let before = out_stmts.len();
+            split_one_copy(stmt, &bounds, MAX_PARTS, &mut out_stmts);
+            out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
+        }
+        let split_any = out_stmts.len() != blocks.len();
+        *stmts = out_stmts;
+        *blocks = out_blocks;
+        if !split_any {
+            break;
+        }
     }
-    *stmts = out_stmts;
-    *blocks = out_blocks;
 }
 
-/// One statement, split when it is a whole-variable copy whose source has
-/// known write boundaries.  The parts tile the destination, so the value is
-/// identical by construction.
+/// Every variable a bit-parallel expression reads, in source order.  `false`
+/// for any other shape.
+///
+/// A leaf must be the WHOLE variable: the cuts the caller collects are that
+/// variable's own bit positions, and a windowed read would put them in a
+/// different coordinate space from the destination's.
+fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<VarOffset>) -> bool {
+    let width = expr.width();
+    match expr {
+        ProtoExpression::Variable {
+            var_offset,
+            select: None,
+            dynamic_select: None,
+            width: w,
+            var_full_width,
+            ..
+        } => {
+            let ok = w == var_full_width;
+            if ok {
+                out.push(*var_offset);
+            }
+            ok
+        }
+        ProtoExpression::Unary {
+            op: Op::BitNot, x, ..
+        } => x.width() == width && bit_parallel_sources(x, out),
+        ProtoExpression::Binary {
+            x,
+            op: Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor,
+            y,
+            ..
+        } => {
+            x.width() == width
+                && y.width() == width
+                && bit_parallel_sources(x, out)
+                && bit_parallel_sources(y, out)
+        }
+        _ => false,
+    }
+}
+
+/// One statement, split when it writes a whole variable from a BIT-PARALLEL
+/// expression -- one whose result bit `i` is a function of bit `i` of each
+/// operand alone -- and some operand has known write boundaries.  The parts
+/// tile the destination and each names the matching window of every operand,
+/// so the value is identical by construction.
+///
+/// The plain copy `dst = src` is the common case; the inverter pair
+/// `inv = ~in; out = ~inv` an anti-optimisation buffer is written as is the
+/// one that matters, because a design that bundles a block's outputs, pushes
+/// the bundle through such a buffer and unbundles it has otherwise welded
+/// every output to every other one.
 fn split_one_copy(
     stmt: ProtoStatement,
     bounds: &HashMap<VarOffset, Option<Vec<usize>>>,
@@ -2556,67 +2617,57 @@ fn split_one_copy(
         out.push(stmt);
         return;
     };
-    let ProtoExpression::Variable {
-        var_offset,
-        select: None,
-        dynamic_select: None,
-        width,
-        var_full_width,
-        expr_context,
-    } = &a.expr
-    else {
-        out.push(ProtoStatement::Assign(a));
-        return;
-    };
     if a.select.is_some()
         || a.dynamic_select.is_some()
         || a.rhs_select.is_some()
-        || *width != a.dst_width
-        || *var_full_width != a.dst_width
+        || a.expr.width() != a.dst_width
     {
         out.push(ProtoStatement::Assign(a));
         return;
     }
-    let Some(Some(cuts)) = bounds.get(var_offset) else {
-        out.push(ProtoStatement::Assign(a));
-        return;
-    };
-    let mut cuts: Vec<usize> = cuts
-        .iter()
-        .copied()
-        .chain([0, a.dst_width])
-        .filter(|b| *b <= a.dst_width)
-        .collect();
-    cuts.sort_unstable();
-    cuts.dedup();
-    if !(3..=max_parts + 1).contains(&cuts.len()) {
+    let mut sources: Vec<VarOffset> = Vec::new();
+    if !bit_parallel_sources(&a.expr, &mut sources) {
         out.push(ProtoStatement::Assign(a));
         return;
     }
-    let (var_offset, var_full_width, signed) = (*var_offset, *var_full_width, expr_context.signed);
+    // A source written with unknown bits contributes no cut, but it does not
+    // stop the others from cutting: each part still reads it whole, so the
+    // dependency it carries is unchanged.
+    let mut cuts: Vec<usize> = vec![0, a.dst_width];
+    let mut any_known = false;
+    for src in &sources {
+        if let Some(Some(known)) = bounds.get(src) {
+            any_known = true;
+            cuts.extend(known.iter().copied().filter(|b| *b <= a.dst_width));
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    if !any_known || !(3..=max_parts + 1).contains(&cuts.len()) {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    let mut parts: Vec<ProtoStatement> = Vec::with_capacity(cuts.len() - 1);
     for w in cuts.windows(2) {
         let (lo, hi) = (w[0], w[1] - 1);
-        out.push(ProtoStatement::Assign(ProtoAssignStatement {
+        let Some(expr) = a.expr.bit_parallel_window(hi, lo) else {
+            // `bit_parallel_sources` accepted it, so this cannot happen; keep
+            // the statement whole rather than emit a partial tiling.
+            out.push(ProtoStatement::Assign(a));
+            return;
+        };
+        parts.push(ProtoStatement::Assign(ProtoAssignStatement {
             dst: a.dst,
             dst_width: a.dst_width,
             select: Some((hi, lo)),
             dynamic_select: None,
             rhs_select: None,
-            expr: ProtoExpression::Variable {
-                var_offset,
-                select: Some((hi, lo)),
-                dynamic_select: None,
-                width: hi - lo + 1,
-                var_full_width,
-                expr_context: crate::ir::ExpressionContext {
-                    width: hi - lo + 1,
-                    signed,
-                },
-            },
+            expr,
             dst_ff_current_offset: a.dst_ff_current_offset,
             token: a.token,
         }));
     }
+    out.extend(parts);
 }
 
 /// Split one `if` into an `if` per independently-written variable set.
@@ -3992,7 +4043,7 @@ fn trace_scc_cycles(sorted: &[ProtoStatement], meta: &ModuleVariableMeta) {
 /// A backward dataflow edge (a statement reads a value written later in
 /// the sorted order) costs one extra pass; the result is the longest
 /// backward-edge chain + 1 over the statement dependency graph.
-fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
+fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
     use daggy::petgraph::Graph;
     use daggy::petgraph::algo::tarjan_scc;
 
@@ -4129,7 +4180,7 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
     let passes = if max_delay == 0 { 1 } else { max_delay + 2 };
     if passes > 1 {
         log::info!(
-            "compute_required_passes: {} passes needed ({} stmts, {} backward edge chain depth)",
+            "compute_required_passes ({scope}): {} passes needed ({} stmts, {} backward edge chain depth)",
             passes,
             n,
             max_delay
@@ -4228,16 +4279,25 @@ fn dump_backward_edge_chain(
     // Aggregate: classify every backward edge.
     let mut total = 0usize;
     let mut with_prior = 0usize;
+    // The read-before-producer ones by name: those are the class a schedule is
+    // supposed to have none of, and a count alone does not say where they are.
+    let mut without_prior: Vec<String> = Vec::new();
     for (pos, reads) in stmt_reads.iter().enumerate() {
         let output_set: HashSet<VarOffset> = stmt_outputs[pos].iter().cloned().collect();
         for (key, rr) in reads {
             if output_set.contains(key) || covered_by_prior_full(key, pos) {
                 continue;
             }
-            if later_writer(key, *rr, pos).is_some() {
+            if let Some(w) = later_writer(key, *rr, pos) {
                 total += 1;
                 if writer_ranges[key].iter().any(|(w, _)| *w < pos) {
                     with_prior += 1;
+                } else if without_prior.len() < 4 {
+                    without_prior.push(format!(
+                        "{} reads {key:?}{rr:?} <- {}",
+                        describe_stmt(pos),
+                        describe_stmt(w)
+                    ));
                 }
             }
         }
@@ -4248,6 +4308,9 @@ fn dump_backward_edge_chain(
         with_prior,
         total - with_prior
     );
+    for e in &without_prior {
+        log::info!("pass_diag:   read before its producer: {e}");
+    }
 
     // Walk one max-delay chain over the metric's own edges: pick an
     // in-edge whose writer accounts for the current delay (a backward hop
@@ -5814,7 +5877,7 @@ impl Conv<&air::Module> for ProtoModule {
                 // only single-pass when that order linearized; where it did not,
                 // one pass reads a producer that runs later and the gated clock
                 // is computed from the previous step's value.
-                let passes = compute_required_passes(&eval_protos);
+                let passes = compute_required_passes("derived-clock-closure", &eval_protos);
                 let eval = try_jit(context, eval_protos);
                 (sched, eval, passes)
             };
