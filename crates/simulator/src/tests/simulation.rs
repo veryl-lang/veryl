@@ -1521,6 +1521,72 @@ fn wide_256_aot_native_comb() {
 }
 
 #[test]
+fn wide_ff_select_sign_extends_a_narrow_signed_rhs() {
+    // A signed 32-bit RHS stored into a 672-bit field of a 1184-bit FF: the
+    // value sign-extends to fill the field, so a negative value must leave the
+    // field's top word all ones.  A raw store would leave it zero.
+    // Expected values cross-checked against Verilator 5.050 and iverilog on
+    // the SV this module generates.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_v  : input  signed logic<32>,
+        o_hi : output logic<32>,
+        o_lo : output logic<32>,
+    ) {
+        var x: logic<1184>;
+        always_ff {
+            if_reset {
+                x = 0;
+            } else {
+                x[1183:512] = i_v;
+            }
+        }
+        assign o_hi = x[1183:1152];
+        assign o_lo = x[543:512];
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        if config.aot_c {
+            let missing: Vec<_> = ir
+                .event_statements
+                .keys()
+                .filter(|e| matches!(e, Event::Clock(_)) && !ir.whole_events.contains_key(e))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "clock event not AOT-C-native: {missing:?}"
+            );
+        }
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        for (v, hi, lo) in [
+            (0xFFFF_FFFFu64, 0xFFFF_FFFFu128, 0xFFFF_FFFFu128), // -1
+            (0x0000_0001, 0, 1),                                // +1
+            (0x8000_0000, 0xFFFF_FFFF, 0x8000_0000),            // most negative
+        ] {
+            sim.set("i_v", Value::new(v, 32, true));
+            sim.step_reset(&clk, &rst);
+            sim.step(&clk);
+            assert_eq!(
+                (
+                    sim.get("o_hi").unwrap().payload_u128(),
+                    sim.get("o_lo").unwrap().payload_u128()
+                ),
+                (hi, lo),
+                "v={v:#x} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn dynsel_window_overrun_clips_to_the_vector() {
     // `x[i +: 32]` on a 1536-bit FF: at i = 1535 the window covers bits
     // 1535..1566, 31 of them past the vector.  The reference behaviour is to

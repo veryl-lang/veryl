@@ -3556,7 +3556,17 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
 /// — 92-bit fields never land on a word boundary) goes through the general
 /// read-modify-write in `emit_event_ff_assign_wide_select`.  dynamic_select /
 /// rhs_select wide FFs stay on Cranelift (the module bails).  2-state only.
-fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
+fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
+    // A sign-extended RHS is only expressible on the static-select path below;
+    // the others would drop the extension, so they are not offered the chance.
+    if se_from.is_some() {
+        return match a.select {
+            Some((hi, lo)) if a.dynamic_select.is_none() && a.rhs_select.is_none() => {
+                emit_event_ff_assign_wide_select(a, hi, lo, se_from)
+            }
+            _ => None,
+        };
+    }
     if let Some(ds) = &a.dynamic_select
         && a.select.is_none()
         && a.rhs_select.is_none()
@@ -3590,7 +3600,7 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         if let Some((hi, lo)) = a.select
             && a.dynamic_select.is_none()
             && a.rhs_select.is_none()
-            && let Some(s) = emit_event_ff_assign_wide_select(a, hi, lo)
+            && let Some(s) = emit_event_ff_assign_wide_select(a, hi, lo, None)
         {
             return Some(s);
         }
@@ -3782,6 +3792,7 @@ fn emit_event_ff_assign_wide_select(
     a: &ProtoAssignStatement,
     hi: usize,
     lo: usize,
+    se_from: Option<usize>,
 ) -> Option<String> {
     let nbits = hi.checked_sub(lo)?.checked_add(1)?;
     let nb = native_bytes(a.dst_width);
@@ -3807,7 +3818,30 @@ fn emit_event_ff_assign_wide_select(
     // Source spans the destination's size class — the contract
     // `emit_wide_select_rmw_store` documents, and what the comb caller passes.
     let mut pre = String::new();
-    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+    let Some(r) = emit_wide_operand(&a.expr, nb, &mut pre) else {
+        ev_diag(&format!(
+            "wide FF select: RHS not materializable at {nb} B (dst_width={}, \
+             select=({hi},{lo}), rhs_width={}, wide_ptr={}, scalar_ok={})",
+            a.dst_width,
+            a.expr.width(),
+            a.expr.builds_wide_pointer(),
+            emit_expr(&a.expr).is_some(),
+        ));
+        return None;
+    };
+    // Signed RHS narrower than the field: fill from its own width first, then
+    // let the merge take the low `nbits` — the comb path's step, same helper.
+    let src = match se_from {
+        Some(w) => {
+            let t = next_wide_tmp();
+            pre.push_str(&format!(
+                "uint64_t _w{t}[{nw}]; vw_sext_copy((uint8_t*)_w{t}, {src}, {w}u, {nb}u); ",
+                src = r.addr,
+            ));
+            format!("((uint8_t*)_w{t})")
+        }
+        None => r.addr.clone(),
+    };
     // Read first: the RMW writes only `reg`, so the RHS still sees the
     // pre-write state however it reaches this FF.
     let mut body = emit_wide_ff_rmw_prologue(
@@ -3818,7 +3852,7 @@ fn emit_event_ff_assign_wide_select(
         &format!("ff_values + {dst_raw:#x}"),
     );
     body.push_str(&emit_wide_select_rmw_store(
-        &r.addr,
+        &src,
         pre,
         &format!("(uint8_t*){reg}"),
         nw,
@@ -4068,7 +4102,7 @@ fn emit_event_ff_assign_wide_dynsel(
 
 /// Event-path FF write (static dst): pushes a WriteLogEntry at the
 /// canonical current offset.  2-state narrow packed FFs only.
-fn emit_event_ff_assign(a: &ProtoAssignStatement) -> Option<String> {
+fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
     if a.dst_width == 0 {
         ev_diag("static FF: width=0");
         return None;
@@ -4077,7 +4111,12 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement) -> Option<String> {
     // FF wider than 64 bits routes through the wide write-log pool (covers
     // 65-128 via __uint128_t promotion and >128 via the helper table).
     if a.dst_width > 64 {
-        return emit_event_ff_assign_wide(a);
+        return emit_event_ff_assign_wide(a, se_from);
+    }
+    // Only the wide static-select path sign-extends (`vw_sext_copy`); every
+    // narrow form here would store the raw value, so they still decline.
+    if se_from.is_some() {
+        return None;
     }
     let nb = native_bytes(a.dst_width);
     let cty = native_c_type(nb)?;
@@ -6895,11 +6934,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 };
                 landed > *from_width
             });
-            // FF stores stay on Cranelift because emit_event_ff_assign does
-            // not sign-extend; comb stores are covered at every width.
-            if se_from.is_some() && a.dst.is_ff() {
-                return None;
-            }
+
             // Route every FF write through the shadow-slot + WriteLogEntry path
             // (matching Cranelift) — a bare shadow store is never committed, so
             // the value is lost.  Needed in the comb path too: the is_ff
@@ -6907,7 +6942,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // emit_event_ff_assign returns None on uncovered patterns, safely
             // bailing the module to Cranelift.
             if a.dst.is_ff() {
-                return emit_event_ff_assign(a);
+                return emit_event_ff_assign(a, se_from);
             }
             // A runtime-indexed bit-slice store. A ≤64-bit dst is the scalar
             // RMW below; a wide (>64-bit) dst is handled here because that path
