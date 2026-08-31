@@ -1092,10 +1092,6 @@ pub enum ProtoStatement {
 
 impl ProtoStatement {
     /// Statements in this tree, itself included.
-    ///
-    /// The unit the size-sensitive consumers care about: a chunk cap counts
-    /// TOP-LEVEL statements, so a tree the IR builder fused is one statement to
-    /// them and this many in the emitted code.  Diagnostic and policy use only.
     pub(crate) fn statement_mass(&self) -> usize {
         let kids: usize = match self {
             ProtoStatement::If(x) => x

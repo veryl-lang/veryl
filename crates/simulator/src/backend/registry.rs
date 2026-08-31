@@ -236,6 +236,11 @@ impl BackendRegistry {
         out
     }
 
+    /// Split `group` into chunks of at most `max_chunk_size` statements,
+    /// COUNTING NESTED ONES: an `if` the IR builder fused is one entry here
+    /// but a whole function to the backend.  One whose own tree exceeds the
+    /// budget cannot be divided (that would duplicate its guard), so it lands
+    /// alone and overshoots.
     fn compile_group(
         &mut self,
         ctx: &CompileCtx,
@@ -243,12 +248,31 @@ impl BackendRegistry {
         max_chunk_size: usize,
         out: &mut Vec<ChunkOutput>,
     ) {
-        if group.len() <= max_chunk_size {
-            self.compile_group_bisect(ctx, group, out);
-        } else {
-            for chunk in group.chunks(max_chunk_size) {
-                self.compile_group_bisect(ctx, chunk.to_vec(), out);
+        let diag = std::env::var("VERYL_JIT_CHUNK_DIAG").as_deref() == Ok("1");
+        // `VERYL_JIT_CHUNK_BY_ENTRIES=1` restores the old unit so a design's
+        // before/after can be measured from one binary.
+        let by_entries = std::env::var("VERYL_JIT_CHUNK_BY_ENTRIES").as_deref() == Ok("1");
+        let mut cur: Vec<ProtoStatement> = Vec::new();
+        let mut mass = 0usize;
+        for stmt in group {
+            let m = if by_entries { 1 } else { stmt.statement_mass() };
+            // `mass > 0` keeps an oversized statement from flushing an empty
+            // chunk ahead of itself; it lands alone and is reported.
+            if mass > 0 && mass + m > max_chunk_size {
+                self.compile_group_bisect(ctx, std::mem::take(&mut cur), out);
+                mass = 0;
             }
+            if diag && m > max_chunk_size {
+                eprintln!(
+                    "[jit_chunk] one statement is {m} statements, over the \
+                     {max_chunk_size} budget; it takes a chunk alone"
+                );
+            }
+            mass += m;
+            cur.push(stmt);
+        }
+        if !cur.is_empty() {
+            self.compile_group_bisect(ctx, cur, out);
         }
     }
 
@@ -331,4 +355,121 @@ fn classify_proto_stmt(s: &ProtoStatement) -> String {
 pub enum ChunkOutput {
     Compiled(Arc<ChunkArtifact>),
     Interpreted(Vec<ProtoStatement>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{
+        ExpressionContext, ProtoAssignStatement, ProtoExpression, ProtoIfStatement, VarOffset,
+    };
+    use veryl_analyzer::value::{Value, ValueU64};
+    use veryl_parser::token_range::TokenRange;
+
+    fn assign(off: isize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(off),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Value {
+                value: Value::U64(ValueU64 {
+                    payload: 1,
+                    mask_xz: 0,
+                    width: 32,
+                    signed: false,
+                }),
+                width: 32,
+                expr_context: ExpressionContext {
+                    width: 32,
+                    signed: false,
+                },
+            },
+            dst_ff_current_offset: -1,
+            token: TokenRange::default(),
+        })
+    }
+
+    /// An `if` holding `n` assigns per arm: 1 + 2n statements.
+    fn fat_if(n: usize) -> ProtoStatement {
+        ProtoStatement::If(ProtoIfStatement {
+            cond: Some(ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(0x8000),
+                select: None,
+                dynamic_select: None,
+                width: 1,
+                var_full_width: 1,
+                expr_context: ExpressionContext {
+                    width: 1,
+                    signed: false,
+                },
+            }),
+            true_side: (0..n).map(|i| assign(i as isize * 4)).collect(),
+            false_side: (0..n).map(|i| assign(i as isize * 4)).collect(),
+        })
+    }
+
+    /// The budget is nested statements, so a handful of fat conditionals must
+    /// still be split — counting top-level entries let them through as one.
+    #[test]
+    fn chunking_budgets_nested_statements_not_entries() {
+        let config = Config {
+            use_jit: true,
+            aot_c: false,
+            ..Default::default()
+        };
+        let mut r = BackendRegistry::for_config(&config);
+        if r.is_empty() {
+            return; // wasm: no chunk backend
+        }
+        let ctx = CompileCtx {
+            config: &config,
+            use_4state: false,
+            contains_compiled_block: false,
+        };
+        // 20 entries x 201 statements = 4020 statements, budget 1024.
+        let group: Vec<ProtoStatement> = (0..20).map(|_| fat_if(100)).collect();
+        let total: usize = group.iter().map(|s| s.statement_mass()).sum();
+        let out = r.build_chunked(&ctx, group, 1024);
+        let chunks = out.len();
+        assert!(
+            chunks >= total.div_ceil(1024),
+            "{total} statements in {chunks} chunk(s) under a 1024 budget: \
+             the budget is counting entries, not statements",
+        );
+        // ...and not shattered: the budget should be roughly filled.
+        assert!(
+            chunks <= 2 * total.div_ceil(1024),
+            "{chunks} chunks is too many"
+        );
+    }
+
+    /// A single statement bigger than the budget cannot be divided (splitting
+    /// inside a conditional would duplicate its guard), so it lands alone
+    /// rather than dragging neighbours into an oversized chunk.
+    #[test]
+    fn an_oversized_statement_takes_a_chunk_alone() {
+        let config = Config {
+            use_jit: true,
+            aot_c: false,
+            ..Default::default()
+        };
+        let mut r = BackendRegistry::for_config(&config);
+        if r.is_empty() {
+            return;
+        }
+        let ctx = CompileCtx {
+            config: &config,
+            use_4state: false,
+            contains_compiled_block: false,
+        };
+        let group = vec![assign(0), fat_if(2000), assign(4)];
+        let out = r.build_chunked(&ctx, group, 1024);
+        assert!(
+            out.len() >= 3,
+            "the oversized statement must not share a chunk; got {} chunk(s)",
+            out.len(),
+        );
+    }
 }

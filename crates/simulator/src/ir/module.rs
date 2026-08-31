@@ -587,11 +587,15 @@ fn validate_meta_offsets(
     }
 }
 
-/// Maximum number of statements per JIT function.
+/// Maximum number of statements per JIT function, COUNTING NESTED ones
+/// (`ProtoStatement::statement_mass`) rather than top-level entries.
 /// Keeps regalloc2 cost manageable (O(N^2) in SSA variable count).
 /// Sweet spot around 1024-2048: per-step enum-match dispatch overhead
 /// grows as chunks shrink below ~256, while Cranelift regalloc spill
 /// cascade / load_cache eviction churn grows as chunks exceed ~4096.
+/// Those figures were calibrated on flat comb lists, where an entry IS a
+/// statement and the two units coincide; nested counting only changes what
+/// happens where they do not.
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
 const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
 
@@ -6228,12 +6232,9 @@ fn reset_dispatch_key(
 
 /// How many statements fusion may ADD to one group.  A dispatch whose own tree
 /// already exceeds this still passes through whole: the cap bounds the merge,
-/// not the input.
-///
-/// Fusing saves one reset test per dispatch absorbed, which is linear; the tree
-/// it builds is not.  A fused group is ONE statement to the chunk budget, to
-/// the AOT-C per-statement ceiling and to regalloc alike, so uncapped it
-/// defeats all three at once.
+/// not the input.  A fused group is ONE statement to the chunk budget, to the
+/// AOT-C per-statement ceiling and to regalloc alike, so uncapped it defeats
+/// all three at once.
 const RESET_FUSE_MAX_MASS: usize = 1024;
 
 /// The cap in force, with `VERYL_RESET_FUSE_MAX` overriding it (`0` = uncapped)
