@@ -955,6 +955,11 @@ pub struct Variable {
     pub path: VarPath,
     pub kind: VarKind,
     pub r#type: Type,
+    /// For each unpacked-array dimension in `type.array`, the number of path
+    /// segments following the segment that owns the dimension. Most arrays
+    /// belong to the final segment (offset zero); flattened interface members
+    /// retain instance-array dimensions on an earlier segment.
+    pub array_path_offsets: Vec<usize>,
     pub value: Vec<Value>,
     pub assigned: Vec<BigUint>,
     pub affiliation: Affiliation,
@@ -984,12 +989,14 @@ impl Variable {
         } else {
             vec![0u32.into(); total_array]
         };
+        let array_path_offsets = vec![0; r#type.array.dims()];
 
         Self {
             id,
             path,
             kind,
             r#type,
+            array_path_offsets,
             value,
             assigned,
             affiliation,
@@ -1071,6 +1078,10 @@ impl Variable {
     }
 
     pub fn prepend_array(&mut self, array: &ShapeRef) {
+        self.prepend_array_at_path(array, 0);
+    }
+
+    pub fn prepend_array_at_path(&mut self, array: &ShapeRef, path_offset: usize) {
         if !array.is_empty()
             && let Some(total_array) = array.total()
         {
@@ -1080,7 +1091,16 @@ impl Variable {
                 self.value.append(&mut value.clone());
                 self.assigned.append(&mut assigned.clone());
             }
+            let mut offsets = vec![path_offset; array.dims()];
+            offsets.append(&mut self.array_path_offsets);
+            self.array_path_offsets = offsets;
             self.r#type.prepend_array(array);
+        }
+    }
+
+    pub fn set_leading_array_path_offset(&mut self, dimensions: usize, path_offset: usize) {
+        for offset in self.array_path_offsets.iter_mut().take(dimensions) {
+            *offset = path_offset;
         }
     }
 }

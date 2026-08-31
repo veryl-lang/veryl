@@ -99,6 +99,130 @@ fn comb_loop_diagnostic_preserves_bit_regions_in_the_cycle() {
     assert_eq!(cycle, Some("data[0] -> data[1] -> data[0]"));
 }
 
+#[test]
+fn comb_loop_diagnostic_preserves_generate_hierarchy_in_the_cycle() {
+    let errors = analyze(
+        r#"
+        module Top {
+            if 1 :g_outer {
+                for i in 0..2 :g_inner {
+                    var a: logic;
+                    var b: logic;
+                    assign a = b;
+                    assign b = a;
+                }
+            }
+        }
+        "#,
+    );
+    let mut cycles = errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::CombinationalLoop { cycle, .. } => Some(cycle.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    cycles.sort_unstable();
+
+    assert_eq!(
+        cycles,
+        [
+            "g_outer.g_inner[0].a -> g_outer.g_inner[0].b -> g_outer.g_inner[0].a",
+            "g_outer.g_inner[1].a -> g_outer.g_inner[1].b -> g_outer.g_inner[1].a",
+        ]
+    );
+}
+
+#[test]
+fn comb_loop_diagnostic_places_array_indices_inside_interface_member_paths() {
+    let errors = analyze(
+        r#"
+        interface Bus {
+            var value: logic [2];
+        }
+        module Top {
+            if 1 :g {
+                inst bus: Bus[2];
+                assign bus[1].value[0] = bus[1].value[0];
+            }
+        }
+        "#,
+    );
+    let cycle = errors.iter().find_map(|error| match error {
+        AnalyzerError::CombinationalLoop { cycle, .. } => Some(cycle.as_str()),
+        _ => None,
+    });
+
+    assert_eq!(cycle, Some("g.bus[1].value[0] -> g.bus[1].value[0]"));
+}
+
+#[test]
+fn comb_loop_diagnostic_preserves_selected_interface_array_prefixes() {
+    let errors = analyze(
+        r#"
+        interface Bus {
+            var value: logic [2];
+        }
+        module Top {
+            if 1 :g {
+                inst bus: Bus[2];
+                assign bus[1].value = bus[1].value;
+            }
+        }
+        "#,
+    );
+    let cycle = errors.iter().find_map(|error| match error {
+        AnalyzerError::CombinationalLoop { cycle, .. } => Some(cycle.as_str()),
+        _ => None,
+    });
+
+    assert_eq!(cycle, Some("g.bus[1].value -> g.bus[1].value"));
+}
+
+#[test]
+fn comb_loop_diagnostic_places_array_indices_on_imported_interface_members() {
+    let errors = analyze(
+        r#"
+        interface Bus {
+            var a: logic;
+            var b: logic;
+            function write_a () {
+                a = b;
+            }
+            function write_b () {
+                b = a;
+            }
+            modport monitor {
+                write_a: import,
+                write_b: import,
+            }
+        }
+        module Receiver (
+            bus: modport Bus::monitor[2],
+        ) {
+            always_comb {
+                bus[1].write_a();
+            }
+            always_comb {
+                bus[1].write_b();
+            }
+        }
+        module Top {
+            inst bus: Bus[2];
+            inst receiver: Receiver (
+                bus: bus,
+            );
+        }
+        "#,
+    );
+    let cycle = errors.iter().find_map(|error| match error {
+        AnalyzerError::CombinationalLoop { cycle, .. } => Some(cycle.as_str()),
+        _ => None,
+    });
+
+    assert_eq!(cycle, Some("bus[1].a -> bus[1].b -> bus[1].a"));
+}
+
 fn captured_coverage_observation() -> (usize, Option<usize>, Option<usize>) {
     // Why this case exists: function summary coverage is mapped back into the
     // caller one captured region at a time. A caller default for value[1] must

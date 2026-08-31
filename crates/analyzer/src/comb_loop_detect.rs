@@ -2333,22 +2333,16 @@ fn format_cycle_node(module: &Module, bit_part: &BitPartition, key: NodeKey) -> 
         .variables
         .get(&id)
         .or_else(|| module.interface_members.get(&id));
-    let mut name = variable
-        .map(|variable| variable.path.to_string())
-        .unwrap_or_else(|| id.to_string());
+    let mut name = variable.map_or_else(|| id.to_string(), |v| v.path.to_string());
 
     let Some(variable) = variable else {
         return name;
     };
     if variable.r#type.total_array() != Some(array.length) || array.start != 0 {
-        if array.length == 1 {
-            if let Some(indices) = unflatten_array_index(&variable.r#type.array, array.start) {
-                for index in indices {
-                    name.push_str(&format!("[{index}]"));
-                }
-            } else {
-                name.push_str(&format!("[flat {}]", array.start));
-            }
+        if let Some(indices) = array_prefix_indices(&variable.r#type.array, array) {
+            name = format_array_path(variable, &indices);
+        } else if array.length == 1 {
+            name.push_str(&format!("[flat {}]", array.start));
         } else if let Some(end) = array.end().and_then(|end| end.checked_sub(1)) {
             let flat = if variable.r#type.array.dims() > 1 {
                 "flat "
@@ -2369,6 +2363,67 @@ fn format_cycle_node(module: &Module, bit_part: &BitPartition, key: NodeKey) -> 
         }
     }
     name
+}
+
+fn format_array_path(variable: &Variable, indices: &[usize]) -> String {
+    if indices.len() > variable.array_path_offsets.len() || variable.path.0.is_empty() {
+        let mut name = variable.path.to_string();
+        for index in indices {
+            name.push_str(&format!("[{index}]"));
+        }
+        return name;
+    }
+
+    let mut selections = vec![Vec::new(); variable.path.0.len()];
+    for (&index, &offset) in indices.iter().zip(&variable.array_path_offsets) {
+        let Some(owner) = variable.path.0.len().checked_sub(offset + 1) else {
+            let mut name = variable.path.to_string();
+            for index in indices {
+                name.push_str(&format!("[{index}]"));
+            }
+            return name;
+        };
+        selections[owner].push(index);
+    }
+
+    let mut name = String::new();
+    for (position, segment) in variable.path.0.iter().enumerate() {
+        if position != 0 {
+            name.push('.');
+        }
+        name.push_str(&segment.to_string());
+        for index in &selections[position] {
+            name.push_str(&format!("[{index}]"));
+        }
+    }
+    name
+}
+
+fn array_prefix_indices(shape: &crate::ir::Shape, span: ArraySpan) -> Option<Vec<usize>> {
+    let dimensions: Vec<usize> = shape.iter().copied().collect::<Option<_>>()?;
+    let total = shape.total()?;
+    if span.length == 0 || dimensions.contains(&0) || span.end().is_none_or(|end| end > total) {
+        return None;
+    }
+
+    // A flat span spells as leading array indices when it covers one complete,
+    // aligned suffix of the declared shape. Prefer the longest prefix so unit
+    // dimensions remain explicit, as they are for a single-element span.
+    let mut suffix_length = 1usize;
+    let mut prefix_dimensions = None;
+    for prefix in (0..=dimensions.len()).rev() {
+        if suffix_length == span.length && span.start.is_multiple_of(suffix_length) {
+            prefix_dimensions = Some(prefix);
+            break;
+        }
+        if prefix != 0 {
+            suffix_length = suffix_length.checked_mul(dimensions[prefix - 1])?;
+        }
+    }
+
+    let mut indices = unflatten_array_index(shape, span.start)?;
+    indices.truncate(prefix_dimensions?);
+    Some(indices)
 }
 
 fn unflatten_array_index(shape: &crate::ir::Shape, flat: usize) -> Option<Vec<usize>> {
