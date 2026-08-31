@@ -2483,17 +2483,11 @@ struct DiagnosticReplay {
 
 type DiagnosticReplayCache = HashMap<Signature, Rc<DiagnosticReplay>>;
 
-#[derive(Clone, Copy)]
-struct DiagnosticWitness {
-    token: TokenRange,
-    depth: usize,
-}
-
 struct DiagnosticTraversal<'a> {
     summaries: &'a HashMap<Signature, ModuleCombSummary>,
     replays: &'a mut DiagnosticReplayCache,
     active: HashSet<Signature>,
-    witnesses: Vec<DiagnosticWitness>,
+    witnesses: Vec<TokenRange>,
 }
 
 fn build_diagnostic_replay(
@@ -2530,8 +2524,8 @@ fn cached_diagnostic_replay(
 }
 
 /// Expand only the edges selected for an already-detected cycle. Module
-/// summaries stay compact on the normal path; this replay recovers one or
-/// more internal assignment witnesses from each summarized instance edge.
+/// summaries stay compact on the normal path; this replay recovers the
+/// internal statements carrying one selected summarized dependency.
 fn diagnostic_provenance(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
@@ -2552,9 +2546,9 @@ fn diagnostic_provenance(
         active,
         witnesses: Vec::new(),
     };
-    // Expand the first summarized edge in the deterministic reported cycle,
-    // then emit only its deepest concrete assignment instead of flooding the
-    // report with every valid place where the loop could be interrupted.
+    // Expand the first summarized edge in the deterministic reported cycle.
+    // Keep every concrete assignment on its recovered path: the deepest
+    // assignment is not necessarily the one that should break the loop.
     for edge in cycle {
         if !replay_edge_matches(&replay, *edge) || !replay.trace.summaries.contains_key(&edge.index)
         {
@@ -2565,20 +2559,18 @@ fn diagnostic_provenance(
             &replay,
             std::slice::from_ref(edge),
             false,
-            0,
             &mut traversal,
         );
         if !traversal.witnesses.is_empty() {
             break;
         }
     }
+    let mut seen = HashSet::default();
     traversal
         .witnesses
         .into_iter()
-        .enumerate()
-        .max_by_key(|(order, witness)| (witness.depth, *order))
-        .map(|(_, witness)| vec![witness.token])
-        .unwrap_or_default()
+        .filter(|token| seen.insert(*token))
+        .collect()
 }
 
 fn replay_edge_matches(replay: &DiagnosticReplay, edge: DiagnosticEdge) -> bool {
@@ -2590,26 +2582,22 @@ fn replay_edge_matches(replay: &DiagnosticReplay, edge: DiagnosticEdge) -> bool 
         && replay.graph[edge.index] == edge.dependency
 }
 
-fn local_dependency_witness(
+fn local_dependency_witnesses(
     module: &Module,
     replay: &DiagnosticReplay,
     edge: DiagnosticEdge,
-) -> Option<TokenRange> {
-    let cause = replay.trace.local.get(&edge.index)?;
-    let Declaration::Comb(comb) = module.declarations.get(cause.declaration)? else {
-        return None;
+) -> Vec<TokenRange> {
+    let Some(cause) = replay.trace.local.get(&edge.index) else {
+        return Vec::new();
+    };
+    let Some(Declaration::Comb(comb)) = module.declarations.get(cause.declaration) else {
+        return Vec::new();
     };
     let target = (cause.source, cause.destination, cause.dependency);
     let mut context = procedure::ProcedureContext::new(module);
     let traced =
         procedure::analyze_traced(&replay.bit_part, &comb.statements, &mut context, target);
-    let witnesses = traced.get(&target)?;
-    witnesses
-        .iter()
-        .copied()
-        .rev()
-        .find(|token| token.source() == module.token.source())
-        .or_else(|| witnesses.last().copied())
+    traced.get(&target).cloned().unwrap_or_default()
 }
 
 fn trace_dependency_path(
@@ -2617,14 +2605,15 @@ fn trace_dependency_path(
     replay: &DiagnosticReplay,
     path: &[DiagnosticEdge],
     include_local: bool,
-    depth: usize,
     traversal: &mut DiagnosticTraversal,
 ) {
     let summaries = traversal.summaries;
     for edge in path {
         let before_local = traversal.witnesses.len();
-        if include_local && let Some(token) = local_dependency_witness(module, replay, *edge) {
-            traversal.witnesses.push(DiagnosticWitness { token, depth });
+        if include_local {
+            traversal
+                .witnesses
+                .extend(local_dependency_witnesses(module, replay, *edge));
         }
         if traversal.witnesses.len() != before_local {
             continue;
@@ -2656,23 +2645,13 @@ fn trace_dependency_path(
                 continue;
             };
             let before = traversal.witnesses.len();
-            trace_dependency_path(
-                child,
-                &child_replay,
-                &child_path,
-                true,
-                depth + 1,
-                traversal,
-            );
+            trace_dependency_path(child, &child_replay, &child_path, true, traversal);
             if traversal.witnesses.len() == before
                 && let Some(token) = diagnostic_tokens(child, &diagnostic_path_nodes(&child_path))
                     .into_iter()
                     .next()
             {
-                traversal.witnesses.push(DiagnosticWitness {
-                    token,
-                    depth: depth + 1,
-                });
+                traversal.witnesses.push(token);
             }
             traversal.active.remove(&cause.child);
             if traversal.witnesses.len() != before {

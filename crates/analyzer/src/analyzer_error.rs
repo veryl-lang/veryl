@@ -1,6 +1,7 @@
 use crate::multi_sources::{MultiSources, Source};
 use miette::{self, Diagnostic, Severity, SourceSpan};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use thiserror::Error;
 use veryl_parser::resource_table::StrId;
@@ -136,8 +137,8 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         #[label(collection, "also involved in combinational feedback")]
         loop_participants: Vec<SourceSpan>,
-        #[label(collection, "dependency passes through this assignment")]
-        dependency_origins: Vec<SourceSpan>,
+        #[label(collection, "dependency passes through this statement")]
+        dependency_sites: Vec<SourceSpan>,
         token_source: TokenSource,
     },
 
@@ -2001,7 +2002,7 @@ fn source(token: &TokenRange) -> MultiSources {
     let path = token.beg.source.to_string();
     let text = token.beg.source.get_text();
     MultiSources {
-        sources: vec![Source { path, text }],
+        sources: vec![Source::new(path, text)],
     }
 }
 
@@ -2016,7 +2017,7 @@ fn source_with_context(
     let mut ranges = Vec::new();
     let mut sources = Vec::new();
 
-    sources.push(Source { path, text });
+    sources.push(Source::new(path, text));
 
     for x in context.iter().rev() {
         let path = x.beg.source.to_string();
@@ -2028,7 +2029,7 @@ fn source_with_context(
 
         base += text.len();
 
-        sources.push(Source { path, text });
+        sources.push(Source::new(path, text));
     }
 
     let sources = MultiSources { sources };
@@ -2036,29 +2037,34 @@ fn source_with_context(
 }
 
 /// Like `source_with_context`, but returns spans in the same order as
-/// `context`. Each label keeps its own source buffer so distant assignments
-/// render as compact snippets instead of one large continuous excerpt.
+/// `context`. Each label keeps its own bounded excerpt so distant statements
+/// render as compact snippets without cloning a complete file for every one.
 fn source_with_ordered_context(
     token: &TokenRange,
     context: &[TokenRange],
 ) -> (MultiSources, Vec<SourceSpan>) {
     let text = token.source().get_text();
     let mut base = text.len();
-    let mut sources = vec![Source {
-        path: token.source().to_string(),
-        text,
-    }];
+    let mut sources = vec![Source::new(token.source().to_string(), text)];
     let mut ranges = Vec::with_capacity(context.len());
+    let mut texts = HashMap::new();
     for token in context {
-        let text = token.source().get_text();
-        let mut range = *token;
-        range.offset(base as u32);
-        ranges.push(range.into());
-        base += text.len();
-        sources.push(Source {
-            path: token.source().to_string(),
+        let token_source = token.source();
+        let text = texts
+            .entry(token_source)
+            .or_insert_with(|| token_source.get_text());
+        let span = (*token).into();
+        let (source, span) = Source::excerpt(
+            token_source.to_string(),
             text,
-        });
+            &span,
+            token.beg.line as usize,
+            1,
+        )
+        .unwrap_or_else(|| (Source::new(token_source.to_string(), text.clone()), span));
+        ranges.push((base + span.offset(), span.len()).into());
+        base += source.text.len();
+        sources.push(source);
     }
     (MultiSources { sources }, ranges)
 }
@@ -2532,19 +2538,19 @@ impl AnalyzerError {
         cycle: &str,
         token: &TokenRange,
         participants: &[TokenRange],
-        origins: &[TokenRange],
+        sites: &[TokenRange],
     ) -> Self {
         let mut context = participants.to_vec();
-        context.extend_from_slice(origins);
+        context.extend_from_slice(sites);
         let (input, context_spans) = source_with_ordered_context(token, &context);
-        let (loop_participants, dependency_origins) = context_spans.split_at(participants.len());
+        let (loop_participants, dependency_sites) = context_spans.split_at(participants.len());
         AnalyzerError::CombinationalLoop {
             identifier: identifier.to_string(),
             cycle: cycle.to_string(),
             input,
             error_location: token.into(),
             loop_participants: loop_participants.to_vec(),
-            dependency_origins: dependency_origins.to_vec(),
+            dependency_sites: dependency_sites.to_vec(),
             token_source: token.source(),
         }
     }

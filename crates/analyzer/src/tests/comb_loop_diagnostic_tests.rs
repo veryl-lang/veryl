@@ -244,7 +244,7 @@ fn comb_loop_diagnostic_places_array_indices_on_imported_interface_members() {
 }
 
 #[test]
-fn comb_loop_diagnostic_traces_a_summarized_edge_into_the_child_module() {
+fn comb_loop_diagnostic_reports_every_data_carrying_statement_on_a_summarized_path() {
     let child = r#"
         module Child (
             accept: input logic,
@@ -279,25 +279,134 @@ fn comb_loop_diagnostic_traces_a_summarized_edge_into_the_child_module() {
         }
     "#;
     let errors = analyze_multiple_inputs(&[child, top]);
-    let (input, participants, origins) = errors
+    let (input, participants, path) = errors
         .iter()
         .find_map(|error| match error {
             AnalyzerError::CombinationalLoop {
                 input,
                 loop_participants,
-                dependency_origins,
+                dependency_sites,
                 ..
-            } => Some((input, loop_participants, dependency_origins)),
+            } => Some((input, loop_participants, dependency_sites)),
             _ => None,
         })
         .expect("the parent connection closes the child feedthrough loop");
-    assert_eq!(origins.len(), 1);
+    assert_eq!(path.len(), 2);
     assert!(participants.is_empty());
-    let (path, text) = diagnostic_span_text(input, &origins[0]).expect("origin is in source");
-    assert_eq!(path, "test_0.veryl");
-    assert!(text.contains("mcmd_active ="));
-    assert!(text.contains("valid || data_done"));
-    assert!(!text.contains("passed ="));
+    let path = path
+        .iter()
+        .map(|step| diagnostic_span_text(input, step).expect("path step is in source"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        path,
+        vec![
+            ("test_0.veryl", "data_done = accept && valid;"),
+            (
+                "test_0.veryl",
+                "mcmd_active =\n                    valid || data_done;",
+            ),
+        ]
+    );
+}
+
+#[test]
+fn comb_loop_diagnostic_reports_every_data_carrying_branch() {
+    let child = r#"
+        module Child (
+            select: input  logic,
+            i     : input  logic,
+            o     : output logic,
+        ) {
+            always_comb {
+                if select {
+                    o = i;
+                } else {
+                    o = ~i;
+                }
+            }
+        }
+    "#;
+    let top = r#"
+        module Top (
+            select: input logic,
+        ) {
+            var feedback: logic;
+            inst child: Child (
+                select: select,
+                i     : feedback,
+                o     : feedback,
+            );
+        }
+    "#;
+    let errors = analyze_multiple_inputs(&[child, top]);
+    let (input, path) = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::CombinationalLoop {
+                input,
+                dependency_sites,
+                ..
+            } => Some((input, dependency_sites)),
+            _ => None,
+        })
+        .expect("both child branches carry the feedback dependency");
+    let path = path
+        .iter()
+        .map(|step| diagnostic_span_text(input, step).expect("path step is in source"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        path,
+        vec![("test_0.veryl", "o = i;"), ("test_0.veryl", "o = ~i;")]
+    );
+}
+
+#[test]
+fn comb_loop_diagnostic_reports_controlled_assignments_for_a_control_dependency() {
+    let child = r#"
+        module Child (
+            i: input  logic,
+            o: output logic,
+        ) {
+            always_comb {
+                if i {
+                    o = 1;
+                } else {
+                    o = 0;
+                }
+            }
+        }
+    "#;
+    let top = r#"
+        module Top {
+            var feedback: logic;
+            inst child: Child (
+                i: feedback,
+                o: feedback,
+            );
+        }
+    "#;
+    let errors = analyze_multiple_inputs(&[child, top]);
+    let (input, sites) = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::CombinationalLoop {
+                input,
+                dependency_sites,
+                ..
+            } => Some((input, dependency_sites)),
+            _ => None,
+        })
+        .expect("the branch condition carries the feedback dependency");
+    let sites = sites
+        .iter()
+        .map(|site| diagnostic_span_text(input, site).expect("dependency site is in source"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        sites,
+        vec![("test_0.veryl", "o = 1;"), ("test_0.veryl", "o = 0;")]
+    );
 }
 
 #[test]
@@ -374,11 +483,15 @@ fn comb_loop_diagnostic_traces_through_nested_module_summaries() {
             valid : input logic,
             passed: output logic,
         ) {
+            var leaf_accept: logic;
+            var leaf_passed: logic;
+            assign leaf_accept = accept;
             inst leaf: Leaf (
-                accept: accept,
+                accept: leaf_accept,
                 valid : valid,
-                passed: passed,
+                passed: leaf_passed,
             );
+            assign passed = leaf_passed;
         }
     "#;
     let top = r#"
@@ -396,24 +509,34 @@ fn comb_loop_diagnostic_traces_through_nested_module_summaries() {
         }
     "#;
     let errors = analyze_multiple_inputs(&[leaf, wrapper, top]);
-    let (input, origins) = errors
+    let (input, path) = errors
         .iter()
         .find_map(|error| match error {
             AnalyzerError::CombinationalLoop {
                 input,
-                dependency_origins,
+                dependency_sites,
                 ..
-            } => Some((input, dependency_origins)),
+            } => Some((input, dependency_sites)),
             _ => None,
         })
         .expect("the top connection closes the nested feedthrough loop");
 
-    assert_eq!(origins.len(), 1);
-    let (path, text) = diagnostic_span_text(input, &origins[0]).expect("origin is in source");
-    assert_eq!(path, "test_0.veryl");
-    assert!(text.contains("mcmd_active ="));
-    assert!(text.contains("valid || data_done"));
-    assert!(!text.contains("passed ="));
+    let path = path
+        .iter()
+        .map(|step| diagnostic_span_text(input, step).expect("path step is in source"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        path,
+        vec![
+            ("test_1.veryl", "assign leaf_accept = accept;"),
+            ("test_0.veryl", "data_done = accept && valid;"),
+            (
+                "test_0.veryl",
+                "mcmd_active =\n                    valid || data_done;",
+            ),
+            ("test_1.veryl", "assign passed = leaf_passed;"),
+        ]
+    );
 }
 
 #[test]
@@ -451,23 +574,23 @@ fn comb_loop_diagnostic_uses_the_closing_parallel_summary_edge() {
         }
     "#;
     let errors = analyze_multiple_inputs(&[child, top]);
-    let (cycle, input, origins) = errors
+    let (cycle, input, path) = errors
         .iter()
         .find_map(|error| match error {
             AnalyzerError::CombinationalLoop {
                 cycle,
                 input,
-                dependency_origins,
+                dependency_sites,
                 ..
-            } => Some((cycle, input, dependency_origins)),
+            } => Some((cycle, input, dependency_sites)),
             _ => None,
         })
         .expect("the direct feedthrough closes the self-loop");
 
     assert_eq!(cycle, "feedback[1] -> feedback[1]");
-    assert_eq!(origins.len(), 1);
-    let (path, text) = diagnostic_span_text(input, &origins[0]).expect("origin is in source");
-    assert_eq!(path, "test_0.veryl");
+    assert_eq!(path.len(), 1);
+    let (source, text) = diagnostic_span_text(input, &path[0]).expect("path step is in source");
+    assert_eq!(source, "test_0.veryl");
     assert_eq!(text, "o[2:1] = id_i[2:1];");
 }
 

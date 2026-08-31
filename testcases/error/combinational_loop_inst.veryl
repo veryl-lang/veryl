@@ -2,7 +2,9 @@ module combinational_loop_inst_buf (
     i: input  logic<8>,
     o: output logic<8>,
 ) {
-    assign o = i;
+    var middle: logic<8>;
+    assign middle = i;
+    assign o      = middle;
 }
 
 module combinational_loop_inst (

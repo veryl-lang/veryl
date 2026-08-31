@@ -5,17 +5,24 @@ expression: out
 combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#combinational_loop)
 
   × combinational loop detected: x -> y -> x
-    ╭─[../../testcases/error/combinational_loop_inst.veryl:18:12]
- 17 │     );
- 18 │     assign x = y;
+    ╭─[../../testcases/error/combinational_loop_inst.veryl:20:12]
+ 19 │     );
+ 20 │     assign x = y;
     ·            ┬
     ·            ╰── involved in combinational feedback
- 19 │     assign b = y;
+ 21 │     assign b = y;
     ╰────
-   ╭─[../../testcases/error/combinational_loop_inst.veryl:5:5]
- 4 │ ) {
- 5 │     assign o = i;
-   ·     ──────┬──────
-   ·           ╰── dependency passes through this assignment
- 6 │ }
+   ╭─[../../testcases/error/combinational_loop_inst.veryl:6:5]
+ 5 │     var middle: logic<8>;
+ 6 │     assign middle = i;
+   ·     ─────────┬────────
+   ·              ╰── dependency passes through this statement
+ 7 │     assign o      = middle;
+   ╰────
+   ╭─[../../testcases/error/combinational_loop_inst.veryl:7:5]
+ 6 │     assign middle = i;
+ 7 │     assign o      = middle;
+   ·     ───────────┬───────────
+   ·                ╰── dependency passes through this statement
+ 8 │ }
    ╰────
