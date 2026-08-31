@@ -1521,6 +1521,78 @@ fn wide_256_aot_native_comb() {
 }
 
 #[test]
+fn wide_ff_select_covered_by_aot_c_event_emitter() {
+    // `emit_event_function` bails all-or-nothing, so ONE uncovered statement
+    // drops a whole clock event to Cranelift.  These two shapes are the ones
+    // that did that on a real SoC clock event; `event_uncovered_census` is
+    // empty exactly when the event-path emitter covers them.
+    use crate::ir::{
+        ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
+        ProtoStatement, VarOffset,
+    };
+    use veryl_parser::token_range::TokenRange;
+
+    let idx = ProtoExpression::Value {
+        value: Value::new(3, 8, false),
+        width: 8,
+        expr_context: ExpressionContext {
+            width: 8,
+            signed: false,
+        },
+    };
+    let val = |w: usize| ProtoExpression::Value {
+        value: Value::new(0x5a5a_5a5a, w, false),
+        width: w,
+        expr_context: ExpressionContext {
+            width: w,
+            signed: false,
+        },
+    };
+
+    // 1. Static bit-select into a wide FF that covers neither one word nor
+    //    whole words: element 13 of 46 x 92 bits packed into one 4232-bit FF.
+    //    92 divides no word, so no element past the first is ever aligned.
+    //    Dual-slot (`dst_ff_current_offset != dst`), as the real one is.
+    let static_slice = ProtoStatement::Assign(ProtoAssignStatement {
+        dst: VarOffset::Ff(0x1000),
+        dst_width: 4232,
+        select: Some((1287, 1196)),
+        dynamic_select: None,
+        rhs_select: None,
+        expr: val(92),
+        dst_ff_current_offset: 0x800,
+        token: TokenRange::default(),
+    });
+
+    // 2. Byte lane of a RUNTIME-indexed wide element: `mem[idx][7:0] <= b`
+    //    over 320-bit elements.
+    let dyn_lane = ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+        dst_base: VarOffset::Ff(0x2000),
+        dst_stride: 40,
+        dst_num_elements: 8,
+        dst_index_expr: idx,
+        dst_width: 320,
+        select: Some((7, 0)),
+        dynamic_select: None,
+        rhs_select: None,
+        expr: val(8),
+        dst_ff_current_base_offset: 0x1800,
+    });
+
+    for (name, stmt) in [
+        ("static unaligned wide slice", static_slice),
+        ("dynamic wide byte lane", dyn_lane),
+    ] {
+        let census = crate::backend::aot_c::emit::event_uncovered_census(&[stmt]);
+        assert!(
+            census.is_empty(),
+            "{name} must be emittable on the AOT-C event path, else the whole \
+             event drops to Cranelift; uncovered: {census:?}",
+        );
+    }
+}
+
+#[test]
 fn probe_wide_comb_oor_select_store() {
     // PROBE: wide (>128-bit) COMB bit-select store where hi >= dst_width.
     // o is 200-bit; a runtime base of 199 writes bits 199..201, but only bit

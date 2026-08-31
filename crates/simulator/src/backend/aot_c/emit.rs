@@ -3552,8 +3552,10 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
 /// `>128` bit (helper-table value).  A static slice covering whole words
 /// reduces to the full-width form at a shifted offset: the commit is a plain
 /// byte-range copy, so a byte-exact subrange needs no read-modify-write
-/// against uncommitted state.  Other select / dynamic_select / rhs_select
-/// wide FFs stay on Cranelift (the module bails).  2-state only.
+/// against uncommitted state.  A slice that covers neither (`ff4232[1287:1196]`
+/// — 92-bit fields never land on a word boundary) goes through the general
+/// read-modify-write in `emit_event_ff_assign_wide_select`.  dynamic_select /
+/// rhs_select wide FFs stay on Cranelift (the module bails).  2-state only.
 fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
     if let Some(ds) = &a.dynamic_select
         && a.select.is_none()
@@ -3582,6 +3584,15 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
     };
     let (Some(slice), false, None) = (aligned_slice, a.dynamic_select.is_some(), &a.rhs_select)
     else {
+        // Unaligned multi-word slice: no byte-range copy expresses it, so
+        // merge the field into a register holding the current value.
+        if let Some((hi, lo)) = a.select
+            && a.dynamic_select.is_none()
+            && a.rhs_select.is_none()
+            && let Some(s) = emit_event_ff_assign_wide_select(a, hi, lo)
+        {
+            return Some(s);
+        }
         let ds = match &a.dynamic_select {
             Some(d) => format!(
                 " ew={} window={} ne={}",
@@ -3644,16 +3655,18 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
 /// width, ready for a field merge.  The clear must precede the merge: a field
 /// may legitimately reach past the width (`ff72[idx +: 8]` at `idx = 71`) and
 /// those bits are kept, while bits past the width outside it are dropped.
+///
+/// `addr` is the C address of the element to read; the dynamic-index paths
+/// pass one carrying a runtime stride term, so it is not a plain offset.
 fn emit_wide_ff_rmw_prologue(
     reg: &str,
     dst_width: usize,
     nb: usize,
     nw: usize,
-    dst_raw: isize,
+    addr: &str,
 ) -> String {
     let mut out = format!(
-        "uint64_t {reg}[{nw}]; \
-         vw_copy((uint8_t*){reg}, (const uint8_t*)(ff_values + {dst_raw:#x}), {nb}u); ",
+        "uint64_t {reg}[{nw}]; vw_copy((uint8_t*){reg}, (const uint8_t*)({addr}), {nb}u); ",
     );
     let top = dst_width / 64;
     if !dst_width.is_multiple_of(64) && top < nw {
@@ -3725,7 +3738,13 @@ fn emit_event_ff_assign_wide_field(
     if w0 >= nw {
         return None;
     }
-    let mut body = emit_wide_ff_rmw_prologue(&reg, a.dst_width, nb, nw, dst_raw);
+    let mut body = emit_wide_ff_rmw_prologue(
+        &reg,
+        a.dst_width,
+        nb,
+        nw,
+        &format!("ff_values + {dst_raw:#x}"),
+    );
     body.push_str(&format!(
         "uint64_t _f{d} = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; ",
     ));
@@ -3746,6 +3765,66 @@ fn emit_event_ff_assign_wide_field(
             w1 = w0 + 1,
         ));
     }
+    body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    Some(format!("{{ {body} }}"))
+}
+
+/// Event-path wide FF write through a static bit-select that is neither a
+/// single ≤64-bit word field (the scalar path above) nor whole words (the
+/// byte-range copy in `emit_event_ff_assign_wide`): `ff4232[1287:1196] <= v`,
+/// a 92-bit element of a flattened array, where no element past the first
+/// starts on a word boundary.  Merges the field into a register holding the
+/// current value with `emit_wide_select_rmw_store` — the same word-at-a-time
+/// RMW the comb path uses — and logs the whole element like the ≤64-bit
+/// sibling, because `eval_step` logs the merged `current`, not the field.
+fn emit_event_ff_assign_wide_select(
+    a: &ProtoAssignStatement,
+    hi: usize,
+    lo: usize,
+) -> Option<String> {
+    let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+    let nb = native_bytes(a.dst_width);
+    let nw = wide_words(nb);
+    // `emit_wide_select_rmw_store` intersects the field with the width clamp,
+    // so a field reaching past `dst_width` would drop the bits the ≤64-bit
+    // path deliberately keeps.  Leave that shape to Cranelift rather than
+    // disagree with it.
+    if nbits == 0 || hi >= a.dst_width || hi >= nb * 8 {
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let d = next_wide_tmp();
+    let reg = format!("_w{d}");
+    // Source spans the destination's size class — the contract
+    // `emit_wide_select_rmw_store` documents, and what the comb caller passes.
+    let mut pre = String::new();
+    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+    // Read first: the RMW writes only `reg`, so the RHS still sees the
+    // pre-write state however it reaches this FF.
+    let mut body = emit_wide_ff_rmw_prologue(
+        &reg,
+        a.dst_width,
+        nb,
+        nw,
+        &format!("ff_values + {dst_raw:#x}"),
+    );
+    body.push_str(&emit_wide_select_rmw_store(
+        &r.addr,
+        pre,
+        &format!("(uint8_t*){reg}"),
+        nw,
+        lo,
+        nbits,
+        a.dst_width,
+    ));
     body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
     Some(format!("{{ {body} }}"))
 }
@@ -3794,7 +3873,7 @@ fn emit_event_ff_assign_wide_dynsel_field(
         a.dst_width,
         nb,
         nw,
-        dst_raw,
+        &format!("ff_values + {dst_raw:#x}"),
     ));
     body.push_str(&format!(
         "uint64_t _f{d} = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
@@ -4085,10 +4164,12 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
 }
 
 /// Wide (>64-bit) analogue of `emit_event_ff_assign_dynamic`, routing through
-/// the wide write-log pool.  Full-element 2-state only; select / dynamic-select
-/// / rhs_select bail (rare; the dcache line-write path has none).
+/// the wide write-log pool.  2-state only.  A static bit-select into the
+/// indexed element (`mem[idx][15:8] <= b`, a byte lane of a 160-bit word) is a
+/// read-modify-write of that element, mirroring the ≤64-bit sibling; rhs_select
+/// still bails.
 fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<String> {
-    if a.select.is_some() || a.rhs_select.is_some() {
+    if a.rhs_select.is_some() {
         ev_diag(&format!(
             "dyn FF wide: select={:?} rhssel={:?} width={}",
             a.select, a.rhs_select, a.dst_width
@@ -4115,12 +4196,50 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
     // slot must not be clobbered before commit.
     let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
     let d = next_wide_tmp();
-    pre.push_str(&format!(
-        "uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
-         vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
-        src = r.addr,
-        p = wpack(nb, a.dst_width),
-    ));
+    // The indexed element, as a C address; `_idx` is bound by the block below.
+    let elem = format!(
+        "ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx",
+        wbase = dst_base_raw,
+        stride = a.dst_stride,
+    );
+    match a.select {
+        None => pre.push_str(&format!(
+            "uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
+             vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
+            src = r.addr,
+            p = wpack(nb, a.dst_width),
+        )),
+        // A field leaves the rest of the element standing, so the whole
+        // element has to be read back and merged before the log push (which
+        // carries all `nb` bytes).  Same width-clamp restriction as the
+        // static sibling, and the same one the ≤64-bit path already applies.
+        Some((hi, lo)) => {
+            let nbits = hi.checked_sub(lo)?.checked_add(1)?;
+            if nbits == 0 || hi >= a.dst_width || hi >= nb * 8 {
+                ev_diag(&format!(
+                    "dyn FF wide: select={:?} width={}",
+                    a.select, a.dst_width
+                ));
+                return None;
+            }
+            pre.push_str(&emit_wide_ff_rmw_prologue(
+                &format!("_w{d}"),
+                a.dst_width,
+                nb,
+                nw,
+                &elem,
+            ));
+            pre.push_str(&emit_wide_select_rmw_store(
+                &r.addr,
+                String::new(),
+                &format!("(uint8_t*)_w{d}"),
+                nw,
+                lo,
+                nbits,
+                a.dst_width,
+            ));
+        }
+    }
     // Packed: skip the in-place store; the wide log push below delivers it
     // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
     // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
@@ -4128,12 +4247,7 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
     let store = if ff_is_packed {
         String::new()
     } else {
-        format!(
-            "vw_copy((uint8_t*)(ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx), \
-                     (const uint8_t*)_w{d}, {nb}u); ",
-            wbase = dst_base_raw,
-            stride = a.dst_stride,
-        )
+        format!("vw_copy((uint8_t*)({elem}), (const uint8_t*)_w{d}, {nb}u); ")
     };
     let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), "_woff", nb);
     Some(format!(
