@@ -1,4 +1,4 @@
-use crate::multi_sources::{MultiSources, Source};
+use crate::multi_sources::{MultiSources, Source, SourceExcerpt};
 use miette::{self, Diagnostic, Severity, SourceSpan};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -2048,25 +2048,75 @@ fn source_with_ordered_context(
     let mut sources = vec![Source::new(token.source().to_string(), text)];
     let mut ranges = Vec::with_capacity(context.len());
     let mut texts = HashMap::new();
+    let mut windows = HashMap::new();
+    let mut excerpt_bases = HashMap::new();
     for token in context {
         let token_source = token.source();
         let text = texts
             .entry(token_source)
             .or_insert_with(|| token_source.get_text());
         let span = (*token).into();
-        let (source, span) = Source::excerpt(
-            token_source.to_string(),
-            text,
-            &span,
-            token.beg.line as usize,
-            1,
-        )
-        .unwrap_or_else(|| (Source::new(token_source.to_string(), text.clone()), span));
-        ranges.push((base + span.offset(), span.len()).into());
-        base += source.text.len();
-        sources.push(source);
+        let window_key = (token_source, token.beg.line, token.end.line);
+        let excerpt = windows
+            .get(&window_key)
+            .copied()
+            .filter(|excerpt: &SourceExcerpt| excerpt.local_span(&span).is_some())
+            .or_else(|| {
+                Source::excerpt_window(text, &span, token.beg.line as usize, 1).inspect(|excerpt| {
+                    windows.insert(window_key, *excerpt);
+                })
+            });
+        let (excerpt, local_span) = excerpt
+            .and_then(|excerpt| Some((excerpt, excerpt.local_span(&span)?)))
+            .unwrap_or_else(|| (SourceExcerpt::whole(text), span));
+        let excerpt_key = (token_source, excerpt);
+        let excerpt_base = if let Some(base) = excerpt_bases.get(&excerpt_key) {
+            *base
+        } else {
+            let source = Source::from_excerpt(token_source.to_string(), text, excerpt)
+                .unwrap_or_else(|| Source::new(token_source.to_string(), text.clone()));
+            let excerpt_base = base;
+            base += source.text.len();
+            sources.push(source);
+            excerpt_bases.insert(excerpt_key, excerpt_base);
+            excerpt_base
+        };
+        ranges.push((excerpt_base + local_span.offset(), local_span.len()).into());
     }
     (MultiSources { sources }, ranges)
+}
+
+#[cfg(test)]
+mod ordered_context_tests {
+    use super::*;
+    use miette::SourceCode;
+    use std::path::Path;
+    use veryl_parser::resource_table;
+    use veryl_parser::text_table::{self, TextInfo};
+    use veryl_parser::veryl_token::{Token, TokenSource};
+
+    #[test]
+    fn labels_on_one_line_share_a_source_excerpt() {
+        let text = "before\na = b; b = c;\nafter\n";
+        let path = resource_table::insert_path(Path::new("shared_excerpt.veryl"));
+        let text_id = text_table::set_current_text(TextInfo {
+            text: text.into(),
+            path,
+        });
+        let source = TokenSource::File {
+            path,
+            text: text_id,
+        };
+        let primary = TokenRange::from(Token::new("before", 1, 1, 6, 0, source));
+        let first = TokenRange::from(Token::new("a = b;", 2, 1, 6, 7, source));
+        let second = TokenRange::from(Token::new("b = c;", 2, 8, 6, 14, source));
+
+        let (input, spans) = source_with_ordered_context(&primary, &[first, second]);
+
+        assert_eq!(input.sources.len(), 2);
+        assert_eq!(input.read_span(&spans[0], 0, 0).unwrap().data(), b"a = b;");
+        assert_eq!(input.read_span(&spans[1], 0, 0).unwrap().data(), b"b = c;");
+    }
 }
 
 /// `miette::Severity`, in a form the diagnostic cache can serialize.

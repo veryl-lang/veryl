@@ -853,3 +853,219 @@ fn comb_loop_dynamic_loop_coverage_site_stays_region_local() {
         code.find("value[0] = 1")
     );
 }
+
+fn reverse_procedural_chain(count: usize, one_line: bool) -> (String, String) {
+    let variables = (0..count)
+        .map(|index| format!("#[allow(unassign_variable)]\nvar x{index}: logic;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut assignments = vec![format!("o = x{};", count - 1)];
+    assignments.extend(
+        (1..count)
+            .rev()
+            .map(|index| format!("x{index} = x{};", index - 1)),
+    );
+    assignments.push("x0 = i;".into());
+    let assignments = assignments.join(if one_line { " " } else { "\n" });
+    let child = format!(
+        r#"
+        module Child (
+            i: input  logic,
+            o: output logic,
+        ) {{
+            {variables}
+            always_comb {{
+                {assignments}
+            }}
+        }}
+        "#,
+    );
+    let top = r#"
+        module Top {
+            var feedback: logic;
+            inst child: Child (
+                i: feedback,
+                o: feedback,
+            );
+        }
+    "#
+    .to_string();
+    (child, top)
+}
+
+#[test]
+fn comb_loop_diagnostic_traces_each_procedure_once() {
+    const COUNT: usize = 32;
+    let (child, top) = reverse_procedural_chain(COUNT, false);
+    crate::comb_loop_detect::reset_traced_procedure_evaluation_count();
+
+    let errors = analyze_multiple_inputs(&[&child, &top]);
+    let sites = errors.iter().find_map(|error| match error {
+        AnalyzerError::CombinationalLoop {
+            dependency_sites, ..
+        } => Some(dependency_sites.len()),
+        _ => None,
+    });
+
+    assert_eq!(sites, Some(COUNT + 1), "{errors:#?}");
+    assert_eq!(
+        crate::comb_loop_detect::traced_procedure_evaluation_count(),
+        1,
+        "one selected path must not re-evaluate its procedure for every edge",
+    );
+}
+
+#[test]
+fn comb_loop_diagnostic_shares_excerpts_on_one_physical_line() {
+    const COUNT: usize = 32;
+    let (child, top) = reverse_procedural_chain(COUNT, true);
+    let errors = analyze_multiple_inputs(&[&child, &top]);
+    let (input, sites) = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::CombinationalLoop {
+                input,
+                dependency_sites,
+                ..
+            } => Some((input, dependency_sites)),
+            _ => None,
+        })
+        .expect("the closed child feedthrough is a loop");
+
+    assert_eq!(sites.len(), COUNT + 1, "{errors:#?}");
+    for site in sites {
+        diagnostic_span_text(input, site).expect("every dependency site remains addressable");
+    }
+    let retained = input
+        .sources
+        .iter()
+        .map(|source| source.text.len())
+        .sum::<usize>();
+    assert!(
+        retained <= (child.len() + top.len()) * 3,
+        "same-line sites retained {retained} bytes for {} bytes of input",
+        child.len() + top.len(),
+    );
+}
+
+fn serial_instance_chain(count: usize) -> (String, String, String) {
+    let leaf = r#"
+        module Pass (
+            i: input  logic,
+            o: output logic,
+        ) {
+            assign o = i;
+        }
+    "#
+    .to_string();
+    let links = (0..count - 1)
+        .map(|index| format!("var link_{index}: logic;"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let instances = (0..count)
+        .map(|index| {
+            let input = if index == 0 {
+                "i".to_string()
+            } else {
+                format!("link_{}", index - 1)
+            };
+            let output = if index + 1 == count {
+                "o".to_string()
+            } else {
+                format!("link_{index}")
+            };
+            format!("inst stage_{index}: Pass (i: {input}, o: {output});")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let chain = format!(
+        r#"
+        module Chain (
+            i: input  logic,
+            o: output logic,
+        ) {{
+            {links}
+            {instances}
+        }}
+        "#,
+    );
+    let top = r#"
+        module Top {
+            var feedback: logic;
+            inst chain: Chain (
+                i: feedback,
+                o: feedback,
+            );
+        }
+    "#
+    .to_string();
+    (leaf, chain, top)
+}
+
+#[test]
+fn comb_loop_diagnostic_resolves_serial_instances_by_declaration_index() {
+    const COUNT: usize = 32;
+    let (leaf, chain, top) = serial_instance_chain(COUNT);
+    crate::comb_loop_detect::reset_diagnostic_instance_probe_count();
+
+    let errors = analyze_multiple_inputs(&[&leaf, &chain, &top]);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+            .count(),
+        1,
+        "{errors:#?}",
+    );
+    assert_eq!(
+        crate::comb_loop_detect::diagnostic_instance_probe_count(),
+        COUNT + 1,
+        "each summarized edge should require exactly one direct instance lookup",
+    );
+}
+
+#[test]
+fn comb_loop_diagnostic_skips_duplicate_region_provenance() {
+    const COUNT: usize = 32;
+    let assignments = (0..COUNT)
+        .map(|index| format!("assign o[{index}] = i[{index}];"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let child = format!(
+        r#"
+        module Child (
+            i: input  logic [{COUNT}],
+            o: output logic [{COUNT}],
+        ) {{
+            {assignments}
+        }}
+        "#,
+    );
+    let top = format!(
+        r#"
+        module Top {{
+            var feedback: logic [{COUNT}];
+            inst child: Child (
+                i: feedback,
+                o: feedback,
+            );
+        }}
+        "#,
+    );
+    crate::comb_loop_detect::reset_diagnostic_provenance_build_count();
+
+    let errors = analyze_multiple_inputs(&[&child, &top]);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+            .count(),
+        1,
+        "{errors:#?}",
+    );
+    assert_eq!(
+        crate::comb_loop_detect::diagnostic_provenance_build_count(),
+        1,
+        "duplicate region loops must be rejected before provenance is built",
+    );
+}

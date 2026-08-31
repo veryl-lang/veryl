@@ -205,6 +205,7 @@ thread_local! {
     static FUNCTION_RESULT_REGION_PROBES: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static MODULE_CONTEXT_ENTRIES: Cell<usize> = const { Cell::new(0) };
+    static TRACED_PROCEDURE_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -245,24 +246,78 @@ pub(crate) fn module_context_entries() -> usize {
     MODULE_CONTEXT_ENTRIES.get()
 }
 
+#[cfg(test)]
+pub(crate) fn reset_traced_procedure_evaluation_count() {
+    TRACED_PROCEDURE_EVALUATIONS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn traced_procedure_evaluation_count() -> usize {
+    TRACED_PROCEDURE_EVALUATIONS.get()
+}
+
 pub(super) fn analyze(
     bit_part: &BitPartition,
     statements: &[Statement],
     context: &mut ProcedureContext,
 ) -> ProcedureResult {
-    ProcedureAnalysis::analyze(bit_part, statements, context, None).0
+    ProcedureAnalysis::analyze(bit_part, statements, context, false).0
 }
 
-pub(super) fn analyze_traced(
+pub(super) fn analyze_with_trace(
     bit_part: &BitPartition,
     statements: &[Statement],
     context: &mut ProcedureContext,
-    target: (NodeKey, NodeKey, BitDependency),
-) -> DependencyWitnesses {
-    ProcedureAnalysis::analyze(bit_part, statements, context, Some(target)).1
+) -> (ProcedureResult, ProcedureWitnessTrace) {
+    #[cfg(test)]
+    TRACED_PROCEDURE_EVALUATIONS.set(TRACED_PROCEDURE_EVALUATIONS.get() + 1);
+    let (result, trace) = ProcedureAnalysis::analyze(bit_part, statements, context, true);
+    (
+        result,
+        trace.expect("traced procedure analysis returns its witness state"),
+    )
 }
 
-pub(super) type DependencyWitnesses = HashMap<(NodeKey, NodeKey, BitDependency), Vec<TokenRange>>;
+pub(super) type DependencyTarget = (NodeKey, NodeKey, BitDependency);
+
+/// SSA state retained by a diagnostic replay. Building it evaluates the
+/// procedure once; individual dependency paths are recovered lazily without
+/// walking the source statements again.
+pub(super) struct ProcedureWitnessTrace {
+    ssa: SsaStore<SsaKey>,
+    targets: HashMap<DependencyTarget, (VersionId, SsaKey)>,
+    definition_sites: HashMap<VersionId, TokenRange>,
+    definition_data_inputs: HashMap<VersionId, Vec<VersionId>>,
+}
+
+impl ProcedureWitnessTrace {
+    pub(super) fn witnesses(&self, target: DependencyTarget) -> Vec<TokenRange> {
+        let Some((version, source)) = self.targets.get(&target).copied() else {
+            return Vec::new();
+        };
+        let versions = self.ssa.source_witness_versions(version, source);
+        let version_set = versions.iter().copied().collect::<HashSet<_>>();
+        let all = versions
+            .iter()
+            .filter_map(|version| self.definition_sites.get(version).copied())
+            .collect::<Vec<_>>();
+        let data = versions
+            .iter()
+            .filter(|version| {
+                self.definition_data_inputs
+                    .get(version)
+                    .is_some_and(|inputs| inputs.iter().any(|input| version_set.contains(input)))
+            })
+            .filter_map(|version| self.definition_sites.get(version).copied())
+            .collect::<Vec<_>>();
+        let witness = if data.is_empty() { all } else { data };
+        let mut seen = HashSet::default();
+        witness
+            .into_iter()
+            .filter(|token| seen.insert(*token))
+            .collect()
+    }
+}
 
 pub(super) struct ProcedureResult {
     pub(super) dependencies: Vec<Dependency>,
@@ -450,7 +505,7 @@ struct ProcedureAnalysis<'a, 's> {
     next_call_frame: usize,
     receiver_indices: Vec<Option<VarIndex>>,
     function_flows: Vec<FunctionFlow>,
-    witness_target: Option<(NodeKey, NodeKey, BitDependency)>,
+    trace_witnesses: bool,
     active_assignment: Option<TokenRange>,
     definition_sites: HashMap<VersionId, TokenRange>,
     definition_data_inputs: HashMap<VersionId, Vec<VersionId>>,
@@ -471,7 +526,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             next_call_frame: 0,
             receiver_indices: Vec::new(),
             function_flows: Vec::new(),
-            witness_target: None,
+            trace_witnesses: false,
             active_assignment: None,
             definition_sites: HashMap::default(),
             definition_data_inputs: HashMap::default(),
@@ -502,19 +557,29 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         bit_part: &'a BitPartition,
         statements: &[Statement],
         context: &mut ProcedureContext,
-        witness_target: Option<(NodeKey, NodeKey, BitDependency)>,
-    ) -> (ProcedureResult, DependencyWitnesses) {
+        trace_witnesses: bool,
+    ) -> (ProcedureResult, Option<ProcedureWitnessTrace>) {
         let mut this = Self::from_context(bit_part, context.take());
-        this.witness_target = witness_target;
+        this.trace_witnesses = trace_witnesses;
         this.eval_block(statements, &[]);
-        let (dependencies, witnesses) = this.dependencies();
+        let (dependencies, targets) = this.dependencies();
         let result = ProcedureResult {
             dependencies,
             complete: this.complete,
             position_overflow: this.position_overflow,
         };
+        let trace = if trace_witnesses {
+            Some(ProcedureWitnessTrace {
+                ssa: this.ssa,
+                targets,
+                definition_sites: this.definition_sites,
+                definition_data_inputs: this.definition_data_inputs,
+            })
+        } else {
+            None
+        };
         context.restore(this.ctx);
-        (result, witnesses)
+        (result, trace)
     }
 
     fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<NodeKey> {
@@ -628,9 +693,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some(summary)
     }
 
-    fn dependencies(&mut self) -> (Vec<Dependency>, DependencyWitnesses) {
+    fn dependencies(
+        &mut self,
+    ) -> (
+        Vec<Dependency>,
+        HashMap<DependencyTarget, (VersionId, SsaKey)>,
+    ) {
         let mut dependencies = Vec::new();
-        let mut witnesses: DependencyWitnesses = HashMap::default();
+        let mut targets = HashMap::default();
         let destinations: Vec<_> = self
             .written
             .iter()
@@ -654,37 +724,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .filter(|(source, _)| self.is_module_scope_key(*source))
             {
                 let kind = Self::dependency_kind(source_kind);
-                if self.witness_target == Some((source, destination, kind)) {
-                    let versions = self.ssa.source_witness_versions(
-                        version,
-                        SsaKey {
-                            node: source,
-                            call_frame: None,
-                        },
+                if self.trace_witnesses {
+                    targets.insert(
+                        (source, destination, kind),
+                        (
+                            version,
+                            SsaKey {
+                                node: source,
+                                call_frame: None,
+                            },
+                        ),
                     );
-                    let version_set = versions.iter().copied().collect::<HashSet<_>>();
-                    let all = versions
-                        .iter()
-                        .filter_map(|version| self.definition_sites.get(version).copied())
-                        .collect::<Vec<_>>();
-                    let data = versions
-                        .iter()
-                        .filter(|version| {
-                            self.definition_data_inputs
-                                .get(version)
-                                .is_some_and(|inputs| {
-                                    inputs.iter().any(|input| version_set.contains(input))
-                                })
-                        })
-                        .filter_map(|version| self.definition_sites.get(version).copied())
-                        .collect::<Vec<_>>();
-                    let witness = if data.is_empty() { all } else { data };
-                    let mut seen = HashSet::default();
-                    let witness = witness
-                        .into_iter()
-                        .filter(|token| seen.insert(*token))
-                        .collect();
-                    witnesses.insert((source, destination, kind), witness);
                 }
                 dependencies.push(Dependency {
                     source,
@@ -694,7 +744,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
         dependencies.sort_unstable_by_key(|dependency| (dependency.source, dependency.destination));
-        (dependencies, witnesses)
+        (dependencies, targets)
     }
 
     fn dependency_kind(source_kind: PositionRelation) -> BitDependency {
@@ -780,7 +830,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
-        if self.witness_target.is_some()
+        if self.trace_witnesses
             && let Some(token) = self.active_assignment
         {
             self.definition_sites.insert(version, token);
@@ -838,7 +888,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let keys = self.write_keys(destination);
         let dynamic = self.destination_is_dynamic(destination);
         let version = self.ssa.definition(dependencies);
-        if self.witness_target.is_some() {
+        if self.trace_witnesses {
             self.definition_data_inputs
                 .insert(version, sources.to_vec());
         }
@@ -923,7 +973,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             } else {
                 ExpressionSources::whole(self.eval_expr(expression))
             };
-            let data_inputs = self.witness_target.is_some().then(|| {
+            let data_inputs = self.trace_witnesses.then(|| {
                 sources
                     .positional
                     .iter()
@@ -1014,7 +1064,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         match statement {
             Statement::Assign(assign) => {
                 let previous_assignment = self.active_assignment;
-                if self.witness_target.is_some() {
+                if self.trace_witnesses {
                     self.active_assignment = Some(assign.token);
                 }
                 self.call_caches.push(Some(HashMap::default()));

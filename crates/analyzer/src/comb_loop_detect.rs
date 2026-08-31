@@ -17,6 +17,7 @@ pub(crate) use procedure::{
     function_barrier_evaluation_count, function_evaluation_count,
     function_result_region_probe_count, function_result_version_count, module_context_entries,
     reset_function_evaluation_count, reset_module_context_entries,
+    reset_traced_procedure_evaluation_count, traced_procedure_evaluation_count,
 };
 
 use region::{ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, var_reads};
@@ -111,7 +112,7 @@ struct DiagnosticEdge {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SummaryEdgeCause {
-    inst_token: TokenRange,
+    inst_declaration: usize,
     child: Signature,
     child_source: SummaryRegion,
     child_destination: SummaryRegion,
@@ -127,15 +128,18 @@ struct LocalEdgeCause {
 
 /// Populated only by a diagnostic replay after a loop has been detected. The
 /// normal graph and module summaries deliberately remain provenance-free.
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 struct DiagnosticTrace {
     local: HashMap<EdgeIndex, LocalEdgeCause>,
     summaries: HashMap<EdgeIndex, Vec<SummaryEdgeCause>>,
+    procedures: HashMap<usize, procedure::ProcedureWitnessTrace>,
 }
 
 #[cfg(test)]
 thread_local! {
     static DIAGNOSTIC_REPLAYS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DIAGNOSTIC_PROVENANCE_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DIAGNOSTIC_INSTANCE_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -146,6 +150,26 @@ pub(crate) fn reset_diagnostic_replay_count() {
 #[cfg(test)]
 pub(crate) fn diagnostic_replay_count() -> usize {
     DIAGNOSTIC_REPLAYS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_diagnostic_provenance_build_count() {
+    DIAGNOSTIC_PROVENANCE_BUILDS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_provenance_build_count() -> usize {
+    DIAGNOSTIC_PROVENANCE_BUILDS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_diagnostic_instance_probe_count() {
+    DIAGNOSTIC_INSTANCE_PROBES.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_instance_probe_count() -> usize {
+    DIAGNOSTIC_INSTANCE_PROBES.get()
 }
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
@@ -242,10 +266,18 @@ fn module_postorder(ir: &Ir) -> Vec<&Module> {
 }
 
 fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
-    module.declarations.iter().filter_map(|d| match d {
-        Declaration::Inst(inst) => Some(inst.as_ref()),
-        _ => None,
-    })
+    walk_indexed_insts(module).map(|(_, inst)| inst)
+}
+
+fn walk_indexed_insts(module: &Module) -> impl Iterator<Item = (usize, &InstDeclaration)> {
+    module
+        .declarations
+        .iter()
+        .enumerate()
+        .filter_map(|(index, declaration)| match declaration {
+            Declaration::Inst(inst) => Some((index, inst.as_ref())),
+            _ => None,
+        })
 }
 
 /// Split only at observed access endpoints. Runtime and storage depend on the
@@ -1211,7 +1243,16 @@ fn build_module_graph(
         let Declaration::Comb(comb) = declaration else {
             continue;
         };
-        let analysis = procedure::analyze(&bit_part, &comb.statements, &mut procedure_context);
+        let (analysis, witness_trace) = if diagnostic_trace.is_some() {
+            let (analysis, trace) =
+                procedure::analyze_with_trace(&bit_part, &comb.statements, &mut procedure_context);
+            (analysis, Some(trace))
+        } else {
+            (
+                procedure::analyze(&bit_part, &comb.statements, &mut procedure_context),
+                None,
+            )
+        };
         if analysis.position_overflow {
             return Err(Box::new(
                 AnalyzerError::combinational_loop_position_overflow(&module.token),
@@ -1221,6 +1262,7 @@ fn build_module_graph(
             complete = false;
             continue;
         }
+        let mut has_local_dependency = false;
         for dependency in analysis.dependencies {
             let source = dependency.source;
             let destination = dependency.destination;
@@ -1235,6 +1277,7 @@ fn build_module_graph(
             let destination_node = ensure_node(&mut graph, &mut node_map, destination);
             let edge = graph.add_edge(source_node, destination_node, dependency.kind);
             if let Some(trace) = diagnostic_trace.as_deref_mut() {
+                has_local_dependency = true;
                 trace.local.insert(
                     edge,
                     LocalEdgeCause {
@@ -1246,9 +1289,15 @@ fn build_module_graph(
                 );
             }
         }
+        if has_local_dependency
+            && let (Some(trace), Some(witness_trace)) =
+                (diagnostic_trace.as_deref_mut(), witness_trace)
+        {
+            trace.procedures.insert(declaration_index, witness_trace);
+        }
     }
 
-    for inst in walk_insts(module) {
+    for (inst_declaration, inst) in walk_indexed_insts(module) {
         match inst.component.as_ref() {
             Component::Module(child) => {
                 let Some(summary) = summaries.get(&child.signature) else {
@@ -1258,6 +1307,7 @@ fn build_module_graph(
                 complete &= summary.complete;
                 let mut position_overflow = false;
                 complete &= add_inst_feedthrough_edges(
+                    inst_declaration,
                     inst,
                     child,
                     summary,
@@ -1289,6 +1339,7 @@ fn build_module_graph(
 
 #[allow(clippy::too_many_arguments)]
 fn add_inst_feedthrough_edges<'a>(
+    inst_declaration: usize,
     inst: &InstDeclaration,
     child: &Module,
     summary: &ModuleCombSummary,
@@ -1423,7 +1474,7 @@ fn add_inst_feedthrough_edges<'a>(
                                 },
                                 *dependency,
                                 diagnostic_trace.as_deref_mut(),
-                                inst,
+                                inst_declaration,
                                 child,
                                 source_region,
                                 destination_region,
@@ -1458,7 +1509,7 @@ fn add_inst_feedthrough_edges<'a>(
                     },
                     *dependency,
                     diagnostic_trace.as_deref_mut(),
-                    inst,
+                    inst_declaration,
                     child,
                     *child_source,
                     *child_destination,
@@ -1486,7 +1537,7 @@ fn add_inst_feedthrough_edges<'a>(
                 &parent_destinations,
                 *dependency,
                 diagnostic_trace.as_deref_mut(),
-                inst,
+                inst_declaration,
                 child,
                 *child_source,
                 *child_destination,
@@ -1822,7 +1873,7 @@ fn add_mapped_dependency_edges(
     destinations: &InstanceRegionMapping,
     dependency: BitDependency,
     mut diagnostic_trace: Option<&mut DiagnosticTrace>,
-    inst: &InstDeclaration,
+    inst_declaration: usize,
     child: &Module,
     child_source: SummaryRegion,
     child_destination: SummaryRegion,
@@ -1861,7 +1912,7 @@ fn add_mapped_dependency_edges(
                     .entry(edge)
                     .or_default()
                     .push(SummaryEdgeCause {
-                        inst_token: inst.token,
+                        inst_declaration,
                         child: child.signature.clone(),
                         child_source,
                         child_destination,
@@ -2226,6 +2277,19 @@ fn check_graph(
         } else {
             diagnostic_path_nodes(&cycle_steps)
         };
+        // `VarId` is fresh per specialization, so paths are the only stable
+        // name. `assign_tokens` can name an id that is in neither map; such a
+        // cycle has none, so report it rather than collapse it with another.
+        // Specializations and disjoint regions can otherwise produce the same
+        // source-declaration loop, so skip its expensive provenance replay.
+        let paths = loop_paths(module, &keys);
+        let report_key = (!paths.is_empty()).then_some((module.signature.symbol, paths));
+        if report_key
+            .as_ref()
+            .is_some_and(|key| reported.contains(key))
+        {
+            continue;
+        }
         let Some(error) = build_error(
             module,
             bit_part,
@@ -2237,11 +2301,7 @@ fn check_graph(
         ) else {
             continue;
         };
-        // `VarId` is fresh per specialization, so paths are the only stable
-        // name. `assign_tokens` can name an id that is in neither map; such a
-        // cycle has none, so report it rather than collapse it with another.
-        let paths = loop_paths(module, &keys);
-        if !paths.is_empty() && !reported.insert((module.signature.symbol, paths)) {
+        if report_key.is_some_and(|key| !reported.insert(key)) {
             continue;
         }
         errors.push(error);
@@ -2487,6 +2547,7 @@ struct DiagnosticTraversal<'a> {
     summaries: &'a HashMap<Signature, ModuleCombSummary>,
     replays: &'a mut DiagnosticReplayCache,
     active: HashSet<Signature>,
+    expanded: HashMap<(Signature, SummaryRegion, SummaryRegion), TokenRange>,
     witnesses: Vec<TokenRange>,
 }
 
@@ -2532,6 +2593,9 @@ fn diagnostic_provenance(
     cycle: &[DiagnosticEdge],
     replays: &mut DiagnosticReplayCache,
 ) -> Vec<TokenRange> {
+    #[cfg(test)]
+    DIAGNOSTIC_PROVENANCE_BUILDS.set(DIAGNOSTIC_PROVENANCE_BUILDS.get() + 1);
+
     if !walk_insts(module).any(|inst| matches!(inst.component.as_ref(), Component::Module(_))) {
         return Vec::new();
     }
@@ -2544,6 +2608,7 @@ fn diagnostic_provenance(
         summaries,
         replays,
         active,
+        expanded: HashMap::default(),
         witnesses: Vec::new(),
     };
     // Expand the first summarized edge in the deterministic reported cycle.
@@ -2582,22 +2647,17 @@ fn replay_edge_matches(replay: &DiagnosticReplay, edge: DiagnosticEdge) -> bool 
         && replay.graph[edge.index] == edge.dependency
 }
 
-fn local_dependency_witnesses(
-    module: &Module,
-    replay: &DiagnosticReplay,
-    edge: DiagnosticEdge,
-) -> Vec<TokenRange> {
+fn local_dependency_witnesses(replay: &DiagnosticReplay, edge: DiagnosticEdge) -> Vec<TokenRange> {
     let Some(cause) = replay.trace.local.get(&edge.index) else {
         return Vec::new();
     };
-    let Some(Declaration::Comb(comb)) = module.declarations.get(cause.declaration) else {
-        return Vec::new();
-    };
     let target = (cause.source, cause.destination, cause.dependency);
-    let mut context = procedure::ProcedureContext::new(module);
-    let traced =
-        procedure::analyze_traced(&replay.bit_part, &comb.statements, &mut context, target);
-    traced.get(&target).cloned().unwrap_or_default()
+    replay
+        .trace
+        .procedures
+        .get(&cause.declaration)
+        .map(|trace| trace.witnesses(target))
+        .unwrap_or_default()
 }
 
 fn trace_dependency_path(
@@ -2613,7 +2673,7 @@ fn trace_dependency_path(
         if include_local {
             traversal
                 .witnesses
-                .extend(local_dependency_witnesses(module, replay, *edge));
+                .extend(local_dependency_witnesses(replay, *edge));
         }
         if traversal.witnesses.len() != before_local {
             continue;
@@ -2630,6 +2690,16 @@ fn trace_dependency_path(
                 traversal.active.remove(&cause.child);
                 continue;
             };
+            let expanded = (
+                cause.child.clone(),
+                cause.child_source,
+                cause.child_destination,
+            );
+            if let Some(witness) = traversal.expanded.get(&expanded).copied() {
+                traversal.witnesses.push(witness);
+                traversal.active.remove(&cause.child);
+                break;
+            }
             let Some(child_replay) = cached_diagnostic_replay(child, summaries, traversal.replays)
             else {
                 traversal.active.remove(&cause.child);
@@ -2655,6 +2725,9 @@ fn trace_dependency_path(
             }
             traversal.active.remove(&cause.child);
             if traversal.witnesses.len() != before {
+                traversal
+                    .expanded
+                    .insert(expanded, traversal.witnesses[before]);
                 break;
             }
         }
@@ -2662,12 +2735,23 @@ fn trace_dependency_path(
 }
 
 fn find_child_module<'a>(module: &'a Module, cause: &SummaryEdgeCause) -> Option<&'a Module> {
-    walk_insts(module).find_map(|inst| {
-        let Component::Module(child) = inst.component.as_ref() else {
-            return None;
-        };
-        (inst.token == cause.inst_token && child.signature == cause.child).then_some(child)
-    })
+    let declaration = diagnostic_declaration(module, cause.inst_declaration)?;
+    let Declaration::Inst(inst) = declaration else {
+        return None;
+    };
+    let Component::Module(child) = inst.component.as_ref() else {
+        return None;
+    };
+    (child.signature == cause.child).then_some(child)
+}
+
+fn diagnostic_declaration(module: &Module, index: usize) -> Option<&Declaration> {
+    // This is one candidate probe. A linear instance search would perform one
+    // such probe for every declaration preceding the selected instance.
+    #[cfg(test)]
+    DIAGNOSTIC_INSTANCE_PROBES.set(DIAGNOSTIC_INSTANCE_PROBES.get() + 1);
+
+    module.declarations.get(index)
 }
 
 fn summary_dependency_path(
