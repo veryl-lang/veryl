@@ -53,6 +53,11 @@ pub trait Backend: Send {
         false
     }
 
+    /// Only Cranelift implements this, so the spans `build_chunked` produces
+    /// are Cranelift-or-interpreter — never a mix of compilers.  A whole-module
+    /// backend reaches the simulation through [`CompiledWhole`] instead, which
+    /// is all-or-nothing: one statement it cannot emit drops the whole comb or
+    /// the whole event.  There is no per-chunk path for such a backend.
     fn compile_chunk(
         &mut self,
         _ctx: &CompileCtx,

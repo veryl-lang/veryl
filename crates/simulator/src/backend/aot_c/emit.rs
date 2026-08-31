@@ -4415,6 +4415,31 @@ pub fn prepare_event(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCe
     Some(compile_or_spawn(src, async_mode))
 }
 
+/// Statements in a `ProtoStatement` tree, itself included — the "mass" a
+/// per-top-level-statement bail forfeits when that tree cannot be emitted.
+fn proto_stmt_mass(s: &ProtoStatement) -> usize {
+    let kids: usize = match s {
+        ProtoStatement::If(x) => x
+            .true_side
+            .iter()
+            .chain(x.false_side.iter())
+            .map(proto_stmt_mass)
+            .sum(),
+        ProtoStatement::Case(c) => c
+            .arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(c.default.iter())
+            .map(proto_stmt_mass)
+            .sum(),
+        ProtoStatement::For(f) => f.body.iter().map(proto_stmt_mass).sum(),
+        ProtoStatement::SequentialBlock(b) => b.iter().map(proto_stmt_mass).sum(),
+        ProtoStatement::CompiledBlock(cb) => cb.original_stmts.iter().map(proto_stmt_mass).sum(),
+        _ => 0,
+    };
+    1 + kids
+}
+
 /// Emit one `veryl_aot_eval` function for an event statement sequence.
 /// FF-target assigns push WriteLogEntries via `write_log` (unused in
 /// the comb path).
@@ -4496,6 +4521,29 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
                         for (k, n) in v.iter().take(40) {
                             eprintln!("  {n:6}x  {k}");
                         }
+                        // Where the uncovered statements sit, by MASS: a
+                        // per-top-level-statement bail can only recover the
+                        // statements under top-level statements that emit
+                        // whole, and an uncovered leaf three `If`s deep
+                        // forfeits its entire top-level tree.
+                        let (mut ok_top, mut ok_mass, mut bad_top, mut bad_mass) = (0, 0, 0, 0);
+                        let mut worst = 0usize;
+                        for s in stmts {
+                            let m = proto_stmt_mass(s);
+                            if emit_stmt(s).is_some() {
+                                ok_top += 1;
+                                ok_mass += m;
+                            } else {
+                                bad_top += 1;
+                                bad_mass += m;
+                                worst = worst.max(m);
+                            }
+                        }
+                        eprintln!(
+                            "[aot_event_granularity] top-level: {ok_top} emittable ({ok_mass} \
+                             nested stmts) / {bad_top} not ({bad_mass} nested stmts); \
+                             largest single un-emittable top-level tree = {worst} stmts"
+                        );
                     }
                     return None;
                 }
