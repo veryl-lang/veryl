@@ -4,7 +4,7 @@ expression: out
 ---
 combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#combinational_loop)
 
-  × potential combinational loop detected: b -> c -> b
+  × combinational loop detected: b -> c -> b
    ╭─[../../testcases/error/combinational_loop.veryl:6:12]
  5 │ ) {
  6 │     assign b = c + a;

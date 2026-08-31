@@ -126,7 +126,7 @@ pub enum AnalyzerError {
         code(combinational_loop),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("potential combinational loop detected: {cycle}")]
+    #[error("combinational loop detected: {cycle}")]
     CombinationalLoop {
         identifier: String,
         cycle: String,
