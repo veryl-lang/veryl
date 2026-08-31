@@ -6235,7 +6235,17 @@ fn merge_reset_dispatch(
     stmts: &mut Vec<ProtoStatement>,
     reset_offsets: &crate::HashSet<VarOffset>,
 ) {
+    // `VERYL_RESET_FUSE=0` leaves each `if_reset` dispatch standing, so the
+    // saving the fusion buys can be measured against it rather than assumed.
+    if std::env::var("VERYL_RESET_FUSE").as_deref() == Ok("0") {
+        return;
+    }
+    let diag = std::env::var("VERYL_RESET_FUSE_DIAG").as_deref() == Ok("1");
+    let before = stmts.len();
     let mut out: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+    // How many source dispatches went into each output statement, so the diag
+    // can report the reset tests actually saved rather than a statement count.
+    let mut fused: Vec<usize> = Vec::with_capacity(stmts.len());
     let mut last_key: Option<(VarOffset, Option<(usize, usize)>)> = None;
     for stmt in stmts.drain(..) {
         let key = match &stmt {
@@ -6251,10 +6261,32 @@ fn merge_reset_dispatch(
             };
             prev.true_side.extend(cur.true_side);
             prev.false_side.extend(cur.false_side);
+            *fused.last_mut().expect("out is non-empty here") += 1;
             continue;
         }
+        fused.push(1);
         last_key = key;
         out.push(stmt);
+    }
+    if diag {
+        let (mut groups, mut saved, mut top_n, mut top_mass) = (0usize, 0usize, 0usize, 0usize);
+        for (i, n) in fused.iter().enumerate() {
+            if *n > 1 {
+                groups += 1;
+                saved += n - 1;
+                let mass = out[i].statement_mass();
+                if mass > top_mass {
+                    top_mass = mass;
+                    top_n = *n;
+                }
+            }
+        }
+        eprintln!(
+            "[reset_fuse] {before} -> {} top-level stmts; {groups} fused group(s), \
+             {saved} reset test(s) saved per edge; largest fuses {top_n} dispatches \
+             into one If of {top_mass} statements",
+            out.len(),
+        );
     }
     *stmts = out;
 }
