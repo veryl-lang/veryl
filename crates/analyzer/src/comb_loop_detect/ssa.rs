@@ -338,6 +338,66 @@ where
         Ok(sources)
     }
 
+    /// Returns every SSA version on a path from `version` to `source`.
+    ///
+    /// This is intentionally separate from `root_source_relations`: normal
+    /// dependency analysis only needs the roots, while diagnostics may replay
+    /// the defining chain after a loop has been found. Keeping this walk lazy
+    /// avoids retaining a provenance vector for every dependency edge.
+    pub(super) fn source_witness_versions(&self, version: VersionId, source: K) -> Vec<VersionId> {
+        type State = (VersionId, bool);
+
+        let start = (version, false);
+        let mut pending = vec![start];
+        let mut visited = HashSet::default();
+        let mut parents: HashMap<State, Vec<State>> = HashMap::default();
+        let mut matches = Vec::new();
+
+        while let Some(state @ (version, include_entry)) = pending.pop() {
+            if !visited.insert(state) {
+                continue;
+            }
+            match &self.versions[version] {
+                Version::Entry(key) => {
+                    if include_entry && *key == source {
+                        matches.push(state);
+                    }
+                }
+                Version::Definition { positional, whole } => {
+                    for input in positional.iter().map(|(input, _)| input).chain(whole) {
+                        let child = (*input, true);
+                        parents.entry(child).or_default().push(state);
+                        pending.push(child);
+                    }
+                }
+                Version::Phi(inputs) => {
+                    for input in inputs {
+                        let child = (*input, include_entry);
+                        parents.entry(child).or_default().push(state);
+                        pending.push(child);
+                    }
+                }
+            }
+        }
+
+        // Walk back from every matching entry. This retains definitions on
+        // all valid witness branches without cloning a growing path at every
+        // SSA node.
+        let mut witness_states = HashSet::default();
+        let mut witness = HashSet::default();
+        let mut pending = matches;
+        while let Some(state) = pending.pop() {
+            if !witness_states.insert(state) {
+                continue;
+            }
+            witness.insert(state.0);
+            pending.extend(parents.get(&state).into_iter().flatten().copied());
+        }
+        let mut witness = witness.into_iter().collect::<Vec<_>>();
+        witness.sort_unstable();
+        witness
+    }
+
     fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
         inputs.sort_unstable();
         inputs.dedup();
@@ -375,6 +435,47 @@ mod tests {
 
         let expected = ["source"].into_iter().collect::<HashSet<_>>();
         assert_eq!(ssa.root_sources(version).unwrap(), expected);
+    }
+
+    #[test]
+    fn witness_walk_ignores_an_unobserved_entry() {
+        let mut ssa = SsaStore::default();
+        let source = ssa.read("source");
+
+        assert!(ssa.source_witness_versions(source, "source").is_empty());
+    }
+
+    #[test]
+    fn witness_walk_excludes_unrelated_phi_branches() {
+        let mut ssa = SsaStore::default();
+        let source_entry = ssa.read("source");
+        let source_definition = ssa.definition(vec![source_entry]);
+        let other_entry = ssa.read("other");
+        let other_definition = ssa.definition(vec![other_entry]);
+        let phi = ssa.phi(vec![source_definition, other_definition]);
+        let destination = ssa.definition(vec![phi]);
+
+        let witness = ssa.source_witness_versions(destination, "source");
+        assert!(witness.contains(&source_entry));
+        assert!(witness.contains(&source_definition));
+        assert!(witness.contains(&phi));
+        assert!(witness.contains(&destination));
+        assert!(!witness.contains(&other_entry));
+        assert!(!witness.contains(&other_definition));
+    }
+
+    #[test]
+    fn witness_walk_does_not_use_the_native_stack() {
+        let mut ssa = SsaStore::default();
+        let source = ssa.read("source");
+        let mut version = ssa.definition(vec![source]);
+        for _ in 0..100_000 {
+            version = ssa.definition(vec![version]);
+        }
+
+        let witness = ssa.source_witness_versions(version, "source");
+        assert!(witness.contains(&source));
+        assert!(witness.contains(&version));
     }
 
     #[test]

@@ -136,6 +136,8 @@ pub enum AnalyzerError {
         error_location: SourceSpan,
         #[label(collection, "also involved in combinational feedback")]
         loop_participants: Vec<SourceSpan>,
+        #[label(collection, "dependency passes through this assignment")]
+        dependency_origins: Vec<SourceSpan>,
         token_source: TokenSource,
     },
 
@@ -2033,6 +2035,34 @@ fn source_with_context(
     (sources, ranges)
 }
 
+/// Like `source_with_context`, but returns spans in the same order as
+/// `context`. Each label keeps its own source buffer so distant assignments
+/// render as compact snippets instead of one large continuous excerpt.
+fn source_with_ordered_context(
+    token: &TokenRange,
+    context: &[TokenRange],
+) -> (MultiSources, Vec<SourceSpan>) {
+    let text = token.source().get_text();
+    let mut base = text.len();
+    let mut sources = vec![Source {
+        path: token.source().to_string(),
+        text,
+    }];
+    let mut ranges = Vec::with_capacity(context.len());
+    for token in context {
+        let text = token.source().get_text();
+        let mut range = *token;
+        range.offset(base as u32);
+        ranges.push(range.into());
+        base += text.len();
+        sources.push(Source {
+            path: token.source().to_string(),
+            text,
+        });
+    }
+    (MultiSources { sources }, ranges)
+}
+
 /// `miette::Severity`, in a form the diagnostic cache can serialize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CachedSeverity {
@@ -2502,14 +2532,19 @@ impl AnalyzerError {
         cycle: &str,
         token: &TokenRange,
         participants: &[TokenRange],
+        origins: &[TokenRange],
     ) -> Self {
-        let (input, loop_participants) = source_with_context(token, participants);
+        let mut context = participants.to_vec();
+        context.extend_from_slice(origins);
+        let (input, context_spans) = source_with_ordered_context(token, &context);
+        let (loop_participants, dependency_origins) = context_spans.split_at(participants.len());
         AnalyzerError::CombinationalLoop {
             identifier: identifier.to_string(),
             cycle: cycle.to_string(),
             input,
             error_location: token.into(),
-            loop_participants,
+            loop_participants: loop_participants.to_vec(),
+            dependency_origins: dependency_origins.to_vec(),
             token_source: token.source(),
         }
     }

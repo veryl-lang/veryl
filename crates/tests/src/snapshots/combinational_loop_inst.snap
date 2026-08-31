@@ -12,10 +12,10 @@ combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_erro
     ·            ╰── involved in combinational feedback
  19 │     assign b = y;
     ╰────
-    ╭─[../../testcases/error/combinational_loop_inst.veryl:16:12]
- 15 │         i: x,
- 16 │         o: y,
-    ·            ┬
-    ·            ╰── also involved in combinational feedback
- 17 │     );
-    ╰────
+   ╭─[../../testcases/error/combinational_loop_inst.veryl:5:5]
+ 4 │ ) {
+ 5 │     assign o = i;
+   ·     ──────┬──────
+   ·           ╰── dependency passes through this assignment
+ 6 │ }
+   ╰────

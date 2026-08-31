@@ -15,6 +15,7 @@ use crate::ir::{
 use crate::value::Value;
 use crate::{HashMap, HashSet};
 use std::rc::Rc;
+use veryl_parser::token_range::TokenRange;
 
 fn checked_position(value: usize) -> Result<isize, PositionOverflow> {
     isize::try_from(value).map_err(|_| PositionOverflow)
@@ -249,8 +250,19 @@ pub(super) fn analyze(
     statements: &[Statement],
     context: &mut ProcedureContext,
 ) -> ProcedureResult {
-    ProcedureAnalysis::analyze(bit_part, statements, context)
+    ProcedureAnalysis::analyze(bit_part, statements, context, None).0
 }
+
+pub(super) fn analyze_traced(
+    bit_part: &BitPartition,
+    statements: &[Statement],
+    context: &mut ProcedureContext,
+    target: (NodeKey, NodeKey, BitDependency),
+) -> DependencyWitnesses {
+    ProcedureAnalysis::analyze(bit_part, statements, context, Some(target)).1
+}
+
+pub(super) type DependencyWitnesses = HashMap<(NodeKey, NodeKey, BitDependency), Vec<TokenRange>>;
 
 pub(super) struct ProcedureResult {
     pub(super) dependencies: Vec<Dependency>,
@@ -399,7 +411,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
     }
 
     pub(super) fn dependencies(&mut self) -> Vec<Dependency> {
-        self.inner().dependencies()
+        self.inner().dependencies().0
     }
 
     pub(super) fn restore(mut self, context: &mut ProcedureContext) {
@@ -438,6 +450,10 @@ struct ProcedureAnalysis<'a, 's> {
     next_call_frame: usize,
     receiver_indices: Vec<Option<VarIndex>>,
     function_flows: Vec<FunctionFlow>,
+    witness_target: Option<(NodeKey, NodeKey, BitDependency)>,
+    active_assignment: Option<TokenRange>,
+    definition_sites: HashMap<VersionId, TokenRange>,
+    definition_data_inputs: HashMap<VersionId, Vec<VersionId>>,
     complete: bool,
     position_overflow: bool,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
@@ -455,6 +471,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             next_call_frame: 0,
             receiver_indices: Vec::new(),
             function_flows: Vec::new(),
+            witness_target: None,
+            active_assignment: None,
+            definition_sites: HashMap::default(),
+            definition_data_inputs: HashMap::default(),
             complete: true,
             position_overflow: false,
             summaries: None,
@@ -482,16 +502,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         bit_part: &'a BitPartition,
         statements: &[Statement],
         context: &mut ProcedureContext,
-    ) -> ProcedureResult {
+        witness_target: Option<(NodeKey, NodeKey, BitDependency)>,
+    ) -> (ProcedureResult, DependencyWitnesses) {
         let mut this = Self::from_context(bit_part, context.take());
+        this.witness_target = witness_target;
         this.eval_block(statements, &[]);
+        let (dependencies, witnesses) = this.dependencies();
         let result = ProcedureResult {
-            dependencies: this.dependencies(),
+            dependencies,
             complete: this.complete,
             position_overflow: this.position_overflow,
         };
         context.restore(this.ctx);
-        result
+        (result, witnesses)
     }
 
     fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<NodeKey> {
@@ -605,8 +628,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some(summary)
     }
 
-    fn dependencies(&mut self) -> Vec<Dependency> {
+    fn dependencies(&mut self) -> (Vec<Dependency>, DependencyWitnesses) {
         let mut dependencies = Vec::new();
+        let mut witnesses: DependencyWitnesses = HashMap::default();
         let destinations: Vec<_> = self
             .written
             .iter()
@@ -619,25 +643,58 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let Some(sources) = self.position(sources) else {
                 continue;
             };
-            dependencies.extend(
-                sources
-                    .into_iter()
-                    .filter_map(|(source, source_kind)| {
-                        source
-                            .call_frame
-                            .is_none()
-                            .then_some((source.node, source_kind))
-                    })
-                    .filter(|(source, _)| self.is_module_scope_key(*source))
-                    .map(|(source, source_kind)| Dependency {
-                        source,
-                        destination,
-                        kind: Self::dependency_kind(source_kind),
-                    }),
-            );
+            for (source, source_kind) in sources
+                .into_iter()
+                .filter_map(|(source, source_kind)| {
+                    source
+                        .call_frame
+                        .is_none()
+                        .then_some((source.node, source_kind))
+                })
+                .filter(|(source, _)| self.is_module_scope_key(*source))
+            {
+                let kind = Self::dependency_kind(source_kind);
+                if self.witness_target == Some((source, destination, kind)) {
+                    let versions = self.ssa.source_witness_versions(
+                        version,
+                        SsaKey {
+                            node: source,
+                            call_frame: None,
+                        },
+                    );
+                    let version_set = versions.iter().copied().collect::<HashSet<_>>();
+                    let all = versions
+                        .iter()
+                        .filter_map(|version| self.definition_sites.get(version).copied())
+                        .collect::<Vec<_>>();
+                    let data = versions
+                        .iter()
+                        .filter(|version| {
+                            self.definition_data_inputs
+                                .get(version)
+                                .is_some_and(|inputs| {
+                                    inputs.iter().any(|input| version_set.contains(input))
+                                })
+                        })
+                        .filter_map(|version| self.definition_sites.get(version).copied())
+                        .collect::<Vec<_>>();
+                    let witness = if data.is_empty() { all } else { data };
+                    let mut seen = HashSet::default();
+                    let witness = witness
+                        .into_iter()
+                        .filter(|token| seen.insert(*token))
+                        .collect();
+                    witnesses.insert((source, destination, kind), witness);
+                }
+                dependencies.push(Dependency {
+                    source,
+                    destination,
+                    kind,
+                });
+            }
         }
         dependencies.sort_unstable_by_key(|dependency| (dependency.source, dependency.destination));
-        dependencies
+        (dependencies, witnesses)
     }
 
     fn dependency_kind(source_kind: PositionRelation) -> BitDependency {
@@ -723,6 +780,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
+        if self.witness_target.is_some()
+            && let Some(token) = self.active_assignment
+        {
+            self.definition_sites.insert(version, token);
+        }
         if dynamic {
             let key = self.ssa_key(key);
             self.ssa.weak_bind(key, version);
@@ -776,6 +838,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let keys = self.write_keys(destination);
         let dynamic = self.destination_is_dynamic(destination);
         let version = self.ssa.definition(dependencies);
+        if self.witness_target.is_some() {
+            self.definition_data_inputs
+                .insert(version, sources.to_vec());
+        }
         for key in keys {
             self.bind_destination(key, version, dynamic);
         }
@@ -857,6 +923,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             } else {
                 ExpressionSources::whole(self.eval_expr(expression))
             };
+            let data_inputs = self.witness_target.is_some().then(|| {
+                sources
+                    .positional
+                    .iter()
+                    .map(|(version, _)| *version)
+                    .chain(sources.whole.iter().copied())
+                    .collect::<Vec<_>>()
+            });
             sources.whole.extend(whole);
             sources.normalize();
             let mut positional = Vec::new();
@@ -872,6 +946,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
             }
             let version = self.ssa.positional_definition(positional, sources.whole);
+            if let Some(data_inputs) = data_inputs {
+                self.definition_data_inputs.insert(version, data_inputs);
+            }
             self.bind_destination(key, version, dynamic);
         }
     }
@@ -936,6 +1013,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> ProcedureFlow {
         match statement {
             Statement::Assign(assign) => {
+                let previous_assignment = self.active_assignment;
+                if self.witness_target.is_some() {
+                    self.active_assignment = Some(assign.token);
+                }
                 self.call_caches.push(Some(HashMap::default()));
                 let widths: Vec<_> = assign
                     .dst
@@ -963,6 +1044,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                 }
                 self.call_caches.pop();
+                self.active_assignment = previous_assignment;
                 if self.is_return_assignment(&assign.dst) {
                     self.record_return();
                     ProcedureFlow::Return

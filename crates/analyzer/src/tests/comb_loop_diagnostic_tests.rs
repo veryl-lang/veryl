@@ -1,6 +1,26 @@
 // Diagnostic ownership and provenance coverage for comb-loop analysis.
 use super::*;
 
+fn diagnostic_span_text<'a>(
+    input: &'a crate::multi_sources::MultiSources,
+    span: &miette::SourceSpan,
+) -> Option<(&'a str, &'a str)> {
+    let start = span.offset();
+    let span_end = start.checked_add(span.len())?;
+    let mut base: usize = 0;
+    for source in &input.sources {
+        let source_end = base.checked_add(source.text.len())?;
+        if base <= start && span_end <= source_end {
+            return Some((
+                source.path.as_str(),
+                source.text.get(start - base..span_end - base)?,
+            ));
+        }
+        base = source_end;
+    }
+    None
+}
+
 #[test]
 fn comb_loop_diagnostic_reports_an_ordered_dependency_cycle() {
     let errors = analyze(
@@ -221,6 +241,234 @@ fn comb_loop_diagnostic_places_array_indices_on_imported_interface_members() {
     });
 
     assert_eq!(cycle, Some("bus[1].a -> bus[1].b -> bus[1].a"));
+}
+
+#[test]
+fn comb_loop_diagnostic_traces_a_summarized_edge_into_the_child_module() {
+    let child = r#"
+        module Child (
+            accept: input logic,
+            valid : input logic,
+            passed: output logic,
+        ) {
+            var data_done: logic;
+            var mcmd_active: logic;
+            always_comb {
+                data_done = accept && valid;
+                mcmd_active =
+                    valid || data_done;
+                passed = 0;
+                if mcmd_active {
+                    passed = valid;
+                }
+            }
+        }
+    "#;
+    let top = r#"
+        module Top (
+            valid : input logic,
+            passed: output logic,
+        ) {
+            var accept: logic;
+            inst child: Child (
+                accept: accept,
+                valid : valid,
+                passed: passed,
+            );
+            assign accept = passed;
+        }
+    "#;
+    let errors = analyze_multiple_inputs(&[child, top]);
+    let (input, participants, origins) = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::CombinationalLoop {
+                input,
+                loop_participants,
+                dependency_origins,
+                ..
+            } => Some((input, loop_participants, dependency_origins)),
+            _ => None,
+        })
+        .expect("the parent connection closes the child feedthrough loop");
+    assert_eq!(origins.len(), 1);
+    assert!(participants.is_empty());
+    let (path, text) = diagnostic_span_text(input, &origins[0]).expect("origin is in source");
+    assert_eq!(path, "test_0.veryl");
+    assert!(text.contains("mcmd_active ="));
+    assert!(text.contains("valid || data_done"));
+    assert!(!text.contains("passed ="));
+}
+
+#[test]
+fn comb_loop_diagnostic_does_not_replay_provenance_without_a_loop() {
+    crate::comb_loop_detect::reset_diagnostic_replay_count();
+    let errors = analyze_multiple_inputs(&[
+        r#"
+        module Child (
+            accept: input logic,
+            valid : input logic,
+            passed: output logic,
+        ) {
+            var data_done: logic;
+            var mcmd_active: logic;
+            always_comb {
+                data_done = accept && valid;
+                mcmd_active =
+                    valid || data_done;
+                passed = 0;
+                if mcmd_active {
+                    passed = valid;
+                }
+            }
+        }
+        "#,
+        r#"
+        module Top (
+            valid : input logic,
+            passed: output logic,
+        ) {
+            var accept: logic;
+            inst child: Child (
+                accept: accept,
+                valid : valid,
+                passed: passed,
+            );
+            assign accept = 0;
+        }
+        "#,
+    ]);
+
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    );
+    assert_eq!(crate::comb_loop_detect::diagnostic_replay_count(), 0);
+}
+
+#[test]
+fn comb_loop_diagnostic_traces_through_nested_module_summaries() {
+    let leaf = r#"
+        module Leaf (
+            accept: input logic,
+            valid : input logic,
+            passed: output logic,
+        ) {
+            var data_done: logic;
+            var mcmd_active: logic;
+            always_comb {
+                data_done = accept && valid;
+                mcmd_active =
+                    valid || data_done;
+                passed = 0;
+                if mcmd_active {
+                    passed = valid;
+                }
+            }
+        }
+    "#;
+    let wrapper = r#"
+        module Wrapper (
+            accept: input logic,
+            valid : input logic,
+            passed: output logic,
+        ) {
+            inst leaf: Leaf (
+                accept: accept,
+                valid : valid,
+                passed: passed,
+            );
+        }
+    "#;
+    let top = r#"
+        module Top (
+            valid : input logic,
+            passed: output logic,
+        ) {
+            var accept: logic;
+            inst wrapper: Wrapper (
+                accept: accept,
+                valid : valid,
+                passed: passed,
+            );
+            assign accept = passed;
+        }
+    "#;
+    let errors = analyze_multiple_inputs(&[leaf, wrapper, top]);
+    let (input, origins) = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::CombinationalLoop {
+                input,
+                dependency_origins,
+                ..
+            } => Some((input, dependency_origins)),
+            _ => None,
+        })
+        .expect("the top connection closes the nested feedthrough loop");
+
+    assert_eq!(origins.len(), 1);
+    let (path, text) = diagnostic_span_text(input, &origins[0]).expect("origin is in source");
+    assert_eq!(path, "test_0.veryl");
+    assert!(text.contains("mcmd_active ="));
+    assert!(text.contains("valid || data_done"));
+    assert!(!text.contains("passed ="));
+}
+
+#[test]
+fn comb_loop_diagnostic_uses_the_closing_parallel_summary_edge() {
+    let child = r#"
+        module Child (
+            sel    : input  logic,
+            shift_i: input  logic<4>,
+            id_i   : input  logic<4>,
+            o      : output logic<4>,
+        ) {
+            always_comb {
+                o = 0;
+                if sel {
+                    o = shift_i >> 1;
+                } else {
+                    o[2:1] = id_i[2:1];
+                }
+            }
+        }
+    "#;
+    let top = r#"
+        module Top (
+            sel: input  logic,
+            out: output logic<4>,
+        ) {
+            var feedback: logic<4>;
+            inst child: Child (
+                sel    : sel,
+                shift_i: feedback,
+                id_i   : feedback,
+                o      : feedback,
+            );
+            assign out = feedback;
+        }
+    "#;
+    let errors = analyze_multiple_inputs(&[child, top]);
+    let (cycle, input, origins) = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::CombinationalLoop {
+                cycle,
+                input,
+                dependency_origins,
+                ..
+            } => Some((cycle, input, dependency_origins)),
+            _ => None,
+        })
+        .expect("the direct feedthrough closes the self-loop");
+
+    assert_eq!(cycle, "feedback[1] -> feedback[1]");
+    assert_eq!(origins.len(), 1);
+    let (path, text) = diagnostic_span_text(input, &origins[0]).expect("origin is in source");
+    assert_eq!(path, "test_0.veryl");
+    assert_eq!(text, "o[2:1] = id_i[2:1];");
 }
 
 fn captured_coverage_observation() -> (usize, Option<usize>, Option<usize>) {
