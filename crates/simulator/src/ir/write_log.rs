@@ -25,6 +25,28 @@ pub struct WriteLogEntry {
     pub payload: u64,
 }
 
+/// The byte range `(first, count)` of the static bit field `[hi:lo]` within an
+/// `nb`-byte element, or None when it does not lie inside one.
+///
+/// A slice write only changes the bytes it covers, so logging the whole
+/// element spends `nb` bytes of entry payload to deposit a couple of bits.
+/// All three engines narrow their FF log push with this, and they are checked
+/// against each other by comparing total entry counts on the same workload —
+/// so it lives here rather than being written out once per backend, where the
+/// copies could drift and that check would start comparing two different
+/// definitions.
+pub(crate) fn static_field_byte_span(hi: usize, lo: usize, nb: usize) -> Option<(usize, usize)> {
+    if hi < lo {
+        return None;
+    }
+    let blo = lo / 8;
+    let bhi = hi / 8;
+    if bhi >= nb {
+        return None;
+    }
+    Some((blo, bhi - blo + 1))
+}
+
 /// Wide-FF log entry.  64 bytes = 1 cache line, with up to 56 bytes of
 /// payload (covers 64–448-bit FFs in a single entry; wider FFs use
 /// multiple entries).  `align(64)` ensures each entry occupies exactly

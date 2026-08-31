@@ -9,6 +9,7 @@
 
 use crate::FuncPtr;
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
+use crate::ir::write_log::static_field_byte_span;
 use crate::ir::{
     ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, ProtoSystemFunctionCall,
@@ -3689,15 +3690,23 @@ fn emit_wide_ff_rmw_prologue(
     out
 }
 
-/// Shared tail for the two wide-FF read-modify-write paths: mirror into the
-/// next slot when dual-slot, and log the WHOLE register — `eval_step` logs the
-/// merged `current`, not just the field.
+/// Shared tail for the wide-FF read-modify-write paths: mirror into the next
+/// slot when dual-slot, then log the merged register.
+///
+/// `span` is the byte range the write actually changed, `None` for the whole
+/// register.  Logging the whole register for a field write is what made one
+/// 2-bit assignment carry 536 bytes through the commit: the commit applies
+/// entries in order, last-write-wins per byte, so a span carrying its
+/// neighbours' current bits composes with the writes around it exactly as the
+/// full register did.  Entries for one FF all sit in the wide pool (routing is
+/// by `dst_width`), so their relative order is push order.
 fn emit_wide_ff_rmw_tail(
     reg: &str,
     nb: usize,
     packed: bool,
     dst_raw: isize,
     cur_off: isize,
+    span: Option<(usize, usize)>,
 ) -> String {
     let mut out = String::new();
     if !packed {
@@ -3705,10 +3714,11 @@ fn emit_wide_ff_rmw_tail(
             "vw_copy((uint8_t*)(ff_values + {dst_raw:#x}), (const uint8_t*){reg}, {nb}u); ",
         ));
     }
+    let (blo, blen) = span.unwrap_or((0, nb));
     out.push_str(&emit_wide_log_chunks(
-        &format!("(uint8_t*){reg}"),
-        &format!("{cur_off:#x}"),
-        nb,
+        &format!("((uint8_t*){reg} + {blo}u)"),
+        &format!("{:#x}", cur_off + blo as isize),
+        blen,
     ));
     out
 }
@@ -3773,7 +3783,14 @@ fn emit_event_ff_assign_wide_field(
             w1 = w0 + 1,
         ));
     }
-    body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    body.push_str(&emit_wide_ff_rmw_tail(
+        &reg,
+        nb,
+        packed,
+        dst_raw,
+        cur_off,
+        static_field_byte_span(hi, lo, nb),
+    ));
     Some(format!("{{ {body} }}"))
 }
 
@@ -3852,7 +3869,14 @@ fn emit_event_ff_assign_wide_select(
         nbits,
         a.dst_width,
     ));
-    body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    body.push_str(&emit_wide_ff_rmw_tail(
+        &reg,
+        nb,
+        packed,
+        dst_raw,
+        cur_off,
+        static_field_byte_span(hi, lo, nb),
+    ));
     Some(format!("{{ {body} }}"))
 }
 
@@ -3955,7 +3979,10 @@ fn emit_event_ff_assign_wide_dynsel_field(
              | (_f{d} >> _up{d}); }} ",
         ));
     }
-    body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    // Runtime index: the touched span is not known at emit time.
+    body.push_str(&emit_wide_ff_rmw_tail(
+        &reg, nb, packed, dst_raw, cur_off, None,
+    ));
     Some(format!("{{ {body} }}"))
 }
 
@@ -4006,7 +4033,10 @@ fn emit_event_ff_assign_wide_dynsel_general(
         nb,
         nw,
     ));
-    inner.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    // Runtime index: the touched span is not known at emit time.
+    inner.push_str(&emit_wide_ff_rmw_tail(
+        &reg, nb, packed, dst_raw, cur_off, None,
+    ));
     // `clip_window_to_width` drops the write outright once the window's LOW
     // bit is past the width, so the guard covers the log push too: an
     // out-of-range index must leave no entry, not re-log the old value.
@@ -10398,20 +10428,29 @@ mod tests {
         let Some(entries) = run_wide_ff_event(&src, "wff_static", &mut ff) else {
             return;
         };
-        assert_eq!(entries.len(), 1, "one wide entry for a 200-bit register");
+        // The entry covers the field's BYTE SPAN, not the register: [34:0]
+        // touches bytes 0..=4.  Bytes outside it are not logged at all, so the
+        // commit leaves them as they were — which is what "untouched words
+        // survive" means once the log is field-granular.
+        assert_eq!(entries.len(), 1, "one wide entry for a 5-byte span");
         let (off, payload) = &entries[0];
         assert_eq!(*off, 0);
-        assert_eq!(payload.len(), 32, "200 bits rounds up to 4 words");
-        let lo = u64::from_le_bytes(payload[0..8].try_into().unwrap());
-        assert_eq!(lo & ((1u64 << 35) - 1), 0x5_a5a5_a5a5, "the field landed");
         assert_eq!(
-            lo >> 35,
-            0xccccccccccccccccu64 >> 35,
-            "bits above 34 survived the merge"
+            payload.len(),
+            5,
+            "[34:0] spans bytes 0..=4, not the register"
         );
-        assert_eq!(payload[8], 0xcc, "untouched words survived");
-        assert_eq!(payload[24], 0xcc, "the top in-width byte survived");
-        assert_eq!(&payload[25..32], &[0u8; 7], "nothing above the width");
+        let mut got = [0u8; 8];
+        got[..5].copy_from_slice(payload);
+        let lo = u64::from_le_bytes(got);
+        assert_eq!(lo & ((1u64 << 35) - 1), 0x5_a5a5_a5a5, "the field landed");
+        // Byte 4 holds bits 32..39: bits 32..34 from the value, 35..39 kept
+        // from the 0xcc the register was preloaded with.
+        assert_eq!(
+            payload[4],
+            ((0x5_a5a5_a5a5u64 >> 32) as u8 & 0x07) | (0xccu8 & 0xf8),
+            "bits above 34 in the spanned byte survived the merge"
+        );
     }
 
     #[test]

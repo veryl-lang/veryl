@@ -1521,6 +1521,56 @@ fn wide_256_aot_native_comb() {
 }
 
 #[test]
+fn sub_byte_fields_of_one_byte_compose_in_program_order() {
+    // Several sub-byte fields of ONE byte of a wide FF, written in one fire.
+    // Each write logs a byte range that necessarily carries its neighbours'
+    // bits, so the commit's in-order last-write-wins per byte is what makes
+    // them compose.  Reorder the entries, or drop the read-back that makes a
+    // later write carry the earlier one, and this loses fields silently.
+    // Expected values are Verilator 5.050 and iverilog on the generated SV.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_lo : output logic<8>,
+        o_hi : output logic<8>,
+    ) {
+        var w: logic<200>;
+        always_ff {
+            if_reset {
+                w = 0;
+            } else {
+                w[1:0] = 2'b01;
+                w[3:2] = 2'b10;
+                w[5:4] = 2'b11;
+                w[7:6] = 2'b01;
+                w[63:62] = 2'b11;
+                w[65:64] = 2'b10;
+            }
+        }
+        assign o_lo = w[7:0];
+        assign o_hi = {w[65:64], w[63:62]};
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        sim.step(&clk);
+        assert_eq!(
+            (
+                sim.get("o_lo").unwrap().payload_u128(),
+                sim.get("o_hi").unwrap().payload_u128()
+            ),
+            (0x79, 0x0b),
+            "sub-byte fields did not compose, config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn wide_ff_select_sign_extends_a_narrow_signed_rhs() {
     // A signed narrow RHS sign-extends to fill the field, so a negative value
     // must leave the bits above it set.

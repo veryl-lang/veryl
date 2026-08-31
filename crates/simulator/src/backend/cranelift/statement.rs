@@ -19,10 +19,37 @@ use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
 
+/// The aligned 1/2/4/8-byte window covering the byte span `[blo, bhi]` of a
+/// static field, or None when no single window fits inside the element.  The
+/// commit writes exactly `width_class` bytes, so the window may not run past
+/// `nb`; bytes of the window outside the field carry the element's current
+/// value, which the RMW payload already holds.
+fn log_window_for_span(blo: usize, bhi: usize, nb: usize) -> Option<(usize, usize)> {
+    if bhi < blo || bhi >= nb {
+        return None;
+    }
+    let mut w = 1usize;
+    while w <= 8 {
+        let start = blo & !(w - 1);
+        if start + w > bhi && start + w <= nb {
+            return Some((start, w));
+        }
+        w <<= 1;
+    }
+    None
+}
+
 /// Push an FF write-log entry for a post-RMW `payload` (+ optional 4-state
 /// `mask_xz`). Narrow FFs (`nb <= 8`) push one I64 entry; wide FFs (`nb > 8`,
 /// I128 payload) split into per-8-byte words — `emit_inline_write_log_push`
 /// takes an I64, so passing a wide value directly panics cranelift.
+///
+/// `span` is the field's `(high, low)` BIT range when the destination is a
+/// statically bounded slice of a wide FF.  A slice write only changes the
+/// bytes it covers, so logging the whole element there costs `nb/8` entries
+/// and `nb` bytes of traffic to deposit a couple of bits.  With a span the
+/// wide path emits one entry over the field's aligned window instead; without
+/// one (runtime index, or a genuine whole-element store) it keeps the split.
 fn emit_ff_log_push(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -30,8 +57,41 @@ fn emit_ff_log_push(
     nb: usize,
     payload: CraneliftValue,
     mask_xz: Option<CraneliftValue>,
+    span: Option<(usize, usize)>,
 ) {
     let nb_i32 = nb as i32;
+    if nb > 8
+        && let Some((start, w)) = span.and_then(|(hi, lo)| log_window_for_span(lo / 8, hi / 8, nb))
+        && w < nb
+    {
+        let width_class_val = builder.ins().iconst(I32, w as i64);
+        let shift = (start * 8) as i64;
+        let shifted = if start == 0 {
+            payload
+        } else {
+            builder.ins().ushr_imm_u(payload, shift)
+        };
+        let word = builder.ins().ireduce(I64, shifted);
+        let entry_offset_val = builder
+            .ins()
+            .iconst(I32, (log_current_offset + start as i32) as i64);
+        emit_inline_write_log_push(context, builder, entry_offset_val, word, width_class_val);
+        if context.use_4state
+            && let Some(m) = mask_xz
+        {
+            let m_shifted = if start == 0 {
+                m
+            } else {
+                builder.ins().ushr_imm_u(m, shift)
+            };
+            let m_word = builder.ins().ireduce(I64, m_shifted);
+            let mask_offset_val = builder
+                .ins()
+                .iconst(I32, (log_current_offset + nb_i32 + start as i32) as i64);
+            emit_inline_write_log_push(context, builder, mask_offset_val, m_word, width_class_val);
+        }
+        return;
+    }
     if nb <= 8 {
         let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
         let width_class_val = builder.ins().iconst(I32, nb as i64);
@@ -1325,7 +1385,7 @@ impl ProtoAssignStatement {
             // portion at `log_current_offset + nb` (matches the storage layout
             // `[payload][mask]` produced by write_native_value).
             if emit_log {
-                emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m);
+                emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m, None);
             }
         } else if let Some((beg, end)) = self.select {
             // Absolute-position masks for the [beg:end] window.  The shifted
@@ -1410,7 +1470,15 @@ impl ProtoAssignStatement {
             // entry at `log_current_offset + nb`.  `emit_ff_log_push` handles
             // both.
             if emit_log {
-                emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m);
+                emit_ff_log_push(
+                    context,
+                    builder,
+                    log_current_offset,
+                    nb,
+                    fwd,
+                    fwd_m,
+                    self.select,
+                );
             }
         } else {
             // Store elimination relies on load_cache forwarding to
@@ -1571,7 +1639,7 @@ impl ProtoAssignStatement {
             // entry per word — the commit-side consumer in
             // `ff_commit_from_log` writes width_class=8 bytes per entry.
             if emit_log {
-                emit_ff_log_push(context, builder, log_current_offset, nb, fwd_p, fwd_m);
+                emit_ff_log_push(context, builder, log_current_offset, nb, fwd_p, fwd_m, None);
             }
         }
 
@@ -1787,7 +1855,14 @@ impl ProtoAssignStatement {
                 let dst_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
                 emit_wide_select_rmw_store(builder, dst_ptr, src_ptr, &win);
                 if is_ff {
-                    emit_wide_log_chunks(context, builder, dst_ptr, log_current_offset, nb);
+                    emit_wide_log_chunks(
+                        context,
+                        builder,
+                        dst_ptr,
+                        log_current_offset,
+                        nb,
+                        self.select,
+                    );
                 }
                 return Some(());
             }
@@ -1858,7 +1933,7 @@ impl ProtoAssignStatement {
         // payload each.  For nb ≤ 56 a single entry suffices; wider FFs
         // chunk into multiple entries at canonical offsets.
         if is_ff {
-            emit_wide_log_chunks(context, builder, src_ptr, log_current_offset, nb);
+            emit_wide_log_chunks(context, builder, src_ptr, log_current_offset, nb, None);
         }
 
         // 4-state mask: direct store (skip for packed FF) + parallel wide
@@ -1902,6 +1977,7 @@ impl ProtoAssignStatement {
                     mask_ptr,
                     log_current_offset + nb as i32,
                     nb,
+                    None,
                 );
             }
         }
@@ -2173,14 +2249,29 @@ fn emit_wide_dynamic_field_store(
 /// at `src_ptr`.  Each entry holds up to `WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES`
 /// (56) bytes; wider FFs are split into multiple entries at consecutive
 /// FF offsets.
+///
+/// `span` is the `(high, low)` BIT range when the write is a statically
+/// bounded slice: only those bytes changed, so logging the whole element
+/// would spend `nb` bytes of entry payload to deposit a couple of bits.
 fn emit_wide_log_chunks(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
     src_ptr: cranelift::prelude::Value,
     base_offset: i32,
     nb: usize,
+    span: Option<(usize, usize)>,
 ) {
-    use crate::ir::write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
+    use crate::ir::write_log::{WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, static_field_byte_span};
+    let (skip, nb) = match span.and_then(|(hi, lo)| static_field_byte_span(hi, lo, nb)) {
+        Some((blo, blen)) => (blo, blen),
+        None => (0, nb),
+    };
+    let src_ptr = if skip == 0 {
+        src_ptr
+    } else {
+        builder.ins().iadd_imm_s(src_ptr, skip as i64)
+    };
+    let base_offset = base_offset + skip as i32;
     let mut written: usize = 0;
     while written < nb {
         let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
@@ -2405,4 +2496,47 @@ fn cold_if_true_enabled() -> bool {
     use std::sync::OnceLock;
     static V: OnceLock<bool> = OnceLock::new();
     *V.get_or_init(|| std::env::var("VERYL_COLD_IF_TRUE").ok().as_deref() != Some("0"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::log_window_for_span;
+
+    /// The window must contain the field and stay inside the element: a
+    /// window running past `nb` would make the commit write a neighbouring
+    /// FF, and one narrower than the field would drop bits.
+    #[test]
+    fn log_window_covers_the_field_and_stays_inside_the_element() {
+        // A 2-bit field inside byte 0, then inside byte 1.
+        assert_eq!(log_window_for_span(0, 0, 16), Some((0, 1)));
+        assert_eq!(log_window_for_span(1, 1, 16), Some((1, 1)));
+        // Straddling a byte boundary widens to the enclosing aligned window.
+        assert_eq!(log_window_for_span(3, 4, 16), Some((0, 8)));
+        assert_eq!(log_window_for_span(2, 3, 16), Some((2, 2)));
+        assert_eq!(log_window_for_span(5, 6, 16), Some((4, 4)));
+        // A span wider than 8 bytes has no single window.
+        assert_eq!(log_window_for_span(0, 8, 16), None);
+        // Out of range spans are refused rather than clipped.
+        assert_eq!(log_window_for_span(0, 16, 16), None);
+        assert_eq!(log_window_for_span(4, 3, 16), None);
+    }
+
+    /// `nb` is not always a multiple of 8 on the narrow side, and a window
+    /// must never be chosen that the commit would run past.
+    #[test]
+    fn log_window_never_runs_past_a_short_element() {
+        for nb in 1..=16usize {
+            for lo in 0..nb {
+                for hi in lo..nb {
+                    if let Some((start, w)) = log_window_for_span(lo, hi, nb) {
+                        assert!(start <= lo, "nb={nb} [{lo},{hi}] window starts late");
+                        assert!(start + w > hi, "nb={nb} [{lo},{hi}] window ends early");
+                        assert!(start + w <= nb, "nb={nb} [{lo},{hi}] window past element");
+                        assert!(w.is_power_of_two() && w <= 8);
+                        assert_eq!(start % w, 0, "nb={nb} [{lo},{hi}] window unaligned");
+                    }
+                }
+            }
+        }
+    }
 }

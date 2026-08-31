@@ -14,6 +14,7 @@ use crate::ir::variable::{
 };
 use crate::ir::write_log::{
     WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, event_write_log_push_static, event_write_log_push_wide,
+    static_field_byte_span,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
@@ -2634,7 +2635,13 @@ impl AssignStatement {
             // only selects bit ranges within a packed-bitfield FF dst).
             // Wide FFs split into per-word entries; see `emit_ff_log`.
             if let Some(offset) = self.ff_log_offset {
-                emit_ff_log(&current, offset, self.dst_native_bytes, self.dst_use_4state);
+                emit_ff_log(
+                    &current,
+                    offset,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    None,
+                );
             }
         } else if let Some((beg, end)) = self.select {
             let mut current = unsafe {
@@ -2661,7 +2668,13 @@ impl AssignStatement {
             // final merged value the direct store deposited.  Wide FFs
             // split into per-word entries; see `emit_ff_log`.
             if let Some(offset) = self.ff_log_offset {
-                emit_ff_log(&current, offset, self.dst_native_bytes, self.dst_use_4state);
+                emit_ff_log(
+                    &current,
+                    offset,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    self.select,
+                );
             }
         } else {
             let mut value = value;
@@ -2683,7 +2696,13 @@ impl AssignStatement {
             // Wide FFs (dst_width > 64) emit one entry per 8-byte word,
             // with parallel mask entries when use_4state is set.
             if let Some(offset) = self.ff_log_offset {
-                emit_ff_log(&value, offset, self.dst_native_bytes, self.dst_use_4state);
+                emit_ff_log(
+                    &value,
+                    offset,
+                    self.dst_native_bytes,
+                    self.dst_use_4state,
+                    None,
+                );
             }
         }
     }
@@ -2734,7 +2753,7 @@ impl AssignDynamicStatement {
         // for nb ∉ {1,2,4,8} — losing every wide dynamic-index FF write.
         let push_log = |current: &Value| {
             if let Some(offset) = log_offset {
-                emit_ff_log(current, offset, self.dst_native_bytes, use_4state);
+                emit_ff_log(current, offset, self.dst_native_bytes, use_4state, None);
             }
         };
         if let Some(dyn_sel) = &self.dynamic_select {
@@ -3972,7 +3991,18 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
 ///
 /// SAFETY: requires an `EVENT_WRITE_LOG` buffer to be installed; no-op
 /// otherwise.
-fn emit_ff_log(value: &Value, base_offset: u32, nb: usize, use_4state: bool) {
+/// `span` is the `(high, low)` BIT range when the write is a statically
+/// bounded slice of a wide FF: only those bytes changed, so the wide push is
+/// narrowed to them.  None (runtime index, or a genuine whole-element store)
+/// keeps the full split.  Matches the AOT-C and Cranelift emitters, which is
+/// what makes the three engines' entry counts comparable.
+fn emit_ff_log(
+    value: &Value,
+    base_offset: u32,
+    nb: usize,
+    use_4state: bool,
+    span: Option<(usize, usize)>,
+) {
     let nb_u16 = nb as u16;
     let nb_u32 = nb as u32;
     if nb <= 8 {
@@ -3998,13 +4028,17 @@ fn emit_ff_log(value: &Value, base_offset: u32, nb: usize, use_4state: bool) {
         let p = payload_digits.get(i).copied().unwrap_or(0);
         payload_bytes.extend_from_slice(&p.to_le_bytes());
     }
+    let (skip, span_len) = match span.and_then(|(hi, lo)| static_field_byte_span(hi, lo, nb)) {
+        Some((blo, blen)) if blo + blen <= payload_bytes.len() => (blo, blen),
+        _ => (0, nb),
+    };
     let mut written: usize = 0;
-    while written < nb {
-        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
+    while written < span_len {
+        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, span_len - written);
         unsafe {
             event_write_log_push_wide(
-                base_offset + written as u32,
-                payload_bytes.as_ptr().add(written),
+                base_offset + (skip + written) as u32,
+                payload_bytes.as_ptr().add(skip + written),
                 chunk,
             );
         }
@@ -4020,13 +4054,18 @@ fn emit_ff_log(value: &Value, base_offset: u32, nb: usize, use_4state: bool) {
             let m = mask_digits.get(i).copied().unwrap_or(0);
             mask_bytes.extend_from_slice(&m.to_le_bytes());
         }
+        let (mskip, mlen) = if skip + span_len <= mask_bytes.len() {
+            (skip, span_len)
+        } else {
+            (0, nb)
+        };
         let mut written: usize = 0;
-        while written < nb {
-            let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
+        while written < mlen {
+            let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, mlen - written);
             unsafe {
                 event_write_log_push_wide(
-                    base_offset + nb_u32 + written as u32,
-                    mask_bytes.as_ptr().add(written),
+                    base_offset + nb_u32 + (mskip + written) as u32,
+                    mask_bytes.as_ptr().add(mskip + written),
                     chunk,
                 );
             }
@@ -4782,6 +4821,78 @@ fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -
             if !sink(item) {
                 return;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod emit_ff_log_tests {
+    use super::emit_ff_log;
+    use crate::ir::write_log::{WriteLogBuffer, clear_event_write_log, set_event_write_log};
+    use veryl_analyzer::value::{Value, ValueU64};
+
+    fn wide_value() -> Value {
+        Value::U64(ValueU64 {
+            payload: 0x0807_0605_0403_0201,
+            mask_xz: 0,
+            width: 128,
+            signed: false,
+        })
+    }
+
+    /// Without a span the whole 16-byte element is logged; with one, only the
+    /// bytes the field touches.  A passing simulation suite does NOT prove
+    /// this fires -- the narrowed and unnarrowed forms commit identical bytes,
+    /// so only the entry's own offset/length distinguishes them.
+    #[test]
+    fn interpreter_wide_ff_log_narrows_to_the_field() {
+        // Whole element: 16 bytes at the base offset.
+        let mut whole = WriteLogBuffer::with_capacity(0, 4);
+        unsafe {
+            set_event_write_log(&mut whole);
+            emit_ff_log(&wide_value(), 0x100, 16, false, None);
+            clear_event_write_log();
+        }
+        assert_eq!(whole.wide_count, 1);
+        let e = &whole.wide_entries_slice()[0];
+        assert_eq!((e.offset, e.native_bytes), (0x100, 16));
+
+        // Bits [17:16] live in byte 2 alone.
+        let mut field = WriteLogBuffer::with_capacity(0, 4);
+        unsafe {
+            set_event_write_log(&mut field);
+            emit_ff_log(&wide_value(), 0x100, 16, false, Some((17, 16)));
+            clear_event_write_log();
+        }
+        assert_eq!(field.wide_count, 1);
+        let e = &field.wide_entries_slice()[0];
+        assert_eq!(
+            (e.offset, e.native_bytes),
+            (0x102, 1),
+            "the span did not narrow the interpreter's push"
+        );
+        assert_eq!(e.payload[0], 0x03, "narrowed push carried the wrong byte");
+    }
+
+    /// A field straddling a byte boundary must carry both bytes, and one that
+    /// spans the whole element must not be narrowed at all.
+    #[test]
+    fn interpreter_wide_ff_log_span_edges() {
+        for (hi, lo, off, nb) in [(23u32, 8u32, 0x101u32, 2u8), (127, 0, 0x100, 16)] {
+            let mut buf = WriteLogBuffer::with_capacity(0, 4);
+            unsafe {
+                set_event_write_log(&mut buf);
+                emit_ff_log(
+                    &wide_value(),
+                    0x100,
+                    16,
+                    false,
+                    Some((hi as usize, lo as usize)),
+                );
+                clear_event_write_log();
+            }
+            let e = &buf.wide_entries_slice()[0];
+            assert_eq!((e.offset, e.native_bytes), (off, nb), "span [{hi}:{lo}]");
         }
     }
 }
