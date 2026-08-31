@@ -1,6 +1,104 @@
 // Diagnostic ownership and provenance coverage for comb-loop analysis.
 use super::*;
 
+#[test]
+fn comb_loop_diagnostic_reports_an_ordered_dependency_cycle() {
+    let errors = analyze(
+        r#"
+        module Top (
+            a: output logic,
+            b: output logic,
+            c: output logic,
+        ) {
+            assign a = b;
+            assign b = c;
+            assign c = a;
+        }
+        "#,
+    );
+    let cycle = errors.iter().find_map(|error| match error {
+        AnalyzerError::CombinationalLoop { cycle, .. } => Some(cycle.as_str()),
+        _ => None,
+    });
+
+    // Sorted SCC members would be a, b, c. The diagnostic follows the
+    // dependency edges instead: a affects c, c affects b, and b affects a.
+    assert_eq!(cycle, Some("a -> c -> b -> a"));
+}
+
+#[test]
+fn comb_loop_diagnostic_labels_only_the_reported_cycle() {
+    let errors = analyze(
+        r#"
+        module Top (
+            a: output logic,
+            b: output logic,
+            c: output logic,
+        ) {
+            assign a = b | c;
+            assign b = a;
+            assign c = a;
+        }
+        "#,
+    );
+    let diagnostic = errors.iter().find_map(|error| match error {
+        AnalyzerError::CombinationalLoop {
+            cycle,
+            loop_participants,
+            ..
+        } => Some((cycle.as_str(), loop_participants.len())),
+        _ => None,
+    });
+
+    // The SCC also contains c, but the selected witness is the shorter a/b
+    // cycle, so the unrelated c assignment should not be labeled.
+    assert_eq!(diagnostic, Some(("a -> b -> a", 1)));
+}
+
+#[test]
+fn comb_loop_diagnostic_preserves_array_elements_in_the_cycle() {
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var mem: logic [2];
+            assign mem[0] = mem[1];
+            assign mem[1] = mem[0];
+            assign o = mem[0];
+        }
+        "#,
+    );
+    let cycle = errors.iter().find_map(|error| match error {
+        AnalyzerError::CombinationalLoop { cycle, .. } => Some(cycle.as_str()),
+        _ => None,
+    });
+
+    assert_eq!(cycle, Some("mem[0] -> mem[1] -> mem[0]"));
+}
+
+#[test]
+fn comb_loop_diagnostic_preserves_bit_regions_in_the_cycle() {
+    let errors = analyze(
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var data: logic<2>;
+            assign data[0] = data[1];
+            assign data[1] = data[0];
+            assign o = data[0];
+        }
+        "#,
+    );
+    let cycle = errors.iter().find_map(|error| match error {
+        AnalyzerError::CombinationalLoop { cycle, .. } => Some(cycle.as_str()),
+        _ => None,
+    });
+
+    assert_eq!(cycle, Some("data[0] -> data[1] -> data[0]"));
+}
+
 fn captured_coverage_observation() -> (usize, Option<usize>, Option<usize>) {
     // Why this case exists: function summary coverage is mapped back into the
     // caller one captured region at a time. A caller default for value[1] must

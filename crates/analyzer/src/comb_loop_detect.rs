@@ -126,7 +126,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
                 continue;
             }
         };
-        check_graph(module, &graph, &mut errors, &mut reported);
+        check_graph(module, &graph, &bit_part, &mut errors, &mut reported);
         let mut summary = match compute_module_summary(module, &graph, &bit_part) {
             Ok(summary) => summary,
             Err(ssa::PositionOverflow) => {
@@ -2083,6 +2083,7 @@ fn collect_dst_node_keys(
 fn check_graph(
     module: &Module,
     graph: &Graph<NodeKey, BitDependency>,
+    bit_part: &BitPartition,
     errors: &mut Vec<AnalyzerError>,
     reported: &mut HashSet<(SymbolId, Vec<VarPath>)>,
 ) {
@@ -2093,12 +2094,14 @@ fn check_graph(
         if !is_loop {
             continue;
         }
+        let cycle = dependency_cycle(graph, &scc);
         let mut keys: Vec<NodeKey> = scc.iter().map(|n| graph[*n]).collect();
         keys.sort();
         if !seen.insert(keys.clone()) {
             continue;
         }
-        let Some(error) = build_error(module, &keys) else {
+        let cycle_keys: Vec<NodeKey> = cycle.iter().map(|node| graph[*node]).collect();
+        let Some(error) = build_error(module, bit_part, &keys, &cycle_keys) else {
             continue;
         };
         // `VarId` is fresh per specialization, so paths are the only stable
@@ -2133,6 +2136,80 @@ fn strongly_connected_components(graph: &Graph<NodeKey, BitDependency>) -> Vec<V
     // shallow dependency chain can therefore exhaust the native stack. The
     // Kosaraju implementation uses explicit worklists for both passes.
     kosaraju_scc(graph)
+}
+
+/// Returns one deterministic directed cycle from an SCC. The repeated final
+/// node makes the dependency direction explicit when the path is rendered.
+fn dependency_cycle(graph: &Graph<NodeKey, BitDependency>, scc: &[NodeIndex]) -> Vec<NodeIndex> {
+    if scc.len() == 1 {
+        return vec![scc[0], scc[0]];
+    }
+
+    let members: HashSet<NodeIndex> = scc.iter().copied().collect();
+    let start = *scc
+        .iter()
+        .min_by_key(|node| graph[**node])
+        .expect("a detected SCC is never empty");
+
+    for next in sorted_successors(graph, start, &members)
+        .into_iter()
+        .filter(|next| *next != start)
+    {
+        if let Some(mut path) = shortest_path(graph, next, start, &members) {
+            path.insert(0, start);
+            return path;
+        }
+    }
+
+    // Every node in a non-trivial SCC has a path back to itself through a
+    // different node, so this is only reachable if the graph is malformed.
+    unreachable!("non-trivial SCC did not contain a directed cycle")
+}
+
+fn shortest_path(
+    graph: &Graph<NodeKey, BitDependency>,
+    start: NodeIndex,
+    end: NodeIndex,
+    members: &HashSet<NodeIndex>,
+) -> Option<Vec<NodeIndex>> {
+    let mut queue = VecDeque::from([start]);
+    let mut visited = HashSet::default();
+    visited.insert(start);
+    let mut predecessor: HashMap<NodeIndex, NodeIndex> = HashMap::default();
+
+    while let Some(node) = queue.pop_front() {
+        if node == end {
+            let mut path = vec![end];
+            while path.last().copied() != Some(start) {
+                path.push(*predecessor.get(path.last()?)?);
+            }
+            path.reverse();
+            return Some(path);
+        }
+
+        for next in sorted_successors(graph, node, members) {
+            if visited.insert(next) {
+                predecessor.insert(next, node);
+                queue.push_back(next);
+            }
+        }
+    }
+    None
+}
+
+fn sorted_successors(
+    graph: &Graph<NodeKey, BitDependency>,
+    node: NodeIndex,
+    members: &HashSet<NodeIndex>,
+) -> Vec<NodeIndex> {
+    let mut successors: Vec<NodeIndex> = graph
+        .edges(node)
+        .map(|edge| edge.target())
+        .filter(|target| members.contains(target))
+        .collect();
+    successors.sort_unstable_by_key(|target| graph[*target]);
+    successors.dedup();
+    successors
 }
 
 fn ensure_node(
@@ -2175,18 +2252,46 @@ fn has_self_edge(graph: &Graph<NodeKey, BitDependency>, node: NodeIndex) -> bool
     !increases_one_coordinate
 }
 
-fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
-    let mut tokens: Vec<veryl_parser::token_range::TokenRange> = Vec::new();
+fn build_error(
+    module: &Module,
+    bit_part: &BitPartition,
+    keys: &[NodeKey],
+    cycle_keys: &[NodeKey],
+) -> Option<AnalyzerError> {
     let mut identifier: Option<String> = None;
-    let mut seen_var: HashSet<VarId> = HashSet::default();
     for (id, _idx, _range) in keys {
-        if !seen_var.insert(*id) {
-            continue;
-        }
         if let Some(var) = module.variables.get(id)
             && identifier.is_none()
         {
             identifier = Some(var.path.to_string());
+        }
+    }
+    let mut tokens = diagnostic_tokens(module, cycle_keys);
+    if tokens.is_empty() {
+        // A synthetic cycle can lack an assignment site of its own. Preserve
+        // the previous best-effort behavior by falling back to its SCC.
+        tokens = diagnostic_tokens(module, keys);
+    }
+    let primary = *tokens.first()?;
+    let participants: Vec<_> = tokens.iter().skip(1).copied().collect();
+    let cycle = format_cycle(module, bit_part, cycle_keys);
+    Some(AnalyzerError::combinational_loop(
+        identifier.as_deref().unwrap_or("?"),
+        &cycle,
+        &primary,
+        &participants,
+    ))
+}
+
+fn diagnostic_tokens(
+    module: &Module,
+    keys: &[NodeKey],
+) -> Vec<veryl_parser::token_range::TokenRange> {
+    let mut tokens = Vec::new();
+    let mut seen_var: HashSet<VarId> = HashSet::default();
+    for (id, _, _) in keys {
+        if !seen_var.insert(*id) {
+            continue;
         }
         if let Some(toks) = module.assign_tokens.get(id) {
             tokens.extend(toks.iter().copied());
@@ -2201,13 +2306,84 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
         let mut seen: HashSet<_> = HashSet::default();
         tokens.retain(|t| seen.insert(*t));
     }
-    let primary = *tokens.first()?;
-    let participants: Vec<_> = tokens.iter().skip(1).copied().collect();
-    Some(AnalyzerError::combinational_loop(
-        identifier.as_deref().unwrap_or("?"),
-        &primary,
-        &participants,
-    ))
+    tokens
+}
+
+fn format_cycle(module: &Module, bit_part: &BitPartition, keys: &[NodeKey]) -> String {
+    let mut names = Vec::new();
+    // `dependency_cycle` repeats the first node at the end. Render each
+    // region once per adjacent run, then close the human-readable cycle.
+    for key in keys.iter().take(keys.len().saturating_sub(1)) {
+        let name = format_cycle_node(module, bit_part, *key);
+        if names.last() != Some(&name) {
+            names.push(name);
+        }
+    }
+    if let Some(first) = names.first().cloned()
+        && (names.len() == 1 || names.last() != Some(&first))
+    {
+        names.push(first);
+    }
+    names.join(" -> ")
+}
+
+fn format_cycle_node(module: &Module, bit_part: &BitPartition, key: NodeKey) -> String {
+    let (id, array, range) = key;
+    let variable = module
+        .variables
+        .get(&id)
+        .or_else(|| module.interface_members.get(&id));
+    let mut name = variable
+        .map(|variable| variable.path.to_string())
+        .unwrap_or_else(|| id.to_string());
+
+    let Some(variable) = variable else {
+        return name;
+    };
+    if variable.r#type.total_array() != Some(array.length) || array.start != 0 {
+        if array.length == 1 {
+            if let Some(indices) = unflatten_array_index(&variable.r#type.array, array.start) {
+                for index in indices {
+                    name.push_str(&format!("[{index}]"));
+                }
+            } else {
+                name.push_str(&format!("[flat {}]", array.start));
+            }
+        } else if let Some(end) = array.end().and_then(|end| end.checked_sub(1)) {
+            let flat = if variable.r#type.array.dims() > 1 {
+                "flat "
+            } else {
+                ""
+            };
+            name.push_str(&format!("[{flat}{}..={end}]", array.start));
+        }
+    }
+
+    if let Some(packed) = bit_part.ranges_of((id, array)).get(range)
+        && (variable.r#type.total_width() != Some(packed.length) || packed.start != 0)
+    {
+        if packed.length == 1 {
+            name.push_str(&format!("[{}]", packed.start));
+        } else {
+            name.push_str(&format!("[{}:{}]", packed.end() - 1, packed.start));
+        }
+    }
+    name
+}
+
+fn unflatten_array_index(shape: &crate::ir::Shape, flat: usize) -> Option<Vec<usize>> {
+    let dimensions: Vec<usize> = shape.iter().copied().collect::<Option<_>>()?;
+    if flat >= shape.total()? || dimensions.contains(&0) {
+        return None;
+    }
+
+    let mut flat = flat;
+    let mut indices = vec![0; dimensions.len()];
+    for (index, dimension) in dimensions.iter().enumerate().rev() {
+        indices[index] = flat % dimension;
+        flat /= dimension;
+    }
+    Some(indices)
 }
 
 fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
@@ -2361,6 +2537,48 @@ fn summary_region(key: NodeKey, bit_part: &BitPartition) -> Option<SummaryRegion
 #[cfg(test)]
 mod region_tests {
     use super::*;
+
+    #[test]
+    fn dependency_cycle_prefers_node_keys_over_edge_insertion_order() {
+        let span = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let mut graph: Graph<NodeKey, BitDependency> = Graph::new();
+        // Deliberately insert nodes and edges in an order that differs from
+        // their keys. The diagnostic should still select a -> b -> a.
+        let c = graph.add_node((VarId::from_raw(2), span, 0));
+        let a = graph.add_node((VarId::from_raw(0), span, 0));
+        let b = graph.add_node((VarId::from_raw(1), span, 0));
+        graph.add_edge(a, c, BitDependency::WHOLE);
+        graph.add_edge(c, a, BitDependency::WHOLE);
+        graph.add_edge(a, b, BitDependency::WHOLE);
+        graph.add_edge(b, a, BitDependency::WHOLE);
+
+        let scc = strongly_connected_components(&graph).remove(0);
+        let cycle: Vec<NodeKey> = dependency_cycle(&graph, &scc)
+            .into_iter()
+            .map(|node| graph[node])
+            .collect();
+
+        assert_eq!(cycle, vec![graph[a], graph[b], graph[a]]);
+    }
+
+    #[test]
+    fn dependency_cycle_closes_a_self_edge() {
+        let mut graph: Graph<NodeKey, BitDependency> = Graph::new();
+        let node = graph.add_node((
+            VarId::from_raw(0),
+            ArraySpan {
+                start: 0,
+                length: 1,
+            },
+            0,
+        ));
+        graph.add_edge(node, node, BitDependency::WHOLE);
+
+        assert_eq!(dependency_cycle(&graph, &[node]), vec![node, node]);
+    }
 
     #[test]
     fn scc_walk_does_not_use_the_native_stack() {

@@ -919,7 +919,15 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
             Some(miette::Severity::Advice) => (DiagnosticSeverity::HINT, "Hint"),
             None => (DiagnosticSeverity::ERROR, "Error"),
         };
-        (severity, format!("Semantic {text}: {err}"))
+        let message = if matches!(x, AnalyzerError::CombinationalLoop { .. })
+            && let Some(help) = x.help()
+            && !help.to_string().is_empty()
+        {
+            format!("Semantic {text}: {err}\nhelp: {help}")
+        } else {
+            format!("Semantic {text}: {err}")
+        };
+        (severity, message)
     } else {
         (DiagnosticSeverity::ERROR, format!("Semantic Error: {err}"))
     };

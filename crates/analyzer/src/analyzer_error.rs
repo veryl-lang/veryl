@@ -124,17 +124,18 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(combinational_loop),
-        help(""),
+        help("this analysis is conservative; simplify logically redundant dependencies, or add a register to break a real cycle"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("combinational loop detected on \"{identifier}\"")]
+    #[error("potential combinational loop detected: {cycle}")]
     CombinationalLoop {
         identifier: String,
+        cycle: String,
         #[source_code]
         input: MultiSources,
-        #[label("Error location")]
+        #[label("involved in combinational feedback")]
         error_location: SourceSpan,
-        #[label(collection, "involved in loop")]
+        #[label(collection, "also involved in combinational feedback")]
         loop_participants: Vec<SourceSpan>,
         token_source: TokenSource,
     },
@@ -2499,12 +2500,14 @@ impl AnalyzerError {
     }
     pub fn combinational_loop(
         identifier: &str,
+        cycle: &str,
         token: &TokenRange,
         participants: &[TokenRange],
     ) -> Self {
         let (input, loop_participants) = source_with_context(token, participants);
         AnalyzerError::CombinationalLoop {
             identifier: identifier.to_string(),
+            cycle: cycle.to_string(),
             input,
             error_location: token.into(),
             loop_participants,

@@ -4,19 +4,19 @@ expression: out
 ---
 combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#combinational_loop)
 
-  × combinational loop detected on "b"
+  × potential combinational loop detected: b -> c -> b
    ╭─[../../testcases/error/combinational_loop.veryl:6:12]
  5 │ ) {
  6 │     assign b = c + a;
    ·            ┬
-   ·            ╰── Error location
+   ·            ╰── involved in combinational feedback
  7 │     assign c = b + 1;
    ╰────
    ╭─[../../testcases/error/combinational_loop.veryl:7:12]
  6 │     assign b = c + a;
  7 │     assign c = b + 1;
    ·            ┬
-   ·            ╰── involved in loop
+   ·            ╰── also involved in combinational feedback
  8 │ }
    ╰────
-  help:
+  help: this analysis is conservative; simplify logically redundant dependencies, or add a register to break a real cycle

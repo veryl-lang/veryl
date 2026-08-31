@@ -1,23 +1,22 @@
 ---
 source: crates/tests/src/lib.rs
-assertion_line: 421
 expression: out
 ---
 combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#combinational_loop)
 
-  × combinational loop detected on "x"
+  × potential combinational loop detected: x -> y -> x
     ╭─[../../testcases/error/combinational_loop_inst.veryl:18:12]
  17 │     );
  18 │     assign x = y;
     ·            ┬
-    ·            ╰── Error location
+    ·            ╰── involved in combinational feedback
  19 │     assign b = y;
     ╰────
     ╭─[../../testcases/error/combinational_loop_inst.veryl:16:12]
  15 │         i: x,
  16 │         o: y,
     ·            ┬
-    ·            ╰── involved in loop
+    ·            ╰── also involved in combinational feedback
  17 │     );
     ╰────
-  help:
+  help: this analysis is conservative; simplify logically redundant dependencies, or add a register to break a real cycle
