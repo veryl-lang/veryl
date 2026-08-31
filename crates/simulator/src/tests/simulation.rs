@@ -1521,14 +1521,149 @@ fn wide_256_aot_native_comb() {
 }
 
 #[test]
+fn dynsel_window_overrun_clips_to_the_vector() {
+    // `x[i +: 32]` on a 1536-bit FF: at i = 1535 the window covers bits
+    // 1535..1566, 31 of them past the vector.  The reference behaviour is to
+    // write the in-range bits and DISCARD the rest — no wrap, no aliasing.
+    // The expected values below were taken from Verilator 5.050 and iverilog
+    // on the SV this module generates; the interpreter and Cranelift agree.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_idx: input  logic<11>,
+        i_v  : input  logic<32>,
+        o_top: output logic<32>,
+        o_bot: output logic<32>,
+    ) {
+        var x: logic<1536>;
+        always_ff {
+            if_reset {
+                x = 0;
+            } else {
+                x[i_idx+:32] = i_v;
+            }
+        }
+        assign o_top = x[1535:1504];
+        assign o_bot = x[31:0];
+    }
+    "#;
+    // (index, o_top, o_bot) walked cumulatively from reset with v = all ones.
+    const SEQ: [(u64, u128, u128); 5] = [
+        (1, 0x0000_0000, 0xffff_fffe),
+        (1503, 0x7fff_ffff, 0xffff_fffe),
+        (1504, 0xffff_ffff, 0xffff_fffe),
+        (1520, 0xffff_ffff, 0xffff_fffe),
+        (1535, 0xffff_ffff, 0xffff_fffe),
+    ];
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        // Non-vacuous for the backend under test: before the event emitter
+        // covered this shape the cc arm silently fell back to Cranelift, so
+        // the values below said nothing about the emitted C.
+        if config.aot_c {
+            let missing: Vec<_> = ir
+                .event_statements
+                .keys()
+                .filter(|e| matches!(e, Event::Clock(_)) && !ir.whole_events.contains_key(e))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "clock event not AOT-C-native: {missing:?}"
+            );
+        }
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_v", Value::new(0xFFFF_FFFFu64, 32, false));
+        sim.set("i_idx", Value::new(0, 11, false));
+        sim.step_reset(&clk, &rst);
+        for (idx, top, bot) in SEQ {
+            sim.set("i_idx", Value::new(idx, 11, false));
+            sim.step(&clk);
+            assert_eq!(
+                (
+                    sim.get("o_top").unwrap().payload_u128(),
+                    sim.get("o_bot").unwrap().payload_u128()
+                ),
+                (top, bot),
+                "idx={idx} config={config:?}"
+            );
+        }
+        // From a fresh reset the top index writes ONE bit and nothing else:
+        // the sharpest statement that the overhang is dropped, not wrapped.
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i_v", Value::new(0xFFFF_FFFFu64, 32, false));
+        sim.set("i_idx", Value::new(1535, 11, false));
+        sim.step_reset(&clk, &rst);
+        sim.step(&clk);
+        assert_eq!(
+            (
+                sim.get("o_top").unwrap().payload_u128(),
+                sim.get("o_bot").unwrap().payload_u128()
+            ),
+            (0x8000_0000, 0),
+            "top-index overhang must be dropped, config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn dynsel_spill_past_width_is_clipped_not_kept() {
+    // `ff72[idx +: 8]` at idx = 71: the window's low bit is inside the 72-bit
+    // vector but its top 7 bits are not.  `clip_window_to_width` clamps the
+    // high end, so exactly one bit lands.  The emitter's own register may keep
+    // more in the 72..127 spare of the 128-bit size class, but no read can see
+    // it — this pins what the DESIGN observes, on both backends.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_idx: input  logic<7>,
+        i_v  : input  logic<8>,
+        o_hi : output logic<8>,
+    ) {
+        var x: logic<72>;
+        always_ff {
+            if_reset {
+                x = 0;
+            } else {
+                x[i_idx+:8] = i_v;
+            }
+        }
+        assign o_hi = x[71:64];
+    }
+    "#;
+    for config in [aot_native_validate_config(), Config::default()] {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_idx", Value::new(71, 7, false));
+        sim.set("i_v", Value::new(0xff, 8, false));
+        sim.step_reset(&clk, &rst);
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("o_hi").unwrap().payload_u128(),
+            0x80,
+            "only bit 71 is inside the vector, config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn wide_ff_select_covered_by_aot_c_event_emitter() {
     // `emit_event_function` bails all-or-nothing, so ONE uncovered statement
     // drops a whole clock event to Cranelift.  These two shapes are the ones
     // that did that on a real SoC clock event; `event_uncovered_census` is
     // empty exactly when the event-path emitter covers them.
     use crate::ir::{
-        ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
-        ProtoStatement, VarOffset,
+        ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement,
+        ProtoDynamicBitSelect, ProtoExpression, ProtoStatement, VarOffset,
     };
     use veryl_parser::token_range::TokenRange;
 
@@ -1540,6 +1675,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
             signed: false,
         },
     };
+    let idx2 = idx.clone();
     let val = |w: usize| ProtoExpression::Value {
         value: Value::new(0x5a5a_5a5a, w, false),
         width: w,
@@ -1579,9 +1715,48 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         dst_ff_current_base_offset: 0x1800,
     });
 
+    // 3. Runtime-indexed 92-bit element of a 64 x 92 packed array: the stride
+    //    is not a whole number of words and the window is wider than one.
+    let dyn_unaligned = ProtoStatement::Assign(ProtoAssignStatement {
+        dst: VarOffset::Ff(0x3000),
+        dst_width: 5888,
+        select: None,
+        dynamic_select: Some(ProtoDynamicBitSelect {
+            index_expr: Box::new(idx2.clone()),
+            elem_width: 92,
+            window: 92,
+            num_elements: 64,
+        }),
+        rhs_select: None,
+        expr: val(92),
+        dst_ff_current_offset: 0x2800,
+        token: TokenRange::default(),
+    });
+
+    // 4. `ff1536[idx +: 32]`: at idx = 1535 the window runs 31 bits past the
+    //    vector.  Emittable BECAUSE the merge clips it (see
+    //    `dynsel_window_overrun_clips_to_the_vector` for the values).
+    let dyn_overrun = ProtoStatement::Assign(ProtoAssignStatement {
+        dst: VarOffset::Ff(0x5000),
+        dst_width: 1536,
+        select: None,
+        dynamic_select: Some(ProtoDynamicBitSelect {
+            index_expr: Box::new(idx2),
+            elem_width: 1,
+            window: 32,
+            num_elements: 1536,
+        }),
+        rhs_select: None,
+        expr: val(32),
+        dst_ff_current_offset: 0x4800,
+        token: TokenRange::default(),
+    });
+
     for (name, stmt) in [
         ("static unaligned wide slice", static_slice),
         ("dynamic wide byte lane", dyn_lane),
+        ("runtime index, word-unaligned stride", dyn_unaligned),
+        ("runtime index, window past the vector", dyn_overrun),
     ] {
         let census = crate::backend::aot_c::emit::event_uncovered_census(&[stmt]);
         assert!(

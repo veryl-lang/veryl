@@ -3562,6 +3562,7 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement) -> Option<String> {
         && a.rhs_select.is_none()
         && let Some(s) = emit_event_ff_assign_wide_dynsel(a, ds)
             .or_else(|| emit_event_ff_assign_wide_dynsel_field(a, ds))
+            .or_else(|| emit_event_ff_assign_wide_dynsel_general(a, ds))
     {
         return Some(s);
     }
@@ -3829,6 +3830,57 @@ fn emit_event_ff_assign_wide_select(
     Some(format!("{{ {body} }}"))
 }
 
+/// Runtime-indexed bit-slice merge into a wide destination:
+/// `dst[idx*ew +: win] = src`, in place over `nb` bytes.
+///
+/// Mirrors `AssignStatement::eval_step`'s dynamic_select +
+/// `Value::assign(beg = _sh+win-1, end = _sh)` exactly.  Intersecting the range
+/// mask with the width mask is `clip_window_to_width`: a window that runs past
+/// `dst_width` at the top index writes only its in-range bits and the overhang
+/// is dropped — measured identical on the interpreter, Cranelift, Verilator and
+/// iverilog, so this is the reference behaviour, not a choice made here.
+///
+/// Whole-width `vw_*` ops, so unlike the two-word scalar forms it holds for any
+/// `ew` / `win` — including an element stride that is not a multiple of a word.
+/// `src` and `dst` are `uint8_t*` over `nb` bytes; `src`'s value sits in its
+/// low `win` bits.
+fn emit_wide_dynsel_merge(
+    dst: &str,
+    src: &str,
+    sh: &str,
+    win: usize,
+    dst_width: usize,
+    nb: usize,
+    nw: usize,
+) -> String {
+    let wmsk = next_wide_tmp(); // mask_range = fill_ones(win) << _sh
+    let keep = next_wide_tmp(); // widthmask & ~mask_range
+    let widm = next_wide_tmp(); // fill_ones(dst_width)
+    let srcsh = next_wide_tmp();
+    let newv = next_wide_tmp();
+    format!(
+        "{{ uint64_t _w{wmsk}[{nw}]; \
+            vw_fill_ones((uint8_t*)_w{wmsk}, (const uint8_t*)0, {pkw}u); \
+            vw_shl((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, {sh}, {nb}u); \
+            uint64_t _w{widm}[{nw}]; \
+            vw_fill_ones((uint8_t*)_w{widm}, (const uint8_t*)0, {pkd}u); \
+            vw_band((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, (const uint8_t*)_w{widm}, {nb}u); \
+            uint64_t _w{keep}[{nw}]; \
+            vw_band_not((uint8_t*)_w{keep}, (const uint8_t*)_w{widm}, (const uint8_t*)_w{wmsk}, {nb}u); \
+            uint64_t _w{srcsh}[{nw}]; \
+            vw_copy((uint8_t*)_w{srcsh}, {src}, {nb}u); \
+            vw_apply_mask((uint8_t*)_w{srcsh}, (const uint8_t*)0, {pkw}u); \
+            vw_shl((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, {sh}, {nb}u); \
+            vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{wmsk}, {nb}u); \
+            uint64_t _w{newv}[{nw}]; \
+            vw_band((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{keep}, {nb}u); \
+            vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); \
+            vw_copy({dst}, (const uint8_t*)_w{newv}, {nb}u); }}",
+        pkw = wpack(nb, win),
+        pkd = wpack(nb, dst_width),
+    )
+}
+
 /// Event-path wide FF write through a RUNTIME-indexed field narrower than a
 /// word (`ff72[idx] <= bit`).  Strides by `elem_width` bits rather than whole
 /// words, so the word index and shift are computed at run time.
@@ -3842,10 +3894,12 @@ fn emit_event_ff_assign_wide_dynsel_field(
     }
     let nb = native_bytes(a.dst_width);
     let nw = wide_words(nb);
-    // At the top index the field may reach past `dst_width` — `Value::assign`
-    // keeps those bits, so the prologue clears the width before the merge —
-    // but it must never reach past the register's storage.
-    if (ne - 1).checked_mul(ew)?.checked_add(win)? > nb * 8 {
+    // The limb form has no width mask, so a window that can reach past
+    // `dst_width` at the top index has to go to the general path below, which
+    // masks like `clip_window_to_width` does.  Gating on the storage size
+    // instead would let the overhang land in the padding, where the wide
+    // comparators walk the whole size class and would read it.
+    if (ne - 1).checked_mul(ew)?.checked_add(win)? > a.dst_width {
         return None;
     }
     let dst_raw = match a.dst {
@@ -3890,6 +3944,71 @@ fn emit_event_ff_assign_wide_dynsel_field(
     }
     body.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
     Some(format!("{{ {body} }}"))
+}
+
+/// Event-path wide FF write at a RUNTIME index that neither form below can
+/// express: an element stride that is not a whole number of words
+/// (`ff5888[idx*92 +: 92]`), a window wider than a word, or a window that runs
+/// past the vector at the top index (`ff1536[idx +: 32]` at `idx = 1535`).
+/// Uses the same runtime merge as the comb path, so the overhang is clipped
+/// identically; the whole element is logged because `eval_step` logs the
+/// merged `current`, not the field.
+fn emit_event_ff_assign_wide_dynsel_general(
+    a: &ProtoAssignStatement,
+    ds: &crate::ir::ProtoDynamicBitSelect,
+) -> Option<String> {
+    let (ew, ne, win) = (ds.elem_width, ds.num_elements, ds.window);
+    if ew == 0 || ne == 0 || win == 0 || a.dst_width == 0 {
+        return None;
+    }
+    let nb = native_bytes(a.dst_width);
+    let nw = wide_words(nb);
+    // A window wider than the storage has no in-range bits to define it.
+    if win > nb * 8 {
+        return None;
+    }
+    let dst_raw = match a.dst {
+        VarOffset::Ff(o) => o,
+        VarOffset::Comb(_) => return None,
+    };
+    let cur_off = a.dst_ff_current_offset;
+    if cur_off < 0 || dst_raw < 0 {
+        return None;
+    }
+    let packed = dst_raw == cur_off;
+    let idx = emit_expr(&ds.index_expr)?;
+    let mut pre = String::new();
+    let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
+    let d = next_wide_tmp();
+    let reg = format!("_w{d}");
+    let mut inner = emit_wide_ff_rmw_prologue(
+        &reg,
+        a.dst_width,
+        nb,
+        nw,
+        &format!("ff_values + {dst_raw:#x}"),
+    );
+    inner.push_str(&emit_wide_dynsel_merge(
+        &format!("(uint8_t*){reg}"),
+        &r.addr,
+        "_sh",
+        win,
+        a.dst_width,
+        nb,
+        nw,
+    ));
+    inner.push_str(&emit_wide_ff_rmw_tail(&reg, nb, packed, dst_raw, cur_off));
+    // `clip_window_to_width` drops the write outright once the window's LOW
+    // bit is past the width, so the guard covers the log push too: an
+    // out-of-range index must leave no entry, not re-log the old value.
+    Some(format!(
+        "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
+            uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
+            uint64_t _sh = _di * {ew}ull; \
+            if (_sh < {dw}ull) {{ {inner} }} }}",
+        max_idx = ne - 1,
+        dw = a.dst_width,
+    ))
 }
 
 /// Runtime whole-element write into a packed wide FF (`ff[idx] <= v` on an
@@ -6683,6 +6802,23 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
     let cap = max_stmt_bytes();
     if cap != 0 && out.len() > cap {
         if diag_enabled() {
+            // Name the shape: a statement over the ceiling is usually a big
+            // TREE, not a big leaf, and the two want different answers.
+            let kind = match stmt {
+                ProtoStatement::Assign(_) => "Assign",
+                ProtoStatement::AssignDynamic(_) => "AssignDynamic",
+                ProtoStatement::If(_) => "If",
+                ProtoStatement::Case(_) => "Case",
+                ProtoStatement::For(_) => "For",
+                ProtoStatement::SequentialBlock(_) => "SequentialBlock",
+                ProtoStatement::CompiledBlock(_) => "CompiledBlock",
+                _ => "other",
+            };
+            eprintln!(
+                "[aot_c]   shape: {kind} holding {} nested statements ({:.0} B each)",
+                proto_stmt_mass(stmt),
+                out.len() as f64 / proto_stmt_mass(stmt) as f64,
+            );
             eprintln!(
                 "[aot_c] one statement emits {} B, over the {} B ceiling; declining AOT-C",
                 out.len(),
@@ -6839,40 +6975,12 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     let mut pre = String::new();
                     // rhs value (masked to `win` below) as an nb-byte buffer.
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
-                    let wmsk = next_wide_tmp(); // mask_range = fill_ones(win) << _sh
-                    let keep = next_wide_tmp(); // widthmask & ~mask_range
-                    let widm = next_wide_tmp(); // fill_ones(dst_width)
-                    let srcsh = next_wide_tmp();
-                    let newv = next_wide_tmp();
-                    // Mirror AssignStatement::eval_step's dynamic_select +
-                    // Value::assign(beg=_sh+win-1, end=_sh) EXACTLY.  The width
-                    // mask drops the overhang a last-element window can have
-                    // past `dst_width`, as `clip_window_to_width` does.
+                    let merge =
+                        emit_wide_dynsel_merge(&dst, &r.addr, "_sh", win, a.dst_width, nb, nw);
                     return Some(format!(
                         "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
                             uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
-                            uint64_t _sh = _di * {ew}ull; \
-                            uint64_t _w{wmsk}[{nw}]; \
-                            vw_fill_ones((uint8_t*)_w{wmsk}, (const uint8_t*)0, {pkw}u); \
-                            vw_shl((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, _sh, {nb}u); \
-                            uint64_t _w{widm}[{nw}]; \
-                            vw_fill_ones((uint8_t*)_w{widm}, (const uint8_t*)0, {pkd}u); \
-                            vw_band((uint8_t*)_w{wmsk}, (const uint8_t*)_w{wmsk}, (const uint8_t*)_w{widm}, {nb}u); \
-                            uint64_t _w{keep}[{nw}]; \
-                            vw_band_not((uint8_t*)_w{keep}, (const uint8_t*)_w{widm}, (const uint8_t*)_w{wmsk}, {nb}u); \
-                            uint64_t _w{srcsh}[{nw}]; \
-                            vw_copy((uint8_t*)_w{srcsh}, {src}, {nb}u); \
-                            vw_apply_mask((uint8_t*)_w{srcsh}, (const uint8_t*)0, {pkw}u); \
-                            vw_shl((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, _sh, {nb}u); \
-                            vw_band((uint8_t*)_w{srcsh}, (const uint8_t*)_w{srcsh}, (const uint8_t*)_w{wmsk}, {nb}u); \
-                            uint64_t _w{newv}[{nw}]; \
-                            vw_band((uint8_t*)_w{newv}, {dst}, (const uint8_t*)_w{keep}, {nb}u); \
-                            vw_bor((uint8_t*)_w{newv}, (const uint8_t*)_w{newv}, (const uint8_t*)_w{srcsh}, {nb}u); \
-                            vw_copy({dst}, (const uint8_t*)_w{newv}, {nb}u); }}",
-                        pkw = wpack(nb, win),
-                        pkd = wpack(nb, a.dst_width),
-                        src = r.addr,
-                        dst = dst,
+                            uint64_t _sh = _di * {ew}ull; {merge} }}"
                     ));
                 }
             }
@@ -10364,9 +10472,10 @@ mod tests {
     }
 
     #[test]
-    fn emit_event_ff_wide_dynamic_field_keeps_the_bits_it_spills_past_the_width() {
-        // `ff72[idx +: 8]` at idx = 71 reaches past the declared 72, and those
-        // bits come from the VALUE — so the width clear must precede the merge.
+    fn emit_event_ff_wide_dynamic_field_clips_what_it_spills_past_the_width() {
+        // `ff72[idx +: 8]` at idx = 71 reaches past the declared 72.  The
+        // reference drops the overhang, so the emit must too: left in the
+        // padding it would be read back by the whole-size-class comparators.
         if !cc_available() {
             eprintln!("emit_event_ff_wide_dynamic_field_keeps_the_bits_it_spills: no cc");
             return;
@@ -10395,31 +10504,49 @@ mod tests {
         let hi = u64::from_le_bytes(entries[0].1[8..16].try_into().unwrap());
         assert_eq!(
             hi,
-            0xffu64 << (71 - 64),
-            "all eight bits land, including the three past bit 71"
+            1u64 << (71 - 64),
+            "only bit 71 is in range; the three above it are dropped"
         );
     }
 
     #[test]
-    fn emit_event_ff_wide_dynamic_field_outside_the_storage_declines() {
-        // Past the declared width is a merge; past the REGISTER is a buffer
-        // overrun, so that shape must bail to Cranelift.
+    fn emit_event_ff_wide_dynamic_index_past_the_width_writes_nothing() {
+        // An index whose window starts past the declared width: the reference
+        // (`clip_window_to_width`) drops the write entirely rather than
+        // clamping it, so nothing may reach the log — re-logging the old value
+        // would clobber a field an earlier statement wrote this event.
+        //
+        // The two-word scalar forms decline this shape because `_sh >> 6`
+        // indexes past the register; the whole-width merge cannot, because
+        // `vw_shl` zeroes once the shift passes the value.
+        if !cc_available() {
+            eprintln!("emit_event_ff_wide_dynamic_index_past_the_width: no cc");
+            return;
+        }
         let a = ProtoAssignStatement {
             dst: VarOffset::Ff(0),
             dst_width: 72,
             select: None,
             dynamic_select: Some(ProtoDynamicBitSelect {
-                index_expr: Box::new(const_expr(0, 8)),
+                index_expr: Box::new(const_expr(16, 8)), // 16 * 8 = 128 >= 72
                 elem_width: 8,
                 window: 8,
-                num_elements: 17, // 16 * 8 + 8 = 136 > 128 bits of storage
+                num_elements: 17,
             }),
             rhs_select: None,
-            expr: const_expr(1, 8),
+            expr: const_expr(0xff, 8),
             dst_ff_current_offset: 0,
             token: dummy_token(),
         };
-        assert!(emit_stmt(&ProtoStatement::Assign(a)).is_none());
+        let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
+        let mut ff = vec![0u8; 32];
+        let Some(entries) = run_wide_ff_event(&src, "wff_oor", &mut ff) else {
+            return;
+        };
+        assert!(
+            entries.is_empty(),
+            "an index past the width must push no write-log entry, got {entries:?}"
+        );
     }
 
     #[test]
