@@ -348,6 +348,13 @@ pub struct WriteLogDiag {
     pub total_entries: u64,
     pub max_entries_per_cycle: u32,
     pub cycles_with_entries: u64,
+    /// Distinct `(offset, bytes)` destinations across all entries, summed per
+    /// cycle.  Entries beyond the first to a destination are overwritten by the
+    /// commit's last-write-wins, so `total_entries / total_destinations` is the
+    /// redundancy the log carries.
+    pub total_destinations: u64,
+    /// Scratch for the per-cycle distinct count; kept to avoid reallocating.
+    dests: Vec<(u32, u8)>,
     next_print_cycle: u64,
 }
 
@@ -357,7 +364,9 @@ impl WriteLogDiag {
             return;
         }
         if self.total_cycles >= self.next_print_cycle {
-            self.next_print_cycle = self.next_print_cycle.saturating_mul(2).max(1_000_000);
+            // Doubling from 1 so a short workload reports at all: the old
+            // schedule started at 1,000,000 and never fired under it.
+            self.next_print_cycle = self.next_print_cycle.saturating_mul(2).max(1);
             self.dump();
         }
     }
@@ -368,13 +377,21 @@ impl WriteLogDiag {
         } else {
             0.0
         };
+        let redundancy = if self.total_destinations > 0 {
+            self.total_entries as f64 / self.total_destinations as f64
+        } else {
+            0.0
+        };
         eprintln!(
-            "[write_log_diag] cycles={} cycles_with_entries={} total_entries={} max_per_cycle={} avg_per_active_cycle={:.2}",
+            "[write_log_diag] cycles={} cycles_with_entries={} total_entries={} max_per_cycle={} \
+             avg_per_active_cycle={:.2} distinct_destinations={} redundancy={:.1}x",
             self.total_cycles,
             self.cycles_with_entries,
             self.total_entries,
             self.max_entries_per_cycle,
             avg,
+            self.total_destinations,
+            redundancy,
         );
     }
 }
@@ -403,7 +420,7 @@ impl Simulator {
             prev_derived_reset_asserted: vec![0u8; n_derived_resets],
             write_log_diag: WriteLogDiag {
                 enabled: env::var("VERYL_WRITE_LOG_DIAG").as_deref() == Ok("1"),
-                next_print_cycle: 1_000_000,
+                next_print_cycle: 1,
                 ..Default::default()
             },
             event_diag: (env::var("VERYL_EVENT_DIAG").as_deref() == Ok("1")).then(HashMap::default),
@@ -1727,6 +1744,28 @@ impl Simulator {
                 if n > self.write_log_diag.max_entries_per_cycle {
                     self.write_log_diag.max_entries_per_cycle = n;
                 }
+                // Distinct destinations this cycle: what the commit actually
+                // had to write, against the entries it walked to do it.
+                let buf = &self.ir.write_log_buffer;
+                let d = &mut self.write_log_diag.dests;
+                d.clear();
+                for e in buf
+                    .narrow_entries_slice()
+                    .iter()
+                    .take(buf.narrow_count as usize)
+                {
+                    d.push((e.offset, (e.width_class as u8).min(8)));
+                }
+                for e in buf
+                    .wide_entries_slice()
+                    .iter()
+                    .take(buf.wide_count as usize)
+                {
+                    d.push((e.offset, e.native_bytes));
+                }
+                d.sort_unstable();
+                d.dedup();
+                self.write_log_diag.total_destinations += d.len() as u64;
             }
             self.write_log_diag.maybe_print();
         }
