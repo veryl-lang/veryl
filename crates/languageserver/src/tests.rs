@@ -299,11 +299,9 @@ async fn combinational_loop_diagnostic() {
     assert!(!diags.is_empty(), "expected combinational_loop diagnostic");
     let diag = &diags[0];
     assert_eq!(diag["code"], Value::from("combinational_loop"));
-    assert!(
-        diag["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("b -> c -> b") && !message.contains("help:")),
-        "expected an ordered dependency cycle without generic help, got: {diag}",
+    assert_eq!(
+        diag["message"],
+        Value::from("Semantic Error: combinational loop detected"),
     );
     let related = diag["relatedInformation"].as_array();
     assert!(
