@@ -300,11 +300,10 @@ async fn combinational_loop_diagnostic() {
     let diag = &diags[0];
     assert_eq!(diag["code"], Value::from("combinational_loop"));
     assert!(
-        diag["message"].as_str().is_some_and(|message| {
-            message.contains("b -> c -> b")
-                && message.contains("help: this analysis is conservative")
-        }),
-        "expected an ordered dependency cycle and its help in the message, got: {diag}",
+        diag["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("b -> c -> b") && !message.contains("help:")),
+        "expected an ordered dependency cycle without generic help, got: {diag}",
     );
     let related = diag["relatedInformation"].as_array();
     assert!(

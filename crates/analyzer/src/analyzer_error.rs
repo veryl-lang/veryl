@@ -124,7 +124,6 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(combinational_loop),
-        help("this analysis is conservative; simplify logically redundant dependencies, or add a register to break a real cycle"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("potential combinational loop detected: {cycle}")]

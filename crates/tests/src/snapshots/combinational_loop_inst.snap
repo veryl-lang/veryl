@@ -19,4 +19,3 @@ combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_erro
     ·            ╰── also involved in combinational feedback
  17 │     );
     ╰────
-  help: this analysis is conservative; simplify logically redundant dependencies, or add a register to break a real cycle
