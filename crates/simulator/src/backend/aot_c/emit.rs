@@ -3554,8 +3554,8 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
 /// byte-range copy, so a byte-exact subrange needs no read-modify-write
 /// against uncommitted state.  A slice that covers neither (`ff4232[1287:1196]`
 /// — 92-bit fields never land on a word boundary) goes through the general
-/// read-modify-write in `emit_event_ff_assign_wide_select`.  dynamic_select /
-/// rhs_select wide FFs stay on Cranelift (the module bails).  2-state only.
+/// read-modify-write in `emit_event_ff_assign_wide_select`; a runtime index
+/// goes to the `_dynsel*` siblings.  rhs_select bails.  2-state only.
 fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -> Option<String> {
     // A sign-extended RHS is only expressible on the static-select path below;
     // the others would drop the extension, so they are not offered the chance.
@@ -3663,12 +3663,9 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -
 }
 
 /// Read a wide FF into a fresh register and clear everything at or above its
-/// width, ready for a field merge.  The clear must precede the merge: a field
-/// may legitimately reach past the width (`ff72[idx +: 8]` at `idx = 71`) and
-/// those bits are kept, while bits past the width outside it are dropped.
-///
-/// `addr` is the C address of the element to read; the dynamic-index paths
-/// pass one carrying a runtime stride term, so it is not a plain offset.
+/// Read a wide FF into a fresh register and clear everything at or above its
+/// width, ready for a field merge.  A field reaching past the width never
+/// reaches this form -- the callers gate on `dst_width`.
 fn emit_wide_ff_rmw_prologue(
     reg: &str,
     dst_width: usize,
@@ -3716,9 +3713,9 @@ fn emit_wide_ff_rmw_tail(
     out
 }
 
-/// Event-path wide FF write through a static bit-select that does NOT cover
-/// whole words (`ff420[34:0] <= v`), so the aligned byte-range copy below
-/// cannot express it.  Only a field the RHS delivers as a C scalar (≤64 bits).
+/// Event-path wide FF write through a static bit-select covering neither a
+/// single word nor whole words.  Logs the whole element, not the field,
+/// because `eval_step` logs the merged `current`.
 fn emit_event_ff_assign_wide_field(
     a: &ProtoAssignStatement,
     hi: usize,
@@ -3780,14 +3777,9 @@ fn emit_event_ff_assign_wide_field(
     Some(format!("{{ {body} }}"))
 }
 
-/// Event-path wide FF write through a static bit-select that is neither a
-/// single ≤64-bit word field (the scalar path above) nor whole words (the
-/// byte-range copy in `emit_event_ff_assign_wide`): `ff4232[1287:1196] <= v`,
-/// a 92-bit element of a flattened array, where no element past the first
-/// starts on a word boundary.  Merges the field into a register holding the
-/// current value with `emit_wide_select_rmw_store` — the same word-at-a-time
-/// RMW the comb path uses — and logs the whole element like the ≤64-bit
-/// sibling, because `eval_step` logs the merged `current`, not the field.
+/// Event-path wide FF write through a static bit-select covering neither a
+/// single word nor whole words.  Logs the whole element, not the field,
+/// because `eval_step` logs the merged `current`.
 fn emit_event_ff_assign_wide_select(
     a: &ProtoAssignStatement,
     hi: usize,
@@ -3864,20 +3856,9 @@ fn emit_event_ff_assign_wide_select(
     Some(format!("{{ {body} }}"))
 }
 
-/// Runtime-indexed bit-slice merge into a wide destination:
-/// `dst[idx*ew +: win] = src`, in place over `nb` bytes.
-///
-/// Mirrors `AssignStatement::eval_step`'s dynamic_select +
-/// `Value::assign(beg = _sh+win-1, end = _sh)` exactly.  Intersecting the range
-/// mask with the width mask is `clip_window_to_width`: a window that runs past
-/// `dst_width` at the top index writes only its in-range bits and the overhang
-/// is dropped — measured identical on the interpreter, Cranelift, Verilator and
-/// iverilog, so this is the reference behaviour, not a choice made here.
-///
-/// Whole-width `vw_*` ops, so unlike the two-word scalar forms it holds for any
-/// `ew` / `win` — including an element stride that is not a multiple of a word.
-/// `src` and `dst` are `uint8_t*` over `nb` bytes; `src`'s value sits in its
-/// low `win` bits.
+/// `dst[idx*ew +: win] = src` in place over `nb` bytes.  Mirrors `eval_step`'s
+/// `Value::assign(_sh+win-1, _sh)`; the width-mask intersection is
+/// `clip_window_to_width`, so a top-index overhang is dropped, not wrapped.
 fn emit_wide_dynsel_merge(
     dst: &str,
     src: &str,
@@ -3929,10 +3910,8 @@ fn emit_event_ff_assign_wide_dynsel_field(
     let nb = native_bytes(a.dst_width);
     let nw = wide_words(nb);
     // The limb form has no width mask, so a window that can reach past
-    // `dst_width` at the top index has to go to the general path below, which
-    // masks like `clip_window_to_width` does.  Gating on the storage size
-    // instead would let the overhang land in the padding, where the wide
-    // comparators walk the whole size class and would read it.
+    // `dst_width` goes to the general path below, which clips like
+    // `clip_window_to_width`.
     if (ne - 1).checked_mul(ew)?.checked_add(win)? > a.dst_width {
         return None;
     }
@@ -3980,13 +3959,9 @@ fn emit_event_ff_assign_wide_dynsel_field(
     Some(format!("{{ {body} }}"))
 }
 
-/// Event-path wide FF write at a RUNTIME index that neither form below can
-/// express: an element stride that is not a whole number of words
-/// (`ff5888[idx*92 +: 92]`), a window wider than a word, or a window that runs
-/// past the vector at the top index (`ff1536[idx +: 32]` at `idx = 1535`).
-/// Uses the same runtime merge as the comb path, so the overhang is clipped
-/// identically; the whole element is logged because `eval_step` logs the
-/// merged `current`, not the field.
+/// Event-path wide FF write at a RUNTIME index neither `_dynsel*` sibling can
+/// express: a stride that is not whole words, a window wider than a word, or
+/// one past the vector's top.  Logs the whole element.
 fn emit_event_ff_assign_wide_dynsel_general(
     a: &ProtoAssignStatement,
     ds: &crate::ir::ProtoDynamicBitSelect,
@@ -4611,7 +4586,9 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     let diag = std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1");
     set_event_mode(true);
     let body_res = (|| {
-        let mut cb = String::new();
+        // One unit per top-level statement, so `split_entry_function` can lay
+        // them over several part functions instead of one enormous body.
+        let mut units: Vec<String> = Vec::with_capacity(stmts.len());
         for (i, stmt) in stmts.iter().enumerate() {
             let s = match emit_stmt(stmt) {
                 Some(s) => s,
@@ -4679,11 +4656,9 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
                         for (k, n) in v.iter().take(40) {
                             eprintln!("  {n:6}x  {k}");
                         }
-                        // Where the uncovered statements sit, by MASS: a
-                        // per-top-level-statement bail can only recover the
-                        // statements under top-level statements that emit
-                        // whole, and an uncovered leaf three `If`s deep
-                        // forfeits its entire top-level tree.
+                        // Where the uncovered statements sit, by MASS: an
+                        // uncovered leaf several `If`s deep forfeits its whole
+                        // top-level tree, not just itself.
                         let (mut ok_top, mut ok_mass, mut bad_top, mut bad_mass) = (0, 0, 0, 0);
                         let mut worst = 0usize;
                         for s in stmts {
@@ -4706,9 +4681,7 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
                     return None;
                 }
             };
-            cb.push_str("    ");
-            cb.push_str(&s);
-            cb.push('\n');
+            units.push(format!("    {s}\n"));
         }
         if diag {
             eprintln!(
@@ -4716,10 +4689,10 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
                 stmts.len()
             );
         }
-        Some(cb)
+        Some(units)
     })();
     set_event_mode(false);
-    let body = body_res?;
+    let units = body_res?;
     // > u32::MAX pushes per eval can't be reserved in one call; bail to
     // Cranelift (which checks per push) rather than under-reserving.
     let narrow_pushes = u32::try_from(EVENT_NARROW_PUSHES.with(|c| c.get())).ok()?;
@@ -4737,14 +4710,16 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     );
     src.push_str(WIDEOPS_C_DECLS);
     src.push_str(WIDEOPS_C_INLINE);
-    src.push_str(
-        "\n\
-         __attribute__((visibility(\"default\")))\n\
-         void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
-    );
-    src.push_str(&emit_reserve_prologue(narrow_pushes, wide_pushes));
-    src.push_str(&body);
-    src.push_str("}\n");
+    src.push('\n');
+    // The bulk reserve is the ENTRY PREAMBLE, not body text: split or not it
+    // stays in `veryl_aot_eval` ahead of the parts, so it dominates every
+    // unchecked push.
+    src.push_str(&split_entry_function(
+        "",
+        &emit_reserve_prologue(narrow_pushes, wide_pushes),
+        &units,
+        false,
+    ));
     Some(src)
 }
 
@@ -10545,15 +10520,51 @@ mod tests {
     }
 
     #[test]
+    fn a_split_event_keeps_its_bulk_reserve_in_the_entry() {
+        // Splitting moves the unchecked pushes into `veryl_aot_eval_pN`; a
+        // reserve duplicated into a part, or stranded behind one, would let a
+        // push run past the pool.
+        let stmts: Vec<ProtoStatement> = (0..6000)
+            .map(|i| {
+                ProtoStatement::Assign(ProtoAssignStatement {
+                    dst: VarOffset::Ff(i * 8),
+                    dst_width: 64,
+                    select: None,
+                    dynamic_select: None,
+                    rhs_select: None,
+                    expr: const_expr(0x1234_5678_9abc_def0, 64),
+                    dst_ff_current_offset: i * 8,
+                    token: dummy_token(),
+                })
+            })
+            .collect();
+        let src = emit_event_function(&stmts).expect("must emit as a function");
+        assert!(
+            src.contains("void veryl_aot_eval_p0"),
+            "a body this large must split into part functions",
+        );
+        // The reserve's indirect call is unique in the source.
+        const RESERVE: &str = "void(*)(void*, unsigned int, unsigned int)";
+        assert_eq!(
+            src.matches(RESERVE).count(),
+            1,
+            "exactly one bulk reserve, or the pushes are not all covered by it",
+        );
+        let entry = src
+            .rfind("void veryl_aot_eval(")
+            .expect("entry function is emitted");
+        let reserve = src.find(RESERVE).expect("reserve is emitted");
+        assert!(
+            reserve > entry,
+            "the reserve sits before the entry, i.e. inside a part function",
+        );
+    }
+
+    #[test]
     fn emit_event_ff_wide_dynamic_index_past_the_width_writes_nothing() {
-        // An index whose window starts past the declared width: the reference
-        // (`clip_window_to_width`) drops the write entirely rather than
-        // clamping it, so nothing may reach the log — re-logging the old value
-        // would clobber a field an earlier statement wrote this event.
-        //
-        // The two-word scalar forms decline this shape because `_sh >> 6`
-        // indexes past the register; the whole-width merge cannot, because
-        // `vw_shl` zeroes once the shift passes the value.
+        // `clip_window_to_width` drops the write entirely rather than clamping,
+        // so nothing may reach the log -- re-logging would clobber an earlier
+        // field write.
         if !cc_available() {
             eprintln!("emit_event_ff_wide_dynamic_index_past_the_width: no cc");
             return;

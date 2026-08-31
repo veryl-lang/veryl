@@ -1522,11 +1522,8 @@ fn wide_256_aot_native_comb() {
 
 #[test]
 fn wide_ff_select_sign_extends_a_narrow_signed_rhs() {
-    // A signed 32-bit RHS stored into a 672-bit field of a 1184-bit FF: the
-    // value sign-extends to fill the field, so a negative value must leave the
-    // field's top word all ones.  A raw store would leave it zero.
-    // Expected values cross-checked against Verilator 5.050 and iverilog on
-    // the SV this module generates.
+    // A signed narrow RHS sign-extends to fill the field, so a negative value
+    // must leave the bits above it set.
     if !crate::backend::aot_c::cc_available() {
         return;
     }
@@ -1591,7 +1588,7 @@ fn dynsel_window_overrun_clips_to_the_vector() {
     // `x[i +: 32]` on a 1536-bit FF: at i = 1535 the window covers bits
     // 1535..1566, 31 of them past the vector.  The reference behaviour is to
     // write the in-range bits and DISCARD the rest — no wrap, no aliasing.
-    // The expected values below were taken from Verilator 5.050 and iverilog
+    // The expected values below were taken from iverilog
     // on the SV this module generates; the interpreter and Cranelift agree.
     let code = r#"
     module Top (
@@ -1724,9 +1721,8 @@ fn dynsel_spill_past_width_is_clipped_not_kept() {
 #[test]
 fn wide_ff_select_covered_by_aot_c_event_emitter() {
     // `emit_event_function` bails all-or-nothing, so ONE uncovered statement
-    // drops a whole clock event to Cranelift.  These two shapes are the ones
-    // that did that on a real SoC clock event; `event_uncovered_census` is
-    // empty exactly when the event-path emitter covers them.
+    // drops a whole clock event to Cranelift.  `event_uncovered_census` is
+    // empty exactly when the event-path emitter covers the shapes below.
     use crate::ir::{
         ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement,
         ProtoDynamicBitSelect, ProtoExpression, ProtoStatement, VarOffset,
