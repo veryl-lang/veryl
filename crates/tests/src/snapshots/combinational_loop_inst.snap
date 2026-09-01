@@ -12,6 +12,13 @@ combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_erro
     ·            ╰── involved in combinational feedback
  21 │     assign b = y;
     ╰────
+    ╭─[../../testcases/error/combinational_loop_inst.veryl:18:12]
+ 17 │         i: x,
+ 18 │         o: y,
+    ·            ┬
+    ·            ╰── also involved in combinational feedback
+ 19 │     );
+    ╰────
    ╭─[../../testcases/error/combinational_loop_inst.veryl:6:5]
  5 │     var middle: logic<8>;
  6 │     assign middle = i;
