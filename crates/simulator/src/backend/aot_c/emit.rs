@@ -3690,16 +3690,10 @@ fn emit_wide_ff_rmw_prologue(
     out
 }
 
-/// Shared tail for the wide-FF read-modify-write paths: mirror into the next
-/// slot when dual-slot, then log the merged register.
-///
-/// `span` is the byte range the write actually changed, `None` for the whole
-/// register.  Logging the whole register for a field write is what made one
-/// 2-bit assignment carry 536 bytes through the commit: the commit applies
-/// entries in order, last-write-wins per byte, so a span carrying its
-/// neighbours' current bits composes with the writes around it exactly as the
-/// full register did.  Entries for one FF all sit in the wide pool (routing is
-/// by `dst_width`), so their relative order is push order.
+/// Shared tail for the wide-FF read-modify-write paths.  `span` is the byte
+/// range the write changed, `None` for the whole register; a narrowed span
+/// still composes, since entries apply in push order, last-write-wins per
+/// byte, and one FF's entries all share the wide pool.
 fn emit_wide_ff_rmw_tail(
     reg: &str,
     nb: usize,
@@ -3755,6 +3749,27 @@ fn emit_event_ff_assign_wide_field(
     let (w0, sh) = (lo / 64, lo % 64);
     if w0 >= nw {
         return None;
+    }
+    // `hi >= dst_width` keeps the scratch: this path deliberately merges bits
+    // above the declared width, while `emit_wide_narrow_field_store` clips to
+    // `[lo, dst_width)`.  A PACKED FF keeps it for the reasons in
+    // `emit_event_ff_assign_wide_select`.
+    if !packed
+        && hi < a.dst_width
+        && let Some(store) = emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, |k| {
+            format!(
+                "(veryl_u64_ua*)(ff_values + {:#x})",
+                dst_raw + (k as isize) * 8
+            )
+        })
+    {
+        let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
+        let log = emit_wide_log_chunks(
+            &format!("((uint8_t*)(ff_values + {dst_raw:#x}) + {blo}u)"),
+            &format!("{:#x}", cur_off + blo as isize),
+            blen,
+        );
+        return Some(format!("{{ {store} {log} }}"));
     }
     let mut body = emit_wide_ff_rmw_prologue(
         &reg,
@@ -3851,6 +3866,30 @@ fn emit_event_ff_assign_wide_select(
         }
         None => r.addr.clone(),
     };
+    // Dual-slot: merge straight into the write slot.  Through a scratch this
+    // costs two whole-register copies to change one field, and neither is
+    // read -- `emit_wide_select_rmw_store` is word-at-a-time and applies
+    // `vw_apply_mask(dst_width)` itself, so the destination ends up normalised
+    // exactly as the prologue normalised the scratch.
+    //
+    // Merging in place would be unsound if the RHS could point AT the
+    // destination.  It cannot here, and the `!packed` gate is why:
+    // `emit_wide_operand`'s two live-storage arms both address the read node's
+    // VarOffset (an FF's CURRENT slot), while an unpacked element's write slot
+    // is `current + vs`.  Disjoint by construction.  So that gate does two
+    // jobs -- keeping the canonical slot untouched before `ff_commit`, and
+    // making the aliasing unreachable.  Widen it and both go at once.
+    if !packed {
+        let dst = format!("(uint8_t*)(ff_values + {dst_raw:#x})");
+        let mut body = emit_wide_select_rmw_store(&src, pre, &dst, nw, lo, nbits, a.dst_width);
+        let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
+        body.push_str(&emit_wide_log_chunks(
+            &format!("({dst} + {blo}u)"),
+            &format!("{:#x}", cur_off + blo as isize),
+            blen,
+        ));
+        return Some(format!("{{ {body} }}"));
+    }
     // Read first: the RMW writes only `reg`, so the RHS still sees the
     // pre-write state however it reaches this FF.
     let mut body = emit_wide_ff_rmw_prologue(
@@ -10401,7 +10440,7 @@ mod tests {
     #[test]
     fn emit_event_ff_wide_static_field_merges_into_the_logged_register() {
         // `ff200[34:0] <= v`: the field spans no whole word, so the emit must
-        // read, merge [34:0], and log the WHOLE merged width.
+        // read, merge [34:0], and log the field's byte span.
         if !cc_available() {
             eprintln!("emit_event_ff_wide_static_field_merges_into_the_logged_register: no cc");
             return;

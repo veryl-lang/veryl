@@ -1521,11 +1521,8 @@ fn wide_256_aot_native_comb() {
 }
 #[test]
 fn a_validate_run_counts_the_dispatches_it_compared() {
-    // A compared dispatch ran the artifact, so it belongs in the tally like
-    // any other.  The counters used to sit only on the non-validate branch,
-    // which left a validate run reporting nothing at all -- and `dispatch` is
-    // skipped when empty, so its absence read as "this module never held a
-    // whole-* handle": exactly the ambiguity the field exists to remove.
+    // The counters used to sit only on the non-validate branch, so a validate
+    // run reported nothing -- indistinguishable from "no whole-* handle".
     if !crate::backend::aot_c::cc_available() {
         return;
     }
@@ -1584,12 +1581,9 @@ fn a_validate_run_counts_the_dispatches_it_compared() {
 
 #[test]
 fn sub_byte_fields_of_one_byte_compose_in_program_order() {
-    // Several sub-byte fields of ONE byte of a wide FF, written in one fire.
-    // Each write logs a byte range that necessarily carries its neighbours'
-    // bits, so the commit's in-order last-write-wins per byte is what makes
-    // them compose.  Reorder the entries, or drop the read-back that makes a
-    // later write carry the earlier one, and this loses fields silently.
-    // Expected values are Verilator 5.050 and iverilog on the generated SV.
+    // Sub-byte fields of ONE byte: each entry necessarily carries its
+    // neighbours' bits, so only the commit's in-order last-write-wins makes
+    // them compose.
     let code = r#"
     module Top (
         i_clk: input  '_ clock,
@@ -1628,6 +1622,71 @@ fn sub_byte_fields_of_one_byte_compose_in_program_order() {
             ),
             (0x79, 0x0b),
             "sub-byte fields did not compose, config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_ff_shift_by_one_element_keeps_pre_write_values() {
+    // A shift-register of elements: each element takes the PREVIOUS contents
+    // of the one below in the same fire, so a narrowed entry must still carry
+    // what the earlier write deposited.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_a  : output logic<32>,
+        o_b  : output logic<32>,
+        o_c  : output logic<32>,
+    ) {
+        var w: logic<4232>;
+        always_ff {
+            if_reset {
+                w = 0;
+            } else {
+                w[91:0] = 92'h5a5a5a5a;
+                w[183:92] = w[91:0];
+                w[275:184] = w[183:92];
+            }
+        }
+        assign o_a = w[31:0];
+        assign o_b = w[123:92];
+        assign o_c = w[215:184];
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        // First fire: element 0 takes the constant; 1 and 2 take the PREVIOUS
+        // (zero) contents of the element below, not the value written this
+        // fire.  A merge that read post-write words would propagate the
+        // constant into all three.
+        sim.step(&clk);
+        assert_eq!(
+            (
+                sim.get("o_a").unwrap().payload_u128(),
+                sim.get("o_b").unwrap().payload_u128(),
+                sim.get("o_c").unwrap().payload_u128()
+            ),
+            (0x5a5a_5a5a, 0, 0),
+            "wide FF element shift lost pre-write values, config={config:?}"
+        );
+        // Second fire: the constant has moved up one element.
+        sim.step(&clk);
+        assert_eq!(
+            (
+                sim.get("o_a").unwrap().payload_u128(),
+                sim.get("o_b").unwrap().payload_u128(),
+                sim.get("o_c").unwrap().payload_u128()
+            ),
+            (0x5a5a_5a5a, 0x5a5a_5a5a, 0),
+            "wide FF element shift did not advance by one element, config={config:?}"
         );
     }
 }

@@ -19,11 +19,8 @@ use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
 
-/// The aligned 1/2/4/8-byte window covering the byte span `[blo, bhi]` of a
-/// static field, or None when no single window fits inside the element.  The
-/// commit writes exactly `width_class` bytes, so the window may not run past
-/// `nb`; bytes of the window outside the field carry the element's current
-/// value, which the RMW payload already holds.
+/// Aligned 1/2/4/8-byte window containing byte span `[blo, bhi]`, or None.
+/// It must not run past `nb`: the commit writes the whole window.
 fn log_window_for_span(blo: usize, bhi: usize, nb: usize) -> Option<(usize, usize)> {
     if bhi < blo || bhi >= nb {
         return None;

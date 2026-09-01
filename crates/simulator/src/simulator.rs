@@ -348,10 +348,8 @@ pub struct WriteLogDiag {
     pub total_entries: u64,
     pub max_entries_per_cycle: u32,
     pub cycles_with_entries: u64,
-    /// Distinct `(offset, bytes)` destinations across all entries, summed per
-    /// cycle.  Entries beyond the first to a destination are overwritten by the
-    /// commit's last-write-wins, so `total_entries / total_destinations` is the
-    /// redundancy the log carries.
+    /// Distinct `(offset, bytes)` destinations per cycle: all but the LAST
+    /// entry to one is overwritten, so entries/destinations is the redundancy.
     pub total_destinations: u64,
     /// Scratch for the per-cycle distinct count; kept to avoid reallocating.
     dests: Vec<(u32, u8)>,
@@ -2138,11 +2136,8 @@ impl Simulator {
         let wide_count_before = self.ir.write_log_buffer.wide_count as usize;
 
         // Whole-event backend, then capture its pushed entries + ff/comb.
-        // Counted like the non-validate path: a compared dispatch ran the
-        // artifact, so leaving it out here would make a validate run report
-        // no dispatches at all — indistinguishable from a module that never
-        // held a whole-event handle.  An off-stride cycle returned above and
-        // is neither, so it stays uncounted.
+        // A compared dispatch ran the artifact, so it counts; an off-stride
+        // cycle returned above and stays uncounted.
         if matches!(
             whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
             DispatchOutcome::NotReady,

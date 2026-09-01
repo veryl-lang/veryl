@@ -56,14 +56,9 @@ pub fn dispatch_counts() -> Vec<(String, u64, u64)> {
     out
 }
 
-/// Every `kind:module` that fell back AT LEAST ONCE, sorted.  Empty means the
-/// run used the engine it asked for throughout — that direction is exact.
-///
-/// The non-empty direction is NOT a measure: the flag behind it latches on the
-/// first fallback and never clears, so one `NotReady` while the async artifact
-/// was still loading marks the whole run, however brief.  It has twice been
-/// read as "this run was degraded" when it meant "at startup, once".  For how
-/// much of the run actually ran which engine, use [`dispatch_counts`].
+/// Every `kind:module` that fell back AT LEAST ONCE, sorted.  Empty is exact;
+/// non-empty is not a measure -- one startup `NotReady` marks the whole run,
+/// so use [`dispatch_counts`] for how much of it ran which engine.
 pub fn degraded_modules() -> Vec<String> {
     let Ok(seen) = seen().lock() else {
         return Vec::new();
@@ -77,10 +72,8 @@ pub fn degraded_modules() -> Vec<String> {
 mod tests {
     use super::*;
 
-    /// The counter must accumulate, not latch: two dispatches that fell back
-    /// once each are two, and a module that ran throughout still appears with
-    /// `fell_back == 0`.  That difference is the whole point of the field --
-    /// `degraded_modules` cannot express either.
+    /// Must accumulate rather than latch, and must keep a `fell_back == 0`
+    /// module -- neither of which `degraded_modules` can express.
     #[test]
     fn dispatch_counts_accumulate_and_keep_zero_fallbacks() {
         record_dispatch("whole_event", "disp_test_a", 100, 1);

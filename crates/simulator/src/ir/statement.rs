@@ -2665,8 +2665,8 @@ impl AssignStatement {
                 }
             }
             // select RMW log push.  `current` after assign holds the
-            // final merged value the direct store deposited.  Wide FFs
-            // split into per-word entries; see `emit_ff_log`.
+            // final merged value the direct store deposited.  A wide FF
+            // narrows to the select's byte span; see `emit_ff_log`.
             if let Some(offset) = self.ff_log_offset {
                 emit_ff_log(
                     &current,
@@ -3994,8 +3994,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
 /// `span` is the `(high, low)` BIT range when the write is a statically
 /// bounded slice of a wide FF: only those bytes changed, so the wide push is
 /// narrowed to them.  None (runtime index, or a genuine whole-element store)
-/// keeps the full split.  Matches the AOT-C and Cranelift emitters, which is
-/// what makes the three engines' entry counts comparable.
+/// keeps the full split.
 fn emit_ff_log(
     value: &Value,
     base_offset: u32,

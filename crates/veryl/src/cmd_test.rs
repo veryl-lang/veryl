@@ -34,12 +34,8 @@ struct TestSuiteReport {
     format_version: u32,
     /// The backend that was asked for; see `degraded_modules` for what ran.
     backend: String,
-    /// `kind:module` for every module that fell back AT LEAST ONCE, empty when
-    /// the run used `backend` throughout.  Empty is exact; non-empty is not a
-    /// measure -- the flag behind it latches on the first fallback and never
-    /// clears, so a single `NotReady` while the artifact was still loading
-    /// marks the whole run.  See `dispatch` for how much of the run ran which
-    /// engine, and compare timings on that.
+    /// `kind:module` for every module that fell back AT LEAST ONCE.  Empty is
+    /// exact; non-empty is not a measure -- compare timings on `dispatch`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     degraded_modules: Vec<String>,
     /// Per-module dispatch tallies for the whole-comb / whole-event handles:

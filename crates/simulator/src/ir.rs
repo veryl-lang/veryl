@@ -167,14 +167,9 @@ pub struct Ir {
     /// taken every cycle; the residency table (a mutex) must be touched once.
     whole_comb_fallback_recorded: AtomicBool,
     pub(crate) whole_event_fallback_recorded: AtomicBool,
-    /// `[ran, fell_back]` dispatch tallies for the whole-comb / whole-event
-    /// handles.  The `*_fallback_recorded` flags above latch on the FIRST
-    /// fallback and never clear, so they answer "did this ever happen" and
-    /// cannot answer "how much of the run was affected" — which is the
-    /// question that actually matters when a warm cache loses the race with
-    /// the async artifact load.  These count every dispatch instead, and are
-    /// published to `residency` when the Ir is dropped (relaxed atomics on a
-    /// local field: no allocation or locking on the dispatch path).
+    /// `[ran, fell_back]` dispatch tallies.  The `*_fallback_recorded` flags
+    /// above latch on the FIRST fallback and so cannot say how much of a run
+    /// was affected; these can.  Published to `residency` on drop.
     pub(crate) whole_comb_dispatch: [AtomicU64; 2],
     pub(crate) whole_event_dispatch: [AtomicU64; 2],
     /// Whether the whole-comb backend's run-once constant-cone entry has
@@ -194,17 +189,18 @@ pub struct ComponentLibrary {
 /// hot path stays a relaxed atomic increment on a local field.
 impl Drop for Ir {
     fn drop(&mut self) {
-        let name = self.name.to_string();
         for (kind, c) in [
             ("whole_comb", &self.whole_comb_dispatch),
             ("whole_event", &self.whole_event_dispatch),
         ] {
-            residency::record_dispatch(
-                kind,
-                &name,
-                c[0].load(Ordering::Relaxed),
-                c[1].load(Ordering::Relaxed),
-            );
+            let (ran, fell_back) = (c[0].load(Ordering::Relaxed), c[1].load(Ordering::Relaxed));
+            // Formatting the name reads a thread-local table, which panics on a
+            // thread that never imported it — and a panic here during unwinding
+            // aborts.  Most drops have nothing to publish, so ask first.
+            if ran == 0 && fell_back == 0 {
+                continue;
+            }
+            residency::record_dispatch(kind, &self.name.to_string(), ran, fell_back);
         }
     }
 }

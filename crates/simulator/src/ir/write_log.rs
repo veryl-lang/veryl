@@ -25,16 +25,9 @@ pub struct WriteLogEntry {
     pub payload: u64,
 }
 
-/// The byte range `(first, count)` of the static bit field `[hi:lo]` within an
-/// `nb`-byte element, or None when it does not lie inside one.
-///
-/// A slice write only changes the bytes it covers, so logging the whole
-/// element spends `nb` bytes of entry payload to deposit a couple of bits.
-/// All three engines narrow their FF log push with this, and they are checked
-/// against each other by comparing total entry counts on the same workload —
-/// so it lives here rather than being written out once per backend, where the
-/// copies could drift and that check would start comparing two different
-/// definitions.
+/// The byte range `(first, count)` a static bit field touches: a slice write
+/// only changes those bytes, so logging the whole element spends `nb` payload
+/// bytes to deposit a couple of bits.
 pub(crate) fn static_field_byte_span(hi: usize, lo: usize, nb: usize) -> Option<(usize, usize)> {
     if hi < lo {
         return None;
@@ -402,20 +395,9 @@ fn commit_from_log_impl<const WATCHED: bool>(
         }
     }
 
-    // Wide path.  A field write logs only the bytes it touches, so most wide
-    // entries carry far less than the 56 bytes the record can hold; a
-    // `copy_from_slice` on a runtime length is a `memcpy` CALL for each of
-    // them, where the narrow pool moves the same bytes with one store.  Take
-    // the narrow pool's store shape for the sizes that dominate and leave the
-    // call for the genuinely wide rest.  Pool, order and record are unchanged,
-    // so same-byte writes still compose last-write-wins in program order.
-    //
-    // Sizes that are not 1/2/4/8 are covered by a PAIR of overlapping accesses
-    // at 0 and nb-W: together they span exactly [0, nb) and never reach past
-    // it, so the doubly-written middle bytes take the same value twice and no
-    // byte of the neighbouring FF is touched.  Those sizes are a tenth of the
-    // entries but about half the payload bytes, so leaving them on the call
-    // would leave most of the copy cost behind.
+    // Wide path.  Most entries are field-sized now, where `copy_from_slice` on
+    // a runtime length is a `memcpy` call.  Pool, order and record are
+    // unchanged, so same-byte writes still compose last-write-wins.
     let wide_limit = buffer.wide_count as usize;
     for entry in buffer.wide_entries_slice().iter().take(wide_limit) {
         let nb = entry.native_bytes as usize;
@@ -471,10 +453,18 @@ fn commit_from_log_impl<const WATCHED: bool>(
                 5..=7 => store_pair!(u32, 4),
                 9..=16 => store_pair!(u64, 8),
                 _ => {
-                    if WATCHED && !hit && ff_values[offset..offset + nb] != entry.payload[..nb] {
+                    // Through `dst` like the arms above: a `&mut ff_values`
+                    // reborrow here would pop its tag, so the next iteration's
+                    // store through it is UB under Stacked Borrows.
+                    let p = dst.add(offset);
+                    let s = entry.payload.as_ptr();
+                    if WATCHED
+                        && !hit
+                        && std::slice::from_raw_parts(p, nb) != std::slice::from_raw_parts(s, nb)
+                    {
                         hit = watched(offset, nb);
                     }
-                    ff_values[offset..offset + nb].copy_from_slice(&entry.payload[..nb]);
+                    std::ptr::copy_nonoverlapping(s, p, nb);
                 }
             }
         }
@@ -716,11 +706,8 @@ mod tests {
         assert_eq!(&entries[0].payload[..32], &payload[..]);
     }
 
-    /// The wide commit takes a typed store for 1/2/4/8 and a `memcpy` for the
-    /// rest, so the sizes on the two sides must stay indistinguishable: each
-    /// must write its `native_bytes` and not one byte more.  A typed store
-    /// wider than `native_bytes` would pass a payload-only check and corrupt
-    /// the neighbouring FF, which is why both borders are asserted.
+    /// A typed store wider than `native_bytes` would pass a payload-only check
+    /// and corrupt the neighbouring FF, so both borders are asserted.
     #[test]
     fn wide_commit_writes_exactly_native_bytes_for_every_size() {
         for nb in 1..=WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES {
