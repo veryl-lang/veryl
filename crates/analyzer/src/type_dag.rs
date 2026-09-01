@@ -523,14 +523,14 @@ impl TypeDag {
         }
     }
 
-    fn toposort(&self) -> Vec<Symbol> {
-        let nodes = algo::toposort(self.dag.graph(), None).unwrap();
+    /// Files in dependency order.
+    fn toposort_file(&self) -> Vec<PathId> {
+        let nodes = algo::toposort(self.file_dag.graph(), None).unwrap();
         let mut ret = vec![];
         for node in nodes {
             let index = node.index() as u32;
-            if self.paths.contains_key(&index) {
-                let sym = self.get_symbol(index);
-                ret.push(sym);
+            if let Some(path) = self.file_nodes.get_by_right(&index) {
+                ret.push(*path);
             }
         }
         ret
@@ -689,8 +689,8 @@ pub fn apply() -> Vec<AnalyzerError> {
     TYPE_DAG.with(|f| f.borrow_mut().apply())
 }
 
-pub fn toposort() -> Vec<Symbol> {
-    TYPE_DAG.with(|f| f.borrow().toposort())
+pub fn toposort_file() -> Vec<PathId> {
+    TYPE_DAG.with(|f| f.borrow().toposort_file())
 }
 
 pub fn connected_components() -> Vec<Vec<Symbol>> {

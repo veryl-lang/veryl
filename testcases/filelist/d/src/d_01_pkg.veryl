@@ -1,0 +1,3 @@
+package d_01_pkg {
+    const D: u32 = 8;
+}
