@@ -23681,6 +23681,774 @@ fn a_handshake_nested_in_an_arm_is_split_inside_the_arm() {
 }
 
 #[test]
+fn a_handshake_closed_across_two_arms_is_split_per_arm() {
+    // The two halves of the apparent cycle live in DIFFERENT `case` arms, so a
+    // one-pass order exists -- but a per-write-set split keeps every arm in
+    // every group.
+    let code = r#"
+    module Top (
+        st   : input  logic<2>,
+        hold : input  logic   ,
+        keep : input  logic   ,
+        ready: input  logic   ,
+        valid: output logic   ,
+        en   : output logic   ,
+    ) {
+        var valid_pre: logic;
+        var en_i     : logic;
+
+        assign valid = valid_pre;
+        assign en    = en_i;
+
+        always_comb {
+            en_i      = 1'b0;
+            valid_pre = 1'b0;
+            case st {
+                2'd1: {
+                    en_i      = hold;
+                    valid_pre = en_i & keep;
+                }
+                2'd2: {
+                    en_i      = valid & ready;
+                    valid_pre = 1'b1;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a handshake closed across two arms settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        // (st, hold, keep, ready) -> (valid, en)
+        for (st, hold, keep, ready, valid, en) in [
+            (0u64, 1u64, 1u64, 1u64, 0u64, 1u64),
+            (1, 1, 1, 1, 1, 1),
+            (1, 0, 1, 1, 0, 0),
+            (1, 1, 0, 1, 0, 1),
+            (2, 0, 0, 1, 1, 1),
+            (2, 0, 0, 0, 1, 0),
+            (3, 0, 0, 0, 0, 1),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("hold", Value::new(hold, 1, false));
+            sim.set("keep", Value::new(keep, 1, false));
+            sim.set("ready", Value::new(ready, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("valid").unwrap(),
+                Value::new(valid, 1, false),
+                "valid: st={st} hold={hold} keep={keep} ready={ready} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("en").unwrap(),
+                Value::new(en, 1, false),
+                "en: st={st} hold={hold} keep={keep} ready={ready} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn an_arm_writing_the_selector_keeps_the_case_whole() {
+    // The first arm writes the SELECTOR: one `case` picks a branch once,
+    // separate pieces each pick again, so the split has to decline.
+    let code = r#"
+    module Top (
+        st   : input  logic<2>,
+        hold : input  logic   ,
+        ready: input  logic   ,
+        valid: output logic   ,
+        en   : output logic   ,
+        sel  : output logic<2>,
+    ) {
+        var valid_pre: logic   ;
+        var en_i     : logic   ;
+        var s        : logic<2>;
+
+        assign valid = valid_pre;
+        assign en    = en_i;
+        assign sel   = s;
+
+        always_comb {
+            s         = st;
+            en_i      = 1'b0;
+            valid_pre = 1'b0;
+            case s {
+                2'd0: {
+                    s = 2'd1;
+                }
+                2'd1: {
+                    en_i      = hold;
+                    valid_pre = en_i;
+                }
+                2'd2: {
+                    en_i      = valid & ready;
+                    valid_pre = 1'b1;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (st, hold, ready) -> (valid, en, sel)
+        for (st, hold, ready, valid, en, sel) in [
+            (0u64, 1u64, 1u64, 0u64, 0u64, 1u64),
+            (1, 1, 1, 1, 1, 1),
+            (1, 0, 1, 0, 0, 1),
+            (2, 0, 1, 1, 1, 2),
+            (2, 0, 0, 1, 0, 2),
+            (3, 0, 0, 0, 1, 3),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("hold", Value::new(hold, 1, false));
+            sim.set("ready", Value::new(ready, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (name, want, width) in [("valid", valid, 1), ("en", en, 1), ("sel", sel, 2)] {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(want, width, false),
+                    "{name}: st={st} hold={hold} ready={ready} JIT={} 4st={}",
+                    config.use_jit,
+                    config.use_4state,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_dynamic_element_write_keeps_the_scope_in_source_order() {
+    // A dynamic write names only its first and last element, so only source
+    // order keeps it after `arr[1]`/`arr[2]`; a phase free to reorder must
+    // leave the scope alone.
+    let code = r#"
+    module Top (
+        st   : input  logic<2>,
+        sel  : input  logic   ,
+        hold : input  logic   ,
+        ready: input  logic   ,
+        idx  : input  logic<2>,
+        a2   : input  logic<8>,
+        valid: output logic   ,
+        en   : output logic   ,
+        o    : output logic<8>,
+    ) {
+        var valid_pre: logic     ;
+        var en_i     : logic     ;
+        var arr      : logic<8>[4];
+
+        assign valid = valid_pre;
+        assign en    = en_i;
+        assign o     = arr[2];
+
+        always_comb {
+            en_i      = 1'b0;
+            valid_pre = 1'b0;
+            arr[0]    = 8'd10;
+            arr[1]    = 8'd11;
+            arr[2]    = a2;
+            arr[3]    = 8'd13;
+            case st {
+                2'd1: {
+                    en_i      = hold;
+                    valid_pre = en_i;
+                }
+                2'd2: {
+                    en_i      = valid & ready;
+                    valid_pre = 1'b1;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+            if sel {
+                arr[idx] = 8'd9;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (st, sel, hold, ready, idx, a2) -> o
+        for (st, sel, hold, ready, idx, a2, o) in [
+            (1u64, 1u64, 1u64, 1u64, 2u64, 0u64, 9u64),
+            (1, 1, 1, 1, 1, 7, 7),
+            (1, 0, 1, 1, 2, 3, 3),
+            (2, 1, 0, 1, 2, 5, 9),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("sel", Value::new(sel, 1, false));
+            sim.set("hold", Value::new(hold, 1, false));
+            sim.set("ready", Value::new(ready, 1, false));
+            sim.set("idx", Value::new(idx, 2, false));
+            sim.set("a2", Value::new(a2, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(o, 8, false),
+                "o: st={st} sel={sel} idx={idx} a2={a2} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_dynamic_element_write_holds_only_its_own_block_in_source_order() {
+    // Same handshake, plus a dynamic array write in a block of its OWN:
+    // keeping that block whole must not turn the split off for the block that
+    // needs it.
+    let code = r#"
+    module Top (
+        st   : input  logic<2>,
+        sel  : input  logic   ,
+        hold : input  logic   ,
+        keep : input  logic   ,
+        ready: input  logic   ,
+        idx  : input  logic<2>,
+        a2   : input  logic<8>,
+        valid: output logic   ,
+        en   : output logic   ,
+        o    : output logic<8>,
+    ) {
+        var valid_pre: logic     ;
+        var en_i     : logic     ;
+        var arr      : logic<8>[4];
+
+        assign valid = valid_pre;
+        assign en    = en_i;
+        assign o     = arr[2];
+
+        always_comb {
+            arr[0] = 8'd10;
+            arr[1] = 8'd11;
+            arr[2] = a2;
+            arr[3] = 8'd13;
+            if sel {
+                arr[idx] = 8'd9;
+            }
+        }
+
+        always_comb {
+            en_i      = 1'b0;
+            valid_pre = 1'b0;
+            case st {
+                2'd1: {
+                    en_i      = hold;
+                    valid_pre = en_i & keep;
+                }
+                2'd2: {
+                    en_i      = valid & ready;
+                    valid_pre = 1'b1;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "the block that needs the per-branch split still gets it (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        // (st, sel, hold, keep, ready, idx, a2) -> (valid, en, o)
+        for (st, sel, hold, keep, ready, idx, a2, valid, en, o) in [
+            (1u64, 1u64, 1u64, 1u64, 1u64, 2u64, 0u64, 1u64, 1u64, 9u64),
+            (1, 1, 1, 1, 1, 1, 7, 1, 1, 7),
+            (1, 0, 1, 1, 1, 2, 3, 1, 1, 3),
+            (2, 1, 0, 0, 1, 2, 5, 1, 1, 9),
+            (2, 1, 0, 0, 0, 2, 5, 1, 0, 9),
+            (0, 0, 1, 1, 1, 0, 4, 0, 1, 4),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("sel", Value::new(sel, 1, false));
+            sim.set("hold", Value::new(hold, 1, false));
+            sim.set("keep", Value::new(keep, 1, false));
+            sim.set("ready", Value::new(ready, 1, false));
+            sim.set("idx", Value::new(idx, 2, false));
+            sim.set("a2", Value::new(a2, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (name, want, width) in [("valid", valid, 1), ("en", en, 1), ("o", o, 8)] {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(want, width, false),
+                    "{name}: st={st} sel={sel} idx={idx} a2={a2} JIT={} 4st={}",
+                    config.use_jit,
+                    config.use_4state,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_read_and_a_write_in_different_arms_are_not_a_loop() {
+    // Nothing linearizes this scope, so the genuine-loop check answers for the
+    // first block: a statement-granularity ring that no evaluation walks.
+    let code = r#"
+    module Top (
+        s  : input  logic<2>,
+        st : input  logic<2>,
+        a  : input  logic   ,
+        c  : input  logic   ,
+        d  : input  logic   ,
+        y  : output logic   ,
+        en : output logic   ,
+        sel: output logic<2>,
+        eno: output logic   ,
+    ) {
+        var v: logic<2>;
+        var z: logic;
+
+        assign y  = v[1];
+        assign en = v[0];
+        assign z  = y & c;
+
+        always_comb {
+            case s {
+                2'd0: {
+                    v = 2'b11;
+                }
+                2'd1: {
+                    v = {1'b0, a};
+                }
+                2'd2: {
+                    v[0] = z;
+                    v[1] = 1'b1;
+                }
+                default: {
+                    v = 2'b00;
+                }
+            }
+        }
+
+        var t    : logic<2>;
+        var en_i : logic   ;
+        assign sel = t;
+        assign eno = en_i;
+
+        always_comb {
+            t     = st;
+            en_i  = 1'b0;
+            case t {
+                2'd0: {
+                    t = 2'd1;
+                }
+                2'd1: {
+                    en_i = d;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (s, st, a, c, d) -> (y, en, sel, eno)
+        for (s, st, a, c, d, y, en, sel, eno) in [
+            (0u64, 1u64, 1u64, 1u64, 1u64, 1u64, 1u64, 1u64, 1u64),
+            (1, 1, 1, 1, 1, 0, 1, 1, 1),
+            (1, 1, 0, 1, 0, 0, 0, 1, 0),
+            (2, 1, 0, 1, 1, 1, 1, 1, 1),
+            (2, 1, 0, 0, 1, 1, 0, 1, 1),
+            (3, 0, 0, 1, 1, 0, 0, 1, 0),
+            (3, 2, 0, 1, 1, 0, 0, 2, 1),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("s", Value::new(s, 2, false));
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("a", Value::new(a, 1, false));
+            sim.set("c", Value::new(c, 1, false));
+            sim.set("d", Value::new(d, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (name, want, width) in
+                [("y", y, 1), ("en", en, 1), ("sel", sel, 2), ("eno", eno, 1)]
+            {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(want, width, false),
+                    "{name}: s={s} st={st} a={a} c={c} d={d} JIT={} 4st={}",
+                    config.use_jit,
+                    config.use_4state,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn two_arms_reading_each_other_back_are_not_a_loop() {
+    // Splitting per branch is what lets `p` and `q` be seen separately -- and
+    // then the two arms appear to feed each other.  They are alternatives.
+    let code = r#"
+    module Top (
+        s : input  logic<2>,
+        st: input  logic<2>,
+        c : input  logic   ,
+        d : input  logic   ,
+        po: output logic   ,
+        qo: output logic   ,
+        eno: output logic  ,
+        sel: output logic<2>,
+    ) {
+        var p: logic;
+        var q: logic;
+
+        assign po = p;
+        assign qo = q;
+
+        // Keeps the scope off every earlier granularity, so the check below
+        // is the one that answers for it.
+        var v: logic<2>;
+        var z: logic;
+        assign z = v[1] & c;
+        always_comb {
+            case s {
+                2'd0: {
+                    v = 2'b11;
+                }
+                2'd1: {
+                    v = {1'b0, c};
+                }
+                2'd2: {
+                    v[0] = z;
+                    v[1] = 1'b1;
+                }
+                default: {
+                    v = 2'b00;
+                }
+            }
+        }
+
+        always_comb {
+            case s {
+                2'd0: {
+                    if c {
+                        p = 1'b1;
+                        q = 1'b1;
+                    } else {
+                        p = 1'b0;
+                        q = 1'b0;
+                    }
+                }
+                2'd1: {
+                    q = 1'b1;
+                    p = q;
+                }
+                2'd2: {
+                    p = c;
+                    q = p;
+                }
+                default: {
+                    p = 1'b0;
+                    q = 1'b1;
+                }
+            }
+        }
+
+        var t   : logic<2>;
+        var en_i: logic   ;
+        assign sel = t;
+        assign eno = en_i;
+
+        always_comb {
+            t    = st;
+            en_i = 1'b0;
+            case t {
+                2'd0: {
+                    t = 2'd1;
+                }
+                2'd1: {
+                    en_i = d;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // (s, st, c, d) -> (po, qo, sel, eno)
+        for (s, st, c, d, po, qo, sel, eno) in [
+            (0u64, 1u64, 1u64, 1u64, 1u64, 1u64, 1u64, 1u64),
+            (0, 1, 0, 0, 0, 0, 1, 0),
+            (1, 1, 0, 1, 1, 1, 1, 1),
+            (2, 1, 1, 1, 1, 1, 1, 1),
+            (2, 1, 0, 1, 0, 0, 1, 1),
+            (3, 0, 0, 1, 0, 1, 1, 0),
+            (3, 2, 0, 1, 0, 1, 2, 1),
+        ] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("s", Value::new(s, 2, false));
+            sim.set("st", Value::new(st, 2, false));
+            sim.set("c", Value::new(c, 1, false));
+            sim.set("d", Value::new(d, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (name, want, width) in [
+                ("po", po, 1),
+                ("qo", qo, 1),
+                ("sel", sel, 2),
+                ("eno", eno, 1),
+            ] {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(want, width, false),
+                    "{name}: s={s} st={st} c={c} d={d} JIT={} 4st={}",
+                    config.use_jit,
+                    config.use_4state,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn struct_members_across_a_boundary_are_not_one_loop() {
+    // One `VarOffset` is the WHOLE struct: a child driving one member while
+    // the parent drives another from it reaches itself at variable
+    // granularity though no bit does.
+    let code = r#"
+    package pkg {
+        struct cfg_t {
+            incr: logic,
+            strb: logic,
+        }
+
+        struct sts_t {
+            busy    : logic,
+            overflow: logic,
+        }
+    }
+
+    #[allow(unassign_variable)]
+    module Reg (
+        cfg: input  pkg::cfg_t,
+        sts: output pkg::sts_t,
+        req: input  logic     ,
+    ) {
+        assign sts.overflow = cfg.incr & req;
+    }
+
+    #[allow(unassign_variable)]
+    module Top (
+        req  : input  logic   ,
+        o    : output logic   ,
+        st   : input  logic<2>,
+        hold : input  logic   ,
+        ready: input  logic   ,
+        valid: output logic   ,
+        en   : output logic   ,
+        sel  : output logic<2>,
+    ) {
+        var cfg: pkg::cfg_t;
+        var sts: pkg::sts_t;
+
+        inst u: Reg (
+            cfg: cfg,
+            sts: sts,
+            req     ,
+        );
+
+        assign cfg.incr = !sts.busy;
+        assign o        = sts.overflow;
+
+        var valid_pre: logic   ;
+        var en_i     : logic   ;
+        var s        : logic<2>;
+
+        assign valid = valid_pre;
+        assign en    = en_i;
+        assign sel   = s;
+
+        always_comb {
+            s         = st;
+            en_i      = 1'b0;
+            valid_pre = 1'b0;
+            case s {
+                2'd0: {
+                    s = 2'd1;
+                }
+                2'd1: {
+                    en_i      = hold;
+                    valid_pre = en_i;
+                }
+                2'd2: {
+                    en_i      = valid & ready;
+                    valid_pre = 1'b1;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // Elaborating at all is the regression, so it is checked under every
+        // config; `busy` is undriven and so X in four-state, which leaves only
+        // two-state able to check the values.
+        analyze(code, &config);
+        if config.use_4state {
+            continue;
+        }
+        // The member-level dependence the fix must KEEP: `o` is `overflow`,
+        // which is `incr & req`, and `incr` is 1 because nothing drives `busy`.
+        for (req, o) in [(1u64, 1u64), (0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("req", Value::new(req, 1, false));
+            sim.set("st", Value::new(1, 2, false));
+            sim.set("hold", Value::new(1, 1, false));
+            sim.set("ready", Value::new(1, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(o, 1, false),
+                "o: req={req} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
+fn disjoint_halves_of_a_vector_are_not_one_loop() {
+    // The same shape without a struct or module boundary: struct members and
+    // vector bits share one `VarOffset` alike.
+    let code = r#"
+    #[allow(unassign_variable)]
+    module Top (
+        c    : input  logic<4>,
+        o    : output logic<4>,
+        st   : input  logic<2>,
+        hold : input  logic   ,
+        ready: input  logic   ,
+        valid: output logic   ,
+        en   : output logic   ,
+        sel  : output logic<2>,
+    ) {
+        var v: logic<8>;
+        var w: logic<8>;
+
+        assign v[3:0] = w[3:0] | c;
+        assign w[7:4] = v[7:4];
+        assign o      = v[3:0];
+
+        var valid_pre: logic   ;
+        var en_i     : logic   ;
+        var s        : logic<2>;
+
+        assign valid = valid_pre;
+        assign en    = en_i;
+        assign sel   = s;
+
+        always_comb {
+            s         = st;
+            en_i      = 1'b0;
+            valid_pre = 1'b0;
+            case s {
+                2'd0: {
+                    s = 2'd1;
+                }
+                2'd1: {
+                    en_i      = hold;
+                    valid_pre = en_i;
+                }
+                2'd2: {
+                    en_i      = valid & ready;
+                    valid_pre = 1'b1;
+                }
+                default: {
+                    en_i = 1'b1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        // As above: elaboration under every config, values where the undriven
+        // halves are 0 rather than X.
+        analyze(code, &config);
+        if config.use_4state {
+            continue;
+        }
+        for (c, o) in [(5u64, 5u64), (12, 12), (0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("c", Value::new(c, 4, false));
+            sim.set("st", Value::new(1, 2, false));
+            sim.set("hold", Value::new(1, 1, false));
+            sim.set("ready", Value::new(1, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(o, 4, false),
+                "o: c={c} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
+
+#[test]
 fn a_module_without_blocks_still_reaches_the_split() {
     // Per bit there is no loop: s[0] <- flat[0] <- a0 <- en, and a3 <- s[0]
     // only feeds flat[3].  The whole-vector copy `s = flat` is one node, so
@@ -24382,5 +25150,129 @@ fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
             config.use_jit,
             config.use_4state,
         );
+    }
+}
+
+#[test]
+fn a_bundle_pushed_through_an_inverter_pair_is_split_per_field() {
+    // Outputs bundled into one vector, pushed through a double inversion and
+    // unbundled on the far side: no bit closes a ring, but whole-statement
+    // granularity does.
+    let code = r#"
+    module Buf #(
+        param Width: u32 = 1,
+    ) (
+        in_i : input  logic<Width>,
+        out_o: output logic<Width>,
+    ) {
+        let inv: logic<Width> = ~in_i;
+        assign out_o = ~inv;
+    }
+
+    module Fsm (
+        st   : input  logic<2>,
+        req_i: input  logic   ,
+        en_o : output logic   ,
+        ack_o: output logic   ,
+    ) {
+        always_comb {
+            en_o  = 1'b0;
+            ack_o = 1'b0;
+            case st {
+                2'd1: {
+                    en_o = 1'b1;
+                    if req_i {
+                        ack_o = 1'b1;
+                    }
+                }
+                default: {
+                    en_o = 1'b0;
+                }
+            }
+        }
+    }
+
+    module Wrap (
+        st   : input  logic<2>,
+        req_i: input  logic   ,
+        en_o : output logic   ,
+        ack_o: output logic   ,
+    ) {
+        var en   : logic   ;
+        var ack  : logic   ;
+        var o    : logic<2>;
+        var o_buf: logic<2>;
+
+        inst c: Fsm (
+            st        ,
+            req_i     ,
+            en_o : en ,
+            ack_o: ack,
+        );
+
+        assign o = {en, ack};
+
+        inst b: Buf #(
+            Width: 2,
+        ) (
+            in_i : o    ,
+            out_o: o_buf,
+        );
+
+        assign {en_o, ack_o} = o_buf;
+    }
+
+    module Top (
+        st : input  logic<2>,
+        en : output logic   ,
+        ack: output logic   ,
+    ) {
+        var req  : logic;
+        var en_i : logic;
+        var ack_i: logic;
+
+        inst w: Wrap (
+            st          ,
+            req_i: req  ,
+            en_o : en_i ,
+            ack_o: ack_i,
+        );
+
+        assign req = en_i;
+        assign en  = en_i;
+        assign ack = ack_i;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a bundle through an inverter pair settles in one pass (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        for (st, en, ack) in [(0u64, 0u64, 0u64), (1, 1, 1), (2, 0, 0), (3, 0, 0)] {
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.set("st", Value::new(st, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("en").unwrap(),
+                Value::new(en, 1, false),
+                "en: st={st} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+            assert_eq!(
+                sim.get("ack").unwrap(),
+                Value::new(ack, 1, false),
+                "ack: st={st} JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
     }
 }

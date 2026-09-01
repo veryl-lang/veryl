@@ -4,7 +4,9 @@ use crate::ir::big_array::BigArrayFold;
 use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
-use crate::ir::declaration::stable_topo_sort_with_blocks;
+use crate::ir::declaration::{
+    branch_tag, stable_topo_sort_with_blocks, stable_topo_sort_with_pieces,
+};
 use crate::ir::derived_clock::{
     DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
 };
@@ -27,9 +29,9 @@ use crate::ir::variable::{
     create_variable_meta, ff_cacheline_pad_enabled, native_bytes, value_size, write_native_value,
 };
 use crate::ir::{
-    CompiledBatchStmt, Event, ProtoCaseArm, ProtoCaseStatement, ProtoDeclaration, ProtoExpression,
-    ProtoIfStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements, Statement, VarId,
-    VarPath,
+    CompiledBatchStmt, Event, Op, ProtoCaseArm, ProtoCaseStatement, ProtoDeclaration,
+    ProtoExpression, ProtoIfStatement, ProtoStatement, ProtoStatementBlock, ProtoStatements,
+    Statement, VarId, VarPath,
 };
 use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
@@ -1259,12 +1261,12 @@ fn run_comb_pipeline(
     let unified_sorted = reorder_by_level(unified_sorted);
     dump_stmt_order("post-level", module_name, &unified_sorted);
     let required_comb_passes =
-        passes_hint.unwrap_or_else(|| compute_required_passes(&unified_sorted));
+        passes_hint.unwrap_or_else(|| compute_required_passes("comb", &unified_sorted));
     if passes_hint.is_some() && std::env::var("VERYL_PASS_DIAG").is_ok() {
         log::info!(
             "pass_diag: exact hint {} passes (positional metric would give {})",
             required_comb_passes,
-            compute_required_passes(&unified_sorted)
+            compute_required_passes("comb", &unified_sorted)
         );
     }
 
@@ -1384,9 +1386,18 @@ fn run_comb_pipeline(
     // subtree into few contiguous segments so the settle can skip them by
     // one compare each.  The reorder is a legal schedule of the same
     // dependency graph, so pass counts and the relayout below stay valid.
+    // Whether the reorder below kept every dataflow edge pointing the same
+    // way, checked on the permutation itself: that is what decides whether an
+    // exact one-pass hint still describes the order that actually runs.
+    let mut cone_kept_edge_directions = false;
     let (unified_sorted, cone_plan) = match cone_inputs {
         Some(ci) => match cone_gate::plan(&unified_sorted, ci) {
             Some(plan) => {
+                let mut new_of = vec![0usize; plan.order.len()];
+                for (new, &old) in plan.order.iter().enumerate() {
+                    new_of[old as usize] = new;
+                }
+                cone_kept_edge_directions = preserves_edge_directions(&unified_sorted, &new_of);
                 let mut reordered = Vec::with_capacity(unified_sorted.len());
                 let mut src: Vec<Option<ProtoStatement>> =
                     unified_sorted.into_iter().map(Some).collect();
@@ -1399,17 +1410,27 @@ fn run_comb_pipeline(
         },
         None => (unified_sorted, None),
     };
-    // The clustered order is a different topological order; a settle
-    // back-edge may sit later in it, so the positional pass metric must be
-    // re-taken (never lowered: the hint may be exact for the OLD order only).
+    // An exact hint for the OLD order carries only if no edge changed
+    // direction; otherwise re-take the positional metric, never lower.
     let required_comb_passes = if cone_plan.is_some() {
-        let repositioned = compute_required_passes(&unified_sorted);
+        let repositioned = compute_required_passes("comb-after-cone-reorder", &unified_sorted);
         if cone_gate::diag() {
             eprintln!(
                 "[cone_gate] passes: pre-reorder {required_comb_passes} positional {repositioned}"
             );
         }
-        required_comb_passes.max(repositioned)
+        match passes_hint {
+            Some(hint) if cone_kept_edge_directions => {
+                if std::env::var("VERYL_PASS_DIAG").is_ok() {
+                    log::info!(
+                        "pass_diag: reorder preserved every dataflow edge direction; \
+                         keeping the exact hint of {hint} (positional would give {repositioned})"
+                    );
+                }
+                hint
+            }
+            _ => required_comb_passes.max(repositioned),
+        }
     } else {
         required_comb_passes
     };
@@ -1829,7 +1850,9 @@ pub(crate) fn analyze_dependency(
     let mut block_of: Vec<usize> = Vec::new();
     let mut new_id = 0usize;
     for key in sorted_keys {
-        let stmt = table.remove(&key).unwrap();
+        // The per-branch phase below re-splits from the unsplit blocks, so
+        // copy rather than take; only this already-failing path pays for it.
+        let stmt = table[&key].clone();
         let mut flat = Vec::new();
         flatten(stmt, &mut flat);
         for sub in flat {
@@ -1838,7 +1861,7 @@ pub(crate) fn analyze_dependency(
             new_id += 1;
         }
     }
-    table = new_table;
+    let unsplit = std::mem::replace(&mut table, new_table);
 
     // Sort the flattened (program-order) statements with the block-aware
     // `stable_topo_sort`, NOT the bipartite `try_topo_sort`: the bipartite
@@ -1879,7 +1902,8 @@ pub(crate) fn analyze_dependency(
             deep_block_of.push(block_of[key]);
         }
     }
-    split_copies_by_source_writes(&mut deep_stmts, &mut deep_block_of);
+    let mut deep_group_of = vec![0usize; deep_stmts.len()];
+    split_copies_by_source_writes(&mut deep_stmts, &mut deep_block_of, &mut deep_group_of);
     table = deep_stmts.into_iter().enumerate().collect();
     // Versions before scheduling: each write is its own statement now, so
     // a reader between two of them can be given the earlier version's
@@ -1889,7 +1913,8 @@ pub(crate) fn analyze_dependency(
         keys.sort();
         let mut flat: Vec<ProtoStatement> = keys.iter().map(|k| table.remove(k).unwrap()).collect();
         let mut blocks = deep_block_of;
-        let renamed = rename_versions(&mut flat, &mut blocks, alloc);
+        let mut groups = vec![0usize; flat.len()];
+        let renamed = rename_versions(&mut flat, &mut blocks, &mut groups, alloc);
         if renamed > 0 {
             pass_diag_phase(&format!("phase2-deep: {renamed} version(s) renamed"));
         }
@@ -1906,12 +1931,73 @@ pub(crate) fn analyze_dependency(
         pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
         return Ok((sorted, passes_hint));
     }
-    // Neither granularity linearized it, so no order here honours every edge.
+
+    // Phase 2-branch: a group's reads are the UNION over its branches, which
+    // pairs one arm's read with another arm's write.  Split from the UNSPLIT
+    // blocks so one branch's pieces stay adjacent.
+    {
+        let mut keys: Vec<usize> = unsplit.keys().cloned().collect();
+        keys.sort();
+        let mut branch_stmts: Vec<ProtoStatement> = Vec::new();
+        let mut branch_block_of: Vec<usize> = Vec::new();
+        let mut split_any = false;
+        // A dynamic write names only its first and last element, so this phase
+        // must emit the block that makes such a write whole; the hazard is one
+        // block's, not the scope's.
+        let mut branch_group_of: Vec<usize> = Vec::new();
+        let mut group_seq = 0usize;
+        if let Some(whole) = blocks_to_keep_in_source_order(&unsplit, &keys) {
+            for key in keys {
+                if whole.contains(&key) {
+                    branch_stmts.push(unsplit[&key].clone());
+                } else {
+                    let mut flat = Vec::new();
+                    flatten_blocks(unsplit[&key].clone(), &mut flat);
+                    for stmt in flat {
+                        let split = split_by_branch(stmt, &mut branch_stmts);
+                        split_any |= split;
+                        let group = if split {
+                            group_seq += 1;
+                            group_seq
+                        } else {
+                            0
+                        };
+                        branch_group_of.resize(branch_stmts.len(), group);
+                    }
+                }
+                branch_block_of.resize(branch_stmts.len(), key);
+                branch_group_of.resize(branch_stmts.len(), 0);
+            }
+        }
+        if split_any {
+            split_copies_by_source_writes(
+                &mut branch_stmts,
+                &mut branch_block_of,
+                &mut branch_group_of,
+            );
+            let renamed = rename_versions(
+                &mut branch_stmts,
+                &mut branch_block_of,
+                &mut branch_group_of,
+                alloc,
+            );
+            let (sorted, passes_hint, fell_back) =
+                stable_topo_sort_with_pieces(branch_stmts, &branch_block_of, &branch_group_of);
+            if !fell_back {
+                pass_diag_phase(&format!(
+                    "phase2-branch: per-branch split ({renamed} version(s) renamed)"
+                ));
+                return Ok((sorted, passes_hint));
+            }
+        }
+    }
+
+    // No granularity linearized it, so no order here honours every edge.
     // Phase 3 below still produces one, but it is not the one-pass order a
     // synthesisable design has: say so rather than let the extra settle
     // passes pass for normal.
     log::warn!(
-        "the statement order for this scope could not be linearized at either granularity; \
+        "the statement order for this scope could not be linearized at any granularity; \
          simulation stays correct but settles in more than one pass. \
          Re-run with VERYL_PASS_DIAG=1 to see the cycle."
     );
@@ -1934,11 +2020,25 @@ pub(crate) fn analyze_dependency(
         let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
         let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
         let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, &blocks);
-        // Verify no genuine combinational loop remains.
-        let n = sorted.len();
+        // Verify no genuine combinational loop remains.  One `VarOffset` is a
+        // whole struct and a conditional's reads are the union over its
+        // branches, so key by bits AND by per-branch piece; `sorted` still runs.
+        let mut pieces: Vec<ProtoStatement> = Vec::new();
+        let mut piece_stmt: Vec<usize> = Vec::new();
+        let mut piece_branch: Vec<usize> = Vec::new();
+        for (si, s) in sorted.iter().enumerate() {
+            let first = pieces.len();
+            split_tagged_by_branch(s, &mut pieces, &mut piece_branch);
+            piece_stmt.resize(pieces.len(), si);
+            debug_assert!(pieces.len() > first);
+        }
+        let n = pieces.len();
         let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
         let mut s_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-        for s in &sorted {
+        let mut read_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
+        let mut write_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
+        let mut bit_ranges = vec![];
+        for s in &pieces {
             let mut ins = vec![];
             let mut outs = vec![];
             s.gather_variable_offsets(&mut ins, &mut outs);
@@ -1949,26 +2049,67 @@ pub(crate) fn analyze_dependency(
             outs.retain(|o| !o.is_ff());
             s_inputs.push(ins);
             s_outputs.push(outs);
+            bit_ranges.clear();
+            s.gather_reads_with_ranges(&mut bit_ranges);
+            read_bits.push(union_bit_ranges(std::mem::take(&mut bit_ranges)));
+            gather_bit_aware_outputs(s, &mut bit_ranges);
+            write_bits.push(union_bit_ranges(std::mem::take(&mut bit_ranges)));
         }
-        let mut w: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+        // Ascending piece order, and pieces of one statement are contiguous:
+        // the rules below read both off the list.
+        let mut w: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
         for (i, outs) in s_outputs.iter().enumerate() {
             for &key in outs {
-                w.entry(key).or_default().push(i);
+                let wbr = write_bits[i].get(&key).copied().flatten();
+                w.entry(key).or_default().push((i, wbr));
             }
         }
         let mut a: Vec<HashSet<usize>> = vec![HashSet::default(); n];
         let mut deg: Vec<usize> = vec![0; n];
+        let mut bound: Vec<usize> = vec![];
         for (ri, ins) in s_inputs.iter().enumerate() {
+            let rs = piece_stmt[ri];
             for key in ins {
-                if let Some(wis) = w.get(key) {
-                    if wis.len() == 1 {
-                        let wi = wis[0];
-                        if wi != ri && a[wi].insert(ri) {
-                            deg[ri] += 1;
-                        }
-                    } else if let Some(&wi) = wis.iter().rev().find(|&&w| w < ri)
-                        && a[wi].insert(ri)
-                    {
+                let Some(wis) = w.get(key) else { continue };
+                let rbr = read_bits[ri].get(key).copied().flatten();
+                bound.clear();
+                // WHICH writer binds stays a statement's decision: pieces of
+                // one statement never overwrite each other.
+                let sole = piece_stmt[wis[0].0] == piece_stmt[wis[wis.len() - 1].0];
+                let overlapping = |from: Option<usize>, bound: &mut Vec<usize>| {
+                    bound.extend(
+                        wis.iter()
+                            .filter(|&&(p, wbr)| {
+                                from.is_none_or(|s| piece_stmt[p] == s) && ranges_overlap(wbr, rbr)
+                            })
+                            .map(|&(p, _)| p),
+                    )
+                };
+                if sole {
+                    // A sole writer binds the read even when it sits later:
+                    // that backward edge is what a loop looks like here.
+                    overlapping(None, &mut bound);
+                } else if let Some(ws) = wis
+                    .iter()
+                    .rev()
+                    .find(|&&(p, wbr)| piece_stmt[p] < rs && ranges_overlap(wbr, rbr))
+                    .map(|&(p, _)| piece_stmt[p])
+                {
+                    overlapping(Some(ws), &mut bound);
+                } else if wis.iter().any(|&(p, _)| piece_stmt[p] < rs) {
+                    // Something ran before the read but wrote other bits, so
+                    // the value comes from a LATER writer of the bits read.
+                    // Without binding those, a ring closed this way is missed.
+                    overlapping(None, &mut bound);
+                }
+                for &wi in &bound {
+                    // Two pieces of one statement that keep different branches
+                    // never both run, so no value passes from one to the other.
+                    let exclusive = piece_stmt[wi] == rs
+                        && piece_branch[wi] != piece_branch[ri]
+                        && piece_branch[wi] != 0
+                        && piece_branch[ri] != 0;
+                    if wi != ri && !exclusive && a[wi].insert(ri) {
                         deg[ri] += 1;
                     }
                 }
@@ -2009,9 +2150,12 @@ pub(crate) fn analyze_dependency(
             let mut cycle: Vec<usize> = tarjan_scc(&g)
                 .into_iter()
                 .filter(|c| c.len() >= 2)
-                .flat_map(|c| c.into_iter().map(|ni| g[ni]))
+                .flat_map(|c| c.into_iter().map(|ni| piece_stmt[g[ni]]))
                 .collect();
             cycle.sort();
+            // Several pieces of one statement can sit on the cycle; the
+            // diagnostic names source lines, so report each line once.
+            cycle.dedup();
             cycle
         };
         let mut tokens: Vec<_> = cycle_indices
@@ -2377,47 +2521,104 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
 ///
 /// Runs after the splits above, so a concatenation already counts per element;
 /// a source written with unknown bits is left alone, no cut being finer.
-fn split_copies_by_source_writes(stmts: &mut Vec<ProtoStatement>, blocks: &mut Vec<usize>) {
+fn split_copies_by_source_writes(
+    stmts: &mut Vec<ProtoStatement>,
+    blocks: &mut Vec<usize>,
+    groups: &mut Vec<usize>,
+) {
     /// Same trade as `MAX_ELEMENTS`, but no design has reached it: the cut
     /// count follows the source's write boundaries, which stay far below.
     const MAX_PARTS: usize = 64;
+    /// A buffer chain carries boundaries one link per round.  A split link names
+    /// its bits and never splits again, so this terminates; the bound only caps
+    /// long chains.
+    const MAX_ROUNDS: usize = 4;
 
-    let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
-    let mut outs = Vec::new();
-    for stmt in stmts.iter() {
-        outs.clear();
-        gather_bit_aware_outputs(stmt, &mut outs);
-        for (off, range) in outs.iter() {
-            let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
-            match range {
-                Some((hi, lo)) => {
-                    if let Some(cuts) = entry {
-                        cuts.push(*lo);
-                        cuts.push(hi + 1);
+    for _ in 0..MAX_ROUNDS {
+        let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
+        let mut outs = Vec::new();
+        for stmt in stmts.iter() {
+            outs.clear();
+            gather_bit_aware_outputs(stmt, &mut outs);
+            for (off, range) in outs.iter() {
+                let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
+                match range {
+                    Some((hi, lo)) => {
+                        if let Some(cuts) = entry {
+                            cuts.push(*lo);
+                            cuts.push(hi + 1);
+                        }
                     }
+                    None => *entry = None,
                 }
-                None => *entry = None,
             }
         }
-    }
 
-    let mut out_stmts: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
-    let mut out_blocks: Vec<usize> = Vec::with_capacity(blocks.len());
-    for (stmt, block) in std::mem::take(stmts)
-        .into_iter()
-        .zip(blocks.iter().copied())
-    {
-        let before = out_stmts.len();
-        split_one_copy(stmt, &bounds, MAX_PARTS, &mut out_stmts);
-        out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
+        let mut out_stmts: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+        let mut out_blocks: Vec<usize> = Vec::with_capacity(blocks.len());
+        let mut out_groups: Vec<usize> = Vec::with_capacity(groups.len());
+        for ((stmt, block), group) in std::mem::take(stmts)
+            .into_iter()
+            .zip(blocks.iter().copied())
+            .zip(groups.iter().copied())
+        {
+            let before = out_stmts.len();
+            split_one_copy(stmt, &bounds, MAX_PARTS, &mut out_stmts);
+            out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
+            // A part of a split piece is still that piece's branch.
+            out_groups.resize(out_stmts.len(), group);
+        }
+        let split_any = out_stmts.len() != blocks.len();
+        *stmts = out_stmts;
+        *blocks = out_blocks;
+        *groups = out_groups;
+        if !split_any {
+            break;
+        }
     }
-    *stmts = out_stmts;
-    *blocks = out_blocks;
 }
 
-/// One statement, split when it is a whole-variable copy whose source has
-/// known write boundaries.  The parts tile the destination, so the value is
-/// identical by construction.
+/// Every variable a bit-parallel expression reads.  A leaf must be the WHOLE
+/// variable, or its cuts land in a different coordinate space from the
+/// destination's.
+fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<VarOffset>) -> bool {
+    let width = expr.width();
+    match expr {
+        ProtoExpression::Variable {
+            var_offset,
+            select: None,
+            dynamic_select: None,
+            width: w,
+            var_full_width,
+            ..
+        } => {
+            let ok = w == var_full_width;
+            if ok {
+                out.push(*var_offset);
+            }
+            ok
+        }
+        ProtoExpression::Unary {
+            op: Op::BitNot, x, ..
+        } => x.width() == width && bit_parallel_sources(x, out),
+        ProtoExpression::Binary {
+            x,
+            op: Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor,
+            y,
+            ..
+        } => {
+            x.width() == width
+                && y.width() == width
+                && bit_parallel_sources(x, out)
+                && bit_parallel_sources(y, out)
+        }
+        _ => false,
+    }
+}
+
+/// One statement, split per source write when it copies a whole variable:
+/// the parts tile the destination and each names the matching window of every
+/// operand, so the value is identical.
 fn split_one_copy(
     stmt: ProtoStatement,
     bounds: &HashMap<VarOffset, Option<Vec<usize>>>,
@@ -2428,67 +2629,57 @@ fn split_one_copy(
         out.push(stmt);
         return;
     };
-    let ProtoExpression::Variable {
-        var_offset,
-        select: None,
-        dynamic_select: None,
-        width,
-        var_full_width,
-        expr_context,
-    } = &a.expr
-    else {
-        out.push(ProtoStatement::Assign(a));
-        return;
-    };
     if a.select.is_some()
         || a.dynamic_select.is_some()
         || a.rhs_select.is_some()
-        || *width != a.dst_width
-        || *var_full_width != a.dst_width
+        || a.expr.width() != a.dst_width
     {
         out.push(ProtoStatement::Assign(a));
         return;
     }
-    let Some(Some(cuts)) = bounds.get(var_offset) else {
-        out.push(ProtoStatement::Assign(a));
-        return;
-    };
-    let mut cuts: Vec<usize> = cuts
-        .iter()
-        .copied()
-        .chain([0, a.dst_width])
-        .filter(|b| *b <= a.dst_width)
-        .collect();
-    cuts.sort_unstable();
-    cuts.dedup();
-    if !(3..=max_parts + 1).contains(&cuts.len()) {
+    let mut sources: Vec<VarOffset> = Vec::new();
+    if !bit_parallel_sources(&a.expr, &mut sources) {
         out.push(ProtoStatement::Assign(a));
         return;
     }
-    let (var_offset, var_full_width, signed) = (*var_offset, *var_full_width, expr_context.signed);
+    // A source written with unknown bits contributes no cut, but it does not
+    // stop the others from cutting: each part still reads it whole, so the
+    // dependency it carries is unchanged.
+    let mut cuts: Vec<usize> = vec![0, a.dst_width];
+    let mut any_known = false;
+    for src in &sources {
+        if let Some(Some(known)) = bounds.get(src) {
+            any_known = true;
+            cuts.extend(known.iter().copied().filter(|b| *b <= a.dst_width));
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    if !any_known || !(3..=max_parts + 1).contains(&cuts.len()) {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    let mut parts: Vec<ProtoStatement> = Vec::with_capacity(cuts.len() - 1);
     for w in cuts.windows(2) {
         let (lo, hi) = (w[0], w[1] - 1);
-        out.push(ProtoStatement::Assign(ProtoAssignStatement {
+        let Some(expr) = a.expr.bit_parallel_window(hi, lo) else {
+            // `bit_parallel_sources` accepted it, so this cannot happen; keep
+            // the statement whole rather than emit a partial tiling.
+            out.push(ProtoStatement::Assign(a));
+            return;
+        };
+        parts.push(ProtoStatement::Assign(ProtoAssignStatement {
             dst: a.dst,
             dst_width: a.dst_width,
             select: Some((hi, lo)),
             dynamic_select: None,
             rhs_select: None,
-            expr: ProtoExpression::Variable {
-                var_offset,
-                select: Some((hi, lo)),
-                dynamic_select: None,
-                width: hi - lo + 1,
-                var_full_width,
-                expr_context: crate::ir::ExpressionContext {
-                    width: hi - lo + 1,
-                    signed,
-                },
-            },
+            expr,
             dst_ff_current_offset: a.dst_ff_current_offset,
             token: a.token,
         }));
     }
+    out.extend(parts);
 }
 
 /// Split one `if` into an `if` per independently-written variable set.
@@ -2619,6 +2810,386 @@ fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>,
                 default: Vec::new(),
             },
         )));
+    }
+}
+
+/// The elements a dynamic write covers but does not name: the dependency
+/// model reports the first and last only, so an access to anything else in
+/// `(lo, hi)` is invisible to every edge rule.
+struct UnmodelledSpan {
+    ff: bool,
+    lo: isize,
+    hi: isize,
+    first: isize,
+    last: isize,
+}
+
+impl UnmodelledSpan {
+    fn covers(&self, key: &VarOffset) -> bool {
+        let raw = key.raw();
+        key.is_ff() == self.ff
+            && self.lo < raw
+            && raw < self.hi
+            && raw != self.first
+            && raw != self.last
+    }
+}
+
+/// Every span in `stmt` a dynamic write covers over more elements than the two
+/// the dependency model names.
+fn unmodelled_spans(stmt: &ProtoStatement, out: &mut Vec<UnmodelledSpan>) {
+    match stmt {
+        ProtoStatement::AssignDynamic(x) if x.dst_num_elements > 2 => {
+            let first = x.dst_base.raw();
+            let last = first + x.dst_stride * (x.dst_num_elements as isize - 1);
+            // The last element reaches past the offset that names it, and a
+            // field inside it is an offset of its own; cover all of it.
+            let width = x.dst_stride.unsigned_abs().max(x.dst_width.div_ceil(8)) as isize;
+            out.push(UnmodelledSpan {
+                ff: x.dst_base.is_ff(),
+                lo: first.min(last),
+                hi: first.max(last) + width,
+                first,
+                last,
+            });
+        }
+        ProtoStatement::If(x) => {
+            for s in x.true_side.iter().chain(&x.false_side) {
+                unmodelled_spans(s, out);
+            }
+        }
+        ProtoStatement::Case(x) => {
+            for s in x
+                .arms
+                .iter()
+                .flat_map(|arm| arm.body.iter())
+                .chain(&x.default)
+            {
+                unmodelled_spans(s, out);
+            }
+        }
+        ProtoStatement::For(x) => {
+            for s in &x.body {
+                unmodelled_spans(s, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for s in body {
+                unmodelled_spans(s, out);
+            }
+        }
+        ProtoStatement::CompiledBlock(cb) => {
+            for s in &cb.original_stmts {
+                unmodelled_spans(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The blocks the per-branch phase must emit whole, or `None` when no set of
+/// blocks covers the hazard.  A write from another block has nothing to bind
+/// to -- hence `None`.
+fn blocks_to_keep_in_source_order(
+    unsplit: &HashMap<usize, ProtoStatement>,
+    keys: &[usize],
+) -> Option<HashSet<usize>> {
+    // Sorted by `lo` with the running maximum of `hi`, so an offset visits
+    // only the spans that can still reach it: one array with a dynamic write
+    // must not make every offset in the scope walk the whole list.
+    let mut spans: Vec<(usize, UnmodelledSpan)> = Vec::new();
+    for key in keys {
+        let mut found = Vec::new();
+        unmodelled_spans(&unsplit[key], &mut found);
+        spans.extend(found.into_iter().map(|span| (*key, span)));
+    }
+    if spans.is_empty() {
+        return Some(HashSet::default());
+    }
+    spans.sort_unstable_by_key(|(_, span)| span.lo);
+    let mut max_hi: Vec<isize> = Vec::with_capacity(spans.len());
+    let mut running = isize::MIN;
+    for (_, span) in &spans {
+        running = running.max(span.hi);
+        max_hi.push(running);
+    }
+    let covering = |key: &VarOffset, out: &mut Vec<usize>| {
+        out.clear();
+        let raw = key.raw();
+        let mut i = spans.partition_point(|(_, span)| span.lo < raw);
+        while i > 0 && max_hi[i - 1] > raw {
+            i -= 1;
+            if spans[i].1.covers(key) {
+                out.push(i);
+            }
+        }
+    };
+
+    let mut whole: HashSet<usize> = HashSet::default();
+    let mut covered_writes: HashSet<VarOffset> = HashSet::default();
+    let mut inputs = vec![];
+    let mut outputs = vec![];
+    let mut hits = vec![];
+    for key in keys {
+        inputs.clear();
+        outputs.clear();
+        unsplit[key].gather_variable_offsets(&mut inputs, &mut outputs);
+        for off in &outputs {
+            covering(off, &mut hits);
+            for &i in &hits {
+                if spans[i].0 != *key {
+                    pass_diag_unmodelled_decline(off, "written outside the covering block");
+                    return None;
+                }
+                whole.insert(spans[i].0);
+                covered_writes.insert(*off);
+            }
+        }
+    }
+    for key in keys {
+        inputs.clear();
+        outputs.clear();
+        unsplit[key].gather_variable_offsets(&mut inputs, &mut outputs);
+        for off in &inputs {
+            covering(off, &mut hits);
+            for &i in &hits {
+                if spans[i].0 != *key && !covered_writes.contains(off) {
+                    pass_diag_unmodelled_decline(off, "read with no writer to bind to");
+                    return None;
+                }
+                whole.insert(spans[i].0);
+            }
+        }
+    }
+    Some(whole)
+}
+
+fn pass_diag_unmodelled_decline(key: &VarOffset, why: &str) {
+    if std::env::var("VERYL_PASS_DIAG").is_ok() {
+        log::info!(
+            "pass_diag: per-branch split declined: {key:?} sits between the elements a dynamic write names, {why}"
+        );
+    }
+}
+
+/// Unwrap compiled and sequential blocks into their own statements, leaving
+/// the conditionals whole for [`split_by_branch`] to take apart per branch.
+fn flatten_blocks(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+    match stmt {
+        ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
+            for sub in cb.original_stmts {
+                flatten_blocks(sub, out);
+            }
+        }
+        ProtoStatement::SequentialBlock(body) => {
+            for sub in body {
+                flatten_blocks(sub, out);
+            }
+        }
+        other => out.push(other),
+    }
+}
+
+/// One node per branch (and per write set inside it).  Returns whether
+/// anything split.  Each piece re-evaluates the guards it sits under, so
+/// `guards_are_stable` must hold.
+fn split_by_branch(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) -> bool {
+    /// A piece keeps one guard per arm it sits behind, so the guards copied
+    /// grow with the arm count times the statement count.  Bounded for the
+    /// wide decoders where that product runs away; they schedule without this
+    /// split anyway.
+    const MAX_GUARD_COPIES: usize = 16384;
+
+    // Whether the guards read the same values at every piece: absence from the
+    // offset lists degrades to full width, so they are the coverage authority.
+    fn guards_are_stable(guards: &[&ProtoExpression], bodies: &[&[ProtoStatement]]) -> bool {
+        let mut guard_reads: HashSet<VarOffset> = HashSet::default();
+        let mut ins = vec![];
+        for guard in guards {
+            ins.clear();
+            guard.gather_variable_offsets(&mut ins);
+            guard_reads.extend(ins.iter().copied().filter(|o| !o.is_ff()));
+        }
+        if guard_reads.is_empty() {
+            return true;
+        }
+        let mut outs = vec![];
+        for body in bodies {
+            for stmt in *body {
+                ins.clear();
+                outs.clear();
+                stmt.gather_variable_offsets(&mut ins, &mut outs);
+                if outs.iter().any(|o| !o.is_ff() && guard_reads.contains(o)) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    // `stmts` grouped by write set and ordered by `group_emission_order`, or
+    // `None` when no order over the groups honours the branch's own reads and
+    // writes.
+    fn grouped(
+        guards: &[&ProtoExpression],
+        stmts: &[ProtoStatement],
+    ) -> Option<Vec<Vec<ProtoStatement>>> {
+        let (ids, count) = group_by_write_set(stmts.iter(), true);
+        let order = (count > 1).then(|| group_emission_order(guards, &[stmts], &ids, count))??;
+        let mut groups: Vec<Vec<ProtoStatement>> = vec![Vec::new(); count];
+        for (i, stmt) in stmts.iter().enumerate() {
+            groups[ids[i]].push(stmt.clone());
+        }
+        Some(
+            order
+                .into_iter()
+                .map(|g| std::mem::take(&mut groups[g]))
+                .collect(),
+        )
+    }
+
+    // One branch's statements as the pieces to emit for it: split further
+    // where that is sound, otherwise the branch whole.
+    fn branch_pieces(
+        guards: &[&ProtoExpression],
+        body: &[ProtoStatement],
+    ) -> Vec<Vec<ProtoStatement>> {
+        if body.is_empty() {
+            return Vec::new();
+        }
+        // Nested conditionals are pieces of their own before grouping, so a
+        // loop running through one is reached too.
+        let mut expanded: Vec<ProtoStatement> = Vec::new();
+        for stmt in body {
+            split_by_branch(stmt.clone(), &mut expanded);
+        }
+        grouped(guards, &expanded).unwrap_or_else(|| vec![expanded])
+    }
+
+    match stmt {
+        ProtoStatement::Case(x) => {
+            let guards: Vec<&ProtoExpression> = x.arms.iter().map(|a| &a.cond).collect();
+            let bodies: Vec<&[ProtoStatement]> = x
+                .arms
+                .iter()
+                .map(|a| a.body.as_slice())
+                .chain(std::iter::once(x.default.as_slice()))
+                .collect();
+            if !guards_are_stable(&guards, &bodies) {
+                drop((guards, bodies));
+                out.push(ProtoStatement::Case(x));
+                return false;
+            }
+            drop(bodies);
+            // Branch index `arms.len()` is the default.
+            let pieces: Vec<(usize, Vec<ProtoStatement>)> = x
+                .arms
+                .iter()
+                .map(|a| a.body.as_slice())
+                .chain(std::iter::once(x.default.as_slice()))
+                .enumerate()
+                .flat_map(|(b, body)| {
+                    branch_pieces(&guards, body)
+                        .into_iter()
+                        .map(move |piece| (b, piece))
+                })
+                .collect();
+            drop(guards);
+            let guard_copies: usize = pieces.iter().map(|(b, _)| (*b + 1).min(x.arms.len())).sum();
+            if pieces.len() < 2 || guard_copies > MAX_GUARD_COPIES {
+                if guard_copies > MAX_GUARD_COPIES && std::env::var("VERYL_PASS_DIAG").is_ok() {
+                    log::info!(
+                        "pass_diag: case of {} arms left unsplit ({guard_copies} guard copies, bound {MAX_GUARD_COPIES})",
+                        x.arms.len()
+                    );
+                }
+                out.push(ProtoStatement::Case(x));
+                return false;
+            }
+            for (b, body) in pieces {
+                let is_default = b == x.arms.len();
+                let kept = if is_default { x.arms.len() } else { b + 1 };
+                let mut arms: Vec<ProtoCaseArm> = x.arms[..kept]
+                    .iter()
+                    .map(|a| ProtoCaseArm {
+                        cond: a.cond.clone(),
+                        body: Vec::new(),
+                    })
+                    .collect();
+                let default = if is_default {
+                    body
+                } else {
+                    arms[b].body = body;
+                    Vec::new()
+                };
+                out.push(ProtoStatement::Case(ProtoCaseStatement { arms, default }));
+            }
+            true
+        }
+        ProtoStatement::If(x) if x.cond.is_some() => {
+            let guards: Vec<&ProtoExpression> = x.cond.iter().collect();
+            if !guards_are_stable(&guards, &[&x.true_side, &x.false_side]) {
+                drop(guards);
+                out.push(ProtoStatement::If(x));
+                return false;
+            }
+            let true_pieces = branch_pieces(&guards, &x.true_side);
+            let false_pieces = branch_pieces(&guards, &x.false_side);
+            drop(guards);
+            if true_pieces.len() + false_pieces.len() < 2 {
+                out.push(ProtoStatement::If(x));
+                return false;
+            }
+            for (true_side, false_side) in true_pieces
+                .into_iter()
+                .map(|piece| (piece, Vec::new()))
+                .chain(false_pieces.into_iter().map(|piece| (Vec::new(), piece)))
+            {
+                out.push(ProtoStatement::If(ProtoIfStatement {
+                    cond: x.cond.clone(),
+                    true_side,
+                    false_side,
+                }));
+            }
+            true
+        }
+        // Not a conditional: apply the deep split anyway, since this phase
+        // starts from the unsplit blocks.
+        other => {
+            split_nested(other, out, true);
+            false
+        }
+    }
+}
+
+/// [`split_by_branch`] pieces of `stmt`, tagged with the branch each keeps
+/// (`0` = not a branch).  Only tagged where the split really was per-branch.
+fn split_tagged_by_branch(
+    stmt: &ProtoStatement,
+    out: &mut Vec<ProtoStatement>,
+    tags: &mut Vec<usize>,
+) {
+    let first = out.len();
+    let conditional = match stmt {
+        ProtoStatement::Case(_) => true,
+        ProtoStatement::If(x) => x.cond.is_some(),
+        _ => false,
+    };
+    let split = split_by_branch(stmt.clone(), out);
+    for piece in &out[first..] {
+        tags.push(match piece {
+            _ if !split || !conditional => 0,
+            // Branch `arms.len()` is the default, as in `split_by_branch`.
+            ProtoStatement::Case(x) if !x.default.is_empty() => x.arms.len() + 1,
+            ProtoStatement::Case(x) => x
+                .arms
+                .iter()
+                .position(|arm| !arm.body.is_empty())
+                .map_or(0, |b| b + 1),
+            ProtoStatement::If(x) if !x.true_side.is_empty() => 1,
+            ProtoStatement::If(x) if !x.false_side.is_empty() => 2,
+            _ => 0,
+        });
     }
 }
 
@@ -3457,12 +4028,63 @@ fn trace_scc_cycles(sorted: &[ProtoStatement], meta: &ModuleVariableMeta) {
     }
 }
 
+/// Does `new_of` keep every overlapping (reader, writer) pair pointing the
+/// same way?  Stronger than `compute_required_passes`' metric -- it skips that
+/// metric's `covered` shortcut -- so passing it carries an exact hint.
+fn preserves_edge_directions(sorted: &[ProtoStatement], new_of: &[usize]) -> bool {
+    let mut writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
+    for (pos, stmt) in sorted.iter().enumerate() {
+        let mut outs = vec![];
+        gather_bit_aware_outputs(stmt, &mut outs);
+        for (key, br) in outs {
+            writer_ranges.entry(key).or_default().push((pos, br));
+        }
+    }
+    let mut ins = vec![];
+    let mut outs = vec![];
+    let mut reads = vec![];
+    let mut output_set: HashSet<VarOffset> = HashSet::default();
+    for (pos, stmt) in sorted.iter().enumerate() {
+        ins.clear();
+        outs.clear();
+        stmt.gather_variable_offsets(&mut ins, &mut outs);
+        output_set.clear();
+        output_set.extend(outs.iter().cloned());
+        reads.clear();
+        stmt.gather_reads_with_ranges(&mut reads);
+        for (key, rr) in &reads {
+            if output_set.contains(key) {
+                continue;
+            }
+            let Some(wranges) = writer_ranges.get(key) else {
+                continue;
+            };
+            for (writer_pos, wr) in wranges {
+                if *writer_pos == pos || !ranges_overlap(*wr, *rr) {
+                    continue;
+                }
+                if (*writer_pos < pos) != (new_of[*writer_pos] < new_of[pos]) {
+                    if std::env::var("VERYL_PASS_DIAG").is_ok() {
+                        log::info!(
+                            "pass_diag: reorder moved a dataflow edge: writer #{writer_pos} -> #{} , reader #{pos} -> #{} on {key:?}",
+                            new_of[*writer_pos],
+                            new_of[pos]
+                        );
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 /// Number of eval_comb passes needed for the comb list to converge.
 ///
 /// A backward dataflow edge (a statement reads a value written later in
 /// the sorted order) costs one extra pass; the result is the longest
 /// backward-edge chain + 1 over the statement dependency graph.
-fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
+fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
     use daggy::petgraph::Graph;
     use daggy::petgraph::algo::tarjan_scc;
 
@@ -3599,7 +4221,7 @@ fn compute_required_passes(sorted: &[ProtoStatement]) -> usize {
     let passes = if max_delay == 0 { 1 } else { max_delay + 2 };
     if passes > 1 {
         log::info!(
-            "compute_required_passes: {} passes needed ({} stmts, {} backward edge chain depth)",
+            "compute_required_passes ({scope}): {} passes needed ({} stmts, {} backward edge chain depth)",
             passes,
             n,
             max_delay
@@ -3698,16 +4320,25 @@ fn dump_backward_edge_chain(
     // Aggregate: classify every backward edge.
     let mut total = 0usize;
     let mut with_prior = 0usize;
+    // The read-before-producer ones by name: those are the class a schedule is
+    // supposed to have none of, and a count alone does not say where they are.
+    let mut without_prior: Vec<String> = Vec::new();
     for (pos, reads) in stmt_reads.iter().enumerate() {
         let output_set: HashSet<VarOffset> = stmt_outputs[pos].iter().cloned().collect();
         for (key, rr) in reads {
             if output_set.contains(key) || covered_by_prior_full(key, pos) {
                 continue;
             }
-            if later_writer(key, *rr, pos).is_some() {
+            if let Some(w) = later_writer(key, *rr, pos) {
                 total += 1;
                 if writer_ranges[key].iter().any(|(w, _)| *w < pos) {
                     with_prior += 1;
+                } else if without_prior.len() < 4 {
+                    without_prior.push(format!(
+                        "{} reads {key:?}{rr:?} <- {}",
+                        describe_stmt(pos),
+                        describe_stmt(w)
+                    ));
                 }
             }
         }
@@ -3718,6 +4349,9 @@ fn dump_backward_edge_chain(
         with_prior,
         total - with_prior
     );
+    for e in &without_prior {
+        log::info!("pass_diag:   read before its producer: {e}");
+    }
 
     // Walk one max-delay chain over the metric's own edges: pick an
     // in-edge whose writer accounts for the current delay (a backward hop
@@ -5284,7 +5918,7 @@ impl Conv<&air::Module> for ProtoModule {
                 // only single-pass when that order linearized; where it did not,
                 // one pass reads a producer that runs later and the gated clock
                 // is computed from the previous step's value.
-                let passes = compute_required_passes(&eval_protos);
+                let passes = compute_required_passes("derived-clock-closure", &eval_protos);
                 let eval = try_jit(context, eval_protos);
                 (sched, eval, passes)
             };
@@ -5694,6 +6328,7 @@ pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<
 fn rename_versions(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
+    groups: &mut Vec<usize>,
     alloc: &mut dyn FnMut(usize) -> isize,
 ) -> usize {
     // Offsets any dynamic access touches: a temp sized for one variable cannot
@@ -5736,6 +6371,7 @@ fn rename_versions(
         width: usize,
     }
     let mut plans: Vec<Plan> = Vec::new();
+    let mut declined = 0usize;
     for (off, ws) in &writes {
         if ws.len() < 2 || dynamic.contains(off) {
             continue;
@@ -5763,6 +6399,24 @@ fn rename_versions(
             continue;
         };
         if mids.iter().any(|&r| blocks[r] != blocks[after]) {
+            continue;
+        }
+        // The WAR edge this copy breaks is false when every write and
+        // mid-reader is a piece of one conditional with differing tags.
+        let group = groups[ws[0]];
+        if group != 0
+            && ws.iter().all(|&w| groups[w] == group)
+            && mids.iter().all(|&r| groups[r] == group)
+            && mids.iter().all(|&r| {
+                let tr = branch_tag(&stmts[r]);
+                tr != 0
+                    && ws.iter().filter(|&&w| w > r).all(|&w| {
+                        let tw = branch_tag(&stmts[w]);
+                        tw != 0 && tw != tr
+                    })
+            })
+        {
+            declined += 1;
             continue;
         }
         let to = VarOffset::Comb(alloc(width));
@@ -5814,17 +6468,28 @@ fn rename_versions(
 
     let old_stmts = std::mem::take(stmts);
     let old_blocks = std::mem::take(blocks);
+    let old_groups = std::mem::take(groups);
     for (i, s) in old_stmts.into_iter().enumerate() {
         stmts.push(s);
         blocks.push(old_blocks[i]);
+        groups.push(old_groups[i]);
         if let Some(copies) = insert_at.remove(&i) {
             for c in copies {
                 stmts.push(c);
                 blocks.push(old_blocks[i]);
+                // A copy runs unconditionally, so it is nobody's branch.
+                groups.push(0);
             }
         }
     }
     debug_assert_eq!(stmts.len(), blocks.len());
+    debug_assert_eq!(stmts.len(), groups.len());
+    if declined > 0 && std::env::var("VERYL_PASS_DIAG").is_ok() {
+        log::info!(
+            "pass_diag: {declined} version copy/copies declined: their writes are alternatives \
+             of one conditional, and the WAR edge they would break is false anyway"
+        );
+    }
     let _ = n;
     plans.len()
 }

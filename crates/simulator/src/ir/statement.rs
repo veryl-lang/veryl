@@ -1590,14 +1590,14 @@ impl ProtoStatement {
     pub fn gather_reads_with_ranges(&self, out: &mut Vec<(VarOffset, Option<(usize, usize)>)>) {
         match self {
             ProtoStatement::Assign(x) => {
-                x.expr.gather_reads_with_ranges(out);
+                gather_assign_rhs_reads(&x.expr, x.rhs_select, out);
                 if let Some(dyn_sel) = &x.dynamic_select {
                     dyn_sel.index_expr.gather_reads_with_ranges(out);
                 }
             }
             ProtoStatement::AssignDynamic(x) => {
                 x.dst_index_expr.gather_reads_with_ranges(out);
-                x.expr.gather_reads_with_ranges(out);
+                gather_assign_rhs_reads(&x.expr, x.rhs_select, out);
                 if let Some(dyn_sel) = &x.dynamic_select {
                     dyn_sel.index_expr.gather_reads_with_ranges(out);
                 }
@@ -4090,6 +4090,22 @@ pub(crate) fn size_literal_rhs(
     *value = value.expand(target, sign_extend).into_owned();
     *width = target;
     expr_context.width = target;
+}
+
+/// The reads of an assignment's right-hand side, narrowed to the destination
+/// window: a concat destructure keeps the WHOLE source and slices it with
+/// `rhs_select`, so the unnarrowed read would span every field.
+pub(crate) fn gather_assign_rhs_reads(
+    expr: &ProtoExpression,
+    rhs_select: Option<(usize, usize)>,
+    out: &mut Vec<(VarOffset, Option<(usize, usize)>)>,
+) {
+    if let Some((hi, lo)) = rhs_select
+        && expr.gather_reads_in_window(hi, lo, out)
+    {
+        return;
+    }
+    expr.gather_reads_with_ranges(out);
 }
 
 /// MSB-first concat-destructure window: take `elem_width` bits off the

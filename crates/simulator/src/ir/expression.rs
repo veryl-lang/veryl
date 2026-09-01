@@ -450,6 +450,132 @@ impl ProtoExpression {
         }
     }
 
+    /// Bits `[hi:lo]` of a bit-parallel expression, or `None`.  Every level must
+    /// be exactly its parent's width: a widened or sign-extended operand is not
+    /// bit-parallel above its own width.
+    pub(crate) fn bit_parallel_window(&self, hi: usize, lo: usize) -> Option<ProtoExpression> {
+        let width = self.width();
+        if width == 0 || lo > hi || hi >= width {
+            return None;
+        }
+        let out_width = hi - lo + 1;
+        let ctx = |signed: bool| ExpressionContext {
+            width: out_width,
+            signed,
+        };
+        match self {
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select: None,
+                width: w,
+                var_full_width,
+                expr_context,
+            } => {
+                // Where bit 0 of the value sits in the variable.
+                let base = match select {
+                    None if *w == *var_full_width => 0,
+                    Some((shi, slo)) if shi >= slo && *w == shi - slo + 1 => *slo,
+                    _ => return None,
+                };
+                Some(ProtoExpression::Variable {
+                    var_offset: *var_offset,
+                    select: Some((base + hi, base + lo)),
+                    dynamic_select: None,
+                    width: out_width,
+                    var_full_width: *var_full_width,
+                    expr_context: ctx(expr_context.signed),
+                })
+            }
+            ProtoExpression::Unary {
+                op: op @ Op::BitNot,
+                x,
+                expr_context,
+                ..
+            } if x.width() == width => Some(ProtoExpression::Unary {
+                op: *op,
+                x: Box::new(x.bit_parallel_window(hi, lo)?),
+                width: out_width,
+                expr_context: ctx(expr_context.signed),
+            }),
+            ProtoExpression::Binary {
+                x,
+                op: op @ (Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor),
+                y,
+                expr_context,
+                ..
+            } if x.width() == width && y.width() == width => Some(ProtoExpression::Binary {
+                x: Box::new(x.bit_parallel_window(hi, lo)?),
+                op: *op,
+                y: Box::new(y.bit_parallel_window(hi, lo)?),
+                width: out_width,
+                expr_context: ctx(expr_context.signed),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Reads of bits `[hi:lo]`, when bit-parallel.  `false` -- with `out`
+    /// untouched -- means fall back to the whole-expression gather.
+    pub(crate) fn gather_reads_in_window(
+        &self,
+        hi: usize,
+        lo: usize,
+        out: &mut Vec<(VarOffset, Option<(usize, usize)>)>,
+    ) -> bool {
+        let mark = out.len();
+        if self.gather_reads_in_window_inner(hi, lo, out) {
+            true
+        } else {
+            out.truncate(mark);
+            false
+        }
+    }
+
+    fn gather_reads_in_window_inner(
+        &self,
+        hi: usize,
+        lo: usize,
+        out: &mut Vec<(VarOffset, Option<(usize, usize)>)>,
+    ) -> bool {
+        let width = self.width();
+        if width == 0 || lo > hi || hi >= width {
+            return false;
+        }
+        match self {
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select: None,
+                width: w,
+                var_full_width,
+                ..
+            } => {
+                let base = match select {
+                    None if *w == *var_full_width => 0,
+                    Some((shi, slo)) if shi >= slo && *w == shi - slo + 1 => *slo,
+                    _ => return false,
+                };
+                out.push((*var_offset, Some((base + hi, base + lo))));
+                true
+            }
+            ProtoExpression::Value { .. } => true,
+            ProtoExpression::Unary {
+                op: Op::BitNot, x, ..
+            } if x.width() == width => x.gather_reads_in_window_inner(hi, lo, out),
+            ProtoExpression::Binary {
+                x,
+                op: Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor,
+                y,
+                ..
+            } if x.width() == width && y.width() == width => {
+                x.gather_reads_in_window_inner(hi, lo, out)
+                    && y.gather_reads_in_window_inner(hi, lo, out)
+            }
+            _ => false,
+        }
+    }
+
     /// Like `gather_variable_offsets` but each read carries its static bit
     /// range when known (`Some((msb, lsb))` from a constant bit select),
     /// `None` for full-width or runtime-determined reads.

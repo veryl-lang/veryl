@@ -24,10 +24,8 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
     analyze_top_inner(code, config, top, false)
 }
 
-/// For the ONE test that targets the simulator's own combinational-loop
-/// detector.  The analyzer rejects such a design first, so nothing else may
-/// wave that error through: a test that needs to is testing a design Veryl
-/// does not accept.
+/// For the tests targeting the simulator's own combinational-loop detector:
+/// the analyzer rejects such designs first, so nothing else may wave it through.
 #[track_caller]
 fn analyze_top_allowing_comb_loop(
     code: &str,
