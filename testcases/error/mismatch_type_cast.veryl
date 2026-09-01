@@ -1,0 +1,7 @@
+module mismatch_type_cast (
+    i_a: input logic,
+) {
+    let _b: logic<2> = i_a as InterfaceA;
+}
+
+interface InterfaceA {}

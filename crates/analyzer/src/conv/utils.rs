@@ -1195,6 +1195,27 @@ pub fn eval_type(
     let mut signed = false;
     let mut is_positive = false;
 
+    // The `var_paths` shortcut below turns a constant into a width, which is what
+    // makes `x as W` work -- so a variable position has to be rejected ahead of it.
+    let resolved = if matches!(pos, TypePosition::Variable) {
+        let resolved = context.resolve_path(path.clone());
+        if let Ok(symbol) = symbol_table::resolve(&resolved)
+            && !symbol.found.is_variable_type()
+        {
+            context.insert_error(AnalyzerError::mismatch_type(
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.found.token.to_string(),
+                    expected: "enum, union, struct or typedef".to_string(),
+                    actual: symbol.found.kind.to_kind_name(),
+                },
+                &path.range,
+            ));
+        }
+        Some(resolved)
+    } else {
+        None
+    };
+
     let kind = if let Some(x) = path.to_var_path()
         && let Some(x) = context.var_paths.get(&x)
     {
@@ -1217,26 +1238,19 @@ pub fn eval_type(
             _ => ir::TypeKind::Unknown,
         }
     } else {
-        let mut path = context.resolve_path(path.clone());
+        let mut path = resolved.unwrap_or_else(|| context.resolve_path(path.clone()));
         check_generic_refereence(context, &path);
 
         let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
-            let type_error = match pos {
-                TypePosition::Variable => !symbol.found.is_variable_type(),
-                TypePosition::Cast => !symbol.found.is_casting_type(),
-                _ => false,
-            };
-
-            if type_error {
-                let token: TokenRange = symbol.found.token.into();
+            if matches!(pos, TypePosition::Cast) && !symbol.found.is_casting_type() {
                 context.insert_error(AnalyzerError::mismatch_type(
                     MismatchTypeKind::SymbolKind {
                         name: symbol.found.token.to_string(),
-                        expected: "enum or union or struct".to_string(),
+                        expected: "enum, union, struct, typedef or integer constant".to_string(),
                         actual: symbol.found.kind.to_kind_name(),
                     },
-                    &token,
+                    &path.range,
                 ));
             }
 

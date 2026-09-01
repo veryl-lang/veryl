@@ -5460,6 +5460,79 @@ fn mismatch_type() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        var b: a;
+        assign a = 0;
+        assign b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        &errors[0],
+        AnalyzerError::MismatchType {
+            kind: crate::analyzer_error::MismatchTypeKind::SymbolKind { actual, .. },
+            ..
+        } if actual == "variable"
+    ));
+
+    let code = r#"
+    module ModuleA {
+        const C: u32 = 8;
+        var a: C;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        &errors[0],
+        AnalyzerError::MismatchType {
+            kind: crate::analyzer_error::MismatchTypeKind::SymbolKind { actual, .. },
+            ..
+        } if actual == "parameter"
+    ));
+
+    let code = r#"
+    module ModuleA {
+        function f (
+            a: input logic,
+        ) -> logic {
+            var x: a;
+            x = a;
+            return x;
+        }
+        let _y: logic = f(0);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        &errors[0],
+        AnalyzerError::MismatchType {
+            kind: crate::analyzer_error::MismatchTypeKind::SymbolKind { actual, .. },
+            ..
+        } if actual == "input port"
+    ));
+
+    let code = r#"
+    module ModuleA {
+        function f::<T: type> (
+            x: input T,
+        ) -> T {
+            var y: T;
+            y = x;
+            return y;
+        }
+        let _c: u32 = f::<u32>(1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
