@@ -5120,3 +5120,59 @@ fn non_portable_variable_lowers_always_ff_to_always() {
     let ret = emit(&metadata, &code);
     assert_eq!(ret.matches("always_ff @").count(), 3, "{ret}");
 }
+
+#[test]
+fn generic_argument_sharing_name_with_generic_parameter() {
+    let code = r#"
+function func_a::<V0: u32, V1: u32> -> u32 {
+    return V0 + V1;
+}
+function func_b::<V0: u32, V1: u32> -> u32 {
+    return func_a::<V0, V1>();
+}
+module ModuleA::<V0: u32> #(
+    param V1: u32 = 1,
+) {
+    const A: u32 = func_b::<V0, 5>();
+    const B: u32 = func_b::<V1, 6>();
+}
+module ModuleB {
+    inst u0: ModuleA::<1> #(V1: 2);
+}
+"#;
+
+    let expect = r#"
+
+
+module prj___ModuleA__1 #(
+    parameter int unsigned V1 = 1
+);
+    localparam int unsigned A = __func_b__1__5();
+    localparam int unsigned B = __func_b__V1__6();
+
+    function automatic int unsigned __func_a__V1__6;
+        return V1 + 6;
+    endfunction
+    function automatic int unsigned __func_a__1__5;
+        return 1 + 5;
+    endfunction
+    function automatic int unsigned __func_b__V1__6;
+        return __func_a__V1__6();
+    endfunction
+    function automatic int unsigned __func_b__1__5;
+        return __func_a__1__5();
+    endfunction
+endmodule
+module prj_ModuleB;
+    prj___ModuleA__1 #( .V1 (2) ) u0 ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}

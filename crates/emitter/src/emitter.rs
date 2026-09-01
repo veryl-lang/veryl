@@ -13,7 +13,7 @@ use veryl_analyzer::attribute_table;
 use veryl_analyzer::connect_operation_table;
 use veryl_analyzer::conv::{Context, Conv};
 use veryl_analyzer::definition_table::{self, Definition};
-use veryl_analyzer::generic_inference_table;
+use veryl_analyzer::generic_inference_table::{self, InferredApply};
 use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::msb_table;
@@ -2871,7 +2871,7 @@ impl Emitter {
     ) -> (Result<Rc<ResolveResult>, ResolveError>, GenericSymbolPath) {
         let path: GenericSymbolPath = arg.into();
 
-        let (result, path) = self.resolve_generic_path(&path, None);
+        let (result, mapped_path) = self.resolve_generic_path(&path, None);
         // GenericParameter resolved in the function namespace takes priority over the caller,
         // so fall through to the bound_namespace lookup to find the actual generic argument.
         let is_generic_param = result
@@ -2879,10 +2879,12 @@ impl Emitter {
             .ok()
             .is_some_and(|r| matches!(r.found.kind, SymbolKind::GenericParameter(_)));
         if (result.is_ok() && !is_generic_param) || self.bound_namespace.is_none() {
-            return (result, path);
+            return (result, mapped_path);
         }
 
         // For unbound function, resolved generic params are in the binding (caller) namespace.
+        // Substituting the mapped path again would replace an argument that shares its
+        // name with a generic parameter.
         self.resolve_generic_path(&path, self.bound_namespace.as_ref())
     }
 
@@ -7097,6 +7099,10 @@ pub fn resolve_generic_path(
 
     path.resolve_imported(scope, define_context, generic_maps);
     if let Some(maps) = generic_maps {
+        // Expanding aliases first exposes the generic parameters inside alias targets, so
+        // that a single substitution reaches them too. Substituting a second time instead
+        // would replace an argument that shares its name with a generic parameter.
+        path.unalias(None);
         path.apply_map(maps);
     }
     path.unalias(None);
@@ -7115,8 +7121,16 @@ pub fn resolve_generic_path(
 
     for (i, symbol) in &path_symbols {
         if symbol.kind.is_generic() {
-            if i + 1 == path.paths.len() {
-                generic_inference_table::apply_inferred_args(&mut path, symbol);
+            // Arguments written in the path were substituted above; the inferred and
+            // default ones added below were not.
+            if i + 1 == path.paths.len()
+                && generic_inference_table::apply_inferred_args(&mut path, symbol)
+                    == InferredApply::Applied
+                && let Some(maps) = generic_maps
+            {
+                for arg in path.paths[*i].arguments.iter_mut() {
+                    arg.apply_map(maps);
+                }
             }
 
             let params = symbol.generic_parameters();
@@ -7129,6 +7143,9 @@ pub fn resolve_generic_path(
                 };
                 let mut arg = default.clone();
                 arg.unalias(None);
+                if let Some(maps) = generic_maps {
+                    arg.apply_map(maps);
+                }
                 path.paths[*i].arguments.push(arg);
             }
 
@@ -7136,9 +7153,6 @@ pub fn resolve_generic_path(
             // build it only on this generic branch rather than on every call.
             let namespace = scope::namespace(scope, define_context);
             for arg in path.paths[*i].arguments.iter_mut() {
-                if let Some(maps) = generic_maps {
-                    arg.apply_map(maps);
-                }
                 arg.unalias(None);
                 if !symbol.is_global_function() {
                     arg.append_namespace_path(&namespace, &symbol.namespace);
