@@ -1635,8 +1635,12 @@ impl Simulator {
 
             if !validate {
                 match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
-                    DispatchOutcome::Done => true,
+                    DispatchOutcome::Done => {
+                        self.ir.whole_event_dispatch[0].fetch_add(1, Ordering::Relaxed);
+                        true
+                    }
                     DispatchOutcome::NotReady => {
+                        self.ir.whole_event_dispatch[1].fetch_add(1, Ordering::Relaxed);
                         // `false` degrades to the per-stmt path below
                         // (see `residency`).
                         if !self
@@ -2134,12 +2138,26 @@ impl Simulator {
         let wide_count_before = self.ir.write_log_buffer.wide_count as usize;
 
         // Whole-event backend, then capture its pushed entries + ff/comb.
+        // Counted like the non-validate path: a compared dispatch ran the
+        // artifact, so leaving it out here would make a validate run report
+        // no dispatches at all — indistinguishable from a module that never
+        // held a whole-event handle.  An off-stride cycle returned above and
+        // is neither, so it stays uncounted.
         if matches!(
             whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
             DispatchOutcome::NotReady,
         ) {
+            self.ir.whole_event_dispatch[1].fetch_add(1, Ordering::Relaxed);
+            if !self
+                .ir
+                .whole_event_fallback_recorded
+                .swap(true, Ordering::Relaxed)
+            {
+                residency::record_fallback("whole_event", &self.ir.name.to_string());
+            }
             return false;
         }
+        self.ir.whole_event_dispatch[0].fetch_add(1, Ordering::Relaxed);
         // The committed FF effect is what `ff_commit_from_log` writes: all
         // narrow entries first (typed stores of `width_class` bytes), then all
         // wide entries (memcpy of `native_bytes`), last-write-wins per byte.

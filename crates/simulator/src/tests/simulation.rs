@@ -1519,6 +1519,68 @@ fn wide_256_aot_native_comb() {
     assert_eq!(sim.get("d").unwrap(), Value::new(0x100E, 256, false));
     assert_eq!(sim.get("e").unwrap(), Value::new(0xFF00, 256, false));
 }
+#[test]
+fn a_validate_run_counts_the_dispatches_it_compared() {
+    // A compared dispatch ran the artifact, so it belongs in the tally like
+    // any other.  The counters used to sit only on the non-validate branch,
+    // which left a validate run reporting nothing at all -- and `dispatch` is
+    // skipped when empty, so its absence read as "this module never held a
+    // whole-* handle": exactly the ambiguity the field exists to remove.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module ValidateDispatchTally (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_v  : input  logic<32>,
+        o_a  : output logic<32>,
+        o_b  : output logic<64>,
+    ) {
+        var acc : logic<32>;
+        var wide: logic<192>;
+        always_ff {
+            if_reset {
+                acc  = 0;
+                wide = 0;
+            } else {
+                acc         = acc + i_v;
+                wide[95:32] = {acc, i_v};
+            }
+        }
+        assign o_a = acc;
+        assign o_b = wide[95:32];
+    }
+    "#;
+    {
+        let config = aot_native_validate_config();
+        let ir = analyze_top(code, &config, "ValidateDispatchTally").unwrap();
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for c in 1..8u64 {
+            sim.set("i_v", Value::new(c * 0x0101_0101, 32, false));
+            sim.step(&clk);
+        }
+        // The tallies publish when the Ir is dropped, so read them after.
+    }
+    let got: Vec<(String, u64, u64)> = crate::residency::dispatch_counts()
+        .into_iter()
+        .filter(|(k, _, _)| k.contains("ValidateDispatchTally"))
+        .collect();
+    // Both kinds, named: the comb tally alone would pass with the event
+    // counters deleted, which is the half this exists to pin.  Either outcome
+    // counts -- where the artifact never lands every dispatch falls back, and
+    // reporting THAT is the whole point of the field.
+    for kind in ["whole_comb:", "whole_event:"] {
+        assert!(
+            got.iter()
+                .any(|(k, ran, fell_back)| k.starts_with(kind) && ran + fell_back > 0),
+            "a validate run dispatched {kind} but counted none: {got:?}"
+        );
+    }
+}
 
 #[test]
 fn sub_byte_fields_of_one_byte_compose_in_program_order() {
