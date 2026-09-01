@@ -1,6 +1,7 @@
-use crate::multi_sources::{MultiSources, Source};
+use crate::multi_sources::{MultiSources, Source, SourceExcerpt};
 use miette::{self, Diagnostic, Severity, SourceSpan};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use thiserror::Error;
 use veryl_parser::resource_table::StrId;
@@ -124,18 +125,20 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(combinational_loop),
-        help(""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("combinational loop detected on \"{identifier}\"")]
+    #[error("combinational loop detected")]
     CombinationalLoop {
         identifier: String,
+        cycle: String,
         #[source_code]
         input: MultiSources,
-        #[label("Error location")]
+        #[label("involved in combinational feedback")]
         error_location: SourceSpan,
-        #[label(collection, "involved in loop")]
+        #[label(collection, "also involved in combinational feedback")]
         loop_participants: Vec<SourceSpan>,
+        #[label(collection, "dependency passes through this statement")]
+        dependency_sites: Vec<SourceSpan>,
         token_source: TokenSource,
     },
 
@@ -1999,7 +2002,7 @@ fn source(token: &TokenRange) -> MultiSources {
     let path = token.beg.source.to_string();
     let text = token.beg.source.get_text();
     MultiSources {
-        sources: vec![Source { path, text }],
+        sources: vec![Source::new(path, text)],
     }
 }
 
@@ -2014,7 +2017,7 @@ fn source_with_context(
     let mut ranges = Vec::new();
     let mut sources = Vec::new();
 
-    sources.push(Source { path, text });
+    sources.push(Source::new(path, text));
 
     for x in context.iter().rev() {
         let path = x.beg.source.to_string();
@@ -2026,11 +2029,94 @@ fn source_with_context(
 
         base += text.len();
 
-        sources.push(Source { path, text });
+        sources.push(Source::new(path, text));
     }
 
     let sources = MultiSources { sources };
     (sources, ranges)
+}
+
+/// Like `source_with_context`, but returns spans in the same order as
+/// `context`. Each label keeps its own bounded excerpt so distant statements
+/// render as compact snippets without cloning a complete file for every one.
+fn source_with_ordered_context(
+    token: &TokenRange,
+    context: &[TokenRange],
+) -> (MultiSources, Vec<SourceSpan>) {
+    let text = token.source().get_text();
+    let mut base = text.len();
+    let mut sources = vec![Source::new(token.source().to_string(), text)];
+    let mut ranges = Vec::with_capacity(context.len());
+    let mut texts = HashMap::new();
+    let mut windows = HashMap::new();
+    let mut excerpt_bases = HashMap::new();
+    for token in context {
+        let token_source = token.source();
+        let text = texts
+            .entry(token_source)
+            .or_insert_with(|| token_source.get_text());
+        let span = (*token).into();
+        let window_key = (token_source, token.beg.line, token.end.line);
+        let excerpt = windows
+            .get(&window_key)
+            .copied()
+            .filter(|excerpt: &SourceExcerpt| excerpt.local_span(&span).is_some())
+            .or_else(|| {
+                Source::excerpt_window(text, &span, token.beg.line as usize, 1).inspect(|excerpt| {
+                    windows.insert(window_key, *excerpt);
+                })
+            });
+        let (excerpt, local_span) = excerpt
+            .and_then(|excerpt| Some((excerpt, excerpt.local_span(&span)?)))
+            .unwrap_or_else(|| (SourceExcerpt::whole(text), span));
+        let excerpt_key = (token_source, excerpt);
+        let excerpt_base = if let Some(base) = excerpt_bases.get(&excerpt_key) {
+            *base
+        } else {
+            let source = Source::from_excerpt(token_source.to_string(), text, excerpt)
+                .unwrap_or_else(|| Source::new(token_source.to_string(), text.clone()));
+            let excerpt_base = base;
+            base += source.text.len();
+            sources.push(source);
+            excerpt_bases.insert(excerpt_key, excerpt_base);
+            excerpt_base
+        };
+        ranges.push((excerpt_base + local_span.offset(), local_span.len()).into());
+    }
+    (MultiSources { sources }, ranges)
+}
+
+#[cfg(test)]
+mod ordered_context_tests {
+    use super::*;
+    use miette::SourceCode;
+    use std::path::Path;
+    use veryl_parser::resource_table;
+    use veryl_parser::text_table::{self, TextInfo};
+    use veryl_parser::veryl_token::{Token, TokenSource};
+
+    #[test]
+    fn labels_on_one_line_share_a_source_excerpt() {
+        let text = "before\na = b; b = c;\nafter\n";
+        let path = resource_table::insert_path(Path::new("shared_excerpt.veryl"));
+        let text_id = text_table::set_current_text(TextInfo {
+            text: text.into(),
+            path,
+        });
+        let source = TokenSource::File {
+            path,
+            text: text_id,
+        };
+        let primary = TokenRange::from(Token::new("before", 1, 1, 6, 0, source));
+        let first = TokenRange::from(Token::new("a = b;", 2, 1, 6, 7, source));
+        let second = TokenRange::from(Token::new("b = c;", 2, 8, 6, 14, source));
+
+        let (input, spans) = source_with_ordered_context(&primary, &[first, second]);
+
+        assert_eq!(input.sources.len(), 2);
+        assert_eq!(input.read_span(&spans[0], 0, 0).unwrap().data(), b"a = b;");
+        assert_eq!(input.read_span(&spans[1], 0, 0).unwrap().data(), b"b = c;");
+    }
 }
 
 /// `miette::Severity`, in a form the diagnostic cache can serialize.
@@ -2499,15 +2585,22 @@ impl AnalyzerError {
     }
     pub fn combinational_loop(
         identifier: &str,
+        cycle: &str,
         token: &TokenRange,
         participants: &[TokenRange],
+        sites: &[TokenRange],
     ) -> Self {
-        let (input, loop_participants) = source_with_context(token, participants);
+        let mut context = participants.to_vec();
+        context.extend_from_slice(sites);
+        let (input, context_spans) = source_with_ordered_context(token, &context);
+        let (loop_participants, dependency_sites) = context_spans.split_at(participants.len());
         AnalyzerError::CombinationalLoop {
             identifier: identifier.to_string(),
+            cycle: cycle.to_string(),
             input,
             error_location: token.into(),
-            loop_participants,
+            loop_participants: loop_participants.to_vec(),
+            dependency_sites: dependency_sites.to_vec(),
             token_source: token.source(),
         }
     }

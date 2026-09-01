@@ -564,8 +564,9 @@ impl Context {
 
     pub fn extract_function(&mut self, context: &mut Context, base: &VarPath, array: &ShapeRef) {
         for (id, mut variable) in context.variables.drain() {
+            let path_offset = variable.path.0.len();
             variable.path.add_prelude(&base.0);
-            variable.prepend_array(array);
+            variable.prepend_array_at_path(array, path_offset);
             self.variables.insert(id, variable);
         }
 
@@ -646,7 +647,8 @@ impl Context {
                 }
             }
 
-            variable.prepend_array(array);
+            let path_offset = variable.path.0.len();
+            variable.prepend_array_at_path(array, path_offset);
 
             // override token, affiliation to interface instance
             variable.token = token;

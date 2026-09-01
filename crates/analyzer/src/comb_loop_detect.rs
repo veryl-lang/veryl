@@ -17,6 +17,7 @@ pub(crate) use procedure::{
     function_barrier_evaluation_count, function_evaluation_count,
     function_result_region_probe_count, function_result_version_count, module_context_entries,
     reset_function_evaluation_count, reset_module_context_entries,
+    reset_traced_procedure_evaluation_count, traced_procedure_evaluation_count,
 };
 
 use region::{ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, var_reads};
@@ -33,9 +34,10 @@ use crate::ir::{
 use crate::symbol::{Affiliation, Direction, SymbolId};
 use daggy::petgraph::Graph;
 use daggy::petgraph::algo::kosaraju_scc;
-use daggy::petgraph::graph::NodeIndex;
+use daggy::petgraph::graph::{EdgeIndex, NodeIndex};
 use daggy::petgraph::visit::EdgeRef;
-use std::collections::VecDeque;
+use std::{collections::VecDeque, rc::Rc};
+use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct SummaryRegion {
@@ -44,7 +46,7 @@ struct SummaryRegion {
     packed: PackedSpan,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct BitDependency {
     /// `None` means that every source coordinate on this axis may affect the
     /// destination region. `Some(C)` preserves `source + C = destination`.
@@ -100,6 +102,76 @@ struct ModuleCombSummary {
     complete: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct DiagnosticEdge {
+    index: EdgeIndex,
+    source: NodeKey,
+    destination: NodeKey,
+    dependency: BitDependency,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SummaryEdgeCause {
+    inst_declaration: usize,
+    child: Signature,
+    child_source: SummaryRegion,
+    child_destination: SummaryRegion,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LocalEdgeCause {
+    declaration: usize,
+    source: NodeKey,
+    destination: NodeKey,
+    dependency: BitDependency,
+}
+
+/// Populated only by a diagnostic replay after a loop has been detected. The
+/// normal graph and module summaries deliberately remain provenance-free.
+#[derive(Default)]
+struct DiagnosticTrace {
+    local: HashMap<EdgeIndex, LocalEdgeCause>,
+    summaries: HashMap<EdgeIndex, Vec<SummaryEdgeCause>>,
+    procedures: HashMap<usize, procedure::ProcedureWitnessTrace>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static DIAGNOSTIC_REPLAYS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DIAGNOSTIC_PROVENANCE_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DIAGNOSTIC_INSTANCE_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_diagnostic_replay_count() {
+    DIAGNOSTIC_REPLAYS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_replay_count() -> usize {
+    DIAGNOSTIC_REPLAYS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_diagnostic_provenance_build_count() {
+    DIAGNOSTIC_PROVENANCE_BUILDS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_provenance_build_count() -> usize {
+    DIAGNOSTIC_PROVENANCE_BUILDS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_diagnostic_instance_probe_count() {
+    DIAGNOSTIC_INSTANCE_PROBES.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_instance_probe_count() -> usize {
+    DIAGNOSTIC_INSTANCE_PROBES.get()
+}
+
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
     check_inner(ir).0
 }
@@ -113,11 +185,13 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut errors = Vec::new();
     let mut complete = true;
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
+    let mut diagnostic_replays = DiagnosticReplayCache::default();
     // Specializations share one declaration; report each of its loops once.
     let mut reported: HashSet<(SymbolId, Vec<VarPath>)> = HashSet::default();
 
     for module in module_postorder(ir) {
-        let (graph, bit_part, module_complete) = match build_module_graph(module, &summaries) {
+        let (graph, bit_part, module_complete) = match build_module_graph(module, &summaries, None)
+        {
             Ok(result) => result,
             Err(error) => {
                 errors.push(*error);
@@ -126,7 +200,15 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
                 continue;
             }
         };
-        check_graph(module, &graph, &mut errors, &mut reported);
+        check_graph(
+            module,
+            &graph,
+            &bit_part,
+            &summaries,
+            &mut diagnostic_replays,
+            &mut errors,
+            &mut reported,
+        );
         let mut summary = match compute_module_summary(module, &graph, &bit_part) {
             Ok(summary) => summary,
             Err(ssa::PositionOverflow) => {
@@ -184,10 +266,18 @@ fn module_postorder(ir: &Ir) -> Vec<&Module> {
 }
 
 fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
-    module.declarations.iter().filter_map(|d| match d {
-        Declaration::Inst(inst) => Some(inst.as_ref()),
-        _ => None,
-    })
+    walk_indexed_insts(module).map(|(_, inst)| inst)
+}
+
+fn walk_indexed_insts(module: &Module) -> impl Iterator<Item = (usize, &InstDeclaration)> {
+    module
+        .declarations
+        .iter()
+        .enumerate()
+        .filter_map(|(index, declaration)| match declaration {
+            Declaration::Inst(inst) => Some((index, inst.as_ref())),
+            _ => None,
+        })
 }
 
 /// Split only at observed access endpoints. Runtime and storage depend on the
@@ -1106,6 +1196,7 @@ fn eval_dst_span(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
+    mut diagnostic_trace: Option<&mut DiagnosticTrace>,
 ) -> Result<(Graph<NodeKey, BitDependency>, BitPartition, bool), Box<AnalyzerError>> {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
@@ -1148,11 +1239,20 @@ fn build_module_graph(
         .values()
         .any(|variable| matches!(variable.kind, crate::ir::VarKind::Inout));
 
-    for declaration in &module.declarations {
+    for (declaration_index, declaration) in module.declarations.iter().enumerate() {
         let Declaration::Comb(comb) = declaration else {
             continue;
         };
-        let analysis = procedure::analyze(&bit_part, &comb.statements, &mut procedure_context);
+        let (analysis, witness_trace) = if diagnostic_trace.is_some() {
+            let (analysis, trace) =
+                procedure::analyze_with_trace(&bit_part, &comb.statements, &mut procedure_context);
+            (analysis, Some(trace))
+        } else {
+            (
+                procedure::analyze(&bit_part, &comb.statements, &mut procedure_context),
+                None,
+            )
+        };
         if analysis.position_overflow {
             return Err(Box::new(
                 AnalyzerError::combinational_loop_position_overflow(&module.token),
@@ -1162,6 +1262,7 @@ fn build_module_graph(
             complete = false;
             continue;
         }
+        let mut has_local_dependency = false;
         for dependency in analysis.dependencies {
             let source = dependency.source;
             let destination = dependency.destination;
@@ -1172,13 +1273,31 @@ fn build_module_graph(
             {
                 continue;
             }
-            let source = ensure_node(&mut graph, &mut node_map, source);
-            let destination = ensure_node(&mut graph, &mut node_map, destination);
-            graph.add_edge(source, destination, dependency.kind);
+            let source_node = ensure_node(&mut graph, &mut node_map, source);
+            let destination_node = ensure_node(&mut graph, &mut node_map, destination);
+            let edge = graph.add_edge(source_node, destination_node, dependency.kind);
+            if let Some(trace) = diagnostic_trace.as_deref_mut() {
+                has_local_dependency = true;
+                trace.local.insert(
+                    edge,
+                    LocalEdgeCause {
+                        declaration: declaration_index,
+                        source,
+                        destination,
+                        dependency: dependency.kind,
+                    },
+                );
+            }
+        }
+        if has_local_dependency
+            && let (Some(trace), Some(witness_trace)) =
+                (diagnostic_trace.as_deref_mut(), witness_trace)
+        {
+            trace.procedures.insert(declaration_index, witness_trace);
         }
     }
 
-    for inst in walk_insts(module) {
+    for (inst_declaration, inst) in walk_indexed_insts(module) {
         match inst.component.as_ref() {
             Component::Module(child) => {
                 let Some(summary) = summaries.get(&child.signature) else {
@@ -1188,6 +1307,7 @@ fn build_module_graph(
                 complete &= summary.complete;
                 let mut position_overflow = false;
                 complete &= add_inst_feedthrough_edges(
+                    inst_declaration,
                     inst,
                     child,
                     summary,
@@ -1199,6 +1319,7 @@ fn build_module_graph(
                     &mut procedure_context,
                     &mut function_summaries,
                     &mut position_overflow,
+                    diagnostic_trace.as_deref_mut(),
                 );
                 if position_overflow {
                     return Err(Box::new(
@@ -1218,6 +1339,7 @@ fn build_module_graph(
 
 #[allow(clippy::too_many_arguments)]
 fn add_inst_feedthrough_edges<'a>(
+    inst_declaration: usize,
     inst: &InstDeclaration,
     child: &Module,
     summary: &ModuleCombSummary,
@@ -1229,6 +1351,7 @@ fn add_inst_feedthrough_edges<'a>(
     procedure_context: &mut procedure::ProcedureContext,
     function_summaries: &mut procedure::FunctionSummaries<'a>,
     position_overflowed: &mut bool,
+    mut diagnostic_trace: Option<&mut DiagnosticTrace>,
 ) -> bool {
     let mut complete = true;
     let mut input_reads: HashMap<VarId, Vec<NodeKey>> = HashMap::default();
@@ -1325,7 +1448,10 @@ fn add_inst_feedthrough_edges<'a>(
                         destination,
                         bit_part,
                     ) {
-                        RegionProjection::Exact(source_region) => {
+                        RegionProjection::Exact {
+                            source: source_region,
+                            destination: destination_region,
+                        } => {
                             let parent_sources = map_instance_source_region(
                                 inst,
                                 child,
@@ -1347,6 +1473,11 @@ fn add_inst_feedthrough_edges<'a>(
                                     nodes: vec![destination],
                                 },
                                 *dependency,
+                                diagnostic_trace.as_deref_mut(),
+                                inst_declaration,
+                                child,
+                                source_region,
+                                destination_region,
                             );
                         }
                         RegionProjection::Disjoint => {}
@@ -1377,6 +1508,11 @@ fn add_inst_feedthrough_edges<'a>(
                         nodes: fallback_destinations,
                     },
                     *dependency,
+                    diagnostic_trace.as_deref_mut(),
+                    inst_declaration,
+                    child,
+                    *child_source,
+                    *child_destination,
                 );
                 continue;
             }
@@ -1400,6 +1536,11 @@ fn add_inst_feedthrough_edges<'a>(
                 &parent_sources,
                 &parent_destinations,
                 *dependency,
+                diagnostic_trace.as_deref_mut(),
+                inst_declaration,
+                child,
+                *child_source,
+                *child_destination,
             );
         }
     }
@@ -1474,7 +1615,10 @@ struct MappedNode {
 }
 
 enum RegionProjection {
-    Exact(SummaryRegion),
+    Exact {
+        source: SummaryRegion,
+        destination: SummaryRegion,
+    },
     Disjoint,
     Unknown,
 }
@@ -1544,11 +1688,18 @@ fn child_source_region_for_destination(
     let Some(packed) = child_source_packed.intersection(child_source.packed) else {
         return RegionProjection::Disjoint;
     };
-    RegionProjection::Exact(SummaryRegion {
-        id: child_source.id,
-        array,
-        packed,
-    })
+    RegionProjection::Exact {
+        source: SummaryRegion {
+            id: child_source.id,
+            array,
+            packed,
+        },
+        destination: SummaryRegion {
+            id: child_destination.id,
+            array: child_destination_array,
+            packed: child_destination_packed,
+        },
+    }
 }
 
 fn translate_array_span(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
@@ -1713,6 +1864,7 @@ fn translated_summary_access(
     Some((array, packed, offset))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_mapped_dependency_edges(
     graph: &mut Graph<NodeKey, BitDependency>,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
@@ -1720,6 +1872,11 @@ fn add_mapped_dependency_edges(
     sources: &InstanceRegionMapping,
     destinations: &InstanceRegionMapping,
     dependency: BitDependency,
+    mut diagnostic_trace: Option<&mut DiagnosticTrace>,
+    inst_declaration: usize,
+    child: &Module,
+    child_source: SummaryRegion,
+    child_destination: SummaryRegion,
 ) {
     for source in &sources.nodes {
         for destination in &destinations.nodes {
@@ -1746,9 +1903,21 @@ fn add_mapped_dependency_edges(
             if !node_regions_overlap_with_dependency(source.key, destination.key, kind, bit_part) {
                 continue;
             }
-            let source = ensure_node(graph, node_map, source.key);
-            let destination = ensure_node(graph, node_map, destination.key);
-            graph.add_edge(source, destination, kind);
+            let source_node = ensure_node(graph, node_map, source.key);
+            let destination_node = ensure_node(graph, node_map, destination.key);
+            let edge = graph.add_edge(source_node, destination_node, kind);
+            if let Some(trace) = diagnostic_trace.as_deref_mut() {
+                trace
+                    .summaries
+                    .entry(edge)
+                    .or_default()
+                    .push(SummaryEdgeCause {
+                        inst_declaration,
+                        child: child.signature.clone(),
+                        child_source,
+                        child_destination,
+                    });
+            }
         }
     }
 }
@@ -2083,6 +2252,9 @@ fn collect_dst_node_keys(
 fn check_graph(
     module: &Module,
     graph: &Graph<NodeKey, BitDependency>,
+    bit_part: &BitPartition,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
+    diagnostic_replays: &mut DiagnosticReplayCache,
     errors: &mut Vec<AnalyzerError>,
     reported: &mut HashSet<(SymbolId, Vec<VarPath>)>,
 ) {
@@ -2093,19 +2265,43 @@ fn check_graph(
         if !is_loop {
             continue;
         }
+        let cycle = dependency_cycle(graph, &scc);
+        let cycle_steps = diagnostic_steps(graph, &cycle);
         let mut keys: Vec<NodeKey> = scc.iter().map(|n| graph[*n]).collect();
         keys.sort();
         if !seen.insert(keys.clone()) {
             continue;
         }
-        let Some(error) = build_error(module, &keys) else {
-            continue;
+        let cycle_keys = if scc.len() == 1 {
+            vec![graph[scc[0]], graph[scc[0]]]
+        } else {
+            diagnostic_path_nodes(&cycle_steps)
         };
         // `VarId` is fresh per specialization, so paths are the only stable
         // name. `assign_tokens` can name an id that is in neither map; such a
         // cycle has none, so report it rather than collapse it with another.
+        // Specializations and disjoint regions can otherwise produce the same
+        // source-declaration loop, so skip its expensive provenance replay.
         let paths = loop_paths(module, &keys);
-        if !paths.is_empty() && !reported.insert((module.signature.symbol, paths)) {
+        let report_key = (!paths.is_empty()).then_some((module.signature.symbol, paths));
+        if report_key
+            .as_ref()
+            .is_some_and(|key| reported.contains(key))
+        {
+            continue;
+        }
+        let Some(error) = build_error(
+            module,
+            bit_part,
+            summaries,
+            &keys,
+            &cycle_keys,
+            &cycle_steps,
+            diagnostic_replays,
+        ) else {
+            continue;
+        };
+        if report_key.is_some_and(|key| !reported.insert(key)) {
             continue;
         }
         errors.push(error);
@@ -2133,6 +2329,129 @@ fn strongly_connected_components(graph: &Graph<NodeKey, BitDependency>) -> Vec<V
     // shallow dependency chain can therefore exhaust the native stack. The
     // Kosaraju implementation uses explicit worklists for both passes.
     kosaraju_scc(graph)
+}
+
+/// Returns the deterministic edges of one directed cycle from an SCC.
+fn dependency_cycle(graph: &Graph<NodeKey, BitDependency>, scc: &[NodeIndex]) -> Vec<EdgeIndex> {
+    let members: HashSet<NodeIndex> = scc.iter().copied().collect();
+    if scc.len() == 1 {
+        let edges = sorted_out_edges(graph, scc[0], &members);
+        if let Some(edge) = edges.iter().copied().find(|edge| {
+            graph[*edge]
+                .exact_offset()
+                .is_none_or(|(array, packed)| array == 0 && packed == 0)
+        }) {
+            return vec![edge];
+        }
+        // `has_self_edge` also accepts opposing exact offsets which compose
+        // into a closed walk. Keep all of those edges available to diagnostic
+        // provenance while rendering the same `node -> node` cycle as before.
+        return edges;
+    }
+
+    let start = *scc
+        .iter()
+        .min_by_key(|node| graph[**node])
+        .expect("a detected SCC is never empty");
+
+    for edge in sorted_out_edges(graph, start, &members) {
+        let (_, next) = graph
+            .edge_endpoints(edge)
+            .expect("an outgoing edge has endpoints");
+        if next == start {
+            continue;
+        }
+        if let Some(mut path) = shortest_path(graph, next, start, &members) {
+            path.insert(0, edge);
+            return path;
+        }
+    }
+
+    // Every node in a non-trivial SCC has a path back to itself through a
+    // different node, so this is only reachable if the graph is malformed.
+    unreachable!("non-trivial SCC did not contain a directed cycle")
+}
+
+fn shortest_path(
+    graph: &Graph<NodeKey, BitDependency>,
+    start: NodeIndex,
+    end: NodeIndex,
+    members: &HashSet<NodeIndex>,
+) -> Option<Vec<EdgeIndex>> {
+    let mut queue = VecDeque::from([start]);
+    let mut visited = HashSet::default();
+    visited.insert(start);
+    let mut predecessor: HashMap<NodeIndex, EdgeIndex> = HashMap::default();
+
+    while let Some(node) = queue.pop_front() {
+        if node == end {
+            let mut path = Vec::new();
+            let mut current = end;
+            while current != start {
+                let edge = *predecessor.get(&current)?;
+                path.push(edge);
+                let (source, _) = graph.edge_endpoints(edge)?;
+                current = source;
+            }
+            path.reverse();
+            return Some(path);
+        }
+
+        for edge in sorted_out_edges(graph, node, members) {
+            let (_, next) = graph.edge_endpoints(edge)?;
+            if visited.insert(next) {
+                predecessor.insert(next, edge);
+                queue.push_back(next);
+            }
+        }
+    }
+    None
+}
+
+fn sorted_out_edges(
+    graph: &Graph<NodeKey, BitDependency>,
+    node: NodeIndex,
+    members: &HashSet<NodeIndex>,
+) -> Vec<EdgeIndex> {
+    let mut edges: Vec<EdgeIndex> = graph
+        .edges(node)
+        .filter(|edge| members.contains(&edge.target()))
+        .map(|edge| edge.id())
+        .collect();
+    edges.sort_unstable_by_key(|edge| {
+        let (_, target) = graph
+            .edge_endpoints(*edge)
+            .expect("an outgoing edge has endpoints");
+        (graph[target], graph[*edge], edge.index())
+    });
+    edges
+}
+
+fn diagnostic_steps(
+    graph: &Graph<NodeKey, BitDependency>,
+    edges: &[EdgeIndex],
+) -> Vec<DiagnosticEdge> {
+    edges
+        .iter()
+        .filter_map(|edge| {
+            let (source, destination) = graph.edge_endpoints(*edge)?;
+            Some(DiagnosticEdge {
+                index: *edge,
+                source: graph[source],
+                destination: graph[destination],
+                dependency: graph[*edge],
+            })
+        })
+        .collect()
+}
+
+fn diagnostic_path_nodes(path: &[DiagnosticEdge]) -> Vec<NodeKey> {
+    let Some(first) = path.first() else {
+        return Vec::new();
+    };
+    std::iter::once(first.source)
+        .chain(path.iter().map(|edge| edge.destination))
+        .collect()
 }
 
 fn ensure_node(
@@ -2175,18 +2494,348 @@ fn has_self_edge(graph: &Graph<NodeKey, BitDependency>, node: NodeIndex) -> bool
     !increases_one_coordinate
 }
 
-fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
-    let mut tokens: Vec<veryl_parser::token_range::TokenRange> = Vec::new();
+fn build_error(
+    module: &Module,
+    bit_part: &BitPartition,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
+    keys: &[NodeKey],
+    cycle_keys: &[NodeKey],
+    cycle: &[DiagnosticEdge],
+    diagnostic_replays: &mut DiagnosticReplayCache,
+) -> Option<AnalyzerError> {
     let mut identifier: Option<String> = None;
-    let mut seen_var: HashSet<VarId> = HashSet::default();
     for (id, _idx, _range) in keys {
-        if !seen_var.insert(*id) {
-            continue;
-        }
         if let Some(var) = module.variables.get(id)
             && identifier.is_none()
         {
             identifier = Some(var.path.to_string());
+        }
+    }
+    let mut tokens = diagnostic_tokens(module, cycle_keys);
+    if tokens.is_empty() {
+        // A synthetic cycle can lack an assignment site of its own. Preserve
+        // the previous best-effort behavior by falling back to its SCC.
+        tokens = diagnostic_tokens(module, keys);
+    }
+    let primary = *tokens.first()?;
+    let mut provenance = diagnostic_provenance(module, summaries, cycle, diagnostic_replays);
+    provenance.retain(|token| !tokens.contains(token));
+    let participants = if provenance.is_empty() {
+        tokens.iter().skip(1).copied().collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let cycle = format_cycle(module, bit_part, cycle_keys);
+    Some(AnalyzerError::combinational_loop(
+        identifier.as_deref().unwrap_or("?"),
+        &cycle,
+        &primary,
+        &participants,
+        &provenance,
+    ))
+}
+
+struct DiagnosticReplay {
+    graph: Graph<NodeKey, BitDependency>,
+    bit_part: BitPartition,
+    trace: DiagnosticTrace,
+}
+
+type DiagnosticReplayCache = HashMap<Signature, Rc<DiagnosticReplay>>;
+
+struct DiagnosticTraversal<'a> {
+    summaries: &'a HashMap<Signature, ModuleCombSummary>,
+    replays: &'a mut DiagnosticReplayCache,
+    active: HashSet<Signature>,
+    expanded: HashMap<(Signature, SummaryRegion, SummaryRegion), TokenRange>,
+    witnesses: Vec<TokenRange>,
+}
+
+fn build_diagnostic_replay(
+    module: &Module,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
+) -> Option<DiagnosticReplay> {
+    #[cfg(test)]
+    DIAGNOSTIC_REPLAYS.set(DIAGNOSTIC_REPLAYS.get() + 1);
+
+    let mut trace = DiagnosticTrace::default();
+    let (graph, bit_part, _) = build_module_graph(module, summaries, Some(&mut trace)).ok()?;
+    for causes in trace.summaries.values_mut() {
+        causes.sort_unstable();
+        causes.dedup();
+    }
+    Some(DiagnosticReplay {
+        graph,
+        bit_part,
+        trace,
+    })
+}
+
+fn cached_diagnostic_replay(
+    module: &Module,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
+    cache: &mut DiagnosticReplayCache,
+) -> Option<Rc<DiagnosticReplay>> {
+    if let Some(replay) = cache.get(&module.signature) {
+        return Some(Rc::clone(replay));
+    }
+    let replay = Rc::new(build_diagnostic_replay(module, summaries)?);
+    cache.insert(module.signature.clone(), Rc::clone(&replay));
+    Some(replay)
+}
+
+/// Expand only the edges selected for an already-detected cycle. Module
+/// summaries stay compact on the normal path; this replay recovers the
+/// internal statements carrying one selected summarized dependency.
+fn diagnostic_provenance(
+    module: &Module,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
+    cycle: &[DiagnosticEdge],
+    replays: &mut DiagnosticReplayCache,
+) -> Vec<TokenRange> {
+    #[cfg(test)]
+    DIAGNOSTIC_PROVENANCE_BUILDS.set(DIAGNOSTIC_PROVENANCE_BUILDS.get() + 1);
+
+    if !walk_insts(module).any(|inst| matches!(inst.component.as_ref(), Component::Module(_))) {
+        return Vec::new();
+    }
+    let Some(replay) = cached_diagnostic_replay(module, summaries, replays) else {
+        return Vec::new();
+    };
+    let mut active = HashSet::default();
+    active.insert(module.signature.clone());
+    let mut traversal = DiagnosticTraversal {
+        summaries,
+        replays,
+        active,
+        expanded: HashMap::default(),
+        witnesses: Vec::new(),
+    };
+    // Expand the first summarized edge in the deterministic reported cycle.
+    // Keep every concrete assignment on its recovered path: the deepest
+    // assignment is not necessarily the one that should break the loop.
+    for edge in cycle {
+        if !replay_edge_matches(&replay, *edge) || !replay.trace.summaries.contains_key(&edge.index)
+        {
+            continue;
+        }
+        trace_dependency_path(
+            module,
+            &replay,
+            std::slice::from_ref(edge),
+            false,
+            &mut traversal,
+        );
+        if !traversal.witnesses.is_empty() {
+            break;
+        }
+    }
+    let mut seen = HashSet::default();
+    traversal
+        .witnesses
+        .into_iter()
+        .filter(|token| seen.insert(*token))
+        .collect()
+}
+
+fn replay_edge_matches(replay: &DiagnosticReplay, edge: DiagnosticEdge) -> bool {
+    let Some((source, destination)) = replay.graph.edge_endpoints(edge.index) else {
+        return false;
+    };
+    replay.graph[source] == edge.source
+        && replay.graph[destination] == edge.destination
+        && replay.graph[edge.index] == edge.dependency
+}
+
+fn local_dependency_witnesses(replay: &DiagnosticReplay, edge: DiagnosticEdge) -> Vec<TokenRange> {
+    let Some(cause) = replay.trace.local.get(&edge.index) else {
+        return Vec::new();
+    };
+    let target = (cause.source, cause.destination, cause.dependency);
+    replay
+        .trace
+        .procedures
+        .get(&cause.declaration)
+        .map(|trace| trace.witnesses(target))
+        .unwrap_or_default()
+}
+
+fn trace_dependency_path(
+    module: &Module,
+    replay: &DiagnosticReplay,
+    path: &[DiagnosticEdge],
+    include_local: bool,
+    traversal: &mut DiagnosticTraversal,
+) {
+    let summaries = traversal.summaries;
+    for edge in path {
+        let before_local = traversal.witnesses.len();
+        if include_local {
+            traversal
+                .witnesses
+                .extend(local_dependency_witnesses(replay, *edge));
+        }
+        if traversal.witnesses.len() != before_local {
+            continue;
+        }
+
+        let Some(causes) = replay.trace.summaries.get(&edge.index) else {
+            continue;
+        };
+        for cause in causes {
+            if !traversal.active.insert(cause.child.clone()) {
+                continue;
+            }
+            let Some(child) = find_child_module(module, cause) else {
+                traversal.active.remove(&cause.child);
+                continue;
+            };
+            let expanded = (
+                cause.child.clone(),
+                cause.child_source,
+                cause.child_destination,
+            );
+            if let Some(witness) = traversal.expanded.get(&expanded).copied() {
+                traversal.witnesses.push(witness);
+                traversal.active.remove(&cause.child);
+                break;
+            }
+            let Some(child_replay) = cached_diagnostic_replay(child, summaries, traversal.replays)
+            else {
+                traversal.active.remove(&cause.child);
+                continue;
+            };
+            let Some(child_path) = summary_dependency_path(
+                &child_replay.graph,
+                &child_replay.bit_part,
+                cause.child_source,
+                cause.child_destination,
+            ) else {
+                traversal.active.remove(&cause.child);
+                continue;
+            };
+            let before = traversal.witnesses.len();
+            trace_dependency_path(child, &child_replay, &child_path, true, traversal);
+            if traversal.witnesses.len() == before
+                && let Some(token) = diagnostic_tokens(child, &diagnostic_path_nodes(&child_path))
+                    .into_iter()
+                    .next()
+            {
+                traversal.witnesses.push(token);
+            }
+            traversal.active.remove(&cause.child);
+            if traversal.witnesses.len() != before {
+                traversal
+                    .expanded
+                    .insert(expanded, traversal.witnesses[before]);
+                break;
+            }
+        }
+    }
+}
+
+fn find_child_module<'a>(module: &'a Module, cause: &SummaryEdgeCause) -> Option<&'a Module> {
+    let declaration = diagnostic_declaration(module, cause.inst_declaration)?;
+    let Declaration::Inst(inst) = declaration else {
+        return None;
+    };
+    let Component::Module(child) = inst.component.as_ref() else {
+        return None;
+    };
+    (child.signature == cause.child).then_some(child)
+}
+
+fn diagnostic_declaration(module: &Module, index: usize) -> Option<&Declaration> {
+    // This is one candidate probe. A linear instance search would perform one
+    // such probe for every declaration preceding the selected instance.
+    #[cfg(test)]
+    DIAGNOSTIC_INSTANCE_PROBES.set(DIAGNOSTIC_INSTANCE_PROBES.get() + 1);
+
+    module.declarations.get(index)
+}
+
+fn summary_dependency_path(
+    graph: &Graph<NodeKey, BitDependency>,
+    bit_part: &BitPartition,
+    source: SummaryRegion,
+    destination: SummaryRegion,
+) -> Option<Vec<DiagnosticEdge>> {
+    let mut sources = graph
+        .node_indices()
+        .filter(|node| node_overlaps_summary_region(graph[*node], bit_part, source))
+        .collect::<Vec<_>>();
+    sources.sort_unstable_by_key(|node| graph[*node]);
+    let destinations = graph
+        .node_indices()
+        .filter(|node| node_overlaps_summary_region(graph[*node], bit_part, destination))
+        .collect::<HashSet<_>>();
+    let members = graph.node_indices().collect::<HashSet<_>>();
+
+    for start in sources {
+        if destinations.contains(&start) {
+            for edge in sorted_out_edges(graph, start, &members) {
+                let (_, next) = graph.edge_endpoints(edge)?;
+                if next == start {
+                    return Some(diagnostic_steps(graph, &[edge]));
+                }
+                if let Some(mut path) = shortest_path(graph, next, start, &members) {
+                    path.insert(0, edge);
+                    return Some(diagnostic_steps(graph, &path));
+                }
+            }
+        }
+
+        let mut queue = VecDeque::from([start]);
+        let mut visited = HashSet::default();
+        let mut predecessor: HashMap<NodeIndex, EdgeIndex> = HashMap::default();
+        visited.insert(start);
+        while let Some(node) = queue.pop_front() {
+            if node != start && destinations.contains(&node) {
+                let mut path = Vec::new();
+                let mut current = node;
+                while current != start {
+                    let edge = *predecessor.get(&current)?;
+                    path.push(edge);
+                    let (source, _) = graph.edge_endpoints(edge)?;
+                    current = source;
+                }
+                path.reverse();
+                return Some(diagnostic_steps(graph, &path));
+            }
+            for edge in sorted_out_edges(graph, node, &members) {
+                let (_, next) = graph.edge_endpoints(edge)?;
+                if visited.insert(next) {
+                    predecessor.insert(next, edge);
+                    queue.push_back(next);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn node_overlaps_summary_region(
+    key: NodeKey,
+    bit_part: &BitPartition,
+    region: SummaryRegion,
+) -> bool {
+    key.0 == region.id
+        && key.1.overlaps(region.array)
+        && bit_part
+            .ranges_of((key.0, key.1))
+            .get(key.2)
+            .is_some_and(|packed| packed.overlaps(region.packed))
+}
+
+fn diagnostic_tokens(
+    module: &Module,
+    keys: &[NodeKey],
+) -> Vec<veryl_parser::token_range::TokenRange> {
+    let mut tokens = Vec::new();
+    let mut seen_var: HashSet<VarId> = HashSet::default();
+    for (id, _, _) in keys {
+        if !seen_var.insert(*id) {
+            continue;
         }
         if let Some(toks) = module.assign_tokens.get(id) {
             tokens.extend(toks.iter().copied());
@@ -2201,13 +2850,139 @@ fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
         let mut seen: HashSet<_> = HashSet::default();
         tokens.retain(|t| seen.insert(*t));
     }
-    let primary = *tokens.first()?;
-    let participants: Vec<_> = tokens.iter().skip(1).copied().collect();
-    Some(AnalyzerError::combinational_loop(
-        identifier.as_deref().unwrap_or("?"),
-        &primary,
-        &participants,
-    ))
+    tokens
+}
+
+fn format_cycle(module: &Module, bit_part: &BitPartition, keys: &[NodeKey]) -> String {
+    let mut names = Vec::new();
+    // `dependency_cycle` repeats the first node at the end. Render each
+    // region once per adjacent run, then close the human-readable cycle.
+    for key in keys.iter().take(keys.len().saturating_sub(1)) {
+        let name = format_cycle_node(module, bit_part, *key);
+        if names.last() != Some(&name) {
+            names.push(name);
+        }
+    }
+    if let Some(first) = names.first().cloned()
+        && (names.len() == 1 || names.last() != Some(&first))
+    {
+        names.push(first);
+    }
+    names.join(" -> ")
+}
+
+fn format_cycle_node(module: &Module, bit_part: &BitPartition, key: NodeKey) -> String {
+    let (id, array, range) = key;
+    let variable = module
+        .variables
+        .get(&id)
+        .or_else(|| module.interface_members.get(&id));
+    let mut name = variable.map_or_else(|| id.to_string(), |v| v.path.to_string());
+
+    let Some(variable) = variable else {
+        return name;
+    };
+    if variable.r#type.total_array() != Some(array.length) || array.start != 0 {
+        if let Some(indices) = array_prefix_indices(&variable.r#type.array, array) {
+            name = format_array_path(variable, &indices);
+        } else if array.length == 1 {
+            name.push_str(&format!("[flat {}]", array.start));
+        } else if let Some(end) = array.end().and_then(|end| end.checked_sub(1)) {
+            let flat = if variable.r#type.array.dims() > 1 {
+                "flat "
+            } else {
+                ""
+            };
+            name.push_str(&format!("[{flat}{}..={end}]", array.start));
+        }
+    }
+
+    if let Some(packed) = bit_part.ranges_of((id, array)).get(range)
+        && (variable.r#type.total_width() != Some(packed.length) || packed.start != 0)
+    {
+        if packed.length == 1 {
+            name.push_str(&format!("[{}]", packed.start));
+        } else {
+            name.push_str(&format!("[{}:{}]", packed.end() - 1, packed.start));
+        }
+    }
+    name
+}
+
+fn format_array_path(variable: &Variable, indices: &[usize]) -> String {
+    if indices.len() > variable.array_path_offsets.len() || variable.path.0.is_empty() {
+        let mut name = variable.path.to_string();
+        for index in indices {
+            name.push_str(&format!("[{index}]"));
+        }
+        return name;
+    }
+
+    let mut selections = vec![Vec::new(); variable.path.0.len()];
+    for (&index, &offset) in indices.iter().zip(&variable.array_path_offsets) {
+        let Some(owner) = variable.path.0.len().checked_sub(offset + 1) else {
+            let mut name = variable.path.to_string();
+            for index in indices {
+                name.push_str(&format!("[{index}]"));
+            }
+            return name;
+        };
+        selections[owner].push(index);
+    }
+
+    let mut name = String::new();
+    for (position, segment) in variable.path.0.iter().enumerate() {
+        if position != 0 {
+            name.push('.');
+        }
+        name.push_str(&segment.to_string());
+        for index in &selections[position] {
+            name.push_str(&format!("[{index}]"));
+        }
+    }
+    name
+}
+
+fn array_prefix_indices(shape: &crate::ir::Shape, span: ArraySpan) -> Option<Vec<usize>> {
+    let dimensions: Vec<usize> = shape.iter().copied().collect::<Option<_>>()?;
+    let total = shape.total()?;
+    if span.length == 0 || dimensions.contains(&0) || span.end().is_none_or(|end| end > total) {
+        return None;
+    }
+
+    // A flat span spells as leading array indices when it covers one complete,
+    // aligned suffix of the declared shape. Prefer the longest prefix so unit
+    // dimensions remain explicit, as they are for a single-element span.
+    let mut suffix_length = 1usize;
+    let mut prefix_dimensions = None;
+    for prefix in (0..=dimensions.len()).rev() {
+        if suffix_length == span.length && span.start.is_multiple_of(suffix_length) {
+            prefix_dimensions = Some(prefix);
+            break;
+        }
+        if prefix != 0 {
+            suffix_length = suffix_length.checked_mul(dimensions[prefix - 1])?;
+        }
+    }
+
+    let mut indices = unflatten_array_index(shape, span.start)?;
+    indices.truncate(prefix_dimensions?);
+    Some(indices)
+}
+
+fn unflatten_array_index(shape: &crate::ir::Shape, flat: usize) -> Option<Vec<usize>> {
+    let dimensions: Vec<usize> = shape.iter().copied().collect::<Option<_>>()?;
+    if flat >= shape.total()? || dimensions.contains(&0) {
+        return None;
+    }
+
+    let mut flat = flat;
+    let mut indices = vec![0; dimensions.len()];
+    for (index, dimension) in dimensions.iter().enumerate().rev() {
+        indices[index] = flat % dimension;
+        flat /= dimension;
+    }
+    Some(indices)
 }
 
 fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
@@ -2361,6 +3136,77 @@ fn summary_region(key: NodeKey, bit_part: &BitPartition) -> Option<SummaryRegion
 #[cfg(test)]
 mod region_tests {
     use super::*;
+
+    #[test]
+    fn dependency_cycle_prefers_node_keys_over_edge_insertion_order() {
+        let span = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let mut graph: Graph<NodeKey, BitDependency> = Graph::new();
+        // Deliberately insert nodes and edges in an order that differs from
+        // their keys. The diagnostic should still select a -> b -> a.
+        let c = graph.add_node((VarId::from_raw(2), span, 0));
+        let a = graph.add_node((VarId::from_raw(0), span, 0));
+        let b = graph.add_node((VarId::from_raw(1), span, 0));
+        graph.add_edge(a, c, BitDependency::WHOLE);
+        graph.add_edge(c, a, BitDependency::WHOLE);
+        graph.add_edge(a, b, BitDependency::WHOLE);
+        graph.add_edge(b, a, BitDependency::WHOLE);
+
+        let scc = strongly_connected_components(&graph).remove(0);
+        let cycle = dependency_cycle(&graph, &scc);
+        let cycle = diagnostic_path_nodes(&diagnostic_steps(&graph, &cycle));
+
+        assert_eq!(cycle, vec![graph[a], graph[b], graph[a]]);
+    }
+
+    #[test]
+    fn dependency_cycle_closes_a_self_edge() {
+        let mut graph: Graph<NodeKey, BitDependency> = Graph::new();
+        let node = graph.add_node((
+            VarId::from_raw(0),
+            ArraySpan {
+                start: 0,
+                length: 1,
+            },
+            0,
+        ));
+        let edge = graph.add_edge(node, node, BitDependency::WHOLE);
+
+        assert_eq!(dependency_cycle(&graph, &[node]), vec![edge]);
+    }
+
+    #[test]
+    fn dependency_cycle_prefers_a_closing_parallel_self_edge() {
+        let mut graph: Graph<NodeKey, BitDependency> = Graph::new();
+        let node = graph.add_node((
+            VarId::from_raw(0),
+            ArraySpan {
+                start: 0,
+                length: 1,
+            },
+            0,
+        ));
+        graph.add_edge(
+            node,
+            node,
+            BitDependency {
+                array: Some(0),
+                packed: Some(-1),
+            },
+        );
+        let closing = graph.add_edge(
+            node,
+            node,
+            BitDependency {
+                array: Some(0),
+                packed: Some(0),
+            },
+        );
+
+        assert_eq!(dependency_cycle(&graph, &[node]), vec![closing]);
+    }
 
     #[test]
     fn scc_walk_does_not_use_the_native_stack() {

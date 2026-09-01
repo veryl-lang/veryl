@@ -1,23 +1,28 @@
 ---
 source: crates/tests/src/lib.rs
-assertion_line: 421
 expression: out
 ---
 combinational_loop (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#combinational_loop)
 
-  × combinational loop detected on "x"
-    ╭─[../../testcases/error/combinational_loop_inst.veryl:18:12]
- 17 │     );
- 18 │     assign x = y;
+  × combinational loop detected
+    ╭─[../../testcases/error/combinational_loop_inst.veryl:20:12]
+ 19 │     );
+ 20 │     assign x = y;
     ·            ┬
-    ·            ╰── Error location
- 19 │     assign b = y;
+    ·            ╰── involved in combinational feedback
+ 21 │     assign b = y;
     ╰────
-    ╭─[../../testcases/error/combinational_loop_inst.veryl:16:12]
- 15 │         i: x,
- 16 │         o: y,
-    ·            ┬
-    ·            ╰── involved in loop
- 17 │     );
-    ╰────
-  help:
+   ╭─[../../testcases/error/combinational_loop_inst.veryl:6:5]
+ 5 │     var middle: logic<8>;
+ 6 │     assign middle = i;
+   ·     ─────────┬────────
+   ·              ╰── dependency passes through this statement
+ 7 │     assign o      = middle;
+   ╰────
+   ╭─[../../testcases/error/combinational_loop_inst.veryl:7:5]
+ 6 │     assign middle = i;
+ 7 │     assign o      = middle;
+   ·     ───────────┬───────────
+   ·                ╰── dependency passes through this statement
+ 8 │ }
+   ╰────

@@ -103,7 +103,7 @@ fn source_with_context(
     let mut ranges = Vec::new();
     let mut sources = Vec::new();
 
-    sources.push(Source { path, text });
+    sources.push(Source::new(path, text));
 
     for x in context.iter().rev() {
         let path = x.beg.source.to_string();
@@ -115,7 +115,7 @@ fn source_with_context(
 
         base += text.len();
 
-        sources.push(Source { path, text });
+        sources.push(Source::new(path, text));
     }
 
     let sources = MultiSources { sources };
@@ -127,7 +127,7 @@ impl SimulatorError {
         let path = token.beg.source.to_string();
         let text = token.beg.source.get_text();
         let input = MultiSources {
-            sources: vec![Source { path, text }],
+            sources: vec![Source::new(path, text)],
         };
         SimulatorError::NoInitialBlock {
             module_name: module_name.to_string(),
@@ -141,7 +141,7 @@ impl SimulatorError {
         let path = token.beg.source.to_string();
         let text = token.beg.source.get_text();
         let input = MultiSources {
-            sources: vec![Source { path, text }],
+            sources: vec![Source::new(path, text)],
         };
         SimulatorError::UnresolvedExpression {
             input,
@@ -153,10 +153,7 @@ impl SimulatorError {
     pub fn undetermined_width(subject: &str, token: &TokenRange) -> Self {
         let source = token.beg.source;
         let input = MultiSources {
-            sources: vec![Source {
-                path: source.to_string(),
-                text: source.get_text(),
-            }],
+            sources: vec![Source::new(source.to_string(), source.get_text())],
         };
         SimulatorError::UndeterminedWidth {
             subject: subject.to_string(),
@@ -170,7 +167,7 @@ impl SimulatorError {
         let path = token.beg.source.to_string();
         let text = token.beg.source.get_text();
         let input = MultiSources {
-            sources: vec![Source { path, text }],
+            sources: vec![Source::new(path, text)],
         };
         SimulatorError::UnsupportedDescription {
             input,
@@ -183,7 +180,7 @@ impl SimulatorError {
         let path = token.beg.source.to_string();
         let text = token.beg.source.get_text();
         let input = MultiSources {
-            sources: vec![Source { path, text }],
+            sources: vec![Source::new(path, text)],
         };
         SimulatorError::RecursiveFunction {
             function_name: function_name.to_string(),

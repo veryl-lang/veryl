@@ -137,7 +137,7 @@ fn source(token: &TokenRange) -> MultiSources {
     let path = token.beg.source.to_string();
     let text = token.beg.source.get_text();
     MultiSources {
-        sources: vec![Source { path, text }],
+        sources: vec![Source::new(path, text)],
     }
 }
 

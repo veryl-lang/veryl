@@ -15,6 +15,7 @@ use crate::ir::{
 use crate::value::Value;
 use crate::{HashMap, HashSet};
 use std::rc::Rc;
+use veryl_parser::token_range::TokenRange;
 
 fn checked_position(value: usize) -> Result<isize, PositionOverflow> {
     isize::try_from(value).map_err(|_| PositionOverflow)
@@ -204,6 +205,7 @@ thread_local! {
     static FUNCTION_RESULT_REGION_PROBES: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static MODULE_CONTEXT_ENTRIES: Cell<usize> = const { Cell::new(0) };
+    static TRACED_PROCEDURE_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -244,12 +246,77 @@ pub(crate) fn module_context_entries() -> usize {
     MODULE_CONTEXT_ENTRIES.get()
 }
 
+#[cfg(test)]
+pub(crate) fn reset_traced_procedure_evaluation_count() {
+    TRACED_PROCEDURE_EVALUATIONS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn traced_procedure_evaluation_count() -> usize {
+    TRACED_PROCEDURE_EVALUATIONS.get()
+}
+
 pub(super) fn analyze(
     bit_part: &BitPartition,
     statements: &[Statement],
     context: &mut ProcedureContext,
 ) -> ProcedureResult {
-    ProcedureAnalysis::analyze(bit_part, statements, context)
+    ProcedureAnalysis::analyze(bit_part, statements, context, false).0
+}
+
+pub(super) fn analyze_with_trace(
+    bit_part: &BitPartition,
+    statements: &[Statement],
+    context: &mut ProcedureContext,
+) -> (ProcedureResult, ProcedureWitnessTrace) {
+    #[cfg(test)]
+    TRACED_PROCEDURE_EVALUATIONS.set(TRACED_PROCEDURE_EVALUATIONS.get() + 1);
+    let (result, trace) = ProcedureAnalysis::analyze(bit_part, statements, context, true);
+    (
+        result,
+        trace.expect("traced procedure analysis returns its witness state"),
+    )
+}
+
+pub(super) type DependencyTarget = (NodeKey, NodeKey, BitDependency);
+
+/// SSA state retained by a diagnostic replay. Building it evaluates the
+/// procedure once; individual dependency paths are recovered lazily without
+/// walking the source statements again.
+pub(super) struct ProcedureWitnessTrace {
+    ssa: SsaStore<SsaKey>,
+    targets: HashMap<DependencyTarget, (VersionId, SsaKey)>,
+    definition_sites: HashMap<VersionId, TokenRange>,
+    definition_data_inputs: HashMap<VersionId, Vec<VersionId>>,
+}
+
+impl ProcedureWitnessTrace {
+    pub(super) fn witnesses(&self, target: DependencyTarget) -> Vec<TokenRange> {
+        let Some((version, source)) = self.targets.get(&target).copied() else {
+            return Vec::new();
+        };
+        let versions = self.ssa.source_witness_versions(version, source);
+        let version_set = versions.iter().copied().collect::<HashSet<_>>();
+        let all = versions
+            .iter()
+            .filter_map(|version| self.definition_sites.get(version).copied())
+            .collect::<Vec<_>>();
+        let data = versions
+            .iter()
+            .filter(|version| {
+                self.definition_data_inputs
+                    .get(version)
+                    .is_some_and(|inputs| inputs.iter().any(|input| version_set.contains(input)))
+            })
+            .filter_map(|version| self.definition_sites.get(version).copied())
+            .collect::<Vec<_>>();
+        let witness = if data.is_empty() { all } else { data };
+        let mut seen = HashSet::default();
+        witness
+            .into_iter()
+            .filter(|token| seen.insert(*token))
+            .collect()
+    }
 }
 
 pub(super) struct ProcedureResult {
@@ -399,7 +466,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
     }
 
     pub(super) fn dependencies(&mut self) -> Vec<Dependency> {
-        self.inner().dependencies()
+        self.inner().dependencies().0
     }
 
     pub(super) fn restore(mut self, context: &mut ProcedureContext) {
@@ -438,6 +505,10 @@ struct ProcedureAnalysis<'a, 's> {
     next_call_frame: usize,
     receiver_indices: Vec<Option<VarIndex>>,
     function_flows: Vec<FunctionFlow>,
+    trace_witnesses: bool,
+    active_assignment: Option<TokenRange>,
+    definition_sites: HashMap<VersionId, TokenRange>,
+    definition_data_inputs: HashMap<VersionId, Vec<VersionId>>,
     complete: bool,
     position_overflow: bool,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
@@ -455,6 +526,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             next_call_frame: 0,
             receiver_indices: Vec::new(),
             function_flows: Vec::new(),
+            trace_witnesses: false,
+            active_assignment: None,
+            definition_sites: HashMap::default(),
+            definition_data_inputs: HashMap::default(),
             complete: true,
             position_overflow: false,
             summaries: None,
@@ -482,16 +557,29 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         bit_part: &'a BitPartition,
         statements: &[Statement],
         context: &mut ProcedureContext,
-    ) -> ProcedureResult {
+        trace_witnesses: bool,
+    ) -> (ProcedureResult, Option<ProcedureWitnessTrace>) {
         let mut this = Self::from_context(bit_part, context.take());
+        this.trace_witnesses = trace_witnesses;
         this.eval_block(statements, &[]);
+        let (dependencies, targets) = this.dependencies();
         let result = ProcedureResult {
-            dependencies: this.dependencies(),
+            dependencies,
             complete: this.complete,
             position_overflow: this.position_overflow,
         };
+        let trace = if trace_witnesses {
+            Some(ProcedureWitnessTrace {
+                ssa: this.ssa,
+                targets,
+                definition_sites: this.definition_sites,
+                definition_data_inputs: this.definition_data_inputs,
+            })
+        } else {
+            None
+        };
         context.restore(this.ctx);
-        result
+        (result, trace)
     }
 
     fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<NodeKey> {
@@ -605,8 +693,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some(summary)
     }
 
-    fn dependencies(&mut self) -> Vec<Dependency> {
+    fn dependencies(
+        &mut self,
+    ) -> (
+        Vec<Dependency>,
+        HashMap<DependencyTarget, (VersionId, SsaKey)>,
+    ) {
         let mut dependencies = Vec::new();
+        let mut targets = HashMap::default();
         let destinations: Vec<_> = self
             .written
             .iter()
@@ -619,25 +713,38 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let Some(sources) = self.position(sources) else {
                 continue;
             };
-            dependencies.extend(
-                sources
-                    .into_iter()
-                    .filter_map(|(source, source_kind)| {
-                        source
-                            .call_frame
-                            .is_none()
-                            .then_some((source.node, source_kind))
-                    })
-                    .filter(|(source, _)| self.is_module_scope_key(*source))
-                    .map(|(source, source_kind)| Dependency {
-                        source,
-                        destination,
-                        kind: Self::dependency_kind(source_kind),
-                    }),
-            );
+            for (source, source_kind) in sources
+                .into_iter()
+                .filter_map(|(source, source_kind)| {
+                    source
+                        .call_frame
+                        .is_none()
+                        .then_some((source.node, source_kind))
+                })
+                .filter(|(source, _)| self.is_module_scope_key(*source))
+            {
+                let kind = Self::dependency_kind(source_kind);
+                if self.trace_witnesses {
+                    targets.insert(
+                        (source, destination, kind),
+                        (
+                            version,
+                            SsaKey {
+                                node: source,
+                                call_frame: None,
+                            },
+                        ),
+                    );
+                }
+                dependencies.push(Dependency {
+                    source,
+                    destination,
+                    kind,
+                });
+            }
         }
         dependencies.sort_unstable_by_key(|dependency| (dependency.source, dependency.destination));
-        dependencies
+        (dependencies, targets)
     }
 
     fn dependency_kind(source_kind: PositionRelation) -> BitDependency {
@@ -723,6 +830,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
+        if self.trace_witnesses
+            && let Some(token) = self.active_assignment
+        {
+            self.definition_sites.insert(version, token);
+        }
         if dynamic {
             let key = self.ssa_key(key);
             self.ssa.weak_bind(key, version);
@@ -776,6 +888,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let keys = self.write_keys(destination);
         let dynamic = self.destination_is_dynamic(destination);
         let version = self.ssa.definition(dependencies);
+        if self.trace_witnesses {
+            self.definition_data_inputs
+                .insert(version, sources.to_vec());
+        }
         for key in keys {
             self.bind_destination(key, version, dynamic);
         }
@@ -857,6 +973,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             } else {
                 ExpressionSources::whole(self.eval_expr(expression))
             };
+            let data_inputs = self.trace_witnesses.then(|| {
+                sources
+                    .positional
+                    .iter()
+                    .map(|(version, _)| *version)
+                    .chain(sources.whole.iter().copied())
+                    .collect::<Vec<_>>()
+            });
             sources.whole.extend(whole);
             sources.normalize();
             let mut positional = Vec::new();
@@ -872,6 +996,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
             }
             let version = self.ssa.positional_definition(positional, sources.whole);
+            if let Some(data_inputs) = data_inputs {
+                self.definition_data_inputs.insert(version, data_inputs);
+            }
             self.bind_destination(key, version, dynamic);
         }
     }
@@ -936,6 +1063,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> ProcedureFlow {
         match statement {
             Statement::Assign(assign) => {
+                let previous_assignment = self.active_assignment;
+                if self.trace_witnesses {
+                    self.active_assignment = Some(assign.token);
+                }
                 self.call_caches.push(Some(HashMap::default()));
                 let widths: Vec<_> = assign
                     .dst
@@ -963,6 +1094,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                 }
                 self.call_caches.pop();
+                self.active_assignment = previous_assignment;
                 if self.is_return_assignment(&assign.dst) {
                     self.record_return();
                     ProcedureFlow::Return
