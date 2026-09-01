@@ -292,7 +292,12 @@ fn comb_loop_diagnostic_reports_every_data_carrying_statement_on_a_summarized_pa
         })
         .expect("the parent connection closes the child feedthrough loop");
     assert_eq!(path.len(), 2);
-    assert!(participants.is_empty());
+    // The parent hop closing the cycle is reachable only as a participant.
+    let participants = participants
+        .iter()
+        .map(|span| diagnostic_span_text(input, span).expect("participant is in source"))
+        .collect::<Vec<_>>();
+    assert_eq!(participants, vec![("test_1.veryl", "accept")]);
     let path = path
         .iter()
         .map(|step| diagnostic_span_text(input, step).expect("path step is in source"))

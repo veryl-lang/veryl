@@ -2520,11 +2520,9 @@ fn build_error(
     let primary = *tokens.first()?;
     let mut provenance = diagnostic_provenance(module, summaries, cycle, diagnostic_replays);
     provenance.retain(|token| !tokens.contains(token));
-    let participants = if provenance.is_empty() {
-        tokens.iter().skip(1).copied().collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
+    // Provenance only reaches inside a child module, so the parent instance
+    // or assignment closing the cycle still needs a label of its own.
+    let participants: Vec<_> = tokens.iter().skip(1).copied().collect();
     let cycle = format_cycle(module, bit_part, cycle_keys);
     Some(AnalyzerError::combinational_loop(
         identifier.as_deref().unwrap_or("?"),
