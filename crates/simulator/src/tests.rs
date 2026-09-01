@@ -24,6 +24,30 @@ fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorEr
     analyze_top_inner(code, config, top, false)
 }
 
+/// The analyzer IR itself, for the tests that build more than one top out of
+/// one design (cross-test DUT reuse keys on `Arc<Component>` identity, which
+/// only holds within a single `air::Ir`).
+#[track_caller]
+fn analyze_air(code: &str) -> air::Ir {
+    symbol_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+
+    let mut errors = vec![];
+    let mut ir = air::Ir::default();
+    errors.append(&mut analyzer.analyze_pass1("prj", &parser.veryl));
+    errors.append(&mut Analyzer::analyze_post_pass1());
+    errors.append(&mut analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+
+    dbg!(&errors);
+    assert!(errors.is_empty());
+    ir
+}
+
 /// For the tests targeting the simulator's own combinational-loop detector:
 /// the analyzer rejects such designs first, so nothing else may wave it through.
 #[track_caller]

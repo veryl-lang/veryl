@@ -4225,6 +4225,191 @@ fn concatenation_repeat() {
 }
 
 #[test]
+fn concat_element_widening_cast() {
+    // A widening `as` cast lowers to its operand, so the element contributed
+    // the OPERAND's bits: `{8'hA5, a as 24, 8'h5A}` collapsed to 28, shifting
+    // `8'h5A` down.
+    let code = r#"
+    module Top (
+        a : input  logic<12>,
+        c0: output logic<40>,
+        c1: output logic<40>,
+        c2: output logic<40>,
+    ) {
+        var w: logic<24>;
+        always_comb {
+            w = a as 24;
+        }
+        assign c0 = {8'hA5, a as 24, 8'h5A};
+        assign c1 = {8'hA5, a as 4, 8'h5A};
+        assign c2 = {8'hA5, w, 8'h5A};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'h85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        for (name, exp) in [
+            ("c0", "40'ha500085b5a"),
+            ("c1", "40'h00000a5b5a"),
+            ("c2", "40'ha500085b5a"),
+        ] {
+            assert_eq!(
+                format!("{:x}", sim.get(name).unwrap()),
+                exp,
+                "{name} config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn concat_element_widening_cast_signed() {
+    // SV's `N'(x)` extends by the OPERAND's signedness, so a signed operand
+    // sign-extends into the element (`24'(12'h85b)` is `24'hfff85b`).
+    let code = r#"
+    module Top (
+        a : input  signed logic<12>,
+        c0: output logic<40>       ,
+    ) {
+        assign c0 = {8'hA5, a as 24, 8'h5A};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'sh85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:x}", sim.get("c0").unwrap()),
+            "40'ha5fff85b5a",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn concat_element_widening_cast_repeat_and_wide() {
+    // The same element under a replication (the width multiplies) and at a
+    // width that leaves the u64 concat path: `c1`'s 128-bit element makes the
+    // result 144 bits, so the wide (>128-bit) lowering carries the fix too.
+    let code = r#"
+    module Top (
+        a : input  logic<12> ,
+        c0: output logic<56> ,
+        c1: output logic<144>,
+    ) {
+        assign c0 = {8'hA5, a as 24 repeat 2};
+        assign c1 = {8'hA5, a as 128, 8'h5A};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'h85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:x}", sim.get("c0").unwrap()),
+            "56'ha500085b00085b",
+            "config={config:?}"
+        );
+        assert_eq!(
+            format!("{:x}", sim.get("c1").unwrap()),
+            "144'ha50000000000000000000000000000085b5a",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn concat_element_widening_cast_nested_concat() {
+    // The cast operand is itself a concatenation, whose lowered node is as
+    // narrow as the operand: `({4'h3, a[7:0]}) as 24` is a 24-bit element.
+    let code = r#"
+    module Top (
+        a : input  logic<12>,
+        c0: output logic<40>,
+    ) {
+        assign c0 = {8'hA5, ({4'h3, a[7:0]}) as 24, 8'h5A};
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'h85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:x}", sim.get("c0").unwrap()),
+            "40'ha500035b5a",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn struct_literal_field_widening_cast() {
+    // A struct-literal field is joined by the same concatenation lowering, so
+    // a widening cast in a field mis-sized it too: the interpreter joined at
+    // the operand width (the compiled backends shift by the member width and
+    // only lost the sign extension).
+    let code = r#"
+    module Top (
+        a : input  logic<12>       ,
+        b : input  signed logic<12>,
+        c0: output logic<40>       ,
+        c1: output logic<40>       ,
+    ) {
+        struct S {
+            hi : logic<8> ,
+            mid: logic<24>,
+            lo : logic<8> ,
+        }
+        var s0: S;
+        var s1: S;
+        always_comb {
+            s0 = S'{hi: 8'hA5, mid: a as 24, lo: 8'h5A};
+            s1 = S'{hi: 8'hA5, mid: b as 24, lo: 8'h5A};
+        }
+        assign c0 = s0;
+        assign c1 = s1;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("12'h85b").unwrap());
+        sim.set("b", Value::from_str("12'sh85b").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:x}", sim.get("c0").unwrap()),
+            "40'ha500085b5a",
+            "config={config:?}"
+        );
+        assert_eq!(
+            format!("{:x}", sim.get("c1").unwrap()),
+            "40'ha5fff85b5a",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn concatenation_4state() {
     // 4-state concatenation with X/Z values
     let code = r#"
@@ -25151,6 +25336,107 @@ fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
             config.use_4state,
         );
     }
+}
+
+/// Enabling reuse must leave a test's own (unshared) design untouched --
+/// de-aliasing below an unshared instance can close a false ring (see
+/// `port_alias_enabled`).
+#[test]
+fn dut_reuse_does_not_dealias_below_an_unshared_instance() {
+    let code = r#"
+    package reuse_pkg {
+        struct Bus {
+            x: logic,
+            y: logic,
+        }
+    }
+
+    // Shared: `ShallowTop` instantiates it directly, `DeepTop` through `Wrap`.
+    // `pad` keeps it over the DUT size floor (VERYL_DUT_REUSE_MIN_BYTES).
+    module Sub (
+        req: input  logic          ,
+        hw : output reuse_pkg::Bus ,
+        pad: output logic<2048>    ,
+    ) {
+        assign hw.x = req;
+        assign hw.y = 1'b1;
+        assign pad  = 2048'd0;
+    }
+
+    // Unshared: only `DeepTop` instantiates it.  `r` reads `w.y` alone, so
+    // `hw.x`'s dependence on `req` closes no real ring.
+    module Wrap (
+        o : output logic      ,
+        op: output logic<2048>,
+    ) {
+        var w: reuse_pkg::Bus;
+        var r: logic         ;
+        inst u: Sub (
+            req: r ,
+            hw : w ,
+            pad: op,
+        );
+        assign r = w.y;
+        assign o = r;
+    }
+
+    module DeepTop (
+        o : output logic      ,
+        op: output logic<2048>,
+    ) {
+        inst d: Wrap (
+            o : o ,
+            op: op,
+        );
+    }
+
+    module ShallowTop (
+        req: input  logic          ,
+        hw : output reuse_pkg::Bus ,
+        pad: output logic<2048>    ,
+    ) {
+        inst u: Sub (
+            req: req,
+            hw : hw ,
+            pad: pad,
+        );
+    }
+    "#;
+
+    let air_ir = analyze_air(code);
+
+    let off = Config {
+        dut_reuse: false,
+        ..Default::default()
+    };
+    let on = Config {
+        dut_reuse: true,
+        ..off.clone()
+    };
+
+    let deep_off = build_ir(&air_ir, "DeepTop".into(), &off).unwrap();
+    let shallow_off = build_ir(&air_ir, "ShallowTop".into(), &off).unwrap();
+
+    crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
+
+    let deep_on = build_ir(&air_ir, "DeepTop".into(), &on).unwrap();
+    assert_eq!(
+        (deep_off.comb_values.len(), deep_off.comb_statements.len()),
+        (deep_on.comb_values.len(), deep_on.comb_statements.len()),
+        "reuse changed a design no other test shares: `Sub` sits under the \
+         unshared `Wrap`, so its ports must stay aliased"
+    );
+
+    // The boundary reuse IS for — the shared component directly under the test
+    // top — must still de-alias, or the check above passes for the wrong reason.
+    let shallow_on = build_ir(&air_ir, "ShallowTop".into(), &on).unwrap();
+    assert!(
+        shallow_on.comb_values.len() > shallow_off.comb_values.len(),
+        "the shared DUT directly under the top must still de-alias \
+         (comb bytes {} -> {})",
+        shallow_off.comb_values.len(),
+        shallow_on.comb_values.len()
+    );
 }
 
 #[test]

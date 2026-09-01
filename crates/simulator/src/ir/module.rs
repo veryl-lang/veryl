@@ -5363,7 +5363,12 @@ impl Conv<&air::Module> for ProtoModule {
                 let pre: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
                 let shadow: usize = s.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
                 let replay: usize = s.replay.iter().map(|&(a, b)| (b - a) as usize).sum();
-                let len = (8 + prerun + pre + shadow + replay).next_multiple_of(8);
+                let len = (crate::ir::opt::cone_gate::GUARD_STATE_HEADER_BYTES
+                    + prerun
+                    + pre
+                    + shadow
+                    + replay)
+                    .next_multiple_of(8);
                 s.state_off = context.comb_total_bytes as u32;
                 context.comb_total_bytes += len;
             }

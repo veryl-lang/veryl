@@ -1770,7 +1770,7 @@ impl ProtoExpression {
     }
 }
 
-/// Non-`Value` expressions already carry the width the analyzer resolved.
+/// Resize a literal in place; a non-`Value` expression is left alone.
 fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
     let ProtoExpression::Value {
         value,
@@ -1787,6 +1787,59 @@ fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
     }
     *value_width = width;
     expr_context.width = width;
+}
+
+/// Grow `expr` to `width` bits.  A widening `as` cast lowers to its operand,
+/// so a node can be narrower than its analyzer width; extend by the OPERAND's
+/// signedness, like `N'(x)`.
+fn extend_to_width(mut expr: ProtoExpression, width: usize) -> ProtoExpression {
+    if matches!(expr, ProtoExpression::Value { .. }) {
+        fit_literal_width(&mut expr, width);
+        return expr;
+    }
+    let src_width = expr.width();
+    if src_width == 0 || src_width >= width {
+        return expr;
+    }
+    let signed = expr.expr_context().signed;
+    let expr_context = ExpressionContext {
+        width,
+        signed: false,
+    };
+    let value_node = |payload: BigUint| ProtoExpression::Value {
+        value: Value::new_biguint(payload, width, false),
+        width,
+        expr_context,
+    };
+
+    // Mask to the operand width first: the bits above a narrow node are not
+    // guaranteed clean, and here they become the extension bits.
+    let mask = (BigUint::one() << src_width) - BigUint::one();
+    let ret = ProtoExpression::Binary {
+        x: Box::new(expr),
+        op: Op::BitAnd,
+        y: Box::new(value_node(mask)),
+        width,
+        expr_context,
+    };
+    if !signed {
+        return ret;
+    }
+    // Sign-extend the masked value: ((v ^ s) - s) mod 2^width.
+    let sign = BigUint::one() << (src_width - 1);
+    ProtoExpression::Binary {
+        x: Box::new(ProtoExpression::Binary {
+            x: Box::new(ret),
+            op: Op::BitXor,
+            y: Box::new(value_node(sign.clone())),
+            width,
+            expr_context,
+        }),
+        op: Op::Sub,
+        y: Box::new(value_node(sign)),
+        width,
+        expr_context,
+    }
 }
 
 /// Build a ProtoExpression computing the linear index from a multi-dimensional VarIndex.
@@ -2627,7 +2680,13 @@ impl Conv<&air::Expression> for ProtoExpression {
             air::Expression::Concatenation(items, comptime) => {
                 let mut elements = Vec::new();
                 for (expr, rep) in items {
-                    let converted: ProtoExpression = Conv::conv(context, expr)?;
+                    let mut converted: ProtoExpression = Conv::conv(context, expr)?;
+                    // A concatenation element is self-determined: it
+                    // contributes its own width, so a widening cast must be
+                    // materialised rather than lowered to its operand.
+                    if let Some(elem_width) = expr.comptime().r#type.total_width() {
+                        converted = extend_to_width(converted, elem_width);
+                    }
                     let elem_width = converted.width();
 
                     let repeat = if let Some(rep) = rep {
@@ -2678,11 +2737,11 @@ impl Conv<&air::Expression> for ProtoExpression {
 
                 let mut elements = Vec::new();
                 for ((_name, expr), member_type) in members.iter().zip(struct_members.iter()) {
-                    let mut converted: ProtoExpression = Conv::conv(context, expr)?;
+                    let converted: ProtoExpression = Conv::conv(context, expr)?;
                     let elem_width = member_type.width().unwrap();
                     // An unsized literal is 32 bits, and the concatenation
                     // joins elements at their value width, not `elem_width`.
-                    fit_literal_width(&mut converted, elem_width);
+                    let converted = extend_to_width(converted, elem_width);
                     debug_assert_eq!(converted.width(), elem_width);
                     elements.push((Box::new(converted), 1, elem_width));
                 }
