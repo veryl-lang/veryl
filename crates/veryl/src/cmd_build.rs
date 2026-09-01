@@ -335,17 +335,10 @@ impl CmdBuild {
         }
 
         let mut ret = vec![];
-        let sorted_symbols = type_dag::toposort();
-        for symbol in sorted_symbols {
-            if matches!(
-                symbol.kind,
-                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
-            ) && let TokenSource::File { path, .. } = symbol.token.source
-            {
-                let path = PathBuf::from(format!("{path}"));
-                if let Some(x) = used_paths.remove(&path) {
-                    ret.push(x.clone());
-                }
+        for path in type_dag::toposort_file() {
+            let path = PathBuf::from(format!("{path}"));
+            if let Some(x) = used_paths.remove(&path) {
+                ret.push(x.clone());
             }
         }
 

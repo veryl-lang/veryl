@@ -755,6 +755,8 @@ mod filelist {
             "axi_pkg.veryl",
             "b_pkg.veryl",
             "c_pkg.veryl",
+            "d_01_pkg.veryl",
+            "d_02_module.veryl",
         ];
         check_list(&paths, all);
 
@@ -775,6 +777,8 @@ mod filelist {
         check_order(&paths, "20_module_p.veryl", "21_alias_q.veryl");
         check_order(&paths, "c_pkg.veryl", "b_pkg.veryl");
         check_order(&paths, "b_pkg.veryl", "22_dependency_r.veryl");
+        check_order(&paths, "d_02_module.veryl", "22_dependency_r.veryl");
+        check_order(&paths, "d_01_pkg.veryl", "d_02_module.veryl");
     }
 }
 
