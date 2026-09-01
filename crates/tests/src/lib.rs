@@ -914,6 +914,69 @@ mod native_test {
         }
     }
 
+    /// A variable nothing reads is still dumped, so the dead-variable DCE has to
+    /// be off while a dump is attached — what `CmdTest` does for `--wave`.  The
+    /// latch is process-wide and one-way, so the sibling tests here only lose an
+    /// optimization, never a result.
+    #[test]
+    fn test_wave_dump_unread_vars() {
+        veryl_simulator::ir::force_disable_dead_var_dce();
+
+        let (native_tests, ir) = analyze_native_tests();
+        let test_str = "test_wave_unread";
+        assert!(
+            native_tests
+                .iter()
+                .any(|(n, _)| resource_table::get_str_value(*n).as_deref() == Some(test_str)),
+            "the {test_str} testcase is missing"
+        );
+
+        let config = Config::default();
+        let top_str_id =
+            resource_table::get_str_id(test_str.to_string()).expect("top module not found");
+        let sim_ir = build_ir(&ir, top_str_id, &config)
+            .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
+        let module_name = sim_ir.name.to_string();
+
+        let dump_buf = Arc::new(Mutex::new(Vec::new()));
+        let table_snapshot = resource_table::export_tables();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                resource_table::import_tables(&table_snapshot);
+                let dumper = WaveDumper::new_vcd(Box::new(SharedWriter(dump_buf.clone())));
+                let result = run_native_testbench(sim_ir, Some(dumper), module_name);
+                assert!(
+                    result.is_ok(),
+                    "wave dump testbench failed for {test_str}: {result:?}"
+                );
+            });
+        });
+
+        let vcd = String::from_utf8(dump_buf.lock().unwrap().clone()).unwrap();
+        // The testbench stops at cnt == 10; each unread net tracks it.
+        for (name, expected) in [("top_let", 220), ("child_let", 120), ("child_var", 110)] {
+            assert_eq!(
+                last_vcd_value(&vcd, name),
+                Some(expected),
+                "{name} was not dumped:\n{vcd}"
+            );
+        }
+    }
+
+    /// Last value dumped for `name`.  2-state only: `x`/`z` decode to `None`.
+    fn last_vcd_value(vcd: &str, name: &str) -> Option<u64> {
+        let id = vcd.lines().find_map(|line| {
+            let rest = line.strip_prefix("$var wire ")?;
+            let (_width, rest) = rest.split_once(' ')?;
+            let (id, rest) = rest.split_once(' ')?;
+            (rest == format!("{name} $end")).then(|| id.to_string())
+        })?;
+        vcd.lines()
+            .filter_map(|line| line.strip_prefix('b')?.split_once(' '))
+            .rfind(|(_, line_id)| *line_id == id)
+            .and_then(|(bits, _)| u64::from_str_radix(bits, 2).ok())
+    }
+
     #[test]
     fn test_ignored_attribute() {
         let (native_tests, ir) = analyze_native_tests();

@@ -38,7 +38,18 @@ use std::sync::OnceLock;
 /// setting `VERYL_DEAD_VAR_DCE=0`.
 pub fn enabled() -> bool {
     static EN: OnceLock<bool> = OnceLock::new();
-    *EN.get_or_init(|| std::env::var("VERYL_DEAD_VAR_DCE").ok().as_deref() != Some("0"))
+    !FORCE_DISABLED.load(std::sync::atomic::Ordering::Relaxed)
+        && *EN.get_or_init(|| std::env::var("VERYL_DEAD_VAR_DCE").ok().as_deref() != Some("0"))
+}
+
+static FORCE_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A dropped write leaves its dst at its initial value, so a dump shows the
+/// variable stuck at 0 while the run still passes.  Widening `protect` is no
+/// answer — a dump reaches every variable of every instance, which is
+/// everything the pass could drop.  Must be called before analysis.
+pub fn force_disable() {
+    FORCE_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[derive(Default, Clone, Copy)]

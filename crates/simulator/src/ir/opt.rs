@@ -106,6 +106,7 @@ pub(crate) mod dead_var_dce {
     pub fn enabled() -> bool {
         false
     }
+    pub fn force_disable() {}
     pub fn census_digest(_slices: &[&[ProtoStatement]]) -> u64 {
         0
     }

@@ -181,15 +181,16 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        // A dump wants every comb word.  Localization and the comb fusion
-        // leave the words no later reader needs holding stale values, so
-        // waveforms would disagree with a full settle while the run still
-        // passes.  Before analysis: the blocklist is computed during conv and
-        // the fusion decision is baked into the memoised pipeline.
+        // A dump wants every comb word.  These passes leave the words no later
+        // reader needs holding stale or initial values, so waveforms would
+        // disagree with a full settle while the run still passes.  Before
+        // analysis: the blocklist is computed during conv and the decisions are
+        // baked into the memoised pipeline.
         if self.opt.wave {
             veryl_simulator::backend::aot_c::force_disable_localize();
             veryl_simulator::ir::force_disable_comb_fusion();
             veryl_simulator::ir::force_disable_field_unfuse();
+            veryl_simulator::ir::force_disable_dead_var_dce();
         }
 
         // force filelist_type to absolute which can be refered from temporary directory
