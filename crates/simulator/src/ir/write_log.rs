@@ -438,6 +438,23 @@ fn commit_from_log_impl<const WATCHED: bool>(
                     (p.add(tail) as *mut $t).write_unaligned(hi_v);
                 }};
             }
+            // Wider than any typed store: decided on ONE compare, so a design
+            // whose FFs are all wide never walks the size table below.
+            if nb > 16 {
+                // Through `dst` like the arms below: a `&mut ff_values`
+                // reborrow here would pop its tag, so the next iteration's
+                // store through it is UB under Stacked Borrows.
+                let p = dst.add(offset);
+                let s = entry.payload.as_ptr();
+                if WATCHED
+                    && !hit
+                    && std::slice::from_raw_parts(p, nb) != std::slice::from_raw_parts(s, nb)
+                {
+                    hit = watched(offset, nb);
+                }
+                std::ptr::copy_nonoverlapping(s, p, nb);
+                continue;
+            }
             match nb {
                 1 => {
                     let v = *s;
@@ -452,20 +469,7 @@ fn commit_from_log_impl<const WATCHED: bool>(
                 3 => store_pair!(u16, 2),
                 5..=7 => store_pair!(u32, 4),
                 9..=16 => store_pair!(u64, 8),
-                _ => {
-                    // Through `dst` like the arms above: a `&mut ff_values`
-                    // reborrow here would pop its tag, so the next iteration's
-                    // store through it is UB under Stacked Borrows.
-                    let p = dst.add(offset);
-                    let s = entry.payload.as_ptr();
-                    if WATCHED
-                        && !hit
-                        && std::slice::from_raw_parts(p, nb) != std::slice::from_raw_parts(s, nb)
-                    {
-                        hit = watched(offset, nb);
-                    }
-                    std::ptr::copy_nonoverlapping(s, p, nb);
-                }
+                _ => unreachable!("nb <= 16 here"),
             }
         }
     }
@@ -473,6 +477,7 @@ fn commit_from_log_impl<const WATCHED: bool>(
 }
 
 /// See [`commit_from_log_impl`].
+#[inline]
 pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
     commit_from_log_impl::<false>(ff_values, buffer, |_, _| false);
 }
