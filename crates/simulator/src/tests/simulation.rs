@@ -5453,6 +5453,46 @@ fn const_array_in_initial() {
 }
 
 #[test]
+fn const_array_to_dynamic_sub_array() {
+    // Lowering the const array element-wise leaves the dynamic index on a scalar.
+    let code = r#"
+    package pk {
+        type sub = logic<8> [3];
+        const TBL: sub = '{8'd1, 8'd2, 8'd3};
+    }
+    module Top (
+        i:  input  logic<1>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+    ) {
+        var s: logic<8> [2, 3];
+        always_comb {
+            s    = '{'{8'd0, 8'd0, 8'd0}, '{8'd0, 8'd0, 8'd0}};
+            s[i] = pk::TBL;
+        }
+        assign o0 = s[0][2];
+        assign o1 = s[1][2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("i", Value::new(1, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o0").unwrap(), Value::new(0, 8, false));
+        assert_eq!(sim.get("o1").unwrap(), Value::new(3, 8, false));
+
+        sim.set("i", Value::new(0, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o0").unwrap(), Value::new(3, 8, false));
+        assert_eq!(sim.get("o1").unwrap(), Value::new(0, 8, false));
+    }
+}
+
+#[test]
 fn sub_array_assign() {
     // The index prefix can be on either side of the assignment.
     let code = r#"

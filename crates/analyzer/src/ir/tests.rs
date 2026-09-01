@@ -3186,6 +3186,52 @@ fn package_const_dynamic_select() {
 }
 
 #[test]
+fn package_const_whole_array() {
+    // A const declared in another package has no whole-array form: every array
+    // context takes it element-wise.
+    let code = r#"
+    package a_pkg {
+        const A: u32 [2]    = '{0, 1};
+        const B: u32 [2, 2] = '{'{1, 2}, '{3, 4}};
+    }
+    module b_module {
+        const C: u32 [2, 2] = '{a_pkg::A, a_pkg::A};
+        var d: u32 [2];
+        var e: u32 [2, 2];
+        assign d = a_pkg::A;
+        assign e = a_pkg::B;
+    }
+    "#;
+
+    let exp = r#"module b_module {
+  const var0[0](C): bit<32> = 32'h00000000;
+  const var0[1](C): bit<32> = 32'h00000001;
+  const var0[2](C): bit<32> = 32'h00000000;
+  const var0[3](C): bit<32> = 32'h00000001;
+  var var1[0](d): bit<32> = 32'hxxxxxxxx;
+  var var1[1](d): bit<32> = 32'hxxxxxxxx;
+  var var2[0](e): bit<32> = 32'hxxxxxxxx;
+  var var2[1](e): bit<32> = 32'hxxxxxxxx;
+  var var2[2](e): bit<32> = 32'hxxxxxxxx;
+  var var2[3](e): bit<32> = 32'hxxxxxxxx;
+
+  comb {
+    var1[32'h00000000] = 32'sh00000000;
+    var1[32'h00000001] = 32'sh00000001;
+  }
+  comb {
+    var2[32'h00000000][32'h00000000] = 32'sh00000001;
+    var2[32'h00000000][32'h00000001] = 32'sh00000002;
+    var2[32'h00000001][32'h00000000] = 32'sh00000003;
+    var2[32'h00000001][32'h00000001] = 32'sh00000004;
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
 fn const_select_multi_dim_width() {
     // `M[2]` on a multi-dimensional packed type is the third 8 bit element,
     // not bit 2.

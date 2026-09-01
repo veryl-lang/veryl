@@ -182,7 +182,6 @@ fn dynamic_index_leaving_a_sub_array() {
     // reporting.
     let bodies = [
         "x = 8'd0; s[i] = t;",
-        "x = 8'd0; s[i] = pk::TBL;",
         "x = 8'd0; s[i] = f();",
         "x = 8'd0; s[i] = u[j];",
         "{s[i], x} = 16'h1234;",

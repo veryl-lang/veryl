@@ -340,6 +340,66 @@ impl ArrayLiteralExpression {
     }
 }
 
+/// A const array declared in another namespace arrives folded to one value per
+/// element instead of an array literal; left whole it lowers to `unknown`.
+fn eval_const_array(
+    context_array: Option<&ShapeRef>,
+    expr: &ir::Expression,
+) -> Option<Vec<ArrayLiteralExpression>> {
+    let array = context_array?;
+    if array.is_empty() {
+        return None;
+    }
+
+    let ir::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let ir::Factor::Value(comptime) = factor.as_ref() else {
+        return None;
+    };
+    let ValueVariant::NumericArray(values) = &comptime.value else {
+        return None;
+    };
+    // Same total but a different shape (`[2, 3]` into `[3, 2]`) is a type
+    // error; expanding it would silently reshape instead.
+    if comptime.r#type.array.as_slice() != array.as_slice() {
+        return None;
+    }
+    let dims: Vec<usize> = array.iter().copied().collect::<Option<_>>()?;
+    // A zero-length dimension would expand to no statement, dropping the assignment.
+    if dims.contains(&0) || array.total()? != values.len() {
+        return None;
+    }
+
+    // Cloned per element, so keeping the element list here would be quadratic.
+    let mut element = comptime.clone();
+    element.r#type.array = Shape::default();
+    element.value = ValueVariant::Unknown;
+
+    let ret = values
+        .iter()
+        .enumerate()
+        .map(|(flat, value)| {
+            // Row-major, matching `ShapeRef::calc_index`.
+            let mut index = vec![0; dims.len()];
+            let mut rest = flat;
+            for (i, dim) in dims.iter().enumerate().rev() {
+                index[i] = rest % dim;
+                rest /= dim;
+            }
+
+            let mut comptime = element.clone();
+            comptime.value = ValueVariant::Numeric(value.clone());
+            ArrayLiteralExpression {
+                index,
+                select: vec![],
+                expr: ir::Expression::Term(Box::new(ir::Factor::Value(comptime))),
+            }
+        })
+        .collect();
+    Some(ret)
+}
+
 pub fn eval_array_literal(
     context: &mut Context,
     context_array: Option<&ShapeRef>,
@@ -347,6 +407,10 @@ pub fn eval_array_literal(
     expr: &mut ir::Expression,
 ) -> IrResult<Option<Vec<ArrayLiteralExpression>>> {
     let token = expr.token_range();
+
+    if let Some(x) = eval_const_array(context_array, expr) {
+        return Ok(Some(x));
+    }
 
     let ir::Expression::ArrayLiteral(items, _) = expr else {
         return Ok(None);
