@@ -5517,6 +5517,22 @@ fn mismatch_type() {
             ..
         } if actual == "input port"
     ));
+
+    let code = r#"
+    module ModuleA {
+        function f::<T: type> (
+            x: input T,
+        ) -> T {
+            var y: T;
+            y = x;
+            return y;
+        }
+        let _c: u32 = f::<u32>(1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
