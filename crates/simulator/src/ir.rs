@@ -104,6 +104,8 @@ pub struct Ir {
     /// JIT-compiled evaluation of the derived-clock dependency closure,
     /// run by `partial_settle` independently of `comb_statements`.
     pub derived_clock_eval_stmts: Vec<Statement>,
+    /// See `Module::derived_clock_eval_passes`.
+    pub derived_clock_eval_passes: usize,
     /// Diagnostic: number of nontrivial SCCs found in the pre-JIT comb
     /// graph.  Real combinational loops are rejected by `analyze_dependency`,
     /// so any non-zero value here indicates duplicate ProtoStatements in
@@ -203,6 +205,7 @@ impl Ir {
             disable_ff_opt: config.disable_ff_opt,
             derived_clock_schedule: module.derived_clock_schedule,
             derived_clock_eval_stmts: module.derived_clock_eval_stmts,
+            derived_clock_eval_passes: module.derived_clock_eval_passes,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
             whole_comb: module.whole_comb,
             aot_c_validate: config.aot_c_validate,
@@ -479,9 +482,16 @@ impl Ir {
     }
 
     /// Re-evaluate just the derived-clock dependency closure.
+    ///
+    /// The closure inherits `comb_statements`' order, so it needs the same
+    /// treatment `settle_comb` gives the whole list: where that order has a
+    /// backward edge, one pass leaves a gated clock holding the value its
+    /// producer had before this edge.
     pub fn partial_settle(&self, mask_cache: &mut MaskCache) {
-        for stmt in &self.derived_clock_eval_stmts {
-            dispatch_stmt_fast(stmt, mask_cache);
+        for _ in 0..self.derived_clock_eval_passes {
+            for stmt in &self.derived_clock_eval_stmts {
+                dispatch_stmt_fast(stmt, mask_cache);
+            }
         }
     }
 

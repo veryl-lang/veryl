@@ -716,3 +716,293 @@ fn packed_struct_array_dynamic_field_ff() {
         }
     }
 }
+
+/// The eval closure inherits the comb list's order, and a scope the
+/// dependency sort could not linearize leaves a reader ahead of its
+/// producer there.  One pass then evaluates the gate from the value its
+/// producer held before this edge, the rising edge is never seen, and every
+/// flop on the gated clock stops.  Reversing the chunk reproduces that order
+/// on a design small enough to state the expected counts for.
+#[test]
+fn gated_clock_closure_order_with_a_backward_edge() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en1: input  '_ logic,
+        i_en2: input  '_ logic,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        let clk1: '_ clock = i_clk & i_en1;
+        let clk2: '_ clock = clk1  & i_en2;
+        always_ff (clk1, i_rst) {
+            if_reset { o_a = 0; } else { o_a += 1; }
+        }
+        always_ff (clk2, i_rst) {
+            if_reset { o_b = 0; } else { o_b += 1; }
+        }
+    }
+    "#;
+
+    let mut exercised = 0;
+    for config in Config::all() {
+        dbg!(&config);
+        let mut ir = analyze(code, &config);
+        // A single batched chunk has no order to reverse; those configs
+        // cannot carry the defect, so they are not evidence either way.
+        if ir.derived_clock_eval_stmts.len() < 2 {
+            continue;
+        }
+        exercised += 1;
+        ir.derived_clock_eval_stmts.reverse();
+        // Any order of N statements converges in N passes.
+        let passes = ir.derived_clock_eval_stmts.len();
+        ir.derived_clock_eval_passes = passes;
+
+        // NEGATIVE CONTROL: the same reversed chunk with the single pass the
+        // closure used to get.  Without this the test would also pass on an
+        // order that never needed the extra passes.
+        let mut one = analyze(code, &config);
+        one.derived_clock_eval_stmts.reverse();
+        one.derived_clock_eval_passes = 1;
+        let mut sim_one = Simulator::new(one, None);
+        let clk_one = sim_one.get_clock("i_clk").unwrap();
+        let rst_one = sim_one.get_reset("i_rst").unwrap();
+        sim_one.set("i_en1", Value::new(1, 1, false));
+        sim_one.set("i_en2", Value::new(1, 1, false));
+        sim_one.step_reset(&clk_one, &rst_one);
+        for _ in 0..6 {
+            sim_one.step(&clk_one);
+        }
+        assert_ne!(
+            sim_one.get("o_b").unwrap(),
+            Value::new(6, 8, false),
+            "vacuous: one pass over the reversed chunk already gave the right \
+             answer, so the order carries no backward edge, {config:?}",
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_en1", Value::new(1, 1, false));
+        sim.set("i_en2", Value::new(1, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        for _ in 0..6 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(6, 8, false),
+            "first-stage gate, {config:?}",
+        );
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(6, 8, false),
+            "second-stage gate reads the first through the reversed chunk, {config:?}",
+        );
+
+        sim.set("i_en2", Value::new(0, 1, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(10, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(6, 8, false),
+            "{config:?}"
+        );
+    }
+    assert!(
+        exercised > 0,
+        "no config produced a multi-statement eval chunk"
+    );
+}
+
+/// The hardened-cell shape: the gate is a cell two levels down, its output
+/// leaves through two module output ports as plain logic, the `clock` object
+/// is formed at the consumer, and it is handed down two more input ports
+/// before it reaches the flop.  Nothing covered the ports.
+///
+/// The check is a GATED-EDGE COUNT against a shadow counter on the master
+/// clock, so a gate that opens a cycle early or late fails too; `o_tot`
+/// makes the run non-vacuous in both directions.
+#[test]
+fn gated_clock_through_module_ports_at_depth() {
+    let code = r#"
+    module Icg (
+        i_clk : input  '_ clock,
+        i_en  : input     logic,
+        o_clkg: output    logic,
+    ) {
+        var en_lat: logic;
+        let clk_n : '_ clock_negedge = i_clk;
+        always_ff (clk_n) {
+            en_lat = i_en;
+        }
+        assign o_clkg = i_clk & en_lat;
+    }
+
+    module Cg (
+        i_clk : input  '_ clock,
+        i_dis : input     logic,
+        o_clkg: output    logic,
+    ) {
+        inst u_icg: Icg (
+            i_clk          ,
+            i_en  : !i_dis ,
+            o_clkg         ,
+        );
+    }
+
+    module Leaf (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset { o_cnt = 0; } else { o_cnt += 1; }
+        }
+    }
+
+    module Mid (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+    ) {
+        inst u_leaf: Leaf (
+            i_clk ,
+            i_rst ,
+            o_cnt ,
+        );
+    }
+
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_dis: input     logic,
+        o_cnt: output    logic<8>,
+        o_exp: output    logic<8>,
+        o_tot: output    logic<8>,
+    ) {
+        var clkg_w: logic;
+        inst u_cg: Cg (
+            i_clk          ,
+            i_dis          ,
+            o_clkg: clkg_w ,
+        );
+        let clkg: '_ clock = clkg_w;
+        inst u_mid: Mid (
+            i_clk: clkg ,
+            i_rst       ,
+            o_cnt       ,
+        );
+
+        // Shadow model, transcribed from the latch the cell stands in for:
+        // `en_lat` is `i_en` as it read while the clock was low.
+        var en_ref: logic;
+        let clk_n : '_ clock_negedge = i_clk;
+        always_ff (clk_n) {
+            en_ref = !i_dis;
+        }
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_exp = 0;
+                o_tot = 0;
+            } else {
+                o_tot += 1;
+                if en_ref {
+                    o_exp += 1;
+                }
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_dis", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        for phase in 0..3 {
+            sim.set("i_dis", Value::new(u64::from(phase == 1), 1, false));
+            for _ in 0..5 {
+                sim.step(&clk);
+                assert_eq!(
+                    sim.get("o_cnt").unwrap(),
+                    sim.get("o_exp").unwrap(),
+                    "gated edges through the ports vs the shadow model, {config:?}",
+                );
+            }
+        }
+
+        let gated = sim.get("o_cnt").unwrap();
+        let total = sim.get("o_tot").unwrap();
+        assert_eq!(total, Value::new(15, 8, false), "{config:?}");
+        assert_ne!(
+            gated,
+            Value::new(0, 8, false),
+            "gate never opened, {config:?}"
+        );
+        assert_ne!(gated, total, "gate never closed, {config:?}");
+    }
+}
+
+#[test]
+fn a_clock_chained_off_a_negedge_flop_keeps_running() {
+    // The flop's rise happens inside the end-of-step fall batch.  Nothing
+    // outside that batch can see it: the snapshot taken right after records
+    // the new level, so a rise left unfired there is lost for good and the
+    // whole downstream domain stops.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+        o_hlf: output    logic,
+    ) {
+        let clk_n: '_ clock_negedge = i_clk;
+        var half: logic;
+        always_ff (clk_n, i_rst) {
+            if_reset { half = 0; } else { half = !half; }
+        }
+        let clk_half: '_ clock = half;
+        always_ff (clk_half, i_rst) {
+            if_reset { o_cnt = 0; } else { o_cnt += 1; }
+        }
+        assign o_hlf = half;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for step in 1..=6u64 {
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("o_hlf").unwrap().payload_u128() as u64,
+                step % 2,
+                "the source flop must toggle every step, {config:?}"
+            );
+            assert_eq!(
+                sim.get("o_cnt").unwrap().payload_u128() as u64,
+                step.div_ceil(2),
+                "step {step}: the chained domain must advance on every rise, {config:?}"
+            );
+        }
+    }
+}

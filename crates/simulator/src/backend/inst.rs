@@ -351,7 +351,7 @@ fn relocate_entry(
     let derived_clock_candidates = entry
         .derived_clock_candidates
         .iter()
-        .map(|(id, off, nb, pol)| (*id, off.adjust(ff_delta, comb_delta), *nb, *pol))
+        .map(|(id, off, nb, pol, neg)| (*id, off.adjust(ff_delta, comb_delta), *nb, *pol, *neg))
         .collect();
     ReusedStatements {
         event_statements,
