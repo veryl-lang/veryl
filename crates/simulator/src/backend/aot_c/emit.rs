@@ -4548,31 +4548,6 @@ pub fn prepare_event(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCe
     Some(compile_or_spawn(src, async_mode))
 }
 
-/// Statements in a `ProtoStatement` tree, itself included — the "mass" a
-/// per-top-level-statement bail forfeits when that tree cannot be emitted.
-fn proto_stmt_mass(s: &ProtoStatement) -> usize {
-    let kids: usize = match s {
-        ProtoStatement::If(x) => x
-            .true_side
-            .iter()
-            .chain(x.false_side.iter())
-            .map(proto_stmt_mass)
-            .sum(),
-        ProtoStatement::Case(c) => c
-            .arms
-            .iter()
-            .flat_map(|a| a.body.iter())
-            .chain(c.default.iter())
-            .map(proto_stmt_mass)
-            .sum(),
-        ProtoStatement::For(f) => f.body.iter().map(proto_stmt_mass).sum(),
-        ProtoStatement::SequentialBlock(b) => b.iter().map(proto_stmt_mass).sum(),
-        ProtoStatement::CompiledBlock(cb) => cb.original_stmts.iter().map(proto_stmt_mass).sum(),
-        _ => 0,
-    };
-    1 + kids
-}
-
 /// Emit one `veryl_aot_eval` function for an event statement sequence.
 /// FF-target assigns push WriteLogEntries via `write_log` (unused in
 /// the comb path).
@@ -4662,7 +4637,7 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
                         let (mut ok_top, mut ok_mass, mut bad_top, mut bad_mass) = (0, 0, 0, 0);
                         let mut worst = 0usize;
                         for s in stmts {
-                            let m = proto_stmt_mass(s);
+                            let m = s.statement_mass();
                             if emit_stmt(s).is_some() {
                                 ok_top += 1;
                                 ok_mass += m;
@@ -6830,8 +6805,8 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
             };
             eprintln!(
                 "[aot_c]   shape: {kind} holding {} nested statements ({:.0} B each)",
-                proto_stmt_mass(stmt),
-                out.len() as f64 / proto_stmt_mass(stmt) as f64,
+                stmt.statement_mass(),
+                out.len() as f64 / stmt.statement_mass() as f64,
             );
             eprintln!(
                 "[aot_c] one statement emits {} B, over the {} B ceiling; declining AOT-C",

@@ -1091,6 +1091,36 @@ pub enum ProtoStatement {
 }
 
 impl ProtoStatement {
+    /// Statements in this tree, itself included.
+    pub(crate) fn statement_mass(&self) -> usize {
+        let kids: usize = match self {
+            ProtoStatement::If(x) => x
+                .true_side
+                .iter()
+                .chain(x.false_side.iter())
+                .map(ProtoStatement::statement_mass)
+                .sum(),
+            ProtoStatement::Case(c) => c
+                .arms
+                .iter()
+                .flat_map(|a| a.body.iter())
+                .chain(c.default.iter())
+                .map(ProtoStatement::statement_mass)
+                .sum(),
+            ProtoStatement::For(f) => f.body.iter().map(ProtoStatement::statement_mass).sum(),
+            ProtoStatement::SequentialBlock(b) => {
+                b.iter().map(ProtoStatement::statement_mass).sum()
+            }
+            ProtoStatement::CompiledBlock(cb) => cb
+                .original_stmts
+                .iter()
+                .map(ProtoStatement::statement_mass)
+                .sum(),
+            _ => 0,
+        };
+        1 + kids
+    }
+
     /// Adjust all embedded byte offsets by the given deltas.
     /// FF offsets are shifted by `ff_delta`, comb offsets by `comb_delta`.
     pub fn adjust_offsets(&mut self, ff_delta: isize, comb_delta: isize) {

@@ -587,11 +587,15 @@ fn validate_meta_offsets(
     }
 }
 
-/// Maximum number of statements per JIT function.
+/// Maximum number of statements per JIT function, COUNTING NESTED ones
+/// (`ProtoStatement::statement_mass`) rather than top-level entries.
 /// Keeps regalloc2 cost manageable (O(N^2) in SSA variable count).
 /// Sweet spot around 1024-2048: per-step enum-match dispatch overhead
 /// grows as chunks shrink below ~256, while Cranelift regalloc spill
 /// cascade / load_cache eviction churn grows as chunks exceed ~4096.
+/// Those figures were calibrated on flat comb lists, where an entry IS a
+/// statement and the two units coincide; nested counting only changes what
+/// happens where they do not.
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
 const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
 
@@ -6226,24 +6230,65 @@ fn reset_dispatch_key(
     }
 }
 
-/// Fuse adjacent `if_reset` dispatches on the same reset net.
+/// How many statements fusion may ADD to one group.  A dispatch whose own tree
+/// already exceeds this still passes through whole: the cap bounds the merge,
+/// not the input.  A fused group is ONE statement to the chunk budget, to the
+/// AOT-C per-statement ceiling and to regalloc alike, so uncapped it defeats
+/// all three at once.
+const RESET_FUSE_MAX_MASS: usize = 1024;
+
+/// The cap in force, with `VERYL_RESET_FUSE_MAX` overriding it (`0` = uncapped)
+/// so a design's before/after can be measured from one binary.
+fn reset_fuse_max_mass() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        match std::env::var("VERYL_RESET_FUSE_MAX")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+        {
+            Some(0) => usize::MAX,
+            Some(n) => n,
+            None => RESET_FUSE_MAX_MASS,
+        }
+    })
+}
+
+/// Fuse adjacent `if_reset` dispatches on the same reset net, up to
+/// [`RESET_FUSE_MAX_MASS`] statements per group.
 ///
 /// Sound because the analyzer rejects an `always_ff` that writes a reset-typed
 /// variable, so nothing a clock event evaluates can change the condition
-/// between two dispatches.  Only ADJACENT ones fuse, so nothing is reordered.
+/// between two dispatches.  Only ADJACENT ones fuse, so nothing is reordered;
+/// stopping early is equally safe — an unfused dispatch just tests reset itself.
 fn merge_reset_dispatch(
     stmts: &mut Vec<ProtoStatement>,
     reset_offsets: &crate::HashSet<VarOffset>,
 ) {
+    // `VERYL_RESET_FUSE=0` leaves each `if_reset` dispatch standing, so the
+    // saving the fusion buys can be measured against it rather than assumed.
+    if std::env::var("VERYL_RESET_FUSE").as_deref() == Ok("0") {
+        return;
+    }
+    let diag = std::env::var("VERYL_RESET_FUSE_DIAG").as_deref() == Ok("1");
+    let cap = reset_fuse_max_mass();
+    let before = stmts.len();
     let mut out: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
+    // How many source dispatches went into each output statement, so the diag
+    // can report the reset tests actually saved rather than a statement count.
+    let mut fused: Vec<usize> = Vec::with_capacity(stmts.len());
     let mut last_key: Option<(VarOffset, Option<(usize, usize)>)> = None;
+    // Running size of the group at `out.last()`, carried rather than recomputed
+    // (walking the growing tree per dispatch would be quadratic).
+    let mut group_mass = 0usize;
     for stmt in stmts.drain(..) {
         let key = match &stmt {
             ProtoStatement::If(x) => reset_dispatch_key(x, reset_offsets),
             _ => None,
         };
+        let mass = stmt.statement_mass();
         if key.is_some()
             && key == last_key
+            && group_mass + mass <= cap
             && let Some(ProtoStatement::If(prev)) = out.last_mut()
         {
             let ProtoStatement::If(cur) = stmt else {
@@ -6251,10 +6296,38 @@ fn merge_reset_dispatch(
             };
             prev.true_side.extend(cur.true_side);
             prev.false_side.extend(cur.false_side);
+            *fused.last_mut().expect("out is non-empty here") += 1;
+            // The merge discards `cur`'s own `If`, so the tree grows by one
+            // less than its mass.
+            group_mass += mass - 1;
             continue;
         }
+        // A new group, including when the cap stopped the previous one: the
+        // key is unchanged there, so the next dispatch fuses into this one.
+        fused.push(1);
+        group_mass = mass;
         last_key = key;
         out.push(stmt);
+    }
+    if diag {
+        let (mut groups, mut saved, mut top_n, mut top_mass) = (0usize, 0usize, 0usize, 0usize);
+        for (i, n) in fused.iter().enumerate() {
+            if *n > 1 {
+                groups += 1;
+                saved += n - 1;
+                let mass = out[i].statement_mass();
+                if mass > top_mass {
+                    top_mass = mass;
+                    top_n = *n;
+                }
+            }
+        }
+        eprintln!(
+            "[reset_fuse] cap={cap} {before} -> {} top-level stmts; {groups} fused group(s), \
+             {saved} reset test(s) saved per edge; largest fuses {top_n} dispatches \
+             into one If of {top_mass} statements",
+            out.len(),
+        );
     }
     *stmts = out;
 }
@@ -6630,6 +6703,57 @@ mod event_written_comb_tests {
                 signed: false,
             },
         }
+    }
+
+    /// `if (rst) { .. } else { .. }` on `rst`, the shape the fusion merges.
+    fn reset_dispatch(rst: VarOffset) -> ProtoStatement {
+        ProtoStatement::If(crate::ir::statement::ProtoIfStatement {
+            cond: Some(ProtoExpression::Variable {
+                var_offset: rst,
+                select: None,
+                dynamic_select: None,
+                width: 1,
+                var_full_width: 1,
+                expr_context: crate::ir::ExpressionContext {
+                    width: 1,
+                    signed: false,
+                },
+            }),
+            true_side: vec![cassign(VarOffset::Ff(0x100), 32)],
+            false_side: vec![cassign(VarOffset::Ff(0x100), 32)],
+        })
+    }
+
+    #[test]
+    fn reset_fusion_stops_at_the_cap() {
+        // Uncapped, a run of same-net dispatches fuses into ONE statement of
+        // unbounded size — which is what defeats the chunk cap, the AOT-C
+        // per-statement ceiling and Cranelift's register allocator at once.
+        let rst = VarOffset::Comb(0x40);
+        let mut resets = crate::HashSet::default();
+        resets.insert(rst);
+        let n = 3000;
+        let mut stmts: Vec<ProtoStatement> = (0..n).map(|_| reset_dispatch(rst)).collect();
+        let total: usize = stmts.iter().map(|s| s.statement_mass()).sum();
+        merge_reset_dispatch(&mut stmts, &resets);
+
+        let worst = stmts.iter().map(|s| s.statement_mass()).max().unwrap_or(0);
+        assert!(
+            worst <= RESET_FUSE_MAX_MASS,
+            "a fused group reached {worst} statements, over the {RESET_FUSE_MAX_MASS} cap",
+        );
+        // Still fusing: the cap costs one reset test per split, not the saving.
+        // Bound from what the groups actually hold -- merging drops each
+        // absorbed dispatch's own `If`, so the pre-fusion sum over-counts.
+        let fused: usize = stmts.iter().map(|s| s.statement_mass()).sum();
+        let lower = fused.div_ceil(RESET_FUSE_MAX_MASS);
+        assert!(
+            stmts.len() >= lower && stmts.len() <= lower * 2,
+            "{n} dispatches ({total} statements, {fused} after fusion) became {} groups; \
+             expected about {lower}",
+            stmts.len(),
+        );
+        assert!(stmts.len() < n, "nothing fused at all");
     }
 
     fn cassign(dst: VarOffset, w: usize) -> ProtoStatement {
