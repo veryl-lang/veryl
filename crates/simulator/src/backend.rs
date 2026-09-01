@@ -53,6 +53,8 @@ pub trait Backend: Send {
         false
     }
 
+    /// Only Cranelift implements this, so `build_chunked`'s spans are never a
+    /// mix of compilers.  A whole-module backend goes through [`CompiledWhole`].
     fn compile_chunk(
         &mut self,
         _ctx: &CompileCtx,

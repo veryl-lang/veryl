@@ -2058,6 +2058,12 @@ impl Simulator {
     /// would diff an empty log against the real Cranelift effect and report a
     /// phantom divergence; mirror the non-validate path instead: return false
     /// and let the caller run the per-stmt Cranelift dispatch.
+    ///
+    /// ONLY reachable for an event that has a whole-event handle.  An event the
+    /// emitter declined has none, so validate never sees it and never says so:
+    /// a green VALIDATE run covers the events AOT-C already compiled, not the
+    /// ones that most need checking.  Read `VERYL_BACKEND_DIAG` alongside it to
+    /// know what was actually compared.
     fn validate_event_aot(
         &mut self,
         whole: &dyn CompiledWhole,
