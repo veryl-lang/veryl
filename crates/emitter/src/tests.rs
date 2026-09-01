@@ -1479,6 +1479,52 @@ endmodule
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+package a_pkg {
+  const A: u32 = 8;
+}
+interface b_if {
+  import a_pkg::A;
+
+  var b: logic<A>;
+
+  modport mp {
+    b: input,
+  }
+}
+#[expand(modport)]
+module c_module (
+  b: modport b_if::mp,
+) {}
+"#;
+
+    let expect = r#"package prj_a_pkg;
+    localparam int unsigned A = 8;
+endpackage
+interface prj_b_if;
+    import prj_a_pkg::A;
+
+    logic [A-1:0] b;
+
+    modport mp (
+        input b
+    );
+endinterface
+
+module prj_c_module (
+    input var logic [prj_a_pkg::A-1:0] __b_b
+);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]
@@ -1929,6 +1975,67 @@ module prj_e_module (
 
     always_comb begin
         fif[0].connect_if(eif[0].ready, eif[0].valid, eif[0].payload);
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+package a_pkg {
+    const A: u32 = 8;
+}
+interface b_if {
+    import a_pkg::A;
+
+    var b: logic<A>;
+
+    modport mp {
+        b: output,
+    }
+}
+module c_module (
+    b: modport b_if::mp,
+) {
+    function func(b: modport b_if::mp) {
+        b.b = 0;
+    }
+
+    always_comb {
+        func(b);
+    }
+}
+"#;
+
+    let expect = r#"package prj_a_pkg;
+    localparam int unsigned A = 8;
+endpackage
+interface prj_b_if;
+    import prj_a_pkg::A;
+
+    logic [A-1:0] b;
+
+    modport mp (
+        output b
+    );
+endinterface
+module prj_c_module (
+    prj_b_if.mp b
+);
+    function automatic void func(
+        output var logic [prj_a_pkg::A-1:0] __b_b
+    ) ;
+        __b_b = 0;
+    endfunction
+
+    always_comb begin
+        func(b.b);
     end
 endmodule
 //# sourceMappingURL=test.sv.map

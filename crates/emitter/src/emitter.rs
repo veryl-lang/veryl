@@ -5845,9 +5845,11 @@ impl VerylWalker for Emitter {
                     self.generic_map.push(entry.generic_maps.to_owned());
 
                     let src_line = self.src_line;
+                    let emit_package_prefix = self.emit_package_prefix;
                     self.aligner.disable_auto_finish();
                     self.clear_adjust_line();
                     self.in_direction_with_var = true;
+                    self.emit_package_prefix = true;
 
                     // Each port carries its comma inside its own guard so the
                     // comma vanishes with it. A guarded last port has none, and is
@@ -5893,6 +5895,7 @@ impl VerylWalker for Emitter {
                     self.aligner.enable_auto_finish();
                     self.src_line = src_line;
                     self.in_direction_with_var = false;
+                    self.emit_package_prefix = emit_package_prefix;
                 } else {
                     let x = x.port_type_concrete.as_ref();
                     self.direction(&x.direction);
