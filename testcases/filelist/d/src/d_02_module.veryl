@@ -1,7 +1,6 @@
 module d_02_top {
-  let _d: logic<d_01_pkg::D> = '0;
-  inst u_sub: d_02_sub;
+    let _d: logic<d_01_pkg::D> = '0;
+    inst u_sub: d_02_sub;
 }
 
-module d_02_sub {
-}
+module d_02_sub {}

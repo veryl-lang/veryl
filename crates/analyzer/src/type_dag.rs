@@ -6,9 +6,11 @@ use crate::symbol_table;
 use crate::{HashMap, HashSet};
 use bimap::BiMap;
 use daggy::petgraph::visit::Dfs;
-use daggy::{Dag, NodeIndex, Walker, petgraph::algo};
+use daggy::{Dag, NodeIndex, Walker, petgraph::Direction, petgraph::algo};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::rc::Rc;
 use veryl_parser::resource_table::PathId;
 use veryl_parser::veryl_token::Token;
@@ -524,13 +526,60 @@ impl TypeDag {
     }
 
     /// Files in dependency order.
+    ///
+    /// Where the graph allows a choice, an opaque file goes last: its content is
+    /// embedded SystemVerilog, so dependencies it really has can be absent from
+    /// the graph. Ties then fall back to the path, as node insertion order
+    /// differs between full and incremental builds.
     fn toposort_file(&self) -> Vec<PathId> {
-        let nodes = algo::toposort(self.file_dag.graph(), None).unwrap();
+        let graph = self.file_dag.graph();
+
+        let mut opaque: HashSet<u32> = self.file_nodes.right_values().copied().collect();
+        for symbol in self.symbols.values() {
+            if matches!(
+                symbol.kind,
+                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
+            ) && let Some(path) = symbol.token.source.get_path()
+                && let Some(node) = self.file_nodes.get_by_left(&path)
+            {
+                opaque.remove(node);
+            }
+        }
+
+        let path_of = |node: u32| self.file_nodes.get_by_right(&node).copied();
+        let sort_key = |node: u32| {
+            let path = path_of(node).map(|x| x.to_string()).unwrap_or_default();
+            (u8::from(opaque.contains(&node)), path)
+        };
+
+        let mut in_degree = HashMap::default();
+        let mut ready = BinaryHeap::new();
+        for node in graph.node_indices() {
+            let node = node.index() as u32;
+            let degree = graph
+                .neighbors_directed(node.into(), Direction::Incoming)
+                .count();
+            if degree == 0 {
+                ready.push(Reverse((sort_key(node), node)));
+            } else {
+                in_degree.insert(node, degree);
+            }
+        }
+
         let mut ret = vec![];
-        for node in nodes {
-            let index = node.index() as u32;
-            if let Some(path) = self.file_nodes.get_by_right(&index) {
-                ret.push(*path);
+        while let Some(Reverse((_, node))) = ready.pop() {
+            if let Some(path) = path_of(node) {
+                ret.push(path);
+            }
+            for child in graph.neighbors_directed(node.into(), Direction::Outgoing) {
+                let child = child.index() as u32;
+                if let Some(degree) = in_degree.get_mut(&child) {
+                    *degree -= 1;
+                    if *degree == 0 {
+                        in_degree.remove(&child);
+                        ready.push(Reverse((sort_key(child), child)));
+                    }
+                }
             }
         }
         ret
