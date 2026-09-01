@@ -1519,6 +1519,177 @@ fn wide_256_aot_native_comb() {
     assert_eq!(sim.get("d").unwrap(), Value::new(0x100E, 256, false));
     assert_eq!(sim.get("e").unwrap(), Value::new(0xFF00, 256, false));
 }
+#[test]
+fn a_validate_run_counts_the_dispatches_it_compared() {
+    // The counters used to sit only on the non-validate branch, so a validate
+    // run reported nothing -- indistinguishable from "no whole-* handle".
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module ValidateDispatchTally (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_v  : input  logic<32>,
+        o_a  : output logic<32>,
+        o_b  : output logic<64>,
+    ) {
+        var acc : logic<32>;
+        var wide: logic<192>;
+        always_ff {
+            if_reset {
+                acc  = 0;
+                wide = 0;
+            } else {
+                acc         = acc + i_v;
+                wide[95:32] = {acc, i_v};
+            }
+        }
+        assign o_a = acc;
+        assign o_b = wide[95:32];
+    }
+    "#;
+    {
+        let config = aot_native_validate_config();
+        let ir = analyze_top(code, &config, "ValidateDispatchTally").unwrap();
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for c in 1..8u64 {
+            sim.set("i_v", Value::new(c * 0x0101_0101, 32, false));
+            sim.step(&clk);
+        }
+        // The tallies publish when the Ir is dropped, so read them after.
+    }
+    let got: Vec<(String, u64, u64)> = crate::residency::dispatch_counts()
+        .into_iter()
+        .filter(|(k, _, _)| k.contains("ValidateDispatchTally"))
+        .collect();
+    // Both kinds, named: the comb tally alone would pass with the event
+    // counters deleted, which is the half this exists to pin.  Either outcome
+    // counts -- where the artifact never lands every dispatch falls back, and
+    // reporting THAT is the whole point of the field.
+    for kind in ["whole_comb:", "whole_event:"] {
+        assert!(
+            got.iter()
+                .any(|(k, ran, fell_back)| k.starts_with(kind) && ran + fell_back > 0),
+            "a validate run dispatched {kind} but counted none: {got:?}"
+        );
+    }
+}
+
+#[test]
+fn sub_byte_fields_of_one_byte_compose_in_program_order() {
+    // Sub-byte fields of ONE byte: each entry necessarily carries its
+    // neighbours' bits, so only the commit's in-order last-write-wins makes
+    // them compose.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_lo : output logic<8>,
+        o_hi : output logic<8>,
+    ) {
+        var w: logic<200>;
+        always_ff {
+            if_reset {
+                w = 0;
+            } else {
+                w[1:0] = 2'b01;
+                w[3:2] = 2'b10;
+                w[5:4] = 2'b11;
+                w[7:6] = 2'b01;
+                w[63:62] = 2'b11;
+                w[65:64] = 2'b10;
+            }
+        }
+        assign o_lo = w[7:0];
+        assign o_hi = {w[65:64], w[63:62]};
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        sim.step(&clk);
+        assert_eq!(
+            (
+                sim.get("o_lo").unwrap().payload_u128(),
+                sim.get("o_hi").unwrap().payload_u128()
+            ),
+            (0x79, 0x0b),
+            "sub-byte fields did not compose, config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_ff_shift_by_one_element_keeps_pre_write_values() {
+    // A shift-register of elements: each element takes the PREVIOUS contents
+    // of the one below in the same fire, so a narrowed entry must still carry
+    // what the earlier write deposited.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_a  : output logic<32>,
+        o_b  : output logic<32>,
+        o_c  : output logic<32>,
+    ) {
+        var w: logic<4232>;
+        always_ff {
+            if_reset {
+                w = 0;
+            } else {
+                w[91:0] = 92'h5a5a5a5a;
+                w[183:92] = w[91:0];
+                w[275:184] = w[183:92];
+            }
+        }
+        assign o_a = w[31:0];
+        assign o_b = w[123:92];
+        assign o_c = w[215:184];
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        // First fire: element 0 takes the constant; 1 and 2 take the PREVIOUS
+        // (zero) contents of the element below, not the value written this
+        // fire.  A merge that read post-write words would propagate the
+        // constant into all three.
+        sim.step(&clk);
+        assert_eq!(
+            (
+                sim.get("o_a").unwrap().payload_u128(),
+                sim.get("o_b").unwrap().payload_u128(),
+                sim.get("o_c").unwrap().payload_u128()
+            ),
+            (0x5a5a_5a5a, 0, 0),
+            "wide FF element shift lost pre-write values, config={config:?}"
+        );
+        // Second fire: the constant has moved up one element.
+        sim.step(&clk);
+        assert_eq!(
+            (
+                sim.get("o_a").unwrap().payload_u128(),
+                sim.get("o_b").unwrap().payload_u128(),
+                sim.get("o_c").unwrap().payload_u128()
+            ),
+            (0x5a5a_5a5a, 0x5a5a_5a5a, 0),
+            "wide FF element shift did not advance by one element, config={config:?}"
+        );
+    }
+}
 
 #[test]
 fn wide_ff_select_sign_extends_a_narrow_signed_rhs() {

@@ -55,7 +55,7 @@ use crate::simulator_error::SimulatorError;
 use crate::{HashMap, HashSet};
 use std::env;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use veryl_analyzer::ir as air;
@@ -167,6 +167,11 @@ pub struct Ir {
     /// taken every cycle; the residency table (a mutex) must be touched once.
     whole_comb_fallback_recorded: AtomicBool,
     pub(crate) whole_event_fallback_recorded: AtomicBool,
+    /// `[ran, fell_back]` dispatch tallies.  The `*_fallback_recorded` flags
+    /// above latch on the FIRST fallback and so cannot say how much of a run
+    /// was affected; these can.  Published to `residency` on drop.
+    pub(crate) whole_comb_dispatch: [AtomicU64; 2],
+    pub(crate) whole_event_dispatch: [AtomicU64; 2],
     /// Whether the whole-comb backend's run-once constant-cone entry has
     /// executed for THIS instance.  Per-instance (not per-artifact): a
     /// shared `.so` serves many simulators, each with fresh comb buffers.
@@ -180,7 +185,40 @@ pub struct ComponentLibrary {
     pub type_name: String,
 }
 
+/// Publishes the dispatch tallies once, at the end of the Ir's life, so the
+/// hot path stays a relaxed atomic increment on a local field.
+impl Drop for Ir {
+    fn drop(&mut self) {
+        for (kind, c) in [
+            ("whole_comb", &self.whole_comb_dispatch),
+            ("whole_event", &self.whole_event_dispatch),
+        ] {
+            let (ran, fell_back) = (c[0].load(Ordering::Relaxed), c[1].load(Ordering::Relaxed));
+            // Formatting the name reads a thread-local table, which panics on a
+            // thread that never imported it — and a panic here during unwinding
+            // aborts.  Most drops have nothing to publish, so ask first.
+            if ran == 0 && fell_back == 0 {
+                continue;
+            }
+            residency::record_dispatch(kind, &self.name.to_string(), ran, fell_back);
+        }
+    }
+}
+
 impl Ir {
+    /// Latch this module into `degraded_modules`.  Both whole-comb dispatch
+    /// sites call it, so a validate run reports the same fallbacks a plain one
+    /// does — otherwise `dispatch` could show `fell_back > 0` beside an empty
+    /// `degraded_modules`, and the two fields would contradict each other.
+    pub(crate) fn record_comb_fallback(&self) {
+        if !self
+            .whole_comb_fallback_recorded
+            .swap(true, Ordering::Relaxed)
+        {
+            residency::record_fallback("whole_comb", &self.name.to_string());
+        }
+    }
+
     pub fn from_module(module: Module, config: &Config, token: TokenRange) -> Ir {
         let mut ir = Ir {
             name: module.name,
@@ -225,6 +263,8 @@ impl Ir {
             cone_gate_state: std::cell::RefCell::new(None),
             whole_comb_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
+            whole_comb_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
+            whole_event_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             const_cone_done: Default::default(),
         };
         // Bake the WriteLogBuffer's heap-stable address into every
@@ -618,16 +658,14 @@ impl Ir {
                 // Common case: passes == 1 (no SCC backward edges).
                 for _ in 0..passes {
                     match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
-                        DispatchOutcome::Done => {}
+                        DispatchOutcome::Done => {
+                            self.whole_comb_dispatch[0].fetch_add(1, Ordering::Relaxed);
+                        }
                         DispatchOutcome::NotReady => {
+                            self.whole_comb_dispatch[1].fetch_add(1, Ordering::Relaxed);
                             // Async compile not finished yet — drop to
                             // Cranelift for this cycle (see `residency`).
-                            if !self
-                                .whole_comb_fallback_recorded
-                                .swap(true, Ordering::Relaxed)
-                            {
-                                residency::record_fallback("whole_comb", &self.name.to_string());
-                            }
+                            self.record_comb_fallback();
                             self.run_chunked_settle(mask_cache, profile);
                             return;
                         }

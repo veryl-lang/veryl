@@ -9,6 +9,7 @@
 use crate::backend::{CompiledWhole, DispatchOutcome};
 use crate::ir::{Ir, ModuleVariables};
 use crate::simulator::SimProfile;
+use std::sync::atomic::Ordering;
 use veryl_analyzer::value::MaskCache;
 
 thread_local! {
@@ -65,8 +66,12 @@ pub fn settle_comb(
 
     for _ in 0..passes {
         match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
-            DispatchOutcome::Done => {}
+            DispatchOutcome::Done => {
+                ir.whole_comb_dispatch[0].fetch_add(1, Ordering::Relaxed);
+            }
             DispatchOutcome::NotReady => {
+                ir.whole_comb_dispatch[1].fetch_add(1, Ordering::Relaxed);
+                ir.record_comb_fallback();
                 crate::output_buffer::truncate_to(out_mark);
                 ir.run_chunked_settle(mask_cache, profile);
                 return;

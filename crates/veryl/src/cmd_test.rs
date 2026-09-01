@@ -34,15 +34,30 @@ struct TestSuiteReport {
     format_version: u32,
     /// The backend that was asked for; see `degraded_modules` for what ran.
     backend: String,
-    /// `kind:module` for every module that fell back, empty when the run used
-    /// `backend` throughout.  A timing comparison is only meaningful when this
-    /// is empty in both arms.
+    /// `kind:module` for every module that fell back AT LEAST ONCE.  Empty is
+    /// exact; non-empty is not a measure -- compare timings on `dispatch`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     degraded_modules: Vec<String>,
+    /// Per-module dispatch tallies for the whole-comb / whole-event handles:
+    /// how many dispatches ran the requested artifact vs fell back.  Present
+    /// only for modules that held such a handle.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dispatch: Vec<DispatchReport>,
     passed: i32,
     failed: i32,
     ignored: usize,
     tests: Vec<TestReport>,
+}
+
+/// One module's whole-* dispatch tally; see `TestSuiteReport::dispatch`.
+#[derive(serde::Serialize)]
+struct DispatchReport {
+    /// `kind:module`, matching the `degraded_modules` spelling.
+    module: String,
+    /// Dispatches that ran the requested artifact.
+    ran: u64,
+    /// Dispatches that found it unavailable and fell back.
+    fell_back: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -732,6 +747,14 @@ impl CmdTest {
                 format_version: 1,
                 backend: backend_name.to_string(),
                 degraded_modules: veryl_simulator::residency::degraded_modules(),
+                dispatch: veryl_simulator::residency::dispatch_counts()
+                    .into_iter()
+                    .map(|(module, ran, fell_back)| DispatchReport {
+                        module,
+                        ran,
+                        fell_back,
+                    })
+                    .collect(),
                 passed: success,
                 failed: failure,
                 ignored: ignored_count,

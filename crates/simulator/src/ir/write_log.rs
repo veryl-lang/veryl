@@ -25,6 +25,21 @@ pub struct WriteLogEntry {
     pub payload: u64,
 }
 
+/// The byte range `(first, count)` a static bit field touches: a slice write
+/// only changes those bytes, so logging the whole element spends `nb` payload
+/// bytes to deposit a couple of bits.
+pub(crate) fn static_field_byte_span(hi: usize, lo: usize, nb: usize) -> Option<(usize, usize)> {
+    if hi < lo {
+        return None;
+    }
+    let blo = lo / 8;
+    let bhi = hi / 8;
+    if bhi >= nb {
+        return None;
+    }
+    Some((blo, bhi - blo + 1))
+}
+
 /// Wide-FF log entry.  64 bytes = 1 cache line, with up to 56 bytes of
 /// payload (covers 64–448-bit FFs in a single entry; wider FFs use
 /// multiple entries).  `align(64)` ensures each entry occupies exactly
@@ -380,7 +395,9 @@ fn commit_from_log_impl<const WATCHED: bool>(
         }
     }
 
-    // Wide path: memcpy of the embedded payload.
+    // Wide path.  Most entries are field-sized now, where `copy_from_slice` on
+    // a runtime length is a `memcpy` call.  Pool, order and record are
+    // unchanged, so same-byte writes still compose last-write-wins.
     let wide_limit = buffer.wide_count as usize;
     for entry in buffer.wide_entries_slice().iter().take(wide_limit) {
         let nb = entry.native_bytes as usize;
@@ -388,15 +405,79 @@ fn commit_from_log_impl<const WATCHED: bool>(
         if nb == 0 || nb > WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES || offset + nb > len {
             continue;
         }
-        if WATCHED && !hit && ff_values[offset..offset + nb] != entry.payload[..nb] {
-            hit = watched(offset, nb);
+        // SAFETY: bounds verified above; dst is the start of the slice, and
+        // `payload` holds at least `nb` bytes since nb <= PAYLOAD_BYTES.  Every
+        // access below lies inside [0, nb): the single-store arms match nb
+        // exactly, and each pair arm is guarded by nb >= W so `nb - W` cannot
+        // wrap and `nb - W + W == nb` is the last byte touched.
+        unsafe {
+            let p = dst.add(offset);
+            let s = entry.payload.as_ptr();
+            macro_rules! store_one {
+                ($t:ty) => {{
+                    let v = (s as *const $t).read_unaligned();
+                    if WATCHED && !hit && (p as *const $t).read_unaligned() != v {
+                        hit = watched(offset, nb);
+                    }
+                    (p as *mut $t).write_unaligned(v);
+                }};
+            }
+            macro_rules! store_pair {
+                ($t:ty, $w:expr) => {{
+                    let tail = nb - $w;
+                    let lo = (s as *const $t).read_unaligned();
+                    let hi_v = (s.add(tail) as *const $t).read_unaligned();
+                    if WATCHED
+                        && !hit
+                        && ((p as *const $t).read_unaligned() != lo
+                            || (p.add(tail) as *const $t).read_unaligned() != hi_v)
+                    {
+                        hit = watched(offset, nb);
+                    }
+                    (p as *mut $t).write_unaligned(lo);
+                    (p.add(tail) as *mut $t).write_unaligned(hi_v);
+                }};
+            }
+            // Wider than any typed store: decided on ONE compare, so a design
+            // whose FFs are all wide never walks the size table below.
+            if nb > 16 {
+                // Through `dst` like the arms below: a `&mut ff_values`
+                // reborrow here would pop its tag, so the next iteration's
+                // store through it is UB under Stacked Borrows.
+                let p = dst.add(offset);
+                let s = entry.payload.as_ptr();
+                if WATCHED
+                    && !hit
+                    && std::slice::from_raw_parts(p, nb) != std::slice::from_raw_parts(s, nb)
+                {
+                    hit = watched(offset, nb);
+                }
+                std::ptr::copy_nonoverlapping(s, p, nb);
+                continue;
+            }
+            match nb {
+                1 => {
+                    let v = *s;
+                    if WATCHED && !hit && *p != v {
+                        hit = watched(offset, nb);
+                    }
+                    *p = v;
+                }
+                2 => store_one!(u16),
+                4 => store_one!(u32),
+                8 => store_one!(u64),
+                3 => store_pair!(u16, 2),
+                5..=7 => store_pair!(u32, 4),
+                9..=16 => store_pair!(u64, 8),
+                _ => unreachable!("nb <= 16 here"),
+            }
         }
-        ff_values[offset..offset + nb].copy_from_slice(&entry.payload[..nb]);
     }
     hit
 }
 
 /// See [`commit_from_log_impl`].
+#[inline]
 pub fn ff_commit_from_log(ff_values: &mut [u8], buffer: &WriteLogBuffer) {
     commit_from_log_impl::<false>(ff_values, buffer, |_, _| false);
 }
@@ -628,6 +709,70 @@ mod tests {
         assert_eq!(entries[0].offset, 0x2000);
         assert_eq!(entries[0].native_bytes, 32);
         assert_eq!(&entries[0].payload[..32], &payload[..]);
+    }
+
+    /// A typed store wider than `native_bytes` would pass a payload-only check
+    /// and corrupt the neighbouring FF, so both borders are asserted.
+    #[test]
+    fn wide_commit_writes_exactly_native_bytes_for_every_size() {
+        for nb in 1..=WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES {
+            let mut buf = WriteLogBuffer::with_capacity(0, 1);
+            let payload: Vec<u8> = (0..nb).map(|i| 0x40 + i as u8).collect();
+            unsafe { write_log_grow_push_wide(&mut buf, 8, payload.as_ptr(), nb as u32) };
+
+            let mut ff = vec![0xcc_u8; 8 + nb + 8];
+            ff_commit_from_log(&mut ff, &buf);
+
+            assert_eq!(&ff[..8], &[0xcc; 8], "nb={nb} wrote before the offset");
+            assert_eq!(&ff[8..8 + nb], &payload[..], "nb={nb} payload mismatch");
+            assert_eq!(&ff[8 + nb..], &[0xcc; 8], "nb={nb} wrote past native_bytes");
+        }
+    }
+
+    /// Same pool, same order: a later wide entry overwrites an earlier one
+    /// byte for byte regardless of which store shape each one takes.  This is
+    /// the property that bars routing by payload size, so it is pinned across
+    /// the specialised/unspecialised boundary rather than within one arm.
+    #[test]
+    fn wide_commit_mixed_sizes_compose_last_write_wins() {
+        let mut buf = WriteLogBuffer::with_capacity(0, 4);
+        unsafe {
+            write_log_grow_push_wide(&mut buf, 0, [0x11u8; 12].as_ptr(), 12); // memcpy arm
+            write_log_grow_push_wide(&mut buf, 0, [0x22u8; 8].as_ptr(), 8); // typed
+            write_log_grow_push_wide(&mut buf, 2, [0x33u8; 4].as_ptr(), 4); // typed
+            write_log_grow_push_wide(&mut buf, 3, [0x44u8; 1].as_ptr(), 1); // typed
+        }
+        let mut ff = vec![0u8; 16];
+        ff_commit_from_log(&mut ff, &buf);
+        assert_eq!(
+            &ff[..12],
+            &[
+                0x22, 0x22, 0x33, 0x44, 0x33, 0x33, 0x22, 0x22, 0x11, 0x11, 0x11, 0x11
+            ]
+        );
+    }
+
+    /// The watched commit's compare is typed on the specialised sizes and a
+    /// slice compare on the rest.  A compare that looked at fewer bytes than
+    /// it stores would silently under-report changes to the settle filter, so
+    /// every size is probed on its LAST byte.
+    #[test]
+    fn wide_watched_compare_sees_the_last_byte_at_every_size() {
+        for nb in 1..=WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES {
+            let payload = vec![0x5a_u8; nb];
+            let mut buf = WriteLogBuffer::with_capacity(0, 1);
+            unsafe { write_log_grow_push_wide(&mut buf, 0, payload.as_ptr(), nb as u32) };
+
+            let mut same = payload.clone();
+            let hit = ff_commit_from_log_watched(&mut same, &buf, &mut |_, _| true);
+            assert!(!hit, "nb={nb} reported a change against identical bytes");
+
+            let mut differs = payload.clone();
+            differs[nb - 1] ^= 0xff;
+            let hit = ff_commit_from_log_watched(&mut differs, &buf, &mut |_, _| true);
+            assert!(hit, "nb={nb} missed a change in the last byte");
+            assert_eq!(differs, payload, "nb={nb} did not commit the payload");
+        }
     }
 
     #[test]
