@@ -1205,7 +1205,7 @@ pub fn eval_type(
             context.insert_error(AnalyzerError::mismatch_type(
                 MismatchTypeKind::SymbolKind {
                     name: symbol.found.token.to_string(),
-                    expected: "enum or union or struct".to_string(),
+                    expected: "enum, union, struct or typedef".to_string(),
                     actual: symbol.found.kind.to_kind_name(),
                 },
                 &path.range,
@@ -1244,14 +1244,13 @@ pub fn eval_type(
         let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
             if matches!(pos, TypePosition::Cast) && !symbol.found.is_casting_type() {
-                let token: TokenRange = symbol.found.token.into();
                 context.insert_error(AnalyzerError::mismatch_type(
                     MismatchTypeKind::SymbolKind {
                         name: symbol.found.token.to_string(),
-                        expected: "enum or union or struct".to_string(),
+                        expected: "enum, union, struct, typedef or integer constant".to_string(),
                         actual: symbol.found.kind.to_kind_name(),
                     },
-                    &token,
+                    &path.range,
                 ));
             }
 
