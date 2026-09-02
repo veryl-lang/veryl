@@ -1024,23 +1024,23 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_bin</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<bin_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;BIN_WIDTH&gt;</span></td>
     <td class="table_list_item"> Binary encoded input.
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_unary</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<unary_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;UNARY_WIDTH&gt;</span></td>
     <td class="table_list_item"> Unary encoded output.
 </td>
+</tr>
 
-
-
-</unary_width></span></td></tr>
-</bin_width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="binary_encoder"><a class="header" href="#binary_encoder">binary_encoder</a></h1>
 <p>A binary encoder.</p>
@@ -1075,23 +1075,23 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_unary</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<unary_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;UNARY_WIDTH&gt;</span></td>
     <td class="table_list_item"> Unary encoded input.
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_bin</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<bin_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;BIN_WIDTH&gt;</span></td>
     <td class="table_list_item"> Binary encoded output.
 </td>
+</tr>
 
-
-
-</bin_width></span></td></tr>
-</unary_width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="counter"><a class="header" href="#counter">counter</a></h1>
 <p>Value counter</p>
@@ -1108,21 +1108,24 @@ a bit vector with a unary encoding.</p>
 
 <tr>
     <th class="table_list_item">MAX_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Max value of counter
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">MIN_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Min value of counter
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">INITIAL_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Initial value of counter
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">WRAP_AROUND</th>
@@ -1131,7 +1134,9 @@ a bit vector with a unary encoding.</p>
 </td>
 </tr>
 
+</tbody>
 
+</table>
 
 <h3 id="ports-4"><a class="header" href="#ports-4">Ports</a></h3>
 <hr>
@@ -1221,11 +1226,6 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-</width></span></td></tr>
-</width></span></td></tr>
-</width></span></td></tr>
-</tbody>
-</table>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="countones"><a class="header" href="#countones">countones</a></h1>
 <h3 id="parameters-5"><a class="header" href="#parameters-5">Parameters</a></h3>
@@ -1249,21 +1249,21 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<w>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;W&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_ones</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<clogw>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;CLOGW&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
-
-
-</clogw></span></td></tr>
-</w></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="delay"><a class="header" href="#delay">delay</a></h1>
 <p>Delay input by configured cycle</p>
@@ -1389,8 +1389,9 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_select</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<select_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;SELECT_WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">i_data</th>
@@ -1402,15 +1403,14 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">o_data</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE<entries>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE&lt;ENTRIES&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
-
-
-</entries></span></td></tr>
-</select_width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ecc_decoder"><a class="header" href="#ecc_decoder">ecc_decoder</a></h1>
 <h3 id="parameters-8"><a class="header" href="#parameters-8">Parameters</a></h3>
@@ -1447,8 +1447,9 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_code</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<code_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;CODE_WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_data</th>
@@ -1471,11 +1472,10 @@ a bit vector with a unary encoding.</p>
     <td class="table_list_item"></td>
 </tr>
 
-
-
-</code_width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ecc_encoder"><a class="header" href="#ecc_encoder">ecc_encoder</a></h1>
 <h3 id="parameters-9"><a class="header" href="#parameters-9">Parameters</a></h3>
@@ -1519,14 +1519,14 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">o_code</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<code_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;CODE_WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
-
-
-</code_width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="edge_detector"><a class="header" href="#edge_detector">edge_detector</a></h1>
 <p>Edge detector</p>
@@ -1543,11 +1543,14 @@ a bit vector with a unary encoding.</p>
 
 <tr>
     <th class="table_list_item">INITIAL_VALUE</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Initial value of internal FF
 </td>
+</tr>
 
+</tbody>
 
+</table>
 
 <h3 id="ports-10"><a class="header" href="#ports-10">Ports</a></h3>
 <hr>
@@ -1580,42 +1583,39 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Data
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_edge</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Both edges
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_posedge</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Positive edge
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_negedge</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Negative edge
 </td>
+</tr>
 
-
-
-</width></span></td></tr>
-</width></span></td></tr>
-</width></span></td></tr>
-</width></span></td></tr>
 </tbody>
+
 </table>
-</width></span></td></tr>
-</tbody>
-</table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="fifo"><a class="header" href="#fifo">fifo</a></h1>
 <h3 id="parameters-11"><a class="header" href="#parameters-11">Parameters</a></h3>
@@ -1976,21 +1976,24 @@ a bit vector with a unary encoding.</p>
 
 <tr>
     <th class="table_list_item">MAX_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Max value of counter (in binary)
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">MIN_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Min value of counter (in binary)
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">INITIAL_COUNT</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Initial value of counter (in binary)
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">WRAP_AROUND</th>
@@ -1999,7 +2002,9 @@ a bit vector with a unary encoding.</p>
 </td>
 </tr>
 
+</tbody>
 
+</table>
 
 <h3 id="ports-13"><a class="header" href="#ports-13">Ports</a></h3>
 <hr>
@@ -2089,11 +2094,6 @@ a bit vector with a unary encoding.</p>
 
 </table>
 
-</width></span></td></tr>
-</width></span></td></tr>
-</width></span></td></tr>
-</tbody>
-</table>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="gray_decoder"><a class="header" href="#gray_decoder">gray_decoder</a></h1>
 <p>Converts a Gray encoded bit vector to a binary encoded bit-vector</p>
@@ -2123,24 +2123,24 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_gray</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Input Gray encoded Bit Vector
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_bin</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Output binary encoded Bit Vector such that
  o_bin[k] = ^o_bin[WIDTH-1:k]
 </td>
+</tr>
 
-
-
-</width></span></td></tr>
-</width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="gray_encoder"><a class="header" href="#gray_encoder">gray_encoder</a></h1>
 <p>Converts a binary encoded bit vector to a Gray encoded bit-vector</p>
@@ -2170,23 +2170,23 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_bin</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Input Binary encoded Bit Vector
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_gray</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"> Output Gray encoded Bit Vector
 </td>
+</tr>
 
-
-
-</width></span></td></tr>
-</width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="lfsr_galois"><a class="header" href="#lfsr_galois">lfsr_galois</a></h1>
 <h3 id="parameters-16"><a class="header" href="#parameters-16">Parameters</a></h3>
@@ -2243,23 +2243,23 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_setval</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<size>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;SIZE&gt;</span></td>
     <td class="table_list_item"> Value which LFSR is set to when `i_set` is set.
 </td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_val</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<size>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;SIZE&gt;</span></td>
     <td class="table_list_item"> LFSR value.
 </td>
+</tr>
 
-
-
-</size></span></td></tr>
-</size></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="mux"><a class="header" href="#mux">mux</a></h1>
 <h3 id="parameters-17"><a class="header" href="#parameters-17">Parameters</a></h3>
@@ -2301,14 +2301,16 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_select</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<select_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;SELECT_WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">i_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">DATA_TYPE<entries>
+    <td class="table_list_item"><span class="hljs-type">DATA_TYPE&lt;ENTRIES&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_data</th>
@@ -2317,12 +2319,10 @@ a bit vector with a unary encoding.</p>
     <td class="table_list_item"></td>
 </tr>
 
-
-
-</entries></span></td></tr>
-</select_width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="onehot"><a class="header" href="#onehot">onehot</a></h1>
 <h3 id="parameters-18"><a class="header" href="#parameters-18">Parameters</a></h3>
@@ -2346,8 +2346,9 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_data</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<w>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;W&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_onehot</th>
@@ -2365,11 +2366,10 @@ a bit vector with a unary encoding.</p>
 </td>
 </tr>
 
-
-
-</w></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ram"><a class="header" href="#ram">ram</a></h1>
 <h3 id="parameters-19"><a class="header" href="#parameters-19">Parameters</a></h3>
@@ -2464,8 +2464,9 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_adra</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<address_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;ADDRESS_WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">i_da</th>
@@ -2484,8 +2485,9 @@ a bit vector with a unary encoding.</p>
 <tr>
     <th class="table_list_item">i_adrb</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<address_width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;ADDRESS_WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_qb</th>
@@ -2494,12 +2496,10 @@ a bit vector with a unary encoding.</p>
     <td class="table_list_item"></td>
 </tr>
 
-
-
-</address_width></span></td></tr>
-</address_width></span></td></tr>
 </tbody>
+
 </table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="slicer"><a class="header" href="#slicer">slicer</a></h1>
 <h3 id="parameters-20"><a class="header" href="#parameters-20">Parameters</a></h3>
@@ -2631,8 +2631,9 @@ a bit vector with a unary encoding.</p>
 
 <tr>
     <th class="table_list_item">INITIAL_VALUE</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">STAGES</th>
@@ -2640,7 +2641,9 @@ a bit vector with a unary encoding.</p>
     <td class="table_list_item"></td>
 </tr>
 
+</tbody>
 
+</table>
 
 <h3 id="clock-domains-2"><a class="header" href="#clock-domains-2">Clock Domains</a></h3>
 <hr>
@@ -2682,25 +2685,22 @@ a bit vector with a unary encoding.</p>
     <th class="table_list_item">i_d</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'s</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_d</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
-
-
-</width></span></td></tr>
-</width></span></td></tr>
 </tbody>
+
 </table>
-</width></span></td></tr>
-</tbody>
-</table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="module-prototypes"><a class="header" href="#module-prototypes">Module Prototypes</a></h1>
 <hr>
@@ -2729,8 +2729,9 @@ a bit vector with a unary encoding.</p>
 
 <tr>
     <th class="table_list_item">INITIAL_VALUE</th>
-    <td class="table_list_item"><span class="hljs-type">bit<width>
+    <td class="table_list_item"><span class="hljs-type">bit&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">STAGES</th>
@@ -2738,7 +2739,9 @@ a bit vector with a unary encoding.</p>
     <td class="table_list_item"></td>
 </tr>
 
+</tbody>
 
+</table>
 
 <h3 id="clock-domains-3"><a class="header" href="#clock-domains-3">Clock Domains</a></h3>
 <hr>
@@ -2780,25 +2783,22 @@ a bit vector with a unary encoding.</p>
     <th class="table_list_item">i_d</th>
     <td class="table_list_item"><span class="hljs-keyword">input</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'s</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
 <tr>
     <th class="table_list_item">o_d</th>
     <td class="table_list_item"><span class="hljs-keyword">output</span></td>
     <td class="table_list_item"><span class="hljs-attribute">'d</span></td>
-    <td class="table_list_item"><span class="hljs-type">logic<width>
+    <td class="table_list_item"><span class="hljs-type">logic&lt;WIDTH&gt;</span></td>
     <td class="table_list_item"></td>
+</tr>
 
-
-
-</width></span></td></tr>
-</width></span></td></tr>
 </tbody>
+
 </table>
-</width></span></td></tr>
-</tbody>
-</table>
+
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="interfaces"><a class="header" href="#interfaces">Interfaces</a></h1>
 <hr>
