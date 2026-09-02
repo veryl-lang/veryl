@@ -26053,3 +26053,78 @@ fn a_bundle_pushed_through_an_inverter_pair_is_split_per_field() {
         }
     }
 }
+
+// Regression: a narrowing cast whose width EQUALS its operands' must still
+// truncate.  Only a backend that evaluates the whole expression in one wide
+// register lets the carry through, so this needs the AOT-C leg below.
+//
+// `o_ctl` is the control: identical shape, operands WIDER than the cast, so
+// it took the truncating path all along and must keep taking it.  DO NOT
+// widen `i_b` / `i_c` to "match" it — the defect only fires while the cast
+// width and the operand width agree, and equalising them silently retires
+// the test.
+#[test]
+fn narrowing_cast_at_operand_width_still_truncates() {
+    let code = r#"
+    module Top (
+        i_b  : input  logic<2>,
+        i_c  : input  logic<2>,
+        i_w  : input  logic<7>,
+        o_add: output logic<7>,
+        o_sub: output logic<7>,
+        o_mul: output logic<7>,
+        o_not: output logic<7>,
+        o_shl: output logic<7>,
+        o_ctl: output logic<7>,
+    ) {
+        assign o_add = 7'd20 + ((i_b + i_c) as 2);
+        assign o_sub = 7'd20 + ((i_b - i_c) as 2);
+        assign o_mul = 7'd20 + ((i_b * i_c) as 2);
+        assign o_not = 7'd20 + ((~i_b) as 2);
+        assign o_shl = 7'd20 + ((i_b << 1) as 2);
+        assign o_ctl = 7'd20 + ((i_w + i_w) as 2);
+    }
+    "#;
+
+    let check = |sim: &mut Simulator, label: &str| {
+        for b in 0u64..4 {
+            for c in 0u64..4 {
+                sim.set("i_b", Value::new(b, 2, false));
+                sim.set("i_c", Value::new(c, 2, false));
+                sim.set("i_w", Value::new(0x55, 7, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                let mut got = |n: &str| sim.get(n).unwrap().payload_u64() & 0x7f;
+                assert_eq!(got("o_add"), 20 + ((b + c) & 3), "{label}: add b={b} c={c}");
+                assert_eq!(
+                    got("o_sub"),
+                    20 + ((b.wrapping_sub(c)) & 3),
+                    "{label}: sub b={b} c={c}"
+                );
+                assert_eq!(got("o_mul"), 20 + ((b * c) & 3), "{label}: mul b={b} c={c}");
+                assert_eq!(got("o_not"), 20 + ((!b) & 3), "{label}: not b={b}");
+                assert_eq!(got("o_shl"), 20 + ((b << 1) & 3), "{label}: shl b={b}");
+                assert_eq!(got("o_ctl"), 20 + ((0x55 + 0x55) & 3), "{label}: control");
+            }
+        }
+    };
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        check(&mut sim, &format!("{config:?}"));
+    }
+
+    // And once more forced onto AOT-C, dual-running against Cranelift: the
+    // configs above only reach it when the host has a C compiler AND the
+    // module clears the cc heuristics, which this six-statement one need not.
+    if crate::backend::aot_c::cc_available() {
+        let config = aot_native_validate_config();
+        let ir = analyze(code, &config);
+        assert!(
+            ir.whole_comb.is_some(),
+            "the AOT-C config must actually compile this module, or the check below is empty",
+        );
+        let mut sim = Simulator::new(ir, None);
+        check(&mut sim, "aot-c");
+    }
+}

@@ -14,6 +14,10 @@ use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
+/// Recursion cap for `ProtoExpression::unmasked_bits`: running out costs a
+/// mask that may not have been needed, nothing more.
+const UNMASKED_BITS_DEPTH: usize = 16;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExpressionContext {
     pub width: usize,
@@ -1197,6 +1201,81 @@ impl ProtoExpression {
                 ..
             } => true_expr.effective_bits().max(false_expr.effective_bits()),
             ProtoExpression::DynamicVariable { width, .. } => *width,
+        }
+    }
+
+    /// An upper bound on the significant bits of this expression's value when
+    /// NOTHING masks the intermediates — the shape a backend that evaluates a
+    /// whole expression in one wide register produces.  `None` means no cheap
+    /// bound exists and a caller that needs one must assume the worst.
+    ///
+    /// Deliberately not `effective_bits()`: that bounds the value
+    /// `build_binary` produces, which masks every node to its own width, so
+    /// for a `Binary` it may answer with the declared width even though the
+    /// unmasked value is wider.
+    ///
+    /// A `Some` drops the cast's mask, so every arm has to hold for the widest
+    /// value the backend can hand on.  `expr_emits_clean` cannot cover for a
+    /// wrong answer here: its re-mask lands on the consumer's result, not on
+    /// this operand.
+    pub fn unmasked_bits(&self, depth: usize) -> Option<usize> {
+        if depth == 0 {
+            return None;
+        }
+        let d = depth - 1;
+        match self {
+            ProtoExpression::HierVariable(x) => Some(x.width),
+            ProtoExpression::Variable { width, .. } => Some(*width),
+            ProtoExpression::DynamicVariable { width, .. } => Some(*width),
+            ProtoExpression::Concatenation { width, .. } => Some(*width),
+            ProtoExpression::Value { .. } => Some(self.effective_bits()),
+            ProtoExpression::Ternary {
+                true_expr,
+                false_expr,
+                ..
+            } => Some(
+                true_expr
+                    .unmasked_bits(d)?
+                    .max(false_expr.unmasked_bits(d)?),
+            ),
+            ProtoExpression::Unary { op, x, .. } => match op {
+                Op::BitAnd
+                | Op::BitNand
+                | Op::BitOr
+                | Op::BitNor
+                | Op::LogicNot
+                | Op::BitXor
+                | Op::BitXnor => Some(1),
+                Op::Add => x.unmasked_bits(d),
+                // `~` and unary `-` set every bit above the operand's width.
+                _ => None,
+            },
+            ProtoExpression::Binary { op, x, y, .. } => match op {
+                Op::Eq
+                | Op::Ne
+                | Op::EqWildcard
+                | Op::NeWildcard
+                | Op::Greater
+                | Op::GreaterEq
+                | Op::Less
+                | Op::LessEq
+                | Op::LogicAnd
+                | Op::LogicOr => Some(1),
+                Op::BitAnd => Some(x.unmasked_bits(d)?.min(y.unmasked_bits(d)?)),
+                Op::BitOr | Op::BitXor => Some(x.unmasked_bits(d)?.max(y.unmasked_bits(d)?)),
+                Op::Add => Some(
+                    x.unmasked_bits(d)?
+                        .max(y.unmasked_bits(d)?)
+                        .saturating_add(1),
+                ),
+                Op::Mul => Some(x.unmasked_bits(d)?.saturating_add(y.unmasked_bits(d)?)),
+                Op::Div | Op::LogicShiftR => x.unmasked_bits(d),
+                Op::Rem => y.unmasked_bits(d),
+                // `-` borrows into every bit above the operands, an arithmetic
+                // right shift copies the sign into them, and a left shift is
+                // bounded by a VALUE (the shift amount), not by a width.
+                _ => None,
+            },
         }
     }
 
@@ -2467,19 +2546,25 @@ impl Conv<&air::Expression> for ProtoExpression {
                         return Ok(proto);
                     }
 
-                    // Int->int casts are otherwise transparent (the operand
-                    // is already sized by the cast in gather_context), but a
-                    // NARROWING cast must still truncate the operand value:
-                    // mask to the cast width, and re-extend by the cast
-                    // signedness when the outer context is wider.  A
-                    // same-width cast that flips signedness needs the same
-                    // re-extension: a wider context must extend by the cast
-                    // signedness, not the operand's own (SV `longint'(a)`
-                    // sign-extends a 64-bit unsigned `a`).
+                    // Int->int casts are otherwise transparent, but a NARROWING
+                    // cast must still truncate the operand value: mask to the
+                    // cast width, and re-extend by the cast signedness when the
+                    // outer context is wider.  A same-width cast that flips
+                    // signedness needs the same re-extension: a wider context
+                    // must extend by the cast signedness, not the operand's own
+                    // (SV `longint'(a)` sign-extends a 64-bit unsigned `a`).
+                    //
+                    // `operand_width` alone does not decide it: it is the width
+                    // `gather_context` settled on for the operand, which for
+                    // `(b + c) as 2` on two 2-bit operands is 2 — equal to the
+                    // cast, so nothing looks narrowed — while the addition
+                    // still carries into a third bit.
                     let cast_width = comptime.r#type.total_width();
                     let operand_width = x.comptime().expr_context.width;
                     let proto: ProtoExpression = Conv::conv(context, x.as_ref())?;
                     let outer: ExpressionContext = (&comptime.expr_context).into();
+                    let unmasked = proto.unmasked_bits(UNMASKED_BITS_DEPTH);
+                    let carries_above = |cw: usize| unmasked.is_none_or(|w| w > cw);
                     let needs_reinterpret = |cw: usize| {
                         outer.width > cw
                             && operand_width <= cw
@@ -2488,7 +2573,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     };
                     if let Some(cw) = cast_width
                         && cw > 0
-                        && (operand_width > cw || needs_reinterpret(cw))
+                        && (operand_width > cw || carries_above(cw) || needs_reinterpret(cw))
                     {
                         let node_width = outer.width.max(cw);
                         let value_node = |payload: BigUint| ProtoExpression::Value {
