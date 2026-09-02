@@ -63,7 +63,12 @@ pub fn check_port_direction(context: &mut Context, value: &PortDeclarationItem) 
         let direction = x.direction.as_ref();
         check_direction(context, direction);
 
-        if let Direction::Inout(_) = direction {
+        // A module's inout port is a net and needs `tri`, but a function's
+        // inout argument is a variable passed in and copied back out, so `tri`
+        // is neither required nor legal there.
+        if let Direction::Inout(_) = direction
+            && !context.is_affiliated(Affiliation::Function)
+        {
             let r#type = &x.array_type;
             let is_tri = r#type
                 .scalar_type
