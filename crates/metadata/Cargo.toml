@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-metadata"
-version               = "0.20.3"
+version               = "0.21.0"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -27,9 +27,9 @@ toml                = {workspace = true}
 url                 = {workspace = true}
 uuid                = {version = "1.23", default-features = false, features = ["v5", "serde"]}
 veryl-component-sys = {version = "0.1.1", path = "../component/sys"}
-veryl-parser        = {version = "0.20.3", path = "../parser"}
-veryl-path          = {version = "0.20.3", path = "../path"}
-veryl-std           = {version = "0.20.3", path = "../std"}
+veryl-parser        = {version = "0.21.0", path = "../parser"}
+veryl-path          = {version = "0.21.0", path = "../path"}
+veryl-std           = {version = "0.21.0", path = "../std"}
 walkdir             = {workspace = true}
 
 [target.'cfg(target_family = "wasm")'.dependencies]

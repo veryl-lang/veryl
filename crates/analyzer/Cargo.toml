@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-analyzer"
-version               = "0.20.3"
+version               = "0.21.0"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true
@@ -34,8 +34,8 @@ toml                = {workspace = true}
 thiserror           = {workspace = true}
 vcd                 = {workspace = true}
 veryl-component-sys = {version = "0.1.1", path = "../component/sys"}
-veryl-metadata      = {version = "0.20.3", path = "../metadata"}
-veryl-parser        = {version = "0.20.3", path = "../parser"}
+veryl-metadata      = {version = "0.21.0", path = "../metadata"}
+veryl-parser        = {version = "0.21.0", path = "../parser"}
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 miette          = {workspace = true, features = ["fancy-no-syscall"]}

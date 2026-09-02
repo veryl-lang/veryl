@@ -8,15 +8,15 @@ license.workspace = true
 
 [dependencies]
 miette          = {workspace = true}
-veryl-analyzer  = {version = "0.20.3", path = "../analyzer"}
-veryl-emitter   = {version = "0.20.3", path = "../emitter"}
-veryl-formatter = {version = "0.20.3", path = "../formatter"}
-veryl-metadata  = {version = "0.20.3", path = "../metadata"}
-veryl-parser    = {version = "0.20.3", path = "../parser"}
-veryl-path      = {version = "0.20.3", path = "../path"}
-veryl-simulator = {version = "0.20.3", path = "../simulator"}
+veryl-analyzer  = {version = "0.21.0", path = "../analyzer"}
+veryl-emitter   = {version = "0.21.0", path = "../emitter"}
+veryl-formatter = {version = "0.21.0", path = "../formatter"}
+veryl-metadata  = {version = "0.21.0", path = "../metadata"}
+veryl-parser    = {version = "0.21.0", path = "../parser"}
+veryl-path      = {version = "0.21.0", path = "../path"}
+veryl-simulator = {version = "0.21.0", path = "../simulator"}
 # skip veryl's gitoxide in benchmark builds (a full `cargo test` unifies it back in)
-veryl           = {version = "0.20.3", path = "../veryl", default-features = false}
+veryl           = {version = "0.21.0", path = "../veryl", default-features = false}
 
 [dev-dependencies]
 criterion = {workspace = true}
