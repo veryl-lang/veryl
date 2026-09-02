@@ -1907,7 +1907,12 @@ pub(crate) fn analyze_dependency(
         }
     }
     let mut deep_group_of = vec![0usize; deep_stmts.len()];
-    split_copies_by_source_writes(&mut deep_stmts, &mut deep_block_of, &mut deep_group_of);
+    split_copies_by_source_writes(
+        &mut deep_stmts,
+        &mut deep_block_of,
+        &mut deep_group_of,
+        SPECULATIVE_MAX_PARTS,
+    );
     table = deep_stmts.into_iter().enumerate().collect();
     // Versions before scheduling: each write is its own statement now, so
     // a reader between two of them can be given the earlier version's
@@ -1978,6 +1983,7 @@ pub(crate) fn analyze_dependency(
                 &mut branch_stmts,
                 &mut branch_block_of,
                 &mut branch_group_of,
+                SPECULATIVE_MAX_PARTS,
             );
             let renamed = rename_versions(
                 &mut branch_stmts,
@@ -2023,150 +2029,38 @@ pub(crate) fn analyze_dependency(
         sorted_keys.sort();
         let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
         let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
-        let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, &blocks);
-        // Verify no genuine combinational loop remains.  One `VarOffset` is a
-        // whole struct and a conditional's reads are the union over its
-        // branches, so key by bits AND by per-branch piece; `sorted` still runs.
-        let mut pieces: Vec<ProtoStatement> = Vec::new();
-        let mut piece_stmt: Vec<usize> = Vec::new();
-        let mut piece_branch: Vec<usize> = Vec::new();
-        for (si, s) in sorted.iter().enumerate() {
-            let first = pieces.len();
-            split_tagged_by_branch(s, &mut pieces, &mut piece_branch);
-            piece_stmt.resize(pieces.len(), si);
-            debug_assert!(pieces.len() > first);
-        }
-        let n = pieces.len();
-        let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-        let mut s_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
-        let mut read_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
-        let mut write_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
-        let mut bit_ranges = vec![];
-        for s in &pieces {
-            let mut ins = vec![];
-            let mut outs = vec![];
-            s.gather_variable_offsets(&mut ins, &mut outs);
-            // FF reads/writes don't participate in comb cycles, and
-            // `packed_ff` collapses next_offset onto current_offset so they'd
-            // share a VarOffset and form phantom edges otherwise.
-            ins.retain(|o| !o.is_ff());
-            outs.retain(|o| !o.is_ff());
-            s_inputs.push(ins);
-            s_outputs.push(outs);
-            bit_ranges.clear();
-            s.gather_reads_with_ranges(&mut bit_ranges);
-            read_bits.push(union_bit_ranges(std::mem::take(&mut bit_ranges)));
-            gather_bit_aware_outputs(s, &mut bit_ranges);
-            write_bits.push(union_bit_ranges(std::mem::take(&mut bit_ranges)));
-        }
-        // Ascending piece order, and pieces of one statement are contiguous:
-        // the rules below read both off the list.
-        let mut w: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
-        for (i, outs) in s_outputs.iter().enumerate() {
-            for &key in outs {
-                let wbr = write_bits[i].get(&key).copied().flatten();
-                w.entry(key).or_default().push((i, wbr));
-            }
-        }
-        let mut a: Vec<HashSet<usize>> = vec![HashSet::default(); n];
-        let mut deg: Vec<usize> = vec![0; n];
-        let mut bound: Vec<usize> = vec![];
-        for (ri, ins) in s_inputs.iter().enumerate() {
-            let rs = piece_stmt[ri];
-            for key in ins {
-                let Some(wis) = w.get(key) else { continue };
-                let rbr = read_bits[ri].get(key).copied().flatten();
-                bound.clear();
-                // WHICH writer binds stays a statement's decision: pieces of
-                // one statement never overwrite each other.
-                let sole = piece_stmt[wis[0].0] == piece_stmt[wis[wis.len() - 1].0];
-                let overlapping = |from: Option<usize>, bound: &mut Vec<usize>| {
-                    bound.extend(
-                        wis.iter()
-                            .filter(|&&(p, wbr)| {
-                                from.is_none_or(|s| piece_stmt[p] == s) && ranges_overlap(wbr, rbr)
-                            })
-                            .map(|&(p, _)| p),
-                    )
-                };
-                if sole {
-                    // A sole writer binds the read even when it sits later:
-                    // that backward edge is what a loop looks like here.
-                    overlapping(None, &mut bound);
-                } else if let Some(ws) = wis
-                    .iter()
-                    .rev()
-                    .find(|&&(p, wbr)| piece_stmt[p] < rs && ranges_overlap(wbr, rbr))
-                    .map(|&(p, _)| piece_stmt[p])
-                {
-                    overlapping(Some(ws), &mut bound);
-                } else if wis.iter().any(|&(p, _)| piece_stmt[p] < rs) {
-                    // Something ran before the read but wrote other bits, so
-                    // the value comes from a LATER writer of the bits read.
-                    // Without binding those, a ring closed this way is missed.
-                    overlapping(None, &mut bound);
-                }
-                for &wi in &bound {
-                    // Two pieces of one statement that keep different branches
-                    // never both run, so no value passes from one to the other.
-                    let exclusive = piece_stmt[wi] == rs
-                        && piece_branch[wi] != piece_branch[ri]
-                        && piece_branch[wi] != 0
-                        && piece_branch[ri] != 0;
-                    if wi != ri && !exclusive && a[wi].insert(ri) {
-                        deg[ri] += 1;
-                    }
-                }
-            }
-        }
-        let mut q: VecDeque<usize> = VecDeque::new();
-        for (i, &d) in deg.iter().enumerate() {
-            if d == 0 {
-                q.push_back(i);
-            }
-        }
-        let mut cnt = 0;
-        while let Some(idx) = q.pop_front() {
-            cnt += 1;
-            for &succ in &a[idx] {
-                deg[succ] -= 1;
-                if deg[succ] == 0 {
-                    q.push_back(succ);
-                }
-            }
-        }
-        if cnt == n {
+        if let Ok((sorted, passes_hint)) = sort_and_verify_acyclic(stmts, &blocks) {
             pass_diag_phase("phase3: stable_topo_sort (no non-expandable CB)");
             return Ok((sorted, passes_hint));
         }
-        // `deg > 0` includes the cycle's downstream cone; isolate just the
-        // cycle (SCC size >= 2) so the diagnostic focuses on the real loop.
-        let cycle_indices: Vec<usize> = {
-            use daggy::petgraph::Graph;
-            use daggy::petgraph::algo::tarjan_scc;
-            let mut g: Graph<usize, ()> = Graph::new();
-            let nodes: Vec<_> = (0..n).map(|i| g.add_node(i)).collect();
-            for (u, succs) in a.iter().enumerate() {
-                for &v in succs {
-                    g.add_edge(nodes[u], nodes[v], ());
-                }
+        // Each part is one more statement every settle evaluates, so a copy
+        // no ring runs through would be cut for nothing.
+        let mut stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
+        let mut blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+        // `groups` tags branches for `stable_topo_sort_with_pieces`; this
+        // phase sorts by block and never reads them.
+        let mut groups = vec![0usize; stmts.len()];
+        split_copies_by_source_writes(&mut stmts, &mut blocks, &mut groups, LAST_RESORT_MAX_PARTS);
+        let (sorted, cycle_indices) = match sort_and_verify_acyclic(stmts, &blocks) {
+            Ok((sorted, passes_hint)) => {
+                pass_diag_phase("phase3: stable_topo_sort after the copy split");
+                return Ok((sorted, passes_hint));
             }
-            let mut cycle: Vec<usize> = tarjan_scc(&g)
-                .into_iter()
-                .filter(|c| c.len() >= 2)
-                .flat_map(|c| c.into_iter().map(|ni| piece_stmt[g[ni]]))
-                .collect();
-            cycle.sort();
-            // Several pieces of one statement can sit on the cycle; the
-            // diagnostic names source lines, so report each line once.
-            cycle.dedup();
-            cycle
+            Err(x) => x,
         };
-        let mut tokens: Vec<_> = cycle_indices
+        // The split turns one assign into a part per written range, each
+        // carrying its token, so a ring through a widely split copy would
+        // name one line once per part.  First of each keeps program order.
+        let mut tokens: Vec<_> = Vec::new();
+        for token in cycle_indices
             .iter()
             .filter_map(|&i| sorted[i].token())
             .filter(|t| *t != Default::default())
-            .collect();
+        {
+            if !tokens.contains(&token) {
+                tokens.push(token);
+            }
+        }
         let trigger = tokens.pop().unwrap_or_default();
         return Err(SimulatorError::combinational_loop(&trigger, &tokens));
     }
@@ -2519,20 +2413,180 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
     }
 }
 
+/// How finely [`split_copies_by_source_writes`] cuts one copy for a phase that
+/// can still fall through to another.  Each part is a statement every settle
+/// evaluates, so a copy wider than this is left for the last phase to judge.
+const SPECULATIVE_MAX_PARTS: usize = 64;
+
+/// The same cap for the last phase, where refusing to cut costs the whole
+/// design rather than granularity — capped at all only because each part
+/// read-modify-writes the full destination, making the split O(parts * width)
+/// per settle.  Clears a real register bundle (~100 boundaries) by enough to
+/// rule out only a bus assembled a bit at a time.
+const LAST_RESORT_MAX_PARTS: usize = 4096;
+
+/// A verified order and its pass count, or that order plus the statements the
+/// surviving cycle runs through.
+type SortOutcome = Result<(Vec<ProtoStatement>, Option<usize>), (Vec<ProtoStatement>, Vec<usize>)>;
+
+/// Sort `stmts`, then verify no cycle survives a bit- and branch-aware
+/// reading of the result.
+fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> SortOutcome {
+    let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, blocks);
+    // Verify no genuine combinational loop remains.  One `VarOffset` is a
+    // whole struct and a conditional's reads are the union over its
+    // branches, so key by bits AND by per-branch piece; `sorted` still runs.
+    let mut pieces: Vec<ProtoStatement> = Vec::new();
+    let mut piece_stmt: Vec<usize> = Vec::new();
+    let mut piece_branch: Vec<usize> = Vec::new();
+    for (si, s) in sorted.iter().enumerate() {
+        let first = pieces.len();
+        split_tagged_by_branch(s, &mut pieces, &mut piece_branch);
+        piece_stmt.resize(pieces.len(), si);
+        debug_assert!(pieces.len() > first);
+    }
+    let n = pieces.len();
+    let mut s_inputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut s_outputs: Vec<Vec<VarOffset>> = Vec::with_capacity(n);
+    let mut read_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
+    let mut write_bits: Vec<HashMap<VarOffset, BitRange>> = Vec::with_capacity(n);
+    let mut bit_ranges = vec![];
+    for s in &pieces {
+        let mut ins = vec![];
+        let mut outs = vec![];
+        s.gather_variable_offsets(&mut ins, &mut outs);
+        // FF reads/writes don't participate in comb cycles, and
+        // `packed_ff` collapses next_offset onto current_offset so they'd
+        // share a VarOffset and form phantom edges otherwise.
+        ins.retain(|o| !o.is_ff());
+        outs.retain(|o| !o.is_ff());
+        s_inputs.push(ins);
+        s_outputs.push(outs);
+        bit_ranges.clear();
+        s.gather_reads_with_ranges(&mut bit_ranges);
+        read_bits.push(union_bit_ranges(std::mem::take(&mut bit_ranges)));
+        gather_bit_aware_outputs(s, &mut bit_ranges);
+        write_bits.push(union_bit_ranges(std::mem::take(&mut bit_ranges)));
+    }
+    // Ascending piece order, and pieces of one statement are contiguous:
+    // the rules below read both off the list.
+    let mut w: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
+    for (i, outs) in s_outputs.iter().enumerate() {
+        for &key in outs {
+            let wbr = write_bits[i].get(&key).copied().flatten();
+            w.entry(key).or_default().push((i, wbr));
+        }
+    }
+    let mut a: Vec<HashSet<usize>> = vec![HashSet::default(); n];
+    let mut deg: Vec<usize> = vec![0; n];
+    let mut bound: Vec<usize> = vec![];
+    for (ri, ins) in s_inputs.iter().enumerate() {
+        let rs = piece_stmt[ri];
+        for key in ins {
+            let Some(wis) = w.get(key) else { continue };
+            let rbr = read_bits[ri].get(key).copied().flatten();
+            bound.clear();
+            // WHICH writer binds stays a statement's decision: pieces of
+            // one statement never overwrite each other.
+            let sole = piece_stmt[wis[0].0] == piece_stmt[wis[wis.len() - 1].0];
+            let overlapping = |from: Option<usize>, bound: &mut Vec<usize>| {
+                bound.extend(
+                    wis.iter()
+                        .filter(|&&(p, wbr)| {
+                            from.is_none_or(|s| piece_stmt[p] == s) && ranges_overlap(wbr, rbr)
+                        })
+                        .map(|&(p, _)| p),
+                )
+            };
+            if sole {
+                // A sole writer binds the read even when it sits later:
+                // that backward edge is what a loop looks like here.
+                overlapping(None, &mut bound);
+            } else if let Some(ws) = wis
+                .iter()
+                .rev()
+                .find(|&&(p, wbr)| piece_stmt[p] < rs && ranges_overlap(wbr, rbr))
+                .map(|&(p, _)| piece_stmt[p])
+            {
+                overlapping(Some(ws), &mut bound);
+            } else if wis.iter().any(|&(p, _)| piece_stmt[p] < rs) {
+                // Something ran before the read but wrote other bits, so
+                // the value comes from a LATER writer of the bits read.
+                // Without binding those, a ring closed this way is missed.
+                overlapping(None, &mut bound);
+            }
+            for &wi in &bound {
+                // Two pieces of one statement that keep different branches
+                // never both run, so no value passes from one to the other.
+                let exclusive = piece_stmt[wi] == rs
+                    && piece_branch[wi] != piece_branch[ri]
+                    && piece_branch[wi] != 0
+                    && piece_branch[ri] != 0;
+                if wi != ri && !exclusive && a[wi].insert(ri) {
+                    deg[ri] += 1;
+                }
+            }
+        }
+    }
+    let mut q: VecDeque<usize> = VecDeque::new();
+    for (i, &d) in deg.iter().enumerate() {
+        if d == 0 {
+            q.push_back(i);
+        }
+    }
+    let mut cnt = 0;
+    while let Some(idx) = q.pop_front() {
+        cnt += 1;
+        for &succ in &a[idx] {
+            deg[succ] -= 1;
+            if deg[succ] == 0 {
+                q.push_back(succ);
+            }
+        }
+    }
+    if cnt == n {
+        return Ok((sorted, passes_hint));
+    }
+    // `deg > 0` includes the cycle's downstream cone; isolate just the
+    // cycle (SCC size >= 2) so the diagnostic focuses on the real loop.
+    let cycle_indices: Vec<usize> = {
+        use daggy::petgraph::Graph;
+        use daggy::petgraph::algo::tarjan_scc;
+        let mut g: Graph<usize, ()> = Graph::new();
+        let nodes: Vec<_> = (0..n).map(|i| g.add_node(i)).collect();
+        for (u, succs) in a.iter().enumerate() {
+            for &v in succs {
+                g.add_edge(nodes[u], nodes[v], ());
+            }
+        }
+        let mut cycle: Vec<usize> = tarjan_scc(&g)
+            .into_iter()
+            .filter(|c| c.len() >= 2)
+            .flat_map(|c| c.into_iter().map(|ni| piece_stmt[g[ni]]))
+            .collect();
+        cycle.sort();
+        // Several pieces of one statement can sit on the cycle; the
+        // diagnostic names source lines, so report each line once.
+        cycle.dedup();
+        cycle
+    };
+    Err((sorted, cycle_indices))
+}
+
 /// `dst = src` is one node, so every bit of `dst` reads as depending on every
 /// bit of `src` — enough to weld a vector written field by field on one side
 /// to one read field by field on the other, closing a cycle no bit takes.
 ///
 /// Runs after the splits above, so a concatenation already counts per element;
 /// a source written with unknown bits is left alone, no cut being finer.
+///
+/// For `max_parts` see [`SPECULATIVE_MAX_PARTS`] and [`LAST_RESORT_MAX_PARTS`].
 fn split_copies_by_source_writes(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
     groups: &mut Vec<usize>,
+    max_parts: usize,
 ) {
-    /// Same trade as `MAX_ELEMENTS`, but no design has reached it: the cut
-    /// count follows the source's write boundaries, which stay far below.
-    const MAX_PARTS: usize = 64;
     /// A buffer chain carries boundaries one link per round.  A split link names
     /// its bits and never splits again, so this terminates; the bound only caps
     /// long chains.
@@ -2567,7 +2621,7 @@ fn split_copies_by_source_writes(
             .zip(groups.iter().copied())
         {
             let before = out_stmts.len();
-            split_one_copy(stmt, &bounds, MAX_PARTS, &mut out_stmts);
+            split_one_copy(stmt, &bounds, max_parts, &mut out_stmts);
             out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
             // A part of a split piece is still that piece's branch.
             out_groups.resize(out_stmts.len(), group);
@@ -2659,7 +2713,7 @@ fn split_one_copy(
     }
     cuts.sort_unstable();
     cuts.dedup();
-    if !any_known || !(3..=max_parts + 1).contains(&cuts.len()) {
+    if !any_known || !(3..=max_parts.saturating_add(1)).contains(&cuts.len()) {
         out.push(ProtoStatement::Assign(a));
         return;
     }
