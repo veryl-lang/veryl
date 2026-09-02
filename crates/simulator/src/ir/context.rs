@@ -95,9 +95,6 @@ pub struct Context {
     /// boundary is de-aliased — the DUT's internals stay aliased (they relocate
     /// uniformly with it, no per-cycle boundary copies on hot paths).
     pub in_reuse_dut: bool,
-    /// Set once conv descends through a component no other test top
-    /// instantiates; nothing below it can be a reuse DUT.
-    pub unshared_ancestor: bool,
     /// Per-testbench id (assigned at `ProtoModule::conv`).  A component is a reuse
     /// DUT only when it recurs across DIFFERENT tops; replication within one top
     /// (SMP harts) shares this id and so does not de-alias.

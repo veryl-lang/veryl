@@ -1272,16 +1272,14 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // to, eliminating the inter-module copy at settle_comb.  De-aliased only
         // for the reuse-target DUT boundary — see `port_alias_enabled`.
         let component_key = Arc::as_ptr(&src.component);
-        let alias_decision = port_alias_enabled(
+        let alias_enabled = port_alias_enabled(
             component_key,
             child_ff_count,
             child_comb_count,
             context.in_reuse_dut,
-            context.unshared_ancestor,
             context.test_top_id,
             context.config.dut_reuse,
         );
-        let alias_enabled = alias_decision.alias_enabled;
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for input in &src.inputs {
@@ -1482,10 +1480,6 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // de-aliased; internals relocate uniformly with the DUT).
             let prev_in_reuse_dut = context.in_reuse_dut;
             context.in_reuse_dut = prev_in_reuse_dut || !alias_enabled;
-            // An unshared instance makes everything below it private to this
-            // test, so no descendant is a reuse DUT.
-            let prev_unshared_ancestor = context.unshared_ancestor;
-            context.unshared_ancestor = prev_unshared_ancestor || !alias_decision.recurring;
 
             for decl in child_decls {
                 let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
@@ -1514,7 +1508,6 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             )?;
 
             context.in_reuse_dut = prev_in_reuse_dut;
-            context.unshared_ancestor = prev_unshared_ancestor;
             context.scope_contexts.pop();
 
             try_compile_inst_chunks(

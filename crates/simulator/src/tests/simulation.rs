@@ -25818,11 +25818,12 @@ fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
     }
 }
 
-/// Enabling reuse must leave a test's own (unshared) design untouched --
-/// de-aliasing below an unshared instance can close a false ring (see
-/// `port_alias_enabled`).
+/// A DUT shared across tests de-aliases wherever it sits, including under a
+/// per-test wrapper no other top instantiates.  The boundary copy that
+/// introduces is cut per written range, so the packed struct crossing it closes
+/// no ring (`split_copies_by_source_writes`).
 #[test]
-fn dut_reuse_does_not_dealias_below_an_unshared_instance() {
+fn dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance() {
     let code = r#"
     package reuse_pkg {
         struct Bus {
@@ -25899,16 +25900,26 @@ fn dut_reuse_does_not_dealias_below_an_unshared_instance() {
 
     crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
 
+    // `unwrap` is half the assertion: de-aliasing wires `w` across the
+    // boundary as a whole-variable copy, and until that copy was cut per range
+    // the scheduler read a ring through it (`r` -> `hw.x` -> `w` -> `w.y` ->
+    // `r`) that no bit takes.
     let deep_on = build_ir(&air_ir, "DeepTop".into(), &on).unwrap();
+    // `w` is already `Wrap`'s own storage, so nothing moves into a fresh slot
+    // and only the copies show.  Exact, because a copy split also adds
+    // statements; with the ports left aliased this stayed at `deep_off`.
     assert_eq!(
-        (deep_off.comb_values.len(), deep_off.comb_statements.len()),
         (deep_on.comb_values.len(), deep_on.comb_statements.len()),
-        "reuse changed a design no other test shares: `Sub` sits under the \
-         unshared `Wrap`, so its ports must stay aliased"
+        (
+            deep_off.comb_values.len(),
+            deep_off.comb_statements.len() + 4
+        ),
+        "the shared DUT under an unshared wrapper must de-alias"
     );
 
-    // The boundary reuse IS for — the shared component directly under the test
-    // top — must still de-alias, or the check above passes for the wrong reason.
+    // The shallow case must keep working, or the check above could pass with
+    // reuse broken in a way that happens to add statements.  This one does move
+    // storage: `Sub` drives `ShallowTop`'s own ports.
     let shallow_on = build_ir(&air_ir, "ShallowTop".into(), &on).unwrap();
     assert!(
         shallow_on.comb_values.len() > shallow_off.comb_values.len(),
