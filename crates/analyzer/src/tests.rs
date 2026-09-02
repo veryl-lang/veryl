@@ -6477,6 +6477,34 @@ fn missing_tri() {
 }
 
 #[test]
+fn inout_function_argument() {
+    // https://github.com/veryl-lang/veryl/issues/3308
+    let code = r#"
+    module ModuleA (
+        a: input  logic<2>,
+        b: output logic<2>,
+    ) {
+        var c: logic<2>;
+
+        function sum (
+            v: inout logic<2>,
+        ) {
+            v = v + 1;
+        }
+
+        always_comb {
+            c = a;
+            sum(c);
+            b = c;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn missing_clock_domain() {
     let code = r#"
     module ModuleA (
