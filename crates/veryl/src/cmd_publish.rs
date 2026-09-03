@@ -1,4 +1,5 @@
 use crate::OptPublish;
+use crate::incremental::OutputIntent;
 use crate::pipeline::{self, AnalyzeOptions, AnalyzeOutput};
 use log::warn;
 use miette::{IntoDiagnostic, Result, bail};
@@ -41,7 +42,7 @@ impl CmdPublish {
         // above keeps `paths` identical to build/check, so the cache is shared.
         let options = AnalyzeOptions {
             defines: &[],
-            emit_mode: false,
+            output_intent: OutputIntent::Never,
             incremental: true,
             fail_fast: true,
         };

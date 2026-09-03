@@ -1,4 +1,5 @@
 use crate::OptCheck;
+use crate::incremental::OutputIntent;
 use crate::pipeline::{self, AnalyzeOptions, AnalyzeOutput};
 use miette::Result;
 use veryl_metadata::Metadata;
@@ -17,7 +18,7 @@ impl CmdCheck {
 
         let options = AnalyzeOptions {
             defines: &[],
-            emit_mode: false,
+            output_intent: OutputIntent::Never,
             incremental: true,
             fail_fast: true,
         };

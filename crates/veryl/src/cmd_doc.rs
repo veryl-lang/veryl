@@ -1,5 +1,6 @@
 use crate::OptDoc;
 use crate::doc::{ComponentItem, DocBuilder, TopLevelItem};
+use crate::incremental::OutputIntent;
 use crate::pipeline::{self, AnalyzeOptions};
 use log::warn;
 use miette::Result;
@@ -25,7 +26,7 @@ impl CmdDoc {
         // Abort on a fatal error rather than document a half-analyzed tree.
         let options = AnalyzeOptions {
             defines: &[],
-            emit_mode: false,
+            output_intent: OutputIntent::Never,
             incremental: false,
             fail_fast: true,
         };
