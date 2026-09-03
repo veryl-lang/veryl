@@ -1673,6 +1673,20 @@ impl SymbolTable {
         }
     }
 
+    /// The paths only: the filelist would otherwise clone the whole table.
+    fn get_test_files(&self, prj: &Namespace) -> HashSet<PathId> {
+        let mut ret = HashSet::default();
+        for symbol in self.symbol_table.values() {
+            if matches!(symbol.kind, SymbolKind::Test(_))
+                && symbol.namespace.included(prj)
+                && let TokenSource::File { path, .. } = symbol.token.source
+            {
+                ret.insert(path);
+            }
+        }
+        ret
+    }
+
     pub fn get_all(&self) -> Vec<Symbol> {
         let mut ret = Vec::new();
         for symbol in self.symbol_table.values() {
@@ -3427,6 +3441,10 @@ pub fn get_namespace_symbol(namespace: &Namespace) -> Option<Symbol> {
 
 pub fn get_all() -> Vec<Symbol> {
     SYMBOL_TABLE.with(|f| f.borrow().get_all())
+}
+
+pub fn get_test_files(prj: &Namespace) -> HashSet<PathId> {
+    SYMBOL_TABLE.with(|f| f.borrow().get_test_files(prj))
 }
 
 pub fn dump() -> String {
