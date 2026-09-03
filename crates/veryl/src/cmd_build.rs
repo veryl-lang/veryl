@@ -11,11 +11,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use veryl_analyzer::namespace::Namespace;
-use veryl_analyzer::symbol::SymbolKind;
 use veryl_analyzer::{symbol_table, type_dag};
 use veryl_emitter::Emitter;
 use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target};
-use veryl_parser::{resource_table, veryl_token::TokenSource};
+use veryl_parser::resource_table;
 use veryl_path::PathSet;
 
 pub struct CmdBuild {
@@ -337,32 +336,26 @@ impl CmdBuild {
         let mut prj_namespace = Namespace::new();
         prj_namespace.push(resource_table::insert_str(&metadata.project.name));
 
-        let mut candidate_symbols: Vec<_> = type_dag::connected_components()
-            .into_iter()
-            .filter(|symbols| symbols[0].namespace.included(&prj_namespace))
-            .flatten()
-            .collect();
+        let mut candidate_files = type_dag::connected_files(&prj_namespace);
         if include_tests {
-            candidate_symbols.extend(symbol_table::get_all().into_iter().filter(|symbol| {
-                matches!(symbol.kind, SymbolKind::Test(_))
-                    && symbol.namespace.included(&prj_namespace)
-            }));
+            candidate_files.extend(symbol_table::get_test_files(&prj_namespace));
         }
 
+        // `PathId`'s `Display` is lossy; the table is keyed on the interned path.
         let mut used_paths = HashMap::new();
-        for symbol in &candidate_symbols {
-            if let TokenSource::File { path, .. } = symbol.token.source {
-                let path = PathBuf::from(format!("{path}"));
-                if let Some(x) = table.remove(&path) {
-                    used_paths.insert(path, x);
-                }
+        for file in candidate_files {
+            if let Some(path) = resource_table::get_path_value(file)
+                && let Some(x) = table.remove(&path)
+            {
+                used_paths.insert(path, x);
             }
         }
 
         let mut ret = vec![];
-        for path in type_dag::toposort_file() {
-            let path = PathBuf::from(format!("{path}"));
-            if let Some(x) = used_paths.remove(&path) {
+        for file in type_dag::toposort_file() {
+            if let Some(path) = resource_table::get_path_value(file)
+                && let Some(x) = used_paths.remove(&path)
+            {
                 ret.push(x.clone());
             }
         }

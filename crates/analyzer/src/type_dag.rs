@@ -5,7 +5,7 @@ use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace, SymbolPa
 use crate::symbol_table;
 use crate::{HashMap, HashSet};
 use bimap::BiMap;
-use daggy::petgraph::visit::Dfs;
+use daggy::petgraph::visit::{Dfs, Reversed};
 use daggy::{Dag, NodeIndex, Walker, petgraph::Direction, petgraph::algo};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -13,7 +13,7 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::rc::Rc;
 use veryl_parser::resource_table::PathId;
-use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_token::{Token, TokenSource};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TypeDagCandidate {
@@ -585,25 +585,25 @@ impl TypeDag {
         ret
     }
 
-    fn connected_components(&self) -> Vec<Vec<Symbol>> {
-        let mut ret = Vec::new();
-        let mut graph = self.dag.graph().clone();
-
+    /// Files holding a symbol the project's own symbols reach through the DAG.
+    /// `move_to` keeps the visited set, so the seeds share one traversal.
+    fn connected_files(&self, prj: &Namespace) -> HashSet<PathId> {
         // Reverse edge to traverse nodes which are called from parent node
-        graph.reverse();
+        let graph = Reversed(self.dag.graph());
 
-        for node in self.symbols.keys() {
-            let mut connected = Vec::new();
-            let mut dfs = Dfs::new(&graph, (*node).into());
-            while let Some(x) = dfs.next(&graph) {
-                let index = x.index() as u32;
-                if self.paths.contains_key(&index) {
-                    let symbol = self.get_symbol(index);
-                    connected.push(symbol);
-                }
+        let mut ret = HashSet::default();
+        let mut dfs = Dfs::empty(graph);
+        for (node, symbol) in &self.symbols {
+            if !symbol.namespace.included(prj) {
+                continue;
             }
-            if !connected.is_empty() {
-                ret.push(connected);
+            dfs.move_to((*node).into());
+            while let Some(x) = dfs.next(graph) {
+                if let Some(symbol) = self.symbols.get(&(x.index() as u32))
+                    && let TokenSource::File { path, .. } = symbol.token.source
+                {
+                    ret.insert(path);
+                }
             }
         }
 
@@ -742,8 +742,8 @@ pub fn toposort_file() -> Vec<PathId> {
     TYPE_DAG.with(|f| f.borrow().toposort_file())
 }
 
-pub fn connected_components() -> Vec<Vec<Symbol>> {
-    TYPE_DAG.with(|f| f.borrow().connected_components())
+pub fn connected_files(prj: &Namespace) -> HashSet<PathId> {
+    TYPE_DAG.with(|f| f.borrow().connected_files(prj))
 }
 
 pub fn dependent_files() -> HashMap<PathId, Vec<PathId>> {
