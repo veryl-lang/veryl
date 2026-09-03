@@ -1,4 +1,4 @@
-use crate::cmd_build::CmdBuild;
+use crate::cmd_build::{CmdBuild, EmitPolicy};
 use crate::runner::{Cocotb, CocotbSource, Dsim, Vcs, Verilator, Vivado};
 use crate::{Format, OptBuild, OptTest, check_format_version};
 use log::{error, info, warn};
@@ -257,6 +257,7 @@ impl CmdTest {
             Some(&mut ir),
             self.opt.test.as_deref(),
             &combined_defines,
+            EmitPolicy::SkipIfNativeOnly,
         )?;
 
         let tests = symbol_table::get_tests(&metadata.project.name);

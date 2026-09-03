@@ -14,6 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use veryl_analyzer::fragment_cache::{self, Fragment, FragmentWatermark};
+use veryl_analyzer::symbol::TestType;
 use veryl_analyzer::{Analyzer, CachedDiagnostic, scope, symbol_table, type_dag};
 use veryl_cache::Store;
 use veryl_metadata::Metadata;
@@ -40,6 +41,22 @@ pub struct Incremental {
     pub restored: usize,
     /// Cached diagnostics of restored files, to re-report on a warm run.
     restored_diagnostics: Vec<CachedDiagnostic>,
+    /// Whether output staleness was ignored because the store said no test
+    /// needs an external simulator. The caller must re-check that against the
+    /// symbol table: a file re-analyzed this run may have introduced one.
+    pub predicted_no_emit: bool,
+}
+
+/// What a run will do with the emitted SystemVerilog, which decides whether a
+/// stale or missing output has to force a cache miss.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OutputIntent {
+    /// The run emits (`build`), so a stale output must be regenerated.
+    Emit,
+    /// The run never emits (`check`, `doc`, `dump`, `synth`, `publish`).
+    Never,
+    /// The run emits only if a test needs an external simulator (`test`).
+    SkipIfNativeOnly,
 }
 
 impl Drop for Incremental {
@@ -55,15 +72,12 @@ impl Incremental {
     /// `selected_tests`: `None` for a plain build, `Some(filter)` when the
     /// caller simulates the matching tests (`None` filter = all). Files with
     /// a selected test are forced to miss so their pass2 IR is available.
-    ///
-    /// `consider_output`: `true` for `build`/`test`, where a stale or missing
-    /// output forces a miss; `false` for `check`, which never emits.
     pub fn open(
         metadata: &Metadata,
         paths: &[PathSet],
         defines: &[String],
         selected_tests: Option<Option<&str>>,
-        consider_output: bool,
+        intent: OutputIntent,
     ) -> Option<Incremental> {
         if !metadata.build.incremental {
             return None;
@@ -73,6 +87,21 @@ impl Incremental {
         // change discards every entry — no separate version check needed.
         let key = global_key(metadata, defines)?;
         let store = Store::open(&metadata.project_dot_build_path().join("cache"), &key);
+
+        // A file the store has never seen is assumed native-only: on a cold
+        // store nothing restores anyway, so the guess is free there. It can
+        // only be wrong for a file being re-analyzed right now.
+        let predicted_no_emit = intent == OutputIntent::SkipIfNativeOnly
+            && !paths.iter().any(|path| {
+                store
+                    .entry(&path.src.to_string_lossy())
+                    .is_some_and(|x| x.has_non_native_test)
+            });
+        let consider_output = match intent {
+            OutputIntent::Emit => true,
+            OutputIntent::Never => false,
+            OutputIntent::SkipIfNativeOnly => !predicted_no_emit,
+        };
 
         let mut miss = HashSet::new();
         let mut inputs = HashMap::new();
@@ -131,6 +160,7 @@ impl Incremental {
             root_project: metadata.project.name.clone(),
             restored: 0,
             restored_diagnostics: Vec::new(),
+            predicted_no_emit,
         })
     }
 
@@ -261,14 +291,17 @@ impl Incremental {
         }
 
         // Only the root project's tests are ever simulated.
-        let mut tests: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        let mut tests: HashMap<PathBuf, (Vec<String>, bool)> = HashMap::new();
         for (name, property) in symbol_table::get_tests(&self.root_project) {
             if let Some(src) = resource_table::get_path_value(property.path) {
-                tests.entry(src).or_default().push(name.to_string());
+                let entry = tests.entry(src).or_default();
+                entry.0.push(name.to_string());
+                entry.1 |= !matches!(property.r#type, TestType::Native);
             }
         }
-        for (src, names) in tests {
-            self.store.set_tests(&src.to_string_lossy(), names);
+        for (src, (names, has_non_native_test)) in tests {
+            self.store
+                .set_tests(&src.to_string_lossy(), names, has_non_native_test);
         }
 
         // Restored files' diagnostics are already preserved by `Store::keep`,

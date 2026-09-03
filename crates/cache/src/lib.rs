@@ -59,6 +59,10 @@ pub struct FileEntry {
     /// simulated), so they must not be restored from a fragment.
     #[serde(default)]
     pub tests: Vec<String>,
+    /// Whether any of those tests needs an external simulator. Read before
+    /// parsing, to decide whether output staleness may force a miss.
+    #[serde(default)]
+    pub has_non_native_test: bool,
     /// Blob path of this file's cached diagnostics, replayed on a warm restore
     /// so a file with warnings stays cacheable instead of being invalidated;
     /// `None` if it produced none.
@@ -203,6 +207,7 @@ impl Store {
                 fragment,
                 dependents: Vec::new(),
                 tests: Vec::new(),
+                has_non_native_test: false,
                 diagnostics: None,
             },
         );
@@ -256,9 +261,10 @@ impl Store {
     }
 
     /// Sets the test names declared in a file for the build in progress.
-    pub fn set_tests(&mut self, src: &str, tests: Vec<String>) {
+    pub fn set_tests(&mut self, src: &str, tests: Vec<String>, has_non_native_test: bool) {
         if let Some(entry) = self.next_files.get_mut(src) {
             entry.tests = tests;
+            entry.has_non_native_test = has_non_native_test;
         }
     }
 

@@ -1,4 +1,5 @@
 use crate::OptDump;
+use crate::incremental::OutputIntent;
 use crate::pipeline::{self, AnalyzeOptions};
 use miette::Result;
 use veryl_analyzer::ir::Ir;
@@ -19,7 +20,7 @@ impl CmdDump {
         // Debug tool: analyze a broken tree best-effort (`fail_fast: false`).
         let options = AnalyzeOptions {
             defines: &self.opt.define,
-            emit_mode: false,
+            output_intent: OutputIntent::Never,
             incremental: false,
             fail_fast: false,
         };

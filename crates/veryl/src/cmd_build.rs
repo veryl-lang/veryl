@@ -1,6 +1,7 @@
 use crate::OptBuild;
 use crate::StopWatch;
 use crate::diff::print_diff;
+use crate::incremental::OutputIntent;
 use crate::pipeline::{self, AnalyzeOptions, AnalyzeOutput};
 use crate::utils;
 use log::{debug, info};
@@ -21,11 +22,21 @@ pub struct CmdBuild {
     opt: OptBuild,
 }
 
+/// Whether [`CmdBuild::exec`] may skip SystemVerilog emission and the filelist.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum EmitPolicy {
+    Always,
+    /// The native simulator runs the analyzer IR directly, so an all-native
+    /// project has no reader for the `.sv` or the filelist.
+    SkipIfNativeOnly,
+}
+
 impl CmdBuild {
     pub fn new(opt: OptBuild) -> Self {
         Self { opt }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn exec(
         &self,
         metadata: &mut Metadata,
@@ -34,6 +45,7 @@ impl CmdBuild {
         ir: Option<&mut veryl_analyzer::ir::Ir>,
         test_filter: Option<&str>,
         defines: &[String],
+        emit_policy: EmitPolicy,
     ) -> Result<bool> {
         if let Some(ref out_dir) = self.opt.out_dir {
             let out_dir = if out_dir.is_absolute() {
@@ -52,7 +64,10 @@ impl CmdBuild {
 
         let options = AnalyzeOptions {
             defines,
-            emit_mode: true,
+            output_intent: match emit_policy {
+                EmitPolicy::Always => OutputIntent::Emit,
+                EmitPolicy::SkipIfNativeOnly => OutputIntent::SkipIfNativeOnly,
+            },
             incremental: true,
             fail_fast: true,
         };
@@ -65,6 +80,11 @@ impl CmdBuild {
 
         let mut stopwatch = StopWatch::new();
 
+        // Decided here rather than by the caller: the test kinds only become
+        // known once analysis has populated the symbol table.
+        let skip_emit = emit_policy == EmitPolicy::SkipIfNativeOnly
+            && pipeline::tests_are_all_native(&metadata.project.name);
+
         let temp_dir = if let Target::Bundle { .. } = &metadata.build.target {
             Some(TempDir::new().into_diagnostic()?)
         } else {
@@ -72,6 +92,9 @@ impl CmdBuild {
         };
 
         let mut all_pass = true;
+        if skip_emit {
+            contexts.clear();
+        }
         for context in contexts.drain(..) {
             if !context.skip && !context.path.example {
                 let path = &context.path;
@@ -143,7 +166,9 @@ impl CmdBuild {
 
         debug!("Executed emit ({} milliseconds)", stopwatch.lap());
 
-        if !self.opt.check {
+        if skip_emit {
+            debug!("Skipped emit and filelist (all tests are native)");
+        } else if !self.opt.check {
             self.gen_filelist(
                 metadata,
                 &paths,
@@ -418,7 +443,7 @@ exclude_std = true
             out_dir,
         });
         build
-            .exec(metadata, false, true, None, None, &[])
+            .exec(metadata, false, true, None, None, &[], EmitPolicy::Always)
             .expect("build should succeed");
 
         Analyzer::new(metadata).clear();
@@ -595,6 +620,56 @@ incremental = true
     }
     "#;
 
+    fn run_native_test(metadata: &mut Metadata) -> bool {
+        Analyzer::new(metadata).clear();
+        let test = crate::cmd_test::CmdTest::new(crate::OptTest {
+            files: Vec::new(),
+            test: None,
+            sim: None,
+            wave: false,
+            backend: crate::Backend::Interpret,
+            backend_validate: None,
+            disable_ff_opt: false,
+            ignored: false,
+            include_ignored: false,
+            define: Vec::new(),
+            no_capture: false,
+            seed: None,
+            four_state: false,
+            format: crate::Format::Pretty,
+            format_version: None,
+        });
+        let ret = test.exec(metadata).expect("test run should succeed");
+        Analyzer::new(metadata).clear();
+        ret
+    }
+
+    /// For runs expected to fail (no external simulator installed); only their
+    /// side effects are under test.
+    fn run_native_test_allow_failure(metadata: &mut Metadata) -> Result<bool> {
+        Analyzer::new(metadata).clear();
+        let test = crate::cmd_test::CmdTest::new(crate::OptTest {
+            files: Vec::new(),
+            test: None,
+            sim: None,
+            wave: false,
+            backend: crate::Backend::Interpret,
+            backend_validate: None,
+            disable_ff_opt: false,
+            ignored: false,
+            include_ignored: false,
+            define: Vec::new(),
+            no_capture: false,
+            seed: None,
+            four_state: false,
+            format: crate::Format::Pretty,
+            format_version: None,
+        });
+        let ret = test.exec(metadata);
+        Analyzer::new(metadata).clear();
+        ret
+    }
+
     fn run_check(metadata: &mut Metadata) -> Result<bool> {
         Analyzer::new(metadata).clear();
 
@@ -658,7 +733,7 @@ exclude_std = true
             out_dir: None,
         });
         let pass = build
-            .exec(metadata, false, true, None, None, &[])
+            .exec(metadata, false, true, None, None, &[], EmitPolicy::Always)
             .expect("check should run");
 
         Analyzer::new(metadata).clear();
@@ -844,7 +919,15 @@ exclude_std = true
         });
         let mut ir = veryl_analyzer::ir::Ir::default();
         build
-            .exec(metadata, true, true, Some(&mut ir), None, &[])
+            .exec(
+                metadata,
+                true,
+                true,
+                Some(&mut ir),
+                None,
+                &[],
+                EmitPolicy::Always,
+            )
             .expect("build should succeed");
 
         Analyzer::new(metadata).clear();
@@ -968,7 +1051,7 @@ exclude_std = true
             .expect("paths");
         let options = AnalyzeOptions {
             defines: &[],
-            emit_mode: false,
+            output_intent: OutputIntent::Never,
             incremental: true,
             fail_fast: true,
         };
@@ -1110,6 +1193,7 @@ exclude_std = true
                 Some(&mut ir),
                 Some("test_a"),
                 &[],
+                EmitPolicy::Always,
             )
             .expect("filtered test build on a clean tree should succeed");
         Analyzer::new(&metadata).clear();
@@ -1157,6 +1241,18 @@ exclude_std = true
             $finish();
         }
     }
+    "#;
+
+    // Needs an external simulator, so a project holding one must emit.
+    const INLINE_TEST: &str = r#"
+    #[test(test_inline)]
+    embed (inline) sv{{{
+    module test_inline;
+        initial begin
+            $finish();
+        end
+    endmodule
+    }}}
     "#;
 
     const EXAMPLE_DUT: &str = r#"
@@ -1274,9 +1370,103 @@ exclude_std = true
         Analyzer::new(&metadata).clear();
 
         assert!(all_pass, "the example testbench must be collected and pass");
+        // Every test here is native, so the run emits nothing.
+        assert!(!project_path.join("target/dut.sv").exists());
+        assert!(!project_path.join("example_test.f").exists());
+
+        // `include_tests` on, as `veryl test` has it: the only combination
+        // where `gen_filelist` sees a `SymbolKind::Test` under examples/.
+        Analyzer::new(&metadata).clear();
+        CmdBuild::new(OptBuild {
+            files: Vec::new(),
+            check: false,
+            out_dir: None,
+        })
+        .exec(
+            &mut metadata,
+            true,
+            true,
+            None,
+            None,
+            &[],
+            EmitPolicy::Always,
+        )
+        .expect("build should succeed");
+        Analyzer::new(&metadata).clear();
+
+        assert!(project_path.join("target/dut.sv").exists());
         assert!(!project_path.join("target/tb.sv").exists());
         let filelist = fs::read_to_string(project_path.join("example_test.f")).unwrap();
+        assert!(filelist.contains("dut.sv"), "{filelist}");
         assert!(!filelist.contains("tb.sv"), "{filelist}");
+    }
+
+    /// Emitting nothing records no generated files, and `dst_is_stale` reads a
+    /// missing record as stale — so without care every file misses on every
+    /// run, in exactly the workflow the emit skip is meant to speed up.
+    #[test]
+    fn incremental_survives_a_native_only_test_run() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_native_test",
+            &[("dut.veryl", EXAMPLE_DUT), ("tb.veryl", EXAMPLE_TEST)],
+        );
+
+        // Cold `veryl test`: populates the cache, restores nothing.
+        run_native_test(&mut metadata);
+        assert_eq!(crate::incremental::last_restored_count(), 0);
+
+        // Warm `veryl test`, nothing edited. tb.veryl holds the selected test
+        // so it must miss for its IR; dut.veryl has no reason to.
+        run_native_test(&mut metadata);
+        assert_eq!(crate::incremental::last_restored_count(), 1);
+    }
+
+    /// The store describes the last analysis, so adding a test that needs an
+    /// external simulator makes the guess wrong; without the restart the files
+    /// it restored would never be emitted.
+    #[test]
+    fn incremental_recovers_when_a_non_native_test_appears() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        // `extra.veryl` is the one that matters: untouched, so the wrong guess
+        // restores it and it never reaches the emitter. `dut.veryl` is edited
+        // and `tb.veryl` holds a selected test, so both miss either way.
+        let (mut metadata, project_path) = write_incremental_project(
+            tempdir.path(),
+            "inc_kind_change",
+            &[
+                ("dut.veryl", EXAMPLE_DUT),
+                ("tb.veryl", EXAMPLE_TEST),
+                ("extra.veryl", CLEAN_MODULE),
+            ],
+        );
+
+        // Warm the store while every test is native, so the next run guesses
+        // "no emit" from it.
+        run_native_test(&mut metadata);
+        run_native_test(&mut metadata);
+        assert_eq!(crate::incremental::last_restored_count(), 2);
+        assert!(!project_path.join("target/extra.sv").exists());
+
+        // dut.veryl now also declares an inline test, which needs the emitted
+        // SystemVerilog. It is the file being re-analyzed, so only the restart
+        // can catch it.
+        fs::write(
+            project_path.join("src/dut.veryl"),
+            format!("{EXAMPLE_DUT}\n{INLINE_TEST}"),
+        )
+        .unwrap();
+
+        // The external simulator is not run here; reaching emit is the point.
+        let _ = run_native_test_allow_failure(&mut metadata);
+        assert!(
+            project_path.join("target/extra.sv").exists(),
+            "a file restored under the wrong guess must still be emitted"
+        );
+        assert!(project_path.join("inc_kind_change.f").exists());
     }
 
     #[test]
