@@ -231,6 +231,41 @@ impl TokenType {
                 | TokenType::Var
         )
     }
+
+    pub fn is_type_keyword(&self) -> bool {
+        matches!(
+            self,
+            TokenType::Bit
+                | TokenType::BBool
+                | TokenType::LBool
+                | TokenType::Clock
+                | TokenType::ClockPosedge
+                | TokenType::ClockNegedge
+                | TokenType::F32
+                | TokenType::F64
+                | TokenType::I8
+                | TokenType::I16
+                | TokenType::I32
+                | TokenType::I64
+                | TokenType::Logic
+                | TokenType::Reset
+                | TokenType::ResetAsyncHigh
+                | TokenType::ResetAsyncLow
+                | TokenType::ResetSyncHigh
+                | TokenType::ResetSyncLow
+                | TokenType::Signed
+                | TokenType::String
+                | TokenType::Tri
+                | TokenType::P8
+                | TokenType::P16
+                | TokenType::P32
+                | TokenType::P64
+                | TokenType::U8
+                | TokenType::U16
+                | TokenType::U32
+                | TokenType::U64
+        )
+    }
 }
 
 impl From<&str> for TokenType {
