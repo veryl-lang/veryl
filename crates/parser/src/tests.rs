@@ -354,6 +354,178 @@ fn parse_error_help() {
 }
 
 #[test]
+fn parse_error_help_retired_keyword() {
+    let code = r#"
+    module ModuleA {
+        local A: u32 = 1;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "'local' and 'localparam' were replaced by 'const'"
+    );
+
+    let code = r#"
+    module ModuleA {
+        localparam A: u32 = 1;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "'local' and 'localparam' were replaced by 'const'"
+    );
+
+    let code = r#"
+    module ModuleA {
+        parameter A: u32 = 1;
+    }
+    "#;
+
+    assert_eq!(&help_message(code), "'parameter' was renamed to 'param'");
+
+    let code = r#"
+    package PackageA {
+        export A;
+    }
+    "#;
+
+    assert_eq!(&help_message(code), "'export' declaration was removed");
+
+    let code = r#"
+    module ModuleA {
+        posedge clk;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "clock edge is specified by the 'clock_posedge' type, not by 'posedge'"
+    );
+
+    // A retired keyword is still a valid identifier.
+    success("var local: logic;");
+}
+
+#[test]
+fn parse_error_help_systemverilog_keyword() {
+    let code = r#"
+    module ModuleA {
+        always @(posedge clk) begin
+        end
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "Veryl has no 'always', use 'always_comb' or 'always_ff'"
+    );
+
+    let code = r#"
+    module ModuleA {
+        always_comb begin
+            a = 1;
+        end
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "Veryl delimits a block by '{' and '}', not by 'begin' and 'end'"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+    endmodule
+    "#;
+
+    assert_eq!(&help_message(code), "Veryl closes a block by '}'");
+
+    let code = r#"
+    module ModuleA {
+        wire a;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "Veryl has no 'wire', use 'let' (with an initial value) or 'var'"
+    );
+
+    let code = r#"
+    module ModuleA {
+        int a;
+    }
+    "#;
+
+    assert_eq!(&help_message(code), "'int' is spelled 'i32' in Veryl");
+
+    let code = r#"
+    module ModuleA {
+        genvar i;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "Veryl has no 'genvar', 'for' declares its loop variable implicitly"
+    );
+}
+
+#[test]
+fn parse_error_help_systemverilog_style_declaration() {
+    let code = r#"
+    module ModuleA {
+        logic [7:0] a;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "variable declaration is in the form 'var <name>: <type>;'"
+    );
+
+    let code = r#"
+    module ModuleA (
+        input wire clk
+    ) {
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "port declaration is in the form '<name>: <direction> <type>'"
+    );
+
+    let code = r#"
+    module ModuleA {
+        always_ff {
+            a <= b;
+        }
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "Veryl has no non-blocking assignment, use '='"
+    );
+
+    // Outside a port list the reserved-keyword hint must win.
+    let code = r#"
+    module ModuleA {
+        var input: logic;
+    }
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "'input' is a reserved keyword and cannot be used as an identifier"
+    );
+}
+
+#[test]
 fn parse_error_location_points_at_divergence() {
     use crate::ParserError;
 

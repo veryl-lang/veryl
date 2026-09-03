@@ -19,6 +19,7 @@ fn generate_token_type() {
         term_name: String,
         display: String,
         is_keyword: bool,
+        is_type: bool,
     }
 
     // Display overrides for tokens without single-quoted literal patterns in veryl.par
@@ -53,6 +54,8 @@ fn generate_token_type() {
     let re = Regex::new(r"^(\w+)\s*:\s*<[^>]+>(?:'([^']+)'|[^\s]+)\s*:\s*Token\s*;")
         .expect("Invalid regex");
     let keyword_re = Regex::new(r":\s*Token\s*;\s*//\s*Keyword").expect("Invalid keyword regex");
+    let type_re =
+        Regex::new(r":\s*Token\s*;\s*//\s*Keyword:\s*Type").expect("Invalid type keyword regex");
 
     let mut tokens: Vec<TokenDef> = Vec::new();
 
@@ -66,6 +69,7 @@ fn generate_token_type() {
             let term_name = caps.get(1).unwrap().as_str().to_string();
             let literal = caps.get(2).map(|m| m.as_str().to_string());
             let is_keyword = keyword_re.is_match(line_trimmed);
+            let is_type = type_re.is_match(line_trimmed);
 
             let variant_name = term_name
                 .strip_suffix("Term")
@@ -97,6 +101,7 @@ fn generate_token_type() {
                 term_name,
                 display,
                 is_keyword,
+                is_type,
             });
         }
     }
@@ -113,29 +118,37 @@ fn generate_token_type() {
     code.push_str("    Error,\n");
     code.push_str("}\n\n");
 
-    let keyword_variants: Vec<&str> = tokens
-        .iter()
-        .filter(|t| t.is_keyword)
-        .map(|t| t.variant_name.as_str())
-        .collect();
-    code.push_str("impl TokenType {\n");
-    code.push_str("    pub fn is_keyword(&self) -> bool {\n");
-    if keyword_variants.is_empty() {
-        code.push_str("        false\n");
-    } else {
-        code.push_str("        matches!(\n");
-        code.push_str("            self,\n");
-        for (i, v) in keyword_variants.iter().enumerate() {
-            if i == 0 {
-                code.push_str(&format!("            TokenType::{}", v));
-            } else {
-                code.push_str(&format!("\n                | TokenType::{}", v));
+    let predicate = |code: &mut String, name: &str, variants: &[&str]| {
+        code.push_str(&format!("    pub fn {}(&self) -> bool {{\n", name));
+        if variants.is_empty() {
+            code.push_str("        false\n");
+        } else {
+            code.push_str("        matches!(\n");
+            code.push_str("            self,\n");
+            for (i, v) in variants.iter().enumerate() {
+                if i == 0 {
+                    code.push_str(&format!("            TokenType::{}", v));
+                } else {
+                    code.push_str(&format!("\n                | TokenType::{}", v));
+                }
             }
+            code.push('\n');
+            code.push_str("        )\n");
         }
-        code.push('\n');
-        code.push_str("        )\n");
-    }
-    code.push_str("    }\n");
+        code.push_str("    }\n");
+    };
+
+    let variants_of = |f: fn(&TokenDef) -> bool| -> Vec<&str> {
+        tokens
+            .iter()
+            .filter(|t| f(t))
+            .map(|t| t.variant_name.as_str())
+            .collect()
+    };
+    code.push_str("impl TokenType {\n");
+    predicate(&mut code, "is_keyword", &variants_of(|t| t.is_keyword));
+    code.push('\n');
+    predicate(&mut code, "is_type_keyword", &variants_of(|t| t.is_type));
     code.push_str("}\n\n");
 
     code.push_str("impl From<&str> for TokenType {\n");

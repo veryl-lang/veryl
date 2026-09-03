@@ -1,3 +1,4 @@
+use crate::keyword_hint::keyword_hint;
 use miette::{self, Diagnostic, NamedSource, SourceSpan};
 use parol_runtime::{ParolError, TokenVec};
 use thiserror::Error;
@@ -77,6 +78,27 @@ fn keyword_as_identifier(unexpected_token: TokenType, expected_tokens: &Expected
     unexpected_token.is_keyword() && expected_tokens.any(TokenType::Identifier)
 }
 
+fn non_blocking_assignment(text: Option<&str>, expected_tokens: &ExpectedTokens) -> bool {
+    // `<=` shares its token type with the other comparison operators.
+    text == Some("<=")
+        && (expected_tokens.any(TokenType::Equ)
+            || expected_tokens.any(TokenType::AssignmentOperator))
+}
+
+fn direction_before_name(unexpected_token: TokenType, expected_tokens: &ExpectedTokens) -> bool {
+    // `RParen` narrows this to a port or argument list, leaving `var input: logic;`
+    // to the reserved-keyword hint.
+    matches!(
+        unexpected_token,
+        TokenType::Input | TokenType::Output | TokenType::Inout
+    ) && expected_tokens.any(TokenType::Identifier)
+        && expected_tokens.any(TokenType::RParen)
+}
+
+fn type_before_name(unexpected_token: TokenType, expected_tokens: &ExpectedTokens) -> bool {
+    unexpected_token.is_type_keyword() && expected_tokens.any(TokenType::Var)
+}
+
 fn block_or_if_after_else(
     unexpected_tokens: &[UnexpectedToken],
     expected_tokens: &ExpectedTokens,
@@ -96,11 +118,8 @@ impl From<parol_runtime::SyntaxError> for SyntaxError {
             .map(|v| {
                 let token: SourceSpan = Location(v.token).into();
                 let token_type: TokenType = v.token_type.as_str().into();
-                let text = (token_type == TokenType::Error)
-                    .then(|| {
-                        source.and_then(|s| s.get(token.offset()..token.offset() + token.len()))
-                    })
-                    .flatten()
+                let text = source
+                    .and_then(|s| s.get(token.offset()..token.offset() + token.len()))
                     .map(str::to_string);
                 UnexpectedToken {
                     name: v.name,
@@ -113,14 +132,17 @@ impl From<parol_runtime::SyntaxError> for SyntaxError {
         let expected_tokens: ExpectedTokens = (&value.expected_tokens).into();
 
         let mut help = String::new();
-        if let Some(token) = unexpected_tokens.last() {
-            let token = token.token_type;
+        if let Some(unexpected) = unexpected_tokens.last() {
+            let text = unexpected.text.as_deref();
+            let token = unexpected.token_type;
             if block_or_if_after_else(&unexpected_tokens, &expected_tokens) {
                 help = "'else' must be followed by a block ('{ ... }') or 'if'".to_string();
             } else if l_angle(token, &expected_tokens) {
                 help = "If you mean \"less than operator\", please use '<:'".to_string();
             } else if r_angle(token, &expected_tokens) {
                 help = "If you mean \"greater than operator\", please use '>:'".to_string();
+            } else if non_blocking_assignment(text, &expected_tokens) {
+                help = "Veryl has no non-blocking assignment, use '='".to_string();
             } else if colon_instead_of_in(token, &expected_tokens) {
                 help = "for declaration doesn't need type specifier (e.g. 'for i in 0..10 {')"
                     .to_string();
@@ -130,11 +152,19 @@ impl From<parol_runtime::SyntaxError> for SyntaxError {
                 help =
                     "The first arm of generate-if declaration needs label (e.g. 'if x :label {')"
                         .to_string();
+            } else if direction_before_name(token, &expected_tokens) {
+                help = "port declaration is in the form '<name>: <direction> <type>'".to_string();
+            } else if type_before_name(token, &expected_tokens) {
+                help = "variable declaration is in the form 'var <name>: <type>;'".to_string();
             } else if keyword_as_identifier(token, &expected_tokens) {
                 help = format!(
                     "'{}' is a reserved keyword and cannot be used as an identifier",
                     token
                 );
+            } else if token == TokenType::Identifier
+                && let Some(hint) = text.and_then(keyword_hint)
+            {
+                help = hint.to_string();
             }
         }
 
@@ -161,7 +191,6 @@ pub struct UnexpectedToken {
     token_type: TokenType,
     #[label("Unexpected token")]
     pub(crate) token: SourceSpan,
-    // Source text, set only for `Error` tokens (see `Display`).
     text: Option<String>,
 }
 
