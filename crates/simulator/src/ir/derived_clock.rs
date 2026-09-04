@@ -56,6 +56,10 @@ pub struct DerivedReset {
 /// reset, and `negedge` marks a `clock_negedge` (meaningless for a reset).
 pub type EdgeCandidate = (VarId, VarOffset, usize, Option<bool>, bool);
 
+/// Statement indices that write one offset, ascending.  A single writer is
+/// the ordinary case; sibling conditional arms are what make it more.
+type Writers = SmallVec<[usize; 1]>;
+
 #[derive(Clone, Debug, Default)]
 pub struct DerivedClockSchedule {
     pub clocks: Vec<DerivedClock>,
@@ -81,9 +85,13 @@ pub fn build_schedule(
     pre_jit_stmts: &[ProtoStatement],
     input_clock_offsets: &HashMap<VarOffset, VarId>,
 ) -> (DerivedClockSchedule, Vec<usize>) {
-    // Comb-only reverse map: VarOffset -> writer stmt index.  FF outputs
-    // go through the event/commit path so they're not tracked.
-    let mut output_to_writer: HashMap<VarOffset, usize> = HashMap::default();
+    // FF outputs go through the event/commit path.  Every writer, not the
+    // last: an offset written by sibling conditional arms has one fragment
+    // per arm, and keeping only the last leaves the extracted subsequence
+    // with a read whose producer runs later.  The schedule then asks for
+    // settle passes it cannot justify — measured 3, and 1 once the closure
+    // is complete.
+    let mut output_to_writer: HashMap<VarOffset, Writers> = HashMap::default();
     let mut scratch_in: Vec<VarOffset> = Vec::new();
     let mut scratch_out: Vec<VarOffset> = Vec::new();
     for (i, stmt) in pre_jit_stmts.iter().enumerate() {
@@ -92,7 +100,13 @@ pub fn build_schedule(
         stmt.gather_variable_offsets(&mut scratch_in, &mut scratch_out);
         for off in &scratch_out {
             if !off.is_ff() {
-                output_to_writer.insert(*off, i);
+                // A statement holding sibling arms gathers its output once per
+                // arm, and only WHICH statements to run matters below.  Its
+                // pushes are adjacent, so the tail is enough to dedupe.
+                let writers = output_to_writer.entry(*off).or_default();
+                if writers.last() != Some(&i) {
+                    writers.push(i);
+                }
             }
         }
     }
@@ -137,9 +151,11 @@ pub fn build_schedule(
         if c.current_offset.is_ff() {
             (0u32, 0u32)
         } else {
+            // The offset only holds its settled value once every fragment
+            // that can write it has run.
             let writer = output_to_writer
                 .get(&c.current_offset)
-                .copied()
+                .and_then(|w| w.last().copied())
                 .unwrap_or(usize::MAX);
             (1u32, writer as u32)
         }
@@ -216,25 +232,23 @@ pub fn extract_eval_proto_stmts(
         .collect()
 }
 
-/// BFS back from `target_offset` through `output_to_writer`.  FF inputs
+/// Walks back from `target_offset` through `output_to_writer`.  FF inputs
 /// are leaves; boundary clock-typed inputs (top-module ports or testbench
 /// inst outputs) are recorded as masters.
 fn collect_comb_closure(
     target_offset: VarOffset,
     pre_jit_stmts: &[ProtoStatement],
-    output_to_writer: &HashMap<VarOffset, usize>,
+    output_to_writer: &HashMap<VarOffset, Writers>,
     input_clock_offsets: &HashMap<VarOffset, VarId>,
     dep_set: &mut HashSet<usize>,
     master_set: &mut HashSet<VarId>,
 ) {
-    let start = match output_to_writer.get(&target_offset) {
-        Some(&idx) => idx,
-        None => return,
-    };
-
     let mut scratch_in: Vec<VarOffset> = Vec::new();
     let mut scratch_out: Vec<VarOffset> = Vec::new();
-    let mut stack: Vec<usize> = vec![start];
+    let mut stack: Vec<usize> = match output_to_writer.get(&target_offset) {
+        Some(writers) => writers.to_vec(),
+        None => return,
+    };
     while let Some(idx) = stack.pop() {
         if !dep_set.insert(idx) {
             continue;
@@ -251,9 +265,11 @@ fn collect_comb_closure(
                 continue;
             }
             match output_to_writer.get(off) {
-                Some(&writer) => {
-                    if !dep_set.contains(&writer) {
-                        stack.push(writer);
+                Some(writers) => {
+                    for &writer in writers {
+                        if !dep_set.contains(&writer) {
+                            stack.push(writer);
+                        }
                     }
                 }
                 None => {

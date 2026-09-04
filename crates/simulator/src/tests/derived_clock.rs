@@ -1006,3 +1006,162 @@ fn a_clock_chained_off_a_negedge_flop_keeps_running() {
         }
     }
 }
+
+/// A gate written by the SIBLING ARMS of a `case`, off a flop that moves
+/// within the step, so the value must be REBUILT before the edge decision.
+///
+/// The RESULT only: an incomplete closure settles to the same value, it just
+/// needs more passes, so this holds either way.  The closure's own shape is
+/// `derived_clock_closure_keeps_every_writer_of_an_offset`'s job.
+#[test]
+fn gated_clock_written_by_sibling_case_arms() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock   ,
+        i_rst: input  '_ reset   ,
+        i_sel: input  '_ logic<2>,
+        o_cnt: output    logic<8>,
+    ) {
+        var en: logic   ;
+        var st: logic<2>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                st = 0;
+            } else {
+                st = i_sel;
+            }
+        }
+        always_comb {
+            en = 0;
+            case st {
+                2'd0   : { en = 1; }
+                2'd1   : { en = 0; }
+                2'd2   : { en = 1; }
+                default: { en = 0; }
+            }
+        }
+        let clk_g: '_ clock = i_clk & en;
+        always_ff (clk_g, i_rst) {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_sel", Value::new(0, 2, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        let opened = sim.get("o_cnt").unwrap().payload_u128();
+        assert!(
+            opened > 0,
+            "the arm that opens the gate must let the clock through, {config:?}",
+        );
+
+        sim.set("i_sel", Value::new(1, 2, false));
+        for _ in 0..2 {
+            sim.step(&clk);
+        }
+        let settled = sim.get("o_cnt").unwrap().payload_u128();
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_cnt").unwrap().payload_u128(),
+            settled,
+            "the arm that closes the gate must stop it, {config:?}",
+        );
+    }
+}
+
+/// The closure `partial_settle` refreshes must hold EVERY writer of the
+/// offsets its clock depends on, not just the last one.  The chain through
+/// `arc` is what makes the drop observable at all.
+#[test]
+fn derived_clock_closure_keeps_every_writer_of_an_offset() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock   ,
+        i_rst: input  '_ reset   ,
+        i_sel: input  '_ logic<2>,
+        o_cnt: output    logic<8>,
+    ) {
+        var en : logic   ;
+        var nxt: logic<4>;
+        var st : logic<2>;
+        let arc: logic = nxt == 4'd3;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                st = 0;
+            } else {
+                st = i_sel;
+            }
+        }
+        always_comb {
+            en  = 0;
+            nxt = 0;
+            case st {
+                2'd0: {
+                    nxt = 4'd3;
+                    en  = 1;
+                }
+                2'd1: {
+                    nxt = 4'd1;
+                    if arc {
+                        en = 1;
+                    }
+                }
+                default: {
+                    nxt = 4'd0;
+                }
+            }
+        }
+        let clk_g: '_ clock = i_clk & en;
+        always_ff (clk_g, i_rst) {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt += 1;
+            }
+        }
+    }
+    "#;
+
+    let mut exercised = 0;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        // A batched chunk is one statement whatever the closure holds.
+        if ir.derived_clock_eval_stmts.len() < 2 {
+            continue;
+        }
+        exercised += 1;
+        // A floor, not an equality: the total moves with lowering (5
+        // two-state, 6 four-state), while the defect caps it at 3 — one
+        // writer per offset in the cone, whatever the lowering.
+        assert!(
+            ir.derived_clock_eval_stmts.len() >= 4,
+            "the closure dropped a sibling arm: {} stmts, {config:?}",
+            ir.derived_clock_eval_stmts.len(),
+        );
+        assert_eq!(
+            ir.derived_clock_eval_passes, 1,
+            "a complete closure keeps the parent's linearized order, {config:?}",
+        );
+    }
+    assert!(
+        exercised > 0,
+        "every config batched the closure: nothing was checked"
+    );
+}
