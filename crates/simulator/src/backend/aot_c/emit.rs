@@ -14538,6 +14538,7 @@ mod tests {
                 filename: "x.hex".into(),
                 elements: vec![],
                 width: 32,
+                hier: None,
             }),
         ];
         assert!(const_cone_partition(&stmts, &HashSet::default()).is_none());

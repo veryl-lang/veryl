@@ -2439,7 +2439,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             | SystemFunctionKind::Unsigned(input) => self.eval_expr(&input.0),
             SystemFunctionKind::Readmemh(input, output) => {
                 let sources = self.eval_expr(&input.0);
-                for destination in &output.0 {
+                for destination in output.local() {
                     self.write_destination(destination, &sources, controls);
                 }
                 Vec::new()

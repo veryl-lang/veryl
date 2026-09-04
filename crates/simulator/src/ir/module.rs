@@ -7007,6 +7007,7 @@ mod event_written_comb_tests {
                     },
                 ],
                 width: 32,
+                hier: None,
             },
         )];
         let out = collect_event_written_comb(&events(stmts)).unwrap();
@@ -7080,6 +7081,7 @@ mod event_written_comb_tests {
                         next_offset: None,
                     }],
                     width: 32,
+                    hier: None,
                 }
             )]),
             None

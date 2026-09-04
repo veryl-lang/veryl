@@ -909,6 +909,10 @@ pub enum ProtoSystemFunctionCall {
         filename: String,
         elements: Vec<ReadmemhElement>,
         width: usize,
+        /// A target inside an instance.  Its offsets exist only once the
+        /// instance tree is assembled, so `elements` and `width` stay empty
+        /// until `resolve_hier_refs` fills them and clears this.
+        hier: Option<Box<ProtoReadmemhHier>>,
     },
     Assert {
         kind: AssertKind,
@@ -917,6 +921,42 @@ pub enum ProtoSystemFunctionCall {
         args: Vec<ProtoExpression>,
     },
     Finish,
+}
+
+pub fn readmemh_elements(meta: &crate::ir::variable::VariableMeta) -> Vec<ReadmemhElement> {
+    meta.elements
+        .iter()
+        .map(|elem| ReadmemhElement {
+            current: elem.current,
+            next_offset: if elem.is_ff() {
+                Some(elem.next_offset)
+            } else {
+                None
+            },
+        })
+        .collect()
+}
+
+/// `$readmemh(path, u_dut.mem)` before `resolve_hier_refs` finds the target.
+#[derive(Clone, Debug)]
+pub struct ProtoReadmemhHier {
+    /// Instance names from the testbench down to the target's module.
+    pub inst_path: Vec<StrId>,
+    pub var_path: air::VarPath,
+    pub token: TokenRange,
+}
+
+// `token` is a per-test source position, excluded as in `ProtoHierVariable`.
+impl std::hash::Hash for ProtoReadmemhHier {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ProtoReadmemhHier {
+            inst_path,
+            var_path,
+            token: _,
+        } = self;
+        inst_path.hash(state);
+        var_path.hash(state);
+    }
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -2214,7 +2254,12 @@ impl ProtoStatement {
                         filename,
                         elements,
                         width,
+                        hier,
                     } => {
+                        debug_assert!(
+                            hier.is_none(),
+                            "a hierarchical $readmemh target was never resolved"
+                        );
                         let nb = calc_native_bytes(*width);
                         let resolved: Arc<[_]> = elements
                             .iter()
@@ -3380,32 +3425,41 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     )]
                 }
                 SystemFunctionKind::Readmemh(input, output) => {
-                    let raw = extract_string_value(&input.0).unwrap();
+                    let raw = extract_string_value(&input.0).ok_or_else(|| {
+                        SimulatorError::unsupported_description(&x.comptime.token)
+                    })?;
                     let filename = raw.trim_matches('"').to_string();
-                    let dst = &output.0[0];
-                    let id = dst.id;
-                    let scope = context.scope();
-                    let meta = scope.variable_meta.get(&id).unwrap();
-                    let width = meta.width;
-                    let elements: Vec<ReadmemhElement> = meta
-                        .elements
-                        .iter()
-                        .map(|elem| ReadmemhElement {
-                            current: elem.current,
-                            next_offset: if elem.is_ff() {
-                                Some(elem.next_offset)
-                            } else {
-                                None
-                            },
-                        })
-                        .collect();
-                    vec![ProtoStatement::SystemFunctionCall(
-                        ProtoSystemFunctionCall::Readmemh {
-                            filename,
-                            elements,
-                            width,
-                        },
-                    )]
+                    let call = match output {
+                        // Left for `resolve_hier_refs` (see the `hier` field).
+                        air::SystemFunctionOutput::Hier(hier) => {
+                            ProtoSystemFunctionCall::Readmemh {
+                                filename,
+                                elements: Vec::new(),
+                                width: 0,
+                                hier: Some(Box::new(ProtoReadmemhHier {
+                                    inst_path: hier.inst_path.clone(),
+                                    var_path: hier.var_path.clone(),
+                                    token: hier.comptime.token,
+                                })),
+                            }
+                        }
+                        air::SystemFunctionOutput::Local(dst) => {
+                            let dst = dst.first().ok_or_else(|| {
+                                SimulatorError::unsupported_description(&x.comptime.token)
+                            })?;
+                            let scope = context.scope();
+                            let meta = scope.variable_meta.get(&dst.id).ok_or_else(|| {
+                                SimulatorError::unsupported_description(&dst.token)
+                            })?;
+                            ProtoSystemFunctionCall::Readmemh {
+                                filename,
+                                elements: readmemh_elements(meta),
+                                width: meta.width,
+                                hier: None,
+                            }
+                        }
+                    };
+                    vec![ProtoStatement::SystemFunctionCall(call)]
                 }
                 SystemFunctionKind::Assert { kind, cond, args } => {
                     let condition: ProtoExpression = Conv::conv(context, &cond.0)?;
