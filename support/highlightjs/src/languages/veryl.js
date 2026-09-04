@@ -1,9 +1,12 @@
-/**
- * Language: Veryl
- * Contributors:
- *   Naoya Hatta <dalance@gmail.com>
- */
-module.exports = function (hljs)
+/*
+Language: Veryl
+Author: Naoya Hatta <dalance@gmail.com>
+Description: Veryl is a modern hardware description language which transpiles to SystemVerilog.
+Website: https://veryl-lang.org
+Category: hardware
+*/
+
+export default function (hljs)
 {
   return {
     name: 'Veryl',
@@ -22,7 +25,7 @@ module.exports = function (hljs)
         hljs.C_BLOCK_COMMENT_MODE,
         hljs.C_LINE_COMMENT_MODE,
         {
-          scope: 'number',
+          className: 'number',
           contains: [ hljs.BACKSLASH_ESCAPE ],
           variants: [
             { begin: /\b((\d+'([bhodBHOD]))[0-9xzXZa-fA-F_]+)/ },
