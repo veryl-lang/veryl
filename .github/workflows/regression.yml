@@ -269,3 +269,17 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run highlightgen
         run: cargo run --bin highlightgen -- check
+
+  highlightjs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: support/highlightjs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Build and test highlightjs package
+        run: npm test

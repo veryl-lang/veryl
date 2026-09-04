@@ -155,4 +155,7 @@ jobs:
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm
         run: npm install -g npm@latest
+      - run: npm ci
+      # `dist` is not committed, so it has to be built before publishing
+      - run: npm test
       - run: npm publish
