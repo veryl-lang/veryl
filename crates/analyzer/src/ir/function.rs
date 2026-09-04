@@ -575,6 +575,16 @@ impl Arguments {
                             .collect();
                         outputs.push((path.clone(), dst));
                     }
+                    // `inout` is copy-in / copy-out: the actual is read on entry
+                    // and written back on return.
+                    Direction::Inout => {
+                        inputs.push((path.clone(), expr));
+                        let dst = dst
+                            .into_iter()
+                            .filter_map(|x| x.to_assign_destination(context, false))
+                            .collect();
+                        outputs.push((path.clone(), dst));
+                    }
                     _ => (),
                 }
             } else {
@@ -601,6 +611,14 @@ impl Arguments {
                         Direction::Output => {
                             let dst = actual_member.to_assign_destination(context, false);
                             if let Some(dst) = dst {
+                                outputs.push((arg_path, vec![dst]));
+                            }
+                        }
+                        Direction::Inout => {
+                            if let Some(expr) = actual_member.clone().to_expression(context) {
+                                inputs.push((arg_path.clone(), expr));
+                            }
+                            if let Some(dst) = actual_member.to_assign_destination(context, false) {
                                 outputs.push((arg_path, vec![dst]));
                             }
                         }

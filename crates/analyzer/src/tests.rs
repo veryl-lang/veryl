@@ -6477,6 +6477,84 @@ fn missing_tri() {
 }
 
 #[test]
+fn inout_function_argument() {
+    // https://github.com/veryl-lang/veryl/issues/3308
+    let code = r#"
+    module ModuleA (
+        a: input  logic<2>,
+        b: output logic<2>,
+    ) {
+        var c: logic<2>;
+
+        function sum (
+            v: inout logic<2>,
+        ) {
+            v = v + 1;
+        }
+
+        always_comb {
+            c = a;
+            sum(c);
+            b = c;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn tri_function_argument() {
+    // https://github.com/veryl-lang/veryl/issues/3308
+    let code = r#"
+    module ModuleA {
+        function sum (
+            v: inout tri logic<2>,
+        ) {
+            v = v + 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidModifier { .. }));
+}
+
+#[test]
+fn inout_function_argument_in_always_ff() {
+    // https://github.com/veryl-lang/veryl/issues/3308
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock,
+        a    : input  logic<2>,
+        b    : output logic<2>,
+    ) {
+        var c: logic<2>;
+
+        function sum (
+            v: inout logic<2>,
+        ) {
+            v = v + 1;
+        }
+
+        always_ff {
+            c = a;
+            sum(c);
+            b = c;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::SideEffectFunctionCallInAlwaysFf { .. }))
+    );
+}
+
+#[test]
 fn missing_clock_domain() {
     let code = r#"
     module ModuleA (

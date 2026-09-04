@@ -4357,6 +4357,43 @@ fn binary_corner_case() {
     binary_test("8'shff", "** ", "8'shfe", 8, "8'b00000001", false);
 }
 
+#[test]
+fn inout_function_argument_copies_back() {
+    // https://github.com/veryl-lang/veryl/issues/3308
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        b: output logic<8>,
+    ) {
+        var c: logic<8>;
+
+        function bump (
+            v: inout logic<8>,
+        ) {
+            v = v + 3;
+        }
+
+        always_comb {
+            c = a;
+            bump(c);
+            b = c;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(10, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("b").unwrap(),
+            Value::new(13, 8, false),
+            "config={config:?}"
+        );
+    }
+}
+
 // Regression: `$signed(x) >>> y` and signed comparisons on a same-width
 // unsigned variable must use the expression-context `signed` flag, not
 // the stored variable flag, otherwise the interpreter falls back to a
