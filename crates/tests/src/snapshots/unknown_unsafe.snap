@@ -12,4 +12,4 @@ unknown_unsafe (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.ht
    ·               ╰── Error location
  3 │ }
    ╰────
-  help:
+  help: the only valid unsafe identifier is 'cdc'

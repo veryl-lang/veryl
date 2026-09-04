@@ -12,4 +12,4 @@ missing_clock_signal (https://doc.veryl-lang.org/book/07_appendix/02_semantic_er
    ·           ╰── Error location
  3 │ }
    ╰────
-  help: add clock port
+  help: add a clock port, or pass an existing one: 'always_ff (i_clk)'

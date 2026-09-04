@@ -1,3 +1,4 @@
+use crate::handlers::check_embed_include::{EMBED_LANG, EMBED_WAY, INCLUDE_WAY};
 use crate::multi_sources::{MultiSources, Source, SourceExcerpt};
 use miette::{self, Diagnostic, Severity, SourceSpan};
 use serde::{Deserialize, Serialize};
@@ -1167,7 +1168,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(mismatch_clock_domain),
-        help(""),
+        help("synchronize the crossing and mark it 'unsafe (cdc) {{ ... }}', or correct the domain annotations if the crossing is not real"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("Clock domain crossing is detected")]
@@ -1255,7 +1256,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(missing_clock_domain),
-        help("add clock domain annotation"),
+        help("name each independent clock's domain ('a, 'b) and annotate every port and variable in it, or use '_ for the implicit domain"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("clock domain annotation is required when there are multiple clocks")]
@@ -1270,7 +1271,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(missing_clock_signal),
-        help("add clock port"),
+        help("add a clock port, or pass an existing one: 'always_ff (i_clk)'"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("clock signal is required for always_ff statement")]
@@ -1380,7 +1381,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(missing_reset_signal),
-        help("add reset port"),
+        help("add a reset port, or pass an existing one: 'always_ff (i_clk, i_rst)'"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("reset signal is required for always_ff with if_reset statement")]
@@ -1787,12 +1788,13 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(unknown_embed_lang),
-        help(""),
+        help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{name}\" is not valid embed language")]
     UnknownEmbedLang {
         name: String,
+        help: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1803,12 +1805,13 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(unknown_embed_way),
-        help(""),
+        help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{name}\" is not valid embed way")]
     UnknownEmbedWay {
         name: String,
+        help: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1819,12 +1822,13 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(unknown_include_way),
-        help(""),
+        help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{name}\" is not valid include way")]
     UnknownIncludeWay {
         name: String,
+        help: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1901,7 +1905,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(unknown_unsafe),
-        help(""),
+        help("the only valid unsafe identifier is 'cdc'"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{name}\" is not valid unsafe identifier")]
@@ -3524,6 +3528,7 @@ impl AnalyzerError {
     pub fn unknown_embed_lang(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownEmbedLang {
             name: name.to_string(),
+            help: format!("valid embed languages are: {}", EMBED_LANG.join("|")),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -3532,6 +3537,7 @@ impl AnalyzerError {
     pub fn unknown_embed_way(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownEmbedWay {
             name: name.to_string(),
+            help: format!("valid embed ways are: {}", EMBED_WAY.join("|")),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -3540,6 +3546,7 @@ impl AnalyzerError {
     pub fn unknown_include_way(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownIncludeWay {
             name: name.to_string(),
+            help: format!("valid include ways are: {}", INCLUDE_WAY.join("|")),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

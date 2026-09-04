@@ -13,4 +13,4 @@ missing_reset_signal (https://doc.veryl-lang.org/book/07_appendix/02_semantic_er
    · ╰──── Error location
  7 │     }
    ╰────
-  help: add reset port
+  help: add a reset port, or pass an existing one: 'always_ff (i_clk, i_rst)'

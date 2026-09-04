@@ -10,4 +10,4 @@ unknown_include_way (https://doc.veryl-lang.org/book/07_appendix/02_semantic_err
    ·          ──┬──
    ·            ╰── Error location
    ╰────
-  help:
+  help: valid include ways are: inline|cocotb
