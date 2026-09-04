@@ -86,6 +86,9 @@ pub(crate) mod field_unfuse {
     pub fn explain_offsets() -> &'static [isize] {
         &[]
     }
+    pub fn event_census_digest(_events: &HashMap<Event, Vec<ProtoStatement>>) -> u128 {
+        0
+    }
     pub fn run(
         _unified: &mut [ProtoStatement],
         _event_statements: &HashMap<Event, Vec<ProtoStatement>>,
@@ -119,8 +122,10 @@ pub(crate) mod dead_var_dce {
     ) -> (Vec<ProtoStatement>, usize) {
         (stmts, 0)
     }
+    pub fn localize_comb_ranges(_comb: &[ProtoStatement]) -> Vec<(isize, usize, isize)> {
+        Vec::new()
+    }
     pub fn collect_localize_info(
-        _comb: &[ProtoStatement],
         _event_slices: &[&[ProtoStatement]],
     ) -> (HashSet<VarOffset>, Vec<(isize, usize, isize)>) {
         (HashSet::default(), Vec::new())

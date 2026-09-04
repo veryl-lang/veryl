@@ -91,6 +91,16 @@ pub(crate) fn whole_comb_fingerprint(
     h.finish_128()
 }
 
+/// `whole_comb_fingerprint` for a caller that hashed the statement list
+/// earlier than it builds the key.
+pub(crate) fn whole_comb_fingerprint_from(stmts_fp: u128, extra: u128) -> u128 {
+    let mut h = Fp128::new();
+    h.write_u128(stmts_fp);
+    h.write_u8(0xE5);
+    h.write_u128(extra);
+    h.finish_128()
+}
+
 /// Ordered collection of backends.  Whole-module backends should come
 /// before chunk backends so a successful whole-module compile elides
 /// the per-chunk grouping pass.

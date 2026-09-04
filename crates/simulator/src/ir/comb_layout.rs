@@ -109,12 +109,10 @@ impl CombLayoutSchedule {
 
 /// Everything the caller must gather BEFORE the pipeline for
 /// `build_schedule`: the per-variable spans (the pipeline never sees the meta
-/// tree), the offsets referenced outside any statement list, and the bump
-/// total the units must fit in.
+/// tree) and the offsets referenced outside any statement list.
 pub struct LayoutInputs {
     pub meta_units: Vec<(isize, isize)>,
     pub extra_offsets: Vec<VarOffset>,
-    pub comb_total: usize,
 }
 
 /// Default-on for 2-state storage; `VERYL_COMB_LAYOUT=0` opts out.  Off on
