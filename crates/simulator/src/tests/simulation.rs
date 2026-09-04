@@ -27141,6 +27141,107 @@ fn a_falling_edge_flop_fires_inside_the_step_that_contains_the_fall() {
 }
 
 #[test]
+fn a_derived_clock_fires_once_per_step_when_the_master_also_drives_an_inversion() {
+    // A clock the master INVERTS reaches its active level when the master
+    // falls, so it is fired from `fire_derived_clock_batch`, whose chain loop
+    // then looks for clocks that rose BECAUSE that batch committed.  That
+    // search read `prev_derived_clock_values`, which is refreshed once per
+    // step at the very end -- so a divided clock the post-commit loop had
+    // ALREADY fired earlier in the same step still read `prev == 0, now == 1`
+    // and fired a second time.  Every count on the divided domain doubled.
+    //
+    // The two domains share nothing but the master clock, and the trigger is
+    // any inversion at all -- a `clock_negedge` (the only way to write an
+    // integrated clock gate in Veryl) or a plain `~clk`.
+    let template = r#"
+    module Top (
+        clk: input  'm clock          ,
+        rst: input  'm reset_async_low,
+        cnt: output 'd logic<8>       ,
+        tog: output 'm logic          ,
+    ) {
+        // Divide by two: a flop fed by its own inverse.
+        var half: 'm logic;
+        always_ff (clk, rst) {
+            if_reset {
+                half = 1'b0;
+            } else {
+                half = ~half;
+            }
+        }
+
+        // A divider is where a new clock root is born.
+        var ck: 'd clock          ;
+        var rs: 'd reset_async_low;
+        unsafe (cdc) {
+            assign ck = half;
+            assign rs = rst;
+        }
+
+        var c: 'd logic<8>;
+        always_ff (ck, rs) {
+            if_reset {
+                c = 0;
+            } else {
+                c = c + 1;
+            }
+        }
+        assign cnt = c;
+
+        // The inversion, connected to nothing but the master clock.
+        COMPANION
+        var t: 'm logic;
+        always_ff (cki, rst) {
+            if_reset {
+                t = 1'b0;
+            } else {
+                t = ~t;
+            }
+        }
+        assign tog = t;
+    }
+    "#;
+
+    for (label, companion) in [
+        ("clock_negedge", "let cki: '_ clock_negedge = clk;"),
+        ("inverted clock", "let cki: '_ clock = ~clk;"),
+    ] {
+        let code = template.replace("COMPANION", companion);
+
+        for config in Config::all() {
+            dbg!(&config, label);
+
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.step_reset(&clk, &rst);
+
+            for k in 1..=8u64 {
+                sim.step(&clk);
+                // `ck` rises on the odd master edges only.
+                assert_eq!(
+                    sim.get("cnt").unwrap(),
+                    Value::new(k.div_ceil(2), 8, false),
+                    "the divided-clock counter after {k} master edges, with a \
+                     {label} companion (JIT={} 4st={})",
+                    config.use_jit,
+                    config.use_4state,
+                );
+                // The companion itself still fires exactly once per step.
+                assert_eq!(
+                    sim.get("tog").unwrap(),
+                    Value::new(k % 2, 1, false),
+                    "the {label} flop after {k} master edges (JIT={} 4st={})",
+                    config.use_jit,
+                    config.use_4state,
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn an_async_reset_the_design_produces_itself_asserts_when_it_falls() {
     // `rst_l` falls as a consequence of the very edge that sets `f`.  SV
     // reacts to that fall in the same time step (`always @(posedge clk or

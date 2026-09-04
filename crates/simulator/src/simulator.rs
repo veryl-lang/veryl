@@ -905,7 +905,14 @@ impl Simulator {
     /// Fire `Event::Clock` for a batch of derived clocks that reached their
     /// active level together, as one event region.  The caller must have
     /// settled first.
-    fn fire_derived_clock_batch(&mut self, batch: &[usize]) {
+    ///
+    /// `fired` is the step's record of which clocks have already fired, shared
+    /// with `step_with_derived_clocks`: one clock fires at most once per step,
+    /// wherever in the step it was detected.
+    fn fire_derived_clock_batch(&mut self, batch: &[usize], fired: &mut [bool]) {
+        for &i in batch {
+            fired[i] = true;
+        }
         self.fire_derived_clock_batch_once(batch);
         self.settle_comb_if_stale();
         // A clock that rose BECAUSE this batch committed reaches its own
@@ -913,10 +920,19 @@ impl Simulator {
         // below already follows.  It cannot be left to the next step: the
         // end-of-step snapshot records the new level, so the post-commit
         // chain loop would see no edge and the domain would never run.
+        //
+        // `prev_derived_clock_values` alone cannot express "rose because of
+        // this batch": it is refreshed once per step, AFTER this call, so a
+        // clock the post-commit loop already fired still reads `prev == 0`
+        // here and its level is still 1.  `fired` is what separates the two.
         let n = self.ir.derived_clock_schedule.clocks.len();
+        debug_assert_eq!(fired.len(), n, "the fired mask covers every derived clock");
         for _ in 0..n {
             let mut chained: SmallVec<[usize; 4]> = SmallVec::new();
-            for i in 0..n {
+            for (i, fired_i) in fired.iter().enumerate().take(n) {
+                if *fired_i {
+                    continue;
+                }
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
                 // Master-gated combinational clocks are the caller's to fire.
                 if !clk.current_offset.is_ff() && clk.master_gated {
@@ -930,7 +946,7 @@ impl Simulator {
                 break;
             }
             for &i in &chained {
-                self.prev_derived_clock_values[i] = 1;
+                fired[i] = true;
             }
             self.fire_derived_clock_batch_once(&chained);
             self.settle_comb_if_stale();
@@ -2343,7 +2359,7 @@ impl Simulator {
                     let clk = &self.ir.derived_clock_schedule.clocks[*i];
                     self.read_derived_clock_bit(clk) == 1
                 });
-                self.fire_derived_clock_batch(&fall);
+                self.fire_derived_clock_batch(&fall, &mut fired_mask);
             }
         }
 
