@@ -1,0 +1,3 @@
+pub package sample_b_pkg {
+    const WIDTH: u32 = 32;
+}
