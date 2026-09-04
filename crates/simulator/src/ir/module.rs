@@ -1,5 +1,7 @@
 use crate::backend::inst::next_test_top_id;
-use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole, whole};
+use crate::backend::{
+    ChunkOutput, ChunkPlan, CompileCtx, CompiledWhole, compile_plans_parallel, whole,
+};
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
@@ -802,7 +804,62 @@ fn precompile_tb_bodies(
 /// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
 /// between loads, so load_cache CSE is disabled in the emitted chunks.
 fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    build_chunked_via_registry(context, proto, /* contains_compiled_block= */ true)
+    let mut pieces = jit_pieces_in_parallel(context, vec![proto]);
+    ProtoStatements(pieces.pop().unwrap_or_default())
+}
+
+/// Chunks every piece of one unified comb list and compiles the lot on helper
+/// threads.  Planning is per piece, so a cone segment still maps to whole
+/// blocks; the compiles pool across pieces.  Only this path parallelises: it
+/// runs once per component behind the comb-pipeline single-flight, while the
+/// per-test chunk paths run on workers that are already busy.
+fn jit_pieces_in_parallel(
+    context: &mut Context,
+    pieces: Vec<Vec<ProtoStatement>>,
+) -> Vec<Vec<ProtoStatementBlock>> {
+    if context.backends.is_empty() {
+        return pieces
+            .into_iter()
+            .map(|p| {
+                if p.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![ProtoStatementBlock::Interpreted(p)]
+                }
+            })
+            .collect();
+    }
+    let max_chunk_size = jit_chunk_size();
+    let mut plans: Vec<ChunkPlan> = Vec::new();
+    // Plans per piece, so the flat output list can be cut back apart.
+    let mut counts: Vec<usize> = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        let planned = context.backends.plan_chunked(piece, max_chunk_size);
+        counts.push(planned.len());
+        plans.extend(planned);
+    }
+    let outputs = {
+        let ctx = CompileCtx {
+            config: &context.config,
+            use_4state: context.config.use_4state,
+            contains_compiled_block: true,
+        };
+        compile_plans_parallel(&mut context.backends, &ctx, plans)
+    };
+    let mut outputs = outputs.into_iter();
+    counts
+        .into_iter()
+        .map(|n| {
+            let mut blocks = Vec::new();
+            for out in outputs.by_ref().take(n).flatten() {
+                blocks.push(match out {
+                    ChunkOutput::Compiled(artifact) => ProtoStatementBlock::Compiled(artifact),
+                    ChunkOutput::Interpreted(stmts) => ProtoStatementBlock::Interpreted(stmts),
+                });
+            }
+            blocks
+        })
+        .collect()
 }
 
 /// `try_jit_no_cache` with chunk splits forced at `boundaries` (sorted pre-JIT
@@ -832,14 +889,13 @@ fn try_jit_with_boundaries(
         debug_assert!(e >= s);
     }
     tails.reverse();
-    for (start, piece) in tails {
-        if piece.is_empty() {
-            pieces.push((start, blocks.len(), blocks.len()));
-            continue;
-        }
+    let (starts, bodies): (Vec<usize>, Vec<Vec<ProtoStatement>>) = tails.into_iter().unzip();
+    for (start, piece_blocks) in starts
+        .into_iter()
+        .zip(jit_pieces_in_parallel(context, bodies))
+    {
         let lo = blocks.len();
-        let ps = build_chunked_via_registry(context, piece, true);
-        blocks.extend(ps.0);
+        blocks.extend(piece_blocks);
         pieces.push((start, lo, blocks.len()));
     }
     (ProtoStatements(blocks), pieces)
