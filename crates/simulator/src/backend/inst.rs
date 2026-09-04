@@ -338,10 +338,21 @@ fn relocate_entry(
 ) -> ReusedStatements {
     let ff_delta = ff_start - entry.ref_ff_start;
     let comb_delta = comb_start - entry.ref_comb_start;
+    // Testbenches lay out identically up to the DUT, so a reused subtree
+    // usually lands where the reference conv put it and its baked offsets
+    // need no rewrite.
+    let zero = ff_delta == 0 && comb_delta == 0;
+    let reloc = |stmts: &[ProtoStatement]| -> Vec<ProtoStatement> {
+        if zero {
+            stmts.to_vec()
+        } else {
+            reloc_stmts(stmts, ff_delta, comb_delta)
+        }
+    };
     let event_statements = entry
         .event_statements
         .iter()
-        .map(|(ev, stmts)| (ev.clone(), reloc_stmts(stmts, ff_delta, comb_delta)))
+        .map(|(ev, stmts)| (ev.clone(), reloc(stmts)))
         .collect();
     let child_modules = entry
         .child_modules
@@ -355,8 +366,8 @@ fn relocate_entry(
         .collect();
     ReusedStatements {
         event_statements,
-        comb_statements: reloc_stmts(&entry.comb_statements, ff_delta, comb_delta),
-        post_comb_fns: reloc_stmts(&entry.post_comb_fns, ff_delta, comb_delta),
+        comb_statements: reloc(&entry.comb_statements),
+        post_comb_fns: reloc(&entry.post_comb_fns),
         child_modules,
         derived_clock_candidates,
         ff_size: entry.ff_size,
