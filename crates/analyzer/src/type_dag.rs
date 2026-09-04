@@ -610,6 +610,31 @@ impl TypeDag {
         ret
     }
 
+    /// `files` and the files they depend on, transitively.
+    /// `move_to` keeps the visited set, so the seeds share one traversal.
+    fn required_files(&self, files: &HashSet<PathId>) -> HashSet<PathId> {
+        // Reverse edge to traverse files which the given file depends on
+        let graph = Reversed(self.file_dag.graph());
+
+        let mut ret = HashSet::default();
+        let mut dfs = Dfs::empty(graph);
+        for file in files {
+            // A file whose symbols never entered the DAG has no node
+            let Some(node) = self.file_nodes.get_by_left(file) else {
+                ret.insert(*file);
+                continue;
+            };
+            dfs.move_to((*node).into());
+            while let Some(x) = dfs.next(graph) {
+                if let Some(path) = self.file_nodes.get_by_right(&(x.index() as u32)) {
+                    ret.insert(*path);
+                }
+            }
+        }
+
+        ret
+    }
+
     fn dependent_files(&self) -> HashMap<PathId, Vec<PathId>> {
         let mut ret = HashMap::default();
         let graph = self.file_dag.graph().clone();
@@ -748,6 +773,10 @@ pub fn connected_files(prj: &Namespace) -> HashSet<PathId> {
 
 pub fn dependent_files() -> HashMap<PathId, Vec<PathId>> {
     TYPE_DAG.with(|f| f.borrow().dependent_files())
+}
+
+pub fn required_files(files: &HashSet<PathId>) -> HashSet<PathId> {
+    TYPE_DAG.with(|f| f.borrow().required_files(files))
 }
 
 pub fn dump() -> String {

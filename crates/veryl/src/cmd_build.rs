@@ -341,6 +341,10 @@ impl CmdBuild {
             candidate_files.extend(symbol_table::get_test_files(&prj_namespace));
         }
 
+        // A file is emitted as a whole, so the files it depends on are required too
+        // even when the symbol holding the dependency is unreachable from the project.
+        let candidate_files = type_dag::required_files(&candidate_files);
+
         // `PathId`'s `Display` is lossy; the table is keyed on the interned path.
         let mut used_paths = HashMap::new();
         for file in candidate_files {

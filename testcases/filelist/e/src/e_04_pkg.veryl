@@ -1,0 +1,3 @@
+package e_04_pkg {
+    const W: u32 = 8;
+}

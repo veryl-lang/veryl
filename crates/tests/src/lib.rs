@@ -758,6 +758,9 @@ mod filelist {
             "c_pkg.veryl",
             "d_01_pkg.veryl",
             "d_02_module.veryl",
+            "e_01_02_module.veryl",
+            "e_03_pkg.veryl",
+            "e_04_pkg.veryl",
         ];
         check_list(&paths, all);
 
@@ -780,6 +783,9 @@ mod filelist {
         check_order(&paths, "b_pkg.veryl", "22_dependency_r.veryl");
         check_order(&paths, "d_02_module.veryl", "22_dependency_r.veryl");
         check_order(&paths, "d_01_pkg.veryl", "d_02_module.veryl");
+        check_order(&paths, "e_01_02_module.veryl", "22_dependency_r.veryl");
+        check_order(&paths, "e_03_pkg.veryl", "e_01_02_module.veryl");
+        check_order(&paths, "e_04_pkg.veryl", "e_01_02_module.veryl");
         // 23_embed_s is opaque, so it must not float ahead of files with a visible dependency
         check_order(&paths, "22_dependency_r.veryl", "23_embed_s.veryl");
     }

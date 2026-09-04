@@ -1,0 +1,7 @@
+pub module e_01_top {
+  let _e: logic<e_03_pkg::W> = 0;
+}
+
+pub module e_02_top {
+  let _e: logic<e_04_pkg::W> = 0;
+}
