@@ -26128,3 +26128,61 @@ fn narrowing_cast_at_operand_width_still_truncates() {
         check(&mut sim, "aot-c");
     }
 }
+
+// Regression: the sibling above with SIGNED operands, where the bound on a
+// quotient stops holding and a dropped cast mask lets the sign fill reach
+// the sum.  `i_b` starts at 1: division by zero is not the subject.
+//
+// Cranelift is the reference rather than a written-out expected value — the
+// interpreter disagrees with both backends about the SIGNEDNESS a cast
+// result carries into a wider context, a separate defect.
+#[test]
+fn narrowing_cast_of_a_signed_quotient_still_truncates() {
+    let code = r#"
+    module Top (
+        i_a  : input  signed logic<4>,
+        i_b  : input  signed logic<4>,
+        o_div: output logic<7>,
+        o_rem: output logic<7>,
+    ) {
+        assign o_div = 7'd20 + ((i_a / i_b) as 4);
+        assign o_rem = 7'd20 + ((i_a % i_b) as 4);
+    }
+    "#;
+
+    let sweep = |config: &Config| {
+        let ir = analyze(code, config);
+        let whole = ir.whole_comb.is_some();
+        let mut sim = Simulator::new(ir, None);
+        let mut out: Vec<(u64, u64, u64, u64)> = Vec::new();
+        for a in 0u64..16 {
+            for b in 1u64..16 {
+                sim.set("i_a", Value::new(a, 4, true));
+                sim.set("i_b", Value::new(b, 4, true));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                out.push((
+                    a,
+                    b,
+                    sim.get("o_div").unwrap().payload_u64() & 0x7f,
+                    sim.get("o_rem").unwrap().payload_u64() & 0x7f,
+                ));
+            }
+        }
+        (out, whole)
+    };
+
+    // The defect is AOT-C only: with no C compiler there is nothing to
+    // compare against.
+    let (reference, _) = sweep(&Config::default());
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let (got, whole) = sweep(&aot_native_validate_config());
+    assert!(
+        whole,
+        "the AOT-C config must actually compile this module, or the check below is empty",
+    );
+    for (r, g) in reference.iter().zip(got.iter()) {
+        assert_eq!(g, r, "a={} b={}", r.0, r.1);
+    }
+}

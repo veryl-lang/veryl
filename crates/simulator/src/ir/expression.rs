@@ -1250,7 +1250,13 @@ impl ProtoExpression {
                 // `~` and unary `-` set every bit above the operand's width.
                 _ => None,
             },
-            ProtoExpression::Binary { op, x, y, .. } => match op {
+            ProtoExpression::Binary {
+                op,
+                x,
+                y,
+                expr_context,
+                ..
+            } => match op {
                 Op::Eq
                 | Op::Ne
                 | Op::EqWildcard
@@ -1269,8 +1275,12 @@ impl ProtoExpression {
                         .saturating_add(1),
                 ),
                 Op::Mul => Some(x.unmasked_bits(d)?.saturating_add(y.unmasked_bits(d)?)),
-                Op::Div | Op::LogicShiftR => x.unmasked_bits(d),
-                Op::Rem => y.unmasked_bits(d),
+                Op::LogicShiftR => x.unmasked_bits(d),
+                // The signed forms sign-fill every bit above the operand
+                // width, so the bound only holds unsigned — the same reason
+                // `expr_emits_clean` excludes them.
+                Op::Div if !expr_context.signed => x.unmasked_bits(d),
+                Op::Rem if !expr_context.signed => y.unmasked_bits(d),
                 // `-` borrows into every bit above the operands, an arithmetic
                 // right shift copies the sign into them, and a left shift is
                 // bounded by a VALUE (the shift amount), not by a width.
