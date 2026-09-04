@@ -25,3 +25,10 @@ source = "../d"
 dependencies = []
 
 [projects.properties]
+
+[[projects]]
+name = "e"
+source = "../e"
+dependencies = []
+
+[projects.properties]
