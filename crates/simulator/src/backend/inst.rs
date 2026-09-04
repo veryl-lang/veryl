@@ -260,17 +260,18 @@ fn reloc_stmt(s: &ProtoStatement, ff_delta: isize, comb_delta: isize) -> ProtoSt
                     .iter()
                     .map(|o| o + ff_delta)
                     .collect(),
-                stmt_deps: cb
-                    .stmt_deps
-                    .iter()
-                    .map(|(ins, outs)| {
-                        (
-                            adjust_offsets_vec(ins, ff_delta, comb_delta),
-                            adjust_offsets_vec(outs, ff_delta, comb_delta),
-                        )
-                    })
-                    .collect(),
-                original_stmts: reloc_stmts(&cb.original_stmts, ff_delta, comb_delta),
+                stmt_deps: Arc::new(
+                    cb.stmt_deps
+                        .iter()
+                        .map(|(ins, outs)| {
+                            (
+                                adjust_offsets_vec(ins, ff_delta, comb_delta),
+                                adjust_offsets_vec(outs, ff_delta, comb_delta),
+                            )
+                        })
+                        .collect(),
+                ),
+                original_stmts: Arc::new(reloc_stmts(&cb.original_stmts, ff_delta, comb_delta)),
             })
         }
         other => {
@@ -570,8 +571,8 @@ pub fn try_compile_inst_chunks(
                     input_offsets: adjust(&cached.input_offsets),
                     output_offsets: adjust(&cached.output_offsets),
                     ff_canonical_offsets: adjusted_canonical,
-                    stmt_deps: vec![],
-                    original_stmts: adjust_stmts(&cached.original_stmts),
+                    stmt_deps: Arc::new(vec![]),
+                    original_stmts: Arc::new(adjust_stmts(&cached.original_stmts)),
                 })];
             }
         }
@@ -589,8 +590,8 @@ pub fn try_compile_inst_chunks(
                 input_offsets: adjust(&cached.input_offsets),
                 output_offsets: adjust(&cached.output_offsets),
                 ff_canonical_offsets: vec![],
-                stmt_deps: adjusted_deps,
-                original_stmts: adjust_stmts(&cached.original_stmts),
+                stmt_deps: Arc::new(adjusted_deps),
+                original_stmts: Arc::new(adjust_stmts(&cached.original_stmts)),
             })];
         }
     } else {
@@ -621,7 +622,7 @@ pub fn try_compile_inst_chunks(
                 let (input_offsets, output_offsets) = (all_inputs, all_outputs);
                 let ff_canonical = gather_ff_canonical(stmts);
 
-                let event_original = stmts.clone();
+                let event_original = Arc::new(stmts.clone());
                 event_funcs.insert(
                     event.clone(),
                     CachedChunk {
@@ -629,8 +630,8 @@ pub fn try_compile_inst_chunks(
                         input_offsets: input_offsets.clone(),
                         output_offsets: output_offsets.clone(),
                         ff_canonical_offsets: ff_canonical.clone(),
-                        stmt_deps: vec![],
-                        original_stmts: event_original.clone(),
+                        stmt_deps: Arc::new(vec![]),
+                        original_stmts: Arc::clone(&event_original),
                     },
                 );
 
@@ -641,7 +642,7 @@ pub fn try_compile_inst_chunks(
                     input_offsets,
                     output_offsets,
                     ff_canonical_offsets: ff_canonical,
-                    stmt_deps: vec![],
+                    stmt_deps: Arc::new(vec![]),
                     original_stmts: event_original,
                 })];
             }
@@ -671,17 +672,19 @@ pub fn try_compile_inst_chunks(
                 let (input_offsets, output_offsets) =
                     gather_external_offsets(&sorted_comb_for_func);
 
-                let stmt_deps: Vec<_> = sorted_comb_for_func
-                    .iter()
-                    .map(|s| {
-                        let mut ins = vec![];
-                        let mut outs = vec![];
-                        s.gather_variable_offsets(&mut ins, &mut outs);
-                        (ins, outs)
-                    })
-                    .collect();
+                let stmt_deps: Arc<Vec<_>> = Arc::new(
+                    sorted_comb_for_func
+                        .iter()
+                        .map(|s| {
+                            let mut ins = vec![];
+                            let mut outs = vec![];
+                            s.gather_variable_offsets(&mut ins, &mut outs);
+                            (ins, outs)
+                        })
+                        .collect(),
+                );
 
-                let original_stmts = sorted_comb_for_func.clone();
+                let original_stmts = Arc::new(sorted_comb_for_func.clone());
                 *all_comb_statements =
                     vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
                         artifact: Arc::clone(&artifact),
@@ -690,7 +693,7 @@ pub fn try_compile_inst_chunks(
                         input_offsets: input_offsets.clone(),
                         output_offsets: output_offsets.clone(),
                         ff_canonical_offsets: vec![],
-                        stmt_deps: stmt_deps.clone(),
+                        stmt_deps: Arc::clone(&stmt_deps),
                         original_stmts,
                     })];
 
@@ -700,7 +703,7 @@ pub fn try_compile_inst_chunks(
                     output_offsets,
                     ff_canonical_offsets: vec![],
                     stmt_deps,
-                    original_stmts: sorted_comb_for_func,
+                    original_stmts: Arc::new(sorted_comb_for_func),
                 })
             } else {
                 None

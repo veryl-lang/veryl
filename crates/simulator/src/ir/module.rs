@@ -765,8 +765,8 @@ fn precompile_tb_bodies(
                         input_offsets: inputs.clone(),
                         output_offsets: outputs.clone(),
                         ff_canonical_offsets: Vec::new(),
-                        stmt_deps: Vec::new(),
-                        original_stmts: originals.clone(),
+                        stmt_deps: std::sync::Arc::new(Vec::new()),
+                        original_stmts: std::sync::Arc::new(originals.clone()),
                     }));
                 }
                 ProtoStatementBlock::Interpreted(stmts) => out.extend(stmts),
@@ -1816,7 +1816,9 @@ pub(crate) fn analyze_dependency(
                 if block_has_reorder_hazard(&cb.original_stmts) {
                     out.push(ProtoStatement::CompiledBlock(cb));
                 } else {
-                    for sub in cb.original_stmts {
+                    for sub in std::sync::Arc::try_unwrap(cb.original_stmts)
+                        .unwrap_or_else(|a| (*a).clone())
+                    {
                         hazard_flatten(sub, out);
                     }
                 }
@@ -1856,7 +1858,9 @@ pub(crate) fn analyze_dependency(
     fn flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
         match stmt {
             ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-                for sub in cb.original_stmts {
+                for sub in
+                    std::sync::Arc::try_unwrap(cb.original_stmts).unwrap_or_else(|a| (*a).clone())
+                {
                     flatten(sub, out);
                 }
             }
@@ -2960,7 +2964,7 @@ fn unmodelled_spans(stmt: &ProtoStatement, out: &mut Vec<UnmodelledSpan>) {
             }
         }
         ProtoStatement::CompiledBlock(cb) => {
-            for s in &cb.original_stmts {
+            for s in cb.original_stmts.iter() {
                 unmodelled_spans(s, out);
             }
         }
@@ -3058,7 +3062,9 @@ fn pass_diag_unmodelled_decline(key: &VarOffset, why: &str) {
 fn flatten_blocks(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
     match stmt {
         ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-            for sub in cb.original_stmts {
+            for sub in
+                std::sync::Arc::try_unwrap(cb.original_stmts).unwrap_or_else(|a| (*a).clone())
+            {
                 flatten_blocks(sub, out);
             }
         }
@@ -3445,7 +3451,7 @@ pub(crate) fn gather_bit_aware_outputs(
                 // would let `stable_topo_sort`'s RAW/WAR edges manufacture
                 // false comb cycles through registers.
                 let mut inner = vec![];
-                for s in &x.original_stmts {
+                for s in x.original_stmts.iter() {
                     gather_bit_aware_outputs(s, &mut inner);
                 }
                 out.extend(inner.into_iter().filter(|(off, _)| !off.is_ff()));
@@ -4634,7 +4640,7 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         match stmt {
             ProtoStatement::CompiledBlock(x) => {
                 if !x.stmt_deps.is_empty() {
-                    for (ins, outs) in &x.stmt_deps {
+                    for (ins, outs) in x.stmt_deps.iter() {
                         inputs.extend_from_slice(ins);
                         outputs.extend_from_slice(outs);
                     }
@@ -6506,7 +6512,7 @@ pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<
                 ProtoStatement::CompiledBlock(x) => {
                     acc.extend(x.input_offsets.iter().copied());
                     acc.extend(x.output_offsets.iter().copied());
-                    for (dep_ins, dep_outs) in &x.stmt_deps {
+                    for (dep_ins, dep_outs) in x.stmt_deps.iter() {
                         acc.extend(dep_ins.iter().copied());
                         acc.extend(dep_outs.iter().copied());
                     }
@@ -6966,8 +6972,8 @@ mod event_written_comb_tests {
                 input_offsets: vec![],
                 output_offsets: vec![VarOffset::Comb(0x0), VarOffset::Comb(0x10)],
                 ff_canonical_offsets: vec![],
-                stmt_deps: vec![],
-                original_stmts: originals,
+                stmt_deps: std::sync::Arc::new(vec![]),
+                original_stmts: std::sync::Arc::new(originals),
             })
         }
         // The originals\u2019 dynamic write taints the middle element the

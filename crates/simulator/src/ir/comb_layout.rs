@@ -186,7 +186,9 @@ pub fn expand_compiled_blocks(stmts: &mut Vec<ProtoStatement>) {
     let mut out = Vec::with_capacity(stmts.len());
     for s in stmts.drain(..) {
         match s {
-            ProtoStatement::CompiledBlock(cb) => out.extend(cb.original_stmts),
+            ProtoStatement::CompiledBlock(cb) => out.extend(
+                std::sync::Arc::try_unwrap(cb.original_stmts).unwrap_or_else(|a| (*a).clone()),
+            ),
             other => out.push(other),
         }
     }
@@ -210,7 +212,7 @@ fn cb_comb_span(cb: &CompiledBlockStatement) -> Option<(isize, isize)> {
     }
     let mut ins = vec![];
     let mut outs = vec![];
-    for s in &cb.original_stmts {
+    for s in cb.original_stmts.iter() {
         ins.clear();
         outs.clear();
         s.gather_variable_offsets(&mut ins, &mut outs);
@@ -683,10 +685,10 @@ fn rigid_shift(cb: &mut CompiledBlockStatement, sched: &CombLayoutSchedule) {
             *off = VarOffset::Comb(*o + delta);
         }
     }
-    for s in &mut cb.original_stmts {
+    for s in std::sync::Arc::make_mut(&mut cb.original_stmts) {
         s.adjust_offsets(0, delta);
     }
-    for (ins, outs) in &mut cb.stmt_deps {
+    for (ins, outs) in std::sync::Arc::make_mut(&mut cb.stmt_deps) {
         for off in ins.iter_mut().chain(outs.iter_mut()) {
             if let VarOffset::Comb(o) = off {
                 *off = VarOffset::Comb(*o + delta);

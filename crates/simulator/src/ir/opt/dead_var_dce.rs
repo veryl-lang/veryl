@@ -274,7 +274,7 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::CompiledBlock(x) => {
-            for s in &x.original_stmts {
+            for s in x.original_stmts.iter() {
                 walk_stmt_liveness(s, c);
             }
         }
