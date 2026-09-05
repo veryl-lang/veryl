@@ -369,3 +369,34 @@ fn comb_loop_unresolved_hierarchy_does_not_hide_independent_cycle() {
         "unresolved hierarchy must not suppress a separate proven loop: {errors:#?}"
     );
 }
+
+#[test]
+fn comb_loop_search_limit_propagates_incomplete_without_inventing_a_diagnostic() {
+    let code = r#"
+        module Child (o: output logic) { assign o = ~o; }
+        module Top (o: output logic) { inst child: Child(o); }
+    "#;
+    crate::comb_loop_detect::with_cycle_search_limit(0, || {
+        assert!(!comb_loop_analysis_is_complete(code));
+        assert!(
+            analyze(code)
+                .iter()
+                .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "an exhausted search has no proven cycle"
+        );
+        assert!(
+            comb_loop_analysis_is_complete(
+                r#"
+            module Top(i: input logic, o: output logic) { assign o = i; }
+        "#
+            ),
+            "acyclic graphs require no search"
+        );
+    });
+    assert!(comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    );
+}

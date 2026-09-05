@@ -1,7 +1,7 @@
 //! Lazy source diagnostics for the constrained dependency graph.
 
 use super::build_module_graph_with_trace;
-use super::graph::{DependencyGraph, has_compatible_cycle, strongly_connected_components};
+use super::graph::{DependencyGraph, compatible_cycle, strongly_connected_components};
 use super::model::{ModuleCombSummary, SummaryRegion};
 use super::region::{ArraySpan, BitPartition, NodeKey};
 use crate::ir::{Component, Declaration, Module, Signature, VarId, VarPath, Variable};
@@ -64,14 +64,20 @@ pub(super) fn check_graph(
     replays: &mut DiagnosticReplayCache,
     errors: &mut Vec<AnalyzerError>,
     reported: &mut HashSet<(SymbolId, Vec<VarPath>)>,
-) {
+) -> bool {
+    let mut complete = true;
     debug_assert!(
         super::graph::unconstrained_subgraph_is_acyclic(graph),
         "unconstrained dependency nodes must be introduced as a DAG"
     );
     for scc in strongly_connected_components(graph) {
-        if !has_compatible_cycle(graph, &scc) {
-            continue;
+        match compatible_cycle(graph, &scc) {
+            Some(true) => {}
+            Some(false) => continue,
+            None => {
+                complete = false;
+                continue;
+            }
         }
         let mut keys = scc
             .iter()
@@ -120,6 +126,7 @@ pub(super) fn check_graph(
             &provenance,
         ));
     }
+    complete
 }
 
 fn sorted_edges(

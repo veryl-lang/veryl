@@ -61,6 +61,10 @@ pub(super) struct PositionRelationSet {
 }
 
 impl PositionRelationSet {
+    pub(super) fn piece_count(&self) -> usize {
+        self.pieces.len()
+    }
+
     pub(super) fn identity(domains: &[PositionDomain]) -> Self {
         let pieces = if domains.is_empty() {
             vec![RelationPiece {

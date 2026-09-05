@@ -6,32 +6,34 @@ use std::hash::Hash;
 use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
 
+#[cfg(test)]
+thread_local! {
+    static SOURCE_WALK_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_source_walk_visits() {
+    SOURCE_WALK_VISITS.set(0);
+}
+#[cfg(test)]
+pub(crate) fn source_walk_visits() -> usize {
+    SOURCE_WALK_VISITS.get()
+}
+
 pub(super) type VersionId = usize;
 
 type SourceMap<K> = HashMap<(K, PositionRelation), PathCondition>;
 
 pub(super) struct SourceCache<K> {
     summaries: HashMap<(VersionId, bool), Rc<SourceMap<K>>>,
-    allowed: Option<HashSet<K>>,
+    ignore_position: bool,
 }
 
 impl<K> Default for SourceCache<K> {
     fn default() -> Self {
         Self {
             summaries: HashMap::default(),
-            allowed: None,
-        }
-    }
-}
-
-impl<K> SourceCache<K>
-where
-    K: Eq + Hash,
-{
-    pub(super) fn restricted(allowed: impl IntoIterator<Item = K>) -> Self {
-        Self {
-            summaries: HashMap::default(),
-            allowed: Some(allowed.into_iter().collect()),
+            ignore_position: false,
         }
     }
 }
@@ -162,6 +164,10 @@ pub(super) struct PathCondition {
 }
 
 impl PathCondition {
+    pub(super) fn branch_count(&self) -> usize {
+        self.constraints.len()
+    }
+
     pub(super) fn is_unconditional(&self) -> bool {
         self.constraints.is_empty()
     }
@@ -306,6 +312,45 @@ impl PathCondition {
             constraints: Rc::new(constraints),
         }
     }
+
+    /// An exact union is Cartesian when the two cubes differ on at most one
+    /// branch. Unlike `disjoin`, this never drops cross-branch correlations.
+    pub(super) fn disjoin_exact(&self, other: &Self) -> Option<Self> {
+        if self.covers(other) {
+            return Some(self.clone());
+        }
+        if other.covers(self) {
+            return Some(other.clone());
+        }
+        let mut differences = 0;
+        for left in self.constraints.iter() {
+            let different = match other
+                .constraints
+                .binary_search_by_key(&left.branch, |c| c.branch)
+            {
+                Ok(index) => left.allowed != other.constraints[index].allowed,
+                Err(_) => !left.allowed.is_all(left.branch.arms),
+            };
+            differences += usize::from(different);
+            if differences > 1 {
+                return None;
+            }
+        }
+        for right in other.constraints.iter() {
+            if self
+                .constraints
+                .binary_search_by_key(&right.branch, |c| c.branch)
+                .is_err()
+                && !right.allowed.is_all(right.branch.arms)
+            {
+                differences += 1;
+                if differences > 1 {
+                    return None;
+                }
+            }
+        }
+        Some(self.disjoin(other))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -372,21 +417,6 @@ impl PositionRelation {
         Self {
             array: compose_axis(self.array, other.array),
             packed: compose_axis(self.packed, other.packed),
-        }
-    }
-
-    pub(super) fn reversed(self) -> Self {
-        Self {
-            array: self.array.map(|offset| {
-                offset
-                    .checked_neg()
-                    .expect("reversed array position offset must fit in isize")
-            }),
-            packed: self.packed.map(|offset| {
-                offset
-                    .checked_neg()
-                    .expect("reversed packed position offset must fit in isize")
-            }),
         }
     }
 
@@ -817,6 +847,19 @@ where
         self.root_source_relations_guarded_cached(version, &mut SourceCache::default())
     }
 
+    /// Whole-value reads need source identities and guards, not every possible
+    /// sum of shifts through an imported DAG. Forget positions before walking.
+    pub(super) fn root_source_keys_guarded(&self, version: VersionId) -> Vec<(K, PathCondition)> {
+        let mut cache = SourceCache {
+            ignore_position: true,
+            ..SourceCache::default()
+        };
+        self.root_source_relations_guarded_cached(version, &mut cache)
+            .into_iter()
+            .map(|(key, _, condition)| (key, condition))
+            .collect()
+    }
+
     pub(super) fn root_source_relations_guarded_cached(
         &self,
         version: VersionId,
@@ -1044,7 +1087,12 @@ where
         }
 
         let mut sources = HashMap::default();
-        let start = (version, include_entry, PositionRelation::default());
+        let initial_relation = if cache.ignore_position {
+            PositionRelation::whole()
+        } else {
+            PositionRelation::default()
+        };
+        let start = (version, include_entry, initial_relation);
         let mut reached = HashMap::default();
         reached.insert(start, PathCondition::default());
         let mut queued = HashSet::default();
@@ -1052,6 +1100,8 @@ where
         let mut queue = VecDeque::from([start]);
 
         while let Some(state @ (current, include_entry, relation)) = queue.pop_front() {
+            #[cfg(test)]
+            SOURCE_WALK_VISITS.set(SOURCE_WALK_VISITS.get() + 1);
             queued.remove(&state);
             let condition = reached[&state].clone();
 
@@ -1083,12 +1133,7 @@ where
 
             match &self.versions[current] {
                 Version::Entry(key) => {
-                    if include_entry
-                        && cache
-                            .allowed
-                            .as_ref()
-                            .is_none_or(|allowed| allowed.contains(key))
-                    {
+                    if include_entry {
                         merge_source(&mut sources, (*key, relation), condition);
                     }
                 }
@@ -1116,7 +1161,7 @@ where
                     branches,
                 } => {
                     for (key, imported_relation, imported_condition) in
-                        dependency_dag_external_sources(graph, *root)
+                        dependency_dag_external_sources(graph, *root, initial_relation)
                     {
                         let imported_condition = imported_condition.remapped(branches);
                         let Some(condition) = condition.conjoin_if_compatible(&imported_condition)
@@ -1151,6 +1196,7 @@ where
 fn dependency_dag_external_sources<K>(
     graph: &DependencyDag<K>,
     root: Option<usize>,
+    initial_relation: PositionRelation,
 ) -> Vec<(K, PositionRelation, PathCondition)>
 where
     K: Copy + Eq + Hash,
@@ -1163,12 +1209,14 @@ where
         incoming.entry(edge.destination).or_default().push(edge);
     }
     let mut reached = HashMap::default();
-    let start = (root, PositionRelation::default());
+    let start = (root, initial_relation);
     reached.insert(start, PathCondition::default());
     let mut queue = VecDeque::from([start]);
     let mut queued = [start].into_iter().collect::<HashSet<_>>();
     let mut sources: HashMap<(K, PositionRelation), PathCondition> = HashMap::default();
     while let Some(state @ (node, relation)) = queue.pop_front() {
+        #[cfg(test)]
+        SOURCE_WALK_VISITS.set(SOURCE_WALK_VISITS.get() + 1);
         queued.remove(&state);
         let condition = reached[&state].clone();
         if let DependencyDagNode::External(key) = graph.nodes[node] {
@@ -1218,13 +1266,17 @@ where
     K: Copy + Eq + Hash,
 {
     let root = root?;
+    let mut incoming = vec![Vec::new(); graph.nodes.len()];
+    for edge in &graph.edges {
+        incoming[edge.destination].push(edge.source);
+    }
     let mut retained = HashSet::default();
     let mut queue = VecDeque::from([root]);
     retained.insert(root);
     while let Some(node) = queue.pop_front() {
-        for edge in graph.edges.iter().filter(|edge| edge.destination == node) {
-            if retained.insert(edge.source) {
-                queue.push_back(edge.source);
+        for &source in &incoming[node] {
+            if retained.insert(source) {
+                queue.push_back(source);
             }
         }
     }
@@ -1607,5 +1659,81 @@ mod tests {
             version = ssa.definition(vec![version]);
         }
         assert_eq!(ssa.root_sources(version), ["source"].into_iter().collect());
+    }
+    #[test]
+    fn exact_condition_union_preserves_correlations() {
+        let a = BranchId::new(1, 0, 2);
+        let b = BranchId::new(1, 1, 2);
+        let left = PathCondition::default().with_choice(a, 0).with_choice(b, 0);
+        let right = PathCondition::default().with_choice(a, 1).with_choice(b, 0);
+        assert_eq!(
+            left.disjoin_exact(&right),
+            Some(PathCondition::default().with_choice(b, 0))
+        );
+        let correlated = PathCondition::default().with_choice(a, 1).with_choice(b, 1);
+        assert_eq!(left.disjoin_exact(&correlated), None);
+        assert_eq!(
+            left.disjoin_exact(&PathCondition::default()),
+            Some(PathCondition::default())
+        );
+    }
+
+    #[test]
+    fn whole_source_query_does_not_enumerate_imported_shift_paths() {
+        let mut callee = SsaStore::default();
+        let mut value = callee.read("input");
+        for shift in 0..32 {
+            value = callee.related_definition(vec![
+                (value, PositionRelation::default()),
+                (
+                    value,
+                    PositionRelation {
+                        array: Some(0),
+                        packed: Some(1isize << shift),
+                    },
+                ),
+            ]);
+        }
+        let graph = Rc::new(callee.dependency_dag(&[value], &["input"].into_iter().collect()));
+        let mut caller = SsaStore::default();
+        let input = caller.read("actual");
+        let root = caller.imported(
+            graph.clone(),
+            graph.roots[0],
+            [("input", vec![(input, PositionRelation::default())])]
+                .into_iter()
+                .collect(),
+            HashMap::default(),
+        );
+        reset_source_walk_visits();
+        assert_eq!(
+            caller.root_source_keys_guarded(root),
+            vec![("actual", PathCondition::default())]
+        );
+        assert!(source_walk_visits() < 100);
+    }
+
+    #[test]
+    fn imported_long_chain_uses_an_incoming_edge_index() {
+        let mut callee = SsaStore::default();
+        let mut value = callee.read("input");
+        for _ in 0..20_000 {
+            value = callee.definition(vec![value]);
+        }
+        let graph = Rc::new(callee.dependency_dag(&[value], &["input"].into_iter().collect()));
+        let mut caller = SsaStore::default();
+        let input = caller.read("actual");
+        let root = caller.imported(
+            graph.clone(),
+            graph.roots[0],
+            [("input", vec![(input, PositionRelation::default())])]
+                .into_iter()
+                .collect(),
+            HashMap::default(),
+        );
+        let result = caller.dependency_dag(&[root], &["actual"].into_iter().collect());
+        assert_eq!(result.nodes.len(), graph.nodes.len() + 1);
+        assert_eq!(result.edges.len(), graph.edges.len() + 1);
+        assert!(result.roots[0].is_some());
     }
 }

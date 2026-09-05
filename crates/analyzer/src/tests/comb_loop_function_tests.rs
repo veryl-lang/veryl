@@ -2201,3 +2201,222 @@ fn comb_loop_function_copyout_actual_aliases_input() {
         true,
     );
 }
+
+#[test]
+fn comb_loop_function_copyout_dynamic_selectors() {
+    for (ty, initial) in [("logic[2]", "'{default: 0}"), ("logic<2>", "0")] {
+        for (index, expected) in [("feedback", true), ("external", false)] {
+            let code = format!(
+                r#"
+                module Top (external: input logic, o: output logic) {{
+                    var values: {ty};
+                    var feedback: logic;
+                    function set (value: output logic) {{ value = 1; }}
+                    always_comb {{
+                        values = {initial};
+                        set(values[{index}]);
+                        feedback = values[0];
+                        o = feedback;
+                    }}
+                }}
+            "#
+            );
+            assert_comb_loop(
+                "copy-out reads both array and packed selectors",
+                &code,
+                expected,
+            );
+        }
+    }
+}
+
+#[test]
+fn comb_loop_function_copyout_converts_formal_type() {
+    for (formal, actual, value, bit, expected) in [
+        ("i8", "i16", "{feedback, 7'b0} as i8", 15, true),
+        ("u8", "u16", "{feedback, 7'b0} as u8", 15, false),
+        ("i8", "i16", "{feedback, 7'b0} as i8", 0, false),
+        ("i16", "i8", "{feedback, 15'b0} as i16", 7, false),
+        ("i16", "i8", "{8'b0, feedback, 7'b0} as i16", 7, true),
+    ] {
+        let code = format!(
+            r#"
+            module Top (o: output logic) {{
+                var value: {actual};
+                var feedback: logic;
+                function set (src: input {formal}, dst: output {formal}) {{ dst = src; }}
+                always_comb {{ set({value}, value); }}
+                assign feedback = value[{bit}];
+                assign o = feedback;
+            }}
+        "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "{formal} -> {actual}: {errors:#?}"
+        );
+        assert_eq!(
+            !errors.is_empty(),
+            expected,
+            "{formal} -> {actual}, bit {bit}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn comb_loop_function_copyout_sign_extension_into_concatenation() {
+    for (read, expected) in [("high[7]", true), ("low[0]", false)] {
+        assert_comb_loop(
+            "sign extension is applied before splitting output actuals",
+            &format!(
+                r#"
+            module Top (o: output logic) {{
+                var high: logic<8>;
+                var low: logic<8>;
+                var feedback: logic;
+                function set (src: input logic, dst: output i8) {{
+                    dst = {{src, 7'b0}} as i8;
+                }}
+                always_comb {{ set(feedback, {{high, low}}); }}
+                assign feedback = {read};
+                assign o = feedback;
+            }}
+        "#
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
+fn comb_loop_function_copyout_evaluates_selector_once_before_region_writes() {
+    assert_comb_loop(
+        "a side-effecting selector is sampled before every copied region",
+        r#"
+        module Top (o: output logic) {
+            var values: logic[2];
+            var feedback: logic;
+            function select () -> logic {
+                let previous: logic = feedback;
+                feedback = 0;
+                return previous;
+            }
+            function set (value: output logic) { value = 1; }
+            always_comb {
+                values = '{default: 0};
+                set(values[select()]);
+                feedback = values[1];
+                o = feedback | values[0];
+            }
+        }
+    "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_function_copyout_dynamic_array_copies_value_to_each_candidate() {
+    assert_comb_loop(
+        "dynamic output actuals may receive the formal at a nonzero index",
+        r#"
+        module Top (external: input logic, o: output logic) {
+            var values: logic[2];
+            var feedback: logic;
+            function set (src: input logic, dst: output logic) { dst = src; }
+            always_comb {
+                values = '{default: 0};
+                set(feedback, values[external]);
+                feedback = values[1];
+                o = feedback;
+            }
+        }
+    "#,
+        true,
+    );
+}
+
+#[test]
+fn function_summary_instance_actual_preserves_shift_fanout_dag() {
+    const STAGES: usize = 18;
+    const WIDTH: usize = 1 << (STAGES + 1);
+    let statements = (0..STAGES)
+        .map(|i| format!("v = (v << {}) | v;", 1usize << i))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let code = format!(
+        r#"
+        module Sink(i: input logic<{WIDTH}>, o: output logic) {{ assign o = i[0]; }}
+        module Top(i: input logic<{WIDTH}>, o: output logic) {{
+            function spread(x: input logic<{WIDTH}>) -> logic<{WIDTH}> {{
+                var v: logic<{WIDTH}>;
+                v = x;
+                {statements}
+                return v;
+            }}
+            inst sink: Sink(i: spread(i), o);
+        }}
+    "#
+    );
+    crate::comb_loop_detect::reset_source_walk_visits();
+    assert!(analyze(&code).is_empty());
+    assert!(
+        crate::comb_loop_detect::source_walk_visits() < STAGES * 10,
+        "an instance actual must not enumerate subset sums of shifts: {}",
+        crate::comb_loop_detect::source_walk_visits()
+    );
+}
+
+#[test]
+fn comb_loop_function_copyout_freezes_concatenated_actual_selectors() {
+    assert_comb_loop(
+        "all selectors precede the concatenation's first copied value",
+        r#"
+        module Top (o: output logic) {
+            var values: logic[2];
+            var index: logic;
+            function set (dst: output logic<2>) { dst = 2'b11; }
+            always_comb {
+                values = '{default: 0};
+                set({index, values[index]});
+                index = values[0];
+                o = index;
+            }
+        }
+    "#,
+        true,
+    );
+}
+
+#[test]
+fn function_summary_instance_actual_keeps_shifted_bit_dependencies() {
+    for (bit, expected) in [(17, true), (40, false)] {
+        let statements = (0..5)
+            .map(|i| format!("v = (v << {}) | v;", 1 << i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let code = format!(
+            r#"
+            module Sink(i: input logic<64>, o: output logic) {{ assign o = i[{bit}]; }}
+            module Top(o: output logic) {{
+                var input_value: logic<64>;
+                var feedback: logic;
+                function spread(x: input logic<64>) -> logic<64> {{
+                    var v: logic<64>; v = x; {statements} return v;
+                }}
+                assign input_value = {{63'b0, feedback}};
+                inst sink: Sink(i: spread(input_value), o: feedback);
+                assign o = feedback;
+            }}
+        "#
+        );
+        assert_comb_loop(
+            "only reachable shifted bits close the instance feedback",
+            &code,
+            expected,
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}

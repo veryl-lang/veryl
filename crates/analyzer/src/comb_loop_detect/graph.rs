@@ -239,6 +239,142 @@ pub(super) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool
     !daggy::petgraph::algo::is_cyclic_directed(&induced)
 }
 
+// Count both transitions and dominance comparisons: a bound on queued states
+// alone still permits quadratic work in the per-node antichains. Exhaustion
+// means incomplete analysis, never an invented cycle or a proof of absence.
+const CYCLE_SEARCH_WORK: usize = 1_000_000;
+
+#[cfg(test)]
+thread_local! {
+    static SEARCH_WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SEARCH_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(CYCLE_SEARCH_WORK) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_cycle_search_work() {
+    SEARCH_WORK.set(0);
+}
+#[cfg(test)]
+pub(crate) fn cycle_search_work() -> usize {
+    SEARCH_WORK.get()
+}
+#[cfg(test)]
+pub(crate) fn with_cycle_search_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
+    struct Reset(usize);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            SEARCH_LIMIT.set(self.0);
+        }
+    }
+    let _reset = Reset(SEARCH_LIMIT.replace(limit));
+    f()
+}
+
+struct SearchBudget {
+    remaining: usize,
+    exhausted: bool,
+}
+
+impl SearchBudget {
+    fn new() -> Self {
+        #[cfg(test)]
+        let remaining = SEARCH_LIMIT.get();
+        #[cfg(not(test))]
+        let remaining = CYCLE_SEARCH_WORK;
+        Self {
+            remaining,
+            exhausted: false,
+        }
+    }
+
+    // Composition distributes over both unions, then normalization compares
+    // the resulting pieces. Charge before allocating that Cartesian product.
+    fn spend_product(&mut self, left: usize, right: usize) -> bool {
+        let pieces = left.saturating_mul(right);
+        self.spend(pieces.saturating_pow(2).saturating_add(1))
+    }
+
+    fn spend(&mut self, work: usize) -> bool {
+        if self.exhausted || work > self.remaining {
+            self.exhausted = true;
+            return false;
+        }
+        self.remaining -= work;
+        #[cfg(test)]
+        SEARCH_WORK.set(SEARCH_WORK.get().saturating_add(work));
+        true
+    }
+}
+
+fn cycle_state_scan_work<R>(
+    states: &[(R, PathCondition)],
+    relation: &R,
+    condition: &PathCondition,
+    size: impl Fn(&R) -> usize,
+) -> usize {
+    states.iter().fold(1usize, |work, (r, c)| {
+        let choices = c.branch_count().saturating_add(condition.branch_count());
+        work.saturating_add(size(r).saturating_mul(size(relation)))
+            .saturating_add(choices.saturating_pow(2).max(1))
+    })
+}
+
+/// Insert a relation/guard state, merging only exact unions at the same
+/// relation. A FIFO worklist lets independent diamond arms meet at their join
+/// before traversing the shared suffix; obsolete queued states are skipped.
+fn insert_cycle_state<R: Clone + Eq>(
+    states: &mut Vec<(R, PathCondition)>,
+    relation: &R,
+    condition: PathCondition,
+    covers: impl Fn(&R, &R) -> bool,
+    size: impl Fn(&R) -> usize,
+    budget: &mut SearchBudget,
+) -> Option<PathCondition> {
+    let mut condition = condition;
+    if !budget.spend(cycle_state_scan_work(states, relation, &condition, &size)) {
+        return None;
+    }
+    if states
+        .iter()
+        .any(|(r, c)| covers(r, relation) && c.covers(&condition))
+    {
+        return None;
+    }
+    loop {
+        if !budget.spend(cycle_state_scan_work(states, relation, &condition, &size)) {
+            return None;
+        }
+        let merge = states.iter().enumerate().find_map(|(index, (r, c))| {
+            (r == relation)
+                .then(|| c.disjoin_exact(&condition))
+                .flatten()
+                .map(|c| (index, c))
+        });
+        let Some((index, merged)) = merge else {
+            break;
+        };
+        states.swap_remove(index);
+        condition = merged;
+    }
+    if !budget.spend(cycle_state_scan_work(states, relation, &condition, &size)) {
+        return None;
+    }
+    states.retain(|(r, c)| !covers(relation, r) || !condition.covers(c));
+    states.push((relation.clone(), condition.clone()));
+    Some(condition)
+}
+
+pub(super) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Option<bool> {
+    let mut budget = SearchBudget::new();
+    let found = has_compatible_cycle_with_budget(graph, scc, &mut budget);
+    (found || !budget.exhausted).then_some(found)
+}
+
+#[cfg(test)]
+fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
+    compatible_cycle(graph, scc).expect("small reference graphs must be decided completely")
+}
+
 // Correctness argument for the graph-relative cycle decision:
 //
 // Interpret a graph state as `(node, array_position, packed_position)`. An edge
@@ -247,11 +383,11 @@ pub(super) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool
 // `PathCondition` as its stored Cartesian set of branch choices. Correlations
 // discarded before graph construction are deliberately not reintroduced here.
 //
-// For a fixed anchor, each stack state denotes one real path that has not
-// revisited the anchor: its condition is the conjunction of the edge
-// conditions, and its `PositionRelationSet` is exactly the relation from the
-// anchor position to the current position. This holds initially by `identity`
-// and is preserved by `then_dependency`. Reverse reachability removes no path
+// For a fixed anchor, every valuation of a queued state's condition admits a
+// real path that has not revisited the anchor, with exactly the state's binary
+// position relation. This holds initially by `identity`, is preserved by
+// `then_dependency`, and by exact unions of guards on the same relation.
+// Reverse reachability removes no path
 // that can return to the anchor. If an existing state has a superset relation
 // under a weaker condition, every continuation of the new state is also a
 // continuation of the existing state: relation composition is monotone and
@@ -266,8 +402,9 @@ pub(super) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool
 // composition intersects identity concatenate to a real closed walk. The
 // guarded-composition argument in `guarded` proves that it finds exactly such
 // sequences. Trying every node as anchor therefore proves that this function
-// returns true exactly when the SCC contains a branch-compatible closed walk
-// that returns to the same array and packed position.
+// decides whether the SCC contains a branch-compatible closed walk that
+// returns to the same array and packed position, provided the budget is not
+// exhausted. The public decision reports exhaustion separately as incomplete.
 //
 // Termination assumes the builder invariant asserted by
 // `unconstrained_subgraph_is_acyclic` in debug builds. An empty-domain-only
@@ -284,9 +421,18 @@ pub(super) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool
 // dominated state is never queued again. Every endpoint and intermediate
 // offset operation is a construction invariant required to be representable
 // in `isize`; overflow is not interpreted as a dependency relation.
-pub(super) fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
+fn has_compatible_cycle_with_budget(
+    graph: &DependencyGraph,
+    scc: &[NodeIndex],
+    budget: &mut SearchBudget,
+) -> bool {
+    if scc.is_empty()
+        || (scc.len() == 1 && !graph.edges(scc[0]).any(|edge| edge.target() == scc[0]))
+    {
+        return false;
+    }
     let nodes: HashSet<_> = scc.iter().copied().collect();
-    if has_zero_dependency_cycle(graph, scc, &nodes) {
+    if has_zero_dependency_cycle(graph, scc, &nodes, budget) {
         return true;
     }
     // Returning to the anchor ends the first-return search, so choosing a
@@ -296,14 +442,33 @@ pub(super) fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -
     let mut starts = scc.to_vec();
     starts.sort_unstable_by_key(|&node| std::cmp::Reverse(domain_area(&graph[node])));
     for start in starts {
+        if !budget.spend(scc.len()) {
+            return false;
+        }
         let returnable = nodes_that_may_reach_start(graph, &nodes, start);
+        if !budget.spend_product(graph[start].domains.len().max(1), 1) {
+            return false;
+        }
         let initial = PositionRelationSet::identity(&graph[start].domains);
         let mut cycles = HashSet::default();
-        let mut stack = vec![(start, PathCondition::default(), initial)];
+        let mut queue = VecDeque::from([(start, PathCondition::default(), initial)]);
         let mut reached: HashMap<NodeIndex, Vec<(PositionRelationSet, PathCondition)>> =
             HashMap::default();
-        while let Some((node, condition, relation)) = stack.pop() {
+        while let Some((node, condition, relation)) = queue.pop_front() {
+            if !budget.spend(reached.get(&node).map_or(1, |states| states.len() + 1)) {
+                return false;
+            }
+            if node != start
+                && !reached[&node]
+                    .iter()
+                    .any(|(r, c)| *r == relation && *c == condition)
+            {
+                continue;
+            }
             for edge in graph.edges(node) {
+                if !budget.spend(1) {
+                    return false;
+                }
                 let next = edge.target();
                 if !returnable.contains(&next) {
                     continue;
@@ -316,6 +481,9 @@ pub(super) fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -
                 // Retain the full binary relation from the anchor position to
                 // the current position. Unlike a single optional offset, this
                 // preserves the reachable current range after a WHOLE edge.
+                if !budget.spend_product(relation.piece_count(), graph[next].domains.len().max(1)) {
+                    return false;
+                }
                 let next_relation =
                     relation.then_dependency(edge.weight().kind, &graph[next].domains);
                 if next_relation.is_empty() {
@@ -331,25 +499,19 @@ pub(super) fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -
                     });
                     continue;
                 }
-                let states = reached.entry(next).or_default();
-                if states
-                    .iter()
-                    .any(|(existing_relation, existing_condition)| {
-                        existing_relation.piecewise_covers(&next_relation)
-                            && existing_condition.covers(&next_condition)
-                    })
-                {
-                    continue;
+                if let Some(condition) = insert_cycle_state(
+                    reached.entry(next).or_default(),
+                    &next_relation,
+                    next_condition,
+                    PositionRelationSet::piecewise_covers,
+                    PositionRelationSet::piece_count,
+                    budget,
+                ) {
+                    queue.push_back((next, condition, next_relation));
                 }
-                states.retain(|(existing_relation, existing_condition)| {
-                    !next_relation.piecewise_covers(existing_relation)
-                        || !next_condition.covers(existing_condition)
-                });
-                states.push((next_relation.clone(), next_condition.clone()));
-                stack.push((next, next_condition, next_relation));
             }
         }
-        if guarded_cycle_displacements_cancel(&cycles) {
+        if guarded_cycle_displacements_cancel(&cycles, budget) {
             return true;
         }
     }
@@ -362,6 +524,7 @@ pub(super) fn diagnostic_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
 ) -> Option<Vec<EdgeIndex>> {
+    let mut budget = SearchBudget::new();
     let members = scc.iter().copied().collect::<HashSet<_>>();
     let mut anchors = scc
         .iter()
@@ -397,11 +560,17 @@ pub(super) fn diagnostic_cycle(
                 )
             });
             for edge in edges {
+                if !budget.spend(1) {
+                    return None;
+                }
                 let (_, next) = graph.edge_endpoints(edge).unwrap();
                 let Some(condition) = condition.conjoin_if_compatible(&graph[edge].condition)
                 else {
                     continue;
                 };
+                if !budget.spend_product(relation.piece_count(), graph[next].domains.len().max(1)) {
+                    return None;
+                }
                 let relation = relation.then_dependency(graph[edge].kind, &graph[next].domains);
                 if relation.is_empty() {
                     continue;
@@ -420,6 +589,9 @@ pub(super) fn diagnostic_cycle(
                     continue;
                 }
                 let previous = reached.entry(next).or_default();
+                if !budget.spend(previous.len().saturating_mul(2)) {
+                    return None;
+                }
                 if previous
                     .iter()
                     .any(|(r, c)| r.piecewise_covers(&relation) && c.covers(&condition))
@@ -487,14 +659,28 @@ fn has_zero_dependency_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
     nodes: &HashSet<NodeIndex>,
+    budget: &mut SearchBudget,
 ) -> bool {
     for &start in scc {
         let initial = initial_feasible_positions(&graph[start]);
-        let mut stack = vec![(start, PathCondition::default(), initial)];
-        let mut reached: HashMap<NodeIndex, Vec<(PathCondition, Vec<FeasiblePosition>)>> =
+        let mut queue = VecDeque::from([(start, PathCondition::default(), initial)]);
+        let mut reached: HashMap<NodeIndex, Vec<(Vec<FeasiblePosition>, PathCondition)>> =
             HashMap::default();
-        while let Some((node, condition, feasible)) = stack.pop() {
+        while let Some((node, condition, feasible)) = queue.pop_front() {
+            if !budget.spend(reached.get(&node).map_or(1, |states| states.len() + 1)) {
+                return false;
+            }
+            if node != start
+                && !reached[&node]
+                    .iter()
+                    .any(|(r, c)| *r == feasible && *c == condition)
+            {
+                continue;
+            }
             for edge in graph.edges(node) {
+                if !budget.spend(1) {
+                    return false;
+                }
                 if !dependency_is_identity(edge.weight().kind) {
                     continue;
                 }
@@ -507,6 +693,9 @@ fn has_zero_dependency_cycle(
                 else {
                     continue;
                 };
+                if !budget.spend_product(feasible.len(), graph[next].domains.len().max(1)) {
+                    return false;
+                }
                 let feasible = restrict_feasible_positions(
                     &feasible,
                     edge.weight().kind,
@@ -518,17 +707,16 @@ fn has_zero_dependency_cycle(
                 if next == start {
                     return true;
                 }
-                let states = reached.entry(next).or_default();
-                if states.iter().any(|(existing, existing_feasible)| {
-                    existing.covers(&next_condition) && *existing_feasible == feasible
-                }) {
-                    continue;
+                if let Some(condition) = insert_cycle_state(
+                    reached.entry(next).or_default(),
+                    &feasible,
+                    next_condition,
+                    PartialEq::eq,
+                    Vec::len,
+                    budget,
+                ) {
+                    queue.push_back((next, condition, feasible));
                 }
-                states.retain(|(existing, existing_feasible)| {
-                    !next_condition.covers(existing) || *existing_feasible != feasible
-                });
-                states.push((next_condition.clone(), feasible.clone()));
-                stack.push((next, next_condition, feasible));
             }
         }
     }
@@ -1694,5 +1882,44 @@ mod tests {
             previous = Some(current);
         }
         assert_eq!(strongly_connected_components(&graph).len(), COUNT);
+    }
+    #[test]
+    fn first_return_composition_obeys_search_limit() {
+        let mut graph = DependencyGraph::new();
+        let node = graph.add_node(test_node(
+            0,
+            ArraySpan {
+                start: 0,
+                length: 128,
+            },
+        ));
+        for shift in 1..=32 {
+            add_dependency_edge(
+                &mut graph,
+                node,
+                node,
+                GraphDependency::unconditional(BitDependency {
+                    array: Some(0),
+                    packed: Some(shift),
+                }),
+            );
+        }
+        with_cycle_search_limit(100, || assert_eq!(compatible_cycle(&graph, &[node]), None));
+        assert_eq!(compatible_cycle(&graph, &[node]), Some(false));
+        for shift in 1..=32 {
+            add_dependency_edge(
+                &mut graph,
+                node,
+                node,
+                GraphDependency::unconditional(BitDependency {
+                    array: Some(0),
+                    packed: Some(-shift),
+                }),
+            );
+        }
+        with_cycle_search_limit(1_000, || {
+            assert_eq!(compatible_cycle(&graph, &[node]), None)
+        });
+        assert_eq!(compatible_cycle(&graph, &[node]), Some(true));
     }
 }

@@ -40,6 +40,8 @@ use graph::{
     DependencyGraph, GraphDependency, GraphNode, add_dependency_edge, add_region_dependency,
     ensure_node, node_regions_overlap_with_dependency,
 };
+#[cfg(test)]
+pub(crate) use graph::{cycle_search_work, reset_cycle_search_work, with_cycle_search_limit};
 use hierarchy::{module_postorder, walk_insts};
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
 use region::{
@@ -47,6 +49,8 @@ use region::{
     translate_position, var_reads,
 };
 use ssa::{BranchId, DependencyDagNode, PathCondition};
+#[cfg(test)]
+pub(crate) use ssa::{reset_source_walk_visits, source_walk_visits};
 use summary::compute_module_summary;
 
 use crate::AnalyzerError;
@@ -87,7 +91,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
                 continue;
             }
         };
-        check_graph(
+        let cycles_complete = check_graph(
             module,
             &graph,
             &bit_part,
@@ -97,9 +101,9 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
             &mut reported,
         );
         let mut summary = compute_module_summary(module, &graph);
-        summary.complete = module_complete;
+        summary.complete = module_complete && cycles_complete;
         summaries.insert(module.signature.clone(), summary);
-        complete &= module_complete;
+        complete &= module_complete && cycles_complete;
     }
 
     (errors, complete)
@@ -657,101 +661,13 @@ impl<'a> ModuleGraphBuilder<'a> {
     }
 
     fn add_procedure_graph(&mut self, module: &Module, analysis: procedure::ProcedureResult) {
-        let destinations = analysis
-            .destinations
-            .into_iter()
-            .filter_map(|(key, root)| {
-                (is_module_scope_var(key.0, &module.variables)
-                    && !is_inout(key.0, &module.variables))
-                .then_some((key, root))
-            })
-            .collect::<Vec<_>>();
-        let Some(internal_region) = destinations.iter().find_map(|(key, _)| {
-            ensure_node(&mut self.graph, &mut self.node_map, self.bit_part, *key)
-                .map(|node| self.graph[node].region)
-        }) else {
-            return;
-        };
-
-        let mapped = analysis
-            .graph
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| match node {
-                DependencyDagNode::External(key)
-                    if is_module_scope_var(key.0, &module.variables)
-                        && !is_inout(key.0, &module.variables) =>
-                {
-                    ensure_node(&mut self.graph, &mut self.node_map, self.bit_part, *key)
-                }
-                DependencyDagNode::External(_) => None,
-                DependencyDagNode::Internal => Some(self.graph.add_node(GraphNode {
-                    // Internal nodes carry no variable identity. The region is
-                    // only a coordinate carrier; exact edge relations retain
-                    // the positional semantics.
-                    region: internal_region,
-                    domains: analysis.graph.domains[index].clone(),
-                    diagnostic: None,
-                })),
-            })
-            .collect::<Vec<_>>();
-
-        for (node, site) in analysis.graph.sites {
-            if let Some(node) = mapped[node] {
-                self.graph.sites.insert(
-                    node,
-                    ssa::DefinitionSite {
-                        token: site.token,
-                        data_inputs: site
-                            .data_inputs
-                            .iter()
-                            .filter_map(|input| mapped[*input])
-                            .collect(),
-                    },
-                );
-            }
-        }
-        for edge in analysis.graph.edges {
-            let (Some(source), Some(destination)) = (mapped[edge.source], mapped[edge.destination])
-            else {
-                continue;
-            };
-            add_dependency_edge(
-                &mut self.graph,
-                source,
-                destination,
-                GraphDependency {
-                    kind: BitDependency {
-                        array: edge.relation.array,
-                        packed: edge.relation.packed,
-                    },
-                    condition: edge.condition,
-                },
-            );
-        }
-        for (destination, root) in destinations {
-            let (Some(root), Some(destination)) = (
-                root.and_then(|root| mapped[root]),
-                ensure_node(
-                    &mut self.graph,
-                    &mut self.node_map,
-                    self.bit_part,
-                    destination,
-                ),
-            ) else {
-                continue;
-            };
-            add_dependency_edge(
-                &mut self.graph,
-                root,
-                destination,
-                GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(0),
-                }),
-            );
-        }
+        add_procedure_graph(
+            &mut self.graph,
+            &mut self.node_map,
+            self.bit_part,
+            module,
+            analysis,
+        );
     }
 
     fn add_instance_feedthrough(
@@ -786,15 +702,8 @@ impl<'a> ModuleGraphBuilder<'a> {
                 );
                 complete &= actual_complete;
                 reads.extend(sources);
-                for dependency in dependencies {
-                    add_region_dependency(
-                        graph,
-                        node_map,
-                        bit_part,
-                        dependency.source,
-                        dependency.destination,
-                        GraphDependency::unconditional(dependency.kind),
-                    );
+                if let Some(dependencies) = dependencies {
+                    add_procedure_graph(graph, node_map, bit_part, module, dependencies);
                 }
             }
             reads.sort_unstable_by_key(|source| {
@@ -828,15 +737,8 @@ impl<'a> ModuleGraphBuilder<'a> {
                         function_summaries,
                     );
                 complete &= selector_complete;
-                for dependency in dependencies {
-                    add_region_dependency(
-                        graph,
-                        node_map,
-                        bit_part,
-                        dependency.source,
-                        dependency.destination,
-                        GraphDependency::unconditional(dependency.kind),
-                    );
+                if let Some(dependencies) = dependencies {
+                    add_procedure_graph(graph, node_map, bit_part, module, dependencies);
                 }
                 for source in selector_reads {
                     for destination in &destination_keys {
@@ -882,6 +784,8 @@ impl<'a> ModuleGraphBuilder<'a> {
                         .iter()
                         .any(|edge| edge.source == index && edge.kind.has_position());
                     let mapping = map_instance_source_region(
+                        graph,
+                        node_map,
                         inst,
                         child,
                         node.region,
@@ -892,9 +796,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                         procedure_context,
                         function_summaries,
                     );
-                    let resolved =
-                        resolve_instance_mapping(graph, node_map, bit_part, mapping.clone());
-                    (resolved, Some(mapping))
+                    (mapping, None)
                 }
                 SummaryNodeKind::Output => {
                     let mapping = instance_region_mapping(
@@ -969,6 +871,8 @@ impl<'a> ModuleGraphBuilder<'a> {
                     ) {
                         RegionProjection::Exact(source_region) => {
                             let sources = map_instance_source_region(
+                                graph,
+                                node_map,
                                 inst,
                                 child,
                                 source_region,
@@ -981,8 +885,6 @@ impl<'a> ModuleGraphBuilder<'a> {
                                 procedure_context,
                                 function_summaries,
                             );
-                            let sources =
-                                resolve_instance_mapping(graph, node_map, bit_part, sources);
                             let destinations = resolve_instance_mapping(
                                 graph,
                                 node_map,
@@ -1038,8 +940,126 @@ impl<'a> ModuleGraphBuilder<'a> {
     }
 }
 
+fn add_dependency_dag(
+    graph: &mut DependencyGraph,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    bit_part: &BitPartition,
+    dag: ssa::DependencyDag<NodeKey>,
+    internal_region: SummaryRegion,
+    allowed: impl Fn(NodeKey) -> bool,
+) -> Vec<Option<NodeIndex>> {
+    // These are parent expression/procedure edges, even when insertion
+    // was triggered by projecting an individual child summary edge.
+    let active_summary = graph.active_summary.take();
+    let mapped = dag
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| match node {
+            DependencyDagNode::External(key) if allowed(*key) => {
+                ensure_node(graph, node_map, bit_part, *key)
+            }
+            DependencyDagNode::External(_) => None,
+            DependencyDagNode::Internal => Some(graph.add_node(GraphNode {
+                // Internal nodes carry no variable identity. The region is
+                // only a coordinate carrier; exact edge relations retain
+                // the positional semantics.
+                region: internal_region,
+                domains: dag.domains[index].clone(),
+                diagnostic: None,
+            })),
+        })
+        .collect::<Vec<_>>();
+
+    for (node, site) in dag.sites {
+        if let Some(node) = mapped[node] {
+            graph.sites.insert(
+                node,
+                ssa::DefinitionSite {
+                    token: site.token,
+                    data_inputs: site
+                        .data_inputs
+                        .iter()
+                        .filter_map(|input| mapped[*input])
+                        .collect(),
+                },
+            );
+        }
+    }
+    for edge in dag.edges {
+        let (Some(source), Some(destination)) = (mapped[edge.source], mapped[edge.destination])
+        else {
+            continue;
+        };
+        add_dependency_edge(
+            graph,
+            source,
+            destination,
+            GraphDependency {
+                kind: BitDependency {
+                    array: edge.relation.array,
+                    packed: edge.relation.packed,
+                },
+                condition: edge.condition,
+            },
+        );
+    }
+    graph.active_summary = active_summary;
+    mapped
+}
+
+fn add_procedure_graph(
+    graph: &mut DependencyGraph,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    bit_part: &BitPartition,
+    module: &Module,
+    analysis: procedure::ProcedureResult,
+) {
+    let destinations = analysis
+        .destinations
+        .into_iter()
+        .filter_map(|(key, root)| {
+            (is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables))
+                .then_some((key, root))
+        })
+        .collect::<Vec<_>>();
+    let Some(internal_region) = destinations.iter().find_map(|(key, _)| {
+        ensure_node(graph, node_map, bit_part, *key).map(|node| graph[node].region)
+    }) else {
+        return;
+    };
+
+    let mapped = add_dependency_dag(
+        graph,
+        node_map,
+        bit_part,
+        analysis.graph,
+        internal_region,
+        |key| is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables),
+    );
+    for (destination, root) in destinations {
+        let (Some(root), Some(destination)) = (
+            root.and_then(|root| mapped[root]),
+            ensure_node(graph, node_map, bit_part, destination),
+        ) else {
+            continue;
+        };
+        add_dependency_edge(
+            graph,
+            root,
+            destination,
+            GraphDependency::unconditional(BitDependency {
+                array: Some(0),
+                packed: Some(0),
+            }),
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn map_instance_source_region<'a>(
+    graph: &mut DependencyGraph,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
@@ -1049,7 +1069,7 @@ fn map_instance_source_region<'a>(
     ctx: &mut Context,
     procedure_context: &mut procedure::ProcedureContext,
     function_summaries: &mut procedure::FunctionSummaries<'a>,
-) -> InstanceRegionMapping {
+) -> ResolvedInstanceRegionMapping {
     let parent_sources = instance_region_mapping(
         inst,
         child,
@@ -1065,21 +1085,21 @@ fn map_instance_source_region<'a>(
             .iter()
             .any(|source| source.offset.is_some())
     {
-        return parent_sources;
+        return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     }
     let Some(input) = inst.inputs.iter().find(|input| input.id == region.id) else {
-        return parent_sources;
+        return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
     let Some(expression) = input.single() else {
-        return parent_sources;
+        return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
     let Some(variable) = child.variables.get(&region.id) else {
-        return parent_sources;
+        return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
     let Some(width) = variable.total_width() else {
-        return parent_sources;
+        return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
-    let mut mapping = analyze_instance_actual_region(
+    let dag = analyze_instance_actual_region(
         bit_part,
         expression,
         region,
@@ -1087,10 +1107,26 @@ fn map_instance_source_region<'a>(
         procedure_context,
         function_summaries,
     );
-    mapping.nodes.retain(|source| {
-        allowed.is_some_and(|allowed| allowed.iter().any(|item| item.key == source.key))
+    let root = dag.roots[0];
+    let allowed = allowed
+        .into_iter()
+        .flatten()
+        .map(|source| source.key)
+        .collect::<HashSet<_>>();
+    let mapped = add_dependency_dag(graph, node_map, bit_part, dag, region, |key| {
+        allowed.contains(&key)
     });
-    mapping
+    ResolvedInstanceRegionMapping {
+        nodes: root
+            .and_then(|root| mapped[root])
+            .into_iter()
+            .map(|node| ResolvedMappedNode {
+                node,
+                offset: Some((0, 0)),
+                condition: PathCondition::default(),
+            })
+            .collect(),
+    }
 }
 
 #[derive(Clone)]
@@ -1476,7 +1512,7 @@ fn analyze_instance_actual<'a>(
     summaries: &mut procedure::FunctionSummaries<'a>,
 ) -> (
     Vec<procedure::RegionSource>,
-    Vec<procedure::Dependency>,
+    Option<procedure::ProcedureResult>,
     bool,
 ) {
     let mut analysis = InstanceActualAnalysis::new(bit_part, ctx, procedure_context, summaries);
@@ -1492,7 +1528,7 @@ fn analyze_instance_destination<'a>(
     summaries: &mut procedure::FunctionSummaries<'a>,
 ) -> (
     Vec<procedure::RegionSource>,
-    Vec<procedure::Dependency>,
+    Option<procedure::ProcedureResult>,
     bool,
 ) {
     let mut analysis = InstanceActualAnalysis::new(bit_part, ctx, procedure_context, summaries);
@@ -1517,21 +1553,11 @@ fn analyze_instance_actual_region<'a>(
     context_width: usize,
     procedure_context: &mut procedure::ProcedureContext,
     summaries: &mut procedure::FunctionSummaries<'a>,
-) -> InstanceRegionMapping {
+) -> ssa::DependencyDag<NodeKey> {
     let mut analysis = procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
-    let sources = analysis.eval_region(expression, region.array, region.packed, context_width);
-    let mapping = InstanceRegionMapping {
-        nodes: sources
-            .into_iter()
-            .map(|source| MappedNode {
-                key: source.key,
-                offset: source.offset,
-                condition: source.condition,
-            })
-            .collect(),
-    };
+    let graph = analysis.eval_region(expression, region.array, region.packed, context_width);
     analysis.restore(procedure_context);
-    mapping
+    graph
 }
 
 struct InstanceActualAnalysis<'a, 's, 'c> {
@@ -1564,7 +1590,7 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
         mut self,
     ) -> (
         Vec<procedure::RegionSource>,
-        Vec<procedure::Dependency>,
+        Option<procedure::ProcedureResult>,
         bool,
     ) {
         self.reads
@@ -1576,11 +1602,11 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
             .as_ref()
             .is_none_or(procedure::ExpressionAnalysis::is_complete);
         let dependencies = if let Some(mut procedure) = self.procedure.take() {
-            let dependencies = procedure.dependencies();
+            let dependencies = Some(procedure.dependencies());
             procedure.restore(self.procedure_context);
             dependencies
         } else {
-            Vec::new()
+            None
         };
         (self.reads, dependencies, complete)
     }

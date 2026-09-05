@@ -1,13 +1,12 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
-use super::model::BitDependency;
 use super::region::{
     ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
 };
 use super::ssa::{
     BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
-    PositionDomain, PositionRelation, SourceCache, SsaStore, VersionId,
+    PositionDomain, PositionRelation, SsaStore, VersionId,
 };
 use crate::conv::Context;
 use crate::ir::VarId;
@@ -855,13 +854,6 @@ impl AnalysisStatus {
     }
 }
 
-pub(super) struct Dependency {
-    pub(super) source: NodeKey,
-    pub(super) destination: NodeKey,
-    pub(super) kind: BitDependency,
-    pub(super) condition: PathCondition,
-}
-
 #[derive(Default)]
 struct ExpressionSources {
     sources: Vec<(VersionId, PositionRelation)>,
@@ -964,48 +956,27 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
     pub(super) fn eval_region(
         &mut self,
         expression: &Expression,
-        array: super::region::ArraySpan,
+        array: ArraySpan,
         packed: PackedSpan,
         context_width: usize,
-    ) -> Vec<RegionSource> {
-        self.inner().use_expression_namespace(expression);
-        let mut sources =
-            self.inner()
-                .eval_expr_requested(expression, array, packed, context_width);
+    ) -> DependencyDag<NodeKey> {
+        let inner = self.inner();
+        inner.use_expression_namespace(expression);
+        let mut sources = inner.eval_expr_requested(expression, array, packed, context_width);
         sources.normalize();
-        let mut mapped = Vec::new();
-        for (version, expression_offset) in sources.sources {
-            let wrapper = self
-                .inner()
-                .ssa
-                .related_definition(vec![(version, expression_offset)]);
-            for (source, relation, condition) in
-                self.inner().ssa.root_source_relations_guarded(wrapper)
-            {
-                if source.call_frame.is_some() {
-                    continue;
-                }
-                let source = source.node;
-                let relation = relation.reversed();
-                let offset = relation.array.zip(relation.packed);
-                mapped.push(RegionSource {
-                    key: source,
-                    offset,
-                    condition,
-                });
-            }
-        }
-        mapped.sort_unstable_by_key(|source| (source.key, source.offset, source.condition.clone()));
-        mapped.dedup_by(|left, right| {
-            left.key == right.key
-                && left.offset == right.offset
-                && left.condition == right.condition
-        });
-        mapped
+        let value = inner.ssa.related_definition(sources.sources);
+        let value = inner.ssa.projected(value, position_domain(array, packed));
+        inner.dependency_dag_for_nodes(&[value], inner.module_scope_keys())
     }
 
-    pub(super) fn dependencies(&mut self) -> Vec<Dependency> {
-        self.inner().dependencies()
+    pub(super) fn dependencies(&mut self) -> ProcedureResult {
+        let inner = self.inner();
+        let (graph, destinations) = inner.dependency_graph();
+        ProcedureResult {
+            graph,
+            destinations,
+            status: inner.status,
+        }
     }
 
     pub(super) fn restore(mut self, context: &mut ProcedureContext) {
@@ -1119,9 +1090,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let value = self.ssa.definition(versions);
         let mut sources = self
             .ssa
-            .root_source_relations_guarded(value)
+            .root_source_keys_guarded(value)
             .into_iter()
-            .filter_map(|(source, _, condition)| {
+            .filter_map(|(source, condition)| {
                 source.call_frame.is_none().then_some(RegionSource {
                     key: source.node,
                     offset: None,
@@ -1260,52 +1231,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some(summary)
     }
 
-    fn dependencies(&mut self) -> Vec<Dependency> {
-        let mut dependencies = Vec::new();
-        let mut source_cache =
-            SourceCache::restricted(self.module_scope_keys().into_iter().map(|node| SsaKey {
-                node,
-                call_frame: None,
-            }));
-        let destinations: Vec<_> = self
-            .written
-            .iter()
-            .copied()
-            .filter(|key| self.is_module_scope_key(*key))
-            .collect();
-        for destination in destinations {
-            let version = self.read_key(destination);
-            let sources = self
-                .ssa
-                .root_source_relations_guarded_cached(version, &mut source_cache);
-            dependencies.extend(
-                sources
-                    .into_iter()
-                    .filter_map(|(source, source_kind, condition)| {
-                        source
-                            .call_frame
-                            .is_none()
-                            .then_some((source.node, source_kind, condition))
-                    })
-                    .filter(|(source, _, _)| self.is_module_scope_key(*source))
-                    .map(|(source, source_kind, condition)| Dependency {
-                        source,
-                        destination,
-                        kind: Self::dependency_kind(source_kind),
-                        condition,
-                    }),
-            );
-        }
-        dependencies.sort_unstable_by_key(|dependency| {
-            (
-                dependency.source,
-                dependency.destination,
-                dependency.condition.clone(),
-            )
-        });
-        dependencies
-    }
-
     fn dependency_graph(&mut self) -> (DependencyDag<NodeKey>, Vec<(NodeKey, Option<usize>)>) {
         let mut destinations = self
             .written
@@ -1325,13 +1250,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .zip(graph.roots.iter().copied())
             .collect();
         (graph, destinations)
-    }
-
-    fn dependency_kind(source_kind: PositionRelation) -> BitDependency {
-        BitDependency {
-            array: source_kind.array,
-            packed: source_kind.packed,
-        }
     }
 
     fn is_module_scope_key(&self, key: NodeKey) -> bool {
@@ -1812,6 +1730,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect()
     }
 
+    fn eval_destination_selectors(&mut self, destination: &AssignDestination) -> Vec<VersionId> {
+        let mut sources = Vec::new();
+        for expression in destination
+            .index
+            .0
+            .iter()
+            .chain(destination.select.0.iter())
+        {
+            sources.extend(self.eval_expr(expression));
+        }
+        if let Some((_, expression)) = &destination.select.1 {
+            sources.extend(self.eval_expr(expression));
+        }
+        sources
+    }
+
     fn write_destination(
         &mut self,
         destination: &AssignDestination,
@@ -1820,17 +1754,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) {
         let mut dependencies = sources.to_vec();
         dependencies.extend_from_slice(controls);
-        for expression in destination
-            .index
-            .0
-            .iter()
-            .chain(destination.select.0.iter())
-        {
-            dependencies.extend(self.eval_expr(expression));
-        }
-        if let Some((_, expression)) = &destination.select.1 {
-            dependencies.extend(self.eval_expr(expression));
-        }
+        dependencies.extend(self.eval_destination_selectors(destination));
+        self.bind_whole_destination(destination, dependencies, controls);
+    }
+
+    fn bind_whole_destination(
+        &mut self,
+        destination: &AssignDestination,
+        dependencies: Vec<VersionId>,
+        controls: &[VersionId],
+    ) {
         let keys = self.write_keys(destination);
         let dynamic = self.destination_is_dynamic(destination);
         let version = self
@@ -3530,33 +3463,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .get(&formal)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            let widths: Vec<_> = destinations
-                .iter()
-                .map(|destination| self.destination_width(destination))
-                .collect();
-            if widths.iter().all(Option::is_some) {
-                let total_width = widths.iter().flatten().sum();
-                let mut offset = total_width;
-                for (destination, width) in destinations.iter().zip(widths) {
-                    let width = width.expect("checked above");
-                    offset -= width;
-                    self.write_formal_output(
-                        destination,
-                        formal_versions,
-                        offset,
-                        total_width,
-                        controls,
-                    );
-                }
-            } else {
-                let sources = formal_versions
-                    .iter()
-                    .map(|(_, version)| *version)
-                    .collect::<Vec<_>>();
-                for destination in destinations {
-                    self.write_destination(destination, &sources, controls);
-                }
-            }
+            self.write_formal_outputs(destinations, formal_versions, controls);
         }
 
         let opaque_sources = if statements_have_unknown(&body.statements) {
@@ -3614,39 +3521,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.written.insert(*destination);
         }
 
+        let formal_outputs = call
+            .outputs
+            .iter()
+            .filter_map(|(path, _)| {
+                let formal = *summary.arg_map.get(path)?;
+                Some((formal, self.current_key_versions_for_id(formal)))
+            })
+            .collect::<HashMap<_, _>>();
+
         for (path, destinations) in &call.outputs {
             let Some(&formal) = summary.arg_map.get(path) else {
                 continue;
             };
-            let widths: Vec<_> = destinations
-                .iter()
-                .map(|destination| self.destination_width(destination))
-                .collect();
-            if widths.iter().all(Option::is_some) {
-                let formal_versions = self.current_key_versions_for_id(formal);
-                let total_width = widths.iter().flatten().sum();
-                let mut offset = total_width;
-                for (destination, width) in destinations.iter().zip(widths) {
-                    let width = width.expect("checked above");
-                    offset -= width;
-                    self.write_formal_output(
-                        destination,
-                        &formal_versions,
-                        offset,
-                        total_width,
-                        controls,
-                    );
-                }
-            } else {
-                let sources = self
-                    .current_key_versions_for_id(formal)
-                    .into_iter()
-                    .map(|(_, version)| version)
-                    .collect::<Vec<_>>();
-                for destination in destinations {
-                    self.write_destination(destination, &sources, controls);
-                }
-            }
+            self.write_formal_outputs(destinations, &formal_outputs[&formal], controls);
         }
 
         let region_groups = summary
@@ -3832,14 +3720,66 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.eval_expr_bits(actual, formal_key.1, span)
     }
 
+    fn write_formal_outputs(
+        &mut self,
+        destinations: &[AssignDestination],
+        formal_versions: &[(NodeKey, VersionId)],
+        controls: &[VersionId],
+    ) {
+        // A concatenated actual is one lvalue. Sample all its selectors after
+        // the callee returns, before writing any piece of the concatenation.
+        let selectors = destinations
+            .iter()
+            .map(|destination| {
+                let mut sources = controls.to_vec();
+                sources.extend(self.eval_destination_selectors(destination));
+                sources
+            })
+            .collect::<Vec<_>>();
+        let widths = destinations
+            .iter()
+            .map(|destination| self.destination_width(destination))
+            .collect::<Option<Vec<_>>>();
+        if let Some(widths) = widths {
+            let total_width = widths.iter().sum();
+            let mut offset = total_width;
+            for ((destination, width), selectors) in destinations.iter().zip(widths).zip(selectors)
+            {
+                offset -= width;
+                self.write_formal_output(
+                    destination,
+                    formal_versions,
+                    offset,
+                    total_width,
+                    &selectors,
+                );
+            }
+        } else {
+            for (destination, mut sources) in destinations.iter().zip(selectors) {
+                sources.extend(formal_versions.iter().map(|(_, version)| *version));
+                self.bind_whole_destination(destination, sources, controls);
+            }
+        }
+    }
+
     fn write_formal_output(
         &mut self,
         destination: &AssignDestination,
         formal_versions: &[(NodeKey, VersionId)],
         formal_offset: usize,
-        formal_width: usize,
-        controls: &[VersionId],
+        context_width: usize,
+        selectors: &[VersionId],
     ) {
+        let formal_type = formal_versions.first().and_then(|(key, _)| {
+            self.ctx
+                .variables
+                .get(&key.0)
+                .map(|variable| &variable.r#type)
+        });
+        let formal_width = formal_type
+            .and_then(|ty| ty.total_width())
+            .unwrap_or(context_width);
+        let signed = formal_type.is_some_and(|ty| ty.signed);
         let variable = self.ctx.variables.get(&destination.id).cloned();
         let selected = if destination.select.is_const_with_range() {
             variable.as_ref().and_then(|variable| {
@@ -3852,10 +3792,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         };
         let mut selected_destination = destination.clone();
         selected_destination.index = self.receiver_index(destination.id, &destination.index);
-        let destination_array = dst_writes(&selected_destination, &mut self.ctx)
-            .into_iter()
-            .map(|(array, _)| array)
-            .next();
+        let destination_array = selected_destination
+            .index
+            .is_const()
+            .then(|| {
+                dst_writes(&selected_destination, &mut self.ctx)
+                    .into_iter()
+                    .map(|(array, _)| array)
+                    .next()
+            })
+            .flatten();
         let position_offset = destination_array
             .zip(selected)
             .and_then(|(array, (_, low))| {
@@ -3867,7 +3813,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let dynamic = self.destination_is_dynamic(destination);
         for key in self.write_keys(destination) {
             let mut positional = Vec::new();
-            let mut whole = controls.to_vec();
+            let mut whole = selectors.to_vec();
             if let (Some(destination_array), Some((_, low)), Some(span), Some(position_offset)) = (
                 destination_array,
                 selected,
@@ -3879,7 +3825,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .intersection(destination_array)
                         .and_then(|array| array.translated(destination_array.start, 0)),
                     span.translated(low, formal_offset)
-                        .and_then(|span| PackedSpan::whole(formal_width)?.intersection(span)),
+                        .and_then(|span| PackedSpan::whole(context_width)?.intersection(span)),
                 ) {
                     for (formal_key, version) in formal_versions {
                         if !formal_key.1.overlaps(requested_array) {
@@ -3894,6 +3840,39 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .into_iter()
                                     .map(|version| (version, position_offset)),
                             );
+                        }
+                        if signed && context_width > formal_width && formal_width != 0 {
+                            let sign = PackedSpan {
+                                start: formal_width - 1,
+                                length: 1,
+                            };
+                            let extension = PackedSpan {
+                                start: formal_width,
+                                length: context_width - formal_width,
+                            };
+                            if formal_span.overlaps(sign)
+                                && let Some(extension) = requested.intersection(extension)
+                            {
+                                // Replicate only the sign bit, and constrain
+                                // the result to the widened portion. Keeping
+                                // both projections avoids inventing a path
+                                // from the sign to an unchanged lower bit.
+                                let sign = self
+                                    .ssa
+                                    .projected(*version, position_domain(requested_array, sign));
+                                let extended = self.ssa.related_definition(vec![(
+                                    sign,
+                                    PositionRelation {
+                                        array: Some(0),
+                                        packed: None,
+                                    },
+                                )]);
+                                let extended = self.ssa.projected(
+                                    extended,
+                                    position_domain(requested_array, extension),
+                                );
+                                positional.push((extended, position_offset));
+                            }
                         }
                     }
                 }

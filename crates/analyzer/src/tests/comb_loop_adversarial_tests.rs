@@ -927,3 +927,39 @@ fn zero_offset_cycle_is_not_hidden_by_parallel_shifted_paths() {
         true,
     );
 }
+
+#[test]
+fn comb_loop_independent_diamonds_merge_without_enumerating_branch_choices() {
+    const COUNT: usize = 32;
+    let transfers = (0..COUNT)
+        .map(|i| format!("assign v[{}] = if flags[{i}] ? v[{i}] : ~v[{i}];", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let code = format!(
+        r#"
+        module Top (gate: input logic, flags: input logic<{COUNT}>, o: output logic) {{
+            var a: logic;
+            var b: logic;
+            var v: logic[{}];
+            always_comb {{
+                if gate {{ a = b; o = 0; }} else {{ a = 0; o = v[{COUNT}]; }}
+            }}
+            assign v[0] = a;
+            {transfers}
+            assign b = o;
+        }}
+    "#,
+        COUNT + 1
+    );
+    crate::comb_loop_detect::reset_cycle_search_work();
+    assert!(analyze(&code).is_empty());
+    assert!(
+        crate::comb_loop_detect::cycle_search_work() < 750_000,
+        "independent guards must meet before traversing the shared suffix: {}",
+        crate::comb_loop_detect::cycle_search_work()
+    );
+    assert!(
+        comb_loop_analysis_is_complete(&code),
+        "a budget cutoff is not a proof of absence"
+    );
+}

@@ -31,7 +31,7 @@
 //! accelerators rather than additional approximations.
 
 use super::relation::PositionRelationSet;
-use super::{FeasiblePosition, intersect_axis};
+use super::{FeasiblePosition, SearchBudget, insert_cycle_state, intersect_axis};
 use crate::comb_loop_detect::model::BitDependency;
 use crate::comb_loop_detect::ssa::PathCondition;
 use crate::{HashMap, HashSet};
@@ -45,7 +45,13 @@ pub(super) struct GuardedCycle {
     pub(super) condition: PathCondition,
 }
 
-pub(super) fn guarded_cycle_displacements_cancel(cycles: &HashSet<GuardedCycle>) -> bool {
+pub(super) fn guarded_cycle_displacements_cancel(
+    cycles: &HashSet<GuardedCycle>,
+    budget: &mut SearchBudget,
+) -> bool {
+    if !budget.spend(cycles.len().saturating_pow(2)) {
+        return false;
+    }
     let translations = cycles
         .iter()
         .filter_map(|cycle| {
@@ -58,10 +64,10 @@ pub(super) fn guarded_cycle_displacements_cancel(cycles: &HashSet<GuardedCycle>)
         })
         .collect::<Vec<_>>();
 
-    if guarded_translations_cancel(&translations) {
+    if guarded_translations_cancel(&translations, budget) {
         return true;
     }
-    if translations.len() == cycles.len() {
+    if budget.exhausted || translations.len() == cycles.len() {
         return false;
     }
     for cycle in cycles {
@@ -81,10 +87,10 @@ pub(super) fn guarded_cycle_displacements_cancel(cycles: &HashSet<GuardedCycle>)
         }
     }
 
-    guarded_relations_close(cycles)
+    guarded_relations_close(cycles, budget)
 }
 
-fn guarded_relations_close(cycles: &HashSet<GuardedCycle>) -> bool {
+fn guarded_relations_close(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) -> bool {
     let cycles = cycles.iter().collect::<Vec<_>>();
     let mut reached: Vec<(PositionRelationSet, PathCondition)> = Vec::new();
     let mut queue = VecDeque::new();
@@ -100,13 +106,20 @@ fn guarded_relations_close(cycles: &HashSet<GuardedCycle>) -> bool {
             &mut queue,
             cycle.relation.clone(),
             cycle.condition.clone(),
+            budget,
         );
     }
     while let Some((relation, condition)) = queue.pop_front() {
         for cycle in &cycles {
+            if !budget.spend(1) {
+                return false;
+            }
             let Some(next_condition) = condition.conjoin_if_compatible(&cycle.condition) else {
                 continue;
             };
+            if !budget.spend_product(relation.piece_count(), cycle.relation.piece_count()) {
+                return false;
+            }
             let next_relation = relation.then(&cycle.relation);
             if next_relation.is_empty() {
                 continue;
@@ -114,7 +127,13 @@ fn guarded_relations_close(cycles: &HashSet<GuardedCycle>) -> bool {
             if next_relation.intersects_identity() {
                 return true;
             }
-            insert_guarded_relation(&mut reached, &mut queue, next_relation, next_condition);
+            insert_guarded_relation(
+                &mut reached,
+                &mut queue,
+                next_relation,
+                next_condition,
+                budget,
+            );
         }
     }
     false
@@ -125,20 +144,18 @@ fn insert_guarded_relation(
     queue: &mut VecDeque<(PositionRelationSet, PathCondition)>,
     relation: PositionRelationSet,
     condition: PathCondition,
+    budget: &mut SearchBudget,
 ) {
-    if reached
-        .iter()
-        .any(|(existing_relation, existing_condition)| {
-            existing_relation.piecewise_covers(&relation) && existing_condition.covers(&condition)
-        })
-    {
-        return;
+    if let Some(condition) = insert_cycle_state(
+        reached,
+        &relation,
+        condition,
+        PositionRelationSet::piecewise_covers,
+        PositionRelationSet::piece_count,
+        budget,
+    ) {
+        queue.push_back((relation, condition));
     }
-    reached.retain(|(existing_relation, existing_condition)| {
-        !relation.piecewise_covers(existing_relation) || !condition.covers(existing_condition)
-    });
-    reached.push((relation.clone(), condition.clone()));
-    queue.push_back((relation, condition));
 }
 
 #[derive(Clone, Debug)]
@@ -148,7 +165,38 @@ struct GuardedTranslation {
     feasible: Vec<FeasiblePosition>,
 }
 
-fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
+fn guarded_translations_cancel(cycles: &[GuardedTranslation], budget: &mut SearchBudget) -> bool {
+    if !budget.spend(cycles.len().saturating_mul(4)) {
+        return false;
+    }
+    // A common sign on either axis cannot sum to zero. This also avoids the
+    // cubic cancellation prefilter for acyclic shift fanout at instance inputs.
+    for array_axis in [true, false] {
+        let offset = |cycle: &GuardedTranslation| {
+            let (array, packed) = cycle.dependency.exact_offset().unwrap();
+            if array_axis { array } else { packed }
+        };
+        if cycles.iter().all(|cycle| offset(cycle) > 0)
+            || cycles.iter().all(|cycle| offset(cycle) < 0)
+        {
+            return false;
+        }
+    }
+    // Account for the transition graph and the pair/triple accelerators before
+    // their nested loops. A large set of distinct first returns is incomplete.
+    let pieces = cycles
+        .iter()
+        .map(|cycle| cycle.feasible.len())
+        .max()
+        .unwrap_or(1);
+    let work = cycles
+        .len()
+        .saturating_pow(3)
+        .saturating_mul(3)
+        .saturating_mul(pieces.saturating_pow(6));
+    if !budget.spend(work) {
+        return false;
+    }
     for cycles in guarded_transition_components_that_can_cancel(cycles) {
         // Large regular walks, such as +1 repeated 999_999 times followed by
         // one -999_999 wrap, are checked from their GCD-derived repetition
@@ -160,7 +208,7 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
         // The remaining irregular cases retain the exact cumulative
         // translation. A state is reusable only when its branch condition and
         // valid starting positions cover the new state as well.
-        let mut reached: HashMap<BitDependency, Vec<(PathCondition, Vec<FeasiblePosition>)>> =
+        let mut reached: HashMap<BitDependency, Vec<(Vec<FeasiblePosition>, PathCondition)>> =
             HashMap::default();
         let mut queue = VecDeque::new();
         for cycle in &cycles {
@@ -170,17 +218,24 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
                 cycle.dependency,
                 cycle.condition.clone(),
                 cycle.feasible.clone(),
+                budget,
             );
         }
 
         while let Some((dependency, condition, feasible)) = queue.pop_front() {
             for cycle in &cycles {
+                if !budget.spend(1) {
+                    return false;
+                }
                 let Some(next_condition) = condition.conjoin_if_compatible(&cycle.condition) else {
                     continue;
                 };
                 let offset = dependency
                     .exact_offset()
                     .expect("an exact guarded walk must retain its displacement");
+                if !budget.spend_product(feasible.len(), cycle.feasible.len()) {
+                    return false;
+                }
                 let next_feasible = compose_feasible_positions(&feasible, offset, &cycle.feasible);
                 if next_feasible.is_empty() {
                     continue;
@@ -195,6 +250,7 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation]) -> bool {
                     next_dependency,
                     next_condition,
                     next_feasible,
+                    budget,
                 );
             }
         }
@@ -472,30 +528,25 @@ fn repeat_axis(
 }
 
 fn insert_guarded_walk(
-    reached: &mut HashMap<BitDependency, Vec<(PathCondition, Vec<FeasiblePosition>)>>,
+    reached: &mut HashMap<BitDependency, Vec<(Vec<FeasiblePosition>, PathCondition)>>,
     queue: &mut VecDeque<(BitDependency, PathCondition, Vec<FeasiblePosition>)>,
     dependency: BitDependency,
     condition: PathCondition,
     mut feasible: Vec<FeasiblePosition>,
+    budget: &mut SearchBudget,
 ) {
     feasible.sort_unstable();
     feasible.dedup();
-    let states = reached.entry(dependency).or_default();
-    if states
-        .iter()
-        .any(|(existing_condition, existing_feasible)| {
-            existing_condition.covers(&condition)
-                && feasible_positions_contain(existing_feasible, &feasible)
-        })
-    {
-        return;
+    if let Some(condition) = insert_cycle_state(
+        reached.entry(dependency).or_default(),
+        &feasible,
+        condition,
+        |outer, inner| feasible_positions_contain(outer, inner),
+        Vec::len,
+        budget,
+    ) {
+        queue.push_back((dependency, condition, feasible));
     }
-    states.retain(|(existing_condition, existing_feasible)| {
-        !condition.covers(existing_condition)
-            || !feasible_positions_contain(&feasible, existing_feasible)
-    });
-    states.push((condition.clone(), feasible.clone()));
-    queue.push_back((dependency, condition, feasible));
 }
 
 fn compose_feasible_positions(
