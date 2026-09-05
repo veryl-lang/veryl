@@ -2551,6 +2551,9 @@ pub struct ModuleProperty {
     pub default_reset: Option<SymbolId>,
     pub definition: DefinitionId,
     pub test: Option<TestProperty>,
+    /// `#[testbench]`: testbench features are allowed, but the module is
+    /// not run as a test.
+    pub testbench: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

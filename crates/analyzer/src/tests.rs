@@ -21258,3 +21258,63 @@ fn nested_generic_interface_effect_trace_uses_parent_specialization() {
     assert_eq!(call_stack.len(), 2, "{errors:?}");
     assert_eq!(external_writes.len(), 1, "{errors:?}");
 }
+
+#[test]
+fn testbench_attribute() {
+    // https://github.com/veryl-lang/veryl/issues/3272
+    let code = r#"
+    module ModuleA {
+        var inner: logic;
+        assign inner = 1;
+    }
+
+    #[testbench]
+    module ModuleB {
+        inst dut: ModuleA;
+        var seen: logic;
+        initial {
+            seen = dut.inner;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn testbench_features_need_the_attribute() {
+    // https://github.com/veryl-lang/veryl/issues/3272
+    let code = r#"
+    module ModuleA {
+        var inner: logic;
+        assign inner = 1;
+    }
+
+    module ModuleB {
+        inst dut: ModuleA;
+        var seen: logic;
+        initial {
+            seen = dut.inner;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(!errors.is_empty());
+}
+
+#[test]
+fn testbench_attribute_takes_no_argument() {
+    // https://github.com/veryl-lang/veryl/issues/3272
+    let code = r#"
+    #[testbench(foo)]
+    module ModuleA {}
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAttributeArgs { .. }
+    ));
+}
