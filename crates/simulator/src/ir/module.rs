@@ -75,6 +75,10 @@ pub struct Module {
     /// Passes of `derived_clock_eval_stmts` needed for the closure to
     /// converge — the `required_comb_passes` of that chunk.
     pub derived_clock_eval_passes: usize,
+    /// One-function compile of the derived-clock closure, the counterpart of
+    /// `whole_comb` for `partial_settle`. `None` leaves it on
+    /// `derived_clock_eval_stmts`.
+    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
     /// Diagnostic: number of non-trivial strongly-connected components in
     /// the pre-JIT `unified_sorted` dataflow graph.  Real RTL combinational
     /// loops are rejected up-front by `analyze_dependency`, so any non-zero
@@ -143,6 +147,9 @@ pub struct ProtoModule {
     pub derived_clock_eval: ProtoStatements,
     /// See `Module::derived_clock_eval_passes`.
     pub derived_clock_eval_passes: usize,
+    /// See `Module::whole_derived_clock`.  Built in `conv()` and shared
+    /// (`Arc::clone`) with every `Module` produced by `instantiate()`.
+    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
     /// See `Module::whole_comb`.  Built in `conv()` and shared
@@ -461,6 +468,7 @@ impl ProtoModule {
             module_variables,
             derived_clock_eval_stmts,
             derived_clock_eval_passes: self.derived_clock_eval_passes,
+            whole_derived_clock: self.whole_derived_clock.clone(),
 
             event_statements,
             comb_statements,
@@ -598,6 +606,10 @@ fn validate_meta_offsets(
 /// Those figures were calibrated on flat comb lists, where an entry IS a
 /// statement and the two units coincide; nested counting only changes what
 /// happens where they do not.
+/// Domain separator folded into the derived-clock closure's whole-compile key,
+/// so a closure can never collide with a comb list of the same shape.
+const DERIVED_CLOCK_KEY_DOMAIN: u128 = 0xD3C1_0CE0_D3C1_0CE0_D3C1_0CE0_D3C1_0CE0;
+
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
 const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
 
@@ -6103,24 +6115,53 @@ impl Conv<&air::Module> for ProtoModule {
 
         // Derived-clock eval is a separate `try_jit` chunk so the main
         // comb JIT/AOT-C blob stays intact while partial_settle is fast.
-        let (derived_clock_schedule, derived_clock_eval, derived_clock_eval_passes) =
-            if derived_clock_vars.is_empty() {
-                (DerivedClockSchedule::default(), ProtoStatements(vec![]), 1)
-            } else {
-                let (sched, eval_indices) = build_derived_clock_schedule(
-                    &derived_clock_vars,
-                    &pre_jit_stmts,
-                    &input_clock_offsets,
+        let (
+            derived_clock_schedule,
+            derived_clock_eval,
+            derived_clock_eval_passes,
+            whole_derived_clock,
+        ) = if derived_clock_vars.is_empty() {
+            (
+                DerivedClockSchedule::default(),
+                ProtoStatements(vec![]),
+                1,
+                None,
+            )
+        } else {
+            let (sched, eval_indices) = build_derived_clock_schedule(
+                &derived_clock_vars,
+                &pre_jit_stmts,
+                &input_clock_offsets,
+            );
+            let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
+            // The closure keeps `unified_sorted`'s relative order, which is
+            // only single-pass when that order linearized; where it did not,
+            // one pass reads a producer that runs later and the gated clock
+            // is computed from the previous step's value.
+            let passes = compute_required_passes("derived-clock-closure", &eval_protos);
+            // The closure runs on every master edge, so it gets the
+            // whole-module backend the comb gets; its own fingerprint lets
+            // the tests sharing a DUT compile it once.
+            let whole = if size_ok {
+                let eval_key = crate::backend::registry::whole_comb_fingerprint(
+                    context.config.use_4state,
+                    &eval_protos,
+                    DERIVED_CLOCK_KEY_DOMAIN,
                 );
-                let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
-                // The closure keeps `unified_sorted`'s relative order, which is
-                // only single-pass when that order linearized; where it did not,
-                // one pass reads a producer that runs later and the gated clock
-                // is computed from the previous step's value.
-                let passes = compute_required_passes("derived-clock-closure", &eval_protos);
-                let eval = try_jit(context, eval_protos);
-                (sched, eval, passes)
+                whole::compile_whole_comb(
+                    &mut context.backends,
+                    &context.config,
+                    eval_key,
+                    context.config.dut_reuse,
+                    &eval_protos,
+                    whole::WholeCombShape::default(),
+                )
+            } else {
+                None
             };
+            let eval = try_jit(context, eval_protos);
+            (sched, eval, passes, whole)
+        };
 
         // Whole-comb backend (today: AOT-C) — when registered + size_ok,
         // try compile_whole_comb; backends that decline (4-state,
@@ -6200,6 +6241,7 @@ impl Conv<&air::Module> for ProtoModule {
             derived_clock_schedule,
             derived_clock_eval,
             derived_clock_eval_passes,
+            whole_derived_clock,
             nontrivial_comb_scc,
             whole_comb,
             whole_events,

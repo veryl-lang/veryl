@@ -17,6 +17,9 @@ thread_local! {
     /// Per-thread (each testbench runs on its own thread); the exact phase is
     /// irrelevant for 1-in-N sampling.
     static SETTLE_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The same, for the derived-clock closure. Separate so the two strides do
+    /// not interleave into a phase where one is never sampled.
+    static PARTIAL_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// Dispatch `whole` on a snapshot, restore inputs, run Cranelift, diff
@@ -125,6 +128,85 @@ pub fn settle_comb(
         ff_jit_out,
         count_aot_out,
         count_jit_out,
+        &skip,
+    );
+}
+
+/// `settle_comb`'s counterpart for the derived-clock closure: run the whole
+/// backend, restore the inputs, run the Cranelift chunk, and diff. The closure
+/// writes comb storage only, so the same comparison applies.
+pub fn partial_settle(ir: &Ir, whole: &dyn CompiledWhole, mask_cache: &mut MaskCache) {
+    // The closure runs on every master edge, several times per cycle, and a
+    // sampled call copies both buffers twice, so honour the stride here as
+    // `settle_comb` does or the validate run never finishes.
+    let stride = ir.aot_c_validate_stride;
+    if stride > 1 {
+        let sample = PARTIAL_COUNT.with(|c| {
+            let v = c.get();
+            c.set(v.wrapping_add(1));
+            v % stride == 0
+        });
+        if !sample {
+            ir.run_chunked_partial_settle(mask_cache);
+            return;
+        }
+    }
+
+    let ff_ptr = ir.ff_values.as_ptr();
+    let comb_ptr = ir.comb_values.as_ptr() as *mut u8;
+    let log_ptr = (&*ir.write_log_buffer as *const _ as *const u8) as *mut u8;
+
+    let ff_snap_in: Vec<u8> = ir.ff_values.to_vec();
+    let comb_snap_in: Vec<u8> = ir.comb_values.to_vec();
+    let narrow_snap = ir.write_log_buffer.narrow_count();
+    let wide_snap = ir.write_log_buffer.wide_count();
+    let buf_mut = (&*ir.write_log_buffer) as *const _ as *mut crate::ir::write_log::WriteLogBuffer;
+    let out_mark = crate::output_buffer::mark();
+
+    for _ in 0..ir.derived_clock_eval_passes {
+        if whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) == DispatchOutcome::NotReady {
+            crate::output_buffer::truncate_to(out_mark);
+            ir.run_chunked_partial_settle(mask_cache);
+            return;
+        }
+    }
+
+    let ff_aot_out: Vec<u8> = ir.ff_values.to_vec();
+    let comb_aot_out: Vec<u8> = ir.comb_values.to_vec();
+    let count_aot_out: u64 = ir.write_log_buffer.count() as u64;
+
+    // SAFETY: same buffers and invariants as `settle_comb` above.
+    unsafe {
+        let ff_dst = ir.ff_values.as_ptr() as *mut u8;
+        std::ptr::copy_nonoverlapping(ff_snap_in.as_ptr(), ff_dst, ff_snap_in.len());
+        let comb_dst = ir.comb_values.as_ptr() as *mut u8;
+        std::ptr::copy_nonoverlapping(comb_snap_in.as_ptr(), comb_dst, comb_snap_in.len());
+        (*buf_mut).narrow_count = narrow_snap;
+        (*buf_mut).wide_count = wide_snap;
+    }
+    crate::output_buffer::truncate_to(out_mark);
+
+    ir.run_chunked_partial_settle(mask_cache);
+
+    let mut skip: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for &(off, nb) in whole.localized_comb_bytes() {
+        if off >= 0 {
+            for b in (off as usize)..(off as usize + nb) {
+                skip.insert(b);
+            }
+        }
+    }
+
+    diff_or_panic(
+        ir,
+        comb_ptr,
+        &comb_snap_in,
+        &comb_aot_out,
+        &ir.comb_values,
+        &ff_aot_out,
+        &ir.ff_values,
+        count_aot_out,
+        ir.write_log_buffer.count() as u64,
         &skip,
     );
 }

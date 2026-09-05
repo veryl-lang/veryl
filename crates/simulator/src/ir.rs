@@ -117,6 +117,9 @@ pub struct Ir {
     /// `try_dispatch` in place of per-chunk Cranelift.  `None` keeps
     /// the per-chunk loop.
     pub whole_comb: Option<Arc<dyn CompiledWhole>>,
+    /// Whole-module compile of the derived-clock closure; `partial_settle`
+    /// invokes it in place of stepping `derived_clock_eval_stmts`.
+    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
     /// Snapshotted from `Config::aot_c_validate`: when set, `settle_comb` /
     /// `step` dual-run the AOT-C and Cranelift paths and panic on divergence.
     pub aot_c_validate: bool,
@@ -166,11 +169,13 @@ pub struct Ir {
     /// A failed compile leaves the cell empty forever, so the fallback is
     /// taken every cycle; the residency table (a mutex) must be touched once.
     whole_comb_fallback_recorded: AtomicBool,
+    whole_derived_clock_fallback_recorded: AtomicBool,
     pub(crate) whole_event_fallback_recorded: AtomicBool,
     /// `[ran, fell_back]` dispatch tallies.  The `*_fallback_recorded` flags
     /// above latch on the FIRST fallback and so cannot say how much of a run
     /// was affected; these can.  Published to `residency` on drop.
     pub(crate) whole_comb_dispatch: [AtomicU64; 2],
+    pub(crate) whole_derived_clock_dispatch: [AtomicU64; 2],
     pub(crate) whole_event_dispatch: [AtomicU64; 2],
     /// Whether the whole-comb backend's run-once constant-cone entry has
     /// executed for THIS instance.  Per-instance (not per-artifact): a
@@ -191,6 +196,7 @@ impl Drop for Ir {
     fn drop(&mut self) {
         for (kind, c) in [
             ("whole_comb", &self.whole_comb_dispatch),
+            ("whole_derived_clock", &self.whole_derived_clock_dispatch),
             ("whole_event", &self.whole_event_dispatch),
         ] {
             let (ran, fell_back) = (c[0].load(Ordering::Relaxed), c[1].load(Ordering::Relaxed));
@@ -246,6 +252,7 @@ impl Ir {
             derived_clock_eval_passes: module.derived_clock_eval_passes,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
             whole_comb: module.whole_comb,
+            whole_derived_clock: module.whole_derived_clock,
             aot_c_validate: config.aot_c_validate,
             aot_c_validate_stride: config.aot_c_validate_stride,
             whole_events: module.whole_events,
@@ -262,8 +269,10 @@ impl Ir {
             cone_segments: module.cone_segments,
             cone_gate_state: std::cell::RefCell::new(None),
             whole_comb_fallback_recorded: Default::default(),
+            whole_derived_clock_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             whole_comb_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
+            whole_derived_clock_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_event_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             const_cone_done: Default::default(),
         };
@@ -528,6 +537,44 @@ impl Ir {
     /// backward edge, one pass leaves a gated clock holding the value its
     /// producer had before this edge.
     pub fn partial_settle(&self, mask_cache: &mut MaskCache) {
+        // As in `settle_comb`, the emitted C never writes the log; the pointer
+        // only satisfies `FuncPtr`.
+        if let Some(whole) = self.whole_derived_clock.as_ref() {
+            // `--backend-validate`: dual-run and diff, like `settle_comb`.
+            if self.aot_c_validate {
+                crate::backend::validate::partial_settle(self, whole.as_ref(), mask_cache);
+                return;
+            }
+            let ff_ptr = self.ff_values.as_ptr();
+            let comb_ptr = self.comb_values.as_ptr() as *mut u8;
+            let log_ptr = (&*self.write_log_buffer as *const _ as *const u8) as *mut u8;
+            let mut ready = true;
+            for _ in 0..self.derived_clock_eval_passes {
+                if whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) == DispatchOutcome::NotReady {
+                    // Async compile still pending; redo every pass on the
+                    // Cranelift chunk so a half-applied closure never escapes.
+                    ready = false;
+                    break;
+                }
+            }
+            if ready {
+                self.whole_derived_clock_dispatch[0].fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+            self.whole_derived_clock_dispatch[1].fetch_add(1, Ordering::Relaxed);
+            if !self
+                .whole_derived_clock_fallback_recorded
+                .swap(true, Ordering::Relaxed)
+            {
+                residency::record_fallback("whole_derived_clock", &self.name.to_string());
+            }
+        }
+        self.run_chunked_partial_settle(mask_cache);
+    }
+
+    /// Cranelift-only derived-clock closure, factored out so the validate mode
+    /// can run it as the reference after the whole backend.
+    pub(crate) fn run_chunked_partial_settle(&self, mask_cache: &mut MaskCache) {
         for _ in 0..self.derived_clock_eval_passes {
             for stmt in &self.derived_clock_eval_stmts {
                 dispatch_stmt_fast(stmt, mask_cache);
