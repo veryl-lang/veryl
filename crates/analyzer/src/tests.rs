@@ -10,6 +10,8 @@ use veryl_parser::resource_table;
 
 mod comb_loop_diagnostic_tests;
 
+mod comb_loop_adversarial_tests;
+
 mod comb_loop_conservative_tests;
 
 mod comb_loop_incomplete_tests;
@@ -27,6 +29,10 @@ mod comb_loop_function_tests;
 mod comb_loop_module_tests;
 
 mod comb_loop_positional_tests;
+
+mod comb_loop_replication_tests;
+
+mod constant_evaluation_tests;
 
 mod comb_loop_sparse_tests;
 

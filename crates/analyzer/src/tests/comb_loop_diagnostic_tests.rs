@@ -592,7 +592,8 @@ fn comb_loop_diagnostic_uses_the_closing_parallel_summary_edge() {
         })
         .expect("the direct feedthrough closes the self-loop");
 
-    assert_eq!(cycle, "feedback[1] -> feedback[1]");
+    // The structural graph keeps the observed two-bit identity region intact.
+    assert_eq!(cycle, "feedback[2:1] -> feedback[2:1]");
     assert_eq!(path.len(), 1);
     let (source, text) = diagnostic_span_text(input, &path[0]).expect("path step is in source");
     assert_eq!(source, "test_0.veryl");

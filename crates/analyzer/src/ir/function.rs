@@ -176,25 +176,74 @@ pub struct FunctionCall {
     pub outputs: CallArgs<Vec<AssignDestination>>,
 }
 
+#[derive(Hash, PartialEq, Eq)]
+struct FunctionValueKey {
+    id: VarId,
+    index: Option<Vec<usize>>,
+    inputs: Vec<(VarPath, Value)>,
+}
+
+/// Reuse pure constant-function results within one evaluation tree. The
+/// cache never survives an outer call, so changing conversion contexts and
+/// captured runtime state cannot make a later evaluation reuse stale data.
+#[derive(Default)]
+pub(crate) struct FunctionValueCache {
+    depth: usize,
+    bits: usize,
+    values: HashMap<FunctionValueKey, Value>,
+}
+
 impl FunctionCall {
     pub fn eval_type(&mut self, context: &mut Context) {
         self.comptime.is_const = self.eval_comptime_flag(context);
     }
 
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
+        #[cfg(test)]
+        VALUE_EVALUATIONS.set(VALUE_EVALUATIONS.get() + 1);
+        context.function_value_cache.depth += 1;
+        let result = self.eval_value_inner(context);
+        context.function_value_cache.depth -= 1;
+        if context.function_value_cache.depth == 0 {
+            context.function_value_cache.values.clear();
+            context.function_value_cache.bits = 0;
+        }
+        result
+    }
+
+    fn eval_value_inner(&self, context: &mut Context) -> Option<Value> {
         let func = context.functions.get(&self.id)?;
+        let cacheable = func.is_const && self.outputs.is_empty();
         let func = if let Some(x) = &self.index {
             func.get_function(x)
         } else {
             func.get_function(&[])
         }?;
 
-        // set inputs
+        let mut inputs = Vec::new();
+        let mut input_bits = 0usize;
+        // Evaluate and bind every actual even on a cache hit: an actual can
+        // itself call a function, and copy-in ordering must remain unchanged.
         for (path, expr) in &self.inputs {
             let id = func.arg_map.get(path)?;
             let value = expr.eval_value(context)?;
+            if cacheable {
+                input_bits = input_bits.saturating_add(value.width().max(64));
+                inputs.push((path.clone(), value.clone()));
+            }
             let var = context.variable_mut(id)?;
             var.set_value(&[], value, None);
+        }
+        let key = cacheable.then(|| FunctionValueKey {
+            id: self.id,
+            index: self.index.clone(),
+            inputs,
+        });
+        if let Some(value) = key
+            .as_ref()
+            .and_then(|key| context.function_value_cache.values.get(key))
+        {
+            return Some(value.clone());
         }
 
         let disable_const_opt = context.disalbe_const_opt;
@@ -227,7 +276,21 @@ impl FunctionCall {
 
         if let Some(x) = &func.ret {
             let variable = context.variables.get(x)?;
-            variable.get_value(&[]).cloned()
+            let value = variable.get_value(&[]).cloned();
+            if let Some(key) = key
+                && let Some(value) = &value
+            {
+                let bits = input_bits.saturating_add(value.width().max(64));
+                let total = context.function_value_cache.bits.saturating_add(bits);
+                if total <= context.config.evaluate_size_limit {
+                    context.function_value_cache.bits = total;
+                    context
+                        .function_value_cache
+                        .values
+                        .insert(key, value.clone());
+                }
+            }
+            value
         } else {
             None
         }
@@ -348,6 +411,11 @@ impl FunctionCall {
 
         is_const
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static VALUE_EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl fmt::Display for FunctionCall {

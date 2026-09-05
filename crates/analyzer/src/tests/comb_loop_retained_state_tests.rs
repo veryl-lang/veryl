@@ -808,7 +808,7 @@ fn comb_loop_const_iterator_preserves_must_write_paths() {
 }
 
 #[test]
-#[ignore = "SSA latch coverage follow-up after comb-loop migration: const iterator control flow"]
+#[ignore = "legacy AssignTable evaluates a const for body once without binding the iterator or modeling break paths"]
 fn latch_const_iterator_preserves_must_write_paths() {
     // Why this case exists: the two const iterations are i=0 and i=1, and the
     // only reachable break follows the i=1 assignment. Every exit is covered;

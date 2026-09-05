@@ -2,6 +2,20 @@ use crate::HashMap;
 use crate::conv::Context;
 use crate::ir::{AssignDestination, Type, VarId, VarIndex, VarSelect};
 
+pub(super) fn signed_difference(destination: usize, source: usize) -> Option<isize> {
+    isize::try_from(destination)
+        .ok()?
+        .checked_sub(isize::try_from(source).ok()?)
+}
+
+pub(super) fn translate_position(position: usize, offset: isize) -> Option<usize> {
+    if offset >= 0 {
+        position.checked_add(offset.unsigned_abs())
+    } else {
+        position.checked_sub(offset.unsigned_abs())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct ArraySpan {
     pub(super) start: usize,

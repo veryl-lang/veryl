@@ -90,6 +90,10 @@ fn comb_loop_dynamic_for_bound_over_known_regions_is_complete_and_loop_free() {
 
 #[test]
 fn comb_loop_dynamic_for_bound_over_known_regions_detects_feedback() {
+    // False-negative guard: the loop may execute zero times, but an
+    // unconstrained runtime bound may also execute the feedback body. Treating
+    // the existence of the zero-trip path as proof that the body is unreachable
+    // would miss a realizable combinational loop.
     let code = r#"
         module Top (
             n: input  logic<32>,
@@ -111,6 +115,33 @@ fn comb_loop_dynamic_for_bound_over_known_regions_detects_feedback() {
         analyze(code)
             .iter()
             .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    );
+}
+
+#[test]
+fn comb_loop_const_zero_for_bound_skips_unreachable_feedback() {
+    // True negative: unlike the runtime-bound case above, this range is proven
+    // empty, so the feedback-shaped body is unreachable.
+    let code = r#"
+        module Top (
+            o: output logic,
+        ) {
+            var a: logic;
+            var b: logic;
+            always_comb {
+                for _index in 0..0 {
+                    a = b;
+                    b = a;
+                }
+                o = b;
+            }
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. }))
     );
 }
 
@@ -138,6 +169,43 @@ fn comb_loop_dynamic_for_bound_with_unknown_effect_is_incomplete() {
         analyze(code)
             .iter()
             .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    );
+}
+
+#[test]
+fn comb_loop_oversized_constant_range_is_incomplete_without_false_feedback() {
+    let evaluate_size_limit = Metadata::create_default("prj")
+        .unwrap()
+        .build
+        .evaluate_size_limit;
+    let code = format!(
+        r#"
+        module Top (
+            o: output logic,
+        ) {{
+            var value   : logic [3];
+            var feedback: logic;
+            assign feedback = value[2];
+            always_comb {{
+                value = '{{default: 0}};
+                value[1] = feedback;
+                for index in 0..{} {{
+                    value[index + 1] = value[index];
+                }}
+                o = feedback;
+            }}
+        }}
+        "#,
+        evaluate_size_limit + 1
+    );
+
+    assert!(!comb_loop_analysis_is_complete(&code));
+    let errors = analyze(&code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "the expansion limit must not create a combinational-loop diagnostic: {errors:#?}"
     );
 }
 
@@ -299,5 +367,36 @@ fn comb_loop_unresolved_hierarchy_does_not_hide_independent_cycle() {
             .iter()
             .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
         "unresolved hierarchy must not suppress a separate proven loop: {errors:#?}"
+    );
+}
+
+#[test]
+fn comb_loop_search_limit_propagates_incomplete_without_inventing_a_diagnostic() {
+    let code = r#"
+        module Child (o: output logic) { assign o = ~o; }
+        module Top (o: output logic) { inst child: Child(o); }
+    "#;
+    crate::comb_loop_detect::with_cycle_search_limit(0, || {
+        assert!(!comb_loop_analysis_is_complete(code));
+        assert!(
+            analyze(code)
+                .iter()
+                .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "an exhausted search has no proven cycle"
+        );
+        assert!(
+            comb_loop_analysis_is_complete(
+                r#"
+            module Top(i: input logic, o: output logic) { assign o = i; }
+        "#
+            ),
+            "acyclic graphs require no search"
+        );
+    });
+    assert!(comb_loop_analysis_is_complete(code));
+    assert!(
+        analyze(code)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
     );
 }

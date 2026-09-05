@@ -1023,6 +1023,62 @@ fn comb_loop_break_exit_preserves_feedback_killed_only_on_the_continuing_path() 
 }
 
 #[test]
+fn comb_loop_false_negative_break_condition_controls_a_following_write() {
+    // The loop reduces to value = stop ? 0 : 1 while stop = value. The break
+    // condition therefore closes a real control-dependency loop.
+    assert_comb_loop(
+        "a break condition controls whether the following assignment executes",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var stop: logic;
+            var value: logic;
+            assign stop = value;
+            always_comb {
+                value = 0;
+                for _index in 0..1 {
+                    if stop {
+                        break;
+                    }
+                    value = 1;
+                }
+                o = value;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_break_condition_does_not_control_write_after_loop_exit() {
+    assert_comb_loop(
+        "all break and fallthrough paths execute a write after the loop",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            var stop : logic;
+            var value: logic;
+            assign stop = value;
+            always_comb {
+                value = 0;
+                for _index in 0..1 {
+                    if stop {
+                        break;
+                    }
+                }
+                value = 1;
+                o = value;
+            }
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 fn comb_loop_branches_in_separate_processes_are_not_mutually_exclusive() {
     assert_comb_loop(
         "branch identities are local to their procedural process",
@@ -1481,7 +1537,6 @@ fn comb_loop_if_expression_function_side_effects_remain_arm_exclusive() {
 }
 
 #[test]
-#[ignore = "a runtime short-circuit RHS write is applied as an unconditional overwrite"]
 fn comb_loop_false_negative_runtime_short_circuit_write_kills_disabled_feedback() {
     assert_comb_loop(
         "a conditionally skipped function write cannot kill a realizable loop",
