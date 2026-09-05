@@ -497,9 +497,9 @@ impl Expression {
                         1
                     };
 
-                    for _ in 0..rep {
-                        ret = ret.concat(&exp);
-                    }
+                    let width = exp.width().checked_mul(rep)?.checked_add(ret.width())?;
+                    context.check_size(width, self.token_range())?;
+                    ret = ret.concat(&exp.repeat(rep));
                 }
                 Some(ret)
             }

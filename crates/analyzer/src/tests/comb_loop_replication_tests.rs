@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn constant_repeat_checks_materialized_width_before_allocation() {
+    let code = "module Top(o: output logic<8>) { assign o = {8'hff repeat 200000}; }";
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::ExceedLimit { .. })),
+        "{errors:#?}"
+    );
+}
+
+#[test]
 fn comb_loop_arithmetic_sign_fill_through_whole_copy() {
     let mut mismatches = Vec::new();
     for op in [">>", ">>>"] {

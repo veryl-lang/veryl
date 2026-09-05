@@ -32,6 +32,8 @@ mod comb_loop_positional_tests;
 
 mod comb_loop_replication_tests;
 
+mod constant_evaluation_tests;
+
 mod comb_loop_sparse_tests;
 
 #[track_caller]

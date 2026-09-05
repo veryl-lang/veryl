@@ -822,6 +822,19 @@ where
     where
         K: Ord,
     {
+        self.try_dependency_dag(roots, allowed, usize::MAX)
+            .expect("unlimited dependency export")
+    }
+
+    pub(super) fn try_dependency_dag(
+        &self,
+        roots: &[VersionId],
+        allowed: &HashSet<K>,
+        mut work: usize,
+    ) -> Option<DependencyDag<K>>
+    where
+        K: Ord,
+    {
         let mut states = HashSet::default();
         let mut queue = VecDeque::new();
         for &root in roots {
@@ -830,6 +843,7 @@ where
             }
         }
         while let Some((version, include_entry)) = queue.pop_front() {
+            work = work.checked_sub(1)?;
             let mut enqueue = |state| {
                 if states.insert(state) {
                     queue.push_back(state);
@@ -875,6 +889,7 @@ where
         let mut ordered = states.into_iter().collect::<Vec<_>>();
         ordered.sort_unstable();
         for state @ (version, include_entry) in ordered {
+            work = work.checked_sub(1)?;
             let site = self.sites.get(&version).map(|site| DefinitionSite {
                 token: site.token,
                 data_inputs: site
@@ -888,6 +903,11 @@ where
                     (include_entry && allowed.contains(key)).then(|| builder.external(*key))
                 }
                 Version::Definition { sources, condition } => {
+                    work = work.checked_sub(
+                        sources
+                            .len()
+                            .saturating_mul(condition.branch_count().saturating_add(1)),
+                    )?;
                     let inputs = sources
                         .iter()
                         .filter_map(|(source, relation)| {
@@ -953,7 +973,8 @@ where
                             &mapped_bindings.into_iter().collect(),
                             branches,
                             &mut builder,
-                        );
+                            &mut work,
+                        )?;
                         imports.insert(key, node);
                         node
                     }
@@ -993,7 +1014,7 @@ where
         }
 
         builder.graph.roots = roots.iter().map(|root| mapped[&(*root, false)]).collect();
-        builder.graph
+        Some(builder.graph)
     }
 
     fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
@@ -1212,11 +1233,21 @@ fn inline_dependency_dag<K>(
     bindings: &HashMap<K, Vec<(usize, PositionRelation)>>,
     branches: &HashMap<BranchId, BranchId>,
     builder: &mut dag::Builder<K>,
-) -> Option<usize>
+    work: &mut usize,
+) -> Option<Option<usize>>
 where
     K: Copy + Eq + Hash,
 {
-    let root = root?;
+    let Some(root) = root else {
+        return Some(None);
+    };
+    // Charge the existing child before allocating an import. Every distinct
+    // invocation can require distinct guards; cap that expansion separately
+    // from positional cycle search, including branch-condition payloads.
+    let cost = graph.edges.iter().fold(graph.nodes.len(), |cost, edge| {
+        cost.saturating_add(edge.condition.branch_count().saturating_add(1))
+    });
+    *work = work.checked_sub(cost)?;
     let mut incoming = vec![Vec::new(); graph.nodes.len()];
     for edge in &graph.edges {
         incoming[edge.destination].push(edge);
@@ -1275,7 +1306,7 @@ where
         };
         mapped.insert(child, node);
     }
-    mapped.get(&root).copied()
+    Some(mapped.get(&root).copied())
 }
 
 fn merge_source<K>(

@@ -301,6 +301,21 @@ struct FunctionSummary {
     writes: Vec<(NodeKey, Option<usize>)>,
     opaque_sources: Vec<NodeKey>,
     status: AnalysisStatus,
+    repeatable: bool,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct SummaryInvocationKey {
+    graph: usize,
+    actuals: Vec<SummaryActualIdentity>,
+    captures: Vec<(NodeKey, VersionId)>,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct SummaryActualIdentity {
+    formal: VarId,
+    actual: VarId,
+    versions: Vec<(NodeKey, VersionId)>,
 }
 
 enum FunctionSummaryLookup {
@@ -310,6 +325,10 @@ enum FunctionSummaryLookup {
 }
 
 type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
+
+// Distinct invocation guards can require genuinely different subgraphs.
+// Bound their materialization before cycle search gets a chance to run.
+const FUNCTION_SUMMARY_WORK: usize = 100_000;
 
 pub(super) struct FunctionSummaries<'a> {
     pub(super) tracing: bool,
@@ -398,7 +417,17 @@ impl ProcedureContext {
                 .get(&id)
                 .or_else(|| module.variables.get(&id));
             if let Some(variable) = variable {
-                ctx.variables.insert(id, variable.clone());
+                let mut variable = variable.clone();
+                // Value evaluation can leave a concrete value in a runtime
+                // formal, local or capture. A summary is shared across all
+                // actuals, so only language constants may prune its branches.
+                if !matches!(
+                    variable.kind,
+                    crate::ir::VarKind::Const | crate::ir::VarKind::Param
+                ) {
+                    variable.value.clear();
+                }
+                ctx.variables.insert(id, variable);
             }
         }
         #[cfg(test)]
@@ -1016,6 +1045,8 @@ struct ProcedureAnalysis<'a, 's> {
     causal_write_keys: Vec<NodeKey>,
     tracing: bool,
     active_assignment: Option<TokenRange>,
+    repeatable: bool,
+    shared_call_branches: HashMap<SummaryInvocationKey, HashMap<BranchId, BranchId>>,
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
@@ -1046,6 +1077,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             causal_write_keys: Vec::new(),
             tracing: false,
             active_assignment: None,
+            repeatable: true,
+            shared_call_branches: HashMap::default(),
         }
     }
 
@@ -1169,7 +1202,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .flat_map(|(_, regions)| regions.iter().map(|(_, version)| *version))
             .collect::<Vec<_>>();
         roots.extend(write_versions.iter().map(|(_, version)| *version));
-        let graph = this.ssa.dependency_dag(&roots, &allowed);
+        let graph = this
+            .ssa
+            .try_dependency_dag(&roots, &allowed, FUNCTION_SUMMARY_WORK)
+            .unwrap_or_else(|| {
+                this.status = AnalysisStatus::Barrier;
+                DependencyDag {
+                    nodes: Vec::new(),
+                    edges: Vec::new(),
+                    domains: Vec::new(),
+                    sites: HashMap::default(),
+                    roots: vec![None; roots.len()],
+                }
+            });
         let graph = Rc::new(graph);
         #[cfg(test)]
         FUNCTION_SUMMARY_GRAPH_NODES.set(FUNCTION_SUMMARY_GRAPH_NODES.get().max(graph.nodes.len()));
@@ -1189,7 +1234,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 (array, regions)
             })
             .collect();
-        let writes = write_versions
+        let writes: Vec<_> = write_versions
             .into_iter()
             .map(|(destination, _)| {
                 (
@@ -1216,6 +1261,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             arg_map: body.arg_map,
             graph,
             result,
+            repeatable: this.repeatable
+                && this.status.is_complete()
+                && writes.is_empty()
+                && opaque_sources.is_empty(),
             writes,
             opaque_sources,
             status: this.status,
@@ -2074,9 +2123,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 self.record_break();
                 FlowResult::new(ProcedureFlow::Break)
             }
-            Statement::IfReset(_) | Statement::TbMethodCall(_) | Statement::Null => {
+            Statement::IfReset(_) | Statement::TbMethodCall(_) => {
+                self.repeatable = false;
                 FlowResult::new(ProcedureFlow::Continue)
             }
+            Statement::Null => FlowResult::new(ProcedureFlow::Continue),
             Statement::Unsupported(_) => {
                 self.status = AnalysisStatus::Barrier;
                 FlowResult::new(ProcedureFlow::Continue)
@@ -2301,6 +2352,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn set_known_iterator_value(&mut self, statement: &ForStatement, value: usize) {
+        // A static iterator changes in the compile-time store without a new
+        // SSA definition. Calls from different iterations therefore cannot
+        // share guards just because their actuals have the same SSA versions.
+        self.shared_call_branches.clear();
         let Some(variable) = self.ctx.variables.get_mut(&statement.var_id) else {
             return;
         };
@@ -2651,14 +2706,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .collect(),
                 },
                 Factor::Unknown(_) => {
+                    self.repeatable = false;
                     if self.function_flows.is_empty() {
                         self.status = AnalysisStatus::Barrier;
                     }
                     ExpressionSources::default()
                 }
-                Factor::HierVariable(_) | Factor::Value(_) | Factor::Anonymous(_) => {
+                Factor::HierVariable(_) | Factor::Anonymous(_) => {
+                    self.repeatable = false;
                     ExpressionSources::default()
                 }
+                Factor::Value(_) => ExpressionSources::default(),
             },
             Expression::Unary(op, operand, _) => match op {
                 Op::BitNot | Op::Add => self.eval_expr_in_context(
@@ -3333,11 +3391,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 reads.extend(self.eval_system_call(call, &[], true));
             }
             Factor::Unknown(_) => {
+                self.repeatable = false;
                 if self.function_flows.is_empty() {
                     self.status = AnalysisStatus::Barrier;
                 }
             }
-            Factor::HierVariable(_) | Factor::Value(_) | Factor::Anonymous(_) => {}
+            Factor::HierVariable(_) | Factor::Anonymous(_) => self.repeatable = false,
+            Factor::Value(_) => {}
         }
     }
 
@@ -3439,6 +3499,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 return self.apply_function_summary(call, controls, summary.as_ref());
             }
             Some(FunctionSummaryLookup::Recursive) => {
+                self.repeatable = false;
                 self.status = AnalysisStatus::Barrier;
                 let mut sources = Vec::new();
                 for input in call.inputs.values() {
@@ -3449,7 +3510,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     opaque_sources: sources,
                 };
             }
-            Some(FunctionSummaryLookup::Missing) | None => {}
+            Some(FunctionSummaryLookup::Missing) | None => self.repeatable = false,
         }
 
         let receiver_index = self.ctx.functions.get(&call.id).and_then(|function| {
@@ -3564,11 +3625,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         summary: &FunctionSummary,
     ) -> CallResult {
         self.status = self.status.max(summary.status);
+        self.repeatable &= summary.repeatable;
         self.call_caches.push(Some(EvaluationCache::default()));
         for actual in call.inputs.values() {
             self.eval_expr(actual);
         }
-        let branch_map = self.instantiate_summary_branches(summary);
+        let invocation = self.summary_invocation_key(call, summary);
+        let branch_map = if let Some(branches) = invocation
+            .as_ref()
+            .and_then(|key| self.shared_call_branches.get(key))
+        {
+            branches.clone()
+        } else {
+            let branches = self.instantiate_summary_branches(summary);
+            if let Some(key) = invocation {
+                self.shared_call_branches.insert(key, branches.clone());
+            }
+            branches
+        };
         let mut bindings = HashMap::default();
         for node in &summary.graph.nodes {
             let DependencyDagNode::External(key) = node else {
@@ -3685,6 +3759,56 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return ExpressionSources::default();
         };
         self.eval_actual_for_formal_key(actual, source)
+    }
+
+    fn summary_invocation_key(
+        &mut self,
+        call: &FunctionCall,
+        summary: &FunctionSummary,
+    ) -> Option<SummaryInvocationKey> {
+        if !summary.repeatable || !call.outputs.is_empty() {
+            return None;
+        }
+        let mut actuals = Vec::new();
+        for (path, actual) in &call.inputs {
+            let Expression::Term(factor) = actual else {
+                return None;
+            };
+            let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+                return None;
+            };
+            if !index.0.is_empty()
+                || !select.is_empty()
+                || !self.receiver_index(*id, index).0.is_empty()
+            {
+                return None;
+            }
+            actuals.push(SummaryActualIdentity {
+                formal: *summary.arg_map.get(path)?,
+                actual: *id,
+                versions: self.current_key_versions_for_id(*id),
+            });
+        }
+        actuals.sort_unstable();
+        let mut captures = Vec::new();
+        for node in &summary.graph.nodes {
+            if let DependencyDagNode::External(key) = node
+                && self.is_module_scope_key(key.node)
+            {
+                captures.push((key.node, self.read_key(key.node)));
+            }
+        }
+        captures.sort_unstable();
+        captures.dedup();
+        // These are value identities of unchanged, unselected variables, not
+        // equality of dependency sets: x and !x have the same dependencies
+        // but can take opposite branches. Keep fresh SSA versions per call so
+        // procedural checkpoints and runtime transfer closure remain valid.
+        Some(SummaryInvocationKey {
+            graph: Rc::as_ptr(&summary.graph) as usize,
+            actuals,
+            captures,
+        })
     }
 
     fn instantiate_summary_branches(
@@ -4009,6 +4133,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         controls: &[VersionId],
         _value_position: bool,
     ) -> Vec<VersionId> {
+        if !matches!(
+            call.kind,
+            SystemFunctionKind::Bits(_)
+                | SystemFunctionKind::Size(_)
+                | SystemFunctionKind::Clog2(_)
+                | SystemFunctionKind::Onehot(_)
+                | SystemFunctionKind::Signed(_)
+                | SystemFunctionKind::Unsigned(_)
+        ) {
+            self.repeatable = false;
+        }
         match &call.kind {
             SystemFunctionKind::Bits(_)
             | SystemFunctionKind::Size(_)

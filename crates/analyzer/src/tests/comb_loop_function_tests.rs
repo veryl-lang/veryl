@@ -897,6 +897,224 @@ fn function_summary_shift_fanout_stays_structural() {
 }
 
 #[test]
+fn function_summary_guarded_fanout_stays_structural() {
+    for depth in [4, 8, 16, 24, 32] {
+        let mut functions = String::from(
+            "function layer0(x: input logic, sel: input logic) -> logic { return if sel ? x : 0; }\n",
+        );
+        for level in 1..=depth {
+            let previous = level - 1;
+            functions.push_str(&format!("function layer{level}(x: input logic, sel: input logic) -> logic {{ return layer{previous}(x, sel) | layer{previous}(x, sel); }}\n"));
+        }
+        let code = format!(
+            "module Top(x: input logic, sel: input logic, o: output logic) {{ {functions} assign o = layer{depth}(x, sel); }}"
+        );
+        crate::comb_loop_detect::reset_function_evaluation_count();
+        symbol_table::clear();
+        attribute_table::clear();
+        doc_comment_table::clear();
+        let metadata = Metadata::create_default("prj").unwrap();
+        let parser = Parser::parse(&code, &"").unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        let mut context = Context::default();
+        let mut ir = Ir::default();
+        let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+        errors.extend(Analyzer::analyze_post_pass1());
+        let start = std::time::Instant::now();
+        crate::ir::VALUE_EVALUATIONS.set(0);
+        errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+        eprintln!(
+            "phase before comb depth={depth} elapsed={:?} value_calls={}",
+            start.elapsed(),
+            crate::ir::VALUE_EVALUATIONS.get()
+        );
+        assert!(crate::ir::VALUE_EVALUATIONS.get() < 4 * (depth + 1) * (depth + 1));
+        let start = std::time::Instant::now();
+        crate::ir::VALUE_EVALUATIONS.set(0);
+        errors.extend(Analyzer::analyze_post_pass2(&ir));
+        eprintln!(
+            "phase comb depth={depth} elapsed={:?} value_calls={}",
+            start.elapsed(),
+            crate::ir::VALUE_EVALUATIONS.get()
+        );
+        assert!(errors.is_empty(), "{errors:#?}");
+        let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
+        eprintln!("guarded fanout depth={depth} nodes={nodes}");
+        assert!(nodes < 16 * depth + 16, "depth={depth}, nodes={nodes}");
+    }
+}
+
+#[test]
+fn function_summary_guard_sharing_preserves_value_and_capture_identity() {
+    for captured in [false, true] {
+        for changed in [false, true] {
+            let parameter = if captured {
+                ""
+            } else {
+                ", selected: input logic"
+            };
+            let argument = if captured { "" } else { ", selected" };
+            let update = if changed { "selected = !selected;" } else { "" };
+            let code = format!(
+                r#"
+                module Top(sel: input logic, o: output logic) {{
+                    var a: logic;
+                    var b: logic;
+                    var selected: logic;
+                    var first: logic<2>;
+                    var second: logic<2>;
+                    function route(a: input logic, b: input logic{parameter}) -> logic<2> {{
+                        return if selected ? {{a, 1'b0}} : {{1'b0, b}};
+                    }}
+                    always_comb {{
+                        selected = sel;
+                        first = route(a, b{argument});
+                        {update}
+                        second = route(a, b{argument});
+                    }}
+                    assign a = second[0];
+                    assign b = first[1];
+                    assign o = a;
+                }}
+            "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{errors:#?}"
+            );
+            assert_eq!(
+                !errors.is_empty(),
+                changed,
+                "captured={captured}, changed={changed}: {errors:#?}"
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+    // Equal dependency sets do not mean equal values: inversion must retain
+    // an independent invocation even though both selectors only read sel.
+    let code = r#"
+        module Top(sel: input logic, o: output logic) {
+            var a: logic;
+            var b: logic;
+            var first: logic<2>;
+            var second: logic<2>;
+            function route(a: input logic, b: input logic, selected: input logic) -> logic<2> {
+                return if selected ? {a, 1'b0} : {1'b0, b};
+            }
+            assign first = route(a, b, sel);
+            assign second = route(a, b, !sel);
+            assign a = second[0];
+            assign b = first[1];
+            assign o = a;
+        }
+    "#;
+    assert_comb_loop(
+        "opposite selector values must permit the actual feedback path",
+        code,
+        true,
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}
+
+#[test]
+fn function_summary_guard_sharing_keeps_fresh_runtime_transfers() {
+    let code = r#"
+        module Top(n: input u32, sel: input logic, external: input logic, o: output logic<2>) {
+            function route(x: input logic, sel: input logic) -> logic<2> {
+                return if sel ? {x, 1'b0} : {1'b0, x};
+            }
+            var value: logic;
+            var feedback: logic;
+            var first: logic<2>;
+            var second: logic<2>;
+            always_comb {
+                value = external;
+                first = route(value, sel);
+                second = 0;
+                for _index in 0..n {
+                    second = route(value, sel);
+                    value = feedback;
+                }
+            }
+            assign feedback = second[1];
+            assign o = {first[1], feedback};
+        }
+    "#;
+    assert_comb_loop(
+        "an invocation inside a runtime transfer must observe later iterations",
+        code,
+        true,
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}
+
+#[test]
+fn function_summary_guard_sharing_separates_static_iterations() {
+    let code = r#"
+        module Top(o: output logic) {
+            function route(a: input logic, b: input logic, selected: input u32) -> logic<2> {
+                return if selected != 0 ? {a, 1'b0} : {1'b0, b};
+            }
+            var a: logic;
+            var b: logic;
+            var first: logic<2>;
+            var second: logic<2>;
+            always_comb {
+                first = 0;
+                second = 0;
+                for index in 0..2 {
+                    first = second;
+                    second = route(a, b, index);
+                    ITERATION_EXIT
+                }
+            }
+            assign a = first[0];
+            assign b = second[1];
+            assign o = a;
+        }
+    "#;
+    // A break retains the For in IR, so also exercise the dependency
+    // evaluator's static iterations rather than only frontend unrolling.
+    for exit in ["", "if index == 1 { break; }"] {
+        let code = code.replace("ITERATION_EXIT", exit);
+        assert_comb_loop(
+            "each static iteration passes a different selector",
+            &code,
+            true,
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn function_summary_distinct_guarded_expansion_is_bounded_and_incomplete() {
+    const DEPTH: usize = 24;
+    let mut functions = String::from(
+        "function f0(x: input logic, sel: input logic) -> logic { return if sel ? x : 0; }\n",
+    );
+    for level in 1..=DEPTH {
+        let previous = level - 1;
+        functions.push_str(&format!("function f{level}(x: input logic, sel: input logic) -> logic {{ return f{previous}(x, sel) | f{previous}(x, !sel); }}\n"));
+    }
+    let code = format!(
+        "module Top(x: input logic, sel: input logic, o: output logic) {{ {functions} assign o = f{DEPTH}(x, sel); }}"
+    );
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    let errors = analyze(&code);
+    assert!(
+        errors.is_empty(),
+        "exhaustion must not invent feedback: {errors:#?}"
+    );
+    let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
+    eprintln!("distinct guarded fanout depth={DEPTH} nodes={nodes}");
+    assert!(nodes < 100_000);
+    assert!(!comb_loop_analysis_is_complete(&code));
+}
+
+#[test]
 fn function_summary_converted_input_fanout_stays_structural() {
     // Copy-in conversion creates separate SSA versions for each call. The
     // dependency graph must recognize equivalent conversions before importing
