@@ -1883,6 +1883,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 *relation = destination_offset
                     .map(|base| relation.compose(base))
                     .unwrap_or_else(PositionRelation::whole);
+                if dynamic_array {
+                    // The LSP's first element is not the runtime destination.
+                    // A scalar RHS can reach every candidate array element;
+                    // this uncertainty does not widen its packed bit mapping.
+                    relation.array = None;
+                }
             }
             let version = self
                 .ssa
@@ -2394,8 +2400,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // iteration. Close that finite transfer instead of re-evaluating the
         // body or enumerating runtime iterator values.
         let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
+        let bit_part = self.bit_part;
         self.ssa
-            .close_repeated_transfer(&transfer, checkpoint, may_execute_zero_times);
+            .close_repeated_transfer(&transfer, checkpoint, may_execute_zero_times, |key| {
+                bit_part
+                    .ranges_of((key.node.0, key.node.1))
+                    .get(key.node.2)
+                    .map(|packed| position_domain(key.node.1, *packed))
+            });
         FlowResult::new(ProcedureFlow::Continue)
     }
 

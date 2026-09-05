@@ -1791,6 +1791,203 @@ fn comb_loop_uncalled_function_still_checks_output_coverage() {
 }
 
 #[test]
+fn comb_loop_runtime_vector_copy_preserves_packed_positions() {
+    for bound in ["none", "1", "n"] {
+        for operation in [
+            "result = source;",
+            "result = identity(source);",
+            "copy(source, result);",
+            "result[0] = source[0]; result[1] = source[1];",
+        ] {
+            for bit in [0, 1] {
+                let body = if bound == "none" {
+                    operation.to_owned()
+                } else {
+                    format!("for _index in 0..{bound} {{ {operation} }}")
+                };
+                let code = format!(
+                    r#"
+                    module Top(n: input u32, external: input logic, o: output logic<2>) {{
+                        var feedback: logic;
+                        var source: logic<2>;
+                        var result: logic<2>;
+                        function identity(x: input logic<2>) -> logic<2> {{ return x; }}
+                        function copy(x: input logic<2>, y: output logic<2>) {{ y = x; }}
+                        assign source = {{feedback, external}};
+                        always_comb {{
+                            result = 0;
+                            {body}
+                        }}
+                        assign feedback = result[{bit}];
+                        assign o = result;
+                    }}
+                    "#
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors.iter().all(|error| matches!(
+                        error,
+                        AnalyzerError::CombinationalLoop { .. }
+                            | AnalyzerError::UnusedVariable { .. }
+                    )),
+                    "{errors:#?}"
+                );
+                assert_eq!(
+                    errors
+                        .iter()
+                        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    bit == 1,
+                    "bound={bound}, operation={operation}, bit={bit}: {errors:#?}",
+                );
+                assert!(comb_loop_analysis_is_complete(&code));
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_runtime_positional_dependencies_cross_iterations() {
+    for (initialize, operation, feedback_bit) in [
+        ("middle = 0;", "result = middle >> 1; middle = source;", 2),
+        ("middle = 0;", "result = shift(middle); middle = source;", 2),
+        (
+            "middle = 0;",
+            "shift_out(middle, result); middle = source;",
+            2,
+        ),
+        (
+            "middle = source;",
+            "result = identity(middle); middle = result;",
+            3,
+        ),
+        (
+            "middle = source;",
+            "copy(middle, result); middle = result;",
+            3,
+        ),
+    ] {
+        for bit in [0, feedback_bit] {
+            let code = format!(
+                r#"
+                module Top(n: input u32, external: input logic, o: output logic<4>) {{
+                    var feedback: logic;
+                    var source: logic<4>;
+                    var middle: logic<4>;
+                    var result: logic<4>;
+                    function identity(x: input logic<4>) -> logic<4> {{ return x; }}
+                    function copy(x: input logic<4>, y: output logic<4>) {{ y = x; }}
+                    function shift(x: input logic<4>) -> logic<4> {{ return x >> 1; }}
+                    function shift_out(x: input logic<4>, y: output logic<4>) {{ y = x >> 1; }}
+                    assign source = {{feedback, external repeat 3}};
+                    always_comb {{
+                        {initialize}
+                        result = 0;
+                        for _index in 0..n {{ {operation} }}
+                    }}
+                    assign feedback = result[{bit}];
+                    assign o = result;
+                }}
+                "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{errors:#?}"
+            );
+            assert_eq!(
+                errors
+                    .iter()
+                    .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                bit == feedback_bit,
+                "operation={operation}, bit={bit}: {errors:#?}",
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
+fn comb_loop_runtime_function_copy_preserves_array_positions() {
+    for operation in ["result = identity(source);", "copy(source, result);"] {
+        for element in [0, 1] {
+            let code = format!(
+                r#"
+                module Top(n: input u32, external: input logic, o: output logic[2]) {{
+                    type Pair = logic[2];
+                    var feedback: logic;
+                    var source: Pair;
+                    var result: Pair;
+                    function identity(x: input Pair) -> Pair {{ return x; }}
+                    function copy(x: input Pair, y: output Pair) {{ y = x; }}
+                    assign source = '{{external, feedback}};
+                    always_comb {{
+                        result = '{{default: 0}};
+                        for _index in 0..n {{ {operation} }}
+                    }}
+                    assign feedback = result[{element}];
+                    assign o = result;
+                }}
+                "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{errors:#?}"
+            );
+            assert_eq!(
+                errors
+                    .iter()
+                    .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                element == 1,
+                "operation={operation}, element={element}: {errors:#?}",
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
+fn comb_loop_runtime_dynamic_array_write_retains_packed_positions() {
+    for row in 0..4 {
+        for bit in [0, 1] {
+            let code = format!(
+                r#"
+                module Top(n: input u32, external: input logic, o: output logic) {{
+                    var value: logic<2>[4, 2];
+                    var feedback: logic;
+                    assign feedback = value[{row}][0][{bit}];
+                    always_comb {{
+                        value = '{{default: 0}};
+                        for index in 0..n {{ value[index][0] = {{feedback, external}}; }}
+                        o = feedback;
+                    }}
+                }}
+                "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{errors:#?}"
+            );
+            assert_eq!(
+                errors
+                    .iter()
+                    .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                bit == 1,
+                "row={row}, bit={bit}: {errors:#?}",
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
 fn comb_loop_runtime_function_outputs_remain_independent() {
     for bound in ["none", "1", "n"] {
         for called in [false, true] {

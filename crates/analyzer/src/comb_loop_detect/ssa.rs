@@ -1,5 +1,7 @@
 //! IR-independent statement-ordered SSA state.
 
+mod repeated;
+
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::hash::Hash;
@@ -389,54 +391,6 @@ pub(super) struct DependencyDag<K> {
     pub(super) sites: HashMap<usize, DefinitionSite<usize>>,
 }
 
-/// Inputs reachable from each output of a shared function summary.
-/// Store formal keys so each call still resolves its own actual versions.
-struct ImportedInputCache<K> {
-    incoming: Vec<Vec<usize>>,
-    inputs_by_root: HashMap<usize, Vec<K>>,
-}
-
-impl<K: Copy + Eq + Hash> ImportedInputCache<K> {
-    fn new(graph: &DependencyDag<K>) -> Self {
-        let mut incoming = vec![Vec::new(); graph.nodes.len()];
-        for edge in &graph.edges {
-            #[cfg(test)]
-            ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
-            incoming[edge.destination].push(edge.source);
-        }
-        Self {
-            incoming,
-            inputs_by_root: HashMap::default(),
-        }
-    }
-
-    fn inputs(&mut self, graph: &DependencyDag<K>, root: usize) -> &[K] {
-        let incoming = &self.incoming;
-        self.inputs_by_root.entry(root).or_insert_with(|| {
-            let mut inputs = HashSet::default();
-            let mut visited = HashSet::default();
-            let mut queue = VecDeque::from([root]);
-            visited.insert(root);
-            // Runtime closure keeps may-dependencies. Visiting node identities
-            // once keeps shift fan-out structural throughout this query.
-            while let Some(node) = queue.pop_front() {
-                #[cfg(test)]
-                ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
-                if let DependencyDagNode::External(key) = graph.nodes[node] {
-                    inputs.insert(key);
-                    continue;
-                }
-                for &source in &incoming[node] {
-                    if visited.insert(source) {
-                        queue.push_back(source);
-                    }
-                }
-            }
-            inputs.into_iter().collect()
-        })
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct PositionDomain {
     pub(super) array_start: usize,
@@ -488,25 +442,6 @@ fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
         ),
         _ => None,
     }
-}
-
-fn reachable_versions(
-    direct: &HashSet<VersionId>,
-    successors: &HashMap<VersionId, HashSet<VersionId>>,
-) -> HashSet<VersionId> {
-    let mut reached = direct.clone();
-    let mut queue = VecDeque::from_iter(direct.iter().copied());
-    while let Some(version) = queue.pop_front() {
-        let Some(next) = successors.get(&version) else {
-            continue;
-        };
-        for &next in next {
-            if reached.insert(next) {
-                queue.push_back(next);
-            }
-        }
-    }
-    reached
 }
 
 #[derive(Clone, Copy)]
@@ -779,113 +714,23 @@ where
     /// `single_iteration` maps each written key to its output after one
     /// abstract iteration. Versions that predate `iteration_checkpoint` are
     /// that iteration's inputs, so they form the nodes of a finite transfer
-    /// graph. Its transitive closure models any positive number of iterations;
-    /// `may_skip` additionally retains each key's loop-entry version.
+    /// graph. Condensing its recurrence components models arbitrary positive
+    /// iteration counts without enumerating positions or paths. `may_skip`
+    /// additionally retains each key's loop-entry version.
     pub(super) fn close_repeated_transfer(
         &mut self,
         single_iteration: &BranchState<K>,
         iteration_checkpoint: Checkpoint,
         may_skip: bool,
+        domain: impl Fn(K) -> Option<PositionDomain>,
     ) {
-        let mut entry_version_by_key = HashMap::default();
-        for &key in single_iteration.bindings.keys() {
-            entry_version_by_key.insert(key, self.read(key));
-        }
-
-        let mut direct_inputs_by_key = HashMap::default();
-        let mut imported_inputs = HashMap::default();
-        for (&key, &output) in &single_iteration.bindings {
-            direct_inputs_by_key.insert(
-                key,
-                self.iteration_input_versions(
-                    output,
-                    iteration_checkpoint.version_start,
-                    &mut imported_inputs,
-                ),
-            );
-        }
-
-        let mut next_inputs_by_input: HashMap<VersionId, HashSet<VersionId>> = HashMap::default();
-        for (&key, direct_inputs) in &direct_inputs_by_key {
-            next_inputs_by_input
-                .entry(entry_version_by_key[&key])
-                .or_default()
-                .extend(direct_inputs);
-        }
-
-        for (&key, direct_inputs) in &direct_inputs_by_key {
-            let mut reached = reachable_versions(direct_inputs, &next_inputs_by_input);
-            if may_skip {
-                reached.insert(entry_version_by_key[&key]);
-            }
-            let output = self.related_definition(
-                reached
-                    .into_iter()
-                    .map(|version| (version, PositionRelation::whole()))
-                    .collect(),
-            );
-            self.bind(key, output);
-        }
-    }
-
-    fn iteration_input_versions(
-        &self,
-        version: VersionId,
-        version_start: usize,
-        imported_inputs: &mut HashMap<*const DependencyDag<K>, ImportedInputCache<K>>,
-    ) -> HashSet<VersionId> {
-        let mut reached = HashSet::default();
-        let mut visited = HashSet::default();
-        let mut queue = VecDeque::from([version]);
-        visited.insert(version);
-        while let Some(current) = queue.pop_front() {
-            if current < version_start || matches!(self.versions[current], Version::Entry(_)) {
-                reached.insert(current);
-                continue;
-            }
-            match &self.versions[current] {
-                Version::Entry(_) => unreachable!("entries are handled above"),
-                Version::Definition { sources, .. } => {
-                    for (source, _) in sources {
-                        if visited.insert(*source) {
-                            queue.push_back(*source);
-                        }
-                    }
-                }
-                Version::Phi(inputs) => {
-                    for input in inputs {
-                        if visited.insert(*input) {
-                            queue.push_back(*input);
-                        }
-                    }
-                }
-                Version::Imported {
-                    graph,
-                    root: Some(root),
-                    bindings,
-                    ..
-                } => {
-                    let inputs = imported_inputs
-                        .entry(Rc::as_ptr(graph))
-                        .or_insert_with(|| ImportedInputCache::new(graph))
-                        .inputs(graph, *root);
-                    for key in inputs {
-                        for (input, _) in bindings.get(key).into_iter().flatten() {
-                            if visited.insert(*input) {
-                                queue.push_back(*input);
-                            }
-                        }
-                    }
-                }
-                Version::Imported { root: None, .. } => {}
-                Version::Projected { source, .. } => {
-                    if visited.insert(*source) {
-                        queue.push_back(*source);
-                    }
-                }
-            }
-        }
-        reached
+        repeated::close(
+            self,
+            single_iteration,
+            iteration_checkpoint,
+            may_skip,
+            domain,
+        );
     }
 
     #[cfg(test)]
@@ -1649,7 +1494,7 @@ mod tests {
         ssa.weak_bind("middle", middle);
 
         let iteration = ssa.capture_and_rollback(checkpoint);
-        ssa.close_repeated_transfer(&iteration, checkpoint, false);
+        ssa.close_repeated_transfer(&iteration, checkpoint, false, |_| None);
 
         let last = ssa.read("last");
         let sources = ssa.root_sources(last);
@@ -1713,7 +1558,9 @@ mod tests {
         }
         let iteration = caller.capture_and_rollback(checkpoint);
         ITERATION_IMPORT_VISITS.set(0);
-        caller.close_repeated_transfer(&iteration, checkpoint, false);
+        let before = caller.versions.len();
+        caller.close_repeated_transfer(&iteration, checkpoint, false, |_| None);
+        assert!(caller.versions.len() - before < CALLS * (STAGES + 8));
         assert!(
             ITERATION_IMPORT_VISITS.get() <= graph.nodes.len() + graph.edges.len(),
             "shared imports must index edges once and visit each selected node once: {}",
@@ -1721,7 +1568,10 @@ mod tests {
         );
         for index in 0..CALLS {
             let output = caller.read(CALLS + 1 + index);
-            assert_eq!(caller.root_sources(output), [index].into_iter().collect());
+            assert_eq!(
+                caller.root_source_keys_guarded(output),
+                vec![(index, PathCondition::default())]
+            );
         }
         for index in 0..2 {
             let output = caller.read(CALLS * 2 + 1 + index);
