@@ -2405,6 +2405,134 @@ fn comb_loop_function_copyin_converts_actual_type() {
 }
 
 #[test]
+fn comb_loop_function_copyin_context_determined_expressions() {
+    for (actual, expected) in [
+        ("value << 1", true),
+        ("{value << 1}", false),
+        ("value as 16 << 1", true),
+        ("(value << 1) as 8", false),
+        ("(value as 8) << 1", true),
+        ("$signed(value << 1)", false),
+        ("$signed(value) << 1", true),
+        ("$unsigned(value << 1)", false),
+        ("$unsigned(value) << 1", true),
+        ("+(value << 1)", true),
+        ("~(value << 1)", true),
+        ("(value << 1) | 8'b0", true),
+        ("if external ? value << 1 : 8'b0", true),
+        ("(value << 1) == 8'b0", false),
+        ("value + value", true),
+    ] {
+        let code = format!(
+            r#"
+            module Top(external: input logic, o: output logic) {{
+                var feedback: logic;
+                var value: logic<8>;
+                function high(x: input logic<16>) -> logic {{ return x[8]; }}
+                assign value = {{feedback, 7'b0}};
+                assign feedback = high({actual});
+                assign o = feedback;
+            }}
+            "#
+        );
+        assert_comb_loop(&format!("copy-in context for {actual}"), &code, expected);
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_function_copyin_extends_before_shifting() {
+    for (r#type, actual, source_bit, result_bit, expected) in [
+        ("i8", "value << 1", 7, 15, true),
+        ("i8", "value << 1", 0, 15, false),
+        ("u8", "value << 1", 7, 15, false),
+        ("i8", "value >> 1", 7, 14, true),
+        ("i8", "value >> 1", 7, 15, false),
+        ("i8", "value >>> 1", 7, 15, true),
+        ("i8", "value >>> 1", 0, 15, false),
+        ("u8", "value >> 1", 7, 14, false),
+        ("i8", "(value >> 1) | 8'b0", 7, 14, false),
+        ("i8", "(value >>> 1) | 8'b0", 7, 15, false),
+    ] {
+        let code = format!(
+            r#"
+            module Top(o: output logic) {{
+                var feedback: logic;
+                var value: {type};
+                function high(x: input logic<16>) -> logic {{ return x[{result_bit}]; }}
+                assign value = (feedback as {type}) << {source_bit};
+                assign feedback = high({actual});
+                assign o = feedback;
+            }}
+            "#
+        );
+        assert_comb_loop(
+            &format!("copy-in {type}[{source_bit}], {actual}, reading bit {result_bit}"),
+            &code,
+            expected,
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_function_copyin_dynamic_array_preserves_packed_position() {
+    for index in ["external", "0", "1"] {
+        for bit in [0, 7] {
+            let code = format!(
+                r#"
+                module Top(external: input logic, o: output logic) {{
+                    var feedback: logic;
+                    var values: i8[2];
+                    function high(x: input i16) -> logic {{ return x[15]; }}
+                    assign values[0] = (feedback as i8) << {bit};
+                    assign values[1] = 0;
+                    assign feedback = high(values[{index}]);
+                    assign o = feedback;
+                }}
+                "#
+            );
+            assert_comb_loop(
+                &format!("copy-in values[{index}], feedback in bit {bit}"),
+                &code,
+                bit == 7 && index != "1",
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
+fn comb_loop_function_copyin_dynamic_array_preserves_packed_slice() {
+    for actual in [
+        "values[external][9:2] as i8",
+        "$signed(values[external][9:2])",
+    ] {
+        for bit in [2, 9] {
+            let code = format!(
+                r#"
+                module Top(external: input logic, o: output logic) {{
+                    var feedback: logic;
+                    var values: logic<10>[2];
+                    function high(x: input i16) -> logic {{ return x[15]; }}
+                    assign values[0] = (feedback as 10) << {bit};
+                    assign values[1] = 0;
+                    assign feedback = high({actual});
+                    assign o = feedback;
+                }}
+                "#
+            );
+            assert_comb_loop(
+                &format!("copy-in {actual}, feedback in bit {bit}"),
+                &code,
+                bit == 9,
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
 fn comb_loop_function_copyin_sign_extension_preserves_array_elements() {
     for element in [0, 1] {
         let code = format!(
@@ -2504,25 +2632,29 @@ fn comb_loop_function_copyout_sign_extension_preserves_array_elements() {
 
 #[test]
 fn comb_loop_function_copyin_samples_side_effecting_actual_once() {
-    assert_comb_loop(
-        "copy-in widening must reuse the sampled value across formal regions",
-        r#"
-        module Top (o: output logic) {
-            var feedback: logic;
-            function sample () -> i8 {
-                let previous: logic = feedback;
-                feedback = 0;
-                return {previous, 7'b0} as i8;
-            }
-            function high (x: input i16) -> logic { return x[15] | x[0]; }
-            always_comb {
-                feedback = high(sample());
-                o = feedback;
-            }
-        }
-        "#,
-        true,
-    );
+    for actual in ["sample()", "sample() << 1"] {
+        assert_comb_loop(
+            "copy-in widening must reuse the sampled value across formal regions",
+            &format!(
+                r#"
+                module Top (o: output logic) {{
+                    var feedback: logic;
+                    function sample () -> i8 {{
+                        let previous: logic = feedback;
+                        feedback = 0;
+                        return {{previous, 7'b0}} as i8;
+                    }}
+                    function high (x: input i16) -> logic {{ return x[15] | x[0]; }}
+                    always_comb {{
+                        feedback = high({actual});
+                        o = feedback;
+                    }}
+                }}
+                "#
+            ),
+            true,
+        );
+    }
 }
 
 #[test]

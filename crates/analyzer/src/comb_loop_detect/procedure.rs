@@ -11,9 +11,9 @@ use super::ssa::{
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, Factor, ForBound,
-    ForRange, ForStatement, FunctionCall, IfStatement, Module, Op, Statement, SystemFunctionCall,
-    SystemFunctionKind, TbMethod, VarIndex, VarPath, VarSelect,
+    ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
+    Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, Module, Op, Statement,
+    SystemFunctionCall, SystemFunctionKind, TbMethod, VarIndex, VarPath, VarSelect,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -2429,6 +2429,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         context_width: usize,
         projection: &ProjectionContext,
     ) -> ExpressionSources {
+        let comptime = expression.comptime();
+        self.eval_expr_in_context(
+            expression,
+            requested_array,
+            requested,
+            ExpressionContext {
+                width: context_width,
+                ..comptime.expr_context
+            },
+            projection,
+        )
+    }
+
+    fn eval_expr_in_context(
+        &mut self,
+        expression: &Expression,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        context: ExpressionContext,
+        projection: &ProjectionContext,
+    ) -> ExpressionSources {
         let requested_array = if matches!(expression, Expression::ArrayLiteral(_, _)) {
             requested_array
         } else {
@@ -2441,29 +2462,62 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             };
             requested_array
         };
-        let expression_width = expression
+        let natural_width = expression
             .comptime()
             .r#type
             .total_width()
-            .unwrap_or(context_width);
+            .unwrap_or(context.width);
+        // Assignment context reaches arithmetic, shifts, bitwise operations
+        // and conditional arms before they are evaluated. Casts, concatenation
+        // and other self-determined values are extended only after evaluation.
+        let context_determined = match expression {
+            Expression::Unary(op, _, _) => !op.unary_x_self_determined(),
+            Expression::Binary(_, op, _, _) => {
+                *op != Op::As && !op.binary_x_self_determined() && !op.binary_op_self_determined()
+            }
+            Expression::Ternary(..) => true,
+            _ => false,
+        };
+        let expression_width = if context_determined {
+            natural_width.max(context.width)
+        } else {
+            natural_width
+        };
+        let evaluation_context = ExpressionContext {
+            width: expression_width,
+            ..context
+        };
         let mut reads = PackedSpan::whole(expression_width)
             .and_then(|width| requested.intersection(width))
-            .map(|span| self.eval_expr_bits_in(expression, requested_array, span, projection))
+            .map(|span| {
+                self.eval_expr_bits_in(
+                    expression,
+                    requested_array,
+                    span,
+                    evaluation_context,
+                    projection,
+                )
+            })
             .unwrap_or_default();
-        if context_width > expression_width
-            && expression.comptime().r#type.signed
+        if context.width > expression_width
+            && context.signed
             && expression_width != 0
             && let Some(extension) = requested.intersection(PackedSpan {
                 start: expression_width,
-                length: context_width - expression_width,
+                length: context.width - expression_width,
             })
         {
             let sign_span = PackedSpan {
                 start: expression_width - 1,
                 length: 1,
             };
-            let mut sign =
-                self.eval_expr_bits_in(expression, requested_array, sign_span, projection);
+            let mut sign = self.eval_expr_bits_in(
+                expression,
+                requested_array,
+                sign_span,
+                evaluation_context,
+                projection,
+            );
             if projection.destination_array.is_some() {
                 // Assignment projections can use destination array coordinates
                 // for affine dynamic indices. Keep their conservative sign
@@ -2487,6 +2541,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         expression: &Expression,
         requested_array: ArraySpan,
         requested: PackedSpan,
+        context: ExpressionContext,
         projection: &ProjectionContext,
     ) -> ExpressionSources {
         match expression {
@@ -2556,49 +2611,37 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 }
                             }
                         }
-                        let offset = dynamic_array_offset
-                            .and_then(|array| {
-                                Some(PositionRelation {
-                                    array: Some(array),
-                                    packed: Some(isize::try_from(low).ok()?.checked_neg()?),
-                                })
-                            })
-                            .or_else(|| {
+                        // An unknown array selector loses only the array
+                        // correspondence, not the selected packed positions.
+                        let offset = PositionRelation {
+                            array: dynamic_array_offset.or_else(|| {
                                 position_preserving
                                     .then(|| {
-                                        Some(PositionRelation {
-                                            array: Some(
-                                                isize::try_from(accesses[0].0.start)
-                                                    .ok()?
-                                                    .checked_neg()?,
-                                            ),
-                                            packed: Some(isize::try_from(low).ok()?.checked_neg()?),
-                                        })
+                                        isize::try_from(accesses[0].0.start).ok()?.checked_neg()
                                     })
                                     .flatten()
-                            });
-                        if let Some(offset) = offset {
-                            let mut sources = ExpressionSources {
-                                sources: reads
-                                    .into_iter()
-                                    .map(|version| (version, offset))
-                                    .collect(),
-                            };
-                            sources.extend_whole(selector_sources);
-                            sources
-                        } else {
-                            selector_sources.extend(reads);
-                            ExpressionSources::whole(selector_sources)
-                        }
+                            }),
+                            packed: isize::try_from(low).ok().and_then(isize::checked_neg),
+                        };
+                        let mut sources = ExpressionSources {
+                            sources: reads.into_iter().map(|version| (version, offset)).collect(),
+                        };
+                        sources.extend_whole(selector_sources);
+                        sources
                     } else {
                         selector_sources.extend(self.read_variable(*id, index, select));
                         ExpressionSources::whole(selector_sources)
                     }
                 }
                 Factor::SystemFunctionCall(call) => match &call.kind {
-                    SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
-                        self.eval_expr_bits_in(&input.0, requested_array, requested, projection)
-                    }
+                    SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => self
+                        .eval_expr_requested_in(
+                            &input.0,
+                            requested_array,
+                            requested,
+                            context.width,
+                            projection,
+                        ),
                     _ => ExpressionSources::whole(self.eval_system_call(call, &[], true)),
                 },
                 Factor::FunctionCall(call) => ExpressionSources {
@@ -2619,9 +2662,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
             },
             Expression::Unary(op, operand, _) => match op {
-                Op::BitNot | Op::Add => {
-                    self.eval_expr_bits_in(operand, requested_array, requested, projection)
-                }
+                Op::BitNot | Op::Add => self.eval_expr_in_context(
+                    operand,
+                    requested_array,
+                    requested,
+                    context,
+                    projection,
+                ),
                 _ => ExpressionSources::whole(self.eval_expr(operand)),
             },
             Expression::Binary(left, op, right, comptime) => match op {
@@ -2645,8 +2692,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         if let Some(length) = requested.end().checked_sub(start)
                             && let Some(input) = PackedSpan::new(start - shift, length)
                         {
-                            let mut input =
-                                self.eval_expr_bits_in(left, requested_array, input, projection);
+                            let mut input = self.eval_expr_in_context(
+                                left,
+                                requested_array,
+                                input,
+                                context,
+                                projection,
+                            );
                             if let Ok(shift) = isize::try_from(shift) {
                                 input.translate(PositionRelation {
                                     array: Some(0),
@@ -2668,13 +2720,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .and_then(|value| value.to_usize());
                     let mut reads = ExpressionSources::whole(self.eval_expr(right));
                     if let Some(shift) = shift {
-                        let width = left.comptime().r#type.total_width().unwrap_or(0);
+                        let width = context.width;
                         let shifted = requested.translated(0, shift);
                         if let Some(input) = shifted
                             .and_then(|shifted| PackedSpan::whole(width)?.intersection(shifted))
                         {
-                            let mut input =
-                                self.eval_expr_bits_in(left, requested_array, input, projection);
+                            let mut input = self.eval_expr_in_context(
+                                left,
+                                requested_array,
+                                input,
+                                context,
+                                projection,
+                            );
                             if let Ok(shift) = isize::try_from(shift) {
                                 input.translate(PositionRelation {
                                     array: Some(0),
@@ -2686,17 +2743,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             reads.extend(input);
                         }
                         if *op == Op::ArithShiftR
-                            && left.comptime().r#type.signed
+                            && context.signed
                             && width != 0
                             && shifted.is_some_and(|shifted| shifted.end() > width)
                         {
-                            let mut sign = self.eval_expr_bits_in(
+                            let mut sign = self.eval_expr_in_context(
                                 left,
                                 requested_array,
                                 PackedSpan {
                                     start: width - 1,
                                     length: 1,
                                 },
+                                context,
                                 projection,
                             );
                             sign.widen_all();
@@ -2708,19 +2766,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     reads
                 }
                 Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
-                    let context_width = comptime.r#type.total_width().unwrap_or(requested.end());
-                    let mut reads = self.eval_expr_requested_in(
+                    let mut reads = self.eval_expr_in_context(
                         left,
                         requested_array,
                         requested,
-                        context_width,
+                        context,
                         projection,
                     );
-                    reads.extend(self.eval_expr_requested_in(
+                    reads.extend(self.eval_expr_in_context(
                         right,
                         requested_array,
                         requested,
-                        context_width,
+                        context,
                         projection,
                     ));
                     reads
@@ -2758,22 +2815,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
                 _ => ExpressionSources::whole(self.eval_expr(expression)),
             },
-            Expression::Ternary(condition, left, right, comptime) => {
-                let context_width = comptime.r#type.total_width().unwrap_or(requested.end());
+            Expression::Ternary(condition, left, right, _) => {
                 let mut reads = ExpressionSources::whole(self.eval_expr(condition));
                 match self.constant_truth(condition) {
-                    Some(true) => reads.extend(self.eval_expr_requested_in(
+                    Some(true) => reads.extend(self.eval_expr_in_context(
                         left,
                         requested_array,
                         requested,
-                        context_width,
+                        context,
                         projection,
                     )),
-                    Some(false) => reads.extend(self.eval_expr_requested_in(
+                    Some(false) => reads.extend(self.eval_expr_in_context(
                         right,
                         requested_array,
                         requested,
-                        context_width,
+                        context,
                         projection,
                     )),
                     None => {
@@ -2782,11 +2838,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
                         let checkpoint = self.ssa.checkpoint();
                         self.path_condition = parent_condition.with_choice(branch, 0);
-                        let left = self.eval_expr_requested_in(
+                        let left = self.eval_expr_in_context(
                             left,
                             requested_array,
                             requested,
-                            context_width,
+                            context,
                             projection,
                         );
                         let left = self.guard_expression_sources(left);
@@ -2794,11 +2850,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
                         let checkpoint = self.ssa.checkpoint();
                         self.path_condition = parent_condition.with_choice(branch, 1);
-                        let right = self.eval_expr_requested_in(
+                        let right = self.eval_expr_in_context(
                             right,
                             requested_array,
                             requested,
-                            context_width,
+                            context,
                             projection,
                         );
                         let right = self.guard_expression_sources(right);
@@ -2845,10 +2901,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             output_start,
                         } => {
                             if let Some(local) = PackedSpan::new(local_start, length) {
-                                let mut part = self.eval_expr_bits_in(
+                                let mut part = self.eval_expr_requested_in(
                                     part,
                                     requested_array,
                                     local,
+                                    width,
                                     projection,
                                 );
                                 if let Ok(output_start) = isize::try_from(output_start) {
@@ -2864,10 +2921,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         }
                         RepeatedProjection::Multiple => {
                             if let Some(local) = PackedSpan::whole(width) {
-                                let mut part = self.eval_expr_bits_in(
+                                let mut part = self.eval_expr_requested_in(
                                     part,
                                     requested_array,
                                     local,
+                                    width,
                                     projection,
                                 );
                                 part.forget_packed_position();
