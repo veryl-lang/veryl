@@ -897,6 +897,104 @@ fn function_summary_shift_fanout_stays_structural() {
 }
 
 #[test]
+fn function_summary_converted_input_fanout_stays_structural() {
+    // Copy-in conversion creates separate SSA versions for each call. The
+    // dependency graph must recognize equivalent conversions before importing
+    // the callee, while preserving different actuals and their positions.
+    const DEPTH: usize = 15;
+    for (left, right) in [
+        ("x", "x"),
+        ("x as u8", "x as u8"),
+        ("x as i8", "x as i8"),
+        ("x", "x << 1"),
+    ] {
+        let mut functions = String::from("function f0(x: input i16) -> i16 { return x; }\n");
+        for depth in 1..=DEPTH {
+            let previous = depth - 1;
+            functions.push_str(&format!(
+                "function f{depth}(x: input i16) -> i16 {{ return f{previous}({left}) | f{previous}({right}); }}\n"
+            ));
+        }
+        let code = format!(
+            "module Top(i: input i16, o: output i16) {{ {functions} assign o = f{DEPTH}(i); }}"
+        );
+        crate::comb_loop_detect::reset_function_evaluation_count();
+        let errors = analyze(&code);
+        assert!(errors.is_empty(), "{left}, {right}: {errors:?}");
+        let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
+        assert!(
+            nodes < DEPTH * DEPTH * 4,
+            "converted or shifted actuals must retain sharing: {left}, {right}: {nodes} nodes"
+        );
+    }
+}
+
+#[test]
+fn function_summary_shared_conversions_preserve_distinct_actuals() {
+    for output_argument in [false, true] {
+        for runtime in [false, true] {
+            for selected in ["first", "second"] {
+                for bit in [0, 15] {
+                    let (function, first, second) = if output_argument {
+                        (
+                            "function wrap(x: input i16, y: output i16) { y = id(x as i8) | id(x as i8); }",
+                            "wrap(source as i8, first);",
+                            "wrap(source as i8, second);",
+                        )
+                    } else {
+                        (
+                            "function wrap(x: input i16) -> i16 { return id(x as i8) | id(x as i8); }",
+                            "first = wrap(source as i8);",
+                            "second = wrap(source as i8);",
+                        )
+                    };
+                    let body = format!(
+                        "source = {{feedback, 7'b0}} as i8; {first} source = {{external, 7'b0}} as i8; {second}"
+                    );
+                    let body = if runtime {
+                        format!("for _index in 0..n {{ {body} }}")
+                    } else {
+                        body
+                    };
+                    let input = if runtime { "n: input u32," } else { "" };
+                    let code = format!(
+                        "module Top({input} external: input logic, o: output i16) {{
+                            function id(x: input i16) -> i16 {{ return x; }}
+                            {function}
+                            var source: i8;
+                            var first: i16;
+                            var second: i16;
+                            var feedback: logic;
+                            always_comb {{
+                                source = 0; first = 0; second = 0;
+                                {body}
+                            }}
+                            assign feedback = {selected}[{bit}];
+                            assign o = first | second;
+                        }}"
+                    );
+                    // The first call samples feedback; the second samples a
+                    // new SSA value. Only their sign-extension bits depend on
+                    // those inputs. Reusing the callee must not merge them.
+                    let errors = analyze(&code);
+                    assert!(
+                        errors
+                            .iter()
+                            .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+                    );
+                    let has_loop = !errors.is_empty();
+                    assert_eq!(
+                        has_loop,
+                        selected == "first" && bit == 15,
+                        "output_argument={output_argument}, runtime={runtime}, {selected}[{bit}]: {errors:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn function_summary_rejects_a_cycle_whose_intermediate_shift_is_out_of_range() {
     assert_comb_loop(
         "opposite offsets do not form a loop when the intermediate value is outside the vector",

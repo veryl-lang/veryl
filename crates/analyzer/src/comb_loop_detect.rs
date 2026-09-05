@@ -29,7 +29,7 @@ pub(crate) use procedure::{
     traced_procedure_evaluation_count, write_footprint_statement_visits,
 };
 
-use diagnostics::{DiagnosticReplayCache, check_graph};
+use diagnostics::{DiagnosticReplayCache, TraceKind, check_graph};
 #[cfg(test)]
 pub(crate) use diagnostics::{
     diagnostic_instance_probe_count, diagnostic_provenance_build_count, diagnostic_replay_count,
@@ -543,13 +543,13 @@ fn build_module_graph(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
 ) -> Result<(DependencyGraph, BitPartition, bool), Box<AnalyzerError>> {
-    build_module_graph_with_trace(module, summaries, false)
+    build_module_graph_with_trace(module, summaries, TraceKind::None)
 }
 
 fn build_module_graph_with_trace(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
-    tracing: bool,
+    tracing: TraceKind,
 ) -> Result<(DependencyGraph, BitPartition, bool), Box<AnalyzerError>> {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
@@ -584,7 +584,8 @@ fn build_module_graph_with_trace(
     }
 
     let mut builder = ModuleGraphBuilder::new(module, &bit_part, ctx);
-    builder.function_summaries.tracing = tracing;
+    builder.function_summaries.tracing = tracing == TraceKind::Sources;
+    builder.trace_instances = tracing != TraceKind::None;
 
     for (declaration_index, declaration) in module.declarations.iter().enumerate() {
         let Declaration::Comb(comb) = declaration else {
@@ -637,6 +638,7 @@ struct ModuleGraphBuilder<'a> {
     ctx: Context,
     procedure_context: procedure::ProcedureContext,
     function_summaries: procedure::FunctionSummaries<'a>,
+    trace_instances: bool,
     complete: bool,
 }
 
@@ -649,6 +651,7 @@ impl<'a> ModuleGraphBuilder<'a> {
             ctx,
             procedure_context: procedure::ProcedureContext::new(module),
             function_summaries: procedure::FunctionSummaries::new(module, bit_part),
+            trace_instances: false,
             complete: !module
                 .variables
                 .values()
@@ -846,7 +849,7 @@ impl<'a> ModuleGraphBuilder<'a> {
         }
 
         for edge in &summary.edges {
-            if function_summaries.tracing {
+            if self.trace_instances {
                 graph.active_summary = Some(diagnostics::SummaryEdgeCause {
                     inst_declaration: declaration_index,
                     child: child.signature.clone(),

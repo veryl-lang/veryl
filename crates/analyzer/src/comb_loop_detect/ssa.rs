@@ -1,5 +1,6 @@
 //! IR-independent statement-ordered SSA state.
 
+mod dag;
 mod repeated;
 
 use crate::{HashMap, HashSet};
@@ -376,7 +377,7 @@ pub(super) struct DependencyDagEdge {
     pub(super) condition: PathCondition,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct DefinitionSite<N> {
     pub(super) token: TokenRange,
     pub(super) data_inputs: Vec<N>,
@@ -829,10 +830,9 @@ where
             }
         }
 
-        let mut nodes = Vec::new();
-        let mut edges = Vec::new();
-        let mut domains = Vec::new();
-        let mut sites = HashMap::default();
+        // Intern only the exported graph. SSA version identities must remain
+        // distinct for checkpoint boundaries, runtime transfers and writes.
+        let mut builder = dag::Builder::new();
         let mut mapped: HashMap<(VersionId, bool), Option<usize>> = HashMap::default();
         type ImportKey<K> = (
             usize,
@@ -845,44 +845,42 @@ where
         let mut ordered = states.into_iter().collect::<Vec<_>>();
         ordered.sort_unstable();
         for state @ (version, include_entry) in ordered {
+            let site = self.sites.get(&version).map(|site| DefinitionSite {
+                token: site.token,
+                data_inputs: site
+                    .data_inputs
+                    .iter()
+                    .filter_map(|input| mapped.get(&(*input, true)).copied().flatten())
+                    .collect(),
+            });
             let node = match &self.versions[version] {
-                Version::Entry(key) => (include_entry && allowed.contains(key)).then(|| {
-                    let node = nodes.len();
-                    nodes.push(DependencyDagNode::External(*key));
-                    domains.push(Vec::new());
-                    node
-                }),
+                Version::Entry(key) => {
+                    (include_entry && allowed.contains(key)).then(|| builder.external(*key))
+                }
                 Version::Definition { sources, condition } => {
-                    let node = nodes.len();
-                    nodes.push(DependencyDagNode::Internal);
-                    domains.push(Vec::new());
-                    for (source, relation) in sources {
-                        if let Some(source) = mapped[&(*source, true)] {
-                            edges.push(DependencyDagEdge {
-                                source,
-                                destination: node,
-                                relation: *relation,
-                                condition: condition.clone(),
-                            });
-                        }
-                    }
-                    Some(node)
+                    let inputs = sources
+                        .iter()
+                        .filter_map(|(source, relation)| {
+                            mapped[&(*source, true)]
+                                .map(|source| (source, *relation, condition.clone()))
+                        })
+                        .collect();
+                    Some(builder.internal(inputs, Vec::new(), site))
                 }
                 Version::Phi(inputs) => {
-                    let node = nodes.len();
-                    nodes.push(DependencyDagNode::Internal);
-                    domains.push(Vec::new());
-                    for input in inputs {
-                        if let Some(source) = mapped[&(*input, include_entry)] {
-                            edges.push(DependencyDagEdge {
-                                source,
-                                destination: node,
-                                relation: PositionRelation::default(),
-                                condition: PathCondition::default(),
-                            });
-                        }
-                    }
-                    Some(node)
+                    let inputs = inputs
+                        .iter()
+                        .filter_map(|input| {
+                            mapped[&(*input, include_entry)].map(|source| {
+                                (
+                                    source,
+                                    PositionRelation::default(),
+                                    PathCondition::default(),
+                                )
+                            })
+                        })
+                        .collect();
+                    Some(builder.internal(inputs, Vec::new(), site))
                 }
                 Version::Imported {
                     graph,
@@ -900,6 +898,7 @@ where
                                 })
                                 .collect::<Vec<_>>();
                             sources.sort_unstable();
+                            sources.dedup();
                             (key, sources)
                         })
                         .collect::<Vec<_>>();
@@ -923,55 +922,31 @@ where
                             *root,
                             &mapped_bindings.into_iter().collect(),
                             branches,
-                            &mut nodes,
-                            &mut edges,
-                            &mut domains,
-                            &mut sites,
+                            &mut builder,
                         );
                         imports.insert(key, node);
                         node
                     }
                 }
                 Version::Projected { source, domain } => {
-                    let node = nodes.len();
-                    nodes.push(DependencyDagNode::Internal);
-                    domains.push(vec![*domain]);
-                    if let Some(source) = mapped[&(*source, true)] {
-                        edges.push(DependencyDagEdge {
-                            source,
-                            destination: node,
-                            relation: PositionRelation::default(),
-                            condition: PathCondition::default(),
-                        });
-                    }
-                    Some(node)
+                    let inputs = mapped[&(*source, true)]
+                        .map(|source| {
+                            (
+                                source,
+                                PositionRelation::default(),
+                                PathCondition::default(),
+                            )
+                        })
+                        .into_iter()
+                        .collect();
+                    Some(builder.internal(inputs, vec![*domain], site))
                 }
             };
-            if let Some(node) = node
-                && let Some(site) = self.sites.get(&version)
-            {
-                sites.insert(
-                    node,
-                    DefinitionSite {
-                        token: site.token,
-                        data_inputs: site
-                            .data_inputs
-                            .iter()
-                            .filter_map(|input| mapped.get(&(*input, true)).copied().flatten())
-                            .collect(),
-                    },
-                );
-            }
             mapped.insert(state, node);
         }
 
-        DependencyDag {
-            nodes,
-            edges,
-            roots: roots.iter().map(|root| mapped[&(*root, false)]).collect(),
-            domains,
-            sites,
-        }
+        builder.graph.roots = roots.iter().map(|root| mapped[&(*root, false)]).collect();
+        builder.graph
     }
 
     fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
@@ -1161,16 +1136,12 @@ where
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn inline_dependency_dag<K>(
     graph: &DependencyDag<K>,
     root: Option<usize>,
     bindings: &HashMap<K, Vec<(usize, PositionRelation)>>,
     branches: &HashMap<BranchId, BranchId>,
-    nodes: &mut Vec<DependencyDagNode<K>>,
-    edges: &mut Vec<DependencyDagEdge>,
-    domains: &mut Vec<Vec<PositionDomain>>,
-    sites: &mut HashMap<usize, DefinitionSite<usize>>,
+    builder: &mut dag::Builder<K>,
 ) -> Option<usize>
 where
     K: Copy + Eq + Hash,
@@ -1178,66 +1149,57 @@ where
     let root = root?;
     let mut incoming = vec![Vec::new(); graph.nodes.len()];
     for edge in &graph.edges {
-        incoming[edge.destination].push(edge.source);
+        incoming[edge.destination].push(edge);
     }
     let mut retained = HashSet::default();
     let mut queue = VecDeque::from([root]);
     retained.insert(root);
     while let Some(node) = queue.pop_front() {
-        for &source in &incoming[node] {
-            if retained.insert(source) {
-                queue.push_back(source);
+        for edge in &incoming[node] {
+            if retained.insert(edge.source) {
+                queue.push_back(edge.source);
             }
         }
     }
 
+    // Exported nodes are topologically ordered. Intern each child after its
+    // inputs are mapped so equivalent conversions and imported subgraphs use
+    // the same parent nodes, including when the actual bindings differ.
     let mut mapped: HashMap<usize, usize> = HashMap::default();
     for (child, child_node) in graph.nodes.iter().enumerate() {
         if !retained.contains(&child) {
             continue;
         }
-        let node = nodes.len();
-        nodes.push(DependencyDagNode::Internal);
-        domains.push(graph.domains[child].clone());
-        mapped.insert(child, node);
+        let mut inputs = incoming[child]
+            .iter()
+            .map(|edge| {
+                debug_assert!(edge.source < child);
+                (
+                    mapped[&edge.source],
+                    edge.relation,
+                    edge.condition.remapped(branches),
+                )
+            })
+            .collect::<Vec<_>>();
         if let DependencyDagNode::External(key) = child_node {
-            for &(source, relation) in bindings.get(key).into_iter().flatten() {
-                edges.push(DependencyDagEdge {
-                    source,
-                    destination: node,
-                    relation,
-                    condition: PathCondition::default(),
-                });
-            }
-        }
-    }
-    for edge in &graph.edges {
-        let (Some(&source), Some(&destination)) =
-            (mapped.get(&edge.source), mapped.get(&edge.destination))
-        else {
-            continue;
-        };
-        edges.push(DependencyDagEdge {
-            source,
-            destination,
-            relation: edge.relation,
-            condition: edge.condition.remapped(branches),
-        });
-    }
-    for (child, site) in &graph.sites {
-        if let Some(&node) = mapped.get(child) {
-            sites.insert(
-                node,
-                DefinitionSite {
-                    token: site.token,
-                    data_inputs: site
-                        .data_inputs
-                        .iter()
-                        .filter_map(|input| mapped.get(input).copied())
-                        .collect(),
-                },
+            inputs.extend(
+                bindings
+                    .get(key)
+                    .into_iter()
+                    .flatten()
+                    .map(|&(source, relation)| (source, relation, PathCondition::default())),
             );
         }
+        let site = graph.sites.get(&child).map(|site| DefinitionSite {
+            token: site.token,
+            data_inputs: site
+                .data_inputs
+                .iter()
+                .filter_map(|input| mapped.get(input).copied())
+                .collect(),
+        });
+        let node = builder.internal(inputs, graph.domains[child].clone(), site);
+        mapped.insert(child, node);
     }
     mapped.get(&root).copied()
 }
@@ -1720,8 +1682,9 @@ mod tests {
             HashMap::default(),
         );
         let result = caller.dependency_dag(&[root], &["actual"].into_iter().collect());
-        assert_eq!(result.nodes.len(), graph.nodes.len() + 1);
-        assert_eq!(result.edges.len(), graph.edges.len() + 1);
+        // The callee's external identity is an alias of the actual input.
+        assert_eq!(result.nodes.len(), graph.nodes.len());
+        assert_eq!(result.edges.len(), graph.edges.len());
         assert!(result.roots[0].is_some());
     }
 }

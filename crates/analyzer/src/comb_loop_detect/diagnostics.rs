@@ -53,7 +53,14 @@ pub(crate) fn diagnostic_instance_probe_count() -> usize {
     DIAGNOSTIC_INSTANCE_PROBES.get()
 }
 
-pub(super) type DiagnosticReplayCache = HashMap<Signature, Rc<DependencyGraph>>;
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum TraceKind {
+    None,
+    Instances,
+    Sources,
+}
+
+pub(super) type DiagnosticReplayCache = HashMap<(Signature, TraceKind), Rc<DependencyGraph>>;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn check_graph(
@@ -226,15 +233,17 @@ fn replay(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     cache: &mut DiagnosticReplayCache,
+    tracing: TraceKind,
 ) -> Option<Rc<DependencyGraph>> {
-    if let Some(graph) = cache.get(&module.signature) {
+    let key = (module.signature.clone(), tracing);
+    if let Some(graph) = cache.get(&key) {
         return Some(Rc::clone(graph));
     }
     #[cfg(test)]
     DIAGNOSTIC_REPLAYS.set(DIAGNOSTIC_REPLAYS.get() + 1);
-    let (graph, _, _) = build_module_graph_with_trace(module, summaries, true).ok()?;
+    let (graph, _, _) = build_module_graph_with_trace(module, summaries, tracing).ok()?;
     let graph = Rc::new(graph);
-    cache.insert(module.signature.clone(), Rc::clone(&graph));
+    cache.insert(key, Rc::clone(&graph));
     Some(graph)
 }
 
@@ -268,7 +277,11 @@ fn diagnostic_provenance(
     if !module.declarations.iter().any(|decl| matches!(decl, Declaration::Inst(inst) if matches!(inst.component.as_ref(), Component::Module(_)))) {
         return Vec::new();
     }
-    let Some(graph) = replay(module, summaries, cache) else {
+    // The selected cycle contains edge indices from the normal graph. Adding
+    // source sites changes which dependency nodes can be shared, so first
+    // replay only instance causes with the same graph structure. Child source
+    // traces use their own edge indices and a separate cache entry.
+    let Some(graph) = replay(module, summaries, cache, TraceKind::Instances) else {
         return Vec::new();
     };
     let Some((_, cause)) = grouped_causes(&graph, cycle).into_iter().next() else {
@@ -302,7 +315,7 @@ fn diagnostic_provenance(
         {
             continue;
         }
-        let Some(graph) = replay(child, summaries, cache) else {
+        let Some(graph) = replay(child, summaries, cache, TraceKind::Sources) else {
             continue;
         };
         let sources = graph
