@@ -2177,6 +2177,10 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     None
                 })();
 
+                let testbench = attribute_table::get(&arg.module.module_token.token)
+                    .iter()
+                    .any(|x| matches!(x, Attr::Testbench));
+
                 let property = ModuleProperty {
                     range: arg.into(),
                     is_proto: false,
@@ -2190,6 +2194,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     default_reset,
                     definition,
                     test,
+                    testbench,
                 };
                 if let Some(id) = self.insert_symbol(
                     &arg.identifier.identifier_token.token,
@@ -2468,6 +2473,7 @@ impl VerylGrammarTrait for CreateSymbolTable {
                     default_reset: None,
                     definition,
                     test: None,
+                    testbench: false,
                 };
                 self.insert_symbol(
                     &arg.identifier.identifier_token.token,
