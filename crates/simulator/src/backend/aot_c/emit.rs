@@ -3433,7 +3433,7 @@ fn clean_elide() -> bool {
 /// from.
 ///
 /// Soundness contract: an elided mask must leave the emitted C value
-/// BIT-IDENTICAL to the masked form (the VERYL_AOT_C_VALIDATE dual-run
+/// BIT-IDENTICAL to the masked form (the `--backend-validate` dual-run
 /// compares storage bytes against the JIT).  Every rule below mirrors the
 /// corresponding emitter arm's needs_clean=false emission; anything
 /// uncertain — width 0 / >64 results, dirty producers (~, unary/binary
@@ -13191,7 +13191,7 @@ mod tests {
 
     // --- Clean-bits mask elision (expr_emits_clean) ---
     // A wrongly-elided mask stores dirty high bits (silent divergence from
-    // Cranelift, caught by VERYL_AOT_C_VALIDATE byte compares) — each rule
+    // Cranelift, caught by `--backend-validate` byte compares), so each rule
     // direction gets a direct emit-string test.
 
     #[test]

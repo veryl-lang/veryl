@@ -619,7 +619,7 @@ impl Ir {
 
         // Dispatch: when a whole-comb backend (today: AOT-C) is ready,
         // invoke it in place of per-chunk Cranelift dispatch.  When
-        // VERYL_AOT_C_VALIDATE=1 (`self.aot_c_validate`) we additionally
+        // `--backend-validate` (`self.aot_c_validate`) we additionally
         // dual-run the whole-comb and the per-chunk path and panic on
         // first divergence.  Both paths fall through to Cranelift if
         // the whole-comb backend declines (`whole_comb == None`) or
@@ -1140,9 +1140,6 @@ impl Config {
         }
         if let Some(v) = env_bool("VERYL_AOT_C_ASYNC") {
             self.aot_c_async = v;
-        }
-        if let Some(v) = env_bool("VERYL_AOT_C_VALIDATE") {
-            self.aot_c_validate = v;
         }
         if let Ok(n) = env::var("VERYL_AOT_C_MIN_STMTS")
             && let Ok(n) = n.parse::<usize>()

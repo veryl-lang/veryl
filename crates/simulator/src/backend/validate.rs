@@ -1,4 +1,4 @@
-//! `VERYL_AOT_C_VALIDATE` dual-run validation.
+//! `--backend-validate` dual-run validation.
 //!
 //! When enabled, dispatches AOT-C (whole-comb) and Cranelift (per-chunk)
 //! on identical inputs, diffs ff/comb buffers + write_log, panics on
@@ -170,7 +170,7 @@ fn diff_or_panic(
             }
         };
         eprintln!(
-            "VERYL_AOT_C_VALIDATE: comb_values diverge at offset {} \
+            "--backend-validate: comb_values diverge at offset {} \
              (AOT-C={:#x}, JIT={:#x}, len={}) var={}",
             off,
             comb_aot_out.get(off).copied().unwrap_or(0),
@@ -259,7 +259,7 @@ fn diff_or_panic(
             .position(|(a, b)| a != b)
             .unwrap_or(usize::MAX);
         eprintln!(
-            "VERYL_AOT_C_VALIDATE: ff_values diverge at offset {} \
+            "--backend-validate: ff_values diverge at offset {} \
              (AOT-C={:#x}, JIT={:#x}, len={})",
             off,
             ff_aot_out.get(off).copied().unwrap_or(0),
@@ -270,7 +270,7 @@ fn diff_or_panic(
     }
     if count_aot_out != count_jit_out {
         eprintln!(
-            "VERYL_AOT_C_VALIDATE: write_log count diverges (AOT-C={}, JIT={})",
+            "--backend-validate: write_log count diverges (AOT-C={}, JIT={})",
             count_aot_out, count_jit_out,
         );
         diverged = true;

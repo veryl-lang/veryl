@@ -1628,7 +1628,7 @@ impl Simulator {
             let comb_ptr = self.ir.comb_values.as_ptr() as *mut u8;
             let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
 
-            // VERYL_AOT_C_VALIDATE=1: dual-run paths and diff.  Default-off.
+            // `--backend-validate`: dual-run paths and diff.  Default-off.
             let validate = self.ir.aot_c_validate;
 
             if !validate {
@@ -2087,7 +2087,7 @@ impl Simulator {
         self.dump_variables();
     }
 
-    /// VERYL_AOT_C_VALIDATE event-path check: run the AOT-C event function and
+    /// `--backend-validate` event-path check: run the AOT-C event function and
     /// the Cranelift per-stmt dispatch on identical inputs, compare the
     /// WriteLogEntries they push plus any direct ff/comb writes, and panic on
     /// first divergence.  Leaves the Cranelift result live (ground truth).
