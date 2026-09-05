@@ -7874,6 +7874,48 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
     }
 }
 
+thread_local! {
+    /// Loop indices whose C variable is in scope, innermost last:
+    /// `(storage, width, storage C type, C variable)`.  An emitted `for`
+    /// writes its index to storage once per iteration and the body reads it
+    /// back from there; `-fno-strict-aliasing` keeps gcc from forwarding the
+    /// store, so each read is a real load of a value the C loop variable
+    /// already holds.
+    static FOR_INDEX: RefCell<Vec<(VarOffset, usize, String, String)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// The C variable holding this load's value, when it is a live loop index.
+/// The width must match the loop's: the store truncates to the index's storage
+/// type, so a read of another width is not the same value.
+fn for_index_read(var_offset: &VarOffset, width: usize) -> Option<String> {
+    FOR_INDEX.with(|f| {
+        f.borrow()
+            .iter()
+            .rev()
+            .find(|(vo, w, _, _)| vo == var_offset && *w == width)
+            .map(|(_, _, cty, name)| format!("({cty}){name}"))
+    })
+}
+
+/// The substitution above holds only while the body leaves the index alone.
+fn writes_offset(body: &[ProtoStatement], vo: &VarOffset) -> bool {
+    body.iter().any(|s| match s {
+        ProtoStatement::Assign(a) => a.dst == *vo,
+        ProtoStatement::AssignDynamic(a) => a.dst_base == *vo,
+        ProtoStatement::If(x) => {
+            writes_offset(&x.true_side, vo) || writes_offset(&x.false_side, vo)
+        }
+        ProtoStatement::Case(x) => {
+            x.arms.iter().any(|a| writes_offset(&a.body, vo)) || writes_offset(&x.default, vo)
+        }
+        ProtoStatement::For(x) => x.var_offset == *vo || writes_offset(&x.body, vo),
+        ProtoStatement::SequentialBlock(b) => writes_offset(b, vo),
+        ProtoStatement::CompiledBlock(x) => writes_offset(&x.original_stmts, vo),
+        _ => false,
+    })
+}
+
 /// `ProtoStatement::For` → C `for` loop.  Covers Forward / Reverse ranges
 /// with constant or dynamic (≤64-bit) bounds and a loop var ≤ 64 bits;
 /// mirrors the Cranelift JIT gate (`ProtoForStatement::can_build_binary`).
@@ -7972,16 +8014,47 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
         VarOffset::Ff(o) => ("ff_values", o),
         VarOffset::Comb(o) => ("comb_values", o),
     };
+    // Depth-suffixed so a nested loop's variable does not shadow an enclosing
+    // one: the body may read either index.
+    let depth = FOR_INDEX.with(|f| f.borrow().len());
+    let itv = format!("_it{depth}");
+    let (init, cond, incr) = (
+        init.replace("_it", &itv),
+        cond.replace("_it", &itv),
+        incr.replace("_it", &itv),
+    );
 
     // Body pushes (FF write-log entries) execute once per iteration; scale the
     // reserve counters by the trip count.  A dynamic bound has no compile-time
     // trip count, so a body that pushes must fall back to the interpreter.
     let narrow_before = EVENT_NARROW_PUSHES.with(|c| c.get());
     let wide_before = EVENT_WIDE_PUSHES.with(|c| c.get());
+    let substitute = !writes_offset(&for_stmt.body, &for_stmt.var_offset);
+    if substitute {
+        FOR_INDEX.with(|f| {
+            f.borrow_mut().push((
+                for_stmt.var_offset,
+                for_stmt.var_width,
+                cty.to_string(),
+                itv.clone(),
+            ))
+        });
+    }
     let mut body = String::new();
     for s in &for_stmt.body {
-        body.push_str(&emit_stmt(s)?);
+        let emitted = emit_stmt(s);
+        if emitted.is_none() && substitute {
+            FOR_INDEX.with(|f| {
+                f.borrow_mut().pop();
+            });
+        }
+        body.push_str(&emitted?);
         body.push(' ');
+    }
+    if substitute {
+        FOR_INDEX.with(|f| {
+            f.borrow_mut().pop();
+        });
     }
     let narrow_body = EVENT_NARROW_PUSHES
         .with(|c| c.get())
@@ -7998,7 +8071,7 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     Some(format!(
         "{{ {var_ty} _lo = {lo}, _hi = {hi}; \
          for ({init}; {cond}; {incr}) {{ \
-            *(({cty}*)({buf} + {off:#x})) = ({cty})_it; \
+            *(({cty}*)({buf} + {off:#x})) = ({cty}){itv}; \
             {body} \
          }} }}",
     ))
@@ -9881,6 +9954,11 @@ fn emit_var_load(var_offset: &VarOffset, width: usize) -> Option<String> {
             rt = result_ty,
             nm = local_name(off)
         ));
+    }
+    // Live loop index: read the C loop variable instead of the storage the
+    // emitted `for` mirrors it into (see `FOR_INDEX`).
+    if let Some(nm) = for_index_read(var_offset, width) {
+        return Some(format!("(({rt}){nm})", rt = result_ty));
     }
     Some(format!(
         "(({rt})*((const {ct}*)({b} + {o:#x})))",
@@ -13418,11 +13496,71 @@ mod tests {
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
         assert!(s.contains("_lo = 0ULL, _hi = 8ULL"));
-        assert!(s.contains("uint64_t _it = _lo"));
-        assert!(s.contains("_it < _hi"));
-        assert!(s.contains("_it += 1ULL"));
+        assert!(s.contains("uint64_t _it0 = _lo"));
+        assert!(s.contains("_it0 < _hi"));
+        assert!(s.contains("_it0 += 1ULL"));
         assert!(s.contains("comb_values + 0x0"));
         assert!(s.contains("0xaULL"));
+    }
+
+    /// The body reads the loop index from the C variable, not from the storage
+    /// the loop mirrors it into: `-fno-strict-aliasing` stops gcc forwarding
+    /// that store, so every read would otherwise be a real load.
+    #[test]
+    fn emit_stmt_for_body_reads_the_index_from_the_c_variable() {
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(0x40),
+            var_width: 8,
+            var_native_bytes: 1,
+            var_signed: false,
+            token: TokenRange::default(),
+            range: ProtoForRange::Forward {
+                start: ProtoForBound::Const(0),
+                end: ProtoForBound::Const(8),
+                inclusive: false,
+                step: 1,
+            },
+            body: vec![comb_assign(
+                0x80,
+                8,
+                None,
+                var_expr(VarOffset::Comb(0x40), 8),
+            )],
+        };
+        let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
+        assert!(
+            !s.contains("(const uint32_t*)(comb_values + 0x40)"),
+            "still loads the index from storage: {s}"
+        );
+        assert!(s.contains("_it0"), "lost the loop variable: {s}");
+    }
+
+    /// A body that assigns the index must keep reading storage: the C loop
+    /// variable no longer holds what a later read in the same iteration sees.
+    #[test]
+    fn emit_stmt_for_body_writing_the_index_keeps_the_load() {
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(0x40),
+            var_width: 8,
+            var_native_bytes: 1,
+            var_signed: false,
+            token: TokenRange::default(),
+            range: ProtoForRange::Forward {
+                start: ProtoForBound::Const(0),
+                end: ProtoForBound::Const(8),
+                inclusive: false,
+                step: 1,
+            },
+            body: vec![
+                comb_assign(0x40, 8, None, const_expr(3, 8)),
+                comb_assign(0x80, 8, None, var_expr(VarOffset::Comb(0x40), 8)),
+            ],
+        };
+        let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
+        assert!(
+            s.contains("(const uint32_t*)(comb_values + 0x40)"),
+            "substituted an index the body overwrites: {s}"
+        );
     }
 
     #[test]
@@ -13465,9 +13603,9 @@ mod tests {
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
         assert!(s.contains("_lo = 0ULL"));
-        assert!(s.contains("uint64_t _it = _lo"));
-        assert!(s.contains("_it < _hi"));
-        assert!(s.contains("_it += 1ULL"));
+        assert!(s.contains("uint64_t _it0 = _lo"));
+        assert!(s.contains("_it0 < _hi"));
+        assert!(s.contains("_it0 += 1ULL"));
     }
 
     #[test]
@@ -13488,9 +13626,9 @@ mod tests {
             body: vec![],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("int64_t _it = _hi - 1"));
-        assert!(s.contains("_it >= _lo"));
-        assert!(s.contains("_it -= 1ULL"));
+        assert!(s.contains("int64_t _it0 = _hi - 1"));
+        assert!(s.contains("_it0 >= _lo"));
+        assert!(s.contains("_it0 -= 1ULL"));
     }
 
     #[test]
