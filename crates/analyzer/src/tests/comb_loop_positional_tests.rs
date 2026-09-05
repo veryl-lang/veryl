@@ -880,8 +880,128 @@ fn comb_loop_signed_extension_retains_sign_bit() {
 }
 
 #[test]
+fn comb_loop_signed_extension_preserves_low_bits_through_whole_copies() {
+    for (source_type, expression) in [
+        ("i16", "source"),
+        ("i16", "identity(source)"),
+        ("i8", "source"),
+    ] {
+        let function = if expression == "identity(source)" {
+            "function identity(x: input i16) -> i16 { return x; }"
+        } else {
+            ""
+        };
+        for bit in [0, 7, 15] {
+            // The whole-vector copy keeps the source partition coarse. A
+            // direct bit selection on source can hide incorrect widening.
+            let code = format!(
+                r#"
+                module Top(o: output i16) {{
+                    {function}
+                    var source: {source_type};
+                    var feedback: logic;
+                    assign source = {{feedback, 7'b0}} as i8;
+                    assign o = {expression};
+                    assign feedback = o[{bit}];
+                }}
+                "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{errors:#?}"
+            );
+            assert_eq!(
+                !errors.is_empty(),
+                bit != 0,
+                "source={source_type}, expression={expression}, bit={bit}: {errors:#?}"
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
+fn comb_loop_signed_extension_preserves_assignment_slices() {
+    for destination in ["wide[17:2]", "{wide[17:10], wide[9:2]}"] {
+        for (bit, expected) in [(0, false), (2, false), (9, true), (17, true)] {
+            let code = format!(
+                r#"
+                module Top(o: output logic<18>) {{
+                    var feedback: logic;
+                    var wide: logic<18>;
+                    always_comb {{
+                        wide = 0;
+                        {destination} = {{feedback, 7'b0}} as i8;
+                    }}
+                    assign o = wide;
+                    assign feedback = o[{bit}];
+                }}
+                "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{errors:#?}"
+            );
+            assert_eq!(
+                !errors.is_empty(),
+                expected,
+                "destination={destination}, bit={bit}: {errors:#?}"
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
+fn comb_loop_signed_extension_preserves_array_elements_through_whole_copies() {
+    for assignment in ["wide = narrow;", "wide[1] = narrow[1];"] {
+        for element in [0, 1, 2] {
+            for bit in [0, 7, 15] {
+                let code = format!(
+                    r#"
+                    module Top(o: output i16[3]) {{
+                        var feedback: logic;
+                        var narrow: i8[3];
+                        var wide: i16[3];
+                        assign narrow[0] = 0;
+                        assign narrow[1] = {{feedback, 7'b0}} as i8;
+                        assign narrow[2] = 0;
+                        always_comb {{
+                            wide = '{{default: 0}};
+                            {assignment}
+                        }}
+                        assign o = wide;
+                        assign feedback = o[{element}][{bit}];
+                    }}
+                    "#
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors
+                        .iter()
+                        .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    "{errors:#?}"
+                );
+                assert_eq!(
+                    !errors.is_empty(),
+                    element == 1 && bit != 0,
+                    "assignment={assignment}, element={element}, bit={bit}: {errors:#?}"
+                );
+                assert!(comb_loop_analysis_is_complete(&code));
+            }
+        }
+    }
+}
+
+#[test]
 fn comb_loop_signed_extension_keeps_dynamic_array_destination_coordinates() {
-    for (bit, expected) in [(15, true), (0, false)] {
+    for (bit, expected) in [(15, true), (7, true), (0, false)] {
         assert_comb_loop(
             "sign replication must not project a dynamic destination back to element zero",
             &format!(
@@ -890,13 +1010,15 @@ fn comb_loop_signed_extension_keeps_dynamic_array_destination_coordinates() {
                     var feedback: logic;
                     var narrow: i8[2];
                     var wide: i16[2];
+                    var copied: i16[2];
                     assign narrow[0] = 0;
                     assign narrow[1] = {{feedback, 7'b0}} as i8;
                     always_comb {{
                         wide = '{{default: 0}};
                         wide[index] = narrow[index];
                     }}
-                    assign feedback = wide[1][{bit}];
+                    assign copied = wide;
+                    assign feedback = copied[1][{bit}];
                     assign o = feedback;
                 }}
                 "#

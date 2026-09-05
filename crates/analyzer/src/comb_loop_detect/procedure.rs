@@ -2530,19 +2530,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 evaluation_context,
                 projection,
             );
-            if projection.destination_array.is_some() {
-                // Assignment projections can use destination array coordinates
-                // for affine dynamic indices. Keep their conservative sign
-                // dependency instead of projecting those positions onto the
-                // expression's zero-based array coordinates.
-                sign.widen_all();
-                reads.extend(sign);
-            } else {
-                let sign = self.ssa.related_definition(sign.sources);
-                let extended =
-                    self.project_sign_extension(sign, requested_array, sign_span, extension);
-                reads.push(extended, PositionRelation::default());
+            if projection
+                .destination_index
+                .as_ref()
+                .is_some_and(|index| !index.terms.is_empty())
+            {
+                // Affine reads can use destination array coordinates. Dynamic
+                // writes already forget array correspondence, so discard only
+                // that axis before projecting the expression's sign bit.
+                sign.forget_array_position();
             }
+            let sign = self.ssa.related_definition(sign.sources);
+            let extended = self.project_sign_extension(sign, requested_array, sign_span, extension);
+            reads.push(extended, PositionRelation::default());
         }
         reads.normalize();
         reads
