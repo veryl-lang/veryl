@@ -1791,6 +1791,114 @@ fn comb_loop_uncalled_function_still_checks_output_coverage() {
 }
 
 #[test]
+fn comb_loop_runtime_function_outputs_remain_independent() {
+    for bound in ["none", "1", "n"] {
+        for called in [false, true] {
+            for source in ["external", "feedback"] {
+                let operation = if called {
+                    format!("split(feedback, {source}, scratch, result);")
+                } else {
+                    format!("scratch = feedback; result = {source};")
+                };
+                let body = if bound == "none" {
+                    operation
+                } else {
+                    format!("for _index in 0..{bound} {{ {operation} }}")
+                };
+                let code = format!(
+                    r#"
+                    module Top(n: input u32, external: input logic, o: output logic) {{
+                        var feedback: logic;
+                        var result: logic;
+                        var scratch: logic;
+                        function split(a: input logic, b: input logic,
+                                       first: output logic, second: output logic) {{
+                            first = a;
+                            second = b;
+                        }}
+                        always_comb {{
+                            result = 0;
+                            scratch = 0;
+                            {body}
+                        }}
+                        assign feedback = result;
+                        assign o = scratch;
+                    }}
+                    "#
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors.iter().all(|error| matches!(
+                        error,
+                        AnalyzerError::CombinationalLoop { .. }
+                            | AnalyzerError::UnusedVariable { .. }
+                    )),
+                    "{errors:#?}"
+                );
+                assert_eq!(
+                    errors
+                        .iter()
+                        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    source == "feedback",
+                    "bound={bound}, called={called}, source={source}: {errors:#?}",
+                );
+                assert!(comb_loop_analysis_is_complete(&code));
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_runtime_function_return_excludes_unrelated_captured_write() {
+    for bound in ["none", "1", "n"] {
+        for source in ["external", "feedback", "1'b0"] {
+            let operation = format!("result = split(feedback, {source});");
+            let body = if bound == "none" {
+                operation
+            } else {
+                format!("for _index in 0..{bound} {{ {operation} }}")
+            };
+            let code = format!(
+                r#"
+                module Top(n: input u32, external: input logic, o: output logic) {{
+                    var feedback: logic;
+                    var result: logic;
+                    var scratch: logic;
+                    function split(a: input logic, b: input logic) -> logic {{
+                        scratch = a;
+                        return b;
+                    }}
+                    always_comb {{
+                        result = 0;
+                        scratch = 0;
+                        {body}
+                    }}
+                    assign feedback = result;
+                    assign o = scratch;
+                }}
+                "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors.iter().all(|error| matches!(
+                    error,
+                    AnalyzerError::CombinationalLoop { .. } | AnalyzerError::UnusedVariable { .. }
+                )),
+                "{errors:#?}"
+            );
+            assert_eq!(
+                errors
+                    .iter()
+                    .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                source == "feedback",
+                "bound={bound}, source={source}: {errors:#?}",
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
 fn comb_loop_function_summary_fanout_is_memoized() {
     // Why this case exists: each function calls the previous specialization
     // twice, so per-call recursive analysis grows as 2^N. The source contains

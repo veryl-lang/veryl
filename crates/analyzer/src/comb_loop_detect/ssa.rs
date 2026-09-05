@@ -9,6 +9,7 @@ use veryl_parser::token_range::TokenRange;
 #[cfg(test)]
 thread_local! {
     static SOURCE_WALK_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ITERATION_IMPORT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -388,6 +389,54 @@ pub(super) struct DependencyDag<K> {
     pub(super) sites: HashMap<usize, DefinitionSite<usize>>,
 }
 
+/// Inputs reachable from each output of a shared function summary.
+/// Store formal keys so each call still resolves its own actual versions.
+struct ImportedInputCache<K> {
+    incoming: Vec<Vec<usize>>,
+    inputs_by_root: HashMap<usize, Vec<K>>,
+}
+
+impl<K: Copy + Eq + Hash> ImportedInputCache<K> {
+    fn new(graph: &DependencyDag<K>) -> Self {
+        let mut incoming = vec![Vec::new(); graph.nodes.len()];
+        for edge in &graph.edges {
+            #[cfg(test)]
+            ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
+            incoming[edge.destination].push(edge.source);
+        }
+        Self {
+            incoming,
+            inputs_by_root: HashMap::default(),
+        }
+    }
+
+    fn inputs(&mut self, graph: &DependencyDag<K>, root: usize) -> &[K] {
+        let incoming = &self.incoming;
+        self.inputs_by_root.entry(root).or_insert_with(|| {
+            let mut inputs = HashSet::default();
+            let mut visited = HashSet::default();
+            let mut queue = VecDeque::from([root]);
+            visited.insert(root);
+            // Runtime closure keeps may-dependencies. Visiting node identities
+            // once keeps shift fan-out structural throughout this query.
+            while let Some(node) = queue.pop_front() {
+                #[cfg(test)]
+                ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
+                if let DependencyDagNode::External(key) = graph.nodes[node] {
+                    inputs.insert(key);
+                    continue;
+                }
+                for &source in &incoming[node] {
+                    if visited.insert(source) {
+                        queue.push_back(source);
+                    }
+                }
+            }
+            inputs.into_iter().collect()
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct PositionDomain {
     pub(super) array_start: usize,
@@ -744,10 +793,15 @@ where
         }
 
         let mut direct_inputs_by_key = HashMap::default();
+        let mut imported_inputs = HashMap::default();
         for (&key, &output) in &single_iteration.bindings {
             direct_inputs_by_key.insert(
                 key,
-                self.iteration_input_versions(output, iteration_checkpoint.version_start),
+                self.iteration_input_versions(
+                    output,
+                    iteration_checkpoint.version_start,
+                    &mut imported_inputs,
+                ),
             );
         }
 
@@ -778,6 +832,7 @@ where
         &self,
         version: VersionId,
         version_start: usize,
+        imported_inputs: &mut HashMap<*const DependencyDag<K>, ImportedInputCache<K>>,
     ) -> HashSet<VersionId> {
         let mut reached = HashSet::default();
         let mut visited = HashSet::default();
@@ -804,15 +859,25 @@ where
                         }
                     }
                 }
-                Version::Imported { bindings, .. } => {
-                    for sources in bindings.values() {
-                        for (input, _) in sources {
+                Version::Imported {
+                    graph,
+                    root: Some(root),
+                    bindings,
+                    ..
+                } => {
+                    let inputs = imported_inputs
+                        .entry(Rc::as_ptr(graph))
+                        .or_insert_with(|| ImportedInputCache::new(graph))
+                        .inputs(graph, *root);
+                    for key in inputs {
+                        for (input, _) in bindings.get(key).into_iter().flatten() {
                             if visited.insert(*input) {
                                 queue.push_back(*input);
                             }
                         }
                     }
                 }
+                Version::Imported { root: None, .. } => {}
                 Version::Projected { source, .. } => {
                     if visited.insert(*source) {
                         queue.push_back(*source);
@@ -1589,6 +1654,79 @@ mod tests {
         let last = ssa.read("last");
         let sources = ssa.root_sources(last);
         assert!(sources.contains("first"));
+    }
+
+    #[test]
+    fn repeated_transfer_shares_import_walks_without_enumerating_shift_paths() {
+        const STAGES: usize = 18;
+        const CALLS: usize = 64;
+        let mut callee = SsaStore::default();
+        let mut value = callee.read(0);
+        for shift in 0..STAGES {
+            value = callee.related_definition(vec![
+                (value, PositionRelation::default()),
+                (
+                    value,
+                    PositionRelation {
+                        array: Some(0),
+                        packed: Some(1isize << shift),
+                    },
+                ),
+            ]);
+        }
+        let unrelated = callee.read(1);
+        let constant = callee.definition(Vec::new());
+        let graph = Rc::new(
+            callee.dependency_dag(&[value, unrelated, constant], &[0, 1].into_iter().collect()),
+        );
+
+        let mut caller = SsaStore::default();
+        let actuals = (0..CALLS).map(|key| caller.read(key)).collect::<Vec<_>>();
+        let unrelated = caller.read(CALLS);
+        let checkpoint = caller.checkpoint();
+        for (index, &actual) in actuals.iter().enumerate() {
+            let output = caller.imported(
+                graph.clone(),
+                graph.roots[0],
+                [
+                    (0, vec![(actual, PositionRelation::default())]),
+                    (1, vec![(unrelated, PositionRelation::default())]),
+                ]
+                .into_iter()
+                .collect(),
+                HashMap::default(),
+            );
+            caller.bind(CALLS + 1 + index, output);
+        }
+        // Neither an absent root nor a constant root reads any actual,
+        // even when other outputs of the same summary do.
+        for (index, root) in [None, graph.roots[2]].into_iter().enumerate() {
+            let output = caller.imported(
+                graph.clone(),
+                root,
+                [(1, vec![(unrelated, PositionRelation::default())])]
+                    .into_iter()
+                    .collect(),
+                HashMap::default(),
+            );
+            caller.bind(CALLS * 2 + 1 + index, output);
+        }
+        let iteration = caller.capture_and_rollback(checkpoint);
+        ITERATION_IMPORT_VISITS.set(0);
+        caller.close_repeated_transfer(&iteration, checkpoint, false);
+        assert!(
+            ITERATION_IMPORT_VISITS.get() <= graph.nodes.len() + graph.edges.len(),
+            "shared imports must index edges once and visit each selected node once: {}",
+            ITERATION_IMPORT_VISITS.get(),
+        );
+        for index in 0..CALLS {
+            let output = caller.read(CALLS + 1 + index);
+            assert_eq!(caller.root_sources(output), [index].into_iter().collect());
+        }
+        for index in 0..2 {
+            let output = caller.read(CALLS * 2 + 1 + index);
+            assert!(caller.root_sources(output).is_empty());
+        }
     }
 
     #[test]
