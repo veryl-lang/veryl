@@ -1291,11 +1291,93 @@ fn emit_wide_operand_signed(
     Some(r)
 }
 
+/// The low 64 bits of a wide value as a scalar C expression, or `None` when
+/// they depend on higher bits.  Bitwise ops take each bit from the same bit
+/// of their operands and add, sub and negate carry only upward, so such a
+/// tree needs no wide buffers; shift, multiply, concatenation, comparison and
+/// cast can move high bits down and decline.  A wide node exceeds 128 bits
+/// (`is_wide_ptr`), so nothing here needs a sub-64-bit mask, and a narrow
+/// operand arrives masked to its width, which is the wide path's
+/// zero-extension; signed contexts decline because the wide path
+/// sign-extends it instead.
+fn emit_expr_low64(expr: &ProtoExpression) -> Option<String> {
+    if !expr.builds_wide_pointer() {
+        return emit_expr(expr);
+    }
+    match expr {
+        ProtoExpression::Binary {
+            x,
+            op,
+            y,
+            expr_context,
+            ..
+        } => {
+            if expr_context.signed {
+                return None;
+            }
+            let (x, y) = (emit_expr_low64(x)?, emit_expr_low64(y)?);
+            let c = match op {
+                Op::BitAnd => "&",
+                Op::BitOr => "|",
+                Op::BitXor => "^",
+                Op::Add => "+",
+                Op::Sub => "-",
+                Op::BitXnor => {
+                    return Some(format!("(~(((uint64_t)({x})) ^ ((uint64_t)({y}))))"));
+                }
+                _ => return None,
+            };
+            Some(format!("(((uint64_t)({x})) {c} ((uint64_t)({y})))"))
+        }
+        ProtoExpression::Unary {
+            op,
+            x,
+            expr_context,
+            ..
+        } => {
+            if expr_context.signed {
+                return None;
+            }
+            match op {
+                // Same meanings as `emit_wide_unary`.
+                Op::Add => emit_expr_low64(x),
+                Op::Sub => Some(format!("(-((uint64_t)({})))", emit_expr_low64(x)?)),
+                Op::BitNot => Some(format!("(~((uint64_t)({})))", emit_expr_low64(x)?)),
+                _ => None,
+            }
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            // `emit_wide_ternary` sign-extends both arms into the result width
+            // when both are signed and narrower; a scalar select does not.
+            if true_expr.expr_context().signed && false_expr.expr_context().signed {
+                return None;
+            }
+            Some(format!(
+                "((({c}) != 0) ? ((uint64_t)({t})) : ((uint64_t)({f})))",
+                c = emit_expr(cond)?,
+                t = emit_expr_low64(true_expr)?,
+                f = emit_expr_low64(false_expr)?,
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// Shift amount: the low 64 bits of `y` (Cranelift loads word 0 of the
 /// promoted operand).  A narrow scalar IS that low word; a wide `y` reads
 /// word 0 of its buffer.
 fn wide_shift_amount(y: &ProtoExpression, pre: &mut String) -> Option<String> {
     if y.builds_wide_pointer() {
+        // Only the low 64 bits are read here, so compute just those when the
+        // tree allows it (see `emit_expr_low64`).
+        if let Some(s) = emit_expr_low64(y) {
+            return Some(s);
+        }
         let r = emit_wide_expr(y, pre)?;
         Some(format!("((const veryl_u64_ua*)({}))[0]", r.addr))
     } else {
@@ -14220,6 +14302,54 @@ mod tests {
             !sets[0].contains(&0x10),
             "read-before-write (backward edge) must not localize"
         );
+    }
+
+    /// A wide XOR whose result reaches a one-bit field is emitted as scalar
+    /// C: the wide path would zero-fill a buffer per operand and call the
+    /// helpers, all to deliver one bit.
+    #[test]
+    fn narrow_field_store_of_a_wide_xor_stays_scalar() {
+        let xor = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x100), 1)),
+            op: Op::BitXor,
+            y: Box::new(var_expr(VarOffset::Comb(0x108), 1)),
+            width: 710,
+            expr_context: ctx(710, false),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((0, 0)), xor)).unwrap();
+        assert!(!c.contains("vw_"), "still calls a wide helper: {c}");
+        assert!(!c.contains("= {0}"), "still zero-fills a wide buffer: {c}");
+        assert!(c.contains('^'), "lost the xor: {c}");
+    }
+
+    /// The low bits of a shift depend on bits above them, so the narrowing
+    /// must decline and leave the wide path in place.
+    #[test]
+    fn narrow_field_store_of_a_wide_shift_keeps_the_wide_path() {
+        let shr = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x100), 710)),
+            op: Op::LogicShiftR,
+            y: Box::new(const_expr(4, 8)),
+            width: 710,
+            expr_context: ctx(710, false),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((0, 0)), shr)).unwrap();
+        assert!(c.contains("vw_"), "narrowed a shift: {c}");
+    }
+
+    /// A signed context sign-extends a narrow operand into the high words,
+    /// which a plain scalar read does not reproduce.
+    #[test]
+    fn narrow_field_store_of_a_signed_wide_add_keeps_the_wide_path() {
+        let add = ProtoExpression::Binary {
+            x: Box::new(var_expr_signed(VarOffset::Comb(0x100), 8)),
+            op: Op::Add,
+            y: Box::new(var_expr_signed(VarOffset::Comb(0x108), 8)),
+            width: 710,
+            expr_context: ctx(710, true),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((3, 0)), add)).unwrap();
+        assert!(c.contains("vw_"), "narrowed a signed add: {c}");
     }
 
     #[test]
