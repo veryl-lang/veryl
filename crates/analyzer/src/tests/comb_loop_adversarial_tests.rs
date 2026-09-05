@@ -963,3 +963,54 @@ fn comb_loop_independent_diamonds_merge_without_enumerating_branch_choices() {
         "a budget cutoff is not a proof of absence"
     );
 }
+
+#[test]
+fn comb_loop_many_opposing_shifts_find_a_witness_before_exhausting_search() {
+    for count in [32, 36, 64] {
+        let terms = (1..=count)
+            .flat_map(|n| [format!("(o << {n})"), format!("(o >> {n})")])
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let code = format!("module Top (o: output logic<128>) {{ assign o = {terms}; }}");
+        crate::comb_loop_detect::reset_cycle_search_work();
+        assert_comb_loop(
+            "opposing shifts already contain a feasible cycle",
+            &code,
+            true,
+        );
+        assert!(
+            crate::comb_loop_detect::cycle_search_work() < 100_000,
+            "a cheap witness must not pay for unvisited triples: {}",
+            crate::comb_loop_detect::cycle_search_work()
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_many_exclusive_opposing_shifts_remain_acyclic_and_complete() {
+    const COUNT: usize = 64;
+    let shifts = |op| {
+        (1..=COUNT)
+            .map(|n| format!("(o {op} {n})"))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+    let code = format!(
+        r#"
+        module Top (select: input logic, o: output logic<128>) {{
+            always_comb {{
+                if select {{ o = {}; }} else {{ o = {}; }}
+            }}
+        }}
+        "#,
+        shifts("<<"),
+        shifts(">>"),
+    );
+    assert_comb_loop(
+        "exclusive shifts cannot form an opposing pair",
+        &code,
+        false,
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+}

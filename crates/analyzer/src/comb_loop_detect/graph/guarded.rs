@@ -49,20 +49,19 @@ pub(super) fn guarded_cycle_displacements_cancel(
     cycles: &HashSet<GuardedCycle>,
     budget: &mut SearchBudget,
 ) -> bool {
-    if !budget.spend(cycles.len().saturating_pow(2)) {
-        return false;
-    }
-    let translations = cycles
-        .iter()
-        .filter_map(|cycle| {
-            let (dependency, feasible) = cycle.relation.exact_translation()?;
-            Some(GuardedTranslation {
+    let mut translations = Vec::new();
+    for cycle in cycles {
+        if !budget.spend_product(cycle.relation.piece_count(), 1) {
+            return false;
+        }
+        if let Some((dependency, feasible)) = cycle.relation.exact_translation() {
+            translations.push(GuardedTranslation {
                 dependency,
                 condition: cycle.condition.clone(),
                 feasible,
-            })
-        })
-        .collect::<Vec<_>>();
+            });
+        }
+    }
 
     if guarded_translations_cancel(&translations, budget) {
         return true;
@@ -72,14 +71,19 @@ pub(super) fn guarded_cycle_displacements_cancel(
     }
     for cycle in cycles {
         for translation in &translations {
+            if !budget.spend_conditions(&cycle.condition, &translation.condition) {
+                return false;
+            }
             if cycle
                 .condition
                 .conjoin_if_compatible(&translation.condition)
                 .is_some()
                 && translation.dependency.exact_offset().is_some_and(|offset| {
-                    cycle
-                        .relation
-                        .closes_after_repeating_translation(offset, &translation.feasible)
+                    cycle.relation.closes_after_repeating_translation(
+                        offset,
+                        &translation.feasible,
+                        budget,
+                    )
                 })
             {
                 return true;
@@ -165,44 +169,46 @@ struct GuardedTranslation {
     feasible: Vec<FeasiblePosition>,
 }
 
+fn displacements_have_common_strict_sign(offsets: impl Iterator<Item = (isize, isize)>) -> bool {
+    let mut signs = [true; 4];
+    for (array, packed) in offsets {
+        signs[0] &= array > 0;
+        signs[1] &= array < 0;
+        signs[2] &= packed > 0;
+        signs[3] &= packed < 0;
+    }
+    signs.into_iter().any(|sign| sign)
+}
+
 fn guarded_translations_cancel(cycles: &[GuardedTranslation], budget: &mut SearchBudget) -> bool {
     if !budget.spend(cycles.len().saturating_mul(4)) {
         return false;
     }
     // A common sign on either axis cannot sum to zero. This also avoids the
     // cubic cancellation prefilter for acyclic shift fanout at instance inputs.
-    for array_axis in [true, false] {
-        let offset = |cycle: &GuardedTranslation| {
-            let (array, packed) = cycle.dependency.exact_offset().unwrap();
-            if array_axis { array } else { packed }
-        };
-        if cycles.iter().all(|cycle| offset(cycle) > 0)
-            || cycles.iter().all(|cycle| offset(cycle) < 0)
-        {
-            return false;
-        }
-    }
-    // Account for the transition graph and the pair/triple accelerators before
-    // their nested loops. A large set of distinct first returns is incomplete.
-    let pieces = cycles
-        .iter()
-        .map(|cycle| cycle.feasible.len())
-        .max()
-        .unwrap_or(1);
-    let work = cycles
-        .len()
-        .saturating_pow(3)
-        .saturating_mul(3)
-        .saturating_mul(pieces.saturating_pow(6));
-    if !budget.spend(work) {
+    if displacements_have_common_strict_sign(
+        cycles
+            .iter()
+            .map(|cycle| cycle.dependency.exact_offset().unwrap()),
+    ) {
         return false;
     }
-    for cycles in guarded_transition_components_that_can_cancel(cycles) {
-        // Large regular walks, such as +1 repeated 999_999 times followed by
-        // one -999_999 wrap, are checked from their GCD-derived repetition
-        // counts and interval endpoints. Runtime is independent of the
-        // declared width.
-        if guarded_opposing_pair_closes(&cycles) || guarded_three_cycle_closes(&cycles) {
+    // Look for a feasible opposing pair before constructing the transition
+    // graph. Charge each comparison and composition as it is reached: a
+    // simple witness must not pay for every possible pair and triple.
+    // GCD-derived repetition counts also handle +1 repeated 999_999 times
+    // followed by one -999_999 wrap without enumerating the declared width.
+    let references = cycles.iter().collect::<Vec<_>>();
+    if guarded_opposing_pair_closes(&references, budget) {
+        return true;
+    }
+    let Some(components) = guarded_transition_components_that_can_cancel(cycles, budget) else {
+        return false;
+    };
+    for cycles in components {
+        // Three non-collinear displacements can also cancel. Their repetition
+        // counts and feasible endpoints do not depend on the declared width.
+        if guarded_three_cycle_closes(&cycles, budget) {
             return true;
         }
         // The remaining irregular cases retain the exact cumulative
@@ -233,10 +239,11 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation], budget: &mut Searc
                 let offset = dependency
                     .exact_offset()
                     .expect("an exact guarded walk must retain its displacement");
-                if !budget.spend_product(feasible.len(), cycle.feasible.len()) {
+                let Some(next_feasible) =
+                    compose_feasible_positions(&feasible, offset, &cycle.feasible, budget)
+                else {
                     return false;
-                }
-                let next_feasible = compose_feasible_positions(&feasible, offset, &cycle.feasible);
+                };
                 if next_feasible.is_empty() {
                     continue;
                 }
@@ -264,9 +271,13 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation], budget: &mut Searc
 /// connected component of this coarse transition graph. Rejecting components
 /// that cannot cancel avoids enumerating a declared width when opposing
 /// translations are separated by a positional gap.
-fn guarded_transition_components_that_can_cancel(
-    cycles: &[GuardedTranslation],
-) -> Vec<Vec<&GuardedTranslation>> {
+fn guarded_transition_components_that_can_cancel<'a>(
+    cycles: &'a [GuardedTranslation],
+    budget: &mut SearchBudget,
+) -> Option<Vec<Vec<&'a GuardedTranslation>>> {
+    if !budget.spend(cycles.len()) {
+        return None;
+    }
     let mut transitions = Graph::<usize, ()>::new();
     let nodes = (0..cycles.len())
         .map(|cycle| transitions.add_node(cycle))
@@ -277,11 +288,15 @@ fn guarded_transition_components_that_can_cancel(
             .exact_offset()
             .expect("guarded translations must retain exact offsets");
         for (right_index, right) in cycles.iter().enumerate() {
+            if !budget.spend_conditions(&left.condition, &right.condition) {
+                return None;
+            }
             if left
                 .condition
                 .conjoin_if_compatible(&right.condition)
                 .is_none()
-                || compose_feasible_positions(&left.feasible, offset, &right.feasible).is_empty()
+                || compose_feasible_positions(&left.feasible, offset, &right.feasible, budget)?
+                    .is_empty()
             {
                 continue;
             }
@@ -289,25 +304,38 @@ fn guarded_transition_components_that_can_cancel(
         }
     }
 
-    kosaraju_scc(&transitions)
-        .into_iter()
-        .filter_map(|component| {
-            let cycles = component
-                .into_iter()
-                .map(|node| &cycles[transitions[node]])
-                .collect::<Vec<_>>();
-            let displacements = cycles
-                .iter()
-                .map(|cycle| (cycle.dependency, cycle.condition.clone()))
-                .collect();
-            compatible_cycle_displacements_cancel(&displacements).then_some(cycles)
-        })
-        .collect()
+    if !budget.spend(
+        transitions
+            .node_count()
+            .saturating_add(transitions.edge_count()),
+    ) {
+        return None;
+    }
+    let mut components = Vec::new();
+    for component in kosaraju_scc(&transitions) {
+        let cycles = component
+            .into_iter()
+            .map(|node| &cycles[transitions[node]])
+            .collect::<Vec<_>>();
+        let displacements = cycles
+            .iter()
+            .map(|cycle| (cycle.dependency, cycle.condition.clone()))
+            .collect();
+        if compatible_cycle_displacements_cancel(&displacements, budget) {
+            components.push(cycles);
+        } else if budget.exhausted {
+            return None;
+        }
+    }
+    Some(components)
 }
 
-fn guarded_opposing_pair_closes(cycles: &[&GuardedTranslation]) -> bool {
+fn guarded_opposing_pair_closes(cycles: &[&GuardedTranslation], budget: &mut SearchBudget) -> bool {
     for left in 0..cycles.len() {
         for right in (left + 1)..cycles.len() {
+            if !budget.spend_conditions(&cycles[left].condition, &cycles[right].condition) {
+                return false;
+            }
             if cycles[left]
                 .condition
                 .conjoin_if_compatible(&cycles[right].condition)
@@ -335,31 +363,15 @@ fn guarded_opposing_pair_closes(cycles: &[&GuardedTranslation]) -> bool {
             else {
                 continue;
             };
-            let Some(left_walk) = repeat_guarded_cycle(cycles[left], left_count) else {
+            let Some(left_walk) = repeat_guarded_cycle(cycles[left], left_count, budget) else {
                 continue;
             };
-            let Some(right_walk) = repeat_guarded_cycle(cycles[right], right_count) else {
+            let Some(right_walk) = repeat_guarded_cycle(cycles[right], right_count, budget) else {
                 continue;
             };
             debug_assert_eq!(left_walk.0.compose(right_walk.0), BitDependency::identity());
-            if !compose_feasible_positions(
-                &left_walk.1,
-                left_walk
-                    .0
-                    .exact_offset()
-                    .expect("an exact cycle stays exact"),
-                &right_walk.1,
-            )
-            .is_empty()
-                || !compose_feasible_positions(
-                    &right_walk.1,
-                    right_walk
-                        .0
-                        .exact_offset()
-                        .expect("an exact cycle stays exact"),
-                    &left_walk.1,
-                )
-                .is_empty()
+            if compose_guarded_walk(&left_walk, &right_walk, budget).is_some()
+                || compose_guarded_walk(&right_walk, &left_walk, budget).is_some()
             {
                 return true;
             }
@@ -368,7 +380,7 @@ fn guarded_opposing_pair_closes(cycles: &[&GuardedTranslation]) -> bool {
     false
 }
 
-fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation]) -> bool {
+fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation], budget: &mut SearchBudget) -> bool {
     const ORDERS: [[usize; 3]; 6] = [
         [0, 1, 2],
         [0, 2, 1],
@@ -379,6 +391,9 @@ fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation]) -> bool {
     ];
     for first in 0..cycles.len() {
         for second in (first + 1)..cycles.len() {
+            if !budget.spend_conditions(&cycles[first].condition, &cycles[second].condition) {
+                return false;
+            }
             let Some(condition) = cycles[first]
                 .condition
                 .conjoin_if_compatible(&cycles[second].condition)
@@ -386,6 +401,9 @@ fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation]) -> bool {
                 continue;
             };
             for third in (second + 1)..cycles.len() {
+                if !budget.spend_conditions(&condition, &cycles[third].condition) {
+                    return false;
+                }
                 if condition
                     .conjoin_if_compatible(&cycles[third].condition)
                     .is_none()
@@ -425,15 +443,16 @@ fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation]) -> bool {
                 let Some(walks) = selected
                     .iter()
                     .zip(counts)
-                    .map(|(cycle, count)| repeat_guarded_cycle(cycle, count))
+                    .map(|(cycle, count)| repeat_guarded_cycle(cycle, count, budget))
                     .collect::<Option<Vec<_>>>()
                     .and_then(|walks| <[_; 3]>::try_from(walks).ok())
                 else {
                     continue;
                 };
                 for order in ORDERS {
-                    let Some(combined) = compose_guarded_walk(&walks[order[0]], &walks[order[1]])
-                        .and_then(|walk| compose_guarded_walk(&walk, &walks[order[2]]))
+                    let Some(combined) =
+                        compose_guarded_walk(&walks[order[0]], &walks[order[1]], budget)
+                            .and_then(|walk| compose_guarded_walk(&walk, &walks[order[2]], budget))
                     else {
                         continue;
                     };
@@ -450,8 +469,9 @@ fn guarded_three_cycle_closes(cycles: &[&GuardedTranslation]) -> bool {
 fn compose_guarded_walk(
     left: &(BitDependency, Vec<FeasiblePosition>),
     right: &(BitDependency, Vec<FeasiblePosition>),
+    budget: &mut SearchBudget,
 ) -> Option<(BitDependency, Vec<FeasiblePosition>)> {
-    let feasible = compose_feasible_positions(&left.1, left.0.exact_offset()?, &right.1);
+    let feasible = compose_feasible_positions(&left.1, left.0.exact_offset()?, &right.1, budget)?;
     (!feasible.is_empty()).then_some((left.0.compose(right.0), feasible))
 }
 
@@ -481,7 +501,11 @@ fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
 fn repeat_guarded_cycle(
     cycle: &GuardedTranslation,
     count: usize,
+    budget: &mut SearchBudget,
 ) -> Option<(BitDependency, Vec<FeasiblePosition>)> {
+    if !budget.spend_product(cycle.feasible.len(), 1) {
+        return None;
+    }
     let offset = cycle.dependency.exact_offset()?;
     let repetitions = count.checked_sub(1)?;
     let repetitions = isize::try_from(repetitions).ok()?;
@@ -553,7 +577,11 @@ fn compose_feasible_positions(
     current: &[FeasiblePosition],
     current_offset: (isize, isize),
     next: &[FeasiblePosition],
-) -> Vec<FeasiblePosition> {
+    budget: &mut SearchBudget,
+) -> Option<Vec<FeasiblePosition>> {
+    if !budget.spend_product(current.len(), next.len()) {
+        return None;
+    }
     let mut result = Vec::new();
     for &current in current {
         for &next in next {
@@ -570,7 +598,7 @@ fn compose_feasible_positions(
     }
     result.sort_unstable();
     result.dedup();
-    result
+    Some(result)
 }
 
 fn translate_axis_to_initial(
@@ -606,7 +634,11 @@ fn axis_contains(outer: Option<(isize, isize)>, inner: Option<(isize, isize)>) -
 
 pub(super) fn compatible_cycle_displacements_cancel(
     cycles: &HashSet<(BitDependency, PathCondition)>,
+    budget: &mut SearchBudget,
 ) -> bool {
+    if !budget.spend(cycles.len().saturating_mul(4)) {
+        return false;
+    }
     // A closed walk is a non-negative combination of its coarse cycles. In
     // two positional dimensions, a zero displacement needs at most three
     // cycle vectors. Keep the associated path conditions so mutually
@@ -618,8 +650,17 @@ pub(super) fn compatible_cycle_displacements_cancel(
         })
         .collect();
 
+    // A transition component can have a common sign even when the full set
+    // did not, for example when opposite shifts occur in exclusive arms.
+    if displacements_have_common_strict_sign(exact.iter().map(|(offset, _)| *offset)) {
+        return false;
+    }
+
     for left in 0..exact.len() {
         for right in (left + 1)..exact.len() {
+            if !budget.spend_conditions(exact[left].1, exact[right].1) {
+                return false;
+            }
             let Some(condition) = exact[left].1.conjoin_if_compatible(exact[right].1) else {
                 continue;
             };
@@ -627,6 +668,9 @@ pub(super) fn compatible_cycle_displacements_cancel(
                 return true;
             }
             for third in (right + 1)..exact.len() {
+                if !budget.spend_conditions(&condition, exact[third].1) {
+                    return false;
+                }
                 if condition.conjoin_if_compatible(exact[third].1).is_some()
                     && origin_is_in_positive_cone(exact[left].0, exact[right].0, exact[third].0)
                 {

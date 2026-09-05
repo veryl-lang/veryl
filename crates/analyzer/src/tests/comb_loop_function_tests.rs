@@ -2339,6 +2339,193 @@ fn comb_loop_function_copyout_dynamic_array_copies_value_to_each_candidate() {
 }
 
 #[test]
+fn comb_loop_function_copyout_dynamic_array_preserves_packed_position() {
+    for index in ["external", "0"] {
+        for element in [0, 1] {
+            for bit in [0, 1] {
+                let code = format!(
+                    r#"
+                    module Top (external: input logic, o: output logic) {{
+                        var values: logic<2>[2];
+                        var feedback: logic;
+                        function set (src: input logic, dst: output logic<2>) {{
+                            dst = {{src, 1'b0}};
+                        }}
+                        always_comb {{
+                            values = '{{default: 0}};
+                            set(feedback, values[{index}]);
+                        }}
+                        assign feedback = values[{element}][{bit}];
+                        assign o = feedback;
+                    }}
+                    "#
+                );
+                assert_comb_loop(
+                    &format!("copy-out to [{index}], reading [{element}][{bit}]"),
+                    &code,
+                    bit == 1 && (index == "external" || element == 0),
+                );
+                assert!(comb_loop_analysis_is_complete(&code));
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_function_copyin_converts_actual_type() {
+    for (actual, formal, source_bit, result_bit, expected) in [
+        ("i8", "i16", 7, 15, true),
+        ("i8", "u16", 7, 15, true),
+        ("u8", "i16", 7, 15, false),
+        ("u8", "u16", 7, 15, false),
+        ("i8", "i16", 0, 15, false),
+        ("i8", "i16", 7, 0, false),
+        ("i16", "i8", 15, 7, false),
+        ("i16", "i8", 7, 7, true),
+    ] {
+        let code = format!(
+            r#"
+            module Top (o: output logic) {{
+                var feedback: logic;
+                var value: {actual};
+                function read_bit (x: input {formal}) -> logic {{ return x[{result_bit}]; }}
+                assign value = (feedback as {actual}) << {source_bit};
+                assign feedback = read_bit(value);
+                assign o = feedback;
+            }}
+            "#
+        );
+        assert_comb_loop(
+            &format!("copy-in {actual}[{source_bit}] -> {formal}[{result_bit}]"),
+            &code,
+            expected,
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_function_copyin_sign_extension_preserves_array_elements() {
+    for element in [0, 1] {
+        let code = format!(
+            r#"
+            module Top (o: output logic) {{
+                var feedback: logic;
+                var values: i8[2];
+                function high (x: input i16[2]) -> logic {{ return x[{element}][15]; }}
+                assign values[0] = {{feedback, 7'b0}} as i8;
+                assign values[1] = 0;
+                assign feedback = high(values);
+                assign o = feedback;
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "{errors:#?}"
+        );
+        assert_eq!(!errors.is_empty(), element == 0);
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_function_copyout_dynamic_array_converts_before_slicing() {
+    for (actual, read_bit, expected) in [
+        ("values[external][17:2]", 0, false),
+        ("values[external][17:2]", 2, false),
+        ("values[external][17:2]", 9, true),
+        ("values[external][17:2]", 17, true),
+        ("{values[external][15:8], values[external][7:0]}", 0, false),
+        ("{values[external][15:8], values[external][7:0]}", 7, true),
+        ("{values[external][15:8], values[external][7:0]}", 15, true),
+    ] {
+        let code = format!(
+            r#"
+            module Top (external: input logic, o: output logic) {{
+                var feedback: logic;
+                var values: logic<18>[2];
+                function set (src: input logic, dst: output i8) {{
+                    dst = {{src, 7'b0}} as i8;
+                }}
+                always_comb {{
+                    values = '{{default: 0}};
+                    set(feedback, {actual});
+                }}
+                assign feedback = values[1][{read_bit}];
+                assign o = feedback;
+            }}
+            "#
+        );
+        assert_comb_loop(
+            &format!("signed copy-out to {actual}, bit {read_bit}"),
+            &code,
+            expected,
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_function_copyout_sign_extension_preserves_array_elements() {
+    for element in [0, 1] {
+        let code = format!(
+            r#"
+            module Top (o: output logic) {{
+                var feedback: logic;
+                var values: i16[2];
+                function set (src: input logic, dst: output i8[2]) {{
+                    dst[0] = {{src, 7'b0}} as i8;
+                    dst[1] = 0;
+                }}
+                always_comb {{
+                    values = '{{default: 0}};
+                    set(feedback, values);
+                }}
+                assign feedback = values[{element}][15];
+                assign o = feedback;
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "{errors:#?}"
+        );
+        assert_eq!(!errors.is_empty(), element == 0);
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_function_copyin_samples_side_effecting_actual_once() {
+    assert_comb_loop(
+        "copy-in widening must reuse the sampled value across formal regions",
+        r#"
+        module Top (o: output logic) {
+            var feedback: logic;
+            function sample () -> i8 {
+                let previous: logic = feedback;
+                feedback = 0;
+                return {previous, 7'b0} as i8;
+            }
+            function high (x: input i16) -> logic { return x[15] | x[0]; }
+            always_comb {
+                feedback = high(sample());
+                o = feedback;
+            }
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
 fn function_summary_instance_actual_preserves_shift_fanout_dag() {
     const STAGES: usize = 18;
     const WIDTH: usize = 1 << (STAGES + 1);

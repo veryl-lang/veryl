@@ -2452,37 +2452,34 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .unwrap_or_default();
         if context_width > expression_width
             && expression.comptime().r#type.signed
-            && requested.end() > expression_width
             && expression_width != 0
+            && let Some(extension) = requested.intersection(PackedSpan {
+                start: expression_width,
+                length: context_width - expression_width,
+            })
         {
-            let mut sign = self.eval_expr_bits_in(
-                expression,
-                requested_array,
-                PackedSpan {
-                    start: expression_width - 1,
-                    length: 1,
-                },
-                projection,
-            );
-            sign.widen_all();
-            reads.extend(sign);
+            let sign_span = PackedSpan {
+                start: expression_width - 1,
+                length: 1,
+            };
+            let mut sign =
+                self.eval_expr_bits_in(expression, requested_array, sign_span, projection);
+            if projection.destination_array.is_some() {
+                // Assignment projections can use destination array coordinates
+                // for affine dynamic indices. Keep their conservative sign
+                // dependency instead of projecting those positions onto the
+                // expression's zero-based array coordinates.
+                sign.widen_all();
+                reads.extend(sign);
+            } else {
+                let sign = self.ssa.related_definition(sign.sources);
+                let extended =
+                    self.project_sign_extension(sign, requested_array, sign_span, extension);
+                reads.push(extended, PositionRelation::default());
+            }
         }
         reads.normalize();
         reads
-    }
-
-    fn eval_expr_bits(
-        &mut self,
-        expression: &Expression,
-        requested_array: ArraySpan,
-        requested: PackedSpan,
-    ) -> ExpressionSources {
-        self.eval_expr_bits_in(
-            expression,
-            requested_array,
-            requested,
-            &ProjectionContext::default(),
-        )
     }
 
     fn eval_expr_bits_in(
@@ -3717,7 +3714,35 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Some(span) = self.key_span(formal_key) else {
             return ExpressionSources::whole(self.eval_expr(actual));
         };
-        self.eval_expr_bits(actual, formal_key.1, span)
+        let context_width = self
+            .ctx
+            .variables
+            .get(&formal_key.0)
+            .and_then(|variable| variable.r#type.total_width())
+            .unwrap_or(span.end());
+        self.eval_expr_requested(actual, formal_key.1, span, context_width)
+    }
+
+    fn project_sign_extension(
+        &mut self,
+        version: VersionId,
+        array: ArraySpan,
+        sign: PackedSpan,
+        extension: PackedSpan,
+    ) -> VersionId {
+        // Project before replication so a coarse source region cannot make
+        // non-sign bits contribute. Preserve the array axis and restrict the
+        // result to the widened portion before translating to the destination.
+        let sign = self.ssa.projected(version, position_domain(array, sign));
+        let extended = self.ssa.related_definition(vec![(
+            sign,
+            PositionRelation {
+                array: Some(0),
+                packed: None,
+            },
+        )]);
+        self.ssa
+            .projected(extended, position_domain(array, extension))
     }
 
     fn write_formal_outputs(
@@ -3802,35 +3827,33 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     .next()
             })
             .flatten();
-        let position_offset = destination_array
-            .zip(selected)
-            .and_then(|(array, (_, low))| {
-                Some(PositionRelation {
-                    array: Some(isize::try_from(array.start).ok()?),
-                    packed: Some(signed_difference(low, formal_offset)?),
-                })
-            });
+        // An unknown array selector loses only the array correspondence.
+        // Packed bits still copy to their corresponding destination bits.
+        let position_offset = PositionRelation {
+            array: destination_array.and_then(|array| isize::try_from(array.start).ok()),
+            packed: selected.and_then(|(_, low)| signed_difference(low, formal_offset)),
+        };
         let dynamic = self.destination_is_dynamic(destination);
         for key in self.write_keys(destination) {
             let mut positional = Vec::new();
             let mut whole = selectors.to_vec();
-            if let (Some(destination_array), Some((_, low)), Some(span), Some(position_offset)) = (
-                destination_array,
-                selected,
-                self.key_span(key),
-                position_offset,
-            ) {
-                if let (Some(requested_array), Some(requested)) = (
-                    key.1
-                        .intersection(destination_array)
-                        .and_then(|array| array.translated(destination_array.start, 0)),
-                    span.translated(low, formal_offset)
-                        .and_then(|span| PackedSpan::whole(context_width)?.intersection(span)),
-                ) {
+            if let (Some((_, low)), Some(span)) = (selected, self.key_span(key)) {
+                if let Some(requested) = span
+                    .translated(low, formal_offset)
+                    .and_then(|span| PackedSpan::whole(context_width)?.intersection(span))
+                {
                     for (formal_key, version) in formal_versions {
-                        if !formal_key.1.overlaps(requested_array) {
+                        let requested_array = if let Some(destination_array) = destination_array {
+                            key.1
+                                .intersection(destination_array)
+                                .and_then(|array| array.translated(destination_array.start, 0))
+                                .and_then(|array| array.intersection(formal_key.1))
+                        } else {
+                            Some(formal_key.1)
+                        };
+                        let Some(requested_array) = requested_array else {
                             continue;
-                        }
+                        };
                         let Some(formal_span) = self.key_span(*formal_key) else {
                             continue;
                         };
@@ -3853,23 +3876,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             if formal_span.overlaps(sign)
                                 && let Some(extension) = requested.intersection(extension)
                             {
-                                // Replicate only the sign bit, and constrain
-                                // the result to the widened portion. Keeping
-                                // both projections avoids inventing a path
-                                // from the sign to an unchanged lower bit.
-                                let sign = self
-                                    .ssa
-                                    .projected(*version, position_domain(requested_array, sign));
-                                let extended = self.ssa.related_definition(vec![(
+                                let extended = self.project_sign_extension(
+                                    *version,
+                                    requested_array,
                                     sign,
-                                    PositionRelation {
-                                        array: Some(0),
-                                        packed: None,
-                                    },
-                                )]);
-                                let extended = self.ssa.projected(
-                                    extended,
-                                    position_domain(requested_array, extension),
+                                    extension,
                                 );
                                 positional.push((extended, position_offset));
                             }

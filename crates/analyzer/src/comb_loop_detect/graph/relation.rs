@@ -31,7 +31,7 @@
 //! repeated product are required to be representable in `isize`; composition
 //! fails the construction invariant instead of weakening overflow to WHOLE.
 
-use super::FeasiblePosition;
+use super::{FeasiblePosition, SearchBudget};
 use crate::comb_loop_detect::model::BitDependency;
 use crate::comb_loop_detect::ssa::PositionDomain;
 
@@ -211,9 +211,13 @@ impl PositionRelationSet {
         &self,
         offset: (isize, isize),
         guards: &[FeasiblePosition],
+        budget: &mut SearchBudget,
     ) -> bool {
         for piece in &self.pieces {
             for &guard in guards {
+                if !budget.spend(1) {
+                    return false;
+                }
                 let mut exact_count = None;
                 if !linked_repetition_count(piece.array, offset.0, &mut exact_count)
                     || !linked_repetition_count(piece.packed, offset.1, &mut exact_count)
@@ -221,7 +225,7 @@ impl PositionRelationSet {
                     continue;
                 }
                 if let Some(count) = exact_count {
-                    if self.closes_after_translation_count(offset, guard, count) {
+                    if self.closes_after_translation_count(offset, guard, count, budget) {
                         return true;
                     }
                     continue;
@@ -239,7 +243,7 @@ impl PositionRelationSet {
                 {
                     continue;
                 }
-                if self.closes_after_translation_count(offset, guard, bounds.0) {
+                if self.closes_after_translation_count(offset, guard, bounds.0, budget) {
                     return true;
                 }
             }
@@ -252,6 +256,7 @@ impl PositionRelationSet {
         offset: (isize, isize),
         guard: FeasiblePosition,
         count: isize,
+        budget: &mut SearchBudget,
     ) -> bool {
         let Some(repetitions) = count.checked_sub(1) else {
             return false;
@@ -283,7 +288,8 @@ impl PositionRelationSet {
                 start: packed_start,
             },
         }]);
-        self.then(&translation).intersects_identity()
+        budget.spend_product(self.piece_count(), translation.piece_count())
+            && self.then(&translation).intersects_identity()
     }
 
     fn normalized(mut pieces: Vec<RelationPiece>) -> Self {

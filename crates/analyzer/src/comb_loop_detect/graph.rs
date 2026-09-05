@@ -294,6 +294,14 @@ impl SearchBudget {
         self.spend(pieces.saturating_pow(2).saturating_add(1))
     }
 
+    fn spend_conditions(&mut self, left: &PathCondition, right: &PathCondition) -> bool {
+        self.spend(
+            left.branch_count()
+                .saturating_add(right.branch_count())
+                .saturating_add(1),
+        )
+    }
+
     fn spend(&mut self, work: usize) -> bool {
         if self.exhausted || work > self.remaining {
             self.exhausted = true;
@@ -431,16 +439,18 @@ fn has_compatible_cycle_with_budget(
     {
         return false;
     }
-    let nodes: HashSet<_> = scc.iter().copied().collect();
+    let mut nodes: HashSet<_> = scc.iter().copied().collect();
     if has_zero_dependency_cycle(graph, scc, &nodes, budget) {
         return true;
     }
-    // Returning to the anchor ends the first-return search, so choosing a
-    // broad domain first keeps that domain out of the internal search state.
-    // This is important for sparse graphs with a wide repeated shift and a
-    // narrow wrap region; correctness does not depend on the order.
+    // Prefer a finite domain to constrain first returns through unbounded
+    // expression nodes. Within finite domains, starting with the broadest
+    // keeps a wide repeated shift out of the internal search state when a
+    // narrow wrap region also exists. Correctness does not depend on order.
     let mut starts = scc.to_vec();
-    starts.sort_unstable_by_key(|&node| std::cmp::Reverse(domain_area(&graph[node])));
+    starts.sort_unstable_by_key(|&node| {
+        std::cmp::Reverse((!graph[node].domains.is_empty(), domain_area(&graph[node])))
+    });
     for start in starts {
         if !budget.spend(scc.len()) {
             return false;
@@ -514,6 +524,13 @@ fn has_compatible_cycle_with_budget(
         if guarded_cycle_displacements_cancel(&cycles, budget) {
             return true;
         }
+        if budget.exhausted {
+            return false;
+        }
+        // All feasible closed walks through this anchor have been rejected.
+        // Any remaining cycle avoids it, so later anchors need not enumerate
+        // those same walks again (including loops inside expression arms).
+        nodes.remove(&start);
     }
     false
 }
@@ -1503,7 +1520,10 @@ mod tests {
         .into_iter()
         .collect();
 
-        assert!(compatible_cycle_displacements_cancel(&cycles));
+        assert!(compatible_cycle_displacements_cancel(
+            &cycles,
+            &mut SearchBudget::new()
+        ));
     }
 
     #[test]
@@ -1528,7 +1548,10 @@ mod tests {
         .into_iter()
         .collect();
 
-        assert!(!compatible_cycle_displacements_cancel(&cycles));
+        assert!(!compatible_cycle_displacements_cancel(
+            &cycles,
+            &mut SearchBudget::new()
+        ));
     }
 
     #[test]
@@ -1560,7 +1583,10 @@ mod tests {
         .into_iter()
         .collect();
 
-        assert!(compatible_cycle_displacements_cancel(&cycles));
+        assert!(compatible_cycle_displacements_cancel(
+            &cycles,
+            &mut SearchBudget::new()
+        ));
     }
 
     #[test]
@@ -1918,8 +1944,41 @@ mod tests {
             );
         }
         with_cycle_search_limit(1_000, || {
-            assert_eq!(compatible_cycle(&graph, &[node]), None)
+            assert_eq!(compatible_cycle(&graph, &[node]), Some(true))
         });
+        with_cycle_search_limit(100, || assert_eq!(compatible_cycle(&graph, &[node]), None));
         assert_eq!(compatible_cycle(&graph, &[node]), Some(true));
+    }
+
+    #[test]
+    fn cancellation_prefilters_stop_without_claiming_acyclicity() {
+        let mut graph = DependencyGraph::new();
+        let node = graph.add_node(test_node(
+            0,
+            ArraySpan {
+                start: 0,
+                length: 128,
+            },
+        ));
+        // Every edge increases array + packed by one, but neither individual
+        // axis has a common sign. Proving absence requires the transition and
+        // cancellation prefilters, including their pair/triple comparisons.
+        for offset in -12..=12 {
+            add_dependency_edge(
+                &mut graph,
+                node,
+                node,
+                GraphDependency::unconditional(BitDependency {
+                    array: Some(offset),
+                    packed: Some(1 - offset),
+                }),
+            );
+        }
+        for limit in [1_000, 3_000] {
+            with_cycle_search_limit(limit, || {
+                assert_eq!(compatible_cycle(&graph, &[node]), None)
+            });
+        }
+        assert_eq!(compatible_cycle(&graph, &[node]), Some(false));
     }
 }

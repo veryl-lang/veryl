@@ -880,6 +880,33 @@ fn comb_loop_signed_extension_retains_sign_bit() {
 }
 
 #[test]
+fn comb_loop_signed_extension_keeps_dynamic_array_destination_coordinates() {
+    for (bit, expected) in [(15, true), (0, false)] {
+        assert_comb_loop(
+            "sign replication must not project a dynamic destination back to element zero",
+            &format!(
+                r#"
+                module Top (index: input logic, o: output logic) {{
+                    var feedback: logic;
+                    var narrow: i8[2];
+                    var wide: i16[2];
+                    assign narrow[0] = 0;
+                    assign narrow[1] = {{feedback, 7'b0}} as i8;
+                    always_comb {{
+                        wide = '{{default: 0}};
+                        wide[index] = narrow[index];
+                    }}
+                    assign feedback = wide[1][{bit}];
+                    assign o = feedback;
+                }}
+                "#
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
 fn comb_loop_ternary_preserves_unsigned_zero_extension() {
     assert_comb_loop(
         "a ternary preserves unsigned zero extension",
