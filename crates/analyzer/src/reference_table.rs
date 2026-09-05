@@ -133,8 +133,8 @@ pub struct ReferenceTable {
     testbench_hier_root: Option<TokenId>,
 }
 
-/// A path whose first segment is a module instance inside a `#[test]` module
-/// is a hierarchical testbench reference.
+/// A path whose first segment is a module instance inside a `#[test]` or
+/// `#[testbench]` module is a hierarchical testbench reference.
 fn is_testbench_hier_ref(
     path: &GenericSymbolPath,
     scope: scope::ScopeId,
@@ -150,7 +150,7 @@ fn is_testbench_hier_ref(
     if let Some(ns_symbol) = symbol_table::get_namespace_symbol(&symbol.found.namespace)
         && let SymbolKind::Module(x) = &ns_symbol.kind
     {
-        x.test.is_some()
+        x.test.is_some() || x.testbench
     } else {
         false
     }
