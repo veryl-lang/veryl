@@ -60,6 +60,11 @@ enum Version<K> {
         source: VersionId,
         domain: PositionDomain,
     },
+    Replicated {
+        source: VersionId,
+        domain: PositionDomain,
+        stride: isize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -367,6 +372,11 @@ pub(super) struct PositionRelation {
 pub(super) enum DependencyDagNode<K> {
     External(K),
     Internal,
+    /// Zero or more positive packed translations within this node's domain.
+    /// Kept as an operation in the DAG; only the circuit graph adds a self edge.
+    Replicated {
+        stride: isize,
+    },
 }
 
 #[derive(Clone)]
@@ -596,6 +606,22 @@ where
         version
     }
 
+    pub(super) fn replicated(
+        &mut self,
+        source: VersionId,
+        domain: PositionDomain,
+        stride: isize,
+    ) -> VersionId {
+        assert!(stride > 0, "replication must advance the packed position");
+        let version = self.versions.len();
+        self.versions.push(Version::Replicated {
+            source,
+            domain,
+            stride,
+        });
+        version
+    }
+
     pub(super) fn has_structural_dependency(&self, version: VersionId) -> bool {
         let mut visited = HashSet::default();
         let mut queue = VecDeque::from([version]);
@@ -604,7 +630,9 @@ where
                 continue;
             }
             match &self.versions[version] {
-                Version::Imported { .. } | Version::Projected { .. } => return true,
+                Version::Imported { .. }
+                | Version::Projected { .. }
+                | Version::Replicated { .. } => return true,
                 Version::Definition { sources, .. } => {
                     queue.extend(sources.iter().map(|(source, _)| *source));
                 }
@@ -826,7 +854,9 @@ where
                         }
                     }
                 }
-                Version::Projected { source, .. } => enqueue((*source, true)),
+                Version::Projected { source, .. } | Version::Replicated { source, .. } => {
+                    enqueue((*source, true))
+                }
             }
         }
 
@@ -940,6 +970,23 @@ where
                         .into_iter()
                         .collect();
                     Some(builder.internal(inputs, vec![*domain], site))
+                }
+                Version::Replicated {
+                    source,
+                    domain,
+                    stride,
+                } => {
+                    let inputs = mapped[&(*source, true)]
+                        .map(|source| {
+                            (
+                                source,
+                                PositionRelation::default(),
+                                PathCondition::default(),
+                            )
+                        })
+                        .into_iter()
+                        .collect();
+                    Some(builder.replicated(inputs, vec![*domain], site, *stride))
                 }
             };
             mapped.insert(state, node);
@@ -1070,6 +1117,21 @@ where
                 Version::Projected { source, .. } => {
                     enqueue((*source, true, relation), condition);
                 }
+                Version::Replicated { source, .. } => {
+                    // Scalar source queries cannot represent periodic positions.
+                    // Exact positional consumers retain the structural operation.
+                    enqueue(
+                        (
+                            *source,
+                            true,
+                            PositionRelation {
+                                packed: None,
+                                ..relation
+                            },
+                        ),
+                        condition,
+                    );
+                }
             }
         }
         let sources = Rc::new(sources);
@@ -1108,6 +1170,14 @@ where
             merge_source(&mut sources, (key, relation), condition);
             continue;
         }
+        let relation = if matches!(graph.nodes[node], DependencyDagNode::Replicated { .. }) {
+            PositionRelation {
+                packed: None,
+                ..relation
+            }
+        } else {
+            relation
+        };
         for edge in incoming.get(&node).into_iter().flatten() {
             let Some(next_condition) = condition.conjoin_if_compatible(&edge.condition) else {
                 continue;
@@ -1198,7 +1268,11 @@ where
                 .filter_map(|input| mapped.get(input).copied())
                 .collect(),
         });
-        let node = builder.internal(inputs, graph.domains[child].clone(), site);
+        let node = if let DependencyDagNode::Replicated { stride } = child_node {
+            builder.replicated(inputs, graph.domains[child].clone(), site, *stride)
+        } else {
+            builder.internal(inputs, graph.domains[child].clone(), site)
+        };
         mapped.insert(child, node);
     }
     mapped.get(&root).copied()

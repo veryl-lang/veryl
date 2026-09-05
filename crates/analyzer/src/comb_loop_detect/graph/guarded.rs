@@ -26,9 +26,10 @@
 //! appending every first-return relation thereafter. Relational composition is
 //! exact, and discarding a state only when a weaker condition carries a
 //! superset relation is safe by monotonicity of composition. The specialized
-//! repeated-translation checks only return after constructing a feasible
-//! composition that intersects identity, so they are witness-preserving
-//! accelerators rather than additional approximations.
+//! repeated-translation checks construct a feasible composition intersecting
+//! identity. A pair with a fixed return coordinate also admits an exact
+//! negative decision: every intervening run has a unique length, whose
+//! divisibility and endpoint extrema decide feasibility without enumeration.
 
 use super::relation::PositionRelationSet;
 use super::{FeasiblePosition, SearchBudget, insert_cycle_state, intersect_axis};
@@ -199,6 +200,9 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation], budget: &mut Searc
     // GCD-derived repetition counts also handle +1 repeated 999_999 times
     // followed by one -999_999 wrap without enumerating the declared width.
     let references = cycles.iter().collect::<Vec<_>>();
+    if let Some(closes) = fixed_coordinate_pair_closes(&references, budget) {
+        return closes;
+    }
     if guarded_opposing_pair_closes(&references, budget) {
         return true;
     }
@@ -206,6 +210,12 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation], budget: &mut Searc
         return false;
     };
     for cycles in components {
+        if let Some(closes) = fixed_coordinate_pair_closes(&cycles, budget) {
+            if closes {
+                return true;
+            }
+            continue;
+        }
         // Three non-collinear displacements can also cancel. Their repetition
         // counts and feasible endpoints do not depend on the declared width.
         if guarded_three_cycle_closes(&cycles, budget) {
@@ -263,6 +273,112 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation], budget: &mut Searc
         }
     }
     false
+}
+
+/// If one translation can start only at one coordinate, every closed word
+/// using it must return to that coordinate before using it again. With just
+/// one other translation, the intervening run has a uniquely determined
+/// length. Divisibility and the extrema of that run decide both feasibility
+/// and infeasibility without enumerating the coordinate range. Require one
+/// rectangular run guard: a union could admit steps in different rectangles.
+fn fixed_coordinate_pair_closes(
+    cycles: &[&GuardedTranslation],
+    budget: &mut SearchBudget,
+) -> Option<bool> {
+    let [first, second] = cycles else {
+        return None;
+    };
+    for (anchor, run) in [(first, second), (second, first)] {
+        let [run_guard] = run.feasible.as_slice() else {
+            continue;
+        };
+        let anchor_offset = anchor.dependency.exact_offset()?;
+        let run_offset = run.dependency.exact_offset()?;
+        if anchor_offset == (0, 0) || run_offset == (0, 0) {
+            return None;
+        }
+        for packed in [false, true] {
+            if !budget.spend(anchor.feasible.len().saturating_add(1)) {
+                return None;
+            }
+            let coordinate =
+                |guard: &FeasiblePosition| if packed { guard.packed } else { guard.array };
+            let Some(fixed) = anchor.feasible.first().and_then(coordinate) else {
+                continue;
+            };
+            if fixed.1 as i128 - fixed.0 as i128 != 1
+                || !anchor
+                    .feasible
+                    .iter()
+                    .all(|guard| coordinate(guard) == Some(fixed))
+            {
+                continue;
+            }
+            let (jump, step) = if packed {
+                (anchor_offset.1 as i128, run_offset.1 as i128)
+            } else {
+                (anchor_offset.0 as i128, run_offset.0 as i128)
+            };
+            if step == 0 {
+                continue;
+            }
+            if -jump % step != 0 || -jump / step <= 0 {
+                return Some(false);
+            }
+            let count = -jump / step;
+            if anchor_offset.0 as i128 + count * run_offset.0 as i128 != 0
+                || anchor_offset.1 as i128 + count * run_offset.1 as i128 != 0
+            {
+                return Some(false);
+            }
+            if !budget.spend_conditions(&anchor.condition, &run.condition) {
+                return None;
+            }
+            if anchor
+                .condition
+                .conjoin_if_compatible(&run.condition)
+                .is_none()
+            {
+                return Some(false);
+            }
+            return Some(anchor.feasible.iter().any(|guard| {
+                fixed_return_axis_is_feasible(
+                    guard.array,
+                    run_guard.array,
+                    anchor_offset.0,
+                    run_offset.0,
+                    count,
+                ) && fixed_return_axis_is_feasible(
+                    guard.packed,
+                    run_guard.packed,
+                    anchor_offset.1,
+                    run_offset.1,
+                    count,
+                )
+            }));
+        }
+    }
+    None
+}
+
+fn fixed_return_axis_is_feasible(
+    anchor: Option<(isize, isize)>,
+    run: Option<(isize, isize)>,
+    jump: isize,
+    step: isize,
+    count: i128,
+) -> bool {
+    let Some((low, high)) = run else {
+        return true;
+    };
+    let first = jump as i128;
+    let last = first + (count - 1) * step as i128;
+    let low = low as i128 - first.min(last);
+    let high = high as i128 - first.max(last);
+    let (anchor_low, anchor_high) = anchor.map_or((i128::MIN, i128::MAX), |(low, high)| {
+        (low as i128, high as i128)
+    });
+    low.max(anchor_low) < high.min(anchor_high)
 }
 
 /// A closed word induces a directed cycle between the first-return relations
@@ -716,4 +832,229 @@ fn dot_product(left: (isize, isize), right: (isize, isize)) -> Option<isize> {
     left.0
         .checked_mul(right.0)?
         .checked_add(left.1.checked_mul(right.1)?)
+}
+
+#[cfg(test)]
+mod fixed_return_tests {
+    use super::*;
+    use crate::comb_loop_detect::ssa::BranchId;
+    use daggy::petgraph::algo::is_cyclic_directed;
+
+    // Independent reference: enumerate coordinates in the small guards and
+    // detect an ordinary graph cycle for each complete branch valuation.
+    fn expanded_cycle(cycles: &[GuardedTranslation], branch: BranchId) -> bool {
+        for arm in 0..2 {
+            let choices = PathCondition::default().with_choice(branch, arm);
+            let mut graph = Graph::<(), ()>::new();
+            let mut nodes = HashMap::default();
+            for cycle in cycles {
+                if cycle.condition.conjoin_if_compatible(&choices).is_none() {
+                    continue;
+                }
+                let (da, dp) = cycle.dependency.exact_offset().unwrap();
+                for array in -4..=4 {
+                    for packed in -4..=4 {
+                        if !cycle.feasible.iter().any(|guard| {
+                            guard
+                                .array
+                                .is_none_or(|(low, high)| low <= array && array < high)
+                                && guard
+                                    .packed
+                                    .is_none_or(|(low, high)| low <= packed && packed < high)
+                        }) {
+                            continue;
+                        }
+                        let source = *nodes
+                            .entry((array, packed))
+                            .or_insert_with(|| graph.add_node(()));
+                        let destination = *nodes
+                            .entry((array + da, packed + dp))
+                            .or_insert_with(|| graph.add_node(()));
+                        graph.add_edge(source, destination, ());
+                    }
+                }
+            }
+            if is_cyclic_directed(&graph) {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn fixed_coordinate_pairs_match_expanded_guarded_coordinates() {
+        let branch = BranchId::new(0, 0, 2);
+        let mut state = 193u32;
+        let mut random = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 16) as usize
+        };
+        let mut decided = 0;
+        let mut positive = 0;
+        for case in 0..512 {
+            let step = [
+                (0, 1),
+                (0, -1),
+                (1, 0),
+                (-1, 0),
+                (1, 1),
+                (1, -1),
+                (-1, 1),
+                (-1, -1),
+            ][random() % 8];
+            let count = 1 + random() as isize % 3;
+            let mut jump = (-step.0 * count, -step.1 * count);
+            if case % 4 == 0 {
+                jump.1 += 1;
+            }
+            if jump == (0, 0) {
+                jump.1 = 2;
+            }
+            let fixed = random() as isize % 5 - 2;
+            let mut guard = FeasiblePosition {
+                array: Some((-3, 4)),
+                packed: Some((-3, 4)),
+            };
+            if step.1 == 0 || step.0 != 0 && case % 2 == 0 {
+                guard.array = Some((fixed, fixed + 1));
+            } else {
+                guard.packed = Some((fixed, fixed + 1));
+            }
+            let mut feasible = vec![guard];
+            if case % 3 == 0 {
+                let mut second = guard;
+                if guard.array == Some((fixed, fixed + 1)) {
+                    feasible[0].packed = Some((-3, -1));
+                    second.packed = Some((1, 4));
+                } else {
+                    feasible[0].array = Some((-3, -1));
+                    second.array = Some((1, 4));
+                }
+                feasible.push(second);
+            }
+            let run_guard = if case % 5 == 0 {
+                FeasiblePosition {
+                    array: Some((-1, 2)),
+                    packed: Some((-1, 2)),
+                }
+            } else {
+                FeasiblePosition {
+                    array: Some((-4, 5)),
+                    packed: Some((-4, 5)),
+                }
+            };
+            let cycles = [
+                GuardedTranslation {
+                    dependency: BitDependency {
+                        array: Some(jump.0),
+                        packed: Some(jump.1),
+                    },
+                    condition: PathCondition::default().with_choice(branch, case % 2),
+                    feasible,
+                },
+                GuardedTranslation {
+                    dependency: BitDependency {
+                        array: Some(step.0),
+                        packed: Some(step.1),
+                    },
+                    condition: if case % 7 == 0 {
+                        PathCondition::default().with_choice(branch, 1 - case % 2)
+                    } else {
+                        PathCondition::default()
+                    },
+                    feasible: vec![run_guard],
+                },
+            ];
+            if let Some(actual) = fixed_coordinate_pair_closes(
+                &cycles.iter().collect::<Vec<_>>(),
+                &mut SearchBudget::new(),
+            ) {
+                let expected = expanded_cycle(&cycles, branch);
+                assert_eq!(actual, expected, "case={case}, cycles={cycles:?}");
+                decided += 1;
+                positive += usize::from(actual);
+            }
+        }
+        assert_eq!(decided, 512);
+        assert!(positive > 50);
+    }
+
+    #[test]
+    fn fixed_return_counts_can_exceed_isize_without_overflow() {
+        let cycles = [
+            GuardedTranslation {
+                dependency: BitDependency {
+                    array: Some(0),
+                    packed: Some(isize::MIN),
+                },
+                condition: PathCondition::default(),
+                feasible: vec![FeasiblePosition {
+                    array: Some((0, 1)),
+                    packed: Some((0, 1)),
+                }],
+            },
+            GuardedTranslation {
+                dependency: BitDependency {
+                    array: Some(0),
+                    packed: Some(1),
+                },
+                condition: PathCondition::default(),
+                feasible: vec![FeasiblePosition {
+                    array: Some((0, 1)),
+                    packed: Some((isize::MIN, 0)),
+                }],
+            },
+        ];
+        assert_eq!(
+            fixed_coordinate_pair_closes(
+                &cycles.iter().collect::<Vec<_>>(),
+                &mut SearchBudget::new()
+            ),
+            Some(true)
+        );
+        let mut clipped = cycles.clone();
+        clipped[1].feasible[0].packed = Some((isize::MIN + 1, 0));
+        assert_eq!(
+            fixed_coordinate_pair_closes(
+                &clipped.iter().collect::<Vec<_>>(),
+                &mut SearchBudget::new()
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn split_run_guards_require_the_general_solver() {
+        let branch = BranchId::new(0, 0, 2);
+        let translation = |packed, ranges: &[(isize, isize)]| GuardedTranslation {
+            dependency: BitDependency {
+                array: Some(0),
+                packed: Some(packed),
+            },
+            condition: PathCondition::default(),
+            feasible: ranges
+                .iter()
+                .map(|&packed| FeasiblePosition {
+                    array: Some((0, 1)),
+                    packed: Some(packed),
+                })
+                .collect(),
+        };
+        let cycles = [
+            translation(-2, &[(2, 3)]),
+            translation(1, &[(0, 1), (1, 2)]),
+        ];
+        assert_eq!(
+            fixed_coordinate_pair_closes(
+                &cycles.iter().collect::<Vec<_>>(),
+                &mut SearchBudget::new()
+            ),
+            None
+        );
+        assert!(expanded_cycle(&cycles, branch));
+        assert!(guarded_translations_cancel(
+            &cycles,
+            &mut SearchBudget::new()
+        ));
+    }
 }

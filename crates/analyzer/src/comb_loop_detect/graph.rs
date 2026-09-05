@@ -443,13 +443,17 @@ fn has_compatible_cycle_with_budget(
     if has_zero_dependency_cycle(graph, scc, &nodes, budget) {
         return true;
     }
-    // Prefer a finite domain to constrain first returns through unbounded
-    // expression nodes. Within finite domains, starting with the broadest
-    // keeps a wide repeated shift out of the internal search state when a
-    // narrow wrap region also exists. Correctness does not depend on order.
+    // Prefer finite self-edge anchors: their translations go straight to the
+    // closed-walk solver instead of being enumerated inside a first-return
+    // path. Among them, broad domains keep wide shifts out of the internal
+    // search state. Correctness does not depend on the anchor order.
     let mut starts = scc.to_vec();
-    starts.sort_unstable_by_key(|&node| {
-        std::cmp::Reverse((!graph[node].domains.is_empty(), domain_area(&graph[node])))
+    starts.sort_by_cached_key(|&node| {
+        std::cmp::Reverse((
+            !graph[node].domains.is_empty(),
+            graph.edges(node).any(|edge| edge.target() == node),
+            domain_area(&graph[node]),
+        ))
     });
     for start in starts {
         if !budget.spend(scc.len()) {

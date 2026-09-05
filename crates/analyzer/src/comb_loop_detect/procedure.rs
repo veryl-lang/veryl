@@ -907,12 +907,6 @@ impl ExpressionSources {
         }
     }
 
-    fn forget_packed_position(&mut self) {
-        for (_, relation) in &mut self.sources {
-            relation.packed = None;
-        }
-    }
-
     fn widen_all(&mut self) {
         for (_, relation) in &mut self.sources {
             *relation = PositionRelation::whole();
@@ -1302,6 +1296,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         ..
                     }) => unreachable!("call-frame storage is not a visible DAG source"),
                     DependencyDagNode::Internal => DependencyDagNode::Internal,
+                    DependencyDagNode::Replicated { stride } => {
+                        DependencyDagNode::Replicated { stride }
+                    }
                 })
                 .collect(),
             edges: graph.edges,
@@ -2523,24 +2520,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 start: expression_width - 1,
                 length: 1,
             };
-            let mut sign = self.eval_expr_bits_in(
+            let sign = self.eval_expr_bits_in(
                 expression,
                 requested_array,
                 sign_span,
                 evaluation_context,
                 projection,
             );
-            if projection
-                .destination_index
-                .as_ref()
-                .is_some_and(|index| !index.terms.is_empty())
-            {
-                // Affine reads can use destination array coordinates. Dynamic
-                // writes already forget array correspondence, so discard only
-                // that axis before projecting the expression's sign bit.
-                sign.forget_array_position();
-            }
-            let sign = self.ssa.related_definition(sign.sources);
+            let sign = self.expression_projection_source(sign, projection);
             let extended = self.project_sign_extension(sign, requested_array, sign_span, extension);
             reads.push(extended, PositionRelation::default());
         }
@@ -2757,20 +2744,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         if *op == Op::ArithShiftR
                             && context.signed
                             && width != 0
-                            && shifted.is_some_and(|shifted| shifted.end() > width)
+                            && let Some(fill) =
+                                PackedSpan::new(width.saturating_sub(shift), width.min(shift))
+                                    .and_then(|fill| fill.intersection(requested))
                         {
-                            let mut sign = self.eval_expr_in_context(
+                            let sign_span = PackedSpan {
+                                start: width - 1,
+                                length: 1,
+                            };
+                            let sign = self.eval_expr_in_context(
                                 left,
                                 requested_array,
-                                PackedSpan {
-                                    start: width - 1,
-                                    length: 1,
-                                },
+                                sign_span,
                                 context,
                                 projection,
                             );
-                            sign.widen_all();
-                            reads.extend(sign);
+                            let sign = self.expression_projection_source(sign, projection);
+                            let filled =
+                                self.project_sign_extension(sign, requested_array, sign_span, fill);
+                            reads.push(filled, PositionRelation::default());
                         }
                     } else {
                         reads.extend_whole(self.eval_expr(left));
@@ -2933,15 +2925,36 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         }
                         RepeatedProjection::Multiple => {
                             if let Some(local) = PackedSpan::whole(width) {
-                                let mut part = self.eval_expr_requested_in(
+                                let part = self.eval_expr_requested_in(
                                     part,
                                     requested_array,
                                     local,
                                     width,
                                     projection,
                                 );
-                                part.forget_packed_position();
-                                reads.extend(part);
+                                let (Some(total), Ok(stride), Ok(offset)) = (
+                                    width.checked_mul(count).and_then(PackedSpan::whole),
+                                    isize::try_from(width),
+                                    isize::try_from(low),
+                                ) else {
+                                    return ExpressionSources::whole(self.eval_expr(expression));
+                                };
+                                let part = self.expression_projection_source(part, projection);
+                                let part = self
+                                    .ssa
+                                    .projected(part, position_domain(requested_array, local));
+                                let repeated = self.ssa.replicated(
+                                    part,
+                                    position_domain(requested_array, total),
+                                    stride,
+                                );
+                                reads.push(
+                                    repeated,
+                                    PositionRelation {
+                                        array: Some(0),
+                                        packed: Some(offset),
+                                    },
+                                );
                             } else {
                                 reads.extend_whole(self.eval_expr(part));
                             }
@@ -3791,6 +3804,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .and_then(|variable| variable.r#type.total_width())
             .unwrap_or(span.end());
         self.eval_expr_requested(actual, formal_key.1, span, context_width)
+    }
+
+    fn expression_projection_source(
+        &mut self,
+        mut sources: ExpressionSources,
+        projection: &ProjectionContext,
+    ) -> VersionId {
+        if projection
+            .destination_index
+            .as_ref()
+            .is_some_and(|index| !index.terms.is_empty())
+        {
+            // Affine reads can use destination array coordinates. Dynamic
+            // writes already forget array correspondence, so discard only
+            // that axis before projecting expression-relative packed bits.
+            sources.forget_array_position();
+        }
+        self.ssa.related_definition(sources.sources)
     }
 
     fn project_sign_extension(

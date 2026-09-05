@@ -7,11 +7,13 @@ struct InternalNode {
     inputs: Vec<(usize, PositionRelation, PathCondition)>,
     domains: Vec<PositionDomain>,
     site: Option<DefinitionSite<usize>>,
+    replication: Option<isize>,
 }
 
 pub(super) struct Builder<K> {
     pub(super) graph: DependencyDag<K>,
     interned: HashMap<InternalNode, usize>,
+    replicated_sources: HashMap<usize, usize>,
 }
 
 impl<K> Builder<K> {
@@ -25,6 +27,7 @@ impl<K> Builder<K> {
                 sites: HashMap::default(),
             },
             interned: HashMap::default(),
+            replicated_sources: HashMap::default(),
         }
     }
 
@@ -37,9 +40,29 @@ impl<K> Builder<K> {
 
     pub(super) fn internal(
         &mut self,
+        inputs: Vec<(usize, PositionRelation, PathCondition)>,
+        domains: Vec<PositionDomain>,
+        site: Option<DefinitionSite<usize>>,
+    ) -> usize {
+        self.operation(inputs, domains, site, None)
+    }
+
+    pub(super) fn replicated(
+        &mut self,
+        inputs: Vec<(usize, PositionRelation, PathCondition)>,
+        domains: Vec<PositionDomain>,
+        site: Option<DefinitionSite<usize>>,
+        stride: isize,
+    ) -> usize {
+        self.operation(inputs, domains, site, Some(stride))
+    }
+
+    fn operation(
+        &mut self,
         mut inputs: Vec<(usize, PositionRelation, PathCondition)>,
         mut domains: Vec<PositionDomain>,
         mut site: Option<DefinitionSite<usize>>,
+        mut replication: Option<isize>,
     ) -> usize {
         inputs.sort_unstable();
         inputs.dedup();
@@ -50,29 +73,65 @@ impl<K> Builder<K> {
             site.data_inputs.dedup();
         }
 
-        // An unrestricted, unconditional identity adds neither a dependency
-        // nor a position boundary. Removing these aliases also lets imports
-        // share subgraphs reached through different numbers of call frames.
+        // An unconditional identity with no additional position boundary
+        // adds no dependency. Removing these aliases also lets imports share
+        // subgraphs reached through different numbers of call frames.
         // Keep diagnostic sites so sharing cannot select an unrelated write.
-        if domains.is_empty()
+        if replication.is_none()
             && site.is_none()
             && let [(source, relation, condition)] = inputs.as_slice()
             && *relation == PositionRelation::default()
             && condition.is_unconditional()
+            && (domains.is_empty() || domains == self.graph.domains[*source])
         {
             return *source;
+        }
+
+        // Repeating complete adjacent blocks of a repetition is one larger
+        // repetition. Retain clipping, array coordinates and diagnostic sites;
+        // use the recorded seed instead of scanning predecessor paths.
+        if let Some(stride) = replication
+            && site.is_none()
+            && let [(source, relation, condition)] = inputs.as_slice()
+            && *relation == PositionRelation::default()
+            && condition.is_unconditional()
+            && let Some(&seed) = self.replicated_sources.get(source)
+            && !self.graph.sites.contains_key(source)
+            && let DependencyDagNode::Replicated { stride: inner } = self.graph.nodes[*source]
+            && !self.graph.domains[seed].is_empty()
+            && self.graph.domains[seed].iter().all(|domain| {
+                domain
+                    .packed_start
+                    .checked_add(domain.packed_length)
+                    .is_some_and(|end| end <= inner as usize)
+            })
+            && let [outer_domain] = domains.as_slice()
+            && let [inner_domain] = self.graph.domains[*source].as_slice()
+            && inner_domain.array_start == outer_domain.array_start
+            && inner_domain.array_length == outer_domain.array_length
+            && inner_domain.packed_start == 0
+            && outer_domain.packed_start == 0
+            && inner_domain.packed_length == stride as usize
+            && inner_domain.packed_length.is_multiple_of(inner as usize)
+        {
+            inputs[0].0 = seed;
+            replication = Some(inner);
         }
 
         let key = InternalNode {
             inputs,
             domains,
             site,
+            replication,
         };
         if let Some(&node) = self.interned.get(&key) {
             return node;
         }
         let node = self.graph.nodes.len();
-        self.graph.nodes.push(DependencyDagNode::Internal);
+        self.graph.nodes.push(match replication {
+            Some(stride) => DependencyDagNode::Replicated { stride },
+            None => DependencyDagNode::Internal,
+        });
         self.graph.domains.push(key.domains.clone());
         self.graph
             .edges
@@ -88,6 +147,13 @@ impl<K> Builder<K> {
             );
         if let Some(site) = &key.site {
             self.graph.sites.insert(node, site.clone());
+        }
+        if replication.is_some()
+            && let [(source, relation, condition)] = key.inputs.as_slice()
+            && *relation == PositionRelation::default()
+            && condition.is_unconditional()
+        {
+            self.replicated_sources.insert(node, *source);
         }
         self.interned.insert(key, node);
         node
@@ -142,6 +208,12 @@ mod tests {
                             }
                         }
                     }
+                    if let DependencyDagNode::Replicated { stride } = kind
+                        && let Some(previous) = bit.checked_sub(*stride as usize)
+                    {
+                        let sources = values[node][array * 4 + previous].clone();
+                        values[node][array * 4 + bit].extend(sources);
+                    }
                 }
             }
         }
@@ -181,7 +253,13 @@ mod tests {
             // can be dropped merely to increase the amount of sharing.
             for _ in 0..2 {
                 let node = raw.nodes.len();
-                raw.nodes.push(DependencyDagNode::Internal);
+                raw.nodes.push(if stage % 4 == 0 {
+                    DependencyDagNode::Replicated {
+                        stride: 1 + (stage / 4 % 2) as isize,
+                    }
+                } else {
+                    DependencyDagNode::Internal
+                });
                 raw.domains.push(vec![PositionDomain {
                     array_start: 0,
                     array_length: 1 + stage % 2,
@@ -265,6 +343,61 @@ mod tests {
                 expected,
                 "valuation={valuation}"
             );
+        }
+    }
+
+    #[test]
+    fn nested_replication_matches_individual_bits_with_clipped_seeds() {
+        for seed_start in 0usize..3 {
+            for stride in 1..=2 {
+                let mut builder = Builder::new();
+                let input = builder.external(0u8);
+                let identity = |source| {
+                    vec![(
+                        source,
+                        PositionRelation::default(),
+                        PathCondition::default(),
+                    )]
+                };
+                let domain = |start, length| {
+                    vec![PositionDomain {
+                        array_start: 1,
+                        array_length: 1,
+                        packed_start: start,
+                        packed_length: length,
+                    }]
+                };
+                let seed = builder.internal(identity(input), domain(seed_start, 1), None);
+                let inner = builder.replicated(identity(seed), domain(0, 2), None, stride);
+                let alias = builder.internal(identity(inner), domain(0, 2), None);
+                let outer = builder.replicated(identity(alias), domain(0, 4), None, 2);
+                assert_eq!(alias, inner);
+                assert_eq!(
+                    outer,
+                    builder.replicated(identity(alias), domain(0, 4), None, 2)
+                );
+                builder.graph.roots.push(Some(outer));
+                let actual = expanded_sources(&builder.graph, &PathCondition::default());
+                for array in 0..2 {
+                    for bit in 0usize..4 {
+                        let expected = if array == 1
+                            && seed_start < 2
+                            && (bit % 2)
+                                .checked_sub(seed_start)
+                                .is_some_and(|offset| offset.is_multiple_of(stride as usize))
+                        {
+                            HashSet::from_iter([(0, 1, seed_start)])
+                        } else {
+                            HashSet::default()
+                        };
+                        assert_eq!(
+                            actual[0][array * 4 + bit],
+                            expected,
+                            "seed={seed_start}, stride={stride}, array={array}, bit={bit}"
+                        );
+                    }
+                }
+            }
         }
     }
 }

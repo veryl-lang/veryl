@@ -963,16 +963,36 @@ fn add_dependency_dag(
                 ensure_node(graph, node_map, bit_part, *key)
             }
             DependencyDagNode::External(_) => None,
-            DependencyDagNode::Internal => Some(graph.add_node(GraphNode {
-                // Internal nodes carry no variable identity. The region is
-                // only a coordinate carrier; exact edge relations retain
-                // the positional semantics.
-                region: internal_region,
-                domains: dag.domains[index].clone(),
-                diagnostic: None,
-            })),
+            DependencyDagNode::Internal | DependencyDagNode::Replicated { .. } => {
+                Some(graph.add_node(GraphNode {
+                    // Internal nodes carry no variable identity. The region is
+                    // only a coordinate carrier; exact edge relations retain
+                    // the positional semantics.
+                    region: internal_region,
+                    domains: dag.domains[index].clone(),
+                    diagnostic: None,
+                }))
+            }
         })
         .collect::<Vec<_>>();
+
+    for (index, node) in dag.nodes.iter().enumerate() {
+        if let DependencyDagNode::Replicated { stride } = node
+            && let Some(node) = mapped[index]
+        {
+            // A bounded positive translation represents every copy without
+            // expanding bits, repetitions or paths through function imports.
+            add_dependency_edge(
+                graph,
+                node,
+                node,
+                GraphDependency::unconditional(BitDependency {
+                    array: Some(0),
+                    packed: Some(*stride),
+                }),
+            );
+        }
+    }
 
     for (node, site) in dag.sites {
         if let Some(node) = mapped[node] {

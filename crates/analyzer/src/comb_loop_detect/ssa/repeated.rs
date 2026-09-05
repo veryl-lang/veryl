@@ -18,6 +18,7 @@ use daggy::petgraph::visit::EdgeRef;
 struct TransferNode {
     input: Option<VersionId>,
     domains: Vec<PositionDomain>,
+    replication: Option<isize>,
 }
 
 type TransferGraph = Graph<TransferNode, PositionRelation>;
@@ -109,6 +110,17 @@ impl TransferBuilder {
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
                 }
+                Version::Replicated {
+                    source,
+                    domain,
+                    stride,
+                } => {
+                    self.graph[node].domains.push(*domain);
+                    self.graph[node].replication = Some(*stride);
+                    let source = self.version(*source);
+                    self.graph
+                        .add_edge(source, node, PositionRelation::default());
+                }
                 Version::Imported {
                     graph,
                     root: Some(root),
@@ -125,6 +137,10 @@ impl TransferBuilder {
                         let copied = self.graph.add_node(TransferNode {
                             input: None,
                             domains: graph.domains[child].clone(),
+                            replication: match graph.nodes[child] {
+                                DependencyDagNode::Replicated { stride } => Some(stride),
+                                _ => None,
+                            },
                         });
                         mapped.insert(child, copied);
                         if let DependencyDagNode::External(key) = graph.nodes[child] {
@@ -172,6 +188,7 @@ pub(super) fn close<K: Copy + Eq + Hash>(
             let root = builder.graph.add_node(TransferNode {
                 input: None,
                 domains: domains.clone(),
+                replication: None,
             });
             builder
                 .graph
@@ -190,6 +207,7 @@ pub(super) fn close<K: Copy + Eq + Hash>(
             let initial = builder.graph.add_node(TransferNode {
                 input: Some(*entry),
                 domains: Vec::new(),
+                replication: None,
             });
             builder
                 .graph
@@ -253,6 +271,14 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
         .map(|nodes| nodes.len() > 1)
         .collect::<Vec<_>>();
     let mut stable = vec![PositionRelation::default(); components.len()];
+    for node in graph.node_indices() {
+        if graph[node].replication.is_some() {
+            // Replication changes packed coordinates if it participates in
+            // an actual runtime recurrence. Otherwise keep it as an operation;
+            // its finite repetitions are not procedural feedback.
+            stable[component_of[node.index()]].packed = None;
+        }
+    }
     for edge in graph.edge_references() {
         let source = component_of[edge.source().index()];
         let destination = component_of[edge.target().index()];
@@ -304,7 +330,16 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
                         .collect(),
                 )
             });
-            mapped[node.index()] = project(ssa, value, &graph[node].domains);
+            mapped[node.index()] = if let Some(stride) = graph[node].replication {
+                let alternatives = graph[node]
+                    .domains
+                    .iter()
+                    .map(|&domain| ssa.replicated(value, domain, stride))
+                    .collect();
+                ssa.phi(alternatives)
+            } else {
+                project(ssa, value, &graph[node].domains)
+            };
         }
         for &successor in &successors[component] {
             pending[successor] -= 1;
@@ -320,6 +355,73 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_transfer_retains_acyclic_packed_replication_at_scale() {
+        for width in [8, 1 << 30] {
+            for imported in [false, true] {
+                let mut ssa = SsaStore::default();
+                let input = ssa.read("input");
+                let domain = PositionDomain {
+                    array_start: 1,
+                    array_length: 1,
+                    packed_start: 0,
+                    packed_length: width,
+                };
+                let checkpoint = ssa.checkpoint();
+                let value = if imported {
+                    let mut callee = SsaStore::default();
+                    let source = callee.read("source");
+                    let source = callee.projected(
+                        source,
+                        PositionDomain {
+                            packed_length: 2,
+                            ..domain
+                        },
+                    );
+                    let result = callee.replicated(source, domain, 2);
+                    let dag = callee.dependency_dag(&[result], &HashSet::default());
+                    let root = dag.roots[0];
+                    ssa.imported(
+                        Rc::new(dag),
+                        root,
+                        HashMap::from_iter([(
+                            "source",
+                            vec![(input, PositionRelation::default())],
+                        )]),
+                        HashMap::default(),
+                    )
+                } else {
+                    let source = ssa.projected(
+                        input,
+                        PositionDomain {
+                            packed_length: 2,
+                            ..domain
+                        },
+                    );
+                    ssa.replicated(source, domain, 2)
+                };
+                ssa.bind("value", value);
+                let iteration = ssa.capture_and_rollback(checkpoint);
+                let before = ssa.versions.len();
+                ssa.close_repeated_transfer(&iteration, checkpoint, false, |_| Some(domain));
+                assert!(ssa.versions.len() - before < 20);
+                let value = ssa.read("value");
+                let dag = ssa.dependency_dag(&[value], &HashSet::default());
+                assert!(dag.nodes.len() < 10);
+                let replicas = dag
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(node, kind)| {
+                        matches!(kind, DependencyDagNode::Replicated { stride: 2 }).then_some(node)
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(replicas.len(), 1);
+                assert_eq!(dag.domains[replicas[0]], [domain]);
+            }
+        }
+    }
 
     #[test]
     fn repeated_transfer_long_chain_stays_structural() {
