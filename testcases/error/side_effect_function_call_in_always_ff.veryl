@@ -1,0 +1,12 @@
+module side_effect_function_call_in_always_ff (
+    clk: input  clock,
+    q  : output logic,
+) {
+    function update () {
+        q = 1;
+    }
+
+    always_ff (clk) {
+        update();
+    }
+}

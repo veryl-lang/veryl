@@ -8,7 +8,7 @@
 
 use crate::StopWatch;
 use crate::context::Context;
-use crate::incremental::Incremental;
+use crate::incremental::{Incremental, OutputIntent};
 use log::{debug, info};
 use miette::{
     self, Diagnostic, IntoDiagnostic, LabeledSpan, Result, Severity, SourceCode, WrapErr,
@@ -18,6 +18,8 @@ use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
+use veryl_analyzer::symbol::TestType;
+use veryl_analyzer::symbol_table;
 use veryl_analyzer::{Analyzer, AnalyzerError, CachedDiagnostic};
 use veryl_metadata::Metadata;
 use veryl_parser::resource_table::PathId;
@@ -204,8 +206,7 @@ pub struct AnalyzeOutput {
 
 pub struct AnalyzeOptions<'a> {
     pub defines: &'a [String],
-    /// A stale output demotes a cache hit; `true` only for emitting commands.
-    pub emit_mode: bool,
+    pub output_intent: OutputIntent,
     /// `false` for doc/dump/synth: they need every file's full pass2 IR/tables,
     /// which a restore (pass2 skipped) would leave incomplete.
     pub incremental: bool,
@@ -213,35 +214,37 @@ pub struct AnalyzeOptions<'a> {
     pub fail_fast: bool,
 }
 
-/// A supplied `ir` is populated by pass2 (the `veryl test` path); files holding
-/// a selected test are then forced to miss so their IR is available.
-pub fn analyze(
+/// Requires a populated symbol table, i.e. call after pass1.
+pub fn tests_are_all_native(project_name: &str) -> bool {
+    let tests = symbol_table::get_tests(project_name);
+    !tests.is_empty()
+        && tests
+            .iter()
+            .all(|(_, property)| matches!(property.r#type, TestType::Native))
+}
+
+/// Split out so [`analyze`] can redo it after a wrong `SkipIfNativeOnly`
+/// guess, while `ir` is still untouched.
+struct Pass1Phase {
+    contexts: Vec<Context>,
+    incremental: Option<Incremental>,
+    check_error: CheckError,
+}
+
+fn pass1_phase(
     metadata: &Metadata,
     paths: &[PathSet],
-    opts: AnalyzeOptions<'_>,
-    mut ir: Option<&mut veryl_analyzer::ir::Ir>,
-    test_filter: Option<&str>,
-) -> Result<AnalyzeOutput> {
+    opts: &AnalyzeOptions<'_>,
+    selected_tests: Option<Option<&str>>,
+    intent: OutputIntent,
+) -> Result<Pass1Phase> {
     let mut check_error = CheckError::new(metadata.build.error_count_limit);
     let mut contexts = Vec::new();
-
     let mut stopwatch = StopWatch::new();
 
-    // A selected test's file must miss: pass2 elaborates its instance tree from
-    // the definition_table, which restored fragments also populate.
-    let ir_requested = ir.is_some();
-    let selected_tests = ir_requested.then_some(test_filter);
     let mut incremental = opts
         .incremental
-        .then(|| {
-            Incremental::open(
-                metadata,
-                paths,
-                opts.defines,
-                selected_tests,
-                opts.emit_mode,
-            )
-        })
+        .then(|| Incremental::open(metadata, paths, opts.defines, selected_tests, intent))
         .flatten();
 
     let analyzer = Analyzer::new(metadata);
@@ -302,6 +305,54 @@ pub fn analyze(
         "Executed analyze_post_pass1 ({} milliseconds)",
         stopwatch.lap()
     );
+
+    Ok(Pass1Phase {
+        contexts,
+        incremental,
+        check_error,
+    })
+}
+
+/// A supplied `ir` is populated by pass2 (the `veryl test` path); files holding
+/// a selected test are then forced to miss so their IR is available.
+pub fn analyze(
+    metadata: &Metadata,
+    paths: &[PathSet],
+    opts: AnalyzeOptions<'_>,
+    mut ir: Option<&mut veryl_analyzer::ir::Ir>,
+    test_filter: Option<&str>,
+) -> Result<AnalyzeOutput> {
+    // A selected test's file must miss: pass2 elaborates its instance tree from
+    // the definition_table, which restored fragments also populate.
+    let ir_requested = ir.is_some();
+    let selected_tests = ir_requested.then_some(test_filter);
+
+    let mut intent = opts.output_intent;
+    let Pass1Phase {
+        mut contexts,
+        incremental,
+        mut check_error,
+    } = loop {
+        let phase = pass1_phase(metadata, paths, &opts, selected_tests, intent)?;
+        // The guess came from the store, and files were restored on it. If a
+        // file re-analyzed this run introduced a test needing an external
+        // simulator, those restored files could never be emitted — so start
+        // over. Only the run that first adds such a test pays for it.
+        if phase
+            .incremental
+            .as_ref()
+            .is_some_and(|x| x.predicted_no_emit)
+            && !tests_are_all_native(&metadata.project.name)
+        {
+            debug!("A test needs an external simulator: re-analyzing to emit");
+            Analyzer::new(metadata).clear();
+            intent = OutputIntent::Emit;
+            continue;
+        }
+        break phase;
+    };
+
+    let mut stopwatch = StopWatch::new();
 
     // Skip pass2/emit for testbench files whose tests don't match `--test`;
     // they are never simulated. Matching ones stay unskipped for their IR.

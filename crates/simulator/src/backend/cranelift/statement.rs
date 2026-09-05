@@ -4,10 +4,12 @@
 use super::helpers::*;
 use super::runtime::{
     Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_wide,
+    scratch_mark, scratch_release,
 };
+use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain};
 use crate::ir::variable::native_bytes as calc_native_bytes;
 use crate::ir::{
-    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoExpression,
+    ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoCaseStatement, ProtoDynamicBitSelect,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoIfStatement, ProtoStatement,
 };
 use cranelift::codegen::ir::BlockArg;
@@ -17,10 +19,34 @@ use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
 
+/// Aligned 1/2/4/8-byte window containing byte span `[blo, bhi]`, or None.
+/// It must not run past `nb`: the commit writes the whole window.
+fn log_window_for_span(blo: usize, bhi: usize, nb: usize) -> Option<(usize, usize)> {
+    if bhi < blo || bhi >= nb {
+        return None;
+    }
+    let mut w = 1usize;
+    while w <= 8 {
+        let start = blo & !(w - 1);
+        if start + w > bhi && start + w <= nb {
+            return Some((start, w));
+        }
+        w <<= 1;
+    }
+    None
+}
+
 /// Push an FF write-log entry for a post-RMW `payload` (+ optional 4-state
 /// `mask_xz`). Narrow FFs (`nb <= 8`) push one I64 entry; wide FFs (`nb > 8`,
 /// I128 payload) split into per-8-byte words — `emit_inline_write_log_push`
 /// takes an I64, so passing a wide value directly panics cranelift.
+///
+/// `span` is the field's `(high, low)` BIT range when the destination is a
+/// statically bounded slice of a wide FF.  A slice write only changes the
+/// bytes it covers, so logging the whole element there costs `nb/8` entries
+/// and `nb` bytes of traffic to deposit a couple of bits.  With a span the
+/// wide path emits one entry over the field's aligned window instead; without
+/// one (runtime index, or a genuine whole-element store) it keeps the split.
 fn emit_ff_log_push(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
@@ -28,8 +54,41 @@ fn emit_ff_log_push(
     nb: usize,
     payload: CraneliftValue,
     mask_xz: Option<CraneliftValue>,
+    span: Option<(usize, usize)>,
 ) {
     let nb_i32 = nb as i32;
+    if nb > 8
+        && let Some((start, w)) = span.and_then(|(hi, lo)| log_window_for_span(lo / 8, hi / 8, nb))
+        && w < nb
+    {
+        let width_class_val = builder.ins().iconst(I32, w as i64);
+        let shift = (start * 8) as i64;
+        let shifted = if start == 0 {
+            payload
+        } else {
+            builder.ins().ushr_imm_u(payload, shift)
+        };
+        let word = builder.ins().ireduce(I64, shifted);
+        let entry_offset_val = builder
+            .ins()
+            .iconst(I32, (log_current_offset + start as i32) as i64);
+        emit_inline_write_log_push(context, builder, entry_offset_val, word, width_class_val);
+        if context.use_4state
+            && let Some(m) = mask_xz
+        {
+            let m_shifted = if start == 0 {
+                m
+            } else {
+                builder.ins().ushr_imm_u(m, shift)
+            };
+            let m_word = builder.ins().ireduce(I64, m_shifted);
+            let mask_offset_val = builder
+                .ins()
+                .iconst(I32, (log_current_offset + nb_i32 + start as i32) as i64);
+            emit_inline_write_log_push(context, builder, mask_offset_val, m_word, width_class_val);
+        }
+        return;
+    }
     if nb <= 8 {
         let offset_val = builder.ins().iconst(I32, log_current_offset as i64);
         let width_class_val = builder.ins().iconst(I32, nb as i64);
@@ -94,31 +153,33 @@ impl ProtoAssignDynamicStatement {
             return false;
         }
         if let Some(dyn_sel) = &self.dynamic_select {
-            let full_width = dyn_sel.elem_width * dyn_sel.num_elements;
-            if full_width > 128 || !dyn_sel.index_expr.can_build_binary() {
+            if !dyn_sel.index_expr.can_build_binary() {
                 return false;
             }
-            return full_width <= 64;
+            // A wide element is the RMW in `build_binary_dynamic_wide_ff`;
+            // `build_binary_dynamic_wide` (comb base) declines a dynamic bit
+            // select, and the narrow path below needs the whole span in a
+            // register.
+            if self.dst_width > 64 {
+                return self.dst_base.is_ff() && self.rhs_select.is_none();
+            }
+            return dyn_sel.elem_width * dyn_sel.num_elements <= 64;
         }
         // build_binary's rhs_select slicing assumes a ≤64-bit scalar
         // payload; wider sources stay on the interpreter (rare).
         if self.rhs_select.is_some() && self.expr.width() > 64 {
             return false;
         }
-        // Wide (>128-bit) comb-base dynamic-indexed store: see
-        // `build_binary_dynamic_wide`.
-        if self.dst_width > 128 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
+        // Wide (>64-bit) comb-base dynamic-indexed store: a 65..128-bit
+        // element is 16-byte storage the narrow path below cannot address,
+        // and `build_binary_dynamic_wide` is width-generic.
+        if self.dst_width > 64 && !self.dst_base.is_ff() && self.rhs_select.is_none() {
             return true;
         }
-        // Wide (>64-bit) FF-base full-element dynamic store:
+        // Wide (>64-bit) FF-base element store, whole or bit-selected:
         // `build_binary_dynamic_wide_ff`.  A 4-state dst bails there (→ module
         // falls back), so the gate here is optimistic.
-        if self.dst_width > 64
-            && self.dst_base.is_ff()
-            && self.select.is_none()
-            && self.rhs_select.is_none()
-            && self.dynamic_select.is_none()
-        {
+        if self.dst_width > 64 && self.dst_base.is_ff() && self.rhs_select.is_none() {
             return true;
         }
         self.dst_width <= 64
@@ -130,18 +191,16 @@ impl ProtoAssignDynamicStatement {
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
         // The narrow path below assumes a native (≤8-byte) dst; route the
-        // wide (>128-bit) comb-base case to its own emitter.
-        if self.dst_width > 128 && !self.dst_base.is_ff() {
+        // wide comb-base cases to their own emitter.  The 65..128-bit band
+        // joins it only without `dynamic_select`, which that emitter declines.
+        if !self.dst_base.is_ff()
+            && (self.dst_width > 128 || (self.dst_width > 64 && self.dynamic_select.is_none()))
+        {
             return self.build_binary_dynamic_wide(context, builder);
         }
-        // Wide (>64-bit) FF-base full-element dynamic write: see
+        // Wide (>64-bit) FF-base element write, whole or bit-selected: see
         // `build_binary_dynamic_wide_ff`.
-        if self.dst_width > 64
-            && self.dst_base.is_ff()
-            && self.select.is_none()
-            && self.rhs_select.is_none()
-            && self.dynamic_select.is_none()
-        {
+        if self.dst_width > 64 && self.dst_base.is_ff() && self.rhs_select.is_none() {
             return self.build_binary_dynamic_wide_ff(context, builder);
         }
         // Plain store re-masks the payload to dst_width (istoreN truncation
@@ -267,12 +326,17 @@ impl ProtoAssignDynamicStatement {
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
 
-            let payload = builder.ins().ishl(payload, shift);
-
+            // Clip mask and payload to the element width: a last-element
+            // window can overhang, and RHS bits above the window must not
+            // leak into neighbouring bits the interpreter leaves alone.
             let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = builder.ins().iconst(I64, elem_mask as i64);
             let dyn_mask = builder.ins().ishl(mask_val, shift);
+            let dyn_mask = band_const(builder, dyn_mask, gen_mask_for_width(self.dst_width), false);
             let not_mask = builder.ins().bnot(dyn_mask);
+
+            let payload = builder.ins().ishl(payload, shift);
+            let payload = builder.ins().band(payload, dyn_mask);
 
             let org = load_native_to_i64(builder, addr, 0);
             let org = builder.ins().band(org, not_mask);
@@ -282,6 +346,7 @@ impl ProtoAssignDynamicStatement {
             }
             let mask_result = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
+                let mask_xz = builder.ins().band(mask_xz, dyn_mask);
                 let org = load_native_to_i64(builder, addr, nb_i32);
                 let org = builder.ins().band(org, not_mask);
                 let result_m = builder.ins().bor(mask_xz, org);
@@ -489,7 +554,28 @@ impl ProtoAssignDynamicStatement {
 
         let addr = self.dynamic_elem_addr(context, builder)?;
 
-        // Wide (>64-bit) bit-select: RMW the [end..=beg] range; else full value.
+        // Wide (>64-bit) bit-select: merge the [end..=beg] range into the
+        // element in place -- no whole-element temporary.
+        if let Some((beg, end)) = self.select
+            && wide_rmw_inplace_on()
+        {
+            // `rhs_select` bailed above, so the source window is the whole
+            // value's low bits.
+            let win = WideWindowStore {
+                end,
+                width: beg - end + 1,
+                src_bit: 0,
+                src_bits: beg - end + 1,
+                nb,
+                src_nb: nb,
+                dst_width: self.dst_width,
+                fused_rhs_select: false,
+            };
+            if win.fits_inline() {
+                emit_wide_select_rmw_store(builder, addr, src_ptr, &win);
+                return Some(());
+            }
+        }
         let store_ptr = if let Some((beg, end)) = self.select {
             emit_wide_select_rmw(context, builder, addr, src_ptr, end, beg - end + 1, nb)
         } else {
@@ -519,11 +605,7 @@ impl ProtoAssignDynamicStatement {
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<()> {
-        if context.use_4state
-            || self.select.is_some()
-            || self.rhs_select.is_some()
-            || self.dynamic_select.is_some()
-        {
+        if context.use_4state || self.rhs_select.is_some() {
             return None;
         }
         if !self.dst_base.is_ff() || self.dst_num_elements == 0 {
@@ -573,6 +655,46 @@ impl ProtoAssignDynamicStatement {
         // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
         // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
         let ff_is_packed = self.dst_base.raw() == self.dst_ff_current_base_offset;
+
+        // `arr[idx][hi:lo] <= v`: read the element back and merge the window
+        // in, so the store/log below still deliver a whole element.  The read
+        // source and the dynamic-over-static precedence follow
+        // `AssignDynamicStatement::eval_step`.
+        let src_ptr = if self.dynamic_select.is_some() || self.select.is_some() {
+            use super::helpers::{emit_wide_select_rmw, emit_wide_select_rmw_at};
+            let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
+            let old_ptr = builder.ins().iadd(context.ff_values, base);
+            let old_ptr = builder.ins().iadd(old_ptr, byte_offset);
+            let merged = match self.dynamic_select.as_ref() {
+                Some(dyn_sel) => {
+                    // Built here, after the element index, so the two index
+                    // expressions are evaluated in the same order as
+                    // `AssignDynamicStatement::eval_step`.
+                    let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+                    emit_wide_select_rmw_at(
+                        context,
+                        builder,
+                        old_ptr,
+                        src_ptr,
+                        shift,
+                        dyn_sel.window,
+                        nb,
+                    )
+                }
+                None => {
+                    let (beg, end) = self.select?;
+                    emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
+                }
+            };
+            // `Value::assign` confines the result to the declared width: a
+            // dynamic window on the last element can overhang, and the padding
+            // above `dst_width` is cleared either way.
+            emit_wide_apply_mask(context, builder, merged, nb, self.dst_width);
+            merged
+        } else {
+            src_ptr
+        };
+
         if !ff_is_packed {
             let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
             let addr = builder.ins().iadd(context.ff_values, base);
@@ -867,6 +989,21 @@ impl ProtoStatement {
         builder: &mut FunctionBuilder,
         is_last: bool,
     ) -> Option<()> {
+        // Retire this statement's wide scratch.  Compound statements release
+        // only after their bodies, so an arm can never recycle its
+        // condition's slots.
+        let mark = scratch_mark();
+        let result = self.build_binary_body(context, builder, is_last);
+        scratch_release(mark);
+        result
+    }
+
+    fn build_binary_body(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        is_last: bool,
+    ) -> Option<()> {
         match self {
             ProtoStatement::Assign(x) => x.build_binary(context, builder),
             ProtoStatement::AssignDynamic(x) => {
@@ -893,25 +1030,66 @@ impl ProtoStatement {
 }
 
 impl ProtoAssignStatement {
+    /// Field width of a wide bit-select store whose sign extension this backend
+    /// can materialize: it happens in an I64/I128 register and is clipped to
+    /// the field, so both must fit.  Anything else stays on the interpreter.
+    fn wide_select_sign_extend_field(&self, from_width: usize) -> Option<usize> {
+        if from_width > 64 || self.rhs_select.is_some() || returns_wide_pointer(&self.expr) {
+            return None;
+        }
+        // A dynamic index moves the field but not its width, so the window is
+        // what the extension has to fit — and it takes precedence over a
+        // static `select` here exactly as it does in the emitters.
+        if let Some(dyn_sel) = &self.dynamic_select {
+            return (dyn_sel.window <= 128).then_some(dyn_sel.window);
+        }
+        let (beg, end) = self.select?;
+        let nbits = beg.checked_sub(end)?.checked_add(1)?;
+        (nbits <= 128).then_some(nbits)
+    }
+
     pub fn can_build_binary(&self) -> bool {
         if !self.expr.can_build_binary() {
             return false;
         }
         // The wide (>128-bit) flat-buffer store path can't sign-extend a
-        // narrow signed RHS; run on the interpreter instead.
+        // narrow signed RHS; run on the interpreter instead.  A field no wider
+        // than the RHS needs no extension (`visible_store_sign_extend`); one
+        // that does is served by `wide_select_sign_extend_field`.
         if self.dst_width > 128
-            && self.rhs_select.is_none()
-            && self.expr.store_sign_extend_from(self.dst_width).is_some()
+            && let Some(from_width) = self.visible_store_sign_extend()
+            && self.wide_select_sign_extend_field(from_width).is_none()
         {
             return false;
         }
-        if let Some(dyn_sel) = &self.dynamic_select
-            && (dyn_sel.elem_width * dyn_sel.num_elements > 128
-                || !dyn_sel.index_expr.can_build_binary())
-        {
-            return false;
+        if let Some(dyn_sel) = &self.dynamic_select {
+            if !dyn_sel.index_expr.can_build_binary() {
+                return false;
+            }
+            // Wider than a register → `build_binary_wide`'s width-generic
+            // RMW; narrower → the register RMW below, which needs the whole
+            // span in an I64/I128.
+            if self.dst_width <= 128 && dyn_sel.elem_width * dyn_sel.num_elements > 128 {
+                return false;
+            }
         }
         true
+    }
+
+    /// Gate for the limb form of a wide dynamic-index store, shared by the
+    /// emitter and its caller so the two cannot drift.
+    ///
+    /// A window on the clamped last element can reach past `dst_width`; the
+    /// limb form has no width mask to drop those bits, so that case is left
+    /// to the general wide RMW, which masks to `dst_width`.  4-state bails
+    /// at the top of `build_binary_wide` instead.
+    fn wide_dynamic_limb_form(&self, dyn_sel: &ProtoDynamicBitSelect) -> bool {
+        !self.dst.is_ff()
+            && self.rhs_select.is_none()
+            && dyn_sel.window > 0
+            && dyn_sel.window <= 64
+            && dyn_sel.num_elements > 0
+            && dynamic_select_top_bit(dyn_sel) < self.dst_width
     }
 
     pub fn build_binary(
@@ -1125,9 +1303,9 @@ impl ProtoAssignStatement {
         if let Some(dyn_sel) = &self.dynamic_select {
             let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
 
-            let payload = builder.ins().ishl(payload, shift);
-
-            // Dynamic mask: elem_mask << shift, then invert
+            // Clip mask and payload to the declared width: a last-element
+            // window can overhang, and `clip_window_to_width` drops those
+            // bits on the interpreter side.
             let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = if wide {
                 iconst_128(builder, elem_mask)
@@ -1135,7 +1313,11 @@ impl ProtoAssignStatement {
                 builder.ins().iconst(I64, elem_mask as i64)
             };
             let dyn_mask = builder.ins().ishl(mask_val, shift);
+            let dyn_mask = band_const(builder, dyn_mask, gen_mask_for_width(self.dst_width), wide);
             let not_mask = builder.ins().bnot(dyn_mask);
+
+            let payload = builder.ins().ishl(payload, shift);
+            let payload = builder.ins().band(payload, dyn_mask);
 
             let (org_payload, org_mask_xz) = if !context.disable_load_cache
                 && let Some(&(cached_p, cached_m)) = context.load_cache.get(&cache_key)
@@ -1159,6 +1341,7 @@ impl ProtoAssignStatement {
 
             let result_mask_xz = if let Some(mask_xz) = mask_xz {
                 let mask_xz = builder.ins().ishl(mask_xz, shift);
+                let mask_xz = builder.ins().band(mask_xz, dyn_mask);
                 let z = if wide { context.zero_128 } else { context.zero };
                 let org_m = org_mask_xz.unwrap_or(z);
                 let org_m = builder.ins().band(org_m, not_mask);
@@ -1199,7 +1382,7 @@ impl ProtoAssignStatement {
             // portion at `log_current_offset + nb` (matches the storage layout
             // `[payload][mask]` produced by write_native_value).
             if emit_log {
-                emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m);
+                emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m, None);
             }
         } else if let Some((beg, end)) = self.select {
             // Absolute-position masks for the [beg:end] window.  The shifted
@@ -1284,7 +1467,15 @@ impl ProtoAssignStatement {
             // entry at `log_current_offset + nb`.  `emit_ff_log_push` handles
             // both.
             if emit_log {
-                emit_ff_log_push(context, builder, log_current_offset, nb, fwd, fwd_m);
+                emit_ff_log_push(
+                    context,
+                    builder,
+                    log_current_offset,
+                    nb,
+                    fwd,
+                    fwd_m,
+                    self.select,
+                );
             }
         } else {
             // Store elimination relies on load_cache forwarding to
@@ -1445,7 +1636,7 @@ impl ProtoAssignStatement {
             // entry per word — the commit-side consumer in
             // `ff_commit_from_log` writes width_class=8 bytes per entry.
             if emit_log {
-                emit_ff_log_push(context, builder, log_current_offset, nb, fwd_p, fwd_m);
+                emit_ff_log_push(context, builder, log_current_offset, nb, fwd_p, fwd_m, None);
             }
         }
 
@@ -1463,7 +1654,7 @@ impl ProtoAssignStatement {
         // Wide-dst bit-select WRITE (RMW) in 4-state mode needs mask-aware
         // read-modify-write semantics; keep that on the interpreter (rare).
         // 2-state dst-select and any rhs_select are handled below.
-        if self.select.is_some() && context.use_4state {
+        if (self.select.is_some() || self.dynamic_select.is_some()) && context.use_4state {
             return None;
         }
 
@@ -1486,6 +1677,17 @@ impl ProtoAssignStatement {
             } else {
                 raw
             };
+            // The field is ≤64 bits and `emit_wide_narrow_field_store` clips
+            // to it, so extending in I64 lands exactly the bits that survive.
+            let sv = match self.visible_store_sign_extend() {
+                Some(from_width) => {
+                    let reg_bits = builder.func.dfg.value_type(sv).bits() as usize;
+                    let sh = (reg_bits - from_width) as i64;
+                    let v = builder.ins().ishl_imm_u(sv, sh);
+                    builder.ins().sshr_imm_u(v, sh)
+                }
+                None => sv,
+            };
             emit_wide_narrow_field_store(
                 builder,
                 context.comb_values,
@@ -1498,8 +1700,70 @@ impl ProtoAssignStatement {
             return Some(());
         }
 
+        // Same collapse for a DYNAMIC ≤64-bit bit-select into a wide COMB
+        // value: the index only moves the word the RMW lands on, so one or
+        // two computed-address words replace the full-width wide-op sequence.
+        if let Some(dyn_sel) = self.dynamic_select.as_ref()
+            && self.wide_dynamic_limb_form(dyn_sel)
+        {
+            let (raw, _mask_xz) = self.expr.build_binary(context, builder)?;
+            // A `builds_wide_pointer` expr returns a pointer; the field is its
+            // low word. A scalar IS that word. (cf. `wide_shift_amount`.)
+            let sv = if returns_wide_pointer(&self.expr) {
+                builder.ins().load(I64, MemFlagsData::trusted(), raw, 0)
+            } else {
+                raw
+            };
+            // The field is ≤64 bits and `emit_wide_dynamic_field_store` clips
+            // to it, so extending in I64 lands exactly the bits that survive.
+            let sv = match self.visible_store_sign_extend() {
+                Some(from_width) => {
+                    let reg_bits = builder.func.dfg.value_type(sv).bits() as usize;
+                    let sh = (reg_bits - from_width) as i64;
+                    let v = builder.ins().ishl_imm_u(sv, sh);
+                    builder.ins().sshr_imm_u(v, sh)
+                }
+                None => sv,
+            };
+            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+            emit_wide_dynamic_field_store(
+                builder,
+                context.comb_values,
+                self.dst.raw() as i32,
+                shift,
+                dyn_sel,
+                self.dst_width,
+                sv,
+            );
+            return Some(());
+        }
+
         let expr_width = self.expr.width();
         let (payload, mask_xz) = self.expr.build_binary(context, builder)?;
+        // Only a bit-select destination reaches here (`can_build_binary` keeps
+        // the rest on the interpreter) and its field fits an I64/I128 register,
+        // so extend there and let the RMW below clip.  `payload` is a scalar.
+        let payload = match self.visible_store_sign_extend() {
+            Some(from_width) => {
+                let field = self.wide_select_sign_extend_field(from_width)?;
+                let reg_bits = if field > 64 { 128 } else { 64 };
+                let v = if reg_bits == 128 {
+                    if builder.func.dfg.value_type(payload) == I128 {
+                        payload
+                    } else {
+                        builder.ins().uextend(I128, payload)
+                    }
+                } else if builder.func.dfg.value_type(payload) == I128 {
+                    builder.ins().ireduce(I64, payload)
+                } else {
+                    payload
+                };
+                let sh = (reg_bits - from_width) as i64;
+                let v = builder.ins().ishl_imm_u(v, sh);
+                builder.ins().sshr_imm_u(v, sh)
+            }
+            None => payload,
+        };
         let nb = calc_native_bytes(self.dst_width);
         let n_words = nb / 8;
         let flags = MemFlagsData::trusted();
@@ -1559,6 +1823,48 @@ impl ProtoAssignStatement {
         } else {
             nb // force-stored above into an nb-sized zeroed slot
         };
+        // Static window merged straight into the destination.  Excludes a
+        // packed FF, whose direct store is skipped so in-event readers still
+        // see the old value.  Must precede the widen: unbacked window bits
+        // take zero either way.
+        if self.dynamic_select.is_none()
+            && !ff_packed
+            && mask_xz.is_none()
+            && wide_rmw_inplace_on()
+            && let Some((beg, end)) = self.select
+        {
+            let width = beg - end + 1;
+            let (src_bit, src_bits) = match self.rhs_select {
+                Some((rbeg, rend)) => (rend, rbeg - rend + 1),
+                None => (0, width),
+            };
+            let win = WideWindowStore {
+                end,
+                width,
+                src_bit,
+                src_bits,
+                nb,
+                src_nb: src_wide_nb,
+                dst_width: self.dst_width,
+                fused_rhs_select: self.rhs_select.is_some(),
+            };
+            if win.fits_inline() {
+                let dst_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+                emit_wide_select_rmw_store(builder, dst_ptr, src_ptr, &win);
+                if is_ff {
+                    emit_wide_log_chunks(
+                        context,
+                        builder,
+                        dst_ptr,
+                        log_current_offset,
+                        nb,
+                        self.select,
+                    );
+                }
+                return Some(());
+            }
+        }
+
         let src_ptr = super::helpers::widen_wide_ptr(builder, src_ptr, src_wide_nb, nb);
         // `src_nb >= nb` after the widen; a wider source keeps its size so
         // `rhs_select`'s shift can reach the high bits it carries.
@@ -1571,6 +1877,7 @@ impl ProtoAssignStatement {
             use super::helpers::emit_wide_shift_right_mask;
             emit_wide_shift_right_mask(context, builder, ptr, end, beg - end + 1, src_nb)
         };
+
         let src_ptr = if let Some((beg, end)) = self.rhs_select {
             extract_window(context, builder, src_ptr, beg, end)
         } else {
@@ -1581,12 +1888,26 @@ impl ProtoAssignStatement {
         // read-modify-write the [beg:end] range (2-state; 4-state bailed
         // above).  `src_ptr` becomes the full post-RMW wide value that the
         // store/log path below writes to the canonical dst.
-        let src_ptr = if let Some((beg, end)) = self.select {
+        //
+        // The read source per storage class matches the interpreter: comb =
+        // live value, packed FF = last-cycle current slot, unpacked multi-RMW
+        // FF = next slot with prior in-event writes forwarded.  Dynamic index
+        // wins over static `select` as in `AssignStatement::eval_step`.
+        let src_ptr = if let Some(dyn_sel) = self.dynamic_select.as_ref() {
+            use super::helpers::emit_wide_select_rmw_at;
+            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+            let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+            emit_wide_select_rmw_at(
+                context,
+                builder,
+                old_ptr,
+                src_ptr,
+                shift,
+                dyn_sel.window,
+                nb,
+            )
+        } else if let Some((beg, end)) = self.select {
             use super::helpers::emit_wide_select_rmw;
-            // Read the current dst value from `dst.raw()` (= `dst_offset`):
-            // for comb that is the live value, for a packed FF the old
-            // (last-cycle) current slot, and for an unpacked multi-RMW FF the
-            // next slot that already holds prior in-event writes (forwarding).
             let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
             emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
         } else {
@@ -1609,7 +1930,7 @@ impl ProtoAssignStatement {
         // payload each.  For nb ≤ 56 a single entry suffices; wider FFs
         // chunk into multiple entries at canonical offsets.
         if is_ff {
-            emit_wide_log_chunks(context, builder, src_ptr, log_current_offset, nb);
+            emit_wide_log_chunks(context, builder, src_ptr, log_current_offset, nb, None);
         }
 
         // 4-state mask: direct store (skip for packed FF) + parallel wide
@@ -1653,6 +1974,7 @@ impl ProtoAssignStatement {
                     mask_ptr,
                     log_current_offset + nb as i32,
                     nb,
+                    None,
                 );
             }
         }
@@ -1680,7 +2002,7 @@ impl ProtoIfStatement {
         // Cranelift's egraph does not synthesize jump tables itself, so
         // recognize Eq-const chains here and emit `br_table` directly.
         if std::env::var("VERYL_SWITCH_LOWER_DISABLE").ok().as_deref() != Some("1")
-            && let Some(chain) = collect_eq_chain(self)
+            && let Some(chain) = collect_eq_chain(self, 2)
             && chain.arms.len() >= 4
             && let Some(()) = emit_switch_via_br_table(&chain, context, builder, is_last)
         {
@@ -1822,18 +2144,131 @@ fn emit_wide_narrow_field_store(
     }
 }
 
+/// Highest bit a dynamic bit-select can reach.  Both the interpreter and
+/// [`build_dynamic_select_shift`] clamp the index to the last element, so the
+/// top of the last window bounds every write.
+fn dynamic_select_top_bit(dyn_sel: &ProtoDynamicBitSelect) -> usize {
+    (dyn_sel.num_elements.saturating_sub(1)) * dyn_sel.elem_width + dyn_sel.window.saturating_sub(1)
+}
+
+/// Whether any reachable index puts the selected window across a 64-bit word
+/// boundary.  `(i * elem_width) % 64` repeats with a period dividing 64, so the
+/// first 64 indices already show every residue that can occur.
+fn dynamic_select_spans_two_words(dyn_sel: &ProtoDynamicBitSelect) -> bool {
+    (0..dyn_sel.num_elements.min(64)).any(|i| (i * dyn_sel.elem_width) % 64 + dyn_sel.window > 64)
+}
+
+/// Runtime-offset sibling of [`emit_wide_narrow_field_store`]: RMW a ≤64-bit
+/// field at runtime low bit `lo_val` into the wide value at
+/// `base_addr + base_off`.
+///
+/// When the field can span a word boundary, the upper word is updated
+/// unconditionally with a mask that is zero for a non-spanning offset — the
+/// write is then a read-back of what the lower-word store just deposited,
+/// which is why it must come *after* it, with the index clamped to the last
+/// word to stay inside the allocation.
+///
+/// 2-state, comb dst (no write-log).  The caller guarantees the highest
+/// reachable bit is inside `dst_width`, so no width clamp is needed.
+fn emit_wide_dynamic_field_store(
+    builder: &mut FunctionBuilder,
+    base_addr: cranelift::prelude::Value,
+    base_off: i32,
+    lo_val: cranelift::prelude::Value,
+    dyn_sel: &ProtoDynamicBitSelect,
+    dst_width: usize,
+    sv: cranelift::prelude::Value,
+) {
+    let nbits = dyn_sel.window;
+    let n_words = calc_native_bytes(dst_width) / 8;
+    let flags = MemFlagsData::trusted();
+    let base_mask: u64 = if nbits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << nbits) - 1
+    };
+    // `sv` may be I128 (e.g. an unsized literal); the field is ≤64-bit so the
+    // low word carries it.
+    let sv = if builder.func.dfg.value_type(sv) == I128 {
+        builder.ins().ireduce(I64, sv)
+    } else {
+        sv
+    };
+    let sv = builder.ins().band_imm_u(sv, base_mask as i64);
+
+    let word = builder.ins().ushr_imm_u(lo_val, 6);
+    let bit = builder.ins().band_imm_u(lo_val, 63);
+    let byte_off = builder.ins().ishl_imm_u(word, 3);
+    let addr0 = builder.ins().iadd(base_addr, byte_off);
+
+    let mask_val = builder.ins().iconst(I64, base_mask as i64);
+    let m0 = builder.ins().ishl(mask_val, bit);
+    let s0 = builder.ins().ishl(sv, bit);
+    let d0 = builder.ins().load(I64, flags, addr0, base_off);
+    let not_m0 = builder.ins().bnot(m0);
+    let cleared0 = builder.ins().band(d0, not_m0);
+    let result0 = builder.ins().bor(cleared0, s0);
+    builder.ins().store(flags, result0, addr0, base_off);
+
+    if !dynamic_select_spans_two_words(dyn_sel) {
+        return;
+    }
+    // `(x >> 1) >> (63 - bit)` is `x >> (64 - bit)` without the shift-amount
+    // wraparound at `bit == 0`.
+    let c63 = builder.ins().iconst(I64, 63);
+    let sh = builder.ins().isub(c63, bit);
+    let spill = |builder: &mut FunctionBuilder, x| {
+        let x1 = builder.ins().ushr_imm_u(x, 1);
+        builder.ins().ushr(x1, sh)
+    };
+    let m1 = spill(builder, mask_val);
+    let s1 = spill(builder, sv);
+    // Clamp to the last word: a field that does not actually span leaves
+    // `m1 == 0`, so the store below is a no-op rewrite of whatever word it
+    // lands on, and clamping keeps that inside the allocation.
+    let next = builder.ins().iadd_imm_s(word, 1);
+    let n_words_val = builder.ins().iconst(I64, n_words as i64);
+    let last = builder.ins().iconst(I64, (n_words - 1) as i64);
+    let in_range = builder
+        .ins()
+        .icmp(IntCC::UnsignedLessThan, next, n_words_val);
+    let word1 = builder.ins().select(in_range, next, last);
+    let byte_off1 = builder.ins().ishl_imm_u(word1, 3);
+    let addr1 = builder.ins().iadd(base_addr, byte_off1);
+    let d1 = builder.ins().load(I64, flags, addr1, base_off);
+    let not_m1 = builder.ins().bnot(m1);
+    let cleared1 = builder.ins().band(d1, not_m1);
+    let result1 = builder.ins().bor(cleared1, s1);
+    builder.ins().store(flags, result1, addr1, base_off);
+}
+
 /// Emit one or more wide write-log entries covering `nb` bytes starting
 /// at `src_ptr`.  Each entry holds up to `WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES`
 /// (56) bytes; wider FFs are split into multiple entries at consecutive
 /// FF offsets.
+///
+/// `span` is the `(high, low)` BIT range when the write is a statically
+/// bounded slice: only those bytes changed, so logging the whole element
+/// would spend `nb` bytes of entry payload to deposit a couple of bits.
 fn emit_wide_log_chunks(
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
     src_ptr: cranelift::prelude::Value,
     base_offset: i32,
     nb: usize,
+    span: Option<(usize, usize)>,
 ) {
-    use crate::ir::write_log::WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
+    use crate::ir::write_log::{WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, static_field_byte_span};
+    let (skip, nb) = match span.and_then(|(hi, lo)| static_field_byte_span(hi, lo, nb)) {
+        Some((blo, blen)) => (blo, blen),
+        None => (0, nb),
+    };
+    let src_ptr = if skip == 0 {
+        src_ptr
+    } else {
+        builder.ins().iadd_imm_s(src_ptr, skip as i64)
+    };
+    let base_offset = base_offset + skip as i32;
     let mut written: usize = 0;
     while written < nb {
         let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
@@ -1878,124 +2313,6 @@ fn emit_wide_log_chunks_dyn(
     }
 }
 // ---------- Switch lowering helpers (br_table emission) ----------
-
-struct EqChainArm<'a> {
-    value: u64,
-    body: &'a [ProtoStatement],
-}
-
-struct EqChain<'a> {
-    selector: &'a ProtoExpression,
-    arms: Vec<EqChainArm<'a>>,
-    default: &'a [ProtoStatement],
-}
-
-fn extract_eq_const(cond: &ProtoExpression) -> Option<(&ProtoExpression, u64)> {
-    let (x, op, y) = match cond {
-        ProtoExpression::Binary { x, op, y, .. } => (x.as_ref(), *op, y.as_ref()),
-        _ => return None,
-    };
-    if !matches!(
-        op,
-        veryl_analyzer::ir::Op::Eq | veryl_analyzer::ir::Op::EqWildcard
-    ) {
-        return None;
-    }
-    fn try_extract<'b>(
-        val_side: &'b ProtoExpression,
-        var_side: &'b ProtoExpression,
-    ) -> Option<(&'b ProtoExpression, u64)> {
-        match val_side {
-            ProtoExpression::Value { value, .. } => {
-                // xz constants would match any value under wildcard
-                // semantics and cannot be encoded as a table index.
-                if value.is_xz() {
-                    None
-                } else {
-                    value.to_u64().map(|v| (var_side, v))
-                }
-            }
-            _ => None,
-        }
-    }
-    if let Some(r) = try_extract(y, x) {
-        return Some(r);
-    }
-    try_extract(x, y)
-}
-
-fn same_var_read(a: &ProtoExpression, b: &ProtoExpression) -> bool {
-    match (a, b) {
-        (
-            ProtoExpression::Variable {
-                var_offset: oa,
-                select: sa,
-                dynamic_select: dsa,
-                ..
-            },
-            ProtoExpression::Variable {
-                var_offset: ob,
-                select: sb,
-                dynamic_select: dsb,
-                ..
-            },
-        ) => oa == ob && sa == sb && dsa.is_none() && dsb.is_none(),
-        _ => false,
-    }
-}
-
-fn collect_eq_chain(start: &ProtoIfStatement) -> Option<EqChain<'_>> {
-    let mut arms: Vec<EqChainArm<'_>> = Vec::new();
-    let mut selector: Option<&ProtoExpression> = None;
-    let mut current = start;
-    // Else-chain once the eq-const prefix stops: the *last consumed* arm's
-    // false_side. A dirty break descends into a non-eq-const / different-selector
-    // node that must stay whole as the default, not be reduced to its false_side.
-    let mut default: &[ProtoStatement] = &[];
-    loop {
-        let cond = current.cond.as_ref()?;
-        let (var_expr, const_val) = match extract_eq_const(cond) {
-            Some(p) => p,
-            None => break,
-        };
-        // Dynamic-indexed reads cannot share a single hoisted dispatch
-        // value across arms, so they break the chain.
-        if let ProtoExpression::Variable {
-            dynamic_select: Some(_),
-            ..
-        } = var_expr
-        {
-            break;
-        }
-        if let Some(sel) = selector {
-            if !same_var_read(sel, var_expr) {
-                break;
-            }
-        } else {
-            selector = Some(var_expr);
-        }
-        arms.push(EqChainArm {
-            value: const_val,
-            body: &current.true_side,
-        });
-        default = &current.false_side[..];
-        if current.false_side.len() == 1
-            && let ProtoStatement::If(next) = &current.false_side[0]
-        {
-            current = next;
-            continue;
-        }
-        break;
-    }
-    if arms.len() < 2 {
-        return None;
-    }
-    Some(EqChain {
-        selector: selector?,
-        arms,
-        default,
-    })
-}
 
 fn emit_switch_via_br_table(
     chain: &EqChain,
@@ -2088,73 +2405,12 @@ fn emit_switch_via_br_table(
     Some(())
 }
 
-/// Extract the constant selector values from a `case` arm condition — succeeds
-/// only for `sel == const` leaves OR-combined against ONE non-dynamic selector,
-/// so a range/casez/mixed-selector leaf rejects it (→ comparison cascade).
-fn extract_case_eq_values<'a>(
-    cond: &'a ProtoExpression,
-    selector: &mut Option<&'a ProtoExpression>,
-    out: &mut Vec<u64>,
-) -> bool {
-    if let ProtoExpression::Binary {
-        x,
-        op: veryl_analyzer::ir::Op::LogicOr,
-        y,
-        ..
-    } = cond
-    {
-        return extract_case_eq_values(x, selector, out)
-            && extract_case_eq_values(y, selector, out);
-    }
-    let Some((var_expr, const_val)) = extract_eq_const(cond) else {
-        return false;
-    };
-    if let ProtoExpression::Variable {
-        dynamic_select: Some(_),
-        ..
-    } = var_expr
-    {
-        return false;
-    }
-    match selector {
-        Some(sel) if !same_var_read(sel, var_expr) => return false,
-        Some(_) => {}
-        None => *selector = Some(var_expr),
-    }
-    out.push(const_val);
-    true
-}
-
 impl ProtoCaseStatement {
     pub fn can_build_binary(&self) -> bool {
         self.arms
             .iter()
             .all(|arm| arm.cond.can_build_binary() && arm.body.iter().all(|s| s.can_build_binary()))
             && self.default.iter().all(|s| s.can_build_binary())
-    }
-
-    /// Reshape the flat arms into an `EqChain` (one entry per matched value) so
-    /// the shared `br_table` emitter can be reused; `None` if not all eq-const.
-    fn as_eq_chain(&self) -> Option<EqChain<'_>> {
-        let mut selector: Option<&ProtoExpression> = None;
-        let mut arms: Vec<EqChainArm<'_>> = Vec::new();
-        for arm in &self.arms {
-            let mut values = Vec::new();
-            if !extract_case_eq_values(&arm.cond, &mut selector, &mut values) {
-                return None;
-            }
-            for value in values {
-                arms.push(EqChainArm {
-                    value,
-                    body: &arm.body,
-                });
-            }
-        }
-        Some(EqChain {
-            selector: selector?,
-            arms,
-            default: &self.default,
-        })
     }
 
     pub fn build_binary(
@@ -2165,7 +2421,7 @@ impl ProtoCaseStatement {
     ) -> Option<()> {
         // Dense eq-const arms → a real jump table (as the nested-if path did).
         if std::env::var("VERYL_SWITCH_LOWER_DISABLE").ok().as_deref() != Some("1")
-            && let Some(chain) = self.as_eq_chain()
+            && let Some(chain) = case_as_eq_chain(self)
             && chain.arms.len() >= 4
             && let Some(()) = emit_switch_via_br_table(&chain, context, builder, is_last)
         {
@@ -2238,122 +2494,46 @@ fn cold_if_true_enabled() -> bool {
     static V: OnceLock<bool> = OnceLock::new();
     *V.get_or_init(|| std::env::var("VERYL_COLD_IF_TRUE").ok().as_deref() != Some("0"))
 }
+
 #[cfg(test)]
-mod eq_chain_tests {
-    use super::*;
-    use crate::ir::{ExpressionContext, Value, VarOffset};
-    use veryl_analyzer::ir::Op;
-    use veryl_analyzer::value::ValueU64;
+mod tests {
+    use super::log_window_for_span;
 
-    fn ctx(width: usize) -> ExpressionContext {
-        ExpressionContext {
-            width,
-            signed: false,
-        }
-    }
-    fn var_expr(off: isize, width: usize) -> ProtoExpression {
-        ProtoExpression::Variable {
-            var_offset: VarOffset::Comb(off),
-            select: None,
-            dynamic_select: None,
-            width,
-            var_full_width: width,
-            expr_context: ctx(width),
-        }
-    }
-    fn const_expr(payload: u64) -> ProtoExpression {
-        ProtoExpression::Value {
-            value: Value::U64(ValueU64 {
-                payload,
-                mask_xz: 0,
-                width: 8,
-                signed: false,
-            }),
-            width: 8,
-            expr_context: ctx(8),
-        }
-    }
-    fn cmp(off: isize, op: Op, val: u64) -> ProtoExpression {
-        ProtoExpression::Binary {
-            x: Box::new(var_expr(off, 8)),
-            op,
-            y: Box::new(const_expr(val)),
-            width: 1,
-            expr_context: ctx(1),
-        }
-    }
-    fn if_node(
-        cond: ProtoExpression,
-        t: Vec<ProtoStatement>,
-        f: Vec<ProtoStatement>,
-    ) -> ProtoIfStatement {
-        ProtoIfStatement {
-            cond: Some(cond),
-            true_side: t,
-            false_side: f,
-        }
-    }
-    fn eq_prefix(sel: isize, tail: Vec<ProtoStatement>) -> ProtoIfStatement {
-        let mut chain = tail;
-        for v in (0..4u64).rev() {
-            chain = vec![ProtoStatement::If(if_node(
-                cmp(sel, Op::Eq, v),
-                vec![ProtoStatement::Break],
-                chain,
-            ))];
-        }
-        match chain.into_iter().next().unwrap() {
-            ProtoStatement::If(x) => x,
-            _ => unreachable!(),
-        }
-    }
-
-    // A node that ends the eq-const prefix because it tests a *different*
-    // selector must survive whole — its cond and true_side — inside the
-    // chain default.
+    /// The window must contain the field and stay inside the element: a
+    /// window running past `nb` would make the commit write a neighbouring
+    /// FF, and one narrower than the field would drop bits.
     #[test]
-    fn dirty_break_keeps_node_in_default_selector_mismatch() {
-        let dirty = ProtoStatement::If(if_node(
-            cmp(0x20, Op::Eq, 5),
-            vec![ProtoStatement::Break],
-            vec![ProtoStatement::Break],
-        ));
-        let head = eq_prefix(0x10, vec![dirty]);
-        let chain = collect_eq_chain(&head).expect("4-arm eq chain");
-        assert_eq!(
-            chain.arms.iter().map(|a| a.value).collect::<Vec<_>>(),
-            vec![0, 1, 2, 3]
-        );
-        assert_eq!(chain.default.len(), 1);
-        assert!(
-            matches!(chain.default[0], ProtoStatement::If(_)),
-            "default must retain the whole different-selector node"
-        );
+    fn log_window_covers_the_field_and_stays_inside_the_element() {
+        // A 2-bit field inside byte 0, then inside byte 1.
+        assert_eq!(log_window_for_span(0, 0, 16), Some((0, 1)));
+        assert_eq!(log_window_for_span(1, 1, 16), Some((1, 1)));
+        // Straddling a byte boundary widens to the enclosing aligned window.
+        assert_eq!(log_window_for_span(3, 4, 16), Some((0, 8)));
+        assert_eq!(log_window_for_span(2, 3, 16), Some((2, 2)));
+        assert_eq!(log_window_for_span(5, 6, 16), Some((4, 4)));
+        // A span wider than 8 bytes has no single window.
+        assert_eq!(log_window_for_span(0, 8, 16), None);
+        // Out of range spans are refused rather than clipped.
+        assert_eq!(log_window_for_span(0, 16, 16), None);
+        assert_eq!(log_window_for_span(4, 3, 16), None);
     }
 
-    // Same, but the prefix ends on a non-Eq operator (extract_eq_const fails).
+    /// `nb` is not always a multiple of 8 on the narrow side, and a window
+    /// must never be chosen that the commit would run past.
     #[test]
-    fn dirty_break_keeps_node_in_default_non_eq_op() {
-        let dirty = ProtoStatement::If(if_node(
-            cmp(0x10, Op::Less, 4),
-            vec![ProtoStatement::Break],
-            vec![ProtoStatement::Break],
-        ));
-        let head = eq_prefix(0x10, vec![dirty]);
-        let chain = collect_eq_chain(&head).expect("4-arm eq chain");
-        assert_eq!(chain.arms.len(), 4);
-        assert_eq!(chain.default.len(), 1);
-        assert!(matches!(chain.default[0], ProtoStatement::If(_)));
-    }
-
-    // A clean chain whose final else is plain statements keeps that else as
-    // the default (regression guard for the common case).
-    #[test]
-    fn clean_chain_default_is_final_else() {
-        let head = eq_prefix(0x10, vec![ProtoStatement::Break]);
-        let chain = collect_eq_chain(&head).expect("4-arm eq chain");
-        assert_eq!(chain.arms.len(), 4);
-        assert_eq!(chain.default.len(), 1);
-        assert!(matches!(chain.default[0], ProtoStatement::Break));
+    fn log_window_never_runs_past_a_short_element() {
+        for nb in 1..=16usize {
+            for lo in 0..nb {
+                for hi in lo..nb {
+                    if let Some((start, w)) = log_window_for_span(lo, hi, nb) {
+                        assert!(start <= lo, "nb={nb} [{lo},{hi}] window starts late");
+                        assert!(start + w > hi, "nb={nb} [{lo},{hi}] window ends early");
+                        assert!(start + w <= nb, "nb={nb} [{lo},{hi}] window past element");
+                        assert!(w.is_power_of_two() && w <= 8);
+                        assert_eq!(start % w, 0, "nb={nb} [{lo},{hi}] window unaligned");
+                    }
+                }
+            }
+        }
     }
 }

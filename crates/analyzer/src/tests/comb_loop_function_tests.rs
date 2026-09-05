@@ -2150,3 +2150,54 @@ fn recursive_function_summary_contexts_clone_only_referenced_metadata() {
         crate::comb_loop_detect::module_context_entries(),
     );
 }
+
+#[test]
+fn comb_loop_function_copyout_is_delayed_until_return() {
+    assert_comb_loop(
+        "function copy-out preserves call boundaries",
+        r#"
+    module Top (o: output logic) {
+        function update (dst: output logic) -> logic {
+            dst = 0;
+            return o;
+        }
+        always_comb { o = update(o); }
+    }
+    "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_function_copyout_overwrites_captured_write() {
+    assert_comb_loop(
+        "function copy-out preserves call boundaries",
+        r#"
+    module Top (o: output logic) {
+        function update (dst: output logic) {
+            dst = o;
+            o = 0;
+        }
+        always_comb { update(o); }
+    }
+    "#,
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_function_copyout_actual_aliases_input() {
+    assert_comb_loop(
+        "function copy-out preserves call boundaries",
+        r#"
+    module Top (o: output logic) {
+        function update (src: input logic, dst: output logic) {
+            dst = 0;
+            dst = src;
+        }
+        always_comb { update(o, o); }
+    }
+    "#,
+        true,
+    );
+}

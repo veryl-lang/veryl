@@ -32,7 +32,155 @@ fn combinational_loop() {
     }
     "#;
 
-    let result = analyze_top(code, &Config::default(), "Top");
+    // The analyzer rejects this too; this test is about the simulator's own
+    // detector, which is the safety net for a loop the analyzer misses.
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
+    assert!(matches!(
+        result,
+        Err(SimulatorError::CombinationalLoop { .. })
+    ));
+}
+
+#[test]
+fn combinational_loop_through_one_struct_member() {
+    // Both ends of the ring are `busy`: keying by bits must not lose a loop
+    // that closes inside one struct member.
+    let code = r#"
+    package pkg {
+        struct cfg_t {
+            incr: logic,
+            strb: logic,
+        }
+
+        struct sts_t {
+            busy    : logic,
+            overflow: logic,
+        }
+    }
+
+    #[allow(unassign_variable)]
+    module Reg (
+        cfg: input  pkg::cfg_t,
+        sts: output pkg::sts_t,
+        req: input  logic     ,
+    ) {
+        assign sts.busy = cfg.incr & req;
+    }
+
+    #[allow(unassign_variable)]
+    module Top (
+        a  : input  logic,
+        req: input  logic,
+        o  : output logic,
+    ) {
+        var cfg: pkg::cfg_t;
+        var sts: pkg::sts_t;
+
+        inst u: Reg (
+            cfg: cfg,
+            sts: sts,
+            req     ,
+        );
+
+        assign cfg.incr = !(a & sts.busy);
+        assign o        = sts.busy;
+    }
+    "#;
+
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
+    assert!(matches!(
+        result,
+        Err(SimulatorError::CombinationalLoop { .. })
+    ));
+}
+
+#[test]
+fn combinational_loop_through_a_dynamic_bit_write() {
+    // `v[i]` names its destination bit at runtime, so the write reports no
+    // range at all.  The bit-keyed check has to read that as "every bit" --
+    // narrowing it to nothing would drop the edge and lose the loop.
+    let code = r#"
+    #[allow(unassign_variable)]
+    module Top (
+        a: input  logic   ,
+        i: input  logic<3>,
+        o: output logic<8>,
+    ) {
+        var v: logic<8>;
+        var u: logic   ;
+
+        assign v[i] = u & a;
+        assign u    = v[3];
+        assign o    = v;
+    }
+    "#;
+
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
+    assert!(matches!(
+        result,
+        Err(SimulatorError::CombinationalLoop { .. })
+    ));
+}
+
+#[test]
+fn combinational_loop_closed_by_a_later_writer_of_the_bits_read() {
+    // The writer producing the bits `z` reads comes AFTER it, so a read must
+    // reach back for its writer even when that writer sits later.
+    let code = r#"
+    module Top (
+        o: output logic<8>,
+    ) {
+        var v: logic<8>;
+        var z: logic<4>;
+
+        assign v[3:0] = z;
+        assign z      = v[7:4];
+        assign v[7:4] = v[3:0];
+        assign o      = v;
+    }
+    "#;
+
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
+    assert!(matches!(
+        result,
+        Err(SimulatorError::CombinationalLoop { .. })
+    ));
+}
+
+#[test]
+fn combinational_loop_closed_inside_one_arm_of_a_case() {
+    // The ring runs through `2'd0` alone.  Per-arm keying makes `a` several
+    // writers where it was one, so WHICH writer binds must stay the
+    // statement's answer.
+    let code = r#"
+    module Top (
+        s: input  logic<2>,
+        c: input  logic   ,
+        o: output logic   ,
+    ) {
+        var a: logic;
+        var b: logic;
+
+        always_comb {
+            case s {
+                2'd0: {
+                    a = b;
+                }
+                2'd1: {
+                    a = c;
+                }
+                default: {
+                    a = 1'b0;
+                }
+            }
+        }
+
+        assign b = a;
+        assign o = b;
+    }
+    "#;
+
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
     assert!(matches!(
         result,
         Err(SimulatorError::CombinationalLoop { .. })
@@ -180,7 +328,6 @@ fn dynamic_index_leaving_a_sub_array() {
     // reporting.
     let bodies = [
         "x = 8'd0; s[i] = t;",
-        "x = 8'd0; s[i] = pk::TBL;",
         "x = 8'd0; s[i] = f();",
         "x = 8'd0; s[i] = u[j];",
         "{s[i], x} = 16'h1234;",

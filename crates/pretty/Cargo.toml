@@ -1,6 +1,6 @@
 [package]
 name                  = "veryl-pretty"
-version               = "0.20.3"
+version               = "0.21.0"
 authors.workspace     = true
 repository.workspace  = true
 keywords.workspace    = true

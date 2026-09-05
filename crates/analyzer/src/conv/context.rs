@@ -3,8 +3,8 @@ use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
     Component, Comptime, Declaration, Expression, FfClock, FfReset, FuncPath, Function, Interface,
-    IrResult, ShapeRef, Signature, Type, VarId, VarIndex, VarKind, VarPath, VarSelect, Variable,
-    VariableInfo,
+    IrResult, ShapeRef, Signature, Statement, Type, VarId, VarIndex, VarKind, VarPath, VarSelect,
+    Variable, VariableInfo,
 };
 use crate::namespace::Namespace;
 use crate::scope;
@@ -28,6 +28,35 @@ pub struct Config {
     pub evaluate_size_limit: usize,
     pub evaluate_array_limit: usize,
     pub defines: HashSet<StrId>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RuntimeFunctionEffect {
+    pub external_write: bool,
+    pub written_outputs: HashSet<VarPath>,
+}
+
+impl RuntimeFunctionEffect {
+    pub fn written_paths_for<'a>(
+        &'a self,
+        formal: &'a VarPath,
+    ) -> impl Iterator<Item = &'a VarPath> {
+        self.written_outputs
+            .iter()
+            .filter(move |path| path.0.starts_with(&formal.0))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FunctionOutputBinding {
+    pub scheduler_external: bool,
+}
+
+#[derive(Clone, Debug)]
+struct FunctionEffectFrame {
+    path: FuncPath,
+    outputs: HashMap<VarId, FunctionOutputBinding>,
+    effect: RuntimeFunctionEffect,
 }
 
 impl Default for Config {
@@ -77,6 +106,14 @@ pub struct Context {
     /// complete via `set_instance_history`, which functions never call, so it
     /// would stay wedged as "active" forever.
     pub function_call_stack: Vec<Signature>,
+    function_effects: HashMap<FuncPath, RuntimeFunctionEffect>,
+    function_effect_stack: Vec<FunctionEffectFrame>,
+    /// Return variable of the function currently being constant-evaluated, and
+    /// whether one of its `return` statements has already run. A `return` is
+    /// lowered to an assignment to that variable, so without this the
+    /// evaluator walks straight past it and the LAST `return` wins.
+    pub function_ret_var: Option<VarId>,
+    pub function_returned: bool,
     pub select_paths: Vec<(VarPath, GenericSymbolPath)>,
     pub select_dims: Vec<usize>,
     pub ignore_var_func: bool,
@@ -90,6 +127,10 @@ pub struct Context {
     pub in_if_reset: bool,
     /// Inside an initial/final block (testbench statement context).
     pub in_tb_block: bool,
+    /// Inside an `initial` block, holding the next `VarId` at its entry so the
+    /// block's own procedural locals can be told from the module's state.
+    /// `in_tb_block` is unusable here: it also covers `final` and connections.
+    pub in_initial: Option<VarId>,
     /// Sink for component method calls hoisted out of the current
     /// testbench statement's expressions; `Some` only while initial/final
     /// statements convert. Each hoisted call runs as its own zero-time
@@ -225,6 +266,11 @@ impl Context {
             &mut tgt.comptime_for_overflow,
         );
         std::mem::swap(&mut self.function_call_stack, &mut tgt.function_call_stack);
+        std::mem::swap(&mut self.function_effects, &mut tgt.function_effects);
+        std::mem::swap(
+            &mut self.function_effect_stack,
+            &mut tgt.function_effect_stack,
+        );
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
@@ -276,6 +322,133 @@ impl Context {
 
     pub fn get_variable_info(&self, id: VarId) -> Option<VariableInfo> {
         self.variables.get(&id).map(VariableInfo::new)
+    }
+
+    pub(crate) fn begin_function_effect(
+        &mut self,
+        path: FuncPath,
+        outputs: HashMap<VarId, FunctionOutputBinding>,
+        effect: RuntimeFunctionEffect,
+    ) {
+        self.function_effect_stack.push(FunctionEffectFrame {
+            path,
+            outputs,
+            effect,
+        });
+    }
+
+    pub(crate) fn finish_function_effect(&mut self) {
+        if let Some(frame) = self.function_effect_stack.pop() {
+            self.function_effects.insert(frame.path, frame.effect);
+        }
+    }
+
+    pub(crate) fn function_effect(&self, path: &FuncPath) -> Option<RuntimeFunctionEffect> {
+        self.function_effects.get(path).cloned()
+    }
+
+    pub(crate) fn record_function_call_effect(
+        &mut self,
+        effect: &RuntimeFunctionEffect,
+        outputs: &[(VarPath, Vec<crate::ir::AssignDestination>)],
+    ) {
+        let Some(frame) = self.function_effect_stack.last() else {
+            return;
+        };
+        let caller_outputs = frame.outputs.clone();
+        let mut external_write = effect.external_write;
+        let mut written_outputs = HashSet::default();
+
+        for (formal, destinations) in outputs {
+            for written in effect.written_paths_for(formal) {
+                let suffix = &written.0[formal.0.len()..];
+                for destination in destinations {
+                    if let Some(output) = caller_outputs.get(&destination.id) {
+                        let mut mapped = destination.path.clone();
+                        mapped.0.extend_from_slice(suffix);
+                        written_outputs.insert(mapped);
+                        external_write |= output.scheduler_external;
+                    } else if self
+                        .get_variable_info(destination.id)
+                        .is_none_or(|variable| variable.affiliation != Affiliation::Function)
+                    {
+                        external_write = true;
+                    }
+                }
+            }
+        }
+
+        if let Some(frame) = self.function_effect_stack.last_mut() {
+            frame.effect.external_write |= external_write;
+            frame.effect.written_outputs.extend(written_outputs);
+        }
+    }
+
+    pub(crate) fn record_function_statement_writes(&mut self, statements: &[Statement]) {
+        let Some(caller_outputs) = self
+            .function_effect_stack
+            .last()
+            .map(|frame| frame.outputs.clone())
+        else {
+            return;
+        };
+        let mut effect = RuntimeFunctionEffect::default();
+
+        fn visit(
+            context: &Context,
+            statements: &[Statement],
+            caller_outputs: &HashMap<VarId, FunctionOutputBinding>,
+            effect: &mut RuntimeFunctionEffect,
+        ) {
+            for statement in statements {
+                match statement {
+                    Statement::Assign(assign) => {
+                        for destination in &assign.dst {
+                            if let Some(output) = caller_outputs.get(&destination.id) {
+                                effect.written_outputs.insert(destination.path.clone());
+                                effect.external_write |= output.scheduler_external;
+                            } else if context.get_variable_info(destination.id).is_none_or(
+                                |variable| {
+                                    variable.affiliation != Affiliation::Function
+                                        || matches!(variable.kind, VarKind::Output | VarKind::Inout)
+                                },
+                            ) {
+                                effect.external_write = true;
+                            }
+                        }
+                    }
+                    Statement::If(statement) => {
+                        visit(context, &statement.true_side, caller_outputs, effect);
+                        visit(context, &statement.false_side, caller_outputs, effect);
+                    }
+                    Statement::IfReset(statement) => {
+                        visit(context, &statement.true_side, caller_outputs, effect);
+                        visit(context, &statement.false_side, caller_outputs, effect);
+                    }
+                    Statement::Case(statement) => {
+                        for arm in &statement.arms {
+                            visit(context, &arm.body, caller_outputs, effect);
+                        }
+                        visit(context, &statement.default, caller_outputs, effect);
+                    }
+                    Statement::For(statement) => {
+                        visit(context, &statement.body, caller_outputs, effect);
+                    }
+                    Statement::SystemFunctionCall(_)
+                    | Statement::FunctionCall(_)
+                    | Statement::TbMethodCall(_)
+                    | Statement::Break
+                    | Statement::Unsupported(_)
+                    | Statement::Null => {}
+                }
+            }
+        }
+
+        visit(self, statements, &caller_outputs, &mut effect);
+        if let Some(frame) = self.function_effect_stack.last_mut() {
+            frame.effect.external_write |= effect.external_write;
+            frame.effect.written_outputs.extend(effect.written_outputs);
+        }
     }
 
     pub fn resolve_path(&self, mut path: GenericSymbolPath) -> GenericSymbolPath {
@@ -391,8 +564,9 @@ impl Context {
 
     pub fn extract_function(&mut self, context: &mut Context, base: &VarPath, array: &ShapeRef) {
         for (id, mut variable) in context.variables.drain() {
+            let path_offset = variable.path.0.len();
             variable.path.add_prelude(&base.0);
-            variable.prepend_array(array);
+            variable.prepend_array_at_path(array, path_offset);
             self.variables.insert(id, variable);
         }
 
@@ -473,7 +647,8 @@ impl Context {
                 }
             }
 
-            variable.prepend_array(array);
+            let path_offset = variable.path.0.len();
+            variable.prepend_array_at_path(array, path_offset);
 
             // override token, affiliation to interface instance
             variable.token = token;
@@ -760,35 +935,35 @@ impl Context {
     }
 
     pub fn drain_var_paths(&mut self) -> HashMap<VarPath, (VarId, Comptime)> {
-        self.var_paths.drain().collect()
+        std::mem::take(&mut self.var_paths)
     }
 
     pub fn drain_func_paths(&mut self) -> HashMap<FuncPath, VarId> {
-        self.func_paths.drain().collect()
+        std::mem::take(&mut self.func_paths)
     }
 
     pub fn drain_variables(&mut self) -> HashMap<VarId, Variable> {
-        self.variables.drain().collect()
+        std::mem::take(&mut self.variables)
     }
 
     pub fn drain_port_types(&mut self) -> HashMap<VarPath, (Type, ClockDomain)> {
-        self.port_types.drain().collect()
+        std::mem::take(&mut self.port_types)
     }
 
     pub fn drain_functions(&mut self) -> HashMap<VarId, Function> {
-        self.functions.drain().collect()
+        std::mem::take(&mut self.functions)
     }
 
     pub fn drain_modports(&mut self) -> HashMap<StrId, Vec<(StrId, Direction)>> {
-        self.modports.drain().collect()
+        std::mem::take(&mut self.modports)
     }
 
     pub fn drain_declarations(&mut self) -> Vec<Declaration> {
-        self.declarations.drain(..).collect()
+        std::mem::take(&mut self.declarations)
     }
 
     pub fn drain_errors(&mut self) -> Vec<AnalyzerError> {
-        self.errors.drain(..).collect()
+        std::mem::take(&mut self.errors)
     }
 }
 

@@ -836,3 +836,25 @@ fn runtime_bound_relation_is_not_used_to_prune_iterator_branches() {
         "#,
     );
 }
+
+#[test]
+fn boolean_cancellation_inside_a_function_does_not_remove_its_input_dependency() {
+    assert_intentional_false_positive(
+        "the detector does not prove x & 0 = 0",
+        r#"
+        module Top (
+            o: output logic,
+        ) {
+            function low (x: input logic<8>) -> logic {
+                var tmp: logic<8>;
+                tmp = x & 8'b00000000;
+                return tmp[0];
+            }
+            var value: logic<8>;
+            assign o = low(value);
+            assign value[0] = o;
+            assign value[7:1] = 0;
+        }
+        "#,
+    );
+}

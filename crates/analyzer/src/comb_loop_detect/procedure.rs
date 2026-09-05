@@ -19,6 +19,7 @@ use crate::ir::{
 use crate::value::Value;
 use crate::{HashMap, HashSet};
 use std::rc::Rc;
+use veryl_parser::token_range::TokenRange;
 
 fn translate_array_span(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
     Some(ArraySpan {
@@ -312,6 +313,7 @@ enum FunctionSummaryLookup {
 type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 
 pub(super) struct FunctionSummaries<'a> {
+    pub(super) tracing: bool,
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
@@ -332,6 +334,7 @@ impl ProcedureContext {
     pub(super) fn new(module: &Module) -> Self {
         let mut ctx = Context::default();
         ctx.variables = module.variables.clone();
+        ctx.variables.extend(module.interface_members.clone());
         ctx.functions = module.functions.clone();
         let module_scope_ids = ctx
             .variables
@@ -689,6 +692,7 @@ fn module_scope_ids(module: &Module) -> HashSet<VarId> {
 impl<'a> FunctionSummaries<'a> {
     pub(super) fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
         Self {
+            tracing: false,
             module,
             bit_part,
             summaries: HashMap::default(),
@@ -752,6 +756,7 @@ thread_local! {
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_SUMMARY_GRAPH_NODES: Cell<usize> = const { Cell::new(0) };
     static MODULE_CONTEXT_ENTRIES: Cell<usize> = const { Cell::new(0) };
+    static TRACED_PROCEDURE_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static WRITE_FOOTPRINT_STATEMENT_VISITS: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -804,6 +809,16 @@ pub(crate) fn reset_module_context_entries() {
 #[cfg(test)]
 pub(crate) fn module_context_entries() -> usize {
     MODULE_CONTEXT_ENTRIES.get()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_traced_procedure_evaluation_count() {
+    TRACED_PROCEDURE_EVALUATIONS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn traced_procedure_evaluation_count() -> usize {
+    TRACED_PROCEDURE_EVALUATIONS.get()
 }
 
 pub(super) fn analyze<'a>(
@@ -932,6 +947,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         ctx.begin_analysis_transaction();
         let mut inner =
             ProcedureAnalysis::from_context(bit_part, summaries.module, ctx, module_scope_ids);
+        inner.tracing = summaries.tracing;
         inner.summaries = Some(summaries);
         Self { inner: Some(inner) }
     }
@@ -1033,6 +1049,8 @@ struct ProcedureAnalysis<'a, 's> {
     status: AnalysisStatus,
     summaries: Option<&'s mut FunctionSummaries<'a>>,
     causal_write_keys: Vec<NodeKey>,
+    tracing: bool,
+    active_assignment: Option<TokenRange>,
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
@@ -1061,6 +1079,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             status: AnalysisStatus::Complete,
             summaries: None,
             causal_write_keys: Vec::new(),
+            tracing: false,
+            active_assignment: None,
         }
     }
 
@@ -1074,7 +1094,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
         let mut this = Self::from_context(bit_part, summaries.module, ctx, module_scope_ids);
+        this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
+        #[cfg(test)]
+        if this.tracing {
+            TRACED_PROCEDURE_EVALUATIONS.set(TRACED_PROCEDURE_EVALUATIONS.get() + 1);
+        }
         this.causal_write_keys = this.process_write_footprint(statements);
         this.branch_namespace = branch_namespace;
         this.eval_block(statements, &[]);
@@ -1124,6 +1149,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
         let mut this = Self::from_context(bit_part, module, ctx, module_scope_ids);
+        this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
         this.call_caches.push(None);
         this.receiver_indices.push(
@@ -1363,6 +1389,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             edges: graph.edges,
             roots: graph.roots,
             domains: graph.domains,
+            sites: graph.sites,
         }
     }
 
@@ -1810,6 +1837,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .ssa
             .definition_guarded(dependencies, &self.path_condition);
         for key in keys {
+            if let Some(token) = self.active_assignment {
+                self.ssa.record_site(version, token, controls);
+            }
             self.bind_destination(key, version, dynamic);
         }
     }
@@ -1844,7 +1874,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
-        let destination_array = dst_writes(destination, &mut self.ctx)
+        let mut selected_destination = destination.clone();
+        selected_destination.index = self.receiver_index(destination.id, &destination.index);
+        let destination_array = dst_writes(&selected_destination, &mut self.ctx)
             .into_iter()
             .map(|(array, _)| array)
             .next();
@@ -1922,6 +1954,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let version = self
                 .ssa
                 .related_definition_guarded(sources.sources, &self.path_condition);
+            if let Some(token) = self.active_assignment {
+                self.ssa.record_site(version, token, controls);
+            }
             self.bind_destination(key, version, dynamic);
         }
     }
@@ -2051,6 +2086,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> FlowResult {
         match statement {
             Statement::Assign(assign) => {
+                let previous_assignment = self.active_assignment;
+                self.active_assignment = self.tracing.then_some(assign.token);
                 self.call_caches.push(Some(EvaluationCache::default()));
                 let widths: Vec<_> = assign
                     .dst
@@ -2078,6 +2115,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                 }
                 self.call_caches.pop();
+                self.active_assignment = previous_assignment;
                 if self.is_return_assignment(&assign.dst) {
                     self.record_return();
                     FlowResult::new(ProcedureFlow::Return)
@@ -2541,7 +2579,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     };
                     if let Some((_, low)) = selected {
                         let mut reads = Vec::new();
-                        let accesses = var_reads(*id, index, select, &mut self.ctx);
+                        let receiver = self.receiver_index(*id, index);
+                        let accesses = var_reads(*id, &receiver, select, &mut self.ctx);
                         let dynamic_array_offset = projection
                             .destination_index
                             .clone()
@@ -2551,7 +2590,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 destination.destination_offset_from(&source)
                             });
                         let position_preserving =
-                            index.0.iter().all(|index| index.comptime().is_const)
+                            receiver.0.iter().all(|index| index.comptime().is_const)
                                 && accesses.len() == 1;
                         if let Some(source_span) = requested.translated(0, low) {
                             for (idx, access) in &accesses {
@@ -2875,30 +2914,37 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             length,
                             output_start,
                         } => {
-                            let Some(local) = PackedSpan::new(local_start, length) else {
-                                continue;
-                            };
-                            let mut part =
-                                self.eval_expr_bits_in(part, requested_array, local, projection);
-                            if let Ok(output_start) = isize::try_from(output_start) {
-                                part.translate(PositionRelation {
-                                    array: Some(0),
-                                    packed: Some(output_start),
-                                });
-                            } else {
-                                part.widen_all();
+                            if let Some(local) = PackedSpan::new(local_start, length) {
+                                let mut part = self.eval_expr_bits_in(
+                                    part,
+                                    requested_array,
+                                    local,
+                                    projection,
+                                );
+                                if let Ok(output_start) = isize::try_from(output_start) {
+                                    part.translate(PositionRelation {
+                                        array: Some(0),
+                                        packed: Some(output_start),
+                                    });
+                                } else {
+                                    part.widen_all();
+                                }
+                                reads.extend(part);
                             }
-                            reads.extend(part);
                         }
                         RepeatedProjection::Multiple => {
-                            let Some(local) = PackedSpan::whole(width) else {
+                            if let Some(local) = PackedSpan::whole(width) {
+                                let mut part = self.eval_expr_bits_in(
+                                    part,
+                                    requested_array,
+                                    local,
+                                    projection,
+                                );
+                                part.forget_packed_position();
+                                reads.extend(part);
+                            } else {
                                 reads.extend_whole(self.eval_expr(part));
-                                continue;
-                            };
-                            let mut part =
-                                self.eval_expr_bits_in(part, requested_array, local, projection);
-                            part.forget_packed_position();
-                            reads.extend(part);
+                            }
                         }
                     }
                     let Some(part_width) = width.checked_mul(count) else {
@@ -3804,7 +3850,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
-        let destination_array = dst_writes(destination, &mut self.ctx)
+        let mut selected_destination = destination.clone();
+        selected_destination.index = self.receiver_index(destination.id, &destination.index);
+        let destination_array = dst_writes(&selected_destination, &mut self.ctx)
             .into_iter()
             .map(|(array, _)| array)
             .next();

@@ -1,6 +1,6 @@
 use crate::emitter::{SymbolContext, resolve_generic_path, symbol_string};
 use std::collections::HashMap;
-use veryl_analyzer::attribute::ExpandItem;
+use veryl_analyzer::attribute::{ExpandItem, IfdefCondition};
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::conv::{Context, Conv};
 use veryl_analyzer::ir;
@@ -20,6 +20,7 @@ use veryl_parser::veryl_walker::VerylWalker;
 pub struct ExpandModportConnection {
     pub port_target: VerylToken,
     pub interface_target: VerylToken,
+    pub defines: Vec<IfdefCondition>,
 }
 
 pub struct ExpandModportConnections {
@@ -34,8 +35,9 @@ impl ExpandModportConnections {
         array_index: &[isize],
     ) -> Self {
         let connections: Vec<_> = collect_modport_member_variables(modport)
-            .iter()
-            .map(|(variable_token, _variable, _direction)| {
+            .into_iter()
+            .map(|member| {
+                let variable_token = member.token;
                 let (port_target, interface_target) = if array_index.is_empty() {
                     (
                         format!("__{}_{}", port.name(), variable_token),
@@ -52,6 +54,7 @@ impl ExpandModportConnections {
                 ExpandModportConnection {
                     port_target: port.token.replace(&port_target),
                     interface_target: interface_name.replace(&interface_target),
+                    defines: member.defines,
                 }
             })
             .collect();
@@ -262,6 +265,7 @@ pub struct ExpandedModportPort {
     pub interface_target: VerylToken,
     pub direction: SymDirection,
     pub direction_token: VerylToken,
+    pub defines: Vec<IfdefCondition>,
 }
 
 #[derive(Clone, Debug)]
@@ -272,8 +276,14 @@ pub struct ExpandedModportPorts {
 impl ExpandedModportPorts {
     fn new(port: &Port, modport: &Symbol, array_index: &[isize]) -> Self {
         let ports: Vec<_> = collect_modport_member_variables(modport)
-            .iter()
-            .map(|(variable_token, variable, direction)| {
+            .into_iter()
+            .map(|member| {
+                let ExpandedMember {
+                    token: variable_token,
+                    variable,
+                    direction,
+                    defines,
+                } = member;
                 let (port_name, interface_target) = if array_index.is_empty() {
                     (
                         format!("__{}_{}", port.name(), variable_token),
@@ -298,8 +308,9 @@ impl ExpandedModportPorts {
                     identifier: port.token.replace(&port_name),
                     r#type: variable.r#type.clone(),
                     interface_target: port.token.replace(&interface_target),
-                    direction: *direction,
+                    direction,
                     direction_token,
+                    defines,
                 }
             })
             .collect();
@@ -426,7 +437,7 @@ impl ExpandedModportPortTable {
     }
 
     pub fn drain(&mut self) -> Vec<ExpandedModportPortTableEntry> {
-        self.entries.drain(..).collect()
+        std::mem::take(&mut self.entries)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -499,9 +510,9 @@ fn expand_array_index(array_size: &[isize], array_index: &[Vec<isize>]) -> Vec<V
     }
 }
 
-fn collect_modport_member_variables(
-    symbol: &Symbol,
-) -> Vec<(Token, VariableProperty, SymDirection)> {
+/// The variables a modport expands into, each with the conditions its member is
+/// declared under, so a guarded member expands into a guarded port.
+fn collect_modport_member_variables(symbol: &Symbol) -> Vec<ExpandedMember> {
     let SymbolKind::Modport(modport) = &symbol.kind else {
         unreachable!()
     };
@@ -510,20 +521,29 @@ fn collect_modport_member_variables(
         .members
         .iter()
         .filter_map(|member| {
-            if let SymbolKind::ModportVariableMember(member) =
-                symbol_table::get(*member).unwrap().kind
-            {
-                let variable_symbol = symbol_table::get(member.variable).unwrap();
-                if let SymbolKind::Variable(variable) = variable_symbol.kind {
-                    Some((variable_symbol.token, variable, member.direction))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+            let member_symbol = symbol_table::get(*member).unwrap();
+            let SymbolKind::ModportVariableMember(ref member) = member_symbol.kind else {
+                return None;
+            };
+            let variable_symbol = symbol_table::get(member.variable).unwrap();
+            let SymbolKind::Variable(variable) = variable_symbol.kind else {
+                return None;
+            };
+            Some(ExpandedMember {
+                token: variable_symbol.token,
+                variable,
+                direction: member.direction,
+                defines: symbol_table::modport_member_conditions(&member_symbol),
+            })
         })
         .collect()
+}
+
+struct ExpandedMember {
+    token: Token,
+    variable: VariableProperty,
+    direction: SymDirection,
+    defines: Vec<IfdefCondition>,
 }
 
 fn resolve_interface(

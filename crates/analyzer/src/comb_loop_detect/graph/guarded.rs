@@ -36,7 +36,7 @@ use crate::comb_loop_detect::model::BitDependency;
 use crate::comb_loop_detect::ssa::PathCondition;
 use crate::{HashMap, HashSet};
 use daggy::petgraph::Graph;
-use daggy::petgraph::algo::tarjan_scc;
+use daggy::petgraph::algo::kosaraju_scc;
 use std::collections::VecDeque;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -233,7 +233,7 @@ fn guarded_transition_components_that_can_cancel(
         }
     }
 
-    tarjan_scc(&transitions)
+    kosaraju_scc(&transitions)
         .into_iter()
         .filter_map(|component| {
             let cycles = component

@@ -1,0 +1,22 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+last_item_with_define (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#last_item_with_define)
+
+  × ifdef/ifndef/elsif/else attribute can't be used with "trace", which is generated as the last member of modport "slave"
+    ╭─[../../testcases/error/last_item_with_define_modport_default.veryl:13:13]
+ 12 │ 
+ 13 │     modport slave {
+    ·             ──┬──
+    ·               ╰── Error location
+ 14 │         ..converse(master)
+    ╰────
+   ╭─[../../testcases/error/last_item_with_define_modport_default.veryl:5:9]
+ 4 │     #[ifdef(A)]
+ 5 │     var trace: logic;
+   ·         ──┬──
+   ·           ╰── generated from
+ 6 │ 
+   ╰────
+  help: declare "trace" before a member without ifdef/ifndef/elsif/else so that it is not generated last

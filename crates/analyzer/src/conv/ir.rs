@@ -160,28 +160,41 @@ fn conv_global_function(context: &mut Context, value: &FunctionDeclaration) {
 }
 
 fn collect_interface_members(context: &Context) -> HashMap<ir::VarId, Variable> {
+    // Rescanning every port per variable path is quadratic, and a module
+    // without modport ports has no interface members at all.
+    let modport_ports: Vec<(&VarPath, usize)> = context
+        .port_types
+        .iter()
+        .filter(|(_, (r#type, _))| matches!(r#type.kind, ir::TypeKind::Modport(_, _)))
+        .map(|(port, (r#type, _))| (port, r#type.array.dims()))
+        .collect();
+    if modport_ports.is_empty() {
+        return HashMap::default();
+    }
+
     context
         .var_paths
         .iter()
         .filter_map(|(path, (id, comptime))| {
-            let belongs_to_modport = context.port_types.iter().any(|(port, (r#type, _))| {
-                matches!(r#type.kind, ir::TypeKind::Modport(_, _))
-                    && path.0.len() > port.0.len()
-                    && path.starts_with(&port.0)
-            });
-            (!context.variables.contains_key(id) && belongs_to_modport).then(|| {
-                let variable = Variable::new(
-                    *id,
-                    path.clone(),
-                    VarKind::Variable,
-                    comptime.r#type.clone(),
-                    vec![],
-                    Affiliation::Module,
-                    &comptime.token,
-                    0,
-                );
-                (*id, variable)
-            })
+            if context.variables.contains_key(id) {
+                return None;
+            }
+            let (port, port_dimensions) = modport_ports
+                .iter()
+                .filter(|(port, _)| path.0.len() > port.0.len() && path.starts_with(&port.0))
+                .max_by_key(|(port, _)| port.0.len())?;
+            let mut variable = Variable::new(
+                *id,
+                path.clone(),
+                VarKind::Variable,
+                comptime.r#type.clone(),
+                vec![],
+                Affiliation::Module,
+                &comptime.token,
+                0,
+            );
+            variable.set_leading_array_path_offset(*port_dimensions, path.0.len() - port.0.len());
+            Some((*id, variable))
         })
         .collect()
 }

@@ -1,4 +1,5 @@
 use crate::HashMap;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
 use crate::ir::variable::{
     VarOffset, is_wide_ptr, native_bytes as calc_native_bytes, read_native_value, value_size,
@@ -12,6 +13,10 @@ use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
+
+/// Recursion cap for `ProtoExpression::unmasked_bits`: running out costs a
+/// mask that may not have been needed, nothing more.
+const UNMASKED_BITS_DEPTH: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExpressionContext {
@@ -449,6 +454,132 @@ impl ProtoExpression {
         }
     }
 
+    /// Bits `[hi:lo]` of a bit-parallel expression, or `None`.  Every level must
+    /// be exactly its parent's width: a widened or sign-extended operand is not
+    /// bit-parallel above its own width.
+    pub(crate) fn bit_parallel_window(&self, hi: usize, lo: usize) -> Option<ProtoExpression> {
+        let width = self.width();
+        if width == 0 || lo > hi || hi >= width {
+            return None;
+        }
+        let out_width = hi - lo + 1;
+        let ctx = |signed: bool| ExpressionContext {
+            width: out_width,
+            signed,
+        };
+        match self {
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select: None,
+                width: w,
+                var_full_width,
+                expr_context,
+            } => {
+                // Where bit 0 of the value sits in the variable.
+                let base = match select {
+                    None if *w == *var_full_width => 0,
+                    Some((shi, slo)) if shi >= slo && *w == shi - slo + 1 => *slo,
+                    _ => return None,
+                };
+                Some(ProtoExpression::Variable {
+                    var_offset: *var_offset,
+                    select: Some((base + hi, base + lo)),
+                    dynamic_select: None,
+                    width: out_width,
+                    var_full_width: *var_full_width,
+                    expr_context: ctx(expr_context.signed),
+                })
+            }
+            ProtoExpression::Unary {
+                op: op @ Op::BitNot,
+                x,
+                expr_context,
+                ..
+            } if x.width() == width => Some(ProtoExpression::Unary {
+                op: *op,
+                x: Box::new(x.bit_parallel_window(hi, lo)?),
+                width: out_width,
+                expr_context: ctx(expr_context.signed),
+            }),
+            ProtoExpression::Binary {
+                x,
+                op: op @ (Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor),
+                y,
+                expr_context,
+                ..
+            } if x.width() == width && y.width() == width => Some(ProtoExpression::Binary {
+                x: Box::new(x.bit_parallel_window(hi, lo)?),
+                op: *op,
+                y: Box::new(y.bit_parallel_window(hi, lo)?),
+                width: out_width,
+                expr_context: ctx(expr_context.signed),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Reads of bits `[hi:lo]`, when bit-parallel.  `false` -- with `out`
+    /// untouched -- means fall back to the whole-expression gather.
+    pub(crate) fn gather_reads_in_window(
+        &self,
+        hi: usize,
+        lo: usize,
+        out: &mut Vec<(VarOffset, Option<(usize, usize)>)>,
+    ) -> bool {
+        let mark = out.len();
+        if self.gather_reads_in_window_inner(hi, lo, out) {
+            true
+        } else {
+            out.truncate(mark);
+            false
+        }
+    }
+
+    fn gather_reads_in_window_inner(
+        &self,
+        hi: usize,
+        lo: usize,
+        out: &mut Vec<(VarOffset, Option<(usize, usize)>)>,
+    ) -> bool {
+        let width = self.width();
+        if width == 0 || lo > hi || hi >= width {
+            return false;
+        }
+        match self {
+            ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select: None,
+                width: w,
+                var_full_width,
+                ..
+            } => {
+                let base = match select {
+                    None if *w == *var_full_width => 0,
+                    Some((shi, slo)) if shi >= slo && *w == shi - slo + 1 => *slo,
+                    _ => return false,
+                };
+                out.push((*var_offset, Some((base + hi, base + lo))));
+                true
+            }
+            ProtoExpression::Value { .. } => true,
+            ProtoExpression::Unary {
+                op: Op::BitNot, x, ..
+            } if x.width() == width => x.gather_reads_in_window_inner(hi, lo, out),
+            ProtoExpression::Binary {
+                x,
+                op: Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor,
+                y,
+                ..
+            } if x.width() == width && y.width() == width => {
+                x.gather_reads_in_window_inner(hi, lo, out)
+                    && y.gather_reads_in_window_inner(hi, lo, out)
+            }
+            _ => false,
+        }
+    }
+
     /// Like `gather_variable_offsets` but each read carries its static bit
     /// range when known (`Some((msb, lsb))` from a constant bit select),
     /// `None` for full-width or runtime-determined reads.
@@ -521,7 +652,16 @@ impl ProtoExpression {
     /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it
     /// could touch alive. Not used by `analyze_dependency` (which keeps the
     /// O(N²)-avoiding base+last encoding).
-    pub fn gather_variable_offsets_expanded(&self, inputs: &mut Vec<VarOffset>) {
+    ///
+    /// `fold` names the arrays too large to expand element by element; both
+    /// their dynamic accesses and static element reads come out as the array
+    /// base instead, so the caller's offset map still sees them alias.  See
+    /// [`BigArrayFold`].
+    pub fn gather_variable_offsets_expanded(
+        &self,
+        fold: &BigArrayFold,
+        inputs: &mut Vec<VarOffset>,
+    ) {
         match self {
             ProtoExpression::HierVariable(_) => {
                 unreachable!("hierarchical reference must be resolved by resolve_hier_refs first")
@@ -531,20 +671,22 @@ impl ProtoExpression {
                 dynamic_select,
                 ..
             } => {
-                inputs.push(*var_offset);
+                inputs.push(fold.canon(*var_offset));
                 if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(inputs),
+            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(fold, inputs),
             ProtoExpression::Binary { x, y, .. } => {
-                x.gather_variable_offsets_expanded(inputs);
-                y.gather_variable_offsets_expanded(inputs);
+                x.gather_variable_offsets_expanded(fold, inputs);
+                y.gather_variable_offsets_expanded(fold, inputs);
             }
             ProtoExpression::Concatenation { elements, .. } => {
                 for (expr, _, _) in elements {
-                    expr.gather_variable_offsets_expanded(inputs);
+                    expr.gather_variable_offsets_expanded(fold, inputs);
                 }
             }
             ProtoExpression::Ternary {
@@ -553,9 +695,9 @@ impl ProtoExpression {
                 false_expr,
                 ..
             } => {
-                cond.gather_variable_offsets_expanded(inputs);
-                true_expr.gather_variable_offsets_expanded(inputs);
-                false_expr.gather_variable_offsets_expanded(inputs);
+                cond.gather_variable_offsets_expanded(fold, inputs);
+                true_expr.gather_variable_offsets_expanded(fold, inputs);
+                false_expr.gather_variable_offsets_expanded(fold, inputs);
             }
             ProtoExpression::DynamicVariable {
                 base_offset,
@@ -565,9 +707,18 @@ impl ProtoExpression {
                 dynamic_select,
                 ..
             } => {
-                index_expr.gather_variable_offsets_expanded(inputs);
+                index_expr.gather_variable_offsets_expanded(fold, inputs);
                 if let Some(dyn_sel) = dynamic_select {
-                    dyn_sel.index_expr.gather_variable_offsets_expanded(inputs);
+                    dyn_sel
+                        .index_expr
+                        .gather_variable_offsets_expanded(fold, inputs);
+                }
+                // A folded array names its base once; every static element
+                // access canonicalises to that same offset above, so the
+                // aliasing the expansion existed to expose survives.
+                if fold.covers(*base_offset) {
+                    inputs.push(*base_offset);
+                    return;
                 }
                 for i in 0..*num_elements {
                     let off = VarOffset::new(
@@ -576,6 +727,81 @@ impl ProtoExpression {
                     );
                     inputs.push(off);
                 }
+            }
+        }
+    }
+
+    /// True when this expression reads `off`, a dynamic array access whose
+    /// span reaches it included.
+    ///
+    /// Same answer as scanning `gather_variable_offsets_expanded`, but it asks
+    /// each dynamic read whether its span contains `off` rather than listing
+    /// every element the read can reach, so the work is proportional to the
+    /// expression instead of to the array.
+    pub fn reads_offset(&self, off: VarOffset) -> bool {
+        let mut ranges: Vec<(bool, isize, isize, usize)> = Vec::new();
+        self.gather_dynamic_read_ranges(&mut ranges);
+        let raw = off.raw();
+        let in_span = ranges.iter().any(|&(is_ff, base, stride, num_elements)| {
+            is_ff == off.is_ff()
+                && stride > 0
+                && raw >= base
+                && raw < base.saturating_add(stride.saturating_mul(num_elements as isize))
+                && (raw - base) % stride == 0
+        });
+        if in_span {
+            return true;
+        }
+        // Everything else — plain reads, index sub-expressions, and the
+        // base/last summary of an array the ranges above already cover.
+        let mut offs: Vec<VarOffset> = Vec::new();
+        self.gather_variable_offsets(&mut offs);
+        offs.contains(&off)
+    }
+
+    /// Record every dynamically-indexed array this expression reaches, so
+    /// [`BigArrayFold`] can decide which are large enough to fold.
+    pub fn collect_big_arrays(&self, fold: &mut BigArrayFold) {
+        match self {
+            ProtoExpression::HierVariable(_) | ProtoExpression::Value { .. } => (),
+            ProtoExpression::Variable { dynamic_select, .. } => {
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+            }
+            ProtoExpression::Unary { x, .. } => x.collect_big_arrays(fold),
+            ProtoExpression::Binary { x, y, .. } => {
+                x.collect_big_arrays(fold);
+                y.collect_big_arrays(fold);
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                for (expr, _, _) in elements {
+                    expr.collect_big_arrays(fold);
+                }
+            }
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => {
+                cond.collect_big_arrays(fold);
+                true_expr.collect_big_arrays(fold);
+                false_expr.collect_big_arrays(fold);
+            }
+            ProtoExpression::DynamicVariable {
+                base_offset,
+                stride,
+                index_expr,
+                num_elements,
+                dynamic_select,
+                ..
+            } => {
+                index_expr.collect_big_arrays(fold);
+                if let Some(dyn_sel) = dynamic_select {
+                    dyn_sel.index_expr.collect_big_arrays(fold);
+                }
+                fold.record(*base_offset, *stride, *num_elements);
             }
         }
     }
@@ -978,6 +1204,91 @@ impl ProtoExpression {
         }
     }
 
+    /// An upper bound on the significant bits of this expression's value when
+    /// NOTHING masks the intermediates — the shape a backend that evaluates a
+    /// whole expression in one wide register produces.  `None` means no cheap
+    /// bound exists and a caller that needs one must assume the worst.
+    ///
+    /// Deliberately not `effective_bits()`: that bounds the value
+    /// `build_binary` produces, which masks every node to its own width, so
+    /// for a `Binary` it may answer with the declared width even though the
+    /// unmasked value is wider.
+    ///
+    /// A `Some` drops the cast's mask, so every arm has to hold for the widest
+    /// value the backend can hand on.  `expr_emits_clean` cannot cover for a
+    /// wrong answer here: its re-mask lands on the consumer's result, not on
+    /// this operand.
+    pub fn unmasked_bits(&self, depth: usize) -> Option<usize> {
+        if depth == 0 {
+            return None;
+        }
+        let d = depth - 1;
+        match self {
+            ProtoExpression::HierVariable(x) => Some(x.width),
+            ProtoExpression::Variable { width, .. } => Some(*width),
+            ProtoExpression::DynamicVariable { width, .. } => Some(*width),
+            ProtoExpression::Concatenation { width, .. } => Some(*width),
+            ProtoExpression::Value { .. } => Some(self.effective_bits()),
+            ProtoExpression::Ternary {
+                true_expr,
+                false_expr,
+                ..
+            } => Some(
+                true_expr
+                    .unmasked_bits(d)?
+                    .max(false_expr.unmasked_bits(d)?),
+            ),
+            ProtoExpression::Unary { op, x, .. } => match op {
+                Op::BitAnd
+                | Op::BitNand
+                | Op::BitOr
+                | Op::BitNor
+                | Op::LogicNot
+                | Op::BitXor
+                | Op::BitXnor => Some(1),
+                Op::Add => x.unmasked_bits(d),
+                // `~` and unary `-` set every bit above the operand's width.
+                _ => None,
+            },
+            ProtoExpression::Binary {
+                op,
+                x,
+                y,
+                expr_context,
+                ..
+            } => match op {
+                Op::Eq
+                | Op::Ne
+                | Op::EqWildcard
+                | Op::NeWildcard
+                | Op::Greater
+                | Op::GreaterEq
+                | Op::Less
+                | Op::LessEq
+                | Op::LogicAnd
+                | Op::LogicOr => Some(1),
+                Op::BitAnd => Some(x.unmasked_bits(d)?.min(y.unmasked_bits(d)?)),
+                Op::BitOr | Op::BitXor => Some(x.unmasked_bits(d)?.max(y.unmasked_bits(d)?)),
+                Op::Add => Some(
+                    x.unmasked_bits(d)?
+                        .max(y.unmasked_bits(d)?)
+                        .saturating_add(1),
+                ),
+                Op::Mul => Some(x.unmasked_bits(d)?.saturating_add(y.unmasked_bits(d)?)),
+                Op::LogicShiftR => x.unmasked_bits(d),
+                // The signed forms sign-fill every bit above the operand
+                // width, so the bound only holds unsigned — the same reason
+                // `expr_emits_clean` excludes them.
+                Op::Div if !expr_context.signed => x.unmasked_bits(d),
+                Op::Rem if !expr_context.signed => y.unmasked_bits(d),
+                // `-` borrows into every bit above the operands, an arithmetic
+                // right shift copies the sign into them, and a left shift is
+                // bounded by a VALUE (the shift amount), not by a width.
+                _ => None,
+            },
+        }
+    }
+
     pub fn expr_context(&self) -> &ExpressionContext {
         match self {
             ProtoExpression::HierVariable(x) => &x.expr_context,
@@ -1012,7 +1323,9 @@ impl ProtoExpression {
             ProtoExpression::HierVariable(_) => false,
             // A static bit-select with a ≤128-bit result extracts into a
             // register, so only a >128-bit result is a pointer.  A dynamic
-            // select on a wide var is interpreter-only, so never a producer.
+            // select reads its window out of the wide source the same way, so
+            // its result form is keyed on the WINDOW: ≤128 bits is a register
+            // (a funnel load in both backends), wider is a slot.
             ProtoExpression::Variable {
                 var_full_width,
                 select,
@@ -1020,8 +1333,15 @@ impl ProtoExpression {
                 width,
                 ..
             } => {
-                is_wide_ptr(*var_full_width)
-                    && !(select.is_some() && dynamic_select.is_none() && !is_wide_ptr(*width))
+                if !is_wide_ptr(*var_full_width) {
+                    return false;
+                }
+                match (select, dynamic_select) {
+                    (None, Some(ds)) => is_wide_ptr(ds.window),
+                    (Some(_), None) => is_wide_ptr(*width),
+                    // No emitter covers the combination; the value is unused.
+                    _ => true,
+                }
             }
             // The all-bit sentinel materializes wider than its 0 `width` field
             // (see `materialized_width`); key on that.
@@ -1539,7 +1859,7 @@ impl ProtoExpression {
     }
 }
 
-/// Non-`Value` expressions already carry the width the analyzer resolved.
+/// Resize a literal in place; a non-`Value` expression is left alone.
 fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
     let ProtoExpression::Value {
         value,
@@ -1556,6 +1876,59 @@ fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
     }
     *value_width = width;
     expr_context.width = width;
+}
+
+/// Grow `expr` to `width` bits.  A widening `as` cast lowers to its operand,
+/// so a node can be narrower than its analyzer width; extend by the OPERAND's
+/// signedness, like `N'(x)`.
+fn extend_to_width(mut expr: ProtoExpression, width: usize) -> ProtoExpression {
+    if matches!(expr, ProtoExpression::Value { .. }) {
+        fit_literal_width(&mut expr, width);
+        return expr;
+    }
+    let src_width = expr.width();
+    if src_width == 0 || src_width >= width {
+        return expr;
+    }
+    let signed = expr.expr_context().signed;
+    let expr_context = ExpressionContext {
+        width,
+        signed: false,
+    };
+    let value_node = |payload: BigUint| ProtoExpression::Value {
+        value: Value::new_biguint(payload, width, false),
+        width,
+        expr_context,
+    };
+
+    // Mask to the operand width first: the bits above a narrow node are not
+    // guaranteed clean, and here they become the extension bits.
+    let mask = (BigUint::one() << src_width) - BigUint::one();
+    let ret = ProtoExpression::Binary {
+        x: Box::new(expr),
+        op: Op::BitAnd,
+        y: Box::new(value_node(mask)),
+        width,
+        expr_context,
+    };
+    if !signed {
+        return ret;
+    }
+    // Sign-extend the masked value: ((v ^ s) - s) mod 2^width.
+    let sign = BigUint::one() << (src_width - 1);
+    ProtoExpression::Binary {
+        x: Box::new(ProtoExpression::Binary {
+            x: Box::new(ret),
+            op: Op::BitXor,
+            y: Box::new(value_node(sign.clone())),
+            width,
+            expr_context,
+        }),
+        op: Op::Sub,
+        y: Box::new(value_node(sign)),
+        width,
+        expr_context,
+    }
 }
 
 /// Build a ProtoExpression computing the linear index from a multi-dimensional VarIndex.
@@ -1917,6 +2290,12 @@ pub(crate) fn inline_function_call(
             for (old, vs) in elems {
                 let new_off = context.comb_total_bytes as isize;
                 context.comb_total_bytes += vs;
+                // The copy has no `VariableMeta`; record it so the owner
+                // table can inherit the original's owner (see
+                // `Context::comb_reloc`).
+                if let VarOffset::Comb(old_off) = old {
+                    context.comb_reloc.push((old_off, new_off, vs));
+                }
                 map.insert(old, VarOffset::Comb(new_off));
             }
         }
@@ -2177,19 +2556,25 @@ impl Conv<&air::Expression> for ProtoExpression {
                         return Ok(proto);
                     }
 
-                    // Int->int casts are otherwise transparent (the operand
-                    // is already sized by the cast in gather_context), but a
-                    // NARROWING cast must still truncate the operand value:
-                    // mask to the cast width, and re-extend by the cast
-                    // signedness when the outer context is wider.  A
-                    // same-width cast that flips signedness needs the same
-                    // re-extension: a wider context must extend by the cast
-                    // signedness, not the operand's own (SV `longint'(a)`
-                    // sign-extends a 64-bit unsigned `a`).
+                    // Int->int casts are otherwise transparent, but a NARROWING
+                    // cast must still truncate the operand value: mask to the
+                    // cast width, and re-extend by the cast signedness when the
+                    // outer context is wider.  A same-width cast that flips
+                    // signedness needs the same re-extension: a wider context
+                    // must extend by the cast signedness, not the operand's own
+                    // (SV `longint'(a)` sign-extends a 64-bit unsigned `a`).
+                    //
+                    // `operand_width` alone does not decide it: it is the width
+                    // `gather_context` settled on for the operand, which for
+                    // `(b + c) as 2` on two 2-bit operands is 2 — equal to the
+                    // cast, so nothing looks narrowed — while the addition
+                    // still carries into a third bit.
                     let cast_width = comptime.r#type.total_width();
                     let operand_width = x.comptime().expr_context.width;
                     let proto: ProtoExpression = Conv::conv(context, x.as_ref())?;
                     let outer: ExpressionContext = (&comptime.expr_context).into();
+                    let unmasked = proto.unmasked_bits(UNMASKED_BITS_DEPTH);
+                    let carries_above = |cw: usize| unmasked.is_none_or(|w| w > cw);
                     let needs_reinterpret = |cw: usize| {
                         outer.width > cw
                             && operand_width <= cw
@@ -2198,7 +2583,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     };
                     if let Some(cw) = cast_width
                         && cw > 0
-                        && (operand_width > cw || needs_reinterpret(cw))
+                        && (operand_width > cw || carries_above(cw) || needs_reinterpret(cw))
                     {
                         let node_width = outer.width.max(cw);
                         let value_node = |payload: BigUint| ProtoExpression::Value {
@@ -2390,7 +2775,13 @@ impl Conv<&air::Expression> for ProtoExpression {
             air::Expression::Concatenation(items, comptime) => {
                 let mut elements = Vec::new();
                 for (expr, rep) in items {
-                    let converted: ProtoExpression = Conv::conv(context, expr)?;
+                    let mut converted: ProtoExpression = Conv::conv(context, expr)?;
+                    // A concatenation element is self-determined: it
+                    // contributes its own width, so a widening cast must be
+                    // materialised rather than lowered to its operand.
+                    if let Some(elem_width) = expr.comptime().r#type.total_width() {
+                        converted = extend_to_width(converted, elem_width);
+                    }
                     let elem_width = converted.width();
 
                     let repeat = if let Some(rep) = rep {
@@ -2441,11 +2832,11 @@ impl Conv<&air::Expression> for ProtoExpression {
 
                 let mut elements = Vec::new();
                 for ((_name, expr), member_type) in members.iter().zip(struct_members.iter()) {
-                    let mut converted: ProtoExpression = Conv::conv(context, expr)?;
+                    let converted: ProtoExpression = Conv::conv(context, expr)?;
                     let elem_width = member_type.width().unwrap();
                     // An unsized literal is 32 bits, and the concatenation
                     // joins elements at their value width, not `elem_width`.
-                    fit_literal_width(&mut converted, elem_width);
+                    let converted = extend_to_width(converted, elem_width);
                     debug_assert_eq!(converted.width(), elem_width);
                     elements.push((Box::new(converted), 1, elem_width));
                 }

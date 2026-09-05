@@ -6,20 +6,46 @@ use veryl_parser::Parser;
 
 #[track_caller]
 fn emit(metadata: &Metadata, code: &str) -> String {
+    emit_project(metadata, "prj", code)
+}
+
+#[track_caller]
+fn emit_project(metadata: &Metadata, project: &str, code: &str) -> String {
+    emit_projects(metadata, &[(project, code)])
+}
+
+/// Analyzes every input, then emits the last one; the preceding inputs stand in
+/// for the dependencies it is built against. One `Analyzer` serves them all, as
+/// in a real build.
+#[track_caller]
+fn emit_projects(metadata: &Metadata, inputs: &[(&str, &str)]) -> String {
     symbol_table::clear();
     attribute_table::clear();
 
-    let parser = Parser::parse(code, &"").unwrap();
     let analyzer = Analyzer::new(metadata);
-    let mut context = Context::default();
+    let parsers: Vec<_> = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, (project, input))| {
+            let path = format!("test_{i}.veryl");
+            let parser = Parser::parse(input, &path).unwrap();
+            analyzer.analyze_pass1(project, &parser.veryl);
+            parser
+        })
+        .collect();
 
-    analyzer.analyze_pass1("prj", &parser.veryl);
     Analyzer::analyze_post_pass1();
-    analyzer.analyze_pass2(&parser.veryl, &mut context, None);
 
+    let mut context = Context::default();
+    for parser in &parsers {
+        analyzer.analyze_pass2(&parser.veryl, &mut context, None);
+    }
+
+    let (project, code) = inputs.last().copied().unwrap();
+    let parser = parsers.last().unwrap();
     let mut emitter = Emitter::new(
         metadata,
-        "prj",
+        project,
         &PathBuf::from("test.veryl"),
         &PathBuf::from("test.sv"),
         &PathBuf::from("test.sv.map"),
@@ -1453,6 +1479,52 @@ endmodule
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+package a_pkg {
+  const A: u32 = 8;
+}
+interface b_if {
+  import a_pkg::A;
+
+  var b: logic<A>;
+
+  modport mp {
+    b: input,
+  }
+}
+#[expand(modport)]
+module c_module (
+  b: modport b_if::mp,
+) {}
+"#;
+
+    let expect = r#"package prj_a_pkg;
+    localparam int unsigned A = 8;
+endpackage
+interface prj_b_if;
+    import prj_a_pkg::A;
+
+    logic [A-1:0] b;
+
+    modport mp (
+        input b
+    );
+endinterface
+
+module prj_c_module (
+    input var logic [prj_a_pkg::A-1:0] __b_b
+);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]
@@ -1903,6 +1975,67 @@ module prj_e_module (
 
     always_comb begin
         fif[0].connect_if(eif[0].ready, eif[0].valid, eif[0].payload);
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+
+    let code = r#"
+package a_pkg {
+    const A: u32 = 8;
+}
+interface b_if {
+    import a_pkg::A;
+
+    var b: logic<A>;
+
+    modport mp {
+        b: output,
+    }
+}
+module c_module (
+    b: modport b_if::mp,
+) {
+    function func(b: modport b_if::mp) {
+        b.b = 0;
+    }
+
+    always_comb {
+        func(b);
+    }
+}
+"#;
+
+    let expect = r#"package prj_a_pkg;
+    localparam int unsigned A = 8;
+endpackage
+interface prj_b_if;
+    import prj_a_pkg::A;
+
+    logic [A-1:0] b;
+
+    modport mp (
+        output b
+    );
+endinterface
+module prj_c_module (
+    prj_b_if.mp b
+);
+    function automatic void func(
+        output var logic [prj_a_pkg::A-1:0] __b_b
+    ) ;
+        __b_b = 0;
+    endfunction
+
+    always_comb begin
+        func(b.b);
     end
 endmodule
 //# sourceMappingURL=test.sv.map
@@ -2821,6 +2954,73 @@ endpackage
 
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
+
+    let code = r#"
+proto package a_proto_pkg {
+    type addr_t;
+    type data_t;
+}
+package a_pkg::<AW: u32, DW: u32> for a_proto_pkg {
+    type addr_t = logic<AW>;
+    type data_t = logic<DW>;
+}
+interface b_if::<PKG: a_proto_pkg> {
+    import PKG::*;
+    var addr: addr_t;
+    var data: data_t;
+    modport mp {
+        ..input
+    }
+}
+package c_pkg {
+    const ADDR_WIDTH: u32 = 16;
+    const DATA_WIDTH: u32 = 32;
+    alias package a_16_32_pkg = a_pkg::<ADDR_WIDTH, DATA_WIDTH>;
+}
+module d_module (
+    a: modport b_if::<a_16_32_pkg>::mp,
+) {
+    import c_pkg::a_16_32_pkg;
+}
+"#;
+
+    let expect = r#"
+
+package prj___a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH;
+    typedef logic [prj_c_pkg::ADDR_WIDTH-1:0] addr_t;
+    typedef logic [prj_c_pkg::DATA_WIDTH-1:0] data_t;
+endpackage
+interface prj___b_if____a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH;
+    import prj___a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH::*;
+    prj___a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH::addr_t addr;
+    prj___a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH::data_t data;
+    modport mp (
+        input addr,
+        input data
+    );
+endinterface
+package prj_c_pkg;
+    localparam int unsigned ADDR_WIDTH = 16;
+    localparam int unsigned DATA_WIDTH = 32;
+
+
+endpackage
+module prj_d_module
+
+(
+    prj___b_if____a_pkg__c_pkg_ADDR_WIDTH__c_pkg_DATA_WIDTH.mp a
+);
+
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }
 
 #[test]
@@ -3683,10 +3883,226 @@ endmodule
     assert_eq!(ret, expect);
 }
 
+#[test]
+fn bare_component_import_suppressed() {
+    // SystemVerilog `import` only accepts `package::*` or `package::item`; a
+    // bare component import (package/module/interface or a generic instance)
+    // is invalid SV, and unnecessary because references through it are
+    // emitted as fully qualified paths.
+    let code = r#"
+package PkgA {
+    const A: u32 = 1;
+    struct S {
+        x: logic<A>,
+    }
+}
+package PkgG::<W: u32> {
+    const C: u32 = W;
+}
+interface IfA {
+    var v: logic<8>;
+}
+module ModA {
+    var _y: logic<8>;
+    assign _y = 0;
+}
+module top {
+    import PkgA;
+    import PkgG;
+    import IfA;
+    import ModA;
+    inst u0: IfA;
+    inst u1: ModA;
+    var s: PkgA::S;
+    const X: u32 = PkgG::<8>::C;
+    assign u0.v = 0;
+    assign s.x = PkgA::A;
+}
+"#;
+
+    let expect = r#"package prj_PkgA;
+    localparam int unsigned A = 1;
+    typedef struct packed {
+        logic [A-1:0] x;
+    } S;
+endpackage
+package prj___PkgG__8;
+    localparam int unsigned C = 8;
+endpackage
+interface prj_IfA;
+    logic [8-1:0] v;
+endinterface
+module prj_ModA;
+    logic [8-1:0] _y;
+    always_comb _y = 0;
+endmodule
+module prj_top;
+
+
+
+
+
+
+
+
+    prj_IfA      u0   ();
+    prj_ModA     u1   ();
+    prj_PkgA::S  s   ;
+    localparam int unsigned X    = prj___PkgG__8::C;
+    always_comb u0.v = 0;
+    always_comb s.x  = prj_PkgA::A;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
 #[track_caller]
 fn emit_with_default(code: &str) -> String {
     let metadata = Metadata::create_default("prj").unwrap();
     emit(&metadata, code)
+}
+
+#[test]
+fn proto_package_import_suppressed() {
+    // A proto package import is a bare component import; it has no
+    // SystemVerilog form and references through it are emitted as fully
+    // qualified paths.
+    let code = r#"
+proto package ProtoPkg {
+    const WIDTH: u32;
+}
+package Impl for ProtoPkg {
+    const WIDTH: u32 = 8;
+}
+module top {
+    import prj::ProtoPkg;
+    var x: logic<Impl::WIDTH>;
+    assign x = 0;
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        !ret.contains("import prj_ProtoPkg;"),
+        "proto package import must not be emitted: {ret}"
+    );
+}
+
+#[test]
+fn project_scope_function_import_suppressed() {
+    // SystemVerilog `import` requires a package qualifier. A project-scope
+    // function has no package in its emitted form, so its import is dropped;
+    // the function is already available at the use site.
+    let code = r#"
+function project_func::<W: u32> (value: input logic<W>) -> logic<W> {
+    return value;
+}
+module M {
+    import prj::project_func;
+    var r: logic<8>;
+    assign r = project_func::<8>(8'd1);
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        !ret.contains("import prj_project_func;"),
+        "project-scope function import must not be emitted: {ret}"
+    );
+    assert!(
+        ret.contains("__project_func__8"),
+        "function must be emitted: {ret}"
+    );
+}
+
+#[test]
+fn project_qualified_global_function_call_matches_definition() {
+    let code = r#"
+function global_func() -> u32 {
+    return 2;
+}
+module M {
+    var value: u32;
+    assign value = prj::global_func();
+}
+"#;
+
+    let ret = emit_with_default(code);
+    assert!(
+        ret.contains("always_comb value = global_func();"),
+        "spelling the own project must not add a prefix: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned global_func()"),
+        "the call and definition must use the same name: {ret}"
+    );
+}
+
+#[test]
+fn dependency_global_function_reference_uses_local_name() {
+    let code = r#"
+function global_func() -> u32 {
+    return 2;
+}
+module M {
+    var value: u32;
+    assign value = global_func();
+}
+"#;
+
+    let metadata = Metadata::create_default("root").unwrap();
+    let ret = emit_project(&metadata, "dep", code);
+    assert!(
+        ret.contains("always_comb value = global_func();"),
+        "a dependency must use its local function name: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned global_func()"),
+        "the call and definition must use the same name: {ret}"
+    );
+    assert!(
+        !ret.contains("dep_global_func()"),
+        "a dependency must not qualify its own function: {ret}"
+    );
+}
+
+#[test]
+fn copied_dependency_global_function_qualifies_nested_calls() {
+    let dependency = r#"
+pub function outer_func() -> u32 {
+    return inner_func();
+}
+pub function inner_func() -> u32 {
+    return 2;
+}
+"#;
+    let root = r#"
+module M {
+    import dep::outer_func;
+    var value: u32;
+    assign value = outer_func();
+}
+"#;
+
+    let metadata = Metadata::create_default("root").unwrap();
+    let ret = emit_projects(&metadata, &[("dep", dependency), ("root", root)]);
+    assert!(
+        ret.contains("always_comb value = dep_outer_func();"),
+        "a copied dependency function must be called with its project prefix: {ret}"
+    );
+    assert!(
+        ret.contains("return dep_inner_func();"),
+        "nested dependency calls must match their copied definitions: {ret}"
+    );
+    assert!(
+        ret.contains("function automatic int unsigned dep_inner_func()"),
+        "the nested function definition must retain its project prefix: {ret}"
+    );
 }
 
 #[test]
@@ -4762,4 +5178,108 @@ fn struct_member_ifdef_keeps_semicolon_inside_guard() {
         !ret.contains("`endif;"),
         "no stray ';' after `endif:\n{ret}"
     );
+}
+
+#[test]
+fn non_portable_variable_lowers_always_ff_to_always() {
+    // SystemVerilog forbids another process from writing a variable an
+    // `always_ff` writes, so the opt-in has to drop the `_ff`.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M (
+    clk0: input clock,
+    clk1: input clock,
+    en0 : input logic,
+    en1 : input logic,
+) {
+    #[allow(multiple_assign)]
+    var ram: logic<32> [32];
+    var other: logic;
+
+    always_ff (clk0) {
+        if en0 {
+            ram[0] = 0;
+        }
+    }
+    always_ff (clk1) {
+        if en1 {
+            ram[1] = 1;
+        }
+    }
+    always_ff (clk0) {
+        other = ram[0];
+    }
+}
+"#;
+    let ret = emit(&metadata, code);
+    assert_eq!(
+        ret.matches("always @").count(),
+        2,
+        "both writers must be plain always:\n{ret}"
+    );
+    assert_eq!(
+        ret.matches("always_ff @").count(),
+        1,
+        "a reader-only block keeps always_ff:\n{ret}"
+    );
+
+    let code = code.replace("    #[allow(multiple_assign)]\n", "");
+    let ret = emit(&metadata, &code);
+    assert_eq!(ret.matches("always_ff @").count(), 3, "{ret}");
+}
+
+#[test]
+fn generic_argument_sharing_name_with_generic_parameter() {
+    let code = r#"
+function func_a::<V0: u32, V1: u32> -> u32 {
+    return V0 + V1;
+}
+function func_b::<V0: u32, V1: u32> -> u32 {
+    return func_a::<V0, V1>();
+}
+module ModuleA::<V0: u32> #(
+    param V1: u32 = 1,
+) {
+    const A: u32 = func_b::<V0, 5>();
+    const B: u32 = func_b::<V1, 6>();
+}
+module ModuleB {
+    inst u0: ModuleA::<1> #(V1: 2);
+}
+"#;
+
+    let expect = r#"
+
+
+module prj___ModuleA__1 #(
+    parameter int unsigned V1 = 1
+);
+    localparam int unsigned A = __func_b__1__5();
+    localparam int unsigned B = __func_b__V1__6();
+
+    function automatic int unsigned __func_a__V1__6;
+        return V1 + 6;
+    endfunction
+    function automatic int unsigned __func_a__1__5;
+        return 1 + 5;
+    endfunction
+    function automatic int unsigned __func_b__V1__6;
+        return __func_a__V1__6();
+    endfunction
+    function automatic int unsigned __func_b__1__5;
+        return __func_a__1__5();
+    endfunction
+endmodule
+module prj_ModuleB;
+    prj___ModuleA__1 #( .V1 (2) ) u0 ();
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
 }

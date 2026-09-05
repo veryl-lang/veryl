@@ -1,10 +1,28 @@
 {
   "name": "highlightjs-veryl",
-  "version": "0.20.3",
+  "version": "0.21.0",
   "description": "Veryl syntax highlighting plugin for highlight.js",
-  "main": "src/languages/veryl.js",
+  "type": "module",
+  "main": "dist/veryl.cjs",
+  "module": "dist/veryl.es.js",
+  "unpkg": "dist/veryl.min.js",
+  "jsdelivr": "dist/veryl.min.js",
+  "exports": {
+    ".": {
+      "import": "./dist/veryl.es.js",
+      "require": "./dist/veryl.cjs"
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "rollup -c",
+    "prepack": "npm run build",
+    "pretest": "npm run build",
+    "test": "mocha",
+    "test-markup": "npm test"
   },
   "repository": {
     "type": "git",
@@ -21,5 +39,16 @@
   "bugs": {
     "url": "https://github.com/veryl-lang/veryl/issues"
   },
-  "homepage": "https://github.com/veryl-lang/veryl"
+  "homepage": "https://github.com/veryl-lang/veryl",
+  "peerDependencies": {
+    "highlight.js": "^11.0.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-terser": "^0.4.4",
+    "glob": "^11.0.0",
+    "highlight.js": "^11.11.1",
+    "mocha": "^11.2.2",
+    "rollup": "^4.0.2",
+    "should": "^13.2.3"
+  }
 }

@@ -5,13 +5,15 @@ use crate::symbol_path::{GenericSymbolPath, GenericSymbolPathNamespace, SymbolPa
 use crate::symbol_table;
 use crate::{HashMap, HashSet};
 use bimap::BiMap;
-use daggy::petgraph::visit::Dfs;
-use daggy::{Dag, NodeIndex, Walker, petgraph::algo};
+use daggy::petgraph::visit::{Dfs, Reversed};
+use daggy::{Dag, NodeIndex, Walker, petgraph::Direction, petgraph::algo};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::rc::Rc;
 use veryl_parser::resource_table::PathId;
-use veryl_parser::veryl_token::Token;
+use veryl_parser::veryl_token::{Token, TokenSource};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TypeDagCandidate {
@@ -85,17 +87,24 @@ pub enum Context {
 
 #[derive(Debug, Clone)]
 pub enum DagError {
-    Cyclic(Box<Symbol>, Box<Symbol>),
+    CyclicType(Box<Symbol>, Box<Symbol>),
+    CyclicFile(Box<Symbol>, PathId, Box<Symbol>, PathId),
 }
 
 impl From<DagError> for AnalyzerError {
     fn from(value: DagError) -> Self {
-        let DagError::Cyclic(s, e) = value;
-        AnalyzerError::cyclic_type_dependency(
-            &s.token.to_string(),
-            &e.token.to_string(),
-            &e.token.into(),
-        )
+        match value {
+            DagError::CyclicType(ssym, esym) => AnalyzerError::cyclic_type_dependency(
+                &ssym.token.to_string(),
+                &esym.token.to_string(),
+                &esym.token.into(),
+            ),
+            DagError::CyclicFile(_, sfile, esym, efile) => AnalyzerError::cyclic_file_dependency(
+                &sfile.to_string(),
+                &efile.to_string(),
+                &esym.token.into(),
+            ),
+        }
     }
 }
 
@@ -124,7 +133,7 @@ impl TypeDag {
 
     fn apply(&mut self) -> Vec<AnalyzerError> {
         symbol_table::suppress_cache_clear();
-        let candidates: Vec<_> = self.candidates.drain(..).collect();
+        let candidates: Vec<_> = std::mem::take(&mut self.candidates);
 
         // Process symbol declarations at first to construct dag_owned
         for cand in &candidates {
@@ -147,12 +156,14 @@ impl TypeDag {
 
                 for map in symbol.generic_maps() {
                     for arg_path in map.map.values() {
+                        if arg_path.is_empty() {
+                            continue;
+                        }
+
+                        let arg_namespace = Self::get_arg_namespace(&symbol, arg_path);
+
                         // insert edge between given generic arg and base symbol
-                        self.insert_path(
-                            arg_path.clone(),
-                            &symbol.namespace,
-                            &Some((*id, *context)),
-                        );
+                        self.insert_path(arg_path.clone(), &arg_namespace, &Some((*id, *context)));
                     }
                 }
             }
@@ -172,6 +183,20 @@ impl TypeDag {
 
         symbol_table::resume_cache_clear();
         self.errors.drain(..).map(|x| x.into()).collect()
+    }
+
+    fn get_arg_namespace(base_symbol: &Symbol, path: &GenericSymbolPath) -> Namespace {
+        if base_symbol.is_global_function() {
+            // A global function is emitted into the caller namespace, so its arguments
+            // keep the template namespace.
+            base_symbol.namespace.clone()
+        } else {
+            // A generic argument is written at the instantiation site, not
+            // at the base template's declaration, so it must be resolved from
+            // the scope its head token belongs to.
+            let head = path.paths.first().unwrap();
+            Namespace::from_token(head.base).unwrap_or_else(|| base_symbol.namespace.clone())
+        }
     }
 
     fn insert_path(
@@ -197,6 +222,17 @@ impl TypeDag {
                 parent.map(|(id, context)| (symbol_table::get_rc(id).unwrap(), context))
             {
                 if !base_symbol.namespace.included(&parent_symbol.namespace) {
+                    // An alias emits nothing; it is substituted by its target at
+                    // the use site, so it carries no dependency of its own. The
+                    // bubbling below would attribute the target to the alias'
+                    // enclosing component, manufacturing a component-level
+                    // dependency the output does not have and closing a false
+                    // cycle against the target's real dependency on that
+                    // component's consts.
+                    if matches!(parent_context, Context::Alias) {
+                        continue;
+                    }
+
                     let (parent_symbol, parent_context) =
                         if let Some(symbol) = parent_symbol.get_parent_component() {
                             let context = if symbol.is_module(true) {
@@ -384,7 +420,9 @@ impl TypeDag {
         if let Some(node_index) = self.nodes.get_by_left(&symbol_id) {
             Ok(*node_index)
         } else {
-            if let Some(path) = symbol.token.source.get_path() {
+            if let Some(path) = symbol.token.source.get_path()
+                && !self.file_nodes.contains_left(&path)
+            {
                 let file_node = self.file_dag.add_node(()).index() as u32;
                 self.file_nodes.insert(path, file_node);
             }
@@ -415,10 +453,7 @@ impl TypeDag {
         recursive_ref: bool,
     ) -> Result<(), DagError> {
         match self.dag.add_edge(start.into(), end.into(), edge) {
-            Ok(_) => {
-                self.insert_file_edge(start, end);
-                Ok(())
-            }
+            Ok(_) => self.insert_file_edge(start, end),
             Err(_) => {
                 let is_allowed_direct_reference = match edge {
                     Context::Module | Context::Interface | Context::Function => {
@@ -436,31 +471,48 @@ impl TypeDag {
                 } else {
                     let ssym = self.get_symbol(start);
                     let esym = self.get_symbol(end);
-                    Err(DagError::Cyclic(Box::new(ssym), Box::new(esym)))
+                    Err(DagError::CyclicType(Box::new(ssym), Box::new(esym)))
                 }
             }
         }
     }
 
-    fn insert_file_edge(&mut self, start: u32, end: u32) {
-        if start != self.source {
-            let start_path = self.paths.get(&start).map(|x| x.token);
-            let end_path = self.paths.get(&end).map(|x| x.token);
-            if let (Some(start), Some(end)) = (
-                start_path.and_then(|x| x.source.get_path()),
-                end_path.and_then(|x| x.source.get_path()),
-            ) {
-                let start = self.file_nodes.get_by_left(&start).unwrap();
-                let end = self.file_nodes.get_by_left(&end).unwrap();
-                let start: NodeIndex = (*start).into();
-                let end: NodeIndex = (*end).into();
-                if start != end && self.file_dag.find_edge(start, end).is_none() {
-                    let err = self.file_dag.add_edge(start, end, ());
-                    // cyclic error should be caught by dag
-                    err.unwrap();
-                }
+    fn insert_file_edge(&mut self, start: u32, end: u32) -> Result<(), DagError> {
+        if start == self.source {
+            return Ok(());
+        }
+
+        let ssym = start;
+        let esym = end;
+
+        let start_path = self.paths.get(&ssym).map(|x| x.token);
+        let end_path = self.paths.get(&esym).map(|x| x.token);
+        let (Some(start_file), Some(end_file)) = (
+            start_path.and_then(|x| x.source.get_path()),
+            end_path.and_then(|x| x.source.get_path()),
+        ) else {
+            return Ok(());
+        };
+
+        let start = self.file_nodes.get_by_left(&start_file).unwrap();
+        let end = self.file_nodes.get_by_left(&end_file).unwrap();
+        let start: NodeIndex = (*start).into();
+        let end: NodeIndex = (*end).into();
+        if start != end && self.file_dag.find_edge(start, end).is_none() {
+            let err = self.file_dag.add_edge(start, end, ());
+            if err.is_err() {
+                let ssym = self.get_symbol(ssym);
+                let esym = self.get_symbol(esym);
+                return Err(DagError::CyclicFile(
+                    Box::new(ssym),
+                    start_file,
+                    Box::new(esym),
+                    end_file,
+                ));
             }
         }
+
+        Ok(())
     }
 
     fn exist_edge(&self, start: u32, end: u32) -> bool {
@@ -473,38 +525,110 @@ impl TypeDag {
         }
     }
 
-    fn toposort(&self) -> Vec<Symbol> {
-        let nodes = algo::toposort(self.dag.graph(), None).unwrap();
+    /// Files in dependency order.
+    ///
+    /// Where the graph allows a choice, an opaque file goes last: its content is
+    /// embedded SystemVerilog, so dependencies it really has can be absent from
+    /// the graph. Ties then fall back to the path, as node insertion order
+    /// differs between full and incremental builds.
+    fn toposort_file(&self) -> Vec<PathId> {
+        let graph = self.file_dag.graph();
+
+        let mut opaque: HashSet<u32> = self.file_nodes.right_values().copied().collect();
+        for symbol in self.symbols.values() {
+            if matches!(
+                symbol.kind,
+                SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
+            ) && let Some(path) = symbol.token.source.get_path()
+                && let Some(node) = self.file_nodes.get_by_left(&path)
+            {
+                opaque.remove(node);
+            }
+        }
+
+        let path_of = |node: u32| self.file_nodes.get_by_right(&node).copied();
+        let sort_key = |node: u32| {
+            let path = path_of(node).map(|x| x.to_string()).unwrap_or_default();
+            (u8::from(opaque.contains(&node)), path)
+        };
+
+        let mut in_degree = HashMap::default();
+        let mut ready = BinaryHeap::new();
+        for node in graph.node_indices() {
+            let node = node.index() as u32;
+            let degree = graph
+                .neighbors_directed(node.into(), Direction::Incoming)
+                .count();
+            if degree == 0 {
+                ready.push(Reverse((sort_key(node), node)));
+            } else {
+                in_degree.insert(node, degree);
+            }
+        }
+
         let mut ret = vec![];
-        for node in nodes {
-            let index = node.index() as u32;
-            if self.paths.contains_key(&index) {
-                let sym = self.get_symbol(index);
-                ret.push(sym);
+        while let Some(Reverse((_, node))) = ready.pop() {
+            if let Some(path) = path_of(node) {
+                ret.push(path);
+            }
+            for child in graph.neighbors_directed(node.into(), Direction::Outgoing) {
+                let child = child.index() as u32;
+                if let Some(degree) = in_degree.get_mut(&child) {
+                    *degree -= 1;
+                    if *degree == 0 {
+                        in_degree.remove(&child);
+                        ready.push(Reverse((sort_key(child), child)));
+                    }
+                }
             }
         }
         ret
     }
 
-    fn connected_components(&self) -> Vec<Vec<Symbol>> {
-        let mut ret = Vec::new();
-        let mut graph = self.dag.graph().clone();
-
+    /// Files holding a symbol the project's own symbols reach through the DAG.
+    /// `move_to` keeps the visited set, so the seeds share one traversal.
+    fn connected_files(&self, prj: &Namespace) -> HashSet<PathId> {
         // Reverse edge to traverse nodes which are called from parent node
-        graph.reverse();
+        let graph = Reversed(self.dag.graph());
 
-        for node in self.symbols.keys() {
-            let mut connected = Vec::new();
-            let mut dfs = Dfs::new(&graph, (*node).into());
-            while let Some(x) = dfs.next(&graph) {
-                let index = x.index() as u32;
-                if self.paths.contains_key(&index) {
-                    let symbol = self.get_symbol(index);
-                    connected.push(symbol);
+        let mut ret = HashSet::default();
+        let mut dfs = Dfs::empty(graph);
+        for (node, symbol) in &self.symbols {
+            if !symbol.namespace.included(prj) {
+                continue;
+            }
+            dfs.move_to((*node).into());
+            while let Some(x) = dfs.next(graph) {
+                if let Some(symbol) = self.symbols.get(&(x.index() as u32))
+                    && let TokenSource::File { path, .. } = symbol.token.source
+                {
+                    ret.insert(path);
                 }
             }
-            if !connected.is_empty() {
-                ret.push(connected);
+        }
+
+        ret
+    }
+
+    /// `files` and the files they depend on, transitively.
+    /// `move_to` keeps the visited set, so the seeds share one traversal.
+    fn required_files(&self, files: &HashSet<PathId>) -> HashSet<PathId> {
+        // Reverse edge to traverse files which the given file depends on
+        let graph = Reversed(self.file_dag.graph());
+
+        let mut ret = HashSet::default();
+        let mut dfs = Dfs::empty(graph);
+        for file in files {
+            // A file whose symbols never entered the DAG has no node
+            let Some(node) = self.file_nodes.get_by_left(file) else {
+                ret.insert(*file);
+                continue;
+            };
+            dfs.move_to((*node).into());
+            while let Some(x) = dfs.next(graph) {
+                if let Some(path) = self.file_nodes.get_by_right(&(x.index() as u32)) {
+                    ret.insert(*path);
+                }
             }
         }
 
@@ -639,16 +763,20 @@ pub fn apply() -> Vec<AnalyzerError> {
     TYPE_DAG.with(|f| f.borrow_mut().apply())
 }
 
-pub fn toposort() -> Vec<Symbol> {
-    TYPE_DAG.with(|f| f.borrow().toposort())
+pub fn toposort_file() -> Vec<PathId> {
+    TYPE_DAG.with(|f| f.borrow().toposort_file())
 }
 
-pub fn connected_components() -> Vec<Vec<Symbol>> {
-    TYPE_DAG.with(|f| f.borrow().connected_components())
+pub fn connected_files(prj: &Namespace) -> HashSet<PathId> {
+    TYPE_DAG.with(|f| f.borrow().connected_files(prj))
 }
 
 pub fn dependent_files() -> HashMap<PathId, Vec<PathId>> {
     TYPE_DAG.with(|f| f.borrow().dependent_files())
+}
+
+pub fn required_files(files: &HashSet<PathId>) -> HashSet<PathId> {
+    TYPE_DAG.with(|f| f.borrow().required_files(files))
 }
 
 pub fn dump() -> String {

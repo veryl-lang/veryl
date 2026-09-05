@@ -2,10 +2,15 @@
 const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency_1", "25_dependency_2"];
 
 #[cfg(test)]
-const STD_TESTS: [&str; 2] = ["68_std_1", "68_std_2"];
+const STD_TESTS: [&str; 4] = ["68_std_1", "68_std_2", "68_std_3", "68_std_4"];
 
 #[cfg(test)]
 const PACKAGE_SELF_REF_TESTS: [&str; 2] = ["84_package_self_ref_1", "84_package_self_ref_2"];
+
+/// Testcases which refer to symbols of dependency projects, but don't need to
+/// be analyzed together with other testcases.
+#[cfg(test)]
+const SUB_PROJECT_TESTS: [&str; 1] = ["81_modport_expansion"];
 
 #[cfg(test)]
 static DEPENDENCY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -41,6 +46,7 @@ fn needs_sub_project(name: &str) -> bool {
     crate::DEPENDENCY_TESTS.contains(&name)
         || crate::STD_TESTS.contains(&name)
         || crate::PACKAGE_SELF_REF_TESTS.contains(&name)
+        || crate::SUB_PROJECT_TESTS.contains(&name)
 }
 
 #[cfg(test)]
@@ -333,10 +339,24 @@ mod error {
 
     const PLATFORM_DEPENDENT_TESTS: [&str; 1] = ["include_failure"];
 
+    /// A dependency cycle between files needs more than one file, so these are
+    /// analyzed together. Only the first one runs the check.
+    const CYCLIC_FILE_DEPENDENCY_TESTS: [&str; 3] = [
+        "cyclic_file_dependency_1",
+        "cyclic_file_dependency_2",
+        "cyclic_file_dependency_3",
+    ];
+
     fn test(name: &str) {
         let name = name.to_string();
 
         if PLATFORM_DEPENDENT_TESTS.contains(&name.as_str()) && !cfg!(target_os = "linux") {
+            return;
+        }
+
+        if CYCLIC_FILE_DEPENDENCY_TESTS.contains(&name.as_str())
+            && CYCLIC_FILE_DEPENDENCY_TESTS[0] != name
+        {
             return;
         }
 
@@ -348,20 +368,36 @@ mod error {
                 let metadata_path = Metadata::search_from_current().unwrap();
                 let metadata = Metadata::load(&metadata_path).unwrap();
 
-                let file = format!("../../testcases/error/{}.veryl", name);
-                let input = fs::read_to_string(&file).unwrap();
+                let files = if CYCLIC_FILE_DEPENDENCY_TESTS.contains(&name.as_str()) {
+                    CYCLIC_FILE_DEPENDENCY_TESTS.to_vec()
+                } else {
+                    vec![name.as_str()]
+                };
 
                 let mut out = String::new();
                 let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
                     .with_links(false);
 
-                let ret = Parser::parse(&input, &file);
-                match ret {
-                    Err(err) => {
+                let mut parsed = Vec::new();
+                let mut parse_error = None;
+                for file in &files {
+                    let file = format!("../../testcases/error/{}.veryl", file);
+                    let input = fs::read_to_string(&file).unwrap();
+                    match Parser::parse(&input, &file) {
+                        Err(err) => {
+                            parse_error = Some(err);
+                            break;
+                        }
+                        Ok(ret) => parsed.push(ret),
+                    }
+                }
+
+                match parse_error {
+                    Some(err) => {
                         let err = Report::from(err);
                         handler.render_report(&mut out, err.as_ref()).unwrap();
                     }
-                    Ok(ret) => {
+                    None => {
                         let prj = &metadata.project.name;
 
                         let mut context = Context::default();
@@ -369,13 +405,17 @@ mod error {
                         let mut errors = vec![];
                         let mut ir = Ir::default();
 
-                        errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
+                        for ret in &parsed {
+                            errors.append(&mut analyzer.analyze_pass1(prj, &ret.veryl));
+                        }
                         errors.append(&mut Analyzer::analyze_post_pass1());
-                        errors.append(&mut analyzer.analyze_pass2(
-                            &ret.veryl,
-                            &mut context,
-                            Some(&mut ir),
-                        ));
+                        for ret in &parsed {
+                            errors.append(&mut analyzer.analyze_pass2(
+                                &ret.veryl,
+                                &mut context,
+                                Some(&mut ir),
+                            ));
+                        }
                         errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
                         if !errors.is_empty() {
@@ -711,10 +751,16 @@ mod filelist {
             "20_module_p.veryl",
             "21_alias_q.veryl",
             "22_dependency_r.veryl",
+            "23_embed_s.veryl",
             "ram.veryl",
             "axi_pkg.veryl",
             "b_pkg.veryl",
             "c_pkg.veryl",
+            "d_01_pkg.veryl",
+            "d_02_module.veryl",
+            "e_01_02_module.veryl",
+            "e_03_pkg.veryl",
+            "e_04_pkg.veryl",
         ];
         check_list(&paths, all);
 
@@ -735,6 +781,13 @@ mod filelist {
         check_order(&paths, "20_module_p.veryl", "21_alias_q.veryl");
         check_order(&paths, "c_pkg.veryl", "b_pkg.veryl");
         check_order(&paths, "b_pkg.veryl", "22_dependency_r.veryl");
+        check_order(&paths, "d_02_module.veryl", "22_dependency_r.veryl");
+        check_order(&paths, "d_01_pkg.veryl", "d_02_module.veryl");
+        check_order(&paths, "e_01_02_module.veryl", "22_dependency_r.veryl");
+        check_order(&paths, "e_03_pkg.veryl", "e_01_02_module.veryl");
+        check_order(&paths, "e_04_pkg.veryl", "e_01_02_module.veryl");
+        // 23_embed_s is opaque, so it must not float ahead of files with a visible dependency
+        check_order(&paths, "22_dependency_r.veryl", "23_embed_s.veryl");
     }
 }
 
@@ -872,6 +925,69 @@ mod native_test {
                 });
             });
         }
+    }
+
+    /// A variable nothing reads is still dumped, so the dead-variable DCE has to
+    /// be off while a dump is attached — what `CmdTest` does for `--wave`.  The
+    /// latch is process-wide and one-way, so the sibling tests here only lose an
+    /// optimization, never a result.
+    #[test]
+    fn test_wave_dump_unread_vars() {
+        veryl_simulator::ir::force_disable_dead_var_dce();
+
+        let (native_tests, ir) = analyze_native_tests();
+        let test_str = "test_wave_unread";
+        assert!(
+            native_tests
+                .iter()
+                .any(|(n, _)| resource_table::get_str_value(*n).as_deref() == Some(test_str)),
+            "the {test_str} testcase is missing"
+        );
+
+        let config = Config::default();
+        let top_str_id =
+            resource_table::get_str_id(test_str.to_string()).expect("top module not found");
+        let sim_ir = build_ir(&ir, top_str_id, &config)
+            .unwrap_or_else(|e| panic!("build_ir failed for {test_str}: {e}"));
+        let module_name = sim_ir.name.to_string();
+
+        let dump_buf = Arc::new(Mutex::new(Vec::new()));
+        let table_snapshot = resource_table::export_tables();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                resource_table::import_tables(&table_snapshot);
+                let dumper = WaveDumper::new_vcd(Box::new(SharedWriter(dump_buf.clone())));
+                let result = run_native_testbench(sim_ir, Some(dumper), module_name);
+                assert!(
+                    result.is_ok(),
+                    "wave dump testbench failed for {test_str}: {result:?}"
+                );
+            });
+        });
+
+        let vcd = String::from_utf8(dump_buf.lock().unwrap().clone()).unwrap();
+        // The testbench stops at cnt == 10; each unread net tracks it.
+        for (name, expected) in [("top_let", 220), ("child_let", 120), ("child_var", 110)] {
+            assert_eq!(
+                last_vcd_value(&vcd, name),
+                Some(expected),
+                "{name} was not dumped:\n{vcd}"
+            );
+        }
+    }
+
+    /// Last value dumped for `name`.  2-state only: `x`/`z` decode to `None`.
+    fn last_vcd_value(vcd: &str, name: &str) -> Option<u64> {
+        let id = vcd.lines().find_map(|line| {
+            let rest = line.strip_prefix("$var wire ")?;
+            let (_width, rest) = rest.split_once(' ')?;
+            let (id, rest) = rest.split_once(' ')?;
+            (rest == format!("{name} $end")).then(|| id.to_string())
+        })?;
+        vcd.lines()
+            .filter_map(|line| line.strip_prefix('b')?.split_once(' '))
+            .rfind(|(_, line_id)| *line_id == id)
+            .and_then(|(bits, _)| u64::from_str_radix(bits, 2).ok())
     }
 
     #[test]

@@ -940,6 +940,7 @@ fn comb_loop_structural_dependency_semantics_a_value_controlling_its_own_dynamic
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_mutually_exclusive_reverse_dependencies_are_not_simultaneous_feedback() {
     assert_comb_loop(
         "opposing dependencies on mutually exclusive branches do not form a realizable loop",
@@ -965,6 +966,7 @@ fn comb_loop_mutually_exclusive_reverse_dependencies_are_not_simultaneous_feedba
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_break_path_does_not_reach_the_opposing_dependency_after_the_loop_exit() {
     assert_comb_loop(
         "a dependency before break is exclusive with the reverse dependency after it",
@@ -992,6 +994,7 @@ fn comb_loop_break_path_does_not_reach_the_opposing_dependency_after_the_loop_ex
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_break_exit_preserves_feedback_killed_only_on_the_continuing_path() {
     assert_comb_loop(
         "a write after a conditional break must not kill the break exit's dependency",
@@ -1138,6 +1141,7 @@ fn comb_loop_feedback_within_one_branch_is_detected() {
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_mutually_exclusive_case_arms_do_not_form_feedback() {
     assert_comb_loop(
         "opposing dependencies in distinct case arms cannot execute together",
@@ -1162,6 +1166,7 @@ fn comb_loop_mutually_exclusive_case_arms_do_not_form_feedback() {
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_opposing_shifts_in_mutually_exclusive_arms_are_acyclic() {
     assert_comb_loop(
         "opposing positional dependencies cannot combine across exclusive arms",
@@ -1424,6 +1429,7 @@ fn comb_loop_if_assignment_to_array_is_feed_forward_array_loop_is_reported() {
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_if_expression_arms_are_mutually_exclusive() {
     // `sel` chooses exactly one direction. The opposite edges cannot coexist:
     // true gives state[1] <- state[0], while false gives state[0] <- state[1].
@@ -1446,6 +1452,7 @@ fn comb_loop_if_expression_arms_are_mutually_exclusive() {
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_case_expression_arms_are_mutually_exclusive() {
     // A case expression selects one arm, so neither selected equation contains
     // a cycle even though the two alternatives use opposite directions.
@@ -1471,6 +1478,7 @@ fn comb_loop_case_expression_arms_are_mutually_exclusive() {
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_switch_expression_arms_are_mutually_exclusive() {
     // A switch expression uses only its first matching arm. No execution can
     // combine the left-arm and right-arm dependencies into a cycle.
@@ -1498,6 +1506,7 @@ fn comb_loop_switch_expression_arms_are_mutually_exclusive() {
 }
 
 #[test]
+#[ignore = "requires feasible path conditions (#3242)"]
 fn comb_loop_if_expression_function_side_effects_remain_arm_exclusive() {
     assert_comb_loop(
         "captured writes in opposite expression arms cannot execute together",

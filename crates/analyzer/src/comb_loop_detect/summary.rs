@@ -1,11 +1,10 @@
 //! Bottom-up finite module dependency-graph summaries.
 
-use super::graph::DependencyGraph;
+use super::graph::{DependencyGraph, strongly_connected_components};
 use super::model::{ModuleCombSummary, SummaryDependency, SummaryNode, SummaryNodeKind};
 use crate::ir::{Module, VarKind};
 use crate::{HashMap, HashSet};
 use daggy::petgraph::Direction;
-use daggy::petgraph::algo::tarjan_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
@@ -40,7 +39,7 @@ pub(super) fn compute_module_summary(
         .filter(|node| forward.contains(node) && backward.contains(node))
         .collect::<HashSet<_>>();
     let mut cyclic = HashSet::default();
-    for scc in tarjan_scc(&**graph) {
+    for scc in strongly_connected_components(graph) {
         if scc.len() > 1
             || scc
                 .first()

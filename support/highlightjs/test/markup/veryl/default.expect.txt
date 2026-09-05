@@ -1,0 +1,26 @@
+<span class="hljs-comment">/// Counter module</span>
+<span class="hljs-keyword">module</span> Counter #(
+    <span class="hljs-keyword">param</span> WIDTH: <span class="hljs-keyword">u32</span> = <span class="hljs-number">8</span>,
+) (
+    i_clk  : <span class="hljs-keyword">input</span>  <span class="hljs-keyword">clock</span>         ,
+    i_rst  : <span class="hljs-keyword">input</span>  <span class="hljs-keyword">reset</span>         ,
+    i_en   : <span class="hljs-keyword">input</span>  <span class="hljs-keyword">logic</span>         ,
+    o_count: <span class="hljs-keyword">output</span> <span class="hljs-keyword">logic</span>  &lt;WIDTH&gt;,
+) {
+    <span class="hljs-comment">// internal state</span>
+    <span class="hljs-keyword">var</span> count: <span class="hljs-keyword">logic</span>&lt;WIDTH&gt;;
+
+    <span class="hljs-keyword">const</span> MAX  : <span class="hljs-keyword">logic</span>&lt;WIDTH&gt; = <span class="hljs-number">8&#x27;hff</span>;
+    <span class="hljs-keyword">const</span> MASK : <span class="hljs-keyword">logic</span>&lt;<span class="hljs-number">32</span>&gt;    = <span class="hljs-number">32&#x27;b0000_1111</span>;
+    <span class="hljs-keyword">const</span> LABEL: <span class="hljs-keyword">string</span>       = <span class="hljs-string">&quot;counter&quot;</span>;
+
+    <span class="hljs-keyword">always_ff</span> {
+        <span class="hljs-keyword">if_reset</span> {
+            count = <span class="hljs-number">0</span>;
+        } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> i_en {
+            count = count + <span class="hljs-number">1</span>;
+        }
+    }
+
+    <span class="hljs-keyword">assign</span> o_count = count;
+}

@@ -17,6 +17,14 @@ module Module21 {
 
     const EnumD: u32 = 1;
 
+    const L: logic<32> = 2;
+
     assign a = (((c as EnumA) as EnumB) as EnumC) as EnumD;
     assign b = c as 2;
+
+    let _d: logic<2> = c as L;
+
+    for i in 1..4 :g {
+        let _e: logic<2> = c as i;
+    }
 }

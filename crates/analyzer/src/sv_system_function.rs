@@ -383,7 +383,7 @@ pub fn sv_system_functions() -> Vec<SvSystemFunction> {
             &[],
         ),
         SvSystemFunction::new(
-            "$random_range",
+            "$urandom_range",
             // it has optional args but not supported
             &[("maxval", Direction::Input)],
         ),

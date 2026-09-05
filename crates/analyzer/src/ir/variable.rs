@@ -2,6 +2,7 @@ use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
+use crate::conv::checker::portability::check_initial_assign;
 use crate::conv::utils::eval_width_select;
 use crate::ir::{
     AssignDestination, Comptime, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind,
@@ -48,6 +49,8 @@ impl VarPathSelect {
         ignore_error: bool,
     ) -> Option<AssignDestination> {
         let (path, mut select, token) = self.into();
+
+        check_initial_assign(context, &path, &token);
 
         if let Some((id, mut comptime)) = context.find_path(&path) {
             if let Some(part_select) = &comptime.part_select {
@@ -147,6 +150,8 @@ impl VarPathSelect {
         let ignore_error = ignore_error || context.in_generic;
 
         let (path, select, token) = self.clone().into();
+
+        check_initial_assign(context, &path, &token);
 
         let Some((id, mut base_comptime)) = context.find_path(&path) else {
             return self
@@ -950,6 +955,11 @@ pub struct Variable {
     pub path: VarPath,
     pub kind: VarKind,
     pub r#type: Type,
+    /// For each unpacked-array dimension in `type.array`, the number of path
+    /// segments following the segment that owns the dimension. Most arrays
+    /// belong to the final segment (offset zero); flattened interface members
+    /// retain instance-array dimensions on an earlier segment.
+    pub array_path_offsets: Vec<usize>,
     pub value: Vec<Value>,
     pub assigned: Vec<BigUint>,
     pub affiliation: Affiliation,
@@ -979,12 +989,14 @@ impl Variable {
         } else {
             vec![0u32.into(); total_array]
         };
+        let array_path_offsets = vec![0; r#type.array.dims()];
 
         Self {
             id,
             path,
             kind,
             r#type,
+            array_path_offsets,
             value,
             assigned,
             affiliation,
@@ -1066,6 +1078,10 @@ impl Variable {
     }
 
     pub fn prepend_array(&mut self, array: &ShapeRef) {
+        self.prepend_array_at_path(array, 0);
+    }
+
+    pub fn prepend_array_at_path(&mut self, array: &ShapeRef, path_offset: usize) {
         if !array.is_empty()
             && let Some(total_array) = array.total()
         {
@@ -1075,7 +1091,16 @@ impl Variable {
                 self.value.append(&mut value.clone());
                 self.assigned.append(&mut assigned.clone());
             }
+            let mut offsets = vec![path_offset; array.dims()];
+            offsets.append(&mut self.array_path_offsets);
+            self.array_path_offsets = offsets;
             self.r#type.prepend_array(array);
+        }
+    }
+
+    pub fn set_leading_array_path_offset(&mut self, dimensions: usize, path_offset: usize) {
+        for offset in self.array_path_offsets.iter_mut().take(dimensions) {
+            *offset = path_offset;
         }
     }
 }

@@ -1,0 +1,47 @@
+module WaveUnread (
+    clk: input  clock    ,
+    rst: input  reset    ,
+    cnt: output logic<32>,
+) {
+    // Unread on purpose: the wave dump is their only observer.
+    var child_var: logic<32>;
+
+    always_ff {
+        if_reset {
+            cnt = 0;
+        } else {
+            cnt += 1;
+        }
+    }
+
+    always_comb {
+        child_var = cnt + 32'd100;
+    }
+
+    #[allow(unused_variable)]
+    let child_let: logic<32> = cnt + 32'd110;
+}
+
+#[test(test_wave_unread)]
+module test_wave_unread {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    var cnt: logic<32>;
+
+    inst dut: WaveUnread (
+        clk: clk,
+        rst: rst,
+        cnt: cnt,
+    );
+
+    #[allow(unused_variable)]
+    let top_let: logic<32> = cnt + 32'd210;
+
+    initial {
+        rst.assert();
+        clk.next(10);
+        $assert(cnt == 32'd10);
+        $finish();
+    }
+}

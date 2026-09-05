@@ -1,4 +1,4 @@
-use crate::cmd_build::CmdBuild;
+use crate::cmd_build::{CmdBuild, EmitPolicy};
 use crate::runner::{Cocotb, CocotbSource, Dsim, Vcs, Verilator, Vivado};
 use crate::{Format, OptBuild, OptTest, check_format_version};
 use log::{error, info, warn};
@@ -14,7 +14,7 @@ use veryl_simulator::ir::{ComponentLibrary, Config, Ir, ProtoModuleCache, build_
 use veryl_simulator::output_buffer;
 use veryl_simulator::simulator::Simulator;
 use veryl_simulator::simulator_error::SimulatorError;
-use veryl_simulator::testbench::{TestResult, run_native_testbench};
+use veryl_simulator::testbench::{TestResult, run_native_testbench_timed};
 use veryl_simulator::wave_dumper::WaveDumper;
 use veryl_simulator::wavedrom::{self, SignalKind, classify_signals, parse_wavedrom};
 
@@ -34,15 +34,30 @@ struct TestSuiteReport {
     format_version: u32,
     /// The backend that was asked for; see `degraded_modules` for what ran.
     backend: String,
-    /// `kind:module` for every module that fell back, empty when the run used
-    /// `backend` throughout.  A timing comparison is only meaningful when this
-    /// is empty in both arms.
+    /// `kind:module` for every module that fell back AT LEAST ONCE.  Empty is
+    /// exact; non-empty is not a measure -- compare timings on `dispatch`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     degraded_modules: Vec<String>,
+    /// Per-module dispatch tallies for the whole-comb / whole-event handles:
+    /// how many dispatches ran the requested artifact vs fell back.  Present
+    /// only for modules that held such a handle.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dispatch: Vec<DispatchReport>,
     passed: i32,
     failed: i32,
     ignored: usize,
     tests: Vec<TestReport>,
+}
+
+/// One module's whole-* dispatch tally; see `TestSuiteReport::dispatch`.
+#[derive(serde::Serialize)]
+struct DispatchReport {
+    /// `kind:module`, matching the `degraded_modules` spelling.
+    module: String,
+    /// Dispatches that ran the requested artifact.
+    ran: u64,
+    /// Dispatches that found it unavailable and fell back.
+    fell_back: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -53,12 +68,20 @@ struct TestReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
     runtime_s: f64,
-    /// Simulation-only wall time: `Simulator::new` + memory preload + the
-    /// cycle loop, excluding the per-test IR build / AOT compile / dlopen that
-    /// `runtime_s` also covers (the boundary a warm Verilator binary re-runs).
+    /// Simulation-only wall time: `Simulator::new`, component init, memory
+    /// preload and the cycle loop — the boundary a warm build re-runs.  What
+    /// the elaborated design alone determines stays out of it, whether that is
+    /// the IR build and AOT compile before the run or the testbench derivation
+    /// inside it; `runtime_s` covers those.
     /// `None` for non-native tests and native tests that never reached execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     sim_s: Option<f64>,
+    /// The build work `sim_s` excludes but the run still did: deriving the
+    /// testbench from the IR, redone on every invocation even where the IR
+    /// build and the AOT compile are cached.  Diagnostic; `sim_s + derive_s`
+    /// is the whole run span.  Reported whenever `sim_s` is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    derive_s: Option<f64>,
     /// Captured `$display`/`$write` output.
     #[serde(skip_serializing_if = "Option::is_none")]
     output: Option<String>,
@@ -173,14 +196,16 @@ impl CmdTest {
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
-        // A dump wants every comb word.  Localization and the comb fusion
-        // leave the words no later reader needs holding stale values, so
-        // waveforms would disagree with a full settle while the run still
-        // passes.  Before analysis: the blocklist is computed during conv and
-        // the fusion decision is baked into the memoised pipeline.
+        // A dump wants every comb word.  These passes leave the words no later
+        // reader needs holding stale or initial values, so waveforms would
+        // disagree with a full settle while the run still passes.  Before
+        // analysis: the blocklist is computed during conv and the decisions are
+        // baked into the memoised pipeline.
         if self.opt.wave {
             veryl_simulator::backend::aot_c::force_disable_localize();
             veryl_simulator::ir::force_disable_comb_fusion();
+            veryl_simulator::ir::force_disable_field_unfuse();
+            veryl_simulator::ir::force_disable_dead_var_dce();
         }
 
         // force filelist_type to absolute which can be refered from temporary directory
@@ -232,6 +257,7 @@ impl CmdTest {
             Some(&mut ir),
             self.opt.test.as_deref(),
             &combined_defines,
+            EmitPolicy::SkipIfNativeOnly,
         )?;
 
         let tests = symbol_table::get_tests(&metadata.project.name);
@@ -318,6 +344,14 @@ impl CmdTest {
                 .or(metadata.test.seed)
                 .unwrap_or_else(random_seed),
             use_4state: self.opt.four_state || metadata.test.four_state,
+            abstract_reset_active_high: matches!(
+                metadata.build.reset_type,
+                veryl_metadata::ResetType::AsyncHigh | veryl_metadata::ResetType::SyncHigh
+            ),
+            abstract_reset_sync: matches!(
+                metadata.build.reset_type,
+                veryl_metadata::ResetType::SyncHigh | veryl_metadata::ResetType::SyncLow
+            ),
             ..Config::default()
         };
         config.apply_env();
@@ -467,6 +501,7 @@ impl CmdTest {
                                     #[cfg(feature = "profile")]
                                     let t_run = std::time::Instant::now();
                                     let mut run_secs: Option<f64> = None;
+                                    let mut derive_secs = 0.0f64;
                                     let outcome = match build_result {
                                         Ok(job) => {
                                             let wave_path =
@@ -479,12 +514,17 @@ impl CmdTest {
                                             // run time is the stable per-test cost that
                                             // longest-first scheduling sorts on.
                                             let t_run_sched = std::time::Instant::now();
-                                            let result = run_native_testbench(
+                                            let timed = run_native_testbench_timed(
                                                 job.sim_ir,
                                                 job.dump,
                                                 job.module_name,
+                                                None,
                                             );
                                             run_secs = Some(t_run_sched.elapsed().as_secs_f64());
+                                            let result = timed.map(|(r, derive)| {
+                                                derive_secs = derive.as_secs_f64();
+                                                r
+                                            });
                                             NativeOutcome::Ran { result, wave_path }
                                         }
                                         Err(e) => NativeOutcome::ElaborateFailed(e),
@@ -492,10 +532,9 @@ impl CmdTest {
                                     if let Some(secs) = run_secs {
                                         tally_timings.push((pending.test_name.clone(), secs));
                                     }
-                                    // `run_secs` is exactly the run_native_testbench
-                                    // span (Simulator::new + preload + cycle loop),
-                                    // which is the sim_s semantics — reuse it.
-                                    let sim_s = run_secs;
+                                    // The derivation belongs with the build.
+                                    let sim_s = run_secs.map(|s| (s - derive_secs).max(0.0));
+                                    let derive_s = sim_s.map(|_| derive_secs);
                                     #[cfg(feature = "profile")]
                                     {
                                         let run_el = t_run.elapsed();
@@ -566,6 +605,7 @@ impl CmdTest {
                                             message: rep_message,
                                             runtime_s,
                                             sim_s,
+                                            derive_s,
                                             output: if output.is_empty() {
                                                 None
                                             } else {
@@ -638,6 +678,7 @@ impl CmdTest {
                     runtime_s,
                     // External simulators compile+run in one step; no split.
                     sim_s: None,
+                    derive_s: None,
                     output: None,
                 });
             }
@@ -683,6 +724,7 @@ impl CmdTest {
                     message,
                     runtime_s,
                     sim_s: None,
+                    derive_s: None,
                     output: None,
                 });
             }
@@ -706,6 +748,14 @@ impl CmdTest {
                 format_version: 1,
                 backend: backend_name.to_string(),
                 degraded_modules: veryl_simulator::residency::degraded_modules(),
+                dispatch: veryl_simulator::residency::dispatch_counts()
+                    .into_iter()
+                    .map(|(module, ran, fell_back)| DispatchReport {
+                        module,
+                        ran,
+                        fell_back,
+                    })
+                    .collect(),
                 passed: success,
                 failed: failure,
                 ignored: ignored_count,
@@ -1226,13 +1276,22 @@ fn run_doc_test(
         })
         .unwrap_or_else(fallback_clock);
 
-    // Resolve reset event
-    let reset_event = sim
-        .ir
-        .event_statements
-        .keys()
-        .find(|e| matches!(e, veryl_simulator::ir::Event::Reset(_)))
-        .cloned();
+    // The scenario drives the reset like any other input; the event only
+    // names the net to hold asserted for the implicit startup reset.
+    let reset_event = scenario
+        .signals
+        .iter()
+        .filter(|s| s.kind == SignalKind::Input)
+        .find_map(|s| {
+            sim.get_reset(&s.name)
+                .or_else(|| sim.get_reset(&format!("i_{}", s.name)))
+        })
+        .or_else(|| {
+            sim.ir
+                .reset_ports()
+                .first()
+                .map(|id| veryl_simulator::ir::Event::Reset(*id))
+        });
 
     remap_signal_names(&mut scenario, ports);
 
@@ -1258,7 +1317,7 @@ fn run_doc_test(
 
     match result {
         TestResult::Pass => {
-            let wave_path = sim.dump.and_then(|d| d.into_path());
+            let wave_path = sim.dump.take().and_then(|d| d.into_path());
             Ok(wave_path)
         }
         TestResult::Fail(msg) => Err(SimulatorError::TestFailed { message: msg }),

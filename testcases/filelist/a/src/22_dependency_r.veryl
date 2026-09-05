@@ -4,3 +4,8 @@ package r_pkg {
         return B;
     }
 }
+
+module r_module {
+    inst u_d: d::d_02_top;
+    inst u_e: e::e_01_top;
+}

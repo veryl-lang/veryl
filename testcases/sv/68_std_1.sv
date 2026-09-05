@@ -269,40 +269,49 @@ module veryl_testcase_Module68D
     endfunction
 endmodule
 
-module veryl_testcase___Module68E____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5 (
-    __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8.slave                                                                                                                                                            axi4_if       ,
-    __std___axi4_lite_if____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH.slave axi4_lite_if  ,
-    __std___axi4_stream_if____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5.receiver                                             axi4_stream_if
+module veryl_testcase___Module68E____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5
+
+
+
+
+(
+    __std___axi4_if____std___axi4_pkg__32__8__8__8__8__8__8__8.slave                                                                                                                                                            a,
+    __std___axi4_lite_if____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH.slave b,
+    __std___axi4_stream_if____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5.receiver                                             c
 );
+
+
+
+
     always_comb begin
-        axi4_if.awready = 0;
-        axi4_if.wready  = 0;
-        axi4_if.bvalid  = 0;
-        axi4_if.bresp   = __std___axi4_pkg__32__8__8__8__8__8__8__8::resp_t'(0);
-        axi4_if.bid     = __std___axi4_pkg__32__8__8__8__8__8__8__8::id_t'(0);
-        axi4_if.buser   = __std___axi4_pkg__32__8__8__8__8__8__8__8::buser_t'(0);
-        axi4_if.arready = 0;
-        axi4_if.rvalid  = 0;
-        axi4_if.rlast   = 0;
-        axi4_if.rdata   = __std___axi4_pkg__32__8__8__8__8__8__8__8::data_t'(0);
-        axi4_if.rresp   = __std___axi4_pkg__32__8__8__8__8__8__8__8::resp_t'(0);
-        axi4_if.rid     = __std___axi4_pkg__32__8__8__8__8__8__8__8::id_t'(0);
-        axi4_if.ruser   = __std___axi4_pkg__32__8__8__8__8__8__8__8::ruser_t'(0);
+        a.awready = 0;
+        a.wready  = 0;
+        a.bvalid  = 0;
+        a.bresp   = __std___axi4_pkg__32__8__8__8__8__8__8__8::resp_t'(0);
+        a.bid     = __std___axi4_pkg__32__8__8__8__8__8__8__8::id_t'(0);
+        a.buser   = __std___axi4_pkg__32__8__8__8__8__8__8__8::buser_t'(0);
+        a.arready = 0;
+        a.rvalid  = 0;
+        a.rlast   = 0;
+        a.rdata   = __std___axi4_pkg__32__8__8__8__8__8__8__8::data_t'(0);
+        a.rresp   = __std___axi4_pkg__32__8__8__8__8__8__8__8::resp_t'(0);
+        a.rid     = __std___axi4_pkg__32__8__8__8__8__8__8__8::id_t'(0);
+        a.ruser   = __std___axi4_pkg__32__8__8__8__8__8__8__8::ruser_t'(0);
     end
     always_comb begin
-        axi4_lite_if.bid     = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::id_t'(0);
-        axi4_lite_if.rid     = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::id_t'(0);
-        axi4_lite_if.awready = 0;
-        axi4_lite_if.wready  = 0;
-        axi4_lite_if.bvalid  = 0;
-        axi4_lite_if.bresp   = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::resp_t'(0);
-        axi4_lite_if.arready = 0;
-        axi4_lite_if.rvalid  = 0;
-        axi4_lite_if.rdata   = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::data_t'(0);
-        axi4_lite_if.rresp   = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::resp_t'(0);
+        b.bid     = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::id_t'(0);
+        b.rid     = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::id_t'(0);
+        b.awready = 0;
+        b.wready  = 0;
+        b.bvalid  = 0;
+        b.bresp   = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::resp_t'(0);
+        b.arready = 0;
+        b.rvalid  = 0;
+        b.rdata   = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::data_t'(0);
+        b.rresp   = __std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH::resp_t'(0);
     end
     always_comb begin
-        axi4_stream_if.tready = 0;
+        c.tready = 0;
     end
 endmodule
 
@@ -374,13 +383,13 @@ module veryl_testcase_Module68F;
     always_comb axi4_lite_if.arid = 0;
 
     veryl_testcase___Module68E____std___axi4_pkg__32__8__8__8__8__8__8__8____std___axi4_lite_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_ADDRESS_WIDTH____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH____std___axi4_stream_pkg____std___axi4_pkg__32__8__8__8__8__8__8__8_DATA_WIDTH_BYTES__2____std___axi4_pkg__32__8__8__8__8__8__8__8_ID_LENGTH__5 u (
-        .axi4_if        (axi4_if       ),
-        .axi4_lite_if   (axi4_lite_if  ),
-        .axi4_stream_if (axi4_stream_if)
+        .a (axi4_if       ),
+        .b (axi4_lite_if  ),
+        .c (axi4_stream_if)
     );
 endmodule
 
-package veryl_testcase_Pkg68G;
+package veryl_testcase_Package68G;
     localparam int unsigned WIDTH = 32;
 endpackage
 //# sourceMappingURL=../map/68_std_1.sv.map

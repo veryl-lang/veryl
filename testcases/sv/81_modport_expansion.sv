@@ -141,4 +141,80 @@ module veryl_testcase_Module81B;
         .__s_if_0_1_data    (b_if[0][1].data   )
     );
 endmodule
+
+interface veryl_testcase_Interface81Define;
+    `ifdef TRACE
+    logic trace;
+    `endif
+    logic data ;
+
+    modport master (
+        `ifdef TRACE
+        output trace,
+        `endif
+        output data 
+    );
+
+    modport slave (
+        `ifdef TRACE
+        input trace,
+        `endif
+        input data 
+    );
+endinterface
+
+module veryl_testcase_Module81C (
+    `ifdef TRACE
+    output var logic __m_if_trace,
+    `endif
+    output var logic __m_if_data 
+);
+    veryl_testcase_Interface81Define m_if ();
+    always_comb begin
+        `ifdef TRACE
+        __m_if_trace = m_if.trace;
+        `endif
+        __m_if_data  = m_if.data ;
+    end
+    always_comb m_if.data = 0;
+endmodule
+
+module veryl_testcase_Module81D;
+    veryl_testcase_Interface81Define c_if ();
+
+    veryl_testcase_Module81C u (
+        `ifdef TRACE
+        .__m_if_trace (c_if.trace),
+        `endif
+        .__m_if_data  (c_if.data )
+    );
+endmodule
+
+
+module veryl_testcase_Module81E
+
+(
+    output var logic [veryl_sample4___baz_pkg__16__32::BAZ_0-1:0] __baz_baz_0,
+    output var logic [veryl_sample4___baz_pkg__16__32::BAZ_1-1:0] __baz_baz_1
+);
+    veryl_sample4___baz_if__veryl_sample4___baz_pkg__16__32 baz ();
+    always_comb begin
+        __baz_baz_0 = baz.baz_0;
+        __baz_baz_1 = baz.baz_1;
+    end
+
+    always_comb baz.baz_0 = '0;
+    always_comb baz.baz_1 = '0;
+endmodule
+
+module veryl_testcase_Module81F;
+
+
+
+    veryl_sample4___baz_if__veryl_sample4___baz_pkg__16__32 baz ();
+    veryl_testcase_Module81E u (
+        .__baz_baz_0 (baz.baz_0),
+        .__baz_baz_1 (baz.baz_1)
+    );
+endmodule
 //# sourceMappingURL=../map/81_modport_expansion.sv.map

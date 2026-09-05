@@ -5,6 +5,8 @@ use crate::analyzer_error::{
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::generic::check_generic_refereence;
+use crate::conv::checker::portability::check_initial_assign_system_function_args;
+use crate::conv::context::RuntimeFunctionEffect;
 use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
@@ -28,6 +30,7 @@ use std::sync::Arc;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
+use veryl_parser::veryl_token::Token;
 
 /// True for "atomic" expressions whose result type is unambiguous:
 /// variable references, sized / real / boolean literals, function
@@ -337,6 +340,66 @@ impl ArrayLiteralExpression {
     }
 }
 
+/// A const array declared in another namespace arrives folded to one value per
+/// element instead of an array literal; left whole it lowers to `unknown`.
+fn eval_const_array(
+    context_array: Option<&ShapeRef>,
+    expr: &ir::Expression,
+) -> Option<Vec<ArrayLiteralExpression>> {
+    let array = context_array?;
+    if array.is_empty() {
+        return None;
+    }
+
+    let ir::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let ir::Factor::Value(comptime) = factor.as_ref() else {
+        return None;
+    };
+    let ValueVariant::NumericArray(values) = &comptime.value else {
+        return None;
+    };
+    // Same total but a different shape (`[2, 3]` into `[3, 2]`) is a type
+    // error; expanding it would silently reshape instead.
+    if comptime.r#type.array.as_slice() != array.as_slice() {
+        return None;
+    }
+    let dims: Vec<usize> = array.iter().copied().collect::<Option<_>>()?;
+    // A zero-length dimension would expand to no statement, dropping the assignment.
+    if dims.contains(&0) || array.total()? != values.len() {
+        return None;
+    }
+
+    // Cloned per element, so keeping the element list here would be quadratic.
+    let mut element = comptime.clone();
+    element.r#type.array = Shape::default();
+    element.value = ValueVariant::Unknown;
+
+    let ret = values
+        .iter()
+        .enumerate()
+        .map(|(flat, value)| {
+            // Row-major, matching `ShapeRef::calc_index`.
+            let mut index = vec![0; dims.len()];
+            let mut rest = flat;
+            for (i, dim) in dims.iter().enumerate().rev() {
+                index[i] = rest % dim;
+                rest /= dim;
+            }
+
+            let mut comptime = element.clone();
+            comptime.value = ValueVariant::Numeric(value.clone());
+            ArrayLiteralExpression {
+                index,
+                select: vec![],
+                expr: ir::Expression::Term(Box::new(ir::Factor::Value(comptime))),
+            }
+        })
+        .collect();
+    Some(ret)
+}
+
 pub fn eval_array_literal(
     context: &mut Context,
     context_array: Option<&ShapeRef>,
@@ -344,6 +407,10 @@ pub fn eval_array_literal(
     expr: &mut ir::Expression,
 ) -> IrResult<Option<Vec<ArrayLiteralExpression>>> {
     let token = expr.token_range();
+
+    if let Some(x) = eval_const_array(context_array, expr) {
+        return Ok(Some(x));
+    }
 
     let ir::Expression::ArrayLiteral(items, _) = expr else {
         return Ok(None);
@@ -549,6 +616,29 @@ pub fn eval_size(
     }
 }
 
+/// A write to a variable declared further down is invisible to every analysis,
+/// while the emitter still emits it.
+pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
+    context: &mut Context,
+    identifier: T,
+    token: Token,
+) {
+    if let Ok(symbol) = symbol_table::resolve(identifier)
+        && let SymbolKind::Variable(x) = &symbol.found.kind
+        && x.affiliation == Affiliation::Module
+        // A module-level variable is registered under its bare name, so a miss
+        // means the declaration is still ahead of the write.
+        && context
+            .find_path(&VarPath::new(symbol.found.token.text))
+            .is_none()
+    {
+        context.insert_error(AnalyzerError::referring_before_definition(
+            &token.text.to_string(),
+            &token.into(),
+        ));
+    }
+}
+
 /// Per-destination clock/CDC checks for an assignment (invalid clock assign,
 /// Implicit-domain inference, dst-vs-RHS and dst-vs-always_ff domain). Shared
 /// by the scalar and concatenation-LHS paths, which build AssignStatement directly.
@@ -719,9 +809,11 @@ pub fn eval_array_range_assign(
 
     // Pair each outer literal item with one element dst; `eval_assign_statement`
     // recurses the element's inner dims. (A flat `eval_array_literal` would over-
-    // recurse and mis-decompose a multi-dim element.) Non-literal RHS: defer.
+    // recurse and mis-decompose a multi-dim element.) A non-literal RHS has no
+    // lowering: the scalar path can't take a range either.
     let ir::Expression::ArrayLiteral(items, _) = &mut rhs_expr else {
-        return Ok(None);
+        context.insert_error(AnalyzerError::invalid_range_assign(&token));
+        return Ok(Some(vec![]));
     };
     let mut outer: Vec<ir::Expression> = Vec::new();
     let mut default: Option<ir::Expression> = None;
@@ -899,6 +991,15 @@ pub fn eval_const_assign(
     expr: &mut (ir::Comptime, ir::Expression),
 ) -> IrResult<()> {
     let (comptime, expr) = expr;
+    // Same unfolded form `get_overridden_params` handles: an indexed read of
+    // an unpacked-array const arrives const but valueless, and left alone the
+    // const stays unresolved.  An array literal keeps its own path.
+    if comptime.value.is_unknown()
+        && comptime.is_const
+        && let Some(value) = expr.eval_value(context)
+    {
+        comptime.value = ValueVariant::Numeric(value);
+    }
     let comptime = comptime.clone();
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
@@ -1158,6 +1259,27 @@ pub fn eval_type(
     let mut signed = false;
     let mut is_positive = false;
 
+    // The `var_paths` shortcut below turns a constant into a width, which is what
+    // makes `x as W` work -- so a variable position has to be rejected ahead of it.
+    let resolved = if matches!(pos, TypePosition::Variable) {
+        let resolved = context.resolve_path(path.clone());
+        if let Ok(symbol) = symbol_table::resolve(&resolved)
+            && !symbol.found.is_variable_type()
+        {
+            context.insert_error(AnalyzerError::mismatch_type(
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.found.token.to_string(),
+                    expected: "enum, union, struct or typedef".to_string(),
+                    actual: symbol.found.kind.to_kind_name(),
+                },
+                &path.range,
+            ));
+        }
+        Some(resolved)
+    } else {
+        None
+    };
+
     let kind = if let Some(x) = path.to_var_path()
         && let Some(x) = context.var_paths.get(&x)
     {
@@ -1180,26 +1302,19 @@ pub fn eval_type(
             _ => ir::TypeKind::Unknown,
         }
     } else {
-        let mut path = context.resolve_path(path.clone());
+        let mut path = resolved.unwrap_or_else(|| context.resolve_path(path.clone()));
         check_generic_refereence(context, &path);
 
         let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
-            let type_error = match pos {
-                TypePosition::Variable => !symbol.found.is_variable_type(),
-                TypePosition::Cast => !symbol.found.is_casting_type(),
-                _ => false,
-            };
-
-            if type_error {
-                let token: TokenRange = symbol.found.token.into();
+            if matches!(pos, TypePosition::Cast) && !symbol.found.is_casting_type() {
                 context.insert_error(AnalyzerError::mismatch_type(
                     MismatchTypeKind::SymbolKind {
                         name: symbol.found.token.to_string(),
-                        expected: "enum or union or struct".to_string(),
+                        expected: "enum, union, struct, typedef or integer constant".to_string(),
                         actual: symbol.found.kind.to_kind_name(),
                     },
-                    &token,
+                    &path.range,
                 ));
             }
 
@@ -1968,6 +2083,7 @@ pub fn eval_function_call(
             SymbolKind::SystemFunction(_) => {
                 let name = symbol.found.token.text;
                 let args = args.to_system_function_args(context, &symbol.found);
+                check_initial_assign_system_function_args(context, &symbol.found, &args);
                 let ret = ir::SystemFunctionCall::new(context, name, args, token)?;
                 Ok(ir::Expression::Term(Box::new(
                     ir::Factor::SystemFunctionCall(ret),
@@ -3570,6 +3686,16 @@ pub fn get_overridden_params(
             expr.0.value = ValueVariant::NumericArray(values);
         }
 
+        // An element of an unpacked-array parameter arrives const but
+        // unfolded, so no instance is specialised and a width derived from it
+        // stays symbolic — which the simulator cannot elaborate.
+        if expr.0.value.is_unknown()
+            && expr.0.is_const
+            && let Some(value) = expr.1.eval_value(context)
+        {
+            expr.0.value = ValueVariant::Numeric(value);
+        }
+
         let is_type_param = matches!(
             &target.kind,
             SymbolKind::Parameter(x) if !x.is_proto && matches!(x.r#type.kind, TypeKind::Type)
@@ -4018,9 +4144,8 @@ pub fn function_call(
 
     check_generic_refereence(context, &generic_path);
 
-    let mut parent_path = generic_path.clone();
-    parent_path.paths.pop();
-    let mut sig = Signature::from_path(context, generic_path).ok_or_else(|| ir_error!(token))?;
+    let mut sig =
+        Signature::from_path(context, generic_path.clone()).ok_or_else(|| ir_error!(token))?;
     sig.normalize();
 
     // same signature re-entered => true infinite recursion
@@ -4042,27 +4167,7 @@ pub fn function_call(
         sig: sig.clone(),
     };
 
-    let mut map = sig.to_generic_map();
-
-    if !parent_path.is_empty()
-        && let Ok(symbol) = symbol_table::resolve(&parent_path)
-    {
-        match &symbol.found.kind {
-            SymbolKind::Instance(x) => {
-                let mut parent_map = x.type_name.to_generic_maps();
-                parent_map.append(&mut map);
-                map = parent_map;
-            }
-            SymbolKind::Port(x) => {
-                if let Some(x) = x.r#type.get_user_defined() {
-                    let mut parent_map = x.path.to_generic_maps();
-                    parent_map.append(&mut map);
-                    map = parent_map;
-                }
-            }
-            _ => (),
-        }
-    }
+    let map = symbol_table::function_call_generic_maps(&sig, &generic_path);
 
     context.push_generic_map(map);
     context.function_call_stack.push(sig.clone());
@@ -4070,6 +4175,85 @@ pub fn function_call(
     let ret = context.block(|c| {
         let func = get_function(c, &path, token)?;
         let (mut inputs, outputs) = args.to_function_args(c, &func, token)?;
+
+        let symbol = symbol_table::get(sig.symbol);
+        let mut effect = symbol
+            .as_ref()
+            .and_then(|symbol| match &symbol.kind {
+                SymbolKind::Function(func) => Some(RuntimeFunctionEffect {
+                    external_write: func.has_side_effect_in(&c.config.defines),
+                    written_outputs: func
+                        .written_output_paths(&c.config.defines)
+                        .into_iter()
+                        .filter_map(|path| path.to_var_path())
+                        .collect(),
+                }),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if let Some(runtime_effect) = c.function_effect(&path) {
+            effect.external_write |= runtime_effect.external_write;
+            effect
+                .written_outputs
+                .extend(runtime_effect.written_outputs);
+        }
+        c.record_function_call_effect(&effect, &outputs);
+
+        if c.is_affiliated(Affiliation::AlwaysFf)
+            && effect.external_write
+            && let Some(symbol) = &symbol
+        {
+            let definition = TokenRange::from(&symbol.token);
+            let external_write = symbol_table::find_external_write(symbol, &sig, c);
+            let (calls, external_writes) = external_write
+                .map(|trace| (trace.calls, vec![trace.write]))
+                .unwrap_or_default();
+            c.insert_error(AnalyzerError::side_effect_function_call_in_always_ff(
+                &symbol.token.text.to_string(),
+                &token,
+                &definition,
+                &calls,
+                &external_writes,
+            ));
+        }
+
+        if c.is_affiliated(Affiliation::AlwaysFf) {
+            for (formal, dsts) in &outputs {
+                let Some(formal_name) = formal.0.first() else {
+                    continue;
+                };
+                if effect.written_paths_for(formal).next().is_none() {
+                    continue;
+                }
+                let output = resource_table::get_str_value(*formal_name).unwrap_or_default();
+                let output_port = symbol.as_ref().and_then(|symbol| match &symbol.kind {
+                    SymbolKind::Function(function) => function.ports.iter().find(|port| {
+                        port.token.token.text == *formal_name
+                            && symbol_table::get(port.symbol).is_some_and(|symbol| {
+                                matches!(symbol.kind, SymbolKind::Port(ref port) if port.direction == symbol::Direction::Output)
+                            })
+                    }),
+                    _ => None,
+                });
+                let Some(output_port) = output_port else {
+                    continue;
+                };
+                let declaration = TokenRange::from(&output_port.token.token);
+                for dst in dsts {
+                    if c.get_variable_info(dst.id)
+                        .is_some_and(|variable| variable.affiliation != Affiliation::AlwaysFf)
+                    {
+                        c.insert_error(AnalyzerError::function_output_in_always_ff(
+                            &func.name.to_string(),
+                            &output,
+                            &dst.path.to_string(),
+                            &dst.token,
+                            Some(&declaration),
+                        ));
+                    }
+                }
+            }
+        }
 
         let mut comptime = func.r#type.clone();
         comptime.token = token;

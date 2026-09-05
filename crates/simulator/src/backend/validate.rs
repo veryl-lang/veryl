@@ -9,6 +9,7 @@
 use crate::backend::{CompiledWhole, DispatchOutcome};
 use crate::ir::{Ir, ModuleVariables};
 use crate::simulator::SimProfile;
+use std::sync::atomic::Ordering;
 use veryl_analyzer::value::MaskCache;
 
 thread_local! {
@@ -59,11 +60,19 @@ pub fn settle_comb(
     let narrow_snap = ir.write_log_buffer.narrow_count();
     let wide_snap = ir.write_log_buffer.wide_count();
     let buf_mut = (&*ir.write_log_buffer) as *const _ as *mut crate::ir::write_log::WriteLogBuffer;
+    // Roll the AOT run's `$display` output back before the reference settle
+    // replays it — the Cranelift copy is the one kept, like its results.
+    let out_mark = crate::output_buffer::mark();
 
     for _ in 0..passes {
         match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
-            DispatchOutcome::Done => {}
+            DispatchOutcome::Done => {
+                ir.whole_comb_dispatch[0].fetch_add(1, Ordering::Relaxed);
+            }
             DispatchOutcome::NotReady => {
+                ir.whole_comb_dispatch[1].fetch_add(1, Ordering::Relaxed);
+                ir.record_comb_fallback();
+                crate::output_buffer::truncate_to(out_mark);
                 ir.run_chunked_settle(mask_cache, profile);
                 return;
             }
@@ -85,6 +94,7 @@ pub fn settle_comb(
         (*buf_mut).narrow_count = narrow_snap;
         (*buf_mut).wide_count = wide_snap;
     }
+    crate::output_buffer::truncate_to(out_mark);
 
     ir.run_chunked_settle(mask_cache, profile);
 

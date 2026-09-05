@@ -356,13 +356,111 @@ pub fn emit_inline_write_log_push_wide(
     builder.switch_to_block(merge_block);
 }
 
-/// Stack slot of `nb` bytes; returns its address as I64.
+/// Pool of wide-value scratch slots for the function under construction.
+/// Cranelift never merges `ExplicitSlot`s, so without reuse the frame grows
+/// with the chunk's statement count.  Safe because no slot address outlives
+/// its statement: `load_cache` never caches a wide pointer.
+#[derive(Default)]
+struct ScratchPool {
+    /// Retired slots, keyed by byte size.
+    free: HashMap<u32, Vec<cranelift::codegen::ir::StackSlot>>,
+    /// Slots handed out and not yet retired, in allocation order.
+    live: Vec<(u32, cranelift::codegen::ir::StackSlot)>,
+}
+
+thread_local! {
+    static SCRATCH: std::cell::RefCell<ScratchPool> =
+        std::cell::RefCell::new(ScratchPool::default());
+}
+
+#[cfg(test)]
+thread_local! {
+    /// (slot count, total slot bytes) of the last function built on this
+    /// thread, so a test can assert the frame stays bounded.
+    pub(crate) static LAST_FRAME_SLOTS: std::cell::Cell<(usize, u64)> =
+        const { std::cell::Cell::new((0, 0)) };
+}
+
+/// `VERYL_JIT_SCRATCH_REUSE=0` allocates a fresh slot per temporary again
+/// (one-binary A/B of the pool's cost; the frame is then unbounded).
+fn scratch_reuse_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_JIT_SCRATCH_REUSE").as_deref() != Ok("0"))
+}
+
+/// Refusal point for a chunk's explicit stack slots — an eighth of the
+/// simulation thread's stack, leaving room for the frame and its callees.
+const MAX_CHUNK_FRAME_BYTES: u64 = (crate::IR_WALK_STACK_BYTES / 8) as u64;
+
+/// `VERYL_JIT_FRAME_DIAG=1` reports chunks whose stack slots alone exceed a
+/// megabyte — the shape that used to run the simulation thread off its stack.
+fn frame_diag_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_JIT_FRAME_DIAG").as_deref() == Ok("1"))
+}
+
+thread_local! {
+    /// (sites, scratch bytes not allocated) of static-window wide RMWs merged
+    /// straight into their destination in the function under construction.
+    static WIDE_RMW_INPLACE: std::cell::Cell<(usize, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// One static-window wide RMW landed in place instead of allocating `slots`
+/// `nb`-byte scratch buffers.
+pub(crate) fn note_wide_rmw_inplace(slots: usize, nb: usize) {
+    if frame_diag_enabled() {
+        WIDE_RMW_INPLACE.with(|c| {
+            let (n, b) = c.get();
+            c.set((n + 1, b + (slots * nb) as u64));
+        });
+    }
+}
+
+/// Drop every pooled slot.  MUST run before a new function is built: the
+/// handles index the function they were created in and mean nothing in the
+/// next one, and a chunk that bailed out mid-emit leaves live entries behind.
+fn scratch_reset() {
+    SCRATCH.with_borrow_mut(|p| {
+        p.free.clear();
+        p.live.clear();
+    });
+    WIDE_RMW_INPLACE.with(|c| c.set((0, 0)));
+}
+
+/// Watermark of the live set, to be handed back to [`scratch_release`].
+pub(crate) fn scratch_mark() -> usize {
+    SCRATCH.with_borrow(|p| p.live.len())
+}
+
+/// Retire every slot allocated since `mark` so later statements reuse them.
+pub(crate) fn scratch_release(mark: usize) {
+    SCRATCH.with_borrow_mut(|p| {
+        if mark >= p.live.len() {
+            return;
+        }
+        for (size, slot) in p.live.drain(mark..) {
+            p.free.entry(size).or_default().push(slot);
+        }
+    });
+}
+
+/// Stack slot of `nb` bytes; returns its address as I64.  Reused from the
+/// pool when a retired slot of that exact size is available.
 pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
-    let slot = builder.create_sized_stack_slot(StackSlotData::new(
-        cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
-        u32::try_from(nb).expect("alloc_wide_slot: nb exceeds u32::MAX"),
-        8,
-    ));
+    let size = u32::try_from(nb).expect("alloc_wide_slot: nb exceeds u32::MAX");
+    let pooled = scratch_reuse_enabled()
+        .then(|| SCRATCH.with_borrow_mut(|p| p.free.get_mut(&size).and_then(Vec::pop)))
+        .flatten();
+    let slot = pooled.unwrap_or_else(|| {
+        builder.create_sized_stack_slot(StackSlotData::new(
+            cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
+            size,
+            8,
+        ))
+    });
+    SCRATCH.with_borrow_mut(|p| p.live.push((size, slot)));
     builder.ins().stack_addr(I64, slot, 0)
 }
 
@@ -437,20 +535,53 @@ fn chunk_shape(stmts: &[ProtoStatement]) -> (usize, usize) {
     (count, max_w)
 }
 
+/// Anchor for the perf-map name: the chunk's first assignment destination, or
+/// None for a chunk whose statements carry no plain destination.
+fn first_dst(stmts: &[ProtoStatement]) -> Option<VarOffset> {
+    for s in stmts {
+        let d = match s {
+            ProtoStatement::Assign(a) => Some(a.dst),
+            ProtoStatement::AssignDynamic(a) => Some(a.dst_base),
+            ProtoStatement::If(x) => first_dst(&x.true_side).or_else(|| first_dst(&x.false_side)),
+            ProtoStatement::Case(c) => c
+                .arms
+                .iter()
+                .find_map(|arm| first_dst(&arm.body))
+                .or_else(|| first_dst(&c.default)),
+            ProtoStatement::For(f) => first_dst(&f.body),
+            ProtoStatement::SequentialBlock(b) => first_dst(b),
+            _ => None,
+        };
+        if d.is_some() {
+            return d;
+        }
+    }
+    None
+}
+
 /// Append a `/tmp/perf-<pid>.map` entry so `perf` can symbolize this JIT'd chunk
 /// (which otherwise samples as an anonymous-mmap address). Gated by
-/// `VERYL_JIT_PERFMAP=1`; the name encodes the chunk's shape so the report groups
-/// hot chunks by statement count and max width. Best-effort — a failed diagnostic
-/// write never aborts a compile.
+/// `VERYL_JIT_PERFMAP=1`. The destination offset in the name joins to a
+/// `VERYL_DUMP_VARMAP` line, which attributes the samples to a module; the
+/// serial keeps identically shaped chunks from sharing one symbol.
+/// Best-effort — a failed diagnostic write never aborts a compile.
 fn emit_jit_perfmap(addr: *const u8, size: usize, proto: &[ProtoStatement]) {
     use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     static ENABLED: OnceLock<bool> = OnceLock::new();
     if !*ENABLED.get_or_init(|| std::env::var("VERYL_JIT_PERFMAP").as_deref() == Ok("1")) {
         return;
     }
+    static SERIAL: AtomicUsize = AtomicUsize::new(0);
+    let serial = SERIAL.fetch_add(1, Ordering::Relaxed);
     let (count, max_w) = chunk_shape(proto);
+    let anchor = match first_dst(proto) {
+        Some(VarOffset::Ff(o)) => format!("_ff{o:x}"),
+        Some(VarOffset::Comb(o)) => format!("_cb{o:x}"),
+        None => String::new(),
+    };
     let line = format!(
-        "{:x} {:x} veryl_comb_{count}s_w{max_w}\n",
+        "{:x} {:x} veryl_jit_c{serial}_{count}s_w{max_w}{anchor}\n",
         addr as usize, size
     );
     if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -469,6 +600,7 @@ fn build_binary_inner(
     store_elim: HashSet<VarOffset>,
     disable_load_cache: bool,
 ) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
+    scratch_reset();
     let mut settings_builder = settings::builder();
     settings_builder.set("opt_level", "speed").unwrap();
     if !config.dump_cranelift {
@@ -593,6 +725,34 @@ fn build_binary_inner(
     builder.ins().return_(&[]);
     builder.seal_all_blocks();
     builder.finalize(isa.frontend_config());
+
+    // A single statement is still user-authored: over budget, hand the
+    // chunk back rather than let the prologue walk off the stack.
+    let slot_bytes: u64 = func.sized_stack_slots.values().map(|d| d.size as u64).sum();
+    let (rmw_sites, rmw_saved) = WIDE_RMW_INPLACE.with(|c| c.get());
+    if frame_diag_enabled() && (slot_bytes > (1 << 20) || rmw_saved > (1 << 20)) {
+        eprintln!(
+            "[frame-diag] stmts={} slots={} slot_bytes={slot_bytes} \
+             wide_rmw_inplace={rmw_sites} wide_rmw_scratch_avoided={rmw_saved}",
+            proto.len(),
+            func.sized_stack_slots.len(),
+        );
+    }
+    if slot_bytes > MAX_CHUNK_FRAME_BYTES {
+        log::warn!(
+            "JIT chunk frame {slot_bytes} B exceeds the {MAX_CHUNK_FRAME_BYTES} B budget \
+             ({} statements), falling back to the interpreter",
+            proto.len(),
+        );
+        return None;
+    }
+    #[cfg(test)]
+    LAST_FRAME_SLOTS.with(|c| {
+        c.set((
+            func.sized_stack_slots.len(),
+            func.sized_stack_slots.values().map(|d| d.size as u64).sum(),
+        ))
+    });
 
     if config.dump_cranelift {
         println!("Cranelift IR");

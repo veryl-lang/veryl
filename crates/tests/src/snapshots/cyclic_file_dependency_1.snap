@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+cyclic_file_dependency (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#cyclic_file_dependency)
+
+  × Cyclic dependency between "../../testcases/error/cyclic_file_dependency_3.veryl" and "../../testcases/error/cyclic_file_dependency_1.veryl"
+   ╭─[../../testcases/error/cyclic_file_dependency_1.veryl:5:15]
+ 4 │ 
+ 5 │ alias package pkg = c_pkg::<a_pkg::WIDTH>;
+   ·               ─┬─
+   ·                ╰── Error location
+ 6 │ 
+   ╰────
+  help:

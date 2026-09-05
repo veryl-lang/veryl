@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+mismatch_type (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_type)
+
+  × "InterfaceA" is expected to "enum, union, struct, typedef or integer constant", but it is "interface"
+   ╭─[../../testcases/error/mismatch_type_cast.veryl:4:31]
+ 3 │ ) {
+ 4 │     let _b: logic<2> = i_a as InterfaceA;
+   ·                               ─────┬────
+   ·                                    ╰── Error location
+ 5 │ }
+   ╰────
+  help:

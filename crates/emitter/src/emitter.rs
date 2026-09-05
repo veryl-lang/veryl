@@ -1,16 +1,19 @@
 use crate::expaneded_modport::{ExpandModportConnectionsTable, ExpandedModportPortTable};
+use crate::portability::drives_non_portable_variable;
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 use veryl_aligner::{Aligner, Location, PadKind, align_kind};
 use veryl_analyzer::attribute;
 use veryl_analyzer::attribute::Attribute as Attr;
-use veryl_analyzer::attribute::{AlignItem, AllowItem, CondTypeItem, EnumEncodingItem, FormatItem};
+use veryl_analyzer::attribute::{
+    AlignItem, AllowItem, CondTypeItem, EnumEncodingItem, FormatItem, IfdefCondition,
+};
 use veryl_analyzer::attribute_table;
 use veryl_analyzer::connect_operation_table;
 use veryl_analyzer::conv::{Context, Conv};
 use veryl_analyzer::definition_table::{self, Definition};
-use veryl_analyzer::generic_inference_table;
+use veryl_analyzer::generic_inference_table::{self, InferredApply};
 use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::msb_table;
@@ -234,9 +237,27 @@ fn enum_list_has_conditional_attribute(list: &EnumList) -> bool {
             .any(|x| enum_group_has_conditional_attribute(&x.enum_group))
 }
 
+/// `base::{a, b}` and `a` -> `base::a`
+fn import_item_path(
+    base: &ScopedIdentifier,
+    colon_colon: &ColonColon,
+    item: &MultipleImportItem,
+) -> ScopedIdentifier {
+    let mut ret = base.clone();
+    ret.scoped_identifier_list.push(ScopedIdentifierList {
+        colon_colon: Box::new(colon_colon.clone()),
+        identifier: item.identifier.clone(),
+        scoped_identifier_opt0: None,
+    });
+    ret
+}
+
 // SV `import` only accepts `package::symbol` or `package::*`, so suppress
-// imports whose target is an enum (wildcard), an enum member or an alias
-// outside a package — emitting them would produce invalid SystemVerilog.
+// imports whose target is an enum (wildcard), an enum member, an alias
+// outside a package, or a bare component (package/module/interface or their
+// instances) — emitting them would produce invalid SystemVerilog. A bare
+// component import is also unnecessary because references through it are
+// emitted as fully qualified paths.
 fn should_skip_import(arg: &ScopedIdentifier, import_members: bool) -> bool {
     let Ok(symbol) = symbol_table::resolve(arg) else {
         return false;
@@ -250,7 +271,16 @@ fn should_skip_import(arg: &ScopedIdentifier, import_members: bool) -> bool {
             .is_none_or(|grandparent| !grandparent.is_package(true)),
         SymbolKind::AliasModule(_)
         | SymbolKind::AliasInterface(_)
-        | SymbolKind::AliasPackage(_) => !import_members,
+        | SymbolKind::AliasPackage(_)
+        | SymbolKind::Package(_)
+        | SymbolKind::Module(_)
+        | SymbolKind::Interface(_)
+        | SymbolKind::GenericInstance(_) => !import_members,
+        // A project-scope function is imported by its project-qualified path
+        // (`import dep::func;`), which has no package to qualify the emitted
+        // SystemVerilog import with. The function is already in scope at the
+        // use site, so the import can be dropped.
+        SymbolKind::Function(x) if !import_members && x.is_global() => true,
         _ => false,
     }
 }
@@ -1197,6 +1227,28 @@ impl Emitter {
         popped
     }
 
+    fn defines_begin(&mut self, defines: &[IfdefCondition]) {
+        if defines.is_empty() {
+            return;
+        }
+        for define in defines {
+            self.str(&format!("`{} {}", define.directive(), define.define));
+            self.newline();
+        }
+        // The directives have no source line of their own, so without this the
+        // line sync inserts a blank line before the item.
+        self.clear_adjust_line();
+    }
+
+    /// Close the chain opened by [`Self::defines_begin`]. A separator the item
+    /// owns must already have been emitted, so that it vanishes with the item.
+    fn defines_end(&mut self, defines: &[IfdefCondition]) {
+        for _ in defines {
+            self.newline();
+            self.str("`endif");
+        }
+    }
+
     fn attribute_end(&mut self) {
         match self.attribute.pop() {
             Some(AttributeType::Ifdef) => {
@@ -1277,6 +1329,29 @@ impl Emitter {
             return;
         }
 
+        // `base::{a, b}` is a shorthand for individual imports of `base::a` and
+        // `base::b`, so each item is filtered on its own. This matters when the
+        // base is not a package (e.g. a project namespace), because then an item
+        // can be a component or a proto package, which has no SystemVerilog
+        // counterpart. The whole declaration is skipped when nothing is left.
+        let mut import_items: Vec<&MultipleImportItem> = Vec::new();
+        if let Some(x) = arg.import_declaration_opt.as_ref()
+            && let ImportDeclarationOptGroup::MultipleImportList(list) =
+                x.import_declaration_opt_group.as_ref()
+        {
+            let items: Vec<&MultipleImportItem> = list.multiple_import_list.as_ref().into();
+            import_items = items
+                .into_iter()
+                .filter(|item| {
+                    let path = import_item_path(&arg.scoped_identifier, &x.colon_colon, item);
+                    !should_skip_import(&path, false)
+                })
+                .collect();
+            if import_items.is_empty() {
+                return;
+            }
+        }
+
         if moved {
             self.clear_adjust_line();
         }
@@ -1293,12 +1368,8 @@ impl Emitter {
             Some((x, ImportDeclarationOptGroup::Star(star))) => {
                 self.emit_wildcard_import(&arg.scoped_identifier, &x.colon_colon, &star.star);
             }
-            Some((x, ImportDeclarationOptGroup::MultipleImportList(list))) => {
-                self.emit_multiple_import(
-                    &arg.scoped_identifier,
-                    &x.colon_colon,
-                    &list.multiple_import_list,
-                );
+            Some((x, ImportDeclarationOptGroup::MultipleImportList(_))) => {
+                self.emit_multiple_import(&arg.scoped_identifier, &x.colon_colon, &import_items);
             }
             None => {
                 self.scoped_identifier(&arg.scoped_identifier);
@@ -1353,18 +1424,16 @@ impl Emitter {
     }
 
     // `import pkg::{a, b};` is emitted as a comma-separated SystemVerilog import
-    // list (`import pkg::a, pkg::b;`). Whether the whole declaration is skipped
-    // is decided from the base by `should_skip_import`, treating it as a limited
-    // wildcard, so no per-item filtering is needed here.
+    // list (`import pkg::a, pkg::b;`). `items` is already filtered by
+    // `emit_import_declaration`, so every item given here is emitted.
     fn emit_multiple_import(
         &mut self,
         base: &ScopedIdentifier,
         colon_colon: &ColonColon,
-        list: &MultipleImportList,
+        items: &[&MultipleImportItem],
     ) {
         // Width-driven: the list stays flat when it fits and wraps (one item
         // per line, indented) otherwise, like a function-call argument list.
-        let items: Vec<&MultipleImportItem> = list.into();
         self.group_begin();
         self.group_nest_begin();
         for (i, item) in items.iter().enumerate() {
@@ -1372,14 +1441,7 @@ impl Emitter {
                 self.str(",");
                 self.soft_line();
             }
-            let mut scoped_identifier = base.clone();
-            scoped_identifier
-                .scoped_identifier_list
-                .push(ScopedIdentifierList {
-                    colon_colon: Box::new(colon_colon.clone()),
-                    identifier: item.identifier.clone(),
-                    scoped_identifier_opt0: None,
-                });
+            let scoped_identifier = import_item_path(base, colon_colon, item);
             // The base package repeats per item; mark all but the first as
             // duplicated so their comments / source mappings are not re-emitted.
             self.force_duplicated = i != 0;
@@ -1844,6 +1906,7 @@ impl Emitter {
                         self.newline();
                     }
                     self.clear_adjust_line();
+                    self.defines_begin(&port.defines);
 
                     let (lhs, rhs) = if matches!(port.direction, SymDirection::Input) {
                         (&port.interface_target, &port.identifier)
@@ -1862,7 +1925,8 @@ impl Emitter {
                     self.align_start(align_kind::EXPRESSION);
                     self.duplicated_token(rhs);
                     self.align_finish(align_kind::EXPRESSION);
-                    self.str(";")
+                    self.str(";");
+                    self.defines_end(&port.defines);
                 }
                 self.newline_pop();
                 self.str("end");
@@ -1919,7 +1983,7 @@ impl Emitter {
             &defined_ports,
             &connected_ports,
             &generic_map,
-            &symbol.namespace,
+            &symbol.inner_namespace(),
         );
         self.modport_connections_tables
             .push(modport_connections_table);
@@ -2568,20 +2632,26 @@ impl Emitter {
             self.aligner.disable_auto_finish();
             self.clear_adjust_line();
 
-            for (i, connection) in x
+            let connections: Vec<_> = x
                 .connections
                 .iter()
                 .flat_map(|x| x.connections.iter())
-                .enumerate()
-            {
+                .collect();
+            let last = connections.len().saturating_sub(1);
+            for (i, connection) in connections.iter().enumerate() {
                 if i > 0 {
-                    self.str(",");
-                    if *self.in_named_argument.last().unwrap() {
+                    // A directive needs a line of its own even where the
+                    // arguments would otherwise be packed onto one line.
+                    if *self.in_named_argument.last().unwrap()
+                        || !connection.defines.is_empty()
+                        || !connections[i - 1].defines.is_empty()
+                    {
                         self.newline();
                     } else {
                         self.space(1);
                     }
                 }
+                self.defines_begin(&connection.defines);
 
                 if arg.argument_item_opt.is_some() {
                     self.str(".");
@@ -2599,6 +2669,10 @@ impl Emitter {
                     self.duplicated_token(&connection.interface_target);
                 }
 
+                if i != last {
+                    self.str(",");
+                }
+                self.defines_end(&connection.defines);
                 self.clear_adjust_line();
             }
 
@@ -2732,28 +2806,47 @@ impl Emitter {
     fn emit_modport_default_member(&mut self, arg: &ModportDeclaration) {
         if let Ok(symbol) = symbol_table::resolve(arg.identifier.as_ref()) {
             if let SymbolKind::Modport(x) = &symbol.found.kind {
-                for (i, x) in x.members.iter().enumerate() {
-                    let symbol = symbol_table::get(*x).unwrap();
-                    if !matches!(symbol.token.source, TokenSource::Generated(_)) {
-                        continue;
-                    }
+                // Generated members have no source position, so their guards come
+                // from the declarations they were generated from.
+                let members: Vec<_> = x
+                    .members
+                    .iter()
+                    .filter_map(|id| {
+                        let symbol = symbol_table::get(*id)?;
+                        if !matches!(symbol.token.source, TokenSource::Generated(_)) {
+                            return None;
+                        }
+                        let direction = match symbol.kind {
+                            SymbolKind::ModportVariableMember(ref x) => x.direction,
+                            SymbolKind::ModportFunctionMember(_) => SymDirection::Import,
+                            _ => return None,
+                        };
+                        let defines = symbol_table::modport_member_conditions(&symbol);
+                        Some((symbol, direction, defines))
+                    })
+                    .collect();
+                // Each member carries its comma inside its own guard so the comma
+                // vanishes with it. The last member has no comma to vanish, so a
+                // guarded one there is rejected in `link_modports` instead.
+                let last = members.len().saturating_sub(1);
+                let token = &arg
+                    .modport_declaration_opt0
+                    .as_ref()
+                    .unwrap()
+                    .dot_dot
+                    .dot_dot_token;
 
-                    let direction = match symbol.kind {
-                        SymbolKind::ModportVariableMember(x) => x.direction,
-                        SymbolKind::ModportFunctionMember(_) => SymDirection::Import,
-                        _ => continue,
-                    };
+                for (n, (symbol, direction, defines)) in members.iter().enumerate() {
+                    let has_prev = n != 0 || arg.modport_declaration_opt.is_some();
 
-                    if i != 0 || arg.modport_declaration_opt.is_some() {
-                        self.str(",");
+                    if has_prev {
+                        if n == 0 {
+                            self.str(",");
+                        }
                         self.newline();
                     }
-                    let token = arg
-                        .modport_declaration_opt0
-                        .clone()
-                        .unwrap()
-                        .dot_dot
-                        .dot_dot_token;
+
+                    self.defines_begin(defines);
                     self.align_start(align_kind::DIRECTION);
                     self.duplicated_token(&token.replace(&direction.to_string()));
                     self.align_finish(align_kind::DIRECTION);
@@ -2761,6 +2854,10 @@ impl Emitter {
                     self.align_start(align_kind::IDENTIFIER);
                     self.duplicated_token(&token.replace(&symbol.token.text.to_string()));
                     self.align_finish(align_kind::IDENTIFIER);
+                    if n != last {
+                        self.str(",");
+                    }
+                    self.defines_end(defines);
                 }
             } else {
                 unreachable!();
@@ -2774,7 +2871,7 @@ impl Emitter {
     ) -> (Result<Rc<ResolveResult>, ResolveError>, GenericSymbolPath) {
         let path: GenericSymbolPath = arg.into();
 
-        let (result, path) = self.resolve_generic_path(&path, None);
+        let (result, mapped_path) = self.resolve_generic_path(&path, None);
         // GenericParameter resolved in the function namespace takes priority over the caller,
         // so fall through to the bound_namespace lookup to find the actual generic argument.
         let is_generic_param = result
@@ -2782,10 +2879,12 @@ impl Emitter {
             .ok()
             .is_some_and(|r| matches!(r.found.kind, SymbolKind::GenericParameter(_)));
         if (result.is_ok() && !is_generic_param) || self.bound_namespace.is_none() {
-            return (result, path);
+            return (result, mapped_path);
         }
 
         // For unbound function, resolved generic params are in the binding (caller) namespace.
+        // Substituting the mapped path again would replace an argument that shares its
+        // name with a generic parameter.
         self.resolve_generic_path(&path, self.bound_namespace.as_ref())
     }
 
@@ -4787,7 +4886,11 @@ impl VerylWalker for Emitter {
     /// Semantic action for non-terminal 'AlwaysFfDeclaration'
     fn always_ff_declaration(&mut self, arg: &AlwaysFfDeclaration) {
         self.in_always_ff = true;
-        self.always_ff(&arg.always_ff);
+        if drives_non_portable_variable(arg) {
+            self.token(&arg.always_ff.always_ff_token.replace("always"));
+        } else {
+            self.always_ff(&arg.always_ff);
+        }
         self.space(1);
         self.str("@");
         self.space(1);
@@ -5524,16 +5627,17 @@ impl VerylWalker for Emitter {
             self.aligner.disable_auto_finish();
             self.clear_adjust_line();
 
-            for (i, connection) in x
+            let connections: Vec<_> = x
                 .connections
                 .iter()
                 .flat_map(|x| x.connections.iter())
-                .enumerate()
-            {
+                .collect();
+            let last = connections.len().saturating_sub(1);
+            for (i, connection) in connections.iter().enumerate() {
                 if i > 0 {
-                    self.str(",");
                     self.newline();
                 }
+                self.defines_begin(&connection.defines);
 
                 self.str(".");
                 self.align_start(align_kind::IDENTIFIER);
@@ -5547,6 +5651,10 @@ impl VerylWalker for Emitter {
                 self.align_finish(align_kind::EXPRESSION);
                 self.str(")");
 
+                if i != last {
+                    self.str(",");
+                }
+                self.defines_end(&connection.defines);
                 self.clear_adjust_line();
             }
 
@@ -5737,15 +5845,22 @@ impl VerylWalker for Emitter {
                     self.generic_map.push(entry.generic_maps.to_owned());
 
                     let src_line = self.src_line;
+                    let emit_package_prefix = self.emit_package_prefix;
                     self.aligner.disable_auto_finish();
                     self.clear_adjust_line();
                     self.in_direction_with_var = true;
+                    self.emit_package_prefix = true;
 
-                    for (i, port) in entry.ports.iter().flat_map(|x| x.ports.iter()).enumerate() {
+                    // Each port carries its comma inside its own guard so the
+                    // comma vanishes with it. A guarded last port has none, and is
+                    // rejected as an unexpandable modport instead.
+                    let ports: Vec<_> = entry.ports.iter().flat_map(|x| x.ports.iter()).collect();
+                    let last = ports.len().saturating_sub(1);
+                    for (i, port) in ports.iter().enumerate() {
                         if i > 0 {
-                            self.str(",");
                             self.newline();
                         }
+                        self.defines_begin(&port.defines);
                         let array_type = port.r#type.array_type.as_ref().unwrap();
 
                         self.align_start(align_kind::DIRECTION);
@@ -5769,6 +5884,10 @@ impl VerylWalker for Emitter {
                         }
                         self.align_finish(align_kind::ARRAY);
 
+                        if i != last {
+                            self.str(",");
+                        }
+                        self.defines_end(&port.defines);
                         self.clear_adjust_line();
                     }
 
@@ -5776,6 +5895,7 @@ impl VerylWalker for Emitter {
                     self.aligner.enable_auto_finish();
                     self.src_line = src_line;
                     self.in_direction_with_var = false;
+                    self.emit_package_prefix = emit_package_prefix;
                 } else {
                     let x = x.port_type_concrete.as_ref();
                     self.direction(&x.direction);
@@ -5974,7 +6094,7 @@ impl VerylWalker for Emitter {
                 &ports,
                 &self.get_generic_map(),
                 &arg.identifier.identifier_token,
-                &symbol.found.namespace,
+                &symbol.found.inner_namespace(),
                 false,
                 &self.into(),
             );
@@ -6761,7 +6881,22 @@ pub fn symbol_string(
                     &symbol.namespace.define_context,
                 )
             };
-            if (scope_depth == 1) & (visible_local | is_imported) & !context.in_import {
+            // A global function is copied into the component that references
+            // it, so its emitted name follows that component, not the path the
+            // reference spells; `global_function_identifier_token` names the
+            // definition by the same rule.
+            let global_function_visible_local =
+                if let Some(bound_namespace) = &context.bound_namespace {
+                    bound_namespace.included(symbol_namespace)
+                } else {
+                    namespace.included(symbol_namespace)
+                };
+            if symbol.is_global_function() {
+                if !global_function_visible_local {
+                    ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
+                }
+                ret.push_str(&token_text);
+            } else if (scope_depth == 1) & (visible_local | is_imported) & !context.in_import {
                 ret.push_str(&token_text);
             } else {
                 ret.push_str(&namespace_string(symbol_namespace, generic_tables, context));
@@ -6813,6 +6948,10 @@ pub fn symbol_string(
                 base.kind,
                 SymbolKind::Module(_) | SymbolKind::Interface(_) | SymbolKind::Package(_)
             );
+            // A generic instance carries its declaring project in the mangled
+            // name, so here the emitting project decides whether the reference
+            // needs the namespace — not the component the definition is copied
+            // into, as it does for a plain global function.
             let global_func = base.namespace.paths[0] != context.project_name.unwrap()
                 && base.is_global_function();
 
@@ -6963,6 +7102,10 @@ pub fn resolve_generic_path(
 
     path.resolve_imported(scope, define_context, generic_maps);
     if let Some(maps) = generic_maps {
+        // Expanding aliases first exposes the generic parameters inside alias targets, so
+        // that a single substitution reaches them too. Substituting a second time instead
+        // would replace an argument that shares its name with a generic parameter.
+        path.unalias(None);
         path.apply_map(maps);
     }
     path.unalias(None);
@@ -6981,8 +7124,16 @@ pub fn resolve_generic_path(
 
     for (i, symbol) in &path_symbols {
         if symbol.kind.is_generic() {
-            if i + 1 == path.paths.len() {
-                generic_inference_table::apply_inferred_args(&mut path, symbol);
+            // Arguments written in the path were substituted above; the inferred and
+            // default ones added below were not.
+            if i + 1 == path.paths.len()
+                && generic_inference_table::apply_inferred_args(&mut path, symbol)
+                    == InferredApply::Applied
+                && let Some(maps) = generic_maps
+            {
+                for arg in path.paths[*i].arguments.iter_mut() {
+                    arg.apply_map(maps);
+                }
             }
 
             let params = symbol.generic_parameters();
@@ -6995,6 +7146,9 @@ pub fn resolve_generic_path(
                 };
                 let mut arg = default.clone();
                 arg.unalias(None);
+                if let Some(maps) = generic_maps {
+                    arg.apply_map(maps);
+                }
                 path.paths[*i].arguments.push(arg);
             }
 
@@ -7002,9 +7156,6 @@ pub fn resolve_generic_path(
             // build it only on this generic branch rather than on every call.
             let namespace = scope::namespace(scope, define_context);
             for arg in path.paths[*i].arguments.iter_mut() {
-                if let Some(maps) = generic_maps {
-                    arg.apply_map(maps);
-                }
                 arg.unalias(None);
                 if !symbol.is_global_function() {
                     arg.append_namespace_path(&namespace, &symbol.namespace);

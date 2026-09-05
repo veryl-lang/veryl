@@ -1,0 +1,16 @@
+---
+source: crates/tests/src/lib.rs
+assertion_line: 425
+expression: out
+---
+combinational_loop_position_overflow (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#combinational_loop_position_overflow)
+
+  × combinational-loop position exceeds the supported range
+   ╭─[../../testcases/error/combinational_loop_position_overflow.veryl:2:9]
+ 1 │ module combinational_loop_position_overflow {
+ 2 │     var _value: logic [1048576, 1048576, 1048576, 8];
+   ·         ───┬──
+   ·            ╰── Error location
+ 3 │ }
+   ╰────
+  help: reduce the flattened width or array size used by this module

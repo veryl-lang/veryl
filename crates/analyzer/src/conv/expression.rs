@@ -1,4 +1,5 @@
 use crate::analyzer_error::AnalyzerError;
+use crate::conv::statement::check_true_false;
 use crate::conv::utils::{
     TypePosition, case_condition, eval_expr, eval_factor_path, eval_function_call, eval_size,
     eval_struct_constructor, eval_type, range_list, switch_condition,
@@ -29,7 +30,8 @@ impl Conv<&IfExpression> for ir::Expression {
     fn conv(context: &mut Context, value: &IfExpression) -> IrResult<Self> {
         let mut ret: ir::Expression = Conv::conv(context, value.expression01.as_ref())?;
         for x in value.if_expression_list.iter().rev() {
-            let y: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
+            let (y_comptime, y): (Comptime, ir::Expression) =
+                eval_expr(context, None, x.expression.as_ref(), false)?;
             let z: ir::Expression = Conv::conv(context, x.expression0.as_ref())?;
 
             if is_if_expression(&x.expression) {
@@ -44,10 +46,47 @@ impl Conv<&IfExpression> for ir::Expression {
             let token = TokenRange::from_range(&y.token_range(), &ret.token_range());
             let comptime = Box::new(Comptime::create_unknown(token));
 
-            ret = ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret), comptime);
+            // A constant condition makes one arm unreachable -- the same
+            // folding a constant `if` STATEMENT already gets.  Only with
+            // SAME-TYPE arms, so the result's width and sign cannot move.
+            let (true_only, false_only) = check_true_false(&y_comptime);
+            let same_type = z.comptime().r#type == ret.comptime().r#type;
+            ret = if same_type && true_only {
+                z
+            } else if same_type && false_only {
+                ret
+            } else if true_only || false_only {
+                // The arms differ, so the node has to stay: its width and sign
+                // are `max` and `&` over BOTH arms.  Replace the unreachable
+                // arm with a constant of its own type instead, which keeps
+                // both while dropping reads that never happen.
+                let (z, r) = if true_only {
+                    let blank = blank_arm(&ret);
+                    (z, blank.unwrap_or(ret))
+                } else {
+                    let blank = blank_arm(&z);
+                    (blank.unwrap_or(z), ret)
+                };
+                ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(r), comptime)
+            } else {
+                ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret), comptime)
+            };
         }
         Ok(ret)
     }
+}
+
+/// A constant standing in for an arm a constant condition rules out: same
+/// type, so the ternary's width and sign do not move, and no reads at all.
+/// `None` when the arm has no single width to build one from.
+fn blank_arm(arm: &ir::Expression) -> Option<ir::Expression> {
+    let comptime = arm.comptime();
+    let width = comptime.r#type.total_width()?;
+    let signed = comptime.r#type.signed;
+    let mut blank = Comptime::create_value(Value::new(0, width, signed), comptime.token);
+    blank.r#type = comptime.r#type.clone();
+    blank.expr_context = comptime.expr_context;
+    Some(ir::Expression::Term(Box::new(ir::Factor::Value(blank))))
 }
 
 fn resolve_op(op: &Expression01Op) -> (Op, u32) {
@@ -1228,19 +1267,28 @@ mod tests {
     fn ternary() {
         let mut context = Context::default();
 
+        // Same-typed arms: a constant condition folds to the arm it selects,
+        // nested or not.
         let x0 = parse_expression("if 1 ? 2 : 3");
         let x1 = parse_expression("if 1 ? 2 : if 3 ? 4 : 5");
+        // Arms of different widths keep the node — its width and sign are
+        // taken over BOTH arms — so these still cover how the tree is built,
+        // right-associated, from the trailing `if`s.
+        let x2 = parse_expression("if 1 ? 8'h2 : 16'h3");
+        let x3 = parse_expression("if 0 ? 8'h2 : if 1 ? 8'h4 : 16'h5");
 
         let x0: ir::Expression = Conv::conv(&mut context, &x0).unwrap();
         let x1: ir::Expression = Conv::conv(&mut context, &x1).unwrap();
+        let x2: ir::Expression = Conv::conv(&mut context, &x2).unwrap();
+        let x3: ir::Expression = Conv::conv(&mut context, &x3).unwrap();
 
+        assert_eq!(format!("{x0}"), "32'sh00000002");
+        assert_eq!(format!("{x1}"), "32'sh00000002");
+        // The ruled-out arm is a constant of its own type, not a read.
+        assert_eq!(format!("{x2}"), "(32'sh00000001 ? 8'h02 : 16'h0000)");
         assert_eq!(
-            format!("{x0}"),
-            "(32'sh00000001 ? 32'sh00000002 : 32'sh00000003)"
-        );
-        assert_eq!(
-            format!("{x1}"),
-            "(32'sh00000001 ? 32'sh00000002 : (32'sh00000003 ? 32'sh00000004 : 32'sh00000005))"
+            format!("{x3}"),
+            "(32'sh00000000 ? 8'h00 : (32'sh00000001 ? 8'h04 : 16'h0000))"
         );
     }
 

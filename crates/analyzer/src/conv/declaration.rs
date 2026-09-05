@@ -14,13 +14,15 @@ use crate::conv::checker::import::check_import;
 use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
+use crate::conv::context::{FunctionOutputBinding, RuntimeFunctionEffect};
 use crate::conv::utils::{
-    TypePosition, assign_rhs_context_type, check_assign_clock_domain, eval_array_range_assign,
-    eval_assign_statement, eval_clock, eval_const_assign, eval_expr, eval_factor_symbol,
-    eval_factor_symbol_external, eval_generate_for_range, eval_reset, eval_size, eval_type,
-    eval_variable, expand_connect, expand_connect_const, expand_input_connect, get_component,
-    get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
-    try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
+    TypePosition, assign_rhs_context_type, check_assign_before_definition,
+    check_assign_clock_domain, eval_array_range_assign, eval_assign_statement, eval_clock,
+    eval_const_assign, eval_expr, eval_factor_symbol, eval_factor_symbol_external,
+    eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable, expand_connect,
+    expand_connect_const, expand_input_connect, get_component, get_overridden_params,
+    get_port_connects, get_return_str, insert_port_connect, try_infer_decl_type,
+    try_infer_var_assign, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::definition_table::{self, Definition};
@@ -957,16 +959,11 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
 
                     Ok(ir::Declaration::new_comb(statements))
                 } else {
-                    if let Ok(symbol) = symbol_table::resolve(x.hierarchical_identifier.as_ref())
-                        && let SymbolKind::Variable(x) = &symbol.found.kind
-                        && x.affiliation == Affiliation::Module
-                    {
-                        let ident_token = ident.identifier.identifier_token.token;
-                        context.insert_error(AnalyzerError::referring_before_definition(
-                            &ident_token.text.to_string(),
-                            &ident_token.into(),
-                        ));
-                    }
+                    check_assign_before_definition(
+                        context,
+                        x.hierarchical_identifier.as_ref(),
+                        ident.identifier.identifier_token.token,
+                    );
                     Err(ir_error!(token))
                 }
             }
@@ -980,17 +977,11 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     if let Some(x) = x.to_assign_destination(context, false) {
                         dst.push(x);
                     } else {
-                        if let Ok(symbol) =
-                            symbol_table::resolve(item.hierarchical_identifier.as_ref())
-                            && let SymbolKind::Variable(x) = &symbol.found.kind
-                            && x.affiliation == Affiliation::Module
-                        {
-                            let ident_token = ident.identifier.identifier_token.token;
-                            context.insert_error(AnalyzerError::referring_before_definition(
-                                &ident_token.text.to_string(),
-                                &ident_token.into(),
-                            ));
-                        }
+                        check_assign_before_definition(
+                            context,
+                            item.hierarchical_identifier.as_ref(),
+                            ident.identifier.identifier_token.token,
+                        );
                         return Err(ir_error!(token));
                     }
                 }
@@ -1264,23 +1255,87 @@ fn conv_function(
             }
         }
 
+        let mut output_ids = HashMap::default();
+        for (arg, port) in args.iter().zip(&proeprty.ports) {
+            let Some(port) = symbol_table::get(port.symbol) else {
+                continue;
+            };
+            let SymbolKind::Port(port) = &port.kind else {
+                continue;
+            };
+            for (path, _, direction) in &arg.members {
+                if !matches!(direction, Direction::Output | Direction::Inout) {
+                    continue;
+                }
+                if let Some(id) = arg_map.get(path) {
+                    output_ids.insert(
+                        *id,
+                        FunctionOutputBinding {
+                            scheduler_external: port.direction != Direction::Output,
+                        },
+                    );
+                }
+            }
+        }
+        let (specialized_external_write, specialized_formal_writes) =
+            symbol_table::specialized_direct_effect(symbol, c);
+        let mut effect = RuntimeFunctionEffect {
+            external_write: proeprty.has_side_effect_in(&c.config.defines),
+            written_outputs: proeprty
+                .written_output_paths(&c.config.defines)
+                .into_iter()
+                .filter_map(|path| path.to_var_path())
+                .collect(),
+        };
+        effect.external_write |= specialized_external_write;
+        effect.external_write |= output_ids.values().any(|output| output.scheduler_external);
+        effect.written_outputs.extend(
+            specialized_formal_writes
+                .into_iter()
+                .filter_map(|path| path.to_var_path()),
+        );
+
+        // SystemVerilog copies every output/inout argument back when the
+        // function returns, even when the body never explicitly assigns it.
+        for arg in &args {
+            for (path, _, direction) in &arg.members {
+                if matches!(direction, Direction::Output | Direction::Inout) {
+                    effect.written_outputs.insert(path.clone());
+                }
+            }
+        }
+        c.begin_function_effect(path.clone(), output_ids, effect);
+
         let body = if let Some(block) = statement_block {
             let disable_const_opt = c.disalbe_const_opt;
             c.disalbe_const_opt = true;
             // A function body is converted once and shared with RTL callers;
             // testbench-only constructs must not leak into it.
             let in_tb_block = c.in_tb_block;
+            let in_initial = c.in_initial;
             c.in_tb_block = false;
+            c.in_initial = None;
             let statements: IrResult<ir::StatementBlock> = Conv::conv(c, block);
             c.in_tb_block = in_tb_block;
+            c.in_initial = in_initial;
             c.disalbe_const_opt = disable_const_opt;
+            let statements = match statements {
+                Ok(statements) => statements,
+                Err(error) => {
+                    c.finish_function_effect();
+                    return Err(error);
+                }
+            };
+            c.record_function_statement_writes(&statements.0);
+            c.finish_function_effect();
 
             vec![ir::FunctionBody {
                 ret: ret_id,
                 arg_map,
-                statements: statements?.0,
+                statements: statements.0,
             }]
         } else {
+            c.finish_function_effect();
             vec![]
         };
 
@@ -1357,10 +1412,12 @@ impl Conv<&EnumDeclaration> for () {
 impl Conv<&InitialDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &InitialDeclaration) -> IrResult<Self> {
         context.in_tb_block = true;
+        context.in_initial = Some(context.var_id);
         context.tb_hoist = Some(Vec::new());
         let statements: IrResult<ir::StatementBlock> =
             Conv::conv(context, value.statement_block.as_ref());
         context.tb_hoist = None;
+        context.in_initial = None;
         context.in_tb_block = false;
         Ok(ir::Declaration::Initial(ir::InitialDeclaration {
             statements: statements?.0,

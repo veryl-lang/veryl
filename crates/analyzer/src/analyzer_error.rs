@@ -1,6 +1,8 @@
-use crate::multi_sources::{MultiSources, Source};
+use crate::handlers::check_embed_include::{EMBED_LANG, EMBED_WAY, INCLUDE_WAY};
+use crate::multi_sources::{MultiSources, Source, SourceExcerpt};
 use miette::{self, Diagnostic, Severity, SourceSpan};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use thiserror::Error;
 use veryl_parser::resource_table::StrId;
@@ -77,19 +79,82 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
-        code(combinational_loop),
-        help(""),
+        code(side_effect_function_call_in_always_ff),
+        help("move the external write into this always_ff, or use an output argument connected to a variable declared inside it"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("combinational loop detected on \"{identifier}\"")]
+    #[error(
+        "function \"{identifier}\" can't be called in always_ff because it may write an HDL object declared outside the function"
+    )]
+    SideEffectFunctionCallInAlwaysFf {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("called from always_ff")]
+        error_location: SourceSpan,
+        #[label(collection, "called from here")]
+        call_stack: Vec<SourceSpan>,
+        #[label(collection, "external write occurs here")]
+        external_writes: Vec<SourceSpan>,
+        #[label(collection, "function declared here")]
+        function_definition: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(function_output_in_always_ff),
+        help("connect \"{output}\" to a variable declared inside this always_ff, then assign that variable to \"{destination}\""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "output \"{output}\" of function \"{function}\" can't write \"{destination}\" directly from always_ff"
+    )]
+    FunctionOutputInAlwaysFf {
+        function: String,
+        output: String,
+        destination: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("\"{destination}\" is declared outside this always_ff")]
+        error_location: SourceSpan,
+        #[label(collection, "\"{output}\" is declared as an output here")]
+        output_declaration: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(combinational_loop),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("combinational loop detected")]
     CombinationalLoop {
         identifier: String,
+        cycle: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("involved in combinational feedback")]
+        error_location: SourceSpan,
+        #[label(collection, "also involved in combinational feedback")]
+        loop_participants: Vec<SourceSpan>,
+        #[label(collection, "dependency passes through this statement")]
+        dependency_sites: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(combinational_loop_position_overflow),
+        help("reduce the flattened width or array size used by this module"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("combinational-loop position exceeds the supported range")]
+    CombinationalLoopPositionOverflow {
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
         error_location: SourceSpan,
-        #[label(collection, "involved in loop")]
-        loop_participants: Vec<SourceSpan>,
         token_source: TokenSource,
     },
 
@@ -101,6 +166,23 @@ pub enum AnalyzerError {
     )]
     #[error("Cyclic dependency between \"{start}\" and \"{end}\"")]
     CyclicTypeDependency {
+        start: String,
+        end: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(cyclic_file_dependency),
+        help(""),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("Cyclic dependency between \"{start}\" and \"{end}\"")]
+    CyclicFileDependency {
         start: String,
         end: String,
         #[source_code]
@@ -740,6 +822,39 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_initial_assign),
+        help("add `#[allow(initial_assign)]` to the declaration of \"{identifier}\" if the target device initializes it at configuration time"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" is assigned in an initial block")]
+    InvalidInitialAssign {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(non_portable_dependency),
+        help("add \"{item}\" to `lint.portability.allow_in_dependencies` in Veryl.toml to accept it"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("non-portable `#[allow({item})]` is used in dependency \"{project}\"")]
+    NonPortableDependency {
+        item: String,
+        project: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(invalid_for_range),
         help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -919,6 +1034,29 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(last_item_with_define),
+        help(
+            "declare \"{identifier}\" before a member without ifdef/ifndef/elsif/else so that it is not generated last"
+        ),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error(
+        "ifdef/ifndef/elsif/else attribute can't be used with \"{identifier}\", which is generated as the last member of modport \"{modport}\""
+    )]
+    LastItemWithDefineInModport {
+        identifier: String,
+        modport: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label(collection, "generated from")]
+        member_source: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(member_access_on_array),
         help("\"{name}\" has {array_dims} array dimension(s); index all of them before accessing member \"{member}\""),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -1030,7 +1168,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(mismatch_clock_domain),
-        help(""),
+        help("synchronize the crossing and mark it 'unsafe (cdc) {{ ... }}', or correct the domain annotations if the crossing is not real"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("Clock domain crossing is detected")]
@@ -1118,7 +1256,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(missing_clock_domain),
-        help("add clock domain annotation"),
+        help("name each independent clock's domain ('a, 'b) and annotate every port and variable in it, or use '_ for the implicit domain"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("clock domain annotation is required when there are multiple clocks")]
@@ -1133,7 +1271,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(missing_clock_signal),
-        help("add clock port"),
+        help("add a clock port, or pass an existing one: 'always_ff (i_clk)'"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("clock signal is required for always_ff statement")]
@@ -1243,7 +1381,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(missing_reset_signal),
-        help("add reset port"),
+        help("add a reset port, or pass an existing one: 'always_ff (i_clk, i_rst)'"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("reset signal is required for always_ff with if_reset statement")]
@@ -1321,7 +1459,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(multiple_assignment),
-        help(""),
+        help("add `#[allow(multiple_assign)]` to the declaration of \"{identifier}\" if it is intentional"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{identifier}\" is assigned in multiple procedural blocks or assignment statements")]
@@ -1650,12 +1788,13 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(unknown_embed_lang),
-        help(""),
+        help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{name}\" is not valid embed language")]
     UnknownEmbedLang {
         name: String,
+        help: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1666,12 +1805,13 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(unknown_embed_way),
-        help(""),
+        help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{name}\" is not valid embed way")]
     UnknownEmbedWay {
         name: String,
+        help: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1682,12 +1822,13 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(unknown_include_way),
-        help(""),
+        help("{help}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{name}\" is not valid include way")]
     UnknownIncludeWay {
         name: String,
+        help: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1764,7 +1905,7 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Error),
         code(unknown_unsafe),
-        help(""),
+        help("the only valid unsafe identifier is 'cdc'"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{name}\" is not valid unsafe identifier")]
@@ -1865,7 +2006,7 @@ fn source(token: &TokenRange) -> MultiSources {
     let path = token.beg.source.to_string();
     let text = token.beg.source.get_text();
     MultiSources {
-        sources: vec![Source { path, text }],
+        sources: vec![Source::new(path, text)],
     }
 }
 
@@ -1880,7 +2021,7 @@ fn source_with_context(
     let mut ranges = Vec::new();
     let mut sources = Vec::new();
 
-    sources.push(Source { path, text });
+    sources.push(Source::new(path, text));
 
     for x in context.iter().rev() {
         let path = x.beg.source.to_string();
@@ -1892,11 +2033,94 @@ fn source_with_context(
 
         base += text.len();
 
-        sources.push(Source { path, text });
+        sources.push(Source::new(path, text));
     }
 
     let sources = MultiSources { sources };
     (sources, ranges)
+}
+
+/// Like `source_with_context`, but returns spans in the same order as
+/// `context`. Each label keeps its own bounded excerpt so distant statements
+/// render as compact snippets without cloning a complete file for every one.
+fn source_with_ordered_context(
+    token: &TokenRange,
+    context: &[TokenRange],
+) -> (MultiSources, Vec<SourceSpan>) {
+    let text = token.source().get_text();
+    let mut base = text.len();
+    let mut sources = vec![Source::new(token.source().to_string(), text)];
+    let mut ranges = Vec::with_capacity(context.len());
+    let mut texts = HashMap::new();
+    let mut windows = HashMap::new();
+    let mut excerpt_bases = HashMap::new();
+    for token in context {
+        let token_source = token.source();
+        let text = texts
+            .entry(token_source)
+            .or_insert_with(|| token_source.get_text());
+        let span = (*token).into();
+        let window_key = (token_source, token.beg.line, token.end.line);
+        let excerpt = windows
+            .get(&window_key)
+            .copied()
+            .filter(|excerpt: &SourceExcerpt| excerpt.local_span(&span).is_some())
+            .or_else(|| {
+                Source::excerpt_window(text, &span, token.beg.line as usize, 1).inspect(|excerpt| {
+                    windows.insert(window_key, *excerpt);
+                })
+            });
+        let (excerpt, local_span) = excerpt
+            .and_then(|excerpt| Some((excerpt, excerpt.local_span(&span)?)))
+            .unwrap_or_else(|| (SourceExcerpt::whole(text), span));
+        let excerpt_key = (token_source, excerpt);
+        let excerpt_base = if let Some(base) = excerpt_bases.get(&excerpt_key) {
+            *base
+        } else {
+            let source = Source::from_excerpt(token_source.to_string(), text, excerpt)
+                .unwrap_or_else(|| Source::new(token_source.to_string(), text.clone()));
+            let excerpt_base = base;
+            base += source.text.len();
+            sources.push(source);
+            excerpt_bases.insert(excerpt_key, excerpt_base);
+            excerpt_base
+        };
+        ranges.push((excerpt_base + local_span.offset(), local_span.len()).into());
+    }
+    (MultiSources { sources }, ranges)
+}
+
+#[cfg(test)]
+mod ordered_context_tests {
+    use super::*;
+    use miette::SourceCode;
+    use std::path::Path;
+    use veryl_parser::resource_table;
+    use veryl_parser::text_table::{self, TextInfo};
+    use veryl_parser::veryl_token::{Token, TokenSource};
+
+    #[test]
+    fn labels_on_one_line_share_a_source_excerpt() {
+        let text = "before\na = b; b = c;\nafter\n";
+        let path = resource_table::insert_path(Path::new("shared_excerpt.veryl"));
+        let text_id = text_table::set_current_text(TextInfo {
+            text: text.into(),
+            path,
+        });
+        let source = TokenSource::File {
+            path,
+            text: text_id,
+        };
+        let primary = TokenRange::from(Token::new("before", 1, 1, 6, 0, source));
+        let first = TokenRange::from(Token::new("a = b;", 2, 1, 6, 7, source));
+        let second = TokenRange::from(Token::new("b = c;", 2, 8, 6, 14, source));
+
+        let (input, spans) = source_with_ordered_context(&primary, &[first, second]);
+
+        assert_eq!(input.sources.len(), 2);
+        assert_eq!(input.read_span(&spans[0], 0, 0).unwrap().data(), b"a = b;");
+        assert_eq!(input.read_span(&spans[1], 0, 0).unwrap().data(), b"b = c;");
+    }
 }
 
 /// `miette::Severity`, in a form the diagnostic cache can serialize.
@@ -2039,8 +2263,12 @@ impl AnalyzerError {
             AnalyzerError::AmbiguousIdentifier { input, .. } => input,
             AnalyzerError::AnonymousIdentifierUsage { input, .. } => input,
             AnalyzerError::CallNonFunction { input, .. } => input,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { input, .. } => input,
+            AnalyzerError::FunctionOutputInAlwaysFf { input, .. } => input,
             AnalyzerError::CombinationalLoop { input, .. } => input,
+            AnalyzerError::CombinationalLoopPositionOverflow { input, .. } => input,
             AnalyzerError::CyclicTypeDependency { input, .. } => input,
+            AnalyzerError::CyclicFileDependency { input, .. } => input,
             AnalyzerError::DuplicateArgument { input, .. } => input,
             AnalyzerError::DuplicatedIdentifier { input, .. } => input,
             AnalyzerError::DuplicateEnumVariant { input, .. } => input,
@@ -2082,6 +2310,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidSelect { input, .. } => input,
             AnalyzerError::InvalidSizeType { input, .. } => input,
             AnalyzerError::InvalidStatement { input, .. } => input,
+            AnalyzerError::InvalidInitialAssign { input, .. } => input,
             AnalyzerError::InvalidTbUsage { input, .. } => input,
             AnalyzerError::InvalidTest { input, .. } => input,
             AnalyzerError::InvalidTypeDeclaration { input, .. } => input,
@@ -2089,6 +2318,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidWavedrom { input, .. } => input,
             AnalyzerError::InvisibleIndentifier { input, .. } => input,
             AnalyzerError::LastItemWithDefine { input, .. } => input,
+            AnalyzerError::LastItemWithDefineInModport { input, .. } => input,
             AnalyzerError::MemberAccessOnArray { input, .. } => input,
             AnalyzerError::MismatchAssignment { input, .. } => input,
             AnalyzerError::MismatchAttributeArgs { input, .. } => input,
@@ -2112,6 +2342,7 @@ impl AnalyzerError {
             AnalyzerError::MultipleDefault { input, .. } => input,
             AnalyzerError::NonConstantSelectWidth { input, .. } => input,
             AnalyzerError::NonPositiveValue { input, .. } => input,
+            AnalyzerError::NonPortableDependency { input, .. } => input,
             AnalyzerError::PrivateMember { input, .. } => input,
             AnalyzerError::PrivateNamespace { input, .. } => input,
             AnalyzerError::ReferringBeforeDefinition { input, .. } => input,
@@ -2156,8 +2387,12 @@ impl AnalyzerError {
             AnalyzerError::AmbiguousIdentifier { token_source, .. } => *token_source,
             AnalyzerError::AnonymousIdentifierUsage { token_source, .. } => *token_source,
             AnalyzerError::CallNonFunction { token_source, .. } => *token_source,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { token_source, .. } => *token_source,
+            AnalyzerError::FunctionOutputInAlwaysFf { token_source, .. } => *token_source,
             AnalyzerError::CombinationalLoop { token_source, .. } => *token_source,
+            AnalyzerError::CombinationalLoopPositionOverflow { token_source, .. } => *token_source,
             AnalyzerError::CyclicTypeDependency { token_source, .. } => *token_source,
+            AnalyzerError::CyclicFileDependency { token_source, .. } => *token_source,
             AnalyzerError::DuplicateArgument { token_source, .. } => *token_source,
             AnalyzerError::DuplicateEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::DuplicatedIdentifier { token_source, .. } => *token_source,
@@ -2197,6 +2432,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidRangeAssign { token_source, .. } => *token_source,
             AnalyzerError::NonConstantSelectWidth { token_source, .. } => *token_source,
             AnalyzerError::InvalidStatement { token_source, .. } => *token_source,
+            AnalyzerError::InvalidInitialAssign { token_source, .. } => *token_source,
             AnalyzerError::InvalidForRange { token_source, .. } => *token_source,
             AnalyzerError::InvalidForStep { token_source, .. } => *token_source,
             AnalyzerError::InvalidTbUsage { token_source, .. } => *token_source,
@@ -2207,11 +2443,13 @@ impl AnalyzerError {
             AnalyzerError::InvalidTypeDeclaration { token_source, .. } => *token_source,
             AnalyzerError::InvisibleIndentifier { token_source, .. } => *token_source,
             AnalyzerError::LastItemWithDefine { token_source, .. } => *token_source,
+            AnalyzerError::LastItemWithDefineInModport { token_source, .. } => *token_source,
             AnalyzerError::MemberAccessOnArray { token_source, .. } => *token_source,
             AnalyzerError::MismatchAssignment { token_source, .. } => *token_source,
             AnalyzerError::ImplicitClockConversion { token_source, .. } => *token_source,
             AnalyzerError::InvalidClockAssignment { token_source, .. } => *token_source,
             AnalyzerError::NonPositiveValue { token_source, .. } => *token_source,
+            AnalyzerError::NonPortableDependency { token_source, .. } => *token_source,
             AnalyzerError::MismatchAttributeArgs { token_source, .. } => *token_source,
             AnalyzerError::MismatchClockDomain { token_source, .. } => *token_source,
             AnalyzerError::MismatchFunctionArg { token_source, .. } => *token_source,
@@ -2300,22 +2538,94 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
-    pub fn combinational_loop(
+    pub fn side_effect_function_call_in_always_ff(
         identifier: &str,
         token: &TokenRange,
-        participants: &[TokenRange],
+        definition: &TokenRange,
+        calls: &[TokenRange],
+        writes: &[TokenRange],
     ) -> Self {
-        let (input, loop_participants) = source_with_context(token, participants);
-        AnalyzerError::CombinationalLoop {
+        let (input, call_stack, external_writes, function_definition) = if writes.is_empty() {
+            let (input, function_definition) =
+                source_with_context(token, std::slice::from_ref(definition));
+            (input, vec![], vec![], function_definition)
+        } else {
+            // `source_with_context` reverses its context so diagnostics render
+            // from the always_ff call through the call stack to the write.
+            let mut context = writes.iter().rev().copied().collect::<Vec<_>>();
+            context.extend(calls.iter().rev().copied());
+            let (input, context_spans) = source_with_context(token, &context);
+            let (call_stack, external_writes) = context_spans.split_at(calls.len());
+            (input, call_stack.to_vec(), external_writes.to_vec(), vec![])
+        };
+        AnalyzerError::SideEffectFunctionCallInAlwaysFf {
             identifier: identifier.to_string(),
             input,
             error_location: token.into(),
-            loop_participants,
+            call_stack,
+            external_writes,
+            function_definition,
+            token_source: token.source(),
+        }
+    }
+    pub fn function_output_in_always_ff(
+        function: &str,
+        output: &str,
+        destination: &str,
+        token: &TokenRange,
+        declaration: Option<&TokenRange>,
+    ) -> Self {
+        let declarations = declaration.into_iter().copied().collect::<Vec<_>>();
+        let (input, output_declaration) = source_with_context(token, &declarations);
+        AnalyzerError::FunctionOutputInAlwaysFf {
+            function: function.to_string(),
+            output: output.to_string(),
+            destination: destination.to_string(),
+            input,
+            error_location: token.into(),
+            output_declaration,
+            token_source: token.source(),
+        }
+    }
+    pub fn combinational_loop(
+        identifier: &str,
+        cycle: &str,
+        token: &TokenRange,
+        participants: &[TokenRange],
+        sites: &[TokenRange],
+    ) -> Self {
+        let mut context = participants.to_vec();
+        context.extend_from_slice(sites);
+        let (input, context_spans) = source_with_ordered_context(token, &context);
+        let (loop_participants, dependency_sites) = context_spans.split_at(participants.len());
+        AnalyzerError::CombinationalLoop {
+            identifier: identifier.to_string(),
+            cycle: cycle.to_string(),
+            input,
+            error_location: token.into(),
+            loop_participants: loop_participants.to_vec(),
+            dependency_sites: dependency_sites.to_vec(),
+            token_source: token.source(),
+        }
+    }
+    pub fn combinational_loop_position_overflow(token: &TokenRange) -> Self {
+        AnalyzerError::CombinationalLoopPositionOverflow {
+            input: source(token),
+            error_location: token.into(),
             token_source: token.source(),
         }
     }
     pub fn cyclic_type_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
         AnalyzerError::CyclicTypeDependency {
+            start: start.into(),
+            end: end.into(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn cyclic_file_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
+        AnalyzerError::CyclicFileDependency {
             start: start.into(),
             end: end.into(),
             input: source(token),
@@ -2670,6 +2980,23 @@ impl AnalyzerError {
             token_source: token.source(),
         }
     }
+    pub fn invalid_initial_assign(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::InvalidInitialAssign {
+            identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn non_portable_dependency(item: &str, project: &str, token: &TokenRange) -> Self {
+        AnalyzerError::NonPortableDependency {
+            item: item.to_string(),
+            project: project.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
     pub fn invalid_for_range(kind: InvalidForRangeKind, token: &TokenRange) -> Self {
         AnalyzerError::InvalidForRange {
             help: kind.help().to_string(),
@@ -2768,6 +3095,22 @@ impl AnalyzerError {
         AnalyzerError::LastItemWithDefine {
             input: source(token),
             error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn last_item_with_define_in_modport(
+        identifier: &str,
+        modport: &str,
+        token: &TokenRange,
+        member_source: &TokenRange,
+    ) -> Self {
+        let (input, member_source) = source_with_context(token, &[*member_source]);
+        AnalyzerError::LastItemWithDefineInModport {
+            identifier: identifier.to_string(),
+            modport: modport.to_string(),
+            input,
+            error_location: token.into(),
+            member_source,
             token_source: token.source(),
         }
     }
@@ -3185,6 +3528,7 @@ impl AnalyzerError {
     pub fn unknown_embed_lang(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownEmbedLang {
             name: name.to_string(),
+            help: format!("valid embed languages are: {}", EMBED_LANG.join("|")),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -3193,6 +3537,7 @@ impl AnalyzerError {
     pub fn unknown_embed_way(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownEmbedWay {
             name: name.to_string(),
+            help: format!("valid embed ways are: {}", EMBED_WAY.join("|")),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -3201,6 +3546,7 @@ impl AnalyzerError {
     pub fn unknown_include_way(name: &str, token: &TokenRange) -> Self {
         AnalyzerError::UnknownIncludeWay {
             name: name.to_string(),
+            help: format!("valid include ways are: {}", INCLUDE_WAY.join("|")),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

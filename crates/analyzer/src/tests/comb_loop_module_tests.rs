@@ -1461,3 +1461,212 @@ fn comb_loop_wide_module_summary_shift_closure_is_sparse() {
         false,
     );
 }
+
+fn instance_ring_code(feedback_bits: &str) -> String {
+    format!(
+        r#"
+        module RingA (b_in: input logic<4>, a_out: output logic<4>) {{
+            assign a_out[3:2] = b_in[1:0];
+            assign a_out[1:0] = 2'b01;
+        }}
+        module RingB (a_in: input logic<4>, b_out: output logic<4>) {{
+            assign b_out[1:0] = a_in[{feedback_bits}];
+            assign b_out[3:2] = 2'b10;
+        }}
+        module Top (o: output logic<4>) {{
+            var a_net: logic<4>;
+            var b_net: logic<4>;
+            inst u_a: RingA (b_in: b_net, a_out: a_net);
+            inst u_b: RingB (a_in: a_net, b_out: b_net);
+            assign o = a_net;
+        }}
+        "#
+    )
+}
+
+#[test]
+fn comb_loop_instance_ring_acyclic_per_bit_is_not_a_loop() {
+    // `RingB` reads back the constant half, so no bit reaches itself.
+    assert_comb_loop(
+        "a whole-port instance ring that is acyclic per bit is not a loop",
+        &instance_ring_code("1:0"),
+        false,
+    );
+}
+
+#[test]
+fn comb_loop_instance_ring_cyclic_per_bit_is_a_loop() {
+    // Same wiring, but now `RingB` reads the very bits `RingA` derives from it.
+    assert_comb_loop(
+        "the same ring closed over its own bits is a loop",
+        &instance_ring_code("3:2"),
+        true,
+    );
+}
+
+#[test]
+fn comb_loop_module_boundary_struct_members_of_one_port_are_bit_disjoint() {
+    // The response struct's `ready` is a constant and its `rdata` depends on
+    // the request; the consumer computes the request from `ready` alone. The
+    // graph is acyclic at any granularity finer than "the whole struct", so a
+    // per-variable child-port summary reports a loop that is not there.
+    assert_comb_loop(
+        "struct members of one port are bit-disjoint across a module boundary",
+        r#"
+        package pk {
+            struct req_t {
+                addr : logic<8>,
+                valid: logic   ,
+            }
+            struct rsp_t {
+                rdata: logic<8>,
+                ready: logic   ,
+            }
+        }
+        module Regs (
+            req_i : input  pk::req_t,
+            resp_o: output pk::rsp_t,
+        ) {
+            always_comb {
+                resp_o.ready = 1'b1;
+                resp_o.rdata = '0;
+                if req_i.valid {
+                    resp_o.rdata = req_i.addr;
+                }
+            }
+        }
+        module Top (
+            i_clk: input  clock   ,
+            i_rst: input  reset   ,
+            o_d  : output logic<8>,
+        ) {
+            var rq: pk::req_t;
+            var rs: pk::rsp_t;
+            inst u: Regs (req_i: rq, resp_o: rs);
+
+            var st: logic<8>;
+            always_comb {
+                rq.valid = 0;
+                rq.addr  = st;
+                if rs.ready {
+                    rq.valid = 1;
+                }
+            }
+            always_ff {
+                if_reset {
+                    st = 0;
+                } else {
+                    st = st + {1'b0 repeat 7, rs.rdata[0]};
+                }
+            }
+            assign o_d = st;
+        }
+        "#,
+        false,
+    );
+}
+
+/// An incremental build restores unchanged files from the fragment cache and
+/// skips their pass2, so their modules never reach `ir.components`; the
+/// elaborated body still exists only inside each instantiating parent. A loop
+/// crossing such a child must still be detected.
+#[test]
+fn comb_loop_through_child_without_top_level_component() {
+    let code = r#"
+    module ChildAnd (
+        i_en: input  logic,
+        i_d : input  logic,
+        o_y : output logic,
+    ) {
+        assign o_y = i_en & i_d;
+    }
+    module Top (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        i_d  : input  logic,
+        o_z  : output logic,
+    ) {
+        var q: logic;
+        var y: logic;
+        let eff : logic = q | y;
+        let won : logic = eff & i_d;
+        let hold: logic = q & !won;
+        inst u: ChildAnd (i_en: !hold, i_d, o_y: y);
+        always_ff {
+            if_reset {
+                q = 1'b0;
+            } else {
+                q = y;
+            }
+        }
+        assign o_z = q;
+    }
+    "#;
+
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    assert!(analyzer.analyze_pass1("prj", &parser.veryl).is_empty());
+    assert!(Analyzer::analyze_post_pass1().is_empty());
+    assert!(
+        analyzer
+            .analyze_pass2(&parser.veryl, &mut context, Some(&mut ir))
+            .is_empty()
+    );
+
+    let has_loop = |ir: &Ir| {
+        crate::comb_loop_detect::check(ir)
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+    };
+    assert!(has_loop(&ir), "loop must be found on the full IR");
+
+    let child = resource_table::insert_str("ChildAnd");
+    ir.components
+        .retain(|c| !matches!(c, crate::ir::Component::Module(m) if m.name == child));
+    assert_eq!(ir.components.len(), 1);
+    assert!(
+        has_loop(&ir),
+        "loop must be found when the child has no top-level component"
+    );
+}
+
+#[test]
+fn comb_loop_generic_specializations_report_one_diagnostic() {
+    // Why this case exists: the body is analyzed once per signature, so one
+    // source location can otherwise produce one diagnostic per specialization.
+    let errors = analyze(
+        r#"
+        module Child #(
+            param W: u32 = 4,
+        ) (
+            o: output logic<W>,
+        ) {
+            var t: logic<W>;
+            always_comb {
+                t = t + 1;
+                o = t;
+            }
+        }
+        module Top (
+            a: output logic<4>,
+            b: output logic<8>,
+        ) {
+            inst u0: Child #(W: 4) (o: a);
+            inst u1: Child #(W: 8) (o: b);
+        }
+        "#,
+    );
+    let loops = errors
+        .iter()
+        .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
+        .count();
+    assert_eq!(loops, 1, "{errors:?}");
+}

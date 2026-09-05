@@ -62,17 +62,21 @@ module Module68D #(
 }
 
 module Module68E::<
-    AXI4_PKG       : $std::axi4_prototype       ,
-    AXI4_LITE_PKG  : $std::axi4_lite_prototype  ,
-    AXI4_STREAM_PKG: $std::axi4_stream_prototype,
+    AXI4_PKG       : axi4_prototype       ,
+    AXI4_LITE_PKG  : axi4_lite_prototype  ,
+    AXI4_STREAM_PKG: axi4_stream_prototype,
 > (
-    axi4_if       : modport $std::axi4_if::<AXI4_PKG>::slave                 ,
-    axi4_lite_if  : modport $std::axi4_lite_if::<AXI4_LITE_PKG>::slave       ,
-    axi4_stream_if: modport $std::axi4_stream_if::<AXI4_STREAM_PKG>::receiver,
+    a: modport axi4_if::<AXI4_PKG>::slave                 ,
+    b: modport axi4_lite_if::<AXI4_LITE_PKG>::slave       ,
+    c: modport axi4_stream_if::<AXI4_STREAM_PKG>::receiver,
 ) {
-    connect axi4_if        <> 0;
-    connect axi4_lite_if   <> 0;
-    connect axi4_stream_if <> 0;
+    import $std::{axi4_prototype, axi4_if};
+    import $std::{axi4_lite_prototype, axi4_lite_if};
+    import $std::{axi4_stream_prototype, axi4_stream_if};
+
+    connect a <> 0;
+    connect b <> 0;
+    connect c <> 0;
 }
 
 alias package axi_pkg = $std::axi4_pkg::<32, 8, 8, 8, 8, 8, 8, 8>;
@@ -95,12 +99,12 @@ module Module68F {
     assign axi4_lite_if.arid = 0;
 
     inst u: Module68E::<axi_pkg, axi_lite_pkg, axi_stream_pkg> (
-        axi4_if       : axi4_if       ,
-        axi4_lite_if  : axi4_lite_if  ,
-        axi4_stream_if: axi4_stream_if,
+        a: axi4_if       ,
+        b: axi4_lite_if  ,
+        c: axi4_stream_if,
     );
 }
 
-package Pkg68G {
+package Package68G {
     const WIDTH: u32 = 32;
 }

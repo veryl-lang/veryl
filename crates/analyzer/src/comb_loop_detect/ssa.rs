@@ -4,6 +4,7 @@ use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::hash::Hash;
 use std::rc::Rc;
+use veryl_parser::token_range::TokenRange;
 
 pub(super) type VersionId = usize;
 
@@ -327,12 +328,19 @@ pub(super) struct DependencyDagEdge {
     pub(super) condition: PathCondition,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct DefinitionSite<N> {
+    pub(super) token: TokenRange,
+    pub(super) data_inputs: Vec<N>,
+}
+
 #[derive(Clone)]
 pub(super) struct DependencyDag<K> {
     pub(super) nodes: Vec<DependencyDagNode<K>>,
     pub(super) edges: Vec<DependencyDagEdge>,
     pub(super) roots: Vec<Option<usize>>,
     pub(super) domains: Vec<Vec<PositionDomain>>,
+    pub(super) sites: HashMap<usize, DefinitionSite<usize>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -453,6 +461,7 @@ pub(super) struct SsaStore<K> {
     current: HashMap<K, VersionId>,
     undo: Vec<Undo<K>>,
     checkpoints: Vec<usize>,
+    sites: HashMap<VersionId, DefinitionSite<VersionId>>,
 }
 
 impl<K> Default for SsaStore<K> {
@@ -463,6 +472,7 @@ impl<K> Default for SsaStore<K> {
             current: HashMap::default(),
             undo: Vec::new(),
             checkpoints: Vec::new(),
+            sites: HashMap::default(),
         }
     }
 }
@@ -471,6 +481,24 @@ impl<K> SsaStore<K>
 where
     K: Copy + Eq + Hash,
 {
+    pub(super) fn record_site(
+        &mut self,
+        version: VersionId,
+        token: TokenRange,
+        controls: &[VersionId],
+    ) {
+        let data_inputs = match &self.versions[version] {
+            Version::Definition { sources, .. } => sources
+                .iter()
+                .map(|(source, _)| *source)
+                .filter(|source| !controls.contains(source))
+                .collect(),
+            _ => Vec::new(),
+        };
+        self.sites
+            .insert(version, DefinitionSite { token, data_inputs });
+    }
+
     fn entry(&mut self, key: K) -> VersionId {
         if let Some(version) = self.entries.get(&key) {
             return *version;
@@ -851,6 +879,7 @@ where
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
         let mut domains = Vec::new();
+        let mut sites = HashMap::default();
         let mut mapped: HashMap<(VersionId, bool), Option<usize>> = HashMap::default();
         type ImportKey<K> = (
             usize,
@@ -944,6 +973,7 @@ where
                             &mut nodes,
                             &mut edges,
                             &mut domains,
+                            &mut sites,
                         );
                         imports.insert(key, node);
                         node
@@ -964,6 +994,21 @@ where
                     Some(node)
                 }
             };
+            if let Some(node) = node
+                && let Some(site) = self.sites.get(&version)
+            {
+                sites.insert(
+                    node,
+                    DefinitionSite {
+                        token: site.token,
+                        data_inputs: site
+                            .data_inputs
+                            .iter()
+                            .filter_map(|input| mapped.get(&(*input, true)).copied().flatten())
+                            .collect(),
+                    },
+                );
+            }
             mapped.insert(state, node);
         }
 
@@ -972,6 +1017,7 @@ where
             edges,
             roots: roots.iter().map(|root| mapped[&(*root, false)]).collect(),
             domains,
+            sites,
         }
     }
 
@@ -1157,6 +1203,7 @@ where
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn inline_dependency_dag<K>(
     graph: &DependencyDag<K>,
     root: Option<usize>,
@@ -1165,6 +1212,7 @@ fn inline_dependency_dag<K>(
     nodes: &mut Vec<DependencyDagNode<K>>,
     edges: &mut Vec<DependencyDagEdge>,
     domains: &mut Vec<Vec<PositionDomain>>,
+    sites: &mut HashMap<usize, DefinitionSite<usize>>,
 ) -> Option<usize>
 where
     K: Copy + Eq + Hash,
@@ -1213,6 +1261,21 @@ where
             relation: edge.relation,
             condition: edge.condition.remapped(branches),
         });
+    }
+    for (child, site) in &graph.sites {
+        if let Some(&node) = mapped.get(child) {
+            sites.insert(
+                node,
+                DefinitionSite {
+                    token: site.token,
+                    data_inputs: site
+                        .data_inputs
+                        .iter()
+                        .filter_map(|input| mapped.get(input).copied())
+                        .collect(),
+                },
+            );
+        }
     }
     mapped.get(&root).copied()
 }
@@ -1533,5 +1596,16 @@ mod tests {
                 PathCondition::default()
             )]
         );
+    }
+
+    #[test]
+    fn root_source_walk_does_not_use_the_native_stack() {
+        let mut ssa = SsaStore::default();
+        let source = ssa.read("source");
+        let mut version = ssa.definition(vec![source]);
+        for _ in 0..100_000 {
+            version = ssa.definition(vec![version]);
+        }
+        assert_eq!(ssa.root_sources(version), ["source"].into_iter().collect());
     }
 }

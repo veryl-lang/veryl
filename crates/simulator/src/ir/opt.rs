@@ -6,10 +6,13 @@
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod comb_fusion;
+pub(crate) mod cone_gate;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dup_assign_dce;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod field_unfuse;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod lane_vector;
 #[cfg(not(target_family = "wasm"))]
@@ -65,6 +68,37 @@ pub(crate) mod dup_assign_dce {
 }
 
 #[cfg(target_family = "wasm")]
+pub(crate) mod field_unfuse {
+    use crate::ir::ProtoStatement;
+    use crate::ir::event::Event;
+    use crate::{HashMap, HashSet};
+
+    #[derive(Default, Debug)]
+    pub struct RunStats;
+
+    pub fn enabled(_use_4state: bool) -> bool {
+        false
+    }
+    pub fn force_disable() {}
+    pub fn inline_fields() -> bool {
+        false
+    }
+    pub fn explain_offsets() -> &'static [isize] {
+        &[]
+    }
+    pub fn run(
+        _unified: &mut [ProtoStatement],
+        _event_statements: &HashMap<Event, Vec<ProtoStatement>>,
+        _blocklist: &HashSet<isize>,
+        _alloc: &mut dyn FnMut(usize) -> isize,
+        _comb_reloc: &mut Vec<(isize, isize, usize)>,
+        _use_4state: bool,
+    ) -> (RunStats, Vec<isize>) {
+        (RunStats, Vec::new())
+    }
+}
+
+#[cfg(target_family = "wasm")]
 pub(crate) mod dead_var_dce {
     use crate::HashSet;
     use crate::ir::ProtoStatement;
@@ -72,6 +106,7 @@ pub(crate) mod dead_var_dce {
     pub fn enabled() -> bool {
         false
     }
+    pub fn force_disable() {}
     pub fn census_digest(_slices: &[&[ProtoStatement]]) -> u64 {
         0
     }

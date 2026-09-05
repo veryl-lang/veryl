@@ -133,18 +133,32 @@ impl BitPartition {
         self.array_spans.get(&id).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    pub(super) fn position_overflow(&self) -> Option<VarId> {
+        let limit = isize::MAX as usize;
+        self.ranges.iter().find_map(|(&(id, array), packed)| {
+            let array_overflows = array.start > limit || array.end().is_none_or(|end| end > limit);
+            let packed_overflows = packed
+                .iter()
+                .any(|span| span.start > limit || span.end() > limit);
+            (array_overflows || packed_overflows).then_some(id)
+        })
+    }
+
     /// Empty slice means the variable's bits are untouched.
     pub(super) fn ranges_of(&self, key: IdxKey) -> &[PackedSpan] {
         self.ranges.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    pub(super) fn overlapping(&self, key: IdxKey, span: PackedSpan) -> Vec<usize> {
+    pub(super) fn overlapping(
+        &self,
+        key: IdxKey,
+        span: PackedSpan,
+    ) -> impl Iterator<Item = usize> + '_ {
         self.ranges_of(key)
             .iter()
             .enumerate()
-            .filter(|(_, range)| range.overlaps(span))
+            .filter(move |(_, range)| range.overlaps(span))
             .map(|(i, _)| i)
-            .collect()
     }
 
     pub(super) fn overlapping_access(

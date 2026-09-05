@@ -11,6 +11,7 @@
 //! boxes, `inout` ports, recursive functions) add no edges; the
 //! simulator's `analyze_dependency` is the backup safety net.
 
+mod diagnostics;
 mod graph;
 mod hierarchy;
 mod model;
@@ -24,12 +25,20 @@ pub(crate) use procedure::{
     function_barrier_evaluation_count, function_evaluation_count,
     function_result_region_probe_count, function_result_version_count,
     function_summary_graph_node_count, module_context_entries, reset_function_evaluation_count,
-    reset_module_context_entries, write_footprint_statement_visits,
+    reset_module_context_entries, reset_traced_procedure_evaluation_count,
+    traced_procedure_evaluation_count, write_footprint_statement_visits,
 };
 
+use diagnostics::{DiagnosticReplayCache, check_graph};
+#[cfg(test)]
+pub(crate) use diagnostics::{
+    diagnostic_instance_probe_count, diagnostic_provenance_build_count, diagnostic_replay_count,
+    reset_diagnostic_instance_probe_count, reset_diagnostic_provenance_build_count,
+    reset_diagnostic_replay_count,
+};
 use graph::{
     DependencyGraph, GraphDependency, GraphNode, add_dependency_edge, add_region_dependency,
-    check_graph, ensure_node, node_regions_overlap_with_dependency,
+    ensure_node, node_regions_overlap_with_dependency,
 };
 use hierarchy::{module_postorder, walk_insts};
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
@@ -66,9 +75,27 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut complete = true;
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
 
+    let mut diagnostic_replays = DiagnosticReplayCache::default();
+    let mut reported = HashSet::default();
     for module in module_postorder(ir) {
-        let (graph, _bit_part, module_complete) = build_module_graph(module, &summaries);
-        check_graph(module, &graph, &mut errors);
+        let (graph, bit_part, module_complete) = match build_module_graph(module, &summaries) {
+            Ok(result) => result,
+            Err(error) => {
+                errors.push(*error);
+                complete = false;
+                summaries.insert(module.signature.clone(), ModuleCombSummary::default());
+                continue;
+            }
+        };
+        check_graph(
+            module,
+            &graph,
+            &bit_part,
+            &summaries,
+            &mut diagnostic_replays,
+            &mut errors,
+            &mut reported,
+        );
         let mut summary = compute_module_summary(module, &graph);
         summary.complete = module_complete;
         summaries.insert(module.signature.clone(), summary);
@@ -511,13 +538,49 @@ fn eval_dst_span(
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
-) -> (DependencyGraph, BitPartition, bool) {
+) -> Result<(DependencyGraph, BitPartition, bool), Box<AnalyzerError>> {
+    build_module_graph_with_trace(module, summaries, false)
+}
+
+fn build_module_graph_with_trace(
+    module: &Module,
+    summaries: &HashMap<Signature, ModuleCombSummary>,
+    tracing: bool,
+) -> Result<(DependencyGraph, BitPartition, bool), Box<AnalyzerError>> {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.variables.extend(module.interface_members.clone());
     ctx.functions = module.functions.clone();
     let bit_part = build_bit_partition(module, summaries, &mut ctx);
+    let limit = isize::MAX as usize;
+    let oversized = module
+        .variables
+        .values()
+        .chain(module.interface_members.values())
+        .find(|variable| {
+            variable
+                .r#type
+                .total_array()
+                .is_some_and(|size| size > limit)
+                || variable.total_width().is_some_and(|width| width > limit)
+        })
+        .map(|variable| variable.token);
+    if let Some(token) = oversized.or_else(|| {
+        bit_part.position_overflow().map(|id| {
+            module
+                .variables
+                .get(&id)
+                .or_else(|| module.interface_members.get(&id))
+                .map_or(module.token, |variable| variable.token)
+        })
+    }) {
+        return Err(Box::new(
+            AnalyzerError::combinational_loop_position_overflow(&token),
+        ));
+    }
+
     let mut builder = ModuleGraphBuilder::new(module, &bit_part, ctx);
+    builder.function_summaries.tracing = tracing;
 
     for (declaration_index, declaration) in module.declarations.iter().enumerate() {
         let Declaration::Comb(comb) = declaration else {
@@ -539,7 +602,10 @@ fn build_module_graph(
         builder.add_procedure_graph(module, analysis);
     }
 
-    for inst in walk_insts(module) {
+    for (declaration_index, declaration) in module.declarations.iter().enumerate() {
+        let Declaration::Inst(inst) = declaration else {
+            continue;
+        };
         match inst.component.as_ref() {
             Component::Module(child) => {
                 let Some(summary) = summaries.get(&child.signature) else {
@@ -547,7 +613,7 @@ fn build_module_graph(
                     continue;
                 };
                 builder.complete &= summary.complete;
-                builder.add_instance_feedthrough(module, inst, child, summary);
+                builder.add_instance_feedthrough(module, declaration_index, inst, child, summary);
             }
             // SV black box: under-detect.
             Component::SystemVerilog(_) => builder.complete = false,
@@ -557,7 +623,7 @@ fn build_module_graph(
     }
 
     let (graph, complete) = builder.finish();
-    (graph, bit_part, complete)
+    Ok((graph, bit_part, complete))
 }
 
 struct ModuleGraphBuilder<'a> {
@@ -631,6 +697,21 @@ impl<'a> ModuleGraphBuilder<'a> {
             })
             .collect::<Vec<_>>();
 
+        for (node, site) in analysis.graph.sites {
+            if let Some(node) = mapped[node] {
+                self.graph.sites.insert(
+                    node,
+                    ssa::DefinitionSite {
+                        token: site.token,
+                        data_inputs: site
+                            .data_inputs
+                            .iter()
+                            .filter_map(|input| mapped[*input])
+                            .collect(),
+                    },
+                );
+            }
+        }
         for edge in analysis.graph.edges {
             let (Some(source), Some(destination)) = (mapped[edge.source], mapped[edge.destination])
             else {
@@ -676,6 +757,7 @@ impl<'a> ModuleGraphBuilder<'a> {
     fn add_instance_feedthrough(
         &mut self,
         module: &'a Module,
+        declaration_index: usize,
         inst: &InstDeclaration,
         child: &Module,
         summary: &ModuleCombSummary,
@@ -862,6 +944,14 @@ impl<'a> ModuleGraphBuilder<'a> {
         }
 
         for edge in &summary.edges {
+            if function_summaries.tracing {
+                graph.active_summary = Some(diagnostics::SummaryEdgeCause {
+                    inst_declaration: declaration_index,
+                    child: child.signature.clone(),
+                    child_source: summary.nodes[edge.source].region,
+                    child_destination: summary.nodes[edge.destination].region,
+                });
+            }
             let condition = edge.condition.remapped(&summary_branches);
             if summary.nodes[edge.source].kind == SummaryNodeKind::Input
                 && let Some((array, packed)) = edge.kind.exact_offset()
@@ -943,6 +1033,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                 &condition,
             );
         }
+        graph.active_summary = None;
         self.complete &= complete;
     }
 }
@@ -1671,5 +1762,88 @@ mod partition_tests {
         ];
 
         assert_eq!(atomic_ranges(&spans, None), spans);
+    }
+    #[test]
+    fn array_partition_sweep_keeps_an_access_active_until_its_own_end() {
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 1,
+        };
+        let mut accesses = HashMap::default();
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 0,
+                    length: 2,
+                },
+            ),
+            vec![packed],
+        );
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 1,
+                    length: 2,
+                },
+            ),
+            vec![packed],
+        );
+
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        for start in 0..3 {
+            assert_eq!(
+                ranges
+                    .get(&(id, ArraySpan { start, length: 1 }))
+                    .map(Vec::as_slice),
+                Some([packed].as_slice())
+            );
+        }
+    }
+    #[test]
+    fn disjoint_array_point_queries_do_not_scan_every_partition() {
+        const COUNT: usize = 16_384;
+
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 32,
+        };
+        let mut accesses = HashMap::default();
+        for start in 0..COUNT {
+            accesses.insert((id, ArraySpan { start, length: 1 }), vec![packed]);
+        }
+
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        let partition = BitPartition::new(ranges);
+        assert_eq!(partition.array_spans(id).len(), COUNT);
+        for start in 0..COUNT {
+            assert_eq!(
+                partition.overlapping_access(id, ArraySpan { start, length: 1 }, packed),
+                vec![(id, ArraySpan { start, length: 1 }, 0)]
+            );
+        }
+    }
+    #[test]
+    fn partition_rejects_positions_that_do_not_fit_the_relation_type() {
+        let id = VarId::from_raw(0);
+        let mut ranges = HashMap::default();
+        ranges.insert(
+            (
+                id,
+                ArraySpan {
+                    start: isize::MAX as usize + 1,
+                    length: 1,
+                },
+            ),
+            vec![PackedSpan {
+                start: 0,
+                length: 1,
+            }],
+        );
+
+        assert_eq!(BitPartition::new(ranges).position_overflow(), Some(id));
     }
 }

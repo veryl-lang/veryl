@@ -1,0 +1,9 @@
+package a_pkg {
+    const WIDTH: u32 = 8;
+}
+
+alias package pkg = c_pkg::<a_pkg::WIDTH>;
+
+module a_module (
+    b: modport b_if::<pkg>::mp,
+) {}

@@ -137,8 +137,15 @@ fn main() -> Result<ExitCode> {
         // check emits nothing, so it writes no info.toml.
         Commands::Check(x) => cmd_check::CmdCheck::new(x).exec(&mut metadata),
         Commands::Build(x) => {
-            let ret =
-                cmd_build::CmdBuild::new(x).exec(&mut metadata, false, opt.quiet, None, None, &[]);
+            let ret = cmd_build::CmdBuild::new(x).exec(
+                &mut metadata,
+                false,
+                opt.quiet,
+                None,
+                None,
+                &[],
+                cmd_build::EmitPolicy::Always,
+            );
             metadata.save_build_info()?;
             ret
         }

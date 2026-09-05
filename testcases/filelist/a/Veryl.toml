@@ -7,3 +7,5 @@ sourcemap_target = {type = "none"}
 
 [dependencies]
 b = {path = "../b"}
+d = {path = "../d"}
+e = {path = "../e"}

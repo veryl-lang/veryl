@@ -6,6 +6,8 @@ version = 1
 name = "b"
 source = "../b"
 
+[projects.properties]
+
 [[projects.dependencies]]
 name = "c"
 source = "../c"
@@ -14,3 +16,19 @@ source = "../c"
 name = "c"
 source = "../c"
 dependencies = []
+
+[projects.properties]
+
+[[projects]]
+name = "d"
+source = "../d"
+dependencies = []
+
+[projects.properties]
+
+[[projects]]
+name = "e"
+source = "../e"
+dependencies = []
+
+[projects.properties]

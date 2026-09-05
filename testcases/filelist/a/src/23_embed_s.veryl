@@ -1,0 +1,10 @@
+#[test(test_s)]
+embed (inline) sv{{{
+module test_s;
+    // Keep this reference raw: naming the package in Veryl would create an edge
+    filelist_a_PackageA::StructA s;
+    initial begin
+        $finish();
+    end
+endmodule
+}}}

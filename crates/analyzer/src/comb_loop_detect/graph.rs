@@ -3,15 +3,20 @@
 mod guarded;
 mod relation;
 
+use super::diagnostics::SummaryEdgeCause;
 use super::model::{BitDependency, SummaryRegion};
 #[cfg(test)]
 use super::region::translate_position;
 use super::region::{BitPartition, NodeKey};
+use super::ssa::DefinitionSite;
 use super::ssa::{PathCondition, PositionDomain};
-use crate::ir::{Module, VarId};
-use crate::{AnalyzerError, HashMap, HashSet};
+#[cfg(test)]
+use crate::ir::VarId;
+use crate::{HashMap, HashSet};
 use daggy::petgraph::Direction;
 use daggy::petgraph::Graph;
+use daggy::petgraph::algo::kosaraju_scc;
+#[cfg(test)]
 use daggy::petgraph::algo::tarjan_scc;
 use daggy::petgraph::graph::{EdgeIndex, NodeIndex};
 use daggy::petgraph::visit::EdgeRef;
@@ -19,6 +24,7 @@ use daggy::petgraph::visit::EdgeRef;
 use guarded::compatible_cycle_displacements_cancel;
 use guarded::{GuardedCycle, guarded_cycle_displacements_cancel};
 use relation::PositionRelationSet;
+use std::collections::VecDeque;
 use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Debug)]
@@ -49,6 +55,9 @@ impl GraphDependency {
 pub(super) struct DependencyGraph {
     graph: Graph<GraphNode, GraphDependency>,
     edges: HashMap<(NodeIndex, NodeIndex, BitDependency), EdgeIndex>,
+    pub(super) sites: HashMap<NodeIndex, DefinitionSite<NodeIndex>>,
+    pub(super) summary_causes: HashMap<EdgeIndex, Vec<SummaryEdgeCause>>,
+    pub(super) active_summary: Option<SummaryEdgeCause>,
 }
 
 impl DependencyGraph {
@@ -56,6 +65,9 @@ impl DependencyGraph {
         Self {
             graph: Graph::new(),
             edges: HashMap::default(),
+            sites: HashMap::default(),
+            summary_causes: HashMap::default(),
+            active_summary: None,
         }
     }
 }
@@ -81,14 +93,19 @@ pub(super) fn add_dependency_edge(
     dependency: GraphDependency,
 ) {
     let key = (source, destination, dependency.kind);
-    if let Some(&existing) = graph.edges.get(&key) {
+    let edge = if let Some(&existing) = graph.edges.get(&key) {
         let weight = graph
             .edge_weight_mut(existing)
             .expect("an edge found in the graph must remain present");
         weight.condition = weight.condition.disjoin(&dependency.condition);
+        existing
     } else {
         let edge = graph.add_edge(source, destination, dependency);
         graph.edges.insert(key, edge);
+        edge
+    };
+    if let Some(cause) = graph.active_summary.clone() {
+        graph.summary_causes.entry(edge).or_default().push(cause);
     }
 }
 
@@ -199,40 +216,12 @@ fn spans_overlap_with_offset(
     }
 }
 
-pub(super) fn check_graph(
-    module: &Module,
-    graph: &DependencyGraph,
-    errors: &mut Vec<AnalyzerError>,
-) {
-    debug_assert!(
-        unconstrained_subgraph_is_acyclic(graph),
-        "unconstrained dependency nodes must be introduced as a DAG"
-    );
-    let sccs = tarjan_scc(&graph.graph);
-    let mut reported: HashSet<Vec<NodeKey>> = HashSet::default();
-    for scc in sccs {
-        if !has_compatible_cycle(graph, &scc) {
-            continue;
-        }
-        let mut keys: Vec<NodeKey> = scc
-            .iter()
-            .filter_map(|node| graph[*node].diagnostic)
-            .collect();
-        keys.sort();
-        keys.dedup();
-        if keys.is_empty() {
-            continue;
-        }
-        if !reported.insert(keys.clone()) {
-            continue;
-        }
-        if let Some(error) = build_error(module, &keys) {
-            errors.push(error);
-        }
-    }
+/// Both passes use explicit worklists, including for long acyclic chains.
+pub(super) fn strongly_connected_components(graph: &DependencyGraph) -> Vec<Vec<NodeIndex>> {
+    kosaraju_scc(&**graph)
 }
 
-fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
+pub(super) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
     let mut induced = Graph::<(), ()>::new();
     let mapped = graph
         .node_indices()
@@ -295,7 +284,7 @@ fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
 // dominated state is never queued again. Every endpoint and intermediate
 // offset operation is a construction invariant required to be representable
 // in `isize`; overflow is not interpreted as a dependency relation.
-fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
+pub(super) fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
     let nodes: HashSet<_> = scc.iter().copied().collect();
     if has_zero_dependency_cycle(graph, scc, &nodes) {
         return true;
@@ -365,6 +354,86 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
         }
     }
     false
+}
+
+/// Recover a feasible first-return path for source diagnostics. Parent indices
+/// keep long paths linear in storage; positions and guards match the decision walk.
+pub(super) fn diagnostic_cycle(
+    graph: &DependencyGraph,
+    scc: &[NodeIndex],
+) -> Option<Vec<EdgeIndex>> {
+    let members = scc.iter().copied().collect::<HashSet<_>>();
+    let mut anchors = scc
+        .iter()
+        .copied()
+        .filter(|node| graph[*node].diagnostic.is_some())
+        .collect::<Vec<_>>();
+    anchors.sort_unstable_by_key(|node| graph[*node].diagnostic);
+    for start in anchors {
+        let relation = PositionRelationSet::identity(&graph[start].domains);
+        let mut states = vec![(
+            start,
+            PathCondition::default(),
+            relation,
+            None::<(usize, EdgeIndex)>,
+        )];
+        let mut queue = VecDeque::from([0]);
+        let mut reached: HashMap<NodeIndex, Vec<(PositionRelationSet, PathCondition)>> =
+            HashMap::default();
+        while let Some(index) = queue.pop_front() {
+            let (node, condition, relation, _) = states[index].clone();
+            let mut edges = graph
+                .edges(node)
+                .filter(|edge| members.contains(&edge.target()))
+                .map(|edge| edge.id())
+                .collect::<Vec<_>>();
+            edges.sort_unstable_by_key(|edge| {
+                let (_, next) = graph.edge_endpoints(*edge).unwrap();
+                (
+                    graph[next].diagnostic,
+                    graph[next].region,
+                    graph[*edge].kind,
+                    edge.index(),
+                )
+            });
+            for edge in edges {
+                let (_, next) = graph.edge_endpoints(edge).unwrap();
+                let Some(condition) = condition.conjoin_if_compatible(&graph[edge].condition)
+                else {
+                    continue;
+                };
+                let relation = relation.then_dependency(graph[edge].kind, &graph[next].domains);
+                if relation.is_empty() {
+                    continue;
+                }
+                if next == start {
+                    if relation.intersects_identity() {
+                        let mut path = vec![edge];
+                        let mut cursor = index;
+                        while let Some((parent, edge)) = states[cursor].3 {
+                            path.push(edge);
+                            cursor = parent;
+                        }
+                        path.reverse();
+                        return Some(path);
+                    }
+                    continue;
+                }
+                let previous = reached.entry(next).or_default();
+                if previous
+                    .iter()
+                    .any(|(r, c)| r.piecewise_covers(&relation) && c.covers(&condition))
+                {
+                    continue;
+                }
+                previous.retain(|(r, c)| !relation.piecewise_covers(r) || !condition.covers(c));
+                previous.push((relation.clone(), condition.clone()));
+                queue.push_back(states.len());
+                states.push((next, condition, relation, Some((index, edge))));
+            }
+        }
+    }
+    None
 }
 
 fn nodes_that_may_reach_start(
@@ -560,41 +629,6 @@ fn intersect_axis(
 
 fn dependency_is_identity(dependency: BitDependency) -> bool {
     dependency.array == Some(0) && dependency.packed == Some(0)
-}
-
-fn build_error(module: &Module, keys: &[NodeKey]) -> Option<AnalyzerError> {
-    let mut tokens: Vec<veryl_parser::token_range::TokenRange> = Vec::new();
-    let mut identifier: Option<String> = None;
-    let mut seen_var: HashSet<VarId> = HashSet::default();
-    for (id, _idx, _range) in keys {
-        if !seen_var.insert(*id) {
-            continue;
-        }
-        if let Some(var) = module.variables.get(id)
-            && identifier.is_none()
-        {
-            identifier = Some(var.path.to_string());
-        }
-        if let Some(toks) = module.assign_tokens.get(id) {
-            tokens.extend(toks.iter().copied());
-        } else if let Some(variable) = module.variables.get(id) {
-            // Assignment coverage intentionally omits oversized arrays. Keep
-            // a usable diagnostic site when the sparse graph still proves a
-            // cycle through one of those variables.
-            tokens.push(variable.token);
-        }
-    }
-    {
-        let mut seen: HashSet<_> = HashSet::default();
-        tokens.retain(|token| seen.insert(*token));
-    }
-    let primary = *tokens.first()?;
-    let participants: Vec<_> = tokens.iter().skip(1).copied().collect();
-    Some(AnalyzerError::combinational_loop(
-        identifier.as_deref().unwrap_or("?"),
-        &primary,
-        &participants,
-    ))
 }
 
 #[cfg(test)]
@@ -1640,5 +1674,25 @@ mod tests {
                 .collect(),
             None => (0..width).collect(),
         }
+    }
+
+    #[test]
+    fn scc_walk_does_not_use_the_native_stack() {
+        const COUNT: usize = 100_000;
+        let mut graph = DependencyGraph::new();
+        let mut previous = None;
+        for start in 0..COUNT {
+            let current = graph.add_node(test_node(0, ArraySpan { start, length: 1 }));
+            if let Some(previous) = previous {
+                add_dependency_edge(
+                    &mut graph,
+                    previous,
+                    current,
+                    GraphDependency::unconditional(BitDependency::WHOLE),
+                );
+            }
+            previous = Some(current);
+        }
+        assert_eq!(strongly_connected_components(&graph).len(), COUNT);
     }
 }
