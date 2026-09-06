@@ -1643,7 +1643,15 @@ fn run_comb_pipeline(
                         .chain(ffs.into_iter().map(|(cs, ce)| (true, cs, ce)))
                         .collect();
                 }
-                let backedge = translate_pairs(&s.backedge);
+                // A single-pass schedule reaches its fixpoint in one run, so
+                // every run is converged by construction and the backedge
+                // snapshot plus its post-run compare would only ever confirm
+                // that; an empty set skips both.
+                let backedge = if required_comb_passes == 1 {
+                    Vec::new()
+                } else {
+                    translate_pairs(&s.backedge)
+                };
                 let mut replay = translate_pairs(&s.replay);
                 coalesce(&mut replay);
                 // The plan guarantees `compare_pre == replay`; keep the
