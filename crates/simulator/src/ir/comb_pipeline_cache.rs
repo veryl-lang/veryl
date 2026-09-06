@@ -79,6 +79,9 @@ pub struct CombPipeline {
     /// `comb_statements` and compare ranges are FINAL (post-relayout) comb
     /// offsets, so a cache hit reuses them verbatim.  Empty when ungated.
     pub cone_segments: Arc<Vec<crate::ir::opt::cone_gate::ConeSegment>>,
+    /// Cone-gate groups over `cone_segments`, compare ranges FINAL; the
+    /// per-instance state offsets are zero here.
+    pub cone_groups: Arc<Vec<crate::ir::opt::cone_gate::ConeGroup>>,
 }
 
 enum Slot {

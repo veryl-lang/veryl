@@ -23499,6 +23499,119 @@ fn cone_gate_skips_only_when_the_result_is_unchanged() {
 }
 
 #[test]
+fn cone_gate_group_skips_both_cones_and_reruns_them_on_a_change() {
+    // Two flat cones fed by the same input sit under one group at the top:
+    // its boundary is that input, cheaper than the two compares it replaces.
+    // Holding the input lets the group go clean and both cones skip; a change
+    // must reach all four outputs on the very next settle.
+    const T: usize = 400;
+    let cone = |name: &str, salt: u64| -> String {
+        let decls: String = (0..T)
+            .map(|i| format!("        var t{i}: logic<16>;\n        var s{i}: logic<16>;\n        var x{i}: logic<16>;\n"))
+            .collect();
+        // Every temp feeds two statements, so single-reader inlining keeps
+        // one statement per element and the cone clears its floor; the two
+        // accumulator chains read each other for the same reason.  Chains
+        // rather than one wide expression keep every tree shallow.
+        let mut body = String::new();
+        for i in 0..T {
+            if i.is_multiple_of(2) {
+                body.push_str(&format!(
+                    "        assign t{i} = a + 16'd{};\n",
+                    i as u64 + salt
+                ));
+            } else {
+                body.push_str(&format!(
+                    "        assign t{i} = a ^ 16'd{};\n",
+                    3 * i as u64 + salt
+                ));
+            }
+        }
+        body.push_str("        assign s0 = t0 ^ t1;\n        assign x0 = t0 ^ t1;\n");
+        for i in 1..T {
+            let j = (i + 1) % T;
+            body.push_str(&format!(
+                "        assign s{i} = s{p} + (t{i} ^ t{j}) + x{p};\n        assign x{i} = x{p} ^ (t{i} ^ t{j}) ^ s{p};\n",
+                p = i - 1
+            ));
+        }
+        format!(
+            r#"
+    module {name} (
+        a:  input  logic<16>,
+        y:  output logic<16>,
+        y2: output logic<16>,
+    ) {{
+{decls}
+{body}
+        assign y = s{last};
+        assign y2 = x{last};
+    }}
+"#,
+            last = T - 1
+        )
+    };
+    let code = format!(
+        r#"
+    module Top (
+        sel: input  logic<16>,
+        o:   output logic<16>,
+        oo:  output logic<16>,
+        o3:  output logic<16>,
+        oo3: output logic<16>,
+    ) {{
+        inst u: ConeA (a: sel, y: o, y2: oo);
+        inst v: ConeB (a: sel, y: o3, y2: oo3);
+    }}
+{}{}"#,
+        cone("ConeA", 0),
+        cone("ConeB", 7)
+    );
+    let expect = |a: u64, salt: u64| -> (u64, u64) {
+        let m = 0xffffu64;
+        let t: Vec<u64> = (0..T)
+            .map(|i| {
+                if i.is_multiple_of(2) {
+                    (a + i as u64 + salt) & m
+                } else {
+                    a ^ (3 * i as u64 + salt)
+                }
+            })
+            .collect();
+        let p = |i: usize| t[i] ^ t[(i + 1) % T];
+        let (mut s, mut x) = (p(0), p(0));
+        for i in 1..T {
+            let (ns, nx) = ((s + p(i) + x) & m, x ^ p(i) ^ s);
+            s = ns;
+            x = nx;
+        }
+        (s, x)
+    };
+    let mut armed = 0;
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        armed += usize::from(ir.cone_segments.len() >= 2);
+        let mut sim = Simulator::new(ir, None);
+        for (sel, repeats) in [(0u64, 4), (1, 1), (1, 6), (0xbeef, 3), (0, 1), (0xbeef, 2)] {
+            sim.set("sel", Value::new(sel, 16, false));
+            for rep in 0..repeats {
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                let mut get = |n: &str| sim.get(n).unwrap().payload_u64();
+                let got = [get("o"), get("oo"), get("o3"), get("oo3")];
+                let (y, y2) = expect(sel, 0);
+                let (y3, y4) = expect(sel, 7);
+                assert_eq!(
+                    got,
+                    [y, y2, y3, y4],
+                    "sel={sel:#x} rep={rep} config={config:?}"
+                );
+            }
+        }
+    }
+    assert!(armed >= 4, "too few configs planned two segments: {armed}");
+}
+
+#[test]
 fn wide_concat_element_placement() {
     // A >128-bit concatenation places each element into the word it lands in,
     // so the two shapes that stress the position arithmetic are one element per
