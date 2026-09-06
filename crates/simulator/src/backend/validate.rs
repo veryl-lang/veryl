@@ -136,6 +136,33 @@ pub fn settle_comb(
 /// backend, restore the inputs, run the Cranelift chunk, and diff. The closure
 /// writes comb storage only, so the same comparison applies.
 pub fn partial_settle(ir: &Ir, whole: &dyn CompiledWhole, mask_cache: &mut MaskCache) {
+    partial_settle_with(
+        ir,
+        whole,
+        mask_cache,
+        ir.derived_clock_eval_passes,
+        &|ir, mc| ir.run_chunked_partial_settle(mc),
+    );
+}
+
+/// `partial_settle` for the closure's master-toggle subset.
+pub fn partial_settle_master(ir: &Ir, whole: &dyn CompiledWhole, mask_cache: &mut MaskCache) {
+    partial_settle_with(
+        ir,
+        whole,
+        mask_cache,
+        ir.derived_clock_master_passes,
+        &|ir, mc| ir.run_chunked_partial_settle_master(mc),
+    );
+}
+
+fn partial_settle_with(
+    ir: &Ir,
+    whole: &dyn CompiledWhole,
+    mask_cache: &mut MaskCache,
+    passes: usize,
+    run_chunked: &dyn Fn(&Ir, &mut MaskCache),
+) {
     // The closure runs on every master edge, several times per cycle, and a
     // sampled call copies both buffers twice, so honour the stride here as
     // `settle_comb` does or the validate run never finishes.
@@ -147,7 +174,7 @@ pub fn partial_settle(ir: &Ir, whole: &dyn CompiledWhole, mask_cache: &mut MaskC
             v % stride == 0
         });
         if !sample {
-            ir.run_chunked_partial_settle(mask_cache);
+            run_chunked(ir, mask_cache);
             return;
         }
     }
@@ -163,10 +190,10 @@ pub fn partial_settle(ir: &Ir, whole: &dyn CompiledWhole, mask_cache: &mut MaskC
     let buf_mut = (&*ir.write_log_buffer) as *const _ as *mut crate::ir::write_log::WriteLogBuffer;
     let out_mark = crate::output_buffer::mark();
 
-    for _ in 0..ir.derived_clock_eval_passes {
+    for _ in 0..passes {
         if whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) == DispatchOutcome::NotReady {
             crate::output_buffer::truncate_to(out_mark);
-            ir.run_chunked_partial_settle(mask_cache);
+            run_chunked(ir, mask_cache);
             return;
         }
     }
@@ -186,7 +213,7 @@ pub fn partial_settle(ir: &Ir, whole: &dyn CompiledWhole, mask_cache: &mut MaskC
     }
     crate::output_buffer::truncate_to(out_mark);
 
-    ir.run_chunked_partial_settle(mask_cache);
+    run_chunked(ir, mask_cache);
 
     let mut skip: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for &(off, nb) in whole.localized_comb_bytes() {

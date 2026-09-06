@@ -756,16 +756,20 @@ fn gated_clock_closure_order_with_a_backward_edge() {
         }
         exercised += 1;
         ir.derived_clock_eval_stmts.reverse();
+        ir.derived_clock_master_stmts.reverse();
         // Any order of N statements converges in N passes.
         let passes = ir.derived_clock_eval_stmts.len();
         ir.derived_clock_eval_passes = passes;
+        ir.derived_clock_master_passes = passes;
 
         // NEGATIVE CONTROL: the same reversed chunk with the single pass the
         // closure used to get.  Without this the test would also pass on an
         // order that never needed the extra passes.
         let mut one = analyze(code, &config);
         one.derived_clock_eval_stmts.reverse();
+        one.derived_clock_master_stmts.reverse();
         one.derived_clock_eval_passes = 1;
+        one.derived_clock_master_passes = 1;
         let mut sim_one = Simulator::new(one, None);
         let clk_one = sim_one.get_clock("i_clk").unwrap();
         let rst_one = sim_one.get_reset("i_rst").unwrap();
