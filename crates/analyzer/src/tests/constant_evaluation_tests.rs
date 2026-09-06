@@ -5,7 +5,7 @@ use crate::value::Value;
 #[test]
 fn constant_function_memoization_matches_uncached_evaluation() {
     type EvaluationCase = (&'static str, fn(u64) -> u64);
-    let cases: [EvaluationCase; 4] = [
+    let cases: [EvaluationCase; 8] = [
         (
             r#"
             function leaf(x: input u32) -> u32 {
@@ -52,6 +52,46 @@ fn constant_function_memoization_matches_uncached_evaluation() {
             }
         "#,
             |x| x * 3 + 4,
+        ),
+        (
+            r#"
+            function pack(x: input u32, y: input u32) -> u32 { return x * 10 + y; }
+            function run(x: input u32) -> u32 {
+                return pack(x, pack(x + 1, 3));
+            }
+        "#,
+            |x| x * 20 + 13,
+        ),
+        (
+            r#"
+            function pack(x: input u32, y: input u32) -> u32 { return x * 10 + y; }
+            function run(x: input u32) -> u32 {
+                let ignored: u32 = pack(x, pack(x + 1, 3));
+                return pack(x, (x + 1) * 10 + 3) + (ignored & 0);
+            }
+        "#,
+            |x| x * 20 + 13,
+        ),
+        (
+            r#"
+            function pack(x: input u32, y: input u32) -> u32 { return x * 10 + y; }
+            function run(x: input u32) -> u32 {
+                return pack(pack(x, 1), pack(x, 2));
+            }
+        "#,
+            |x| x * 110 + 12,
+        ),
+        (
+            r#"
+            var counter: u32;
+            function bump() -> u32 { counter += 1; return counter; }
+            function pack(x: input u32, y: input u32) -> u32 { return x * 10 + y; }
+            function run(x: input u32) -> u32 {
+                counter = x;
+                return pack(bump(), pack(bump(), bump()));
+            }
+        "#,
+            |x| x * 21 + 33,
         ),
     ];
     for (functions, expected) in cases {
@@ -119,4 +159,57 @@ fn constant_function_memoization_matches_uncached_evaluation() {
             }
         }
     }
+}
+
+#[test]
+fn nested_function_actuals_do_not_corrupt_constant_folding() {
+    let code = r#"
+        module Top(o: output u32) {
+            function pack(x: input u32, y: input u32) -> u32 {
+                return x * 10 + y;
+            }
+            function run(x: input u32) -> u32 {
+                let ignored: u32 = pack(x, pack(x + 1, 3));
+                return pack(x, (x + 1) * 10 + 3) + (ignored & 0);
+            }
+            assign o = run(1);
+        }
+    "#;
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+    errors.extend(Analyzer::analyze_post_pass1());
+    errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    assert!(errors.is_empty(), "{errors:#?}");
+    let Component::Module(module) = &ir.components[0] else {
+        panic!("expected module");
+    };
+    let expression = module
+        .declarations
+        .iter()
+        .find_map(|declaration| {
+            let Declaration::Comb(comb) = declaration else {
+                return None;
+            };
+            comb.statements.iter().find_map(|statement| {
+                let Statement::Assign(assign) = statement else {
+                    return None;
+                };
+                Some(&assign.expr)
+            })
+        })
+        .unwrap();
+    // No variable/function table: inspect the actual folded constant rather
+    // than re-evaluating run with a fresh set of call frames.
+    let result = expression
+        .eval_value(&mut Context::default())
+        .unwrap()
+        .to_u64();
+    assert_eq!(result, Some(33), "{ir}");
 }

@@ -222,16 +222,21 @@ impl FunctionCall {
 
         let mut inputs = Vec::new();
         let mut input_bits = 0usize;
-        // Evaluate and bind every actual even on a cache hit: an actual can
-        // itself call a function, and copy-in ordering must remain unchanged.
+        let mut evaluated_inputs = Vec::new();
+        // Evaluate every actual in order, even on a cache hit. Defer copy-in
+        // until all actuals are ready: an actual can call this same function
+        // and overwrite its formals while the outer call is still evaluating.
         for (path, expr) in &self.inputs {
-            let id = func.arg_map.get(path)?;
+            let id = *func.arg_map.get(path)?;
             let value = expr.eval_value(context)?;
             if cacheable {
                 input_bits = input_bits.saturating_add(value.width().max(64));
                 inputs.push((path.clone(), value.clone()));
             }
-            let var = context.variable_mut(id)?;
+            evaluated_inputs.push((id, value));
+        }
+        for (id, value) in evaluated_inputs {
+            let var = context.variable_mut(&id)?;
             var.set_value(&[], value, None);
         }
         let key = cacheable.then(|| FunctionValueKey {
