@@ -14,6 +14,7 @@ use crate::conv::checker::import::check_import;
 use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
+use crate::conv::checker::portability::check_statement_after_if_reset;
 use crate::conv::context::{FunctionOutputBinding, RuntimeFunctionEffect};
 use crate::conv::utils::{
     TypePosition, assign_rhs_context_type, check_assign_before_definition,
@@ -658,6 +659,7 @@ impl Conv<&AlwaysFfDeclaration> for ir::Declaration {
                 &reset.comptime,
                 &value.always_ff.always_ff_token.token,
             );
+            check_statement_after_if_reset(context, value, reset);
         }
 
         context.current_clock = Some(clock.comptime.clone());
