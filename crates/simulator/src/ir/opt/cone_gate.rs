@@ -42,6 +42,7 @@ use veryl_analyzer::ir::VarId;
 /// FF-buffer ownership, held per uniformly strided RUN of elements rather
 /// than per element: memory arrays make the element count grow with the
 /// modelled depth while the array count does not.
+#[derive(Clone)]
 pub struct FfOwner {
     /// `(start, stride, count, bytes)`, sorted by `start` and disjoint.  The
     /// run covers `[start, start + count * stride)`, of which each element
@@ -69,6 +70,7 @@ impl FfOwner {
 
 /// Node tables of the module-instance tree plus storage-ownership intervals,
 /// prepared by the caller (`ProtoModule::conv`) from `ModuleVariableMeta`.
+#[derive(Clone)]
 pub struct ConeGateInputs {
     /// Parent per node; the root's parent is `u32::MAX`.
     pub node_parent: Vec<u32>,
@@ -490,7 +492,9 @@ const COMPARE_BYTES_PER_STMT: usize = 8;
 fn compare_budget(comb_stmts: usize) -> usize {
     comb_stmts.saturating_mul(COMPARE_BYTES_PER_STMT)
 }
-/// A segment smaller than this is not worth its dispatch branch.
+/// A segment smaller than this is not worth its dispatch branch: on cones
+/// that fragment into short bursts the per-segment guard costs more than the
+/// statements it skips.
 const MIN_SEGMENT_STMTS: usize = 64;
 /// A subtree carrying fewer statements than this is not worth a cone of its
 /// own; its statements gate as part of an ancestor's, or not at all.
@@ -607,39 +611,62 @@ fn comb_extent(elements: &[VariableElement], use_4state: bool) -> (usize, usize)
     (bytes, hi.saturating_sub(lo))
 }
 
-/// Assemble the node tables from the pre-instantiation variable-meta tree.
-/// `event_written` holds every comb offset the event statements can write
-/// (element-expanded); the covering variable spans join each segment's
-/// compare set so an event overwrite wakes the segment.
-/// Give each function-local comb copy the owner of the storage it was copied
-/// from (`Context::comb_reloc`): the copy is private to the same instance, so
-/// the original's owner is exactly right, and without one the statement reads
-/// as `unbounded` and pins itself to the root.  `comb_owner` must be sorted on
-/// entry; an unowned original adds nothing.
+/// Give each function-local comb copy and rename temp the owner of the storage
+/// it stands in for (`Context::comb_reloc`): the copy is private to the same
+/// instance, so the original's owner is exactly right, and without one the
+/// statement reads as `unbounded` and pins itself to the root.  `comb_owner`
+/// must be sorted on entry; an unowned original adds nothing.  Entries chain
+/// (a temp renaming another temp), so passes repeat until none resolves.
 fn inherit_reloc_owners(
     comb_owner: &mut Vec<(usize, usize, u32)>,
     comb_reloc: &[(isize, isize, usize)],
 ) {
-    let mut extra: Vec<(usize, usize, u32)> = Vec::new();
-    for &(old, new, bytes) in comb_reloc {
-        if old < 0 || new < 0 || bytes == 0 {
-            continue;
+    let mut pending: Vec<(usize, usize, usize)> = comb_reloc
+        .iter()
+        .filter(|&&(old, new, bytes)| old >= 0 && new >= 0 && bytes > 0)
+        .map(|&(old, new, bytes)| (old as usize, new as usize, bytes))
+        .collect();
+    loop {
+        let mut extra: Vec<(usize, usize, u32)> = Vec::new();
+        pending.retain(|&(old, new, bytes)| {
+            let i = comb_owner.partition_point(|&(s, _, _)| s <= old);
+            match i.checked_sub(1) {
+                Some(i) if comb_owner[i].0 <= old && old < comb_owner[i].1 => {
+                    extra.push((new, new + bytes, comb_owner[i].2));
+                    false
+                }
+                _ => true,
+            }
+        });
+        if extra.is_empty() {
+            return;
         }
-        let x = old as usize;
-        let i = comb_owner.partition_point(|&(s, _, _)| s <= x);
-        if let Some(i) = i.checked_sub(1)
-            && comb_owner[i].0 <= x
-            && x < comb_owner[i].1
-        {
-            extra.push((new as usize, new as usize + bytes, comb_owner[i].2));
-        }
-    }
-    if !extra.is_empty() {
         comb_owner.extend(extra);
         radix_sort_intervals(comb_owner);
     }
 }
 
+impl ConeGateInputs {
+    /// Own comb storage allocated after `build_inputs`, given as
+    /// `(from, to, bytes)` entries in the `Context::comb_reloc` shape, as the
+    /// owner of `from`.
+    pub fn adopt_relocations(&mut self, reloc: &[(isize, isize, usize)]) {
+        let before = self.comb_owner.len();
+        inherit_reloc_owners(&mut self.comb_owner, reloc);
+        if diag() {
+            eprintln!(
+                "[cone_gate] adopt_relocations: entries={} owned={}",
+                reloc.len(),
+                self.comb_owner.len() - before,
+            );
+        }
+    }
+}
+
+/// Assemble the node tables from the pre-instantiation variable-meta tree.
+/// `event_written` holds every comb offset the event statements can write
+/// (element-expanded); the covering variable spans join each segment's
+/// compare set so an event overwrite wakes the segment.
 pub fn build_inputs(
     top_name: &str,
     top_vars: &HashMap<VarId, VariableMeta>,
@@ -718,7 +745,16 @@ pub fn build_inputs(
         }
     }
     radix_sort_intervals(&mut comb_owner);
+    let before = comb_owner.len();
     inherit_reloc_owners(&mut comb_owner, comb_reloc);
+    if diag() {
+        eprintln!(
+            "[cone_gate] build_inputs: reloc entries={} owned={} comb_extent={}",
+            comb_reloc.len(),
+            comb_owner.len() - before,
+            comb_owner.last().map_or(0, |&(_, e, _)| e),
+        );
+    }
     ff_runs.sort_unstable();
     ff_runs.dedup();
     debug_assert!(
@@ -1465,6 +1501,16 @@ fn finish_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reloc_owners_follow_temp_chains() {
+        // Node 1 owns [0, 8); the temp at 8 stands in for it and the temp at
+        // 16 for that temp, listed before its parent resolves.  An entry whose
+        // original nobody owns adds nothing.
+        let mut owner = vec![(0usize, 8usize, 1u32)];
+        inherit_reloc_owners(&mut owner, &[(8, 16, 8), (0, 8, 8), (100, 24, 8)]);
+        assert_eq!(owner, vec![(0, 8, 1), (8, 16, 1), (16, 24, 1)]);
+    }
 
     #[test]
     fn rearm_retries_offed_segments_each_epoch() {

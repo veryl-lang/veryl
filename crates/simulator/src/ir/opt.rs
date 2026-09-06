@@ -142,7 +142,10 @@ pub(crate) mod version_split {
     pub fn pass_enabled(_use_4state: bool) -> bool {
         false
     }
-    pub fn run(_stmts: &mut [ProtoStatement], _alloc: &mut dyn FnMut(usize) -> isize) -> RunStats {
+    pub fn run(
+        _stmts: &mut [ProtoStatement],
+        _alloc: &mut dyn FnMut(usize, isize) -> isize,
+    ) -> RunStats {
         RunStats
     }
     pub fn accumulate(_s: &RunStats) {}

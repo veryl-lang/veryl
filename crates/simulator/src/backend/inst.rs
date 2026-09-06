@@ -210,6 +210,9 @@ struct CachedStatements {
     post_comb_fns: Vec<ProtoStatement>,
     child_modules: Vec<ModuleVariableMeta>,
     derived_clock_candidates: Vec<crate::ir::EdgeCandidate>,
+    /// `Context::comb_reloc` entries the reference conv recorded inside its
+    /// region; a copy needs them relocated too or its temps stay unowned.
+    comb_reloc: Vec<(isize, isize, usize)>,
 }
 
 /// Single-flight cache slot: one thread `Computing` a component blocks others
@@ -235,6 +238,7 @@ pub struct ReusedStatements {
     pub derived_clock_candidates: Vec<crate::ir::EdgeCandidate>,
     pub ff_size: usize,
     pub comb_size: usize,
+    pub comb_reloc: Vec<(isize, isize, usize)>,
 }
 
 fn adjust_offsets_vec(offs: &[VarOffset], ff_delta: isize, comb_delta: isize) -> Vec<VarOffset> {
@@ -365,6 +369,11 @@ fn relocate_entry(
         .iter()
         .map(|(id, off, nb, pol, neg)| (*id, off.adjust(ff_delta, comb_delta), *nb, *pol, *neg))
         .collect();
+    let comb_reloc = entry
+        .comb_reloc
+        .iter()
+        .map(|&(from, to, vs)| (from + comb_delta, to + comb_delta, vs))
+        .collect();
     ReusedStatements {
         event_statements,
         comb_statements: reloc(&entry.comb_statements),
@@ -373,6 +382,7 @@ fn relocate_entry(
         derived_clock_candidates,
         ff_size: entry.ff_size,
         comb_size: entry.comb_size,
+        comb_reloc,
     }
 }
 
@@ -409,6 +419,7 @@ impl ClaimGuard {
         post_comb_fns: &[ProtoStatement],
         child_modules: &[ModuleVariableMeta],
         derived_clock_candidates: &[crate::ir::EdgeCandidate],
+        comb_reloc: &[(isize, isize, usize)],
     ) {
         let entry = Arc::new(CachedStatements {
             ref_ff_start: ff_start,
@@ -420,6 +431,7 @@ impl ClaimGuard {
             post_comb_fns: post_comb_fns.to_vec(),
             child_modules: child_modules.to_vec(),
             derived_clock_candidates: derived_clock_candidates.to_vec(),
+            comb_reloc: comb_reloc.to_vec(),
         });
         let mut cache = GLOBAL_STMT_CACHE.lock().unwrap();
         cache.insert(self.key, Slot::Done(entry));

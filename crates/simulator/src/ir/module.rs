@@ -1299,16 +1299,22 @@ fn run_comb_pipeline(
     // covers every comb temp this function allocates, the scheduler's version
     // renames included).
     let temps_before = context.comb_total_bytes;
+    // The temps allocated below have no `VariableMeta`; the cone plan adopts
+    // each as storage of the variable it stands in for (see
+    // `ConeGateInputs::adopt_relocations`).
+    let mut temp_reloc: Vec<(isize, isize, usize)> = Vec::new();
     let unified = {
         let mut unified = unified;
         if version_split::pass_enabled(context.config.use_4state) {
             let use_4state = context.config.use_4state;
             let before = context.comb_total_bytes;
             let comb_total = &mut context.comb_total_bytes;
-            let mut alloc = |width: usize| -> isize {
+            let mut alloc = |width: usize, from: isize| -> isize {
                 let nb = crate::ir::variable::native_bytes(width);
+                let vs = crate::ir::variable::value_size(nb, use_4state);
                 let off = *comb_total as isize;
-                *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                *comb_total += vs;
+                temp_reloc.push((from, off, vs));
                 off
             };
             let stats = version_split::run(&mut unified, &mut alloc);
@@ -1325,10 +1331,12 @@ fn run_comb_pipeline(
     let (unified_sorted, passes_hint) = {
         let use_4state = context.config.use_4state;
         let comb_total = &mut context.comb_total_bytes;
-        let mut alloc = |width: usize| -> isize {
+        let mut alloc = |width: usize, from: isize| -> isize {
             let nb = crate::ir::variable::native_bytes(width);
+            let vs = crate::ir::variable::value_size(nb, use_4state);
             let off = *comb_total as isize;
-            *comb_total += crate::ir::variable::value_size(nb, use_4state);
+            *comb_total += vs;
+            temp_reloc.push((from, off, vs));
             off
         };
         analyze_dependency(unified, &mut alloc)?
@@ -1471,6 +1479,12 @@ fn run_comb_pipeline(
     // way, checked on the permutation itself: that is what decides whether an
     // exact one-pass hint still describes the order that actually runs.
     let mut cone_kept_edge_directions = false;
+    let adopted_inputs = cone_inputs.filter(|_| !temp_reloc.is_empty()).map(|ci| {
+        let mut ci = ci.clone();
+        ci.adopt_relocations(&temp_reloc);
+        ci
+    });
+    let cone_inputs = adopted_inputs.as_ref().or(cone_inputs);
     let (unified_sorted, cone_plan) = match cone_inputs {
         Some(ci) => match cone_gate::plan(&unified_sorted, ci) {
             Some(plan) => {
@@ -1684,9 +1698,11 @@ fn run_comb_pipeline(
 /// Returns the scheduled statements plus an exact required-pass hint when the
 /// block-aware sort could derive one (see `stable_topo_sort_with_blocks`);
 /// `None` means the caller must fall back to `compute_required_passes`.
+/// `alloc(width, from)` reserves a version-rename temp standing in for the
+/// comb variable at offset `from` (see `rename_versions`).
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
-    alloc: &mut dyn FnMut(usize) -> isize,
+    alloc: &mut dyn FnMut(usize, isize) -> isize,
 ) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
@@ -6639,7 +6655,7 @@ fn rename_versions(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
     groups: &mut Vec<usize>,
-    alloc: &mut dyn FnMut(usize) -> isize,
+    alloc: &mut dyn FnMut(usize, isize) -> isize,
 ) -> usize {
     // Offsets any dynamic access touches: a temp sized for one variable cannot
     // stand in for a base that names a whole array.
@@ -6729,7 +6745,7 @@ fn rename_versions(
             declined += 1;
             continue;
         }
-        let to = VarOffset::Comb(alloc(width));
+        let to = VarOffset::Comb(alloc(width, off.raw()));
         plans.push(Plan {
             after,
             readers: mids,
