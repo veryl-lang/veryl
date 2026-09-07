@@ -460,6 +460,18 @@ impl Conv<&CastingType> for ir::Factor {
 
                     return Ok(ir::Factor::Value(comptime));
                 }
+                CastingType::LParenExpressionRParen(x) => {
+                    let token: TokenRange = value.into();
+                    let (comptime, _) = eval_expr(context, None, x.expression.as_ref(), false)?;
+
+                    if let Ok(value) = comptime.get_value()
+                        && let Some(value) = value.to_usize()
+                    {
+                        let _ = context.check_size(value, token);
+                    }
+
+                    return Ok(ir::Factor::Value(comptime));
+                }
                 CastingType::UserDefinedType(_) => unreachable!(),
             };
             {

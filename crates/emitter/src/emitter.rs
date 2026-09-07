@@ -3612,6 +3612,12 @@ impl VerylWalker for Emitter {
                     self.base_less(&x.base_less);
                     self.str("'(");
                 }
+                CastingType::LParenExpressionRParen(x) => {
+                    self.l_paren(&x.l_paren);
+                    self.expression(&x.expression);
+                    self.r_paren(&x.r_paren);
+                    self.str("'(");
+                }
                 // casting to clock type doesn't change polarity
                 CastingType::Clock(_)
                 | CastingType::ClockPosedge(_)
@@ -3698,7 +3704,8 @@ impl VerylWalker for Emitter {
                 | CastingType::F64(_)
                 | CastingType::UserDefinedType(_)
                 | CastingType::Based(_)
-                | CastingType::BaseLess(_) => self.str(")"),
+                | CastingType::BaseLess(_)
+                | CastingType::LParenExpressionRParen(_) => self.str(")"),
                 CastingType::BBool(_) | CastingType::LBool(_) => self.str(") != 1'b0)"),
                 // casting to clock/reset emits no surrounding cast wrapper
                 CastingType::Clock(_)
