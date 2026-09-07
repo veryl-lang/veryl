@@ -206,6 +206,7 @@ pub fn build_schedule(
 
     // Sort by pre_jit_stmts index so partial_settle runs deps first.
     let mut eval_indices: Vec<usize> = dep_set.into_iter().collect();
+    absorb_forwarders(&mut eval_indices, pre_jit_stmts);
     eval_indices.sort_unstable();
     let master_indices = master_downstream(&eval_indices, pre_jit_stmts, input_clock_offsets);
 
@@ -223,6 +224,53 @@ pub fn build_schedule(
         eval_indices,
         master_indices,
     )
+}
+
+/// Extend the closure with the plain comb assigns outside it that read only
+/// what it already keeps current (its inputs and outputs, transitively).
+/// Left outside, such a statement (a clock net copied onto a port nobody
+/// reads, say) is a reader of the closure's inputs that the settle filter
+/// must honour, so every change of those inputs forces a full settle;
+/// evaluated with the closure it is refreshed at the closure's cost.  Bounded
+/// so the closure stays small.
+fn absorb_forwarders(eval_indices: &mut Vec<usize>, pre_jit_stmts: &[ProtoStatement]) {
+    const CAP: usize = 64;
+    let mut in_closure: HashSet<usize> = eval_indices.iter().copied().collect();
+    let mut visible: HashSet<VarOffset> = HashSet::default();
+    let (mut ins, mut outs) = (Vec::new(), Vec::new());
+    for &i in eval_indices.iter() {
+        ins.clear();
+        outs.clear();
+        pre_jit_stmts[i].gather_variable_offsets(&mut ins, &mut outs);
+        visible.extend(ins.iter().copied());
+        visible.extend(outs.iter().copied());
+    }
+    let mut absorbed = 0usize;
+    let mut grew = true;
+    while grew && absorbed < CAP {
+        grew = false;
+        for (i, stmt) in pre_jit_stmts.iter().enumerate() {
+            if in_closure.contains(&i)
+                || !matches!(stmt, ProtoStatement::Assign(a) if !a.dst.is_ff())
+            {
+                continue;
+            }
+            ins.clear();
+            outs.clear();
+            stmt.gather_variable_offsets(&mut ins, &mut outs);
+            if ins.is_empty() || !ins.iter().all(|o| visible.contains(o)) {
+                continue;
+            }
+            in_closure.insert(i);
+            eval_indices.push(i);
+            visible.extend(outs.iter().copied());
+            absorbed += 1;
+            grew = true;
+            if absorbed == CAP {
+                break;
+            }
+        }
+    }
 }
 
 /// The closure statements a master input clock can change: those reading a

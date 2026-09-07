@@ -114,6 +114,16 @@ pub struct Module {
     /// per test does not deep-clone the whole set.  The testbench uses it to
     /// decide which of its own statements really invalidate the comb.
     pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// `comb_touched_offsets` without what only the derived-clock closure
+    /// touches: the settle filter's read set.  The closure is re-evaluated
+    /// on its own at every step, so an input only it reads never calls for
+    /// a full settle; what it writes for the rest of the comb is watched
+    /// through `closure_out_watch`.
+    pub settle_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// Comb byte ranges `(offset, len)` the derived-clock closure writes and
+    /// a statement outside it reads: a change of one after a closure
+    /// evaluation dirties the comb.
+    pub closure_out_watch: Vec<(u32, u32)>,
     pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
     /// Per event, the comb byte offsets its statements can write, or `None`
     /// when unboundable (`event_comb_write_offsets`).  The simulator's
@@ -177,6 +187,10 @@ pub struct ProtoModule {
     pub fused_comb_offsets: Vec<isize>,
     /// See `Module::comb_touched_offsets`.
     pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// See `Module::settle_touched_offsets`.
+    pub settle_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// See `Module::closure_out_watch`.
+    pub closure_out_watch: Vec<(u32, u32)>,
     /// Cone-gate segments in BLOCK space (`comb_statements.0` indices) with
     /// their state offsets assigned; `instantiate` maps them to the flat
     /// statement space.
@@ -507,6 +521,8 @@ impl ProtoModule {
             rtl_driven: self.rtl_driven.clone(),
             fused_comb_offsets: self.fused_comb_offsets.clone(),
             comb_touched_offsets: Arc::clone(&self.comb_touched_offsets),
+            settle_touched_offsets: Arc::clone(&self.settle_touched_offsets),
+            closure_out_watch: self.closure_out_watch.clone(),
             cone_segments,
             event_comb_writes: self.event_comb_writes.clone(),
             cone_state_base: self.cone_state_base,
@@ -6216,6 +6232,8 @@ impl Conv<&air::Module> for ProtoModule {
 
         // Derived-clock eval is a separate `try_jit` chunk so the main
         // comb JIT/AOT-C blob stays intact while partial_settle is fast.
+        let mut settle_touched_offsets = Arc::clone(&comb_touched_offsets);
+        let mut closure_out_watch: Vec<(u32, u32)> = Vec::new();
         let (
             derived_clock_schedule,
             derived_clock_eval,
@@ -6241,6 +6259,15 @@ impl Conv<&air::Module> for ProtoModule {
                 &input_clock_offsets,
             );
             let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
+            if let Some(split) = closure_settle_split(
+                &pre_jit_stmts,
+                &eval_indices,
+                &eval_protos,
+                context.comb_total_bytes,
+            ) {
+                settle_touched_offsets = Arc::new(split.touched);
+                closure_out_watch = split.out_watch;
+            }
             // The closure keeps `unified_sorted`'s relative order, which is
             // only single-pass when that order linearized; where it did not,
             // one pass reads a producer that runs later and the gated clock
@@ -6376,6 +6403,8 @@ impl Conv<&air::Module> for ProtoModule {
             fused_comb_offsets: cached.fused_offsets.clone(),
             cone_segments,
             comb_touched_offsets,
+            settle_touched_offsets,
+            closure_out_watch,
             event_comb_writes,
             cone_state_base,
             settle_info: Default::default(),
@@ -6704,6 +6733,60 @@ fn merge_reset_dispatch(
 /// would silently skip a required settle, leaving a stale comb value to be
 /// read as settled.
 pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<VarOffset> {
+    let mut acc = HashSet::default();
+    walk_touched_offsets(stmts, &mut acc);
+    acc
+}
+
+/// What `closure_settle_split` derives for the settle filter.
+struct ClosureSettleSplit {
+    /// The comb's touched offsets with the derived-clock closure left out.
+    touched: HashSet<VarOffset>,
+    /// Closure outputs the rest of the comb reads, `(offset, len)` in comb
+    /// bytes.
+    out_watch: Vec<(u32, u32)>,
+}
+
+/// `None` when a closure write cannot be bounded or lies outside the comb
+/// buffer: the filter then keeps the whole comb as its read set.
+fn closure_settle_split(
+    all: &[ProtoStatement],
+    eval_indices: &[usize],
+    eval_protos: &[ProtoStatement],
+    comb_bytes: usize,
+) -> Option<ClosureSettleSplit> {
+    let closure: HashSet<usize> = eval_indices.iter().copied().collect();
+    let mut touched = HashSet::default();
+    for (i, s) in all.iter().enumerate() {
+        if !closure.contains(&i) {
+            walk_touched_offsets(std::slice::from_ref(s), &mut touched);
+        }
+    }
+    let mut outer_comb: Vec<isize> = touched
+        .iter()
+        .filter_map(|o| match o {
+            VarOffset::Comb(x) => Some(*x),
+            VarOffset::Ff(_) => None,
+        })
+        .collect();
+    outer_comb.sort_unstable();
+    let mut watch = Vec::new();
+    for (lo, hi) in event_comb_write_offsets(eval_protos)? {
+        if lo < 0 || hi < lo || hi as usize >= comb_bytes {
+            return None;
+        }
+        let i = outer_comb.partition_point(|&x| x < lo);
+        if outer_comb.get(i).is_some_and(|&x| x <= hi) {
+            watch.push((lo as u32, (hi - lo + 1) as u32));
+        }
+    }
+    Some(ClosureSettleSplit {
+        touched,
+        out_watch: watch,
+    })
+}
+
+fn walk_touched_offsets(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) {
     fn walk(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) {
         let mut ins: Vec<VarOffset> = Vec::new();
         let mut outs: Vec<VarOffset> = Vec::new();
@@ -6748,9 +6831,7 @@ pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<
             acc.extend(outs.drain(..));
         }
     }
-    let mut acc = HashSet::default();
-    walk(stmts, &mut acc);
-    acc
+    walk(stmts, acc);
 }
 
 /// Give the readers that sit BETWEEN two writes of one comb variable their own
