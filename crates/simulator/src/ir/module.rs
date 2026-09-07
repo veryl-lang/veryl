@@ -7248,7 +7248,7 @@ fn rename_versions(
 }
 
 /// Width of the variable an `Assign` inside `stmt` writes to `off`.
-fn assign_width_of(stmt: &ProtoStatement, off: VarOffset) -> Option<usize> {
+pub(crate) fn assign_width_of(stmt: &ProtoStatement, off: VarOffset) -> Option<usize> {
     match stmt {
         ProtoStatement::Assign(a) if a.dst == off => Some(a.dst_width),
         ProtoStatement::If(x) => x

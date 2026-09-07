@@ -164,6 +164,43 @@ pub(crate) fn stable_topo_sort_with_pieces(
     stable_topo_sort_impl(statements, Some(blocks), Some(groups))
 }
 
+/// First token anywhere in a statement tree.  Only `Assign` carries one, so a
+/// conditional or a block reports `@generated` and a cycle through it cannot be
+/// located in the source at all; the nearest assign inside it names the scope.
+fn nested_token(stmt: &ProtoStatement) -> Option<TokenRange> {
+    if let Some(t) = stmt.token().filter(|t| *t != Default::default()) {
+        return Some(t);
+    }
+    let kids: Vec<&ProtoStatement> = match stmt {
+        ProtoStatement::If(x) => x.true_side.iter().chain(x.false_side.iter()).collect(),
+        ProtoStatement::Case(c) => c
+            .arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(c.default.iter())
+            .collect(),
+        ProtoStatement::For(f) => f.body.iter().collect(),
+        ProtoStatement::SequentialBlock(b) => b.iter().collect(),
+        ProtoStatement::CompiledBlock(cb) => cb.original_stmts.iter().collect(),
+        _ => return None,
+    };
+    kids.into_iter().find_map(nested_token)
+}
+
+/// `file:line` of the nearest token, `~` marking one borrowed from a nested
+/// statement rather than the statement's own.
+fn nested_where(stmt: &ProtoStatement) -> String {
+    match nested_token(stmt) {
+        Some(t) => {
+            let src = t.beg.source.to_string();
+            let file = src.rsplit('/').next().unwrap_or(&src).to_string();
+            let own = stmt.token().is_some_and(|o| o != Default::default());
+            format!("{file}:{}{}", t.beg.line, if own { "" } else { "~" })
+        }
+        None => "generated".to_string(),
+    }
+}
+
 /// ` @file:line` for a diagnostic, empty when the statement carries no token.
 fn where_stmt(stmt: &ProtoStatement) -> String {
     match stmt.token() {
@@ -453,8 +490,20 @@ fn stable_topo_sort_impl(
             if *p <= reader_idx || !ranges_overlap(*wr, rr) || exclusive_pieces(reader_idx, *p) {
                 continue;
             }
+            // `None` here means "no range recorded", which for a writer of this
+            // variable is the WHOLE VARIABLE -- a partial write carries its
+            // `Some((hi, lo))`.  `usize::MAX` therefore made the coverage test
+            // unsatisfiable: writers that between them cover every bit still
+            // could not cover it, and the exact pass hint was refused.  The
+            // width is the variable's, so an unknown one still falls back to
+            // MAX.
             let (hi, lo) = match wr {
-                None => (usize::MAX, 0),
+                None => (
+                    crate::ir::module::assign_width_of(&statements[*p], *key)
+                        .map(|w| w.saturating_sub(1))
+                        .unwrap_or(usize::MAX),
+                    0,
+                ),
                 Some((hi, lo)) => (*hi, *lo),
             };
             if !merged.iter().any(|(m_lo, m_hi)| *m_lo <= lo && hi <= *m_hi) {
@@ -891,13 +940,31 @@ fn trace_sort_cycles(
         return;
     }
     for (k, id) in ids.iter().enumerate() {
+        // One traced cycle names three statements; on a 1600-member SCC that
+        // says nothing about WHICH modules have to be split.
+        let mut files: Vec<(String, usize)> = Vec::new();
+        for i in (0..n).filter(|&i| scc_id[i] == *id) {
+            let f = nested_where(&statements[i]);
+            let f = f.split(':').next().unwrap_or(&f).to_string();
+            match files.iter_mut().find(|(name, _)| *name == f) {
+                Some((_, c)) => *c += 1,
+                None => files.push((f, 1)),
+            }
+        }
+        files.sort_by_key(|a| std::cmp::Reverse(a.1));
+        let top: Vec<String> = files
+            .iter()
+            .take(6)
+            .map(|(f, c)| format!("{f}x{c}"))
+            .collect();
         log::info!(
-            "pass_diag: SCC {k} (id {id}) has {} members",
-            scc_id.iter().filter(|&&x| x == *id).count()
+            "pass_diag: SCC {k} (id {id}) has {} members: {}",
+            scc_id.iter().filter(|&&x| x == *id).count(),
+            top.join(" ")
         );
     }
 
-    const MAX_TRACED: usize = 4;
+    const MAX_TRACED: usize = 32;
     for (k, id) in ids.iter().enumerate().take(MAX_TRACED) {
         let members: Vec<usize> = (0..n).filter(|&i| scc_id[i] == *id).collect();
         log::info!("pass_diag: cycle inside SCC {k}:");
@@ -952,14 +1019,11 @@ fn trace_sort_cycles(
                 ProtoStatement::SystemFunctionCall(_) => "SysFn",
                 _ => "?",
             };
-            let desc = match statements[m].token() {
-                Some(t) => {
-                    let src = t.beg.source.to_string();
-                    let file = src.rsplit('/').next().unwrap_or(&src).to_string();
-                    format!("{}@{file}:{}", kind_of(&statements[m]), t.beg.line)
-                }
-                None => format!("{}@generated", kind_of(&statements[m])),
-            };
+            let desc = format!(
+                "{}@{}",
+                kind_of(&statements[m]),
+                nested_where(&statements[m])
+            );
             // The pair of RANGES is what decides whether the edge is real: the
             // writer's bits on `m` against the reader's bits on `nxt`.
             let mut w_bits = vec![];
@@ -1714,7 +1778,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
             // Array port fed by a bare or constant partial-index variable
             // (e.g. `w_q[i]` from `logic [N, M]`): expand per-element.
-            if child_meta.elements.len() > 1
+            // A one-element port is still an ARRAY, so gating on the element
+            // COUNT sent `logic<W> [1]` to the scalar path below, where
+            // `Conv::conv` meets an array-valued expression and raises
+            // `unsupported_description`.
+            if !child_meta.r#type.array.is_empty()
                 && let air::Expression::Term(factor) = input_expr
                 && let air::Factor::Variable(parent_id, index, select, _) = factor.as_ref()
                 && select.is_empty()
