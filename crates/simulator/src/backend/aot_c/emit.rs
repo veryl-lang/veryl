@@ -4307,10 +4307,15 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
     }
     if let Some((hi, lo)) = a.select {
         let nbits = hi.checked_sub(lo)?.checked_add(1)?;
-        if nbits >= 64 {
+        if lo.checked_add(nbits)? > 64 {
             return None;
         }
-        let vmask = (1u64 << nbits) - 1;
+        // A full 64-bit select is legal: `[63:0]` on a 64-bit register.
+        let vmask = if nbits == 64 {
+            u64::MAX
+        } else {
+            (1u64 << nbits) - 1
+        };
         let pmask = vmask << lo;
         // RMW: read the dst slot (matches AssignStatement::eval_step reading
         // `self.dst`), merge [lo,hi], write dst if dual-slot, push merged.
@@ -10595,6 +10600,25 @@ mod tests {
             .collect();
         let _ = fs::remove_dir_all(&tmp);
         Some(out)
+    }
+
+    #[test]
+    fn emit_event_ff_full_width_select_emits() {
+        // `ff64[63:0] <= v`: a select covering the whole 64-bit register must
+        // not bail on the mask width.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 64,
+            select: Some((63, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x0123_4567_89ab_cdef, 64),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_event_function(&[ProtoStatement::Assign(a)])
+            .expect("a full-width select must emit");
+        assert!(src.contains("0xffffffffffffffffULL"), "{src}");
     }
 
     #[test]
