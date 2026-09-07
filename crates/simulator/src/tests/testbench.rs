@@ -3271,7 +3271,7 @@ fn tb_chunk_does_not_outrun_the_settle() {
 }
 
 /// Each `initial` block of a test module keeps its own statement list and
-/// runs as its own process, in declaration order.
+/// runs as its own process; at one instant they run in declaration order.
 #[test]
 fn initial_blocks_are_separate_processes() {
     let code = r#"
@@ -3304,8 +3304,8 @@ fn initial_blocks_are_separate_processes() {
 
         initial {
             $assert(seen == 8'd7, "the first block runs first");
-            clk.next(5);
-            $assert(o_cnt == 8'd5, "five edges after reset");
+            clk.next(8);
+            $assert(o_cnt == 8'd5, "eight shared edges, three of them in reset");
             $finish();
         }
     }
@@ -3315,6 +3315,238 @@ fn initial_blocks_are_separate_processes() {
             .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
         assert!(ir.event_statements.contains_key(&Event::Initial));
         assert!(ir.event_statements.contains_key(&Event::InitialBlock(1)));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+/// A block that ends at once (a nested `$readmemh` initial, say) leaves the
+/// other process to take every later edge on its own, reset window included.
+#[test]
+fn an_early_ending_process_leaves_the_edges_to_the_survivor() {
+    let code = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+
+    #[test(test_early_end)]
+    module test_early_end {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        var seen : logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            seen = 8'd7;
+        }
+
+        initial {
+            rst.assert();
+            clk.next(8);
+            $assert(seen == 8'd7, "the first block ran");
+            $assert(o_cnt == 8'd8, "eleven edges, three of them in reset: %d", o_cnt);
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_early_end")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+/// Two generators due at the same instant fire in one step: each domain
+/// reads the other's pre-edge value, so a swap swaps.
+#[test]
+fn simultaneous_clock_edges_fire_as_one_step() {
+    let code = r#"
+    module Swap (
+        clk_a: input 'ca clock,
+        clk_b: input 'cb clock,
+        rst: input '_ reset_sync_high,
+        oa: output 'ca logic,
+        ob: output 'cb logic,
+    ) {
+        var a_r: 'ca logic;
+        var b_r: 'cb logic;
+        unsafe (cdc) {
+            always_ff (clk_a, rst) {
+                if_reset {
+                    a_r = 1;
+                } else {
+                    a_r = b_r;
+                }
+            }
+        }
+        unsafe (cdc) {
+            always_ff (clk_b, rst) {
+                if_reset {
+                    b_r = 0;
+                } else {
+                    b_r = a_r;
+                }
+            }
+        }
+        assign oa = a_r;
+        assign ob = b_r;
+    }
+
+    #[test(test_swap)]
+    module test_swap {
+        inst ga: $tb::clock_gen;
+        inst gb: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk: ga);
+        var oa: 'ca logic;
+        var ob: 'cb logic;
+        inst dut: Swap (clk_a: ga, clk_b: gb, rst, oa, ob);
+
+        initial {
+            rst.assert(2);
+            ga.next(1);
+        }
+
+        initial {
+            gb.next(3);
+            $assert(oa == 0, "a took b's pre-edge value: oa=%d", oa);
+            $assert(ob == 1, "b took a's pre-edge value: ob=%d", ob);
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_swap") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+/// Two processes waiting on one clock count the same edges, and the ones
+/// released at an instant run in declaration order.
+#[test]
+fn processes_share_a_clock_and_run_in_order() {
+    let code = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+
+    #[test(test_shared_clock)]
+    module test_shared_clock {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        var seen : logic;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            seen = 0;
+            rst.assert();
+            clk.next(5);
+            seen = 1;
+        }
+
+        initial {
+            clk.next(8);
+            $assert(seen == 1, "the first process ran first at this instant");
+            $assert(o_cnt == 8'd5, "eight shared edges, three of them in reset: %d", o_cnt);
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_shared_clock") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
+
+/// A process resuming later than another clock's edges must see those edges
+/// taken first: candidates are ordered by time, not by kind.
+#[test]
+fn slow_clock_process_resumes_after_the_fast_clock_edges() {
+    let code = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+
+    #[test(test_slow_fast)]
+    module test_slow_fast {
+        inst ga: $tb::clock_gen #(period: 10);
+        inst gb: $tb::clock_gen #(period: 2);
+        inst rst: $tb::reset_gen (clk: gb);
+        var cnt: logic<8>;
+        inst dut: Counter (i_clk: gb, i_rst: rst, o_cnt: cnt);
+
+        initial {
+            rst.assert(1);
+            gb.next(4);
+        }
+
+        initial {
+            ga.next(1);
+            $assert(cnt == 8'd4, "four fast edges before the slow process resumed: %d", cnt);
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = match analyze_top(code, &config, "test_slow_fast") {
+            Ok(ir) => ir,
+            Err(x) => panic!("build failed for {config:?}: {x:?}"),
+        };
         let module_name = ir.name.to_string();
         assert_eq!(
             run_native_testbench(ir, None, module_name).unwrap(),

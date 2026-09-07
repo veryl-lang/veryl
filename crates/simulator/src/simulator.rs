@@ -39,6 +39,16 @@ pub struct SimProfile {
 #[derive(Default, Debug)]
 pub struct SimProfile;
 
+/// A reset held across a clock edge: `clock`'s step evaluates under the
+/// asserted level, and the first step of the window also fires `reset`'s
+/// assertion edge.
+#[derive(Clone, Debug)]
+pub struct ResetWindow {
+    pub clock: Event,
+    pub reset: Event,
+    pub assertion_edge: bool,
+}
+
 pub struct Simulator {
     pub ir: Ir,
     pub time: u64,
@@ -97,12 +107,6 @@ pub struct Simulator {
     /// Waveform handles for component trace variables:
     /// (handle, component index, trace variable index).
     trace_dump_vars: Vec<(crate::wave_dumper::VarHandle, usize, usize)>,
-    /// `(clock event, reset event)` installed by `step_in_reset`: components
-    /// keep their own reset hook while the RTL takes an ordinary clock edge.
-    component_event_override: Option<(Event, Event)>,
-    /// The async-reset assertion edge to evaluate alongside this step's clock
-    /// event, taken once.  See `step_in_reset`.
-    pending_assertion_edge: Option<Event>,
     /// Settle filter (`VERYL_SETTLE_FILTER=0` opts out): variable spans of
     /// FF storage annotated with whether the comb can read them.  With it,
     /// `comb_dirty` is maintained precisely, so a step that changes no comb
@@ -428,8 +432,6 @@ impl Simulator {
             components: Vec::new(),
             components_pending,
             trace_dump_vars: Vec::new(),
-            component_event_override: None,
-            pending_assertion_edge: None,
             settle_filter: None,
             clock_toggle_dirties: true,
             dirty_events: Default::default(),
@@ -1310,28 +1312,37 @@ impl Simulator {
     /// reset asserting into a gated-off domain).  Components have a reset
     /// hook of their own, so they are staged and fired with the reset event.
     pub fn step_in_reset(&mut self, clock: &Event, reset: &Event, assertion_edge: bool) {
-        if assertion_edge {
-            self.pending_assertion_edge = Some(reset.clone());
-        }
-        if self.components.is_empty() {
-            self.step(clock);
-        } else {
-            self.component_event_override = Some((clock.clone(), reset.clone()));
-            self.step(clock);
-            self.component_event_override = None;
-        }
-        self.pending_assertion_edge = None;
+        let window = ResetWindow {
+            clock: clock.clone(),
+            reset: reset.clone(),
+            assertion_edge,
+        };
+        self.step_events(std::slice::from_ref(clock), std::slice::from_ref(&window));
     }
 
-    /// Event whose component hooks `event` fires; see `step_in_reset`.
-    fn component_event<'a>(&'a self, event: &'a Event) -> &'a Event {
-        match &self.component_event_override {
-            Some((from, to)) if from == event => to,
-            _ => event,
-        }
+    /// Event whose component hooks `event` fires: inside a reset window the
+    /// RTL takes an ordinary clock edge while components keep their own
+    /// reset hook.
+    fn component_event<'a>(event: &'a Event, resets: &'a [ResetWindow]) -> &'a Event {
+        resets
+            .iter()
+            .find(|window| window.clock == *event)
+            .map_or(event, |window| &window.reset)
     }
 
     pub fn step(&mut self, event: &Event) {
+        self.step_events(std::slice::from_ref(event), &[]);
+    }
+
+    /// Take one instant's edges: every event in `events` is evaluated
+    /// against the same pre-edge state and the write log commits once, so
+    /// domains whose clocks rise together read each other's old values (NBA).
+    /// `resets` are the reset windows the instant lies in.
+    ///
+    /// Always inlined, with the derived-clock path kept out of line, so
+    /// `step`'s one-event, no-reset call folds the loops away.
+    #[inline(always)]
+    pub fn step_events(&mut self, events: &[Event], resets: &[ResetWindow]) {
         // A missing init_components call would let the run pass vacuously
         // (no hook ever fires); catch that bug in debug builds without
         // paying an assert on every step.
@@ -1347,13 +1358,15 @@ impl Simulator {
 
         // Common case (no derived clocks) skips the edge-detect loop.
         if self.ir.derived_clock_schedule.is_empty() {
-            self.step_legacy(event);
+            self.step_legacy(events, resets);
         } else {
-            self.step_with_derived_clocks(event);
+            self.step_with_derived_clocks(events, resets);
         }
     }
 
-    fn step_legacy(&mut self, event: &Event) {
+    /// Folds with `step_events`.
+    #[inline(always)]
+    fn step_legacy(&mut self, events: &[Event], resets: &[ResetWindow]) {
         // Install before settle_comb so comb-scope FF writes
         // (`--disable-ff-opt` path) hit a live log.
         // SAFETY: buffer outlives every dispatch_stmt_fast call below
@@ -1380,7 +1393,7 @@ impl Simulator {
             self.check_skipped_settle();
         }
 
-        self.step_event_inner(event);
+        self.step_event_inner(events, resets);
 
         clear_event_write_log();
         // With the filter, the commit compare / event comb-write flag have
@@ -1390,9 +1403,9 @@ impl Simulator {
         }
 
         if !self.watch_vars.is_empty() {
-            let tag = match event {
-                Event::Clock(_) => "clk",
-                Event::Reset(_) => "rst",
+            let tag = match events.first() {
+                Some(Event::Clock(_)) => "clk",
+                Some(Event::Reset(_)) => "rst",
                 _ => "evt",
             };
             self.dump_watch_changes(tag);
@@ -1403,20 +1416,34 @@ impl Simulator {
 
     /// Fire `event_statements[event]` then `ff_commit_from_log`.  The
     /// caller is responsible for `set_event_write_log`, `settle_comb`,
-    /// and `dump_variables`.
-    fn step_event_inner(&mut self, event: &Event) {
+    /// and `dump_variables`.  Folds with `step_events`.
+    #[inline(always)]
+    fn step_event_inner(&mut self, events: &[Event], resets: &[ResetWindow]) {
         let has_components = !self.components.is_empty();
         if has_components {
-            self.stage_components(event);
+            for event in events {
+                self.stage_components(Self::component_event(event, resets));
+            }
         }
-        self.eval_event_stmts(event);
-        // The async-reset assertion edge, if this step carries one.
-        if let Some(reset) = self.pending_assertion_edge.take() {
-            self.eval_event_stmts(&reset);
+        for event in events {
+            self.eval_event_stmts(event);
         }
+        self.eval_assertion_edges(resets);
         self.commit_event_log();
         if has_components {
-            self.fire_components(event);
+            for event in events {
+                self.fire_components(Self::component_event(event, resets));
+            }
+        }
+    }
+
+    /// Fire the assertion edges among `resets`; the caller commits them with
+    /// the clock events.
+    fn eval_assertion_edges(&mut self, resets: &[ResetWindow]) {
+        for window in resets {
+            if window.assertion_edge {
+                self.eval_event_stmts(&window.reset);
+            }
         }
     }
 
@@ -1460,10 +1487,9 @@ impl Simulator {
         if self.components.is_empty() {
             return;
         }
-        let event = self.component_event(event).clone();
         let mut components = std::mem::take(&mut self.components);
         for c in &mut components {
-            if c.listens_to(&event) {
+            if c.listens_to(event) {
                 c.stage_inputs(&mut self.mask_cache);
             }
         }
@@ -1477,8 +1503,6 @@ impl Simulator {
         if self.components.is_empty() {
             return;
         }
-        let event = self.component_event(event).clone();
-        let event = &event;
         let mut components = std::mem::take(&mut self.components);
         let mut wrote = false;
         for c in &mut components {
@@ -1784,7 +1808,8 @@ impl Simulator {
     /// Toggles master 0→1, fires the event + chained derived-clock
     /// events, then restores master=0 so `prev_derived_clock_values`
     /// samples on a consistent baseline.
-    fn step_with_derived_clocks(&mut self, event: &Event) {
+    #[inline(never)]
+    fn step_with_derived_clocks(&mut self, events: &[Event], resets: &[ResetWindow]) {
         // SAFETY: same as `step_legacy`; one install covers settle_comb
         // plus every step_event_inner fire in this step.
         unsafe {
@@ -1809,24 +1834,29 @@ impl Simulator {
             self.dump_watch("after_settle");
         }
 
-        let master_id_opt = match event {
-            Event::Clock(id) | Event::Reset(id) => {
-                let id = *id;
-                let is_master = self
-                    .ir
-                    .derived_clock_schedule
-                    .master_input_clocks
-                    .contains(&id);
-                if is_master { Some(id) } else { None }
-            }
-            _ => None,
-        };
+        let masters: SmallVec<[VarId; 2]> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Clock(id) | Event::Reset(id)
+                    if self
+                        .ir
+                        .derived_clock_schedule
+                        .master_input_clocks
+                        .contains(id) =>
+                {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .collect();
 
         let has_eval_chunk = !self.ir.derived_clock_eval_stmts.is_empty();
 
-        // Master high → gated-clock exprs see the rising edge.
-        if let Some(id) = master_id_opt {
-            self.set_input_clock_bit(id, 1);
+        // Masters high → gated-clock exprs see the rising edge.
+        if !masters.is_empty() {
+            for &id in &masters {
+                self.set_input_clock_bit(id, 1);
+            }
             if has_eval_chunk {
                 self.ir.partial_settle_master(&mut self.mask_cache);
             }
@@ -1849,7 +1879,7 @@ impl Simulator {
         // step's low phase, where an inversion already reads 1.
         let mut high_values = std::mem::take(&mut self.derived_clock_high);
         high_values.fill(0);
-        if master_id_opt.is_some() {
+        if !masters.is_empty() {
             for (i, high) in high_values.iter_mut().enumerate() {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
                 if clk.current_offset.is_ff() || !clk.master_gated {
@@ -1862,12 +1892,16 @@ impl Simulator {
             }
         }
 
-        self.stage_components(event);
+        for event in events {
+            self.stage_components(Self::component_event(event, resets));
+        }
         for &i in &pre_fire {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
             self.stage_components(&Event::Clock(vid));
         }
-        self.eval_event_stmts(event);
+        for event in events {
+            self.eval_event_stmts(event);
+        }
         for &i in &pre_fire {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
             if watch_enabled {
@@ -1878,11 +1912,11 @@ impl Simulator {
         }
         // Rides the master event's commit so a domain whose clock is gated off
         // still takes its reset values.
-        if let Some(reset) = self.pending_assertion_edge.take() {
-            self.eval_event_stmts(&reset);
-        }
+        self.eval_assertion_edges(resets);
         self.commit_event_log();
-        self.fire_components(event);
+        for event in events {
+            self.fire_components(Self::component_event(event, resets));
+        }
         for &i in &pre_fire {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
             self.fire_components(&Event::Clock(vid));
@@ -1908,7 +1942,7 @@ impl Simulator {
         // to detect, so on a master step the closure refresh is left to the
         // master=0 pass below.
         let post_commit_sources = n_rst > 0
-            || master_id_opt.is_none()
+            || masters.is_empty()
             || self
                 .ir
                 .derived_clock_schedule
@@ -2026,10 +2060,6 @@ impl Simulator {
                 let vid = self.ir.derived_clock_schedule.resets[i].var_id;
                 self.eval_event_stmts(&Event::Reset(vid));
             }
-            // The async-reset assertion edge, if this step carries one.
-            if let Some(reset) = self.pending_assertion_edge.take() {
-                self.eval_event_stmts(&reset);
-            }
             self.commit_event_log();
             for &i in &rst_batch {
                 let vid = self.ir.derived_clock_schedule.resets[i].var_id;
@@ -2051,8 +2081,10 @@ impl Simulator {
 
         // master=0 + resettle so the prev snapshot matches the next
         // step's starting baseline.
-        if let Some(id) = master_id_opt {
-            self.set_input_clock_bit(id, 0);
+        if !masters.is_empty() {
+            for &id in &masters {
+                self.set_input_clock_bit(id, 0);
+            }
             if has_eval_chunk {
                 self.ir.partial_settle(&mut self.mask_cache);
             }

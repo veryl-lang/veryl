@@ -8,6 +8,7 @@ use crate::ir::{
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use crate::wave_dumper::WaveDumper;
+use smallvec::SmallVec;
 use veryl_analyzer::ir::{AssertKind, ControlFlow};
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
@@ -482,7 +483,6 @@ fn convert_stmts(
         .collect()
 }
 
-/// Run one `initial` block as the whole testbench.
 pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestResult {
     run_testbench_blocks(sim, &[stmts])
 }
@@ -745,8 +745,7 @@ impl<'a> Process<'a> {
         }
     }
 
-    /// Enter a `for`: evaluate the bounds, seed the loop variable, and push
-    /// the body frame unless the loop runs zero times.
+    /// Push the body frame unless the loop runs zero times.
     fn enter_for(
         &mut self,
         sim: &mut Simulator,
@@ -944,111 +943,451 @@ impl<'a> Process<'a> {
     }
 }
 
-/// Run the blocks' processes.  Each block runs to completion before the
-/// next starts, so several blocks behave as one concatenated block.
-fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecResult {
-    for block in blocks {
-        let mut process = Process::new(block);
-        loop {
-            match process.run(sim) {
-                ProcStep::Wait(wait) => {
-                    let result = take_edges(sim, wait);
-                    if result.should_stop() {
-                        return result;
-                    }
-                    if assert_buffer::has_fatal() {
-                        return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
-                    }
-                }
-                ProcStep::Done => break,
-                ProcStep::Finished => return ExecResult::Finished,
-                ProcStep::Fail(msg) => return ExecResult::Fail(msg),
-            }
-        }
-    }
-    ExecResult::Continue
+/// A `$tb::clock_gen` some process has waited on.
+struct TbClock<'a> {
+    event: &'a Event,
+    high_time: u64,
+    low_time: u64,
+    /// Simulated time of its next posedge.  A clock nobody waits on does
+    /// not advance, so this may lie in the past; the edge is then taken at
+    /// the current time.
+    next_edge: u64,
 }
 
-/// Take the clock edges a process is waiting for.
-fn take_edges(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
-    match wait {
+/// A `rst.assert` in progress: the level is held while its process waits
+/// for the clock, and the first of those edges carries the assertion.
+struct ResetHold<'a> {
+    reset: &'a Event,
+    assertion_pending: bool,
+}
+
+enum TaskState<'a> {
+    /// Runs when simulated time reaches `at`.
+    Runnable {
+        at: u64,
+    },
+    /// Waiting for `remaining` more posedges of `clocks[clock]`.
+    Waiting {
+        clock: usize,
+        remaining: u64,
+        reset: Option<ResetHold<'a>>,
+    },
+    Done,
+}
+
+struct Task<'a> {
+    process: Process<'a>,
+    state: TaskState<'a>,
+}
+
+/// The scheduler's next thing to do, earliest time first; at one instant a
+/// clock's falling edge (waveform only) is recorded first, then the runnable
+/// processes execute, then the posedges are taken -- statements between two
+/// `next` calls run before the edge they lead up to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Due {
+    Negedge(u64),
+    Run(u64),
+    Edge(u64),
+}
+
+impl Due {
+    fn time(self) -> u64 {
+        match self {
+            Due::Negedge(t) | Due::Run(t) | Due::Edge(t) => t,
+        }
+    }
+
+    /// Time first, then the order within an instant.
+    fn key(self) -> (u64, u8) {
+        match self {
+            Due::Negedge(t) => (t, 0),
+            Due::Run(t) => (t, 1),
+            Due::Edge(t) => (t, 2),
+        }
+    }
+}
+
+/// Run the blocks as concurrent processes: at one instant the runnable ones
+/// execute in declaration order, each until it waits on a clock or ends;
+/// time then advances to the earliest posedge being waited on, and every
+/// clock due at that instant fires in one step so domains that rise together
+/// read each other's pre-edge values.  A `$finish` anywhere ends the run.
+fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecResult {
+    if let [block] = blocks {
+        return run_single_process(sim, Process::new(block));
+    }
+    let mut tasks: Vec<Task> = blocks
+        .iter()
+        .map(|block| Task {
+            process: Process::new(block),
+            state: TaskState::Runnable { at: sim.time },
+        })
+        .collect();
+    let mut clocks: Vec<TbClock> = Vec::new();
+    // Pending falling edges `(time, clock)`, kept only for the waveform.
+    let mut negedges: Vec<(u64, usize)> = Vec::new();
+    let result = loop {
+        // Once the other processes have ended, the survivor no longer needs
+        // the scheduler: at its next run point it is handed to the
+        // single-process loop, which steps the clock in place at a fraction
+        // of the cost per edge.  Only while at most one clock has been waited
+        // on, so every later edge lands at the time the scheduler would have
+        // given it.
+        if negedges.is_empty() && clocks.len() <= 1 {
+            let mut live = tasks
+                .iter_mut()
+                .filter(|task| !matches!(task.state, TaskState::Done));
+            if let (Some(task), None) = (live.next(), live.next())
+                && let TaskState::Runnable { at } = task.state
+            {
+                sim.time = at;
+                let process = std::mem::replace(&mut task.process, Process::new(&[]));
+                break run_single_process(sim, process);
+            }
+        }
+        let now = sim.time;
+        let mut due: Option<Due> = None;
+        let mut consider = |d: Due| {
+            if due.is_none_or(|cur| d.key() < cur.key()) {
+                due = Some(d);
+            }
+        };
+        if let Some(&(t, _)) = negedges.iter().min_by_key(|(t, _)| *t) {
+            consider(Due::Negedge(t));
+        }
+        for task in &tasks {
+            match task.state {
+                TaskState::Runnable { at } => consider(Due::Run(at)),
+                TaskState::Waiting { clock, .. } => {
+                    consider(Due::Edge(clocks[clock].next_edge.max(now)));
+                }
+                TaskState::Done => {}
+            }
+        }
+        let Some(due) = due else {
+            break ExecResult::Continue;
+        };
+        sim.time = due.time();
+        match due {
+            Due::Negedge(t) => {
+                for &(_, clock) in negedges.iter().filter(|(tt, _)| *tt == t) {
+                    if let Some(id) = clocks[clock].event.var_id() {
+                        sim.set_var_by_id(&id, Value::new(0, 1, false));
+                    }
+                }
+                negedges.retain(|(tt, _)| *tt != t);
+                sim.dump_variables();
+            }
+            Due::Run(t) => {
+                let mut stop = None;
+                for task in tasks.iter_mut() {
+                    if !matches!(task.state, TaskState::Runnable { at } if at == t) {
+                        continue;
+                    }
+                    let result = run_task(sim, task, &mut clocks);
+                    if result.should_stop() {
+                        stop = Some(result);
+                        break;
+                    }
+                }
+                if let Some(result) = stop {
+                    break result;
+                }
+            }
+            Due::Edge(t) => {
+                let fired: SmallVec<[usize; 4]> = (0..clocks.len())
+                    .filter(|&i| {
+                        clocks[i].next_edge.max(now) == t
+                            && tasks
+                                .iter()
+                                .any(|task| matches!(task.state, TaskState::Waiting { clock, .. } if clock == i))
+                    })
+                    .collect();
+                let result = take_edges(sim, &mut tasks, &mut clocks, &fired, &mut negedges);
+                if result.should_stop() {
+                    break result;
+                }
+            }
+        }
+    };
+    // The waveform still gets the falling edges of the last step.
+    negedges.sort_unstable();
+    for (t, clock) in negedges {
+        sim.time = t;
+        if let Some(id) = clocks[clock].event.var_id() {
+            sim.set_var_by_id(&id, Value::new(0, 1, false));
+        }
+        sim.dump_variables();
+    }
+    result
+}
+
+/// The one-process case needs no scheduler: its clocks are stepped in place
+/// as each wait is reached, which is also the cheapest path for the
+/// `clk.next(1)` per cycle testbenches that dominate.
+fn run_single_process(sim: &mut Simulator, mut process: Process<'_>) -> ExecResult {
+    loop {
+        match process.run(sim) {
+            ProcStep::Wait(wait) => {
+                let result = take_edges_alone(sim, wait);
+                if result.should_stop() {
+                    return result;
+                }
+                if assert_buffer::has_fatal() {
+                    return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
+                }
+            }
+            ProcStep::Done => return ExecResult::Continue,
+            ProcStep::Finished => return ExecResult::Finished,
+            ProcStep::Fail(msg) => return ExecResult::Fail(msg),
+        }
+    }
+}
+
+/// Take the edges the only process is waiting for, one step each.
+fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
+    let has_dump = sim.dump.is_some();
+    let has_components = !sim.components.is_empty();
+    let (clock, count, high_time, low_time, reset) = match wait {
         Wait::Clock {
             clock,
             count,
             high_time,
             low_time,
-        } => {
-            let has_dump = sim.dump.is_some();
-            let has_components = !sim.components.is_empty();
-            for _ in 0..count {
-                if has_dump && let Some(id) = clock.var_id() {
-                    sim.set_var_by_id(&id, Value::new(1, 1, false));
-                }
-                sim.step(clock);
-                sim.time += high_time;
-                if has_dump {
-                    if let Some(id) = clock.var_id() {
-                        sim.set_var_by_id(&id, Value::new(0, 1, false));
-                    }
-                    sim.dump_variables();
-                }
-                sim.time += low_time;
-                // Component-requested termination, checked at cycle end
-                // (after commit and dump).
-                if has_components {
-                    if sim.components_failed() {
-                        return ExecResult::Fail(sim.take_component_failures().join("\n"));
-                    }
-                    if sim.component_finish_requested() {
-                        return ExecResult::Finished;
-                    }
-                }
-                // Stop once the optional clock-cycle cap is reached.
-                if let Some(limit) = sim.cycle_limit {
-                    sim.cycle_count += 1;
-                    if sim.cycle_count >= limit {
-                        return ExecResult::Finished;
-                    }
-                }
-            }
-            ExecResult::Continue
-        }
+        } => (clock, count, high_time, low_time, None),
         Wait::Reset {
             reset,
             clock,
             duration,
             high_time,
             low_time,
-        } => {
-            // Hold the net asserted and take `duration` ordinary clock edges:
-            // the rest of the design keeps clocking through the window, as it
-            // does in SystemVerilog, and a reset derived from that net reaches
-            // its own `if_reset` too.
-            let has_dump = sim.dump.is_some();
-            let reset_id = reset.var_id();
-            if let Some(id) = &reset_id {
-                sim.set_reset_level(id, true);
+        } => (clock, duration, high_time, low_time, Some(reset)),
+    };
+    // Hold the net asserted and take `duration` ordinary clock edges: the
+    // rest of the design keeps clocking through the window, as it does in
+    // SystemVerilog, and a reset derived from that net reaches its own
+    // `if_reset` too.
+    if let Some(id) = reset.and_then(Event::var_id) {
+        sim.set_reset_level(&id, true);
+    }
+    let mut result = ExecResult::Continue;
+    for i in 0..count {
+        if has_dump && let Some(id) = clock.var_id() {
+            sim.set_var_by_id(&id, Value::new(1, 1, false));
+        }
+        match reset {
+            Some(reset) => sim.step_in_reset(clock, reset, i == 0),
+            None => sim.step(clock),
+        }
+        sim.time += high_time;
+        if has_dump {
+            if let Some(id) = clock.var_id() {
+                sim.set_var_by_id(&id, Value::new(0, 1, false));
             }
-            for i in 0..duration {
-                if has_dump && let Some(id) = clock.var_id() {
-                    sim.set_var_by_id(&id, Value::new(1, 1, false));
-                }
-                sim.step_in_reset(clock, reset, i == 0);
-                sim.time += high_time;
-                if has_dump {
-                    if let Some(id) = clock.var_id() {
-                        sim.set_var_by_id(&id, Value::new(0, 1, false));
-                    }
-                    sim.dump_variables();
-                }
-                sim.time += low_time;
+            sim.dump_variables();
+        }
+        sim.time += low_time;
+        // Component-requested termination, checked at cycle end (after
+        // commit and dump).
+        if has_components {
+            if sim.components_failed() {
+                result = ExecResult::Fail(sim.take_component_failures().join("\n"));
+                break;
             }
-            if let Some(id) = &reset_id {
-                sim.set_reset_level(id, false);
+            if sim.component_finish_requested() {
+                result = ExecResult::Finished;
+                break;
             }
-            ExecResult::Continue
+        }
+        // Stop once the optional clock-cycle cap is reached.
+        if let Some(limit) = sim.cycle_limit {
+            sim.cycle_count += 1;
+            if sim.cycle_count >= limit {
+                result = ExecResult::Finished;
+                break;
+            }
         }
     }
+    if let Some(id) = reset.and_then(Event::var_id) {
+        sim.set_reset_level(&id, false);
+    }
+    result
+}
+
+/// Run one process until it waits on a clock, ends, or stops the run.
+fn run_task<'a>(
+    sim: &mut Simulator,
+    task: &mut Task<'a>,
+    clocks: &mut Vec<TbClock<'a>>,
+) -> ExecResult {
+    loop {
+        match task.process.run(sim) {
+            ProcStep::Wait(Wait::Clock {
+                clock,
+                count,
+                high_time,
+                low_time,
+            }) => {
+                // count 0 advances 0 cycles (SV `repeat(0)`): the process
+                // just carries on.
+                if count == 0 {
+                    continue;
+                }
+                task.state = TaskState::Waiting {
+                    clock: clock_index(clocks, clock, high_time, low_time),
+                    remaining: count,
+                    reset: None,
+                };
+                return ExecResult::Continue;
+            }
+            ProcStep::Wait(Wait::Reset {
+                reset,
+                clock,
+                duration,
+                high_time,
+                low_time,
+            }) => {
+                // The window holds the net asserted while ordinary clock
+                // edges are taken; see `take_edges_alone`.
+                if let Some(id) = reset.var_id() {
+                    sim.set_reset_level(&id, true);
+                }
+                if duration == 0 {
+                    if let Some(id) = reset.var_id() {
+                        sim.set_reset_level(&id, false);
+                    }
+                    continue;
+                }
+                task.state = TaskState::Waiting {
+                    clock: clock_index(clocks, clock, high_time, low_time),
+                    remaining: duration,
+                    reset: Some(ResetHold {
+                        reset,
+                        assertion_pending: true,
+                    }),
+                };
+                return ExecResult::Continue;
+            }
+            ProcStep::Done => {
+                task.state = TaskState::Done;
+                return ExecResult::Continue;
+            }
+            ProcStep::Finished => return ExecResult::Finished,
+            ProcStep::Fail(msg) => return ExecResult::Fail(msg),
+        }
+    }
+}
+
+fn clock_index<'a>(
+    clocks: &mut Vec<TbClock<'a>>,
+    event: &'a Event,
+    high_time: u64,
+    low_time: u64,
+) -> usize {
+    if let Some(i) = clocks.iter().position(|c| c.event == event) {
+        return i;
+    }
+    clocks.push(TbClock {
+        event,
+        high_time,
+        low_time,
+        next_edge: 0,
+    });
+    clocks.len() - 1
+}
+
+/// Take the posedges of `fired` as one step and release the processes whose
+/// wait they complete.
+fn take_edges<'a>(
+    sim: &mut Simulator,
+    tasks: &mut [Task<'a>],
+    clocks: &mut [TbClock<'a>],
+    fired: &[usize],
+    negedges: &mut Vec<(u64, usize)>,
+) -> ExecResult {
+    let has_dump = sim.dump.is_some();
+    let events: SmallVec<[Event; 4]> = fired.iter().map(|&i| clocks[i].event.clone()).collect();
+    let mut windows: SmallVec<[crate::simulator::ResetWindow; 2]> = SmallVec::new();
+    for task in tasks.iter_mut() {
+        if let TaskState::Waiting {
+            clock,
+            reset: Some(hold),
+            ..
+        } = &mut task.state
+            && fired.contains(clock)
+        {
+            windows.push(crate::simulator::ResetWindow {
+                clock: clocks[*clock].event.clone(),
+                reset: hold.reset.clone(),
+                assertion_edge: hold.assertion_pending,
+            });
+            hold.assertion_pending = false;
+        }
+    }
+    if has_dump {
+        for &i in fired {
+            if let Some(id) = clocks[i].event.var_id() {
+                sim.set_var_by_id(&id, Value::new(1, 1, false));
+            }
+        }
+    }
+    sim.step_events(&events, &windows);
+    let t = sim.time;
+    for &i in fired {
+        let clock = &mut clocks[i];
+        clock.next_edge = t + clock.high_time + clock.low_time;
+        if has_dump {
+            negedges.push((t + clock.high_time, i));
+        }
+    }
+    for task in tasks.iter_mut() {
+        let TaskState::Waiting {
+            clock,
+            remaining,
+            reset,
+        } = &mut task.state
+        else {
+            continue;
+        };
+        if !fired.contains(clock) {
+            continue;
+        }
+        *remaining -= 1;
+        if *remaining > 0 {
+            continue;
+        }
+        if let Some(hold) = reset
+            && let Some(id) = hold.reset.var_id()
+        {
+            sim.set_reset_level(&id, false);
+        }
+        // Resumes once the cycle is over, just before the next edge.
+        task.state = TaskState::Runnable {
+            at: clocks[*clock].next_edge,
+        };
+    }
+    if assert_buffer::has_fatal() {
+        return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
+    }
+    // Component-requested termination, checked at cycle end (after commit
+    // and dump).
+    if !sim.components.is_empty() {
+        if sim.components_failed() {
+            return ExecResult::Fail(sim.take_component_failures().join("\n"));
+        }
+        if sim.component_finish_requested() {
+            return ExecResult::Finished;
+        }
+    }
+    // Stop once the optional clock-cycle cap is reached.
+    if let Some(limit) = sim.cycle_limit {
+        sim.cycle_count += 1;
+        if sim.cycle_count >= limit {
+            return ExecResult::Finished;
+        }
+    }
+    ExecResult::Continue
 }
 
 /// A statement that neither branches nor waits: runs to completion in zero
