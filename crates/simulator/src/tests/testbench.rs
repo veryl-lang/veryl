@@ -3269,3 +3269,57 @@ fn tb_chunk_does_not_outrun_the_settle() {
         );
     }
 }
+
+/// Each `initial` block of a test module keeps its own statement list and
+/// runs as its own process, in declaration order.
+#[test]
+fn initial_blocks_are_separate_processes() {
+    let code = r#"
+    module Counter (
+        i_clk: input clock,
+        i_rst: input reset,
+        o_cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt = o_cnt + 1;
+            }
+        }
+    }
+
+    #[test(test_two_initials)]
+    module test_two_initials {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen (clk);
+        var o_cnt: logic<8>;
+        var seen : logic<8>;
+        inst dut: Counter (i_clk: clk, i_rst: rst, o_cnt);
+
+        initial {
+            seen = 8'd7;
+            rst.assert();
+        }
+
+        initial {
+            $assert(seen == 8'd7, "the first block runs first");
+            clk.next(5);
+            $assert(o_cnt == 8'd5, "five edges after reset");
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "test_two_initials")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        assert!(ir.event_statements.contains_key(&Event::Initial));
+        assert!(ir.event_statements.contains_key(&Event::InitialBlock(1)));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}

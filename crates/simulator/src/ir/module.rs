@@ -658,6 +658,24 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
     build_chunked_via_registry(context, proto, /* contains_compiled_block= */ false)
 }
 
+/// Appends a declaration's statements for `event`.  `initial` blocks, a
+/// nested instance's included, are not concatenated but keyed apart so the
+/// testbench can run each as its own process.
+pub(crate) fn merge_event_statements(
+    all: &mut HashMap<Event, Vec<ProtoStatement>>,
+    event: Event,
+    mut stmts: Vec<ProtoStatement>,
+) {
+    let event = if event.is_initial() {
+        Event::next_initial(all.keys().filter(|e| e.is_initial()).count() as u32)
+    } else {
+        event
+    };
+    all.entry(event)
+        .and_modify(|v| v.append(&mut stmts))
+        .or_insert(stmts);
+}
+
 /// Offsets a testbench-body chunk may write: those of the testbench's own
 /// variables that the design's comb does not read.  A comb-touched element
 /// disqualifies its whole variable, which is the granularity `tb_dirty`'s
@@ -5170,11 +5188,8 @@ impl Conv<&air::Module> for ProtoModule {
         for decl in declarations {
             let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
-            for (event, mut stmts) in proto_decl.event_statements {
-                all_event_statements
-                    .entry(event)
-                    .and_modify(|v| v.append(&mut stmts))
-                    .or_insert(stmts);
+            for (event, stmts) in proto_decl.event_statements {
+                merge_event_statements(&mut all_event_statements, event, stmts);
             }
             // Move (not clone): `proto_decl` is dropped after this iteration, so
             // draining its comb list avoids a full deep-copy of the child subtree
@@ -5761,7 +5776,7 @@ impl Conv<&air::Module> for ProtoModule {
                 // Testbench-side writes (e.g. initialization in `initial`)
                 // are not RTL drivers; a component may drive such a
                 // variable.
-                if matches!(event, Event::Initial | Event::Final) {
+                if event.is_initial() || *event == Event::Final {
                     continue;
                 }
                 for stmt in stmts {
@@ -6060,7 +6075,7 @@ impl Conv<&air::Module> for ProtoModule {
             .into_iter()
             .map(|(event, stmts)| {
                 #[cfg(not(target_family = "wasm"))]
-                let stmts = if event == Event::Initial {
+                let stmts = if event.is_initial() {
                     precompile_tb_bodies(context, stmts, &tb_private)
                 } else {
                     stmts
