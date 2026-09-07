@@ -22190,3 +22190,66 @@ fn sv_keyword_usage_loop_var_and_label() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
 }
+
+#[test]
+fn zero_size() {
+    // https://github.com/veryl-lang/veryl/issues/3347
+    let code = r#"
+    module ModuleA {
+        var a: logic<0>;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 0,
+    ) {
+        var a: logic<W>;
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA {
+        var a: logic<8> [0];
+        assign a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::ZeroSize { .. }),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn non_zero_size_is_allowed() {
+    // https://github.com/veryl-lang/veryl/issues/3347
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 1,
+    ) {
+        var a: logic<W>;
+        var b: logic<8> [1];
+        assign a    = 0;
+        assign b[0] = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
