@@ -26186,3 +26186,36 @@ fn narrowing_cast_of_a_signed_quotient_still_truncates() {
         assert_eq!(g, r, "a={} b={}", r.0, r.1);
     }
 }
+
+#[test]
+fn zero_width_signal_elaborates() {
+    // https://github.com/veryl-lang/veryl/issues/3347
+    let code = r#"
+    module Top #(
+        param SIDE_W: u32 = 0,
+    ) (
+        a: input  logic<32>,
+        s: input  logic<SIDE_W>,
+        c: output logic<32>,
+        d: output logic<SIDE_W>,
+    ) {
+        var z: logic<0>;
+
+        assign z = s;
+        assign d = z;
+        assign c = a + 1;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::new(10, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("c").unwrap(), Value::new(11, 32, false));
+    }
+}

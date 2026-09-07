@@ -606,11 +606,7 @@ pub fn eval_size(
     if let Ok(x) = comptime.get_value() {
         let value = x.to_usize().unwrap_or(0);
         let value = context.check_size(value, expr.token_range());
-        if value == Some(0) {
-            Ok((comptime, None))
-        } else {
-            Ok((comptime, value))
-        }
+        Ok((comptime, value))
     } else {
         Ok((comptime, None))
     }
