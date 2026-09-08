@@ -155,12 +155,18 @@ pub struct Ir {
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
     /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
     pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
+    /// See `Module::settle_touched_offsets`.
+    pub settle_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
+    /// See `Module::closure_out_watch`.
+    pub closure_out_watch: Vec<(u32, u32)>,
     /// See `Module::event_comb_writes`.  Consumed by the simulator's
     /// settle filter: a fire of an event whose writes can reach a comb
     /// read dirties the comb.
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// See `Module::cone_state_base`.
     pub cone_state_base: u32,
+    /// See `Module::event_gate_flags`.
+    pub event_gate_flags: Vec<u32>,
     /// See `Module::settle_info`.
     pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
     /// Cone-gate segments over `comb_statements`; empty when ungated.
@@ -277,8 +283,11 @@ impl Ir {
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
             comb_touched_offsets: module.comb_touched_offsets,
+            settle_touched_offsets: module.settle_touched_offsets,
+            closure_out_watch: module.closure_out_watch,
             event_comb_writes: module.event_comb_writes,
             cone_state_base: module.cone_state_base,
+            event_gate_flags: module.event_gate_flags,
             settle_info: module.settle_info,
             cone_segments: module.cone_segments,
             cone_gate_state: std::cell::RefCell::new(None),

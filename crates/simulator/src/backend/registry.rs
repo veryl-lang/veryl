@@ -148,10 +148,11 @@ impl BackendRegistry {
         ctx: &CompileCtx,
         event: &Event,
         stmts: &[ProtoStatement],
+        gates: &[crate::ir::opt::event_gate::EventGate],
     ) -> Option<Arc<dyn CompiledWhole>> {
         self.backends
             .iter_mut()
-            .find_map(|b| b.compile_whole_event(ctx, event, stmts))
+            .find_map(|b| b.compile_whole_event(ctx, event, stmts, gates))
     }
 
     pub fn try_compile_chunk(

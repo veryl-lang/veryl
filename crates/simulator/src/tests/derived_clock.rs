@@ -1169,3 +1169,51 @@ fn derived_clock_closure_keeps_every_writer_of_an_offset() {
         "every config batched the closure: nothing was checked"
     );
 }
+
+#[test]
+fn a_closure_output_read_as_data_stays_current_without_a_settle_of_its_own() {
+    // `clk_half` is computed by the derived-clock closure from a flop only
+    // the closure reads, so the flop's commits no longer dirty the comb; the
+    // mux reading the clock net as data must still follow it, through the
+    // closure's output watch.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+        o_sel: output    logic<8>,
+    ) {
+        var half: logic;
+        always_ff (i_clk, i_rst) {
+            if_reset { half = 0; } else { half = !half; }
+        }
+        let clk_half: '_ clock = half;
+        var cnt: logic<8>;
+        always_ff (clk_half, i_rst) {
+            if_reset { cnt = 0; } else { cnt += 1; }
+        }
+        assign o_cnt = cnt;
+        assign o_sel = if clk_half ? cnt : 8'hff;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for step in 1..=8u64 {
+            sim.step(&clk);
+            let half = step % 2;
+            let cnt = sim.get("o_cnt").unwrap().payload_u128() as u64;
+            assert_eq!(cnt, step.div_ceil(2), "{config:?}");
+            let want = if half == 1 { cnt } else { 0xff };
+            assert_eq!(
+                sim.get("o_sel").unwrap().payload_u128() as u64,
+                want,
+                "the mux must see the clock net's new level, step {step}, {config:?}"
+            );
+        }
+    }
+}
