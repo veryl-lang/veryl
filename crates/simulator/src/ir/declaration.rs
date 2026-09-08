@@ -5,7 +5,9 @@ use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
-use crate::ir::module::{BitRange, gather_bit_aware_outputs, ranges_overlap};
+use crate::ir::module::{
+    BitRange, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
+};
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
 use crate::ir::opt::version_split;
@@ -1492,11 +1494,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             for decl in child_decls {
                 let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
-                for (event, mut stmts) in proto_decl.event_statements {
-                    all_event_statements
-                        .entry(event)
-                        .and_modify(|v| v.append(&mut stmts))
-                        .or_insert(stmts);
+                for (event, stmts) in proto_decl.event_statements {
+                    merge_event_statements(&mut all_event_statements, event, stmts);
                 }
                 // Move, not clone: `proto_decl` is dropped after this iteration.
                 all_comb_statements.append(&mut proto_decl.comb_statements);

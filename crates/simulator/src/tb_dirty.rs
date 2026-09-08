@@ -73,9 +73,16 @@ impl TbDirtyFilter {
         !self.clean.is_empty() && self.clean.contains(&(stmt as *const Statement))
     }
 
-    /// Classify `stmts` against `ir`'s comb reach.  `stmts` must be the exact
-    /// slice later executed; the filter keys on statement addresses.
+    /// Classify one block; see `build_blocks`.
+    #[cfg(test)]
     pub(crate) fn build(ir: &Ir, stmts: &[TestbenchStatement]) -> Self {
+        Self::build_blocks(ir, &[stmts])
+    }
+
+    /// Classify the `initial` blocks (one slice each) against `ir`'s comb
+    /// reach.  They must be the exact slices later executed; the filter keys
+    /// on statement addresses.
+    pub(crate) fn build_blocks(ir: &Ir, blocks: &[&[TestbenchStatement]]) -> Self {
         let mut filter = TbDirtyFilter::default();
         if !enabled() {
             return filter;
@@ -87,7 +94,9 @@ impl TbDirtyFilter {
             None => SpanTable::build(ir),
         };
         let mut clean = HashSet::default();
-        collect_clean(stmts, &spans, &mut clean);
+        for stmts in blocks {
+            collect_clean(stmts, &spans, &mut clean);
+        }
         filter.clean = clean;
         filter
     }

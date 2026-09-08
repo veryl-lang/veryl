@@ -23,11 +23,12 @@ pub fn resolve_hier_refs(
     // The analyzer emits hierarchical references only inside initial/final
     // blocks; skipping RTL events also keeps this recursive walk away from
     // arbitrarily deep synthesizable expressions.
-    for event in [Event::Initial, Event::Final] {
-        if let Some(stmts) = event_statements.get_mut(&event) {
-            for stmt in stmts.iter_mut() {
-                resolve_stmt(stmt, context, children)?;
-            }
+    for (event, stmts) in event_statements.iter_mut() {
+        if !(event.is_initial() || *event == Event::Final) {
+            continue;
+        }
+        for stmt in stmts.iter_mut() {
+            resolve_stmt(stmt, context, children)?;
         }
     }
     Ok(())
