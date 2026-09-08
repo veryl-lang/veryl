@@ -983,12 +983,18 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // Fresh comb offsets for rename temps come from the same
                     // allocator as function locals; instance-reuse records
                     // the post-conv size, so cache replay stays consistent.
+                    // A temp has no `VariableMeta`; recording it as a
+                    // relocation of the variable it serves lets the cone-gate
+                    // owner table adopt it (see `Context::comb_reloc`).
                     let use_4state = context.config.use_4state;
                     let comb_total = &mut context.comb_total_bytes;
-                    let mut alloc = |width: usize| -> isize {
+                    let comb_reloc = &mut context.comb_reloc;
+                    let mut alloc = |width: usize, from: isize| -> isize {
                         let nb = crate::ir::variable::native_bytes(width);
+                        let vs = crate::ir::variable::value_size(nb, use_4state);
                         let off = *comb_total as isize;
-                        *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                        *comb_total += vs;
+                        comb_reloc.push((from, off, vs));
                         off
                     };
                     let stats = version_split::run(&mut comb_statements, &mut alloc);
@@ -1245,6 +1251,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.ff_total_bytes = ff_start as usize;
         }
         let comb_start = context.comb_total_bytes as isize;
+        let comb_reloc_start = context.comb_reloc.len();
 
         // Analyzer-IR pre-pass to identify multi-RMW FFs.  Same as
         // ProtoModule::conv but for child module.
@@ -1463,6 +1470,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             // where the rest was allocated.
             context.ff_total_bytes = ff_start as usize + reuse.ff_size;
             context.comb_total_bytes = comb_start as usize + reuse.comb_size;
+            context.comb_reloc.extend(reuse.comb_reloc);
         } else {
             let child_scope = ScopeContext {
                 variable_meta: child_variable_meta.clone(),
@@ -1540,6 +1548,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     &all_post_comb_fns,
                     &all_child_modules,
                     &all_derived_clock_candidates,
+                    &context.comb_reloc[comb_reloc_start..],
                 );
             }
         }

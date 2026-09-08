@@ -75,6 +75,16 @@ pub struct Module {
     /// Passes of `derived_clock_eval_stmts` needed for the closure to
     /// converge — the `required_comb_passes` of that chunk.
     pub derived_clock_eval_passes: usize,
+    /// One-function compile of the derived-clock closure, the counterpart of
+    /// `whole_comb` for `partial_settle`. `None` leaves it on
+    /// `derived_clock_eval_stmts`.
+    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
+    /// The closure statements a master input clock can change (see
+    /// `derived_clock::master_downstream`): what `partial_settle_master` runs
+    /// right after the master toggles, the rest of the design being settled.
+    pub derived_clock_master_stmts: Vec<Statement>,
+    pub derived_clock_master_passes: usize,
+    pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
     /// Diagnostic: number of non-trivial strongly-connected components in
     /// the pre-JIT `unified_sorted` dataflow graph.  Real RTL combinational
     /// loops are rejected up-front by `analyze_dependency`, so any non-zero
@@ -143,6 +153,14 @@ pub struct ProtoModule {
     pub derived_clock_eval: ProtoStatements,
     /// See `Module::derived_clock_eval_passes`.
     pub derived_clock_eval_passes: usize,
+    /// See `Module::whole_derived_clock`.  Built in `conv()` and shared
+    /// (`Arc::clone`) with every `Module` produced by `instantiate()`.
+    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
+    /// Pre-JIT form of `Module::derived_clock_master_stmts`, with its pass
+    /// count and whole-module compile.
+    pub derived_clock_master_eval: ProtoStatements,
+    pub derived_clock_master_passes: usize,
+    pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
     /// See `Module::whole_comb`.  Built in `conv()` and shared
@@ -438,17 +456,21 @@ impl ProtoModule {
             comb_flat
         };
 
-        let derived_clock_eval_stmts = if self.derived_clock_eval.0.is_empty() {
-            Vec::new()
-        } else {
-            batch_compiled_statements(self.derived_clock_eval.to_statements(
-                ff_ptr,
-                ff_len,
-                comb_ptr,
-                comb_len,
-                self.use_4state,
-            ))
+        let closure_stmts = |protos: &ProtoStatements| -> Vec<Statement> {
+            if protos.0.is_empty() {
+                Vec::new()
+            } else {
+                batch_compiled_statements(protos.to_statements(
+                    ff_ptr,
+                    ff_len,
+                    comb_ptr,
+                    comb_len,
+                    self.use_4state,
+                ))
+            }
         };
+        let derived_clock_eval_stmts = closure_stmts(&self.derived_clock_eval);
+        let derived_clock_master_stmts = closure_stmts(&self.derived_clock_master_eval);
 
         #[cfg(debug_assertions)]
         self.validate_offsets();
@@ -461,6 +483,10 @@ impl ProtoModule {
             module_variables,
             derived_clock_eval_stmts,
             derived_clock_eval_passes: self.derived_clock_eval_passes,
+            whole_derived_clock: self.whole_derived_clock.clone(),
+            derived_clock_master_stmts,
+            derived_clock_master_passes: self.derived_clock_master_passes,
+            whole_derived_clock_master: self.whole_derived_clock_master.clone(),
 
             event_statements,
             comb_statements,
@@ -600,6 +626,12 @@ fn validate_meta_offsets(
 /// happens where they do not.
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
 const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
+
+/// Domain separator folded into the derived-clock closure's whole-compile key,
+/// so a closure can never collide with a comb list of the same shape.
+const DERIVED_CLOCK_KEY_DOMAIN: u128 = 0xD3C1_0CE0_D3C1_0CE0_D3C1_0CE0_D3C1_0CE0;
+/// Same for the closure's master-toggle subset.
+const DERIVED_CLOCK_MASTER_KEY_DOMAIN: u128 = 0x3A57_E2C1_3A57_E2C1_3A57_E2C1_3A57_E2C1;
 
 fn jit_chunk_size() -> usize {
     std::env::var("VERYL_JIT_CHUNK_SIZE")
@@ -1287,16 +1319,22 @@ fn run_comb_pipeline(
     // covers every comb temp this function allocates, the scheduler's version
     // renames included).
     let temps_before = context.comb_total_bytes;
+    // The temps allocated below have no `VariableMeta`; the cone plan adopts
+    // each as storage of the variable it stands in for (see
+    // `ConeGateInputs::adopt_relocations`).
+    let mut temp_reloc: Vec<(isize, isize, usize)> = Vec::new();
     let unified = {
         let mut unified = unified;
         if version_split::pass_enabled(context.config.use_4state) {
             let use_4state = context.config.use_4state;
             let before = context.comb_total_bytes;
             let comb_total = &mut context.comb_total_bytes;
-            let mut alloc = |width: usize| -> isize {
+            let mut alloc = |width: usize, from: isize| -> isize {
                 let nb = crate::ir::variable::native_bytes(width);
+                let vs = crate::ir::variable::value_size(nb, use_4state);
                 let off = *comb_total as isize;
-                *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                *comb_total += vs;
+                temp_reloc.push((from, off, vs));
                 off
             };
             let stats = version_split::run(&mut unified, &mut alloc);
@@ -1313,10 +1351,12 @@ fn run_comb_pipeline(
     let (unified_sorted, passes_hint) = {
         let use_4state = context.config.use_4state;
         let comb_total = &mut context.comb_total_bytes;
-        let mut alloc = |width: usize| -> isize {
+        let mut alloc = |width: usize, from: isize| -> isize {
             let nb = crate::ir::variable::native_bytes(width);
+            let vs = crate::ir::variable::value_size(nb, use_4state);
             let off = *comb_total as isize;
-            *comb_total += crate::ir::variable::value_size(nb, use_4state);
+            *comb_total += vs;
+            temp_reloc.push((from, off, vs));
             off
         };
         analyze_dependency(unified, &mut alloc)?
@@ -1459,6 +1499,12 @@ fn run_comb_pipeline(
     // way, checked on the permutation itself: that is what decides whether an
     // exact one-pass hint still describes the order that actually runs.
     let mut cone_kept_edge_directions = false;
+    let adopted_inputs = cone_inputs.filter(|_| !temp_reloc.is_empty()).map(|ci| {
+        let mut ci = ci.clone();
+        ci.adopt_relocations(&temp_reloc);
+        ci
+    });
+    let cone_inputs = adopted_inputs.as_ref().or(cone_inputs);
     let (unified_sorted, cone_plan) = match cone_inputs {
         Some(ci) => match cone_gate::plan(&unified_sorted, ci) {
             Some(plan) => {
@@ -1617,7 +1663,15 @@ fn run_comb_pipeline(
                         .chain(ffs.into_iter().map(|(cs, ce)| (true, cs, ce)))
                         .collect();
                 }
-                let backedge = translate_pairs(&s.backedge);
+                // A single-pass schedule reaches its fixpoint in one run, so
+                // every run is converged by construction and the backedge
+                // snapshot plus its post-run compare would only ever confirm
+                // that; an empty set skips both.
+                let backedge = if required_comb_passes == 1 {
+                    Vec::new()
+                } else {
+                    translate_pairs(&s.backedge)
+                };
                 let mut replay = translate_pairs(&s.replay);
                 coalesce(&mut replay);
                 // The plan guarantees `compare_pre == replay`; keep the
@@ -1672,9 +1726,11 @@ fn run_comb_pipeline(
 /// Returns the scheduled statements plus an exact required-pass hint when the
 /// block-aware sort could derive one (see `stable_topo_sort_with_blocks`);
 /// `None` means the caller must fall back to `compute_required_passes`.
+/// `alloc(width, from)` reserves a version-rename temp standing in for the
+/// comb variable at offset `from` (see `rename_versions`).
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
-    alloc: &mut dyn FnMut(usize) -> isize,
+    alloc: &mut dyn FnMut(usize, isize) -> isize,
 ) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
@@ -6103,24 +6159,74 @@ impl Conv<&air::Module> for ProtoModule {
 
         // Derived-clock eval is a separate `try_jit` chunk so the main
         // comb JIT/AOT-C blob stays intact while partial_settle is fast.
-        let (derived_clock_schedule, derived_clock_eval, derived_clock_eval_passes) =
-            if derived_clock_vars.is_empty() {
-                (DerivedClockSchedule::default(), ProtoStatements(vec![]), 1)
-            } else {
-                let (sched, eval_indices) = build_derived_clock_schedule(
-                    &derived_clock_vars,
-                    &pre_jit_stmts,
-                    &input_clock_offsets,
+        let (
+            derived_clock_schedule,
+            derived_clock_eval,
+            derived_clock_eval_passes,
+            whole_derived_clock,
+            derived_clock_master_eval,
+            derived_clock_master_passes,
+            whole_derived_clock_master,
+        ) = if derived_clock_vars.is_empty() {
+            (
+                DerivedClockSchedule::default(),
+                ProtoStatements(vec![]),
+                1,
+                None,
+                ProtoStatements(vec![]),
+                1,
+                None,
+            )
+        } else {
+            let (sched, eval_indices, master_indices) = build_derived_clock_schedule(
+                &derived_clock_vars,
+                &pre_jit_stmts,
+                &input_clock_offsets,
+            );
+            let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
+            // The closure keeps `unified_sorted`'s relative order, which is
+            // only single-pass when that order linearized; where it did not,
+            // one pass reads a producer that runs later and the gated clock
+            // is computed from the previous step's value.
+            let passes = compute_required_passes("derived-clock-closure", &eval_protos);
+            // The closure runs on every master edge, so it gets the
+            // whole-module backend the comb gets; its own fingerprint lets
+            // the tests sharing a DUT compile it once.
+            let mut compile_closure = |protos: &[ProtoStatement], domain: u128| {
+                if !size_ok || protos.is_empty() {
+                    return None;
+                }
+                let key = crate::backend::registry::whole_comb_fingerprint(
+                    context.config.use_4state,
+                    protos,
+                    domain,
                 );
-                let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
-                // The closure keeps `unified_sorted`'s relative order, which is
-                // only single-pass when that order linearized; where it did not,
-                // one pass reads a producer that runs later and the gated clock
-                // is computed from the previous step's value.
-                let passes = compute_required_passes("derived-clock-closure", &eval_protos);
-                let eval = try_jit(context, eval_protos);
-                (sched, eval, passes)
+                whole::compile_whole_comb(
+                    &mut context.backends,
+                    &context.config,
+                    key,
+                    context.config.dut_reuse,
+                    protos,
+                    whole::WholeCombShape::default(),
+                )
             };
+            let whole = compile_closure(&eval_protos, DERIVED_CLOCK_KEY_DOMAIN);
+            // The master-toggle subset runs on every master edge too.
+            let master_protos = extract_eval_proto_stmts(&master_indices, &pre_jit_stmts);
+            let master_passes = compute_required_passes("derived-clock-master", &master_protos);
+            let whole_master = compile_closure(&master_protos, DERIVED_CLOCK_MASTER_KEY_DOMAIN);
+            let eval = try_jit(context, eval_protos);
+            let master_eval = try_jit(context, master_protos);
+            (
+                sched,
+                eval,
+                passes,
+                whole,
+                master_eval,
+                master_passes,
+                whole_master,
+            )
+        };
 
         // Whole-comb backend (today: AOT-C) — when registered + size_ok,
         // try compile_whole_comb; backends that decline (4-state,
@@ -6200,6 +6306,10 @@ impl Conv<&air::Module> for ProtoModule {
             derived_clock_schedule,
             derived_clock_eval,
             derived_clock_eval_passes,
+            whole_derived_clock,
+            derived_clock_master_eval,
+            derived_clock_master_passes,
+            whole_derived_clock_master,
             nontrivial_comb_scc,
             whole_comb,
             whole_events,
@@ -6597,7 +6707,7 @@ fn rename_versions(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
     groups: &mut Vec<usize>,
-    alloc: &mut dyn FnMut(usize) -> isize,
+    alloc: &mut dyn FnMut(usize, isize) -> isize,
 ) -> usize {
     // Offsets any dynamic access touches: a temp sized for one variable cannot
     // stand in for a base that names a whole array.
@@ -6687,7 +6797,7 @@ fn rename_versions(
             declined += 1;
             continue;
         }
-        let to = VarOffset::Comb(alloc(width));
+        let to = VarOffset::Comb(alloc(width, off.raw()));
         plans.push(Plan {
             after,
             readers: mids,

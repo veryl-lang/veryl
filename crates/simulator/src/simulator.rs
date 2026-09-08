@@ -703,9 +703,11 @@ impl Simulator {
                 );
             }
             eprintln!(
-                "[derived_clock] eval chunk: {} entries x {} passes",
+                "[derived_clock] eval chunk: {} entries x {} passes; master subset: {} entries x {} passes",
                 ret.ir.derived_clock_eval_stmts.len(),
                 ret.ir.derived_clock_eval_passes,
+                ret.ir.derived_clock_master_stmts.len(),
+                ret.ir.derived_clock_master_passes,
             );
         }
 
@@ -1628,7 +1630,7 @@ impl Simulator {
             let comb_ptr = self.ir.comb_values.as_ptr() as *mut u8;
             let log_ptr = (&*self.ir.write_log_buffer) as *const _ as *mut u8;
 
-            // VERYL_AOT_C_VALIDATE=1: dual-run paths and diff.  Default-off.
+            // `--backend-validate`: dual-run paths and diff.  Default-off.
             let validate = self.ir.aot_c_validate;
 
             if !validate {
@@ -1826,7 +1828,7 @@ impl Simulator {
         if let Some(id) = master_id_opt {
             self.set_input_clock_bit(id, 1);
             if has_eval_chunk {
-                self.ir.partial_settle(&mut self.mask_cache);
+                self.ir.partial_settle_master(&mut self.mask_cache);
             }
         }
 
@@ -1901,7 +1903,22 @@ impl Simulator {
         let n_rst = self.ir.derived_clock_schedule.resets.len();
         let max_iters = n + n_rst + 1;
         let mut iters = 0;
+        // Only FF-driven clocks and derived resets can gain an edge from a
+        // commit.  A schedule of master-gated comb clocks alone has nothing
+        // to detect, so on a master step the closure refresh is left to the
+        // master=0 pass below.
+        let post_commit_sources = n_rst > 0
+            || master_id_opt.is_none()
+            || self
+                .ir
+                .derived_clock_schedule
+                .clocks
+                .iter()
+                .any(|c| c.current_offset.is_ff() || !c.master_gated);
         loop {
+            if !post_commit_sources {
+                break;
+            }
             if has_eval_chunk {
                 self.ir.partial_settle(&mut self.mask_cache);
             }
@@ -2087,7 +2104,7 @@ impl Simulator {
         self.dump_variables();
     }
 
-    /// VERYL_AOT_C_VALIDATE event-path check: run the AOT-C event function and
+    /// `--backend-validate` event-path check: run the AOT-C event function and
     /// the Cranelift per-stmt dispatch on identical inputs, compare the
     /// WriteLogEntries they push plus any direct ff/comb writes, and panic on
     /// first divergence.  Leaves the Cranelift result live (ground truth).

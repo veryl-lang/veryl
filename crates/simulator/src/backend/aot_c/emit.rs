@@ -1291,11 +1291,93 @@ fn emit_wide_operand_signed(
     Some(r)
 }
 
+/// The low 64 bits of a wide value as a scalar C expression, or `None` when
+/// they depend on higher bits.  Bitwise ops take each bit from the same bit
+/// of their operands and add, sub and negate carry only upward, so such a
+/// tree needs no wide buffers; shift, multiply, concatenation, comparison and
+/// cast can move high bits down and decline.  A wide node exceeds 128 bits
+/// (`is_wide_ptr`), so nothing here needs a sub-64-bit mask, and a narrow
+/// operand arrives masked to its width, which is the wide path's
+/// zero-extension; signed contexts decline because the wide path
+/// sign-extends it instead.
+fn emit_expr_low64(expr: &ProtoExpression) -> Option<String> {
+    if !expr.builds_wide_pointer() {
+        return emit_expr(expr);
+    }
+    match expr {
+        ProtoExpression::Binary {
+            x,
+            op,
+            y,
+            expr_context,
+            ..
+        } => {
+            if expr_context.signed {
+                return None;
+            }
+            let (x, y) = (emit_expr_low64(x)?, emit_expr_low64(y)?);
+            let c = match op {
+                Op::BitAnd => "&",
+                Op::BitOr => "|",
+                Op::BitXor => "^",
+                Op::Add => "+",
+                Op::Sub => "-",
+                Op::BitXnor => {
+                    return Some(format!("(~(((uint64_t)({x})) ^ ((uint64_t)({y}))))"));
+                }
+                _ => return None,
+            };
+            Some(format!("(((uint64_t)({x})) {c} ((uint64_t)({y})))"))
+        }
+        ProtoExpression::Unary {
+            op,
+            x,
+            expr_context,
+            ..
+        } => {
+            if expr_context.signed {
+                return None;
+            }
+            match op {
+                // Same meanings as `emit_wide_unary`.
+                Op::Add => emit_expr_low64(x),
+                Op::Sub => Some(format!("(-((uint64_t)({})))", emit_expr_low64(x)?)),
+                Op::BitNot => Some(format!("(~((uint64_t)({})))", emit_expr_low64(x)?)),
+                _ => None,
+            }
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            // `emit_wide_ternary` sign-extends both arms into the result width
+            // when both are signed and narrower; a scalar select does not.
+            if true_expr.expr_context().signed && false_expr.expr_context().signed {
+                return None;
+            }
+            Some(format!(
+                "((({c}) != 0) ? ((uint64_t)({t})) : ((uint64_t)({f})))",
+                c = emit_expr(cond)?,
+                t = emit_expr_low64(true_expr)?,
+                f = emit_expr_low64(false_expr)?,
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// Shift amount: the low 64 bits of `y` (Cranelift loads word 0 of the
 /// promoted operand).  A narrow scalar IS that low word; a wide `y` reads
 /// word 0 of its buffer.
 fn wide_shift_amount(y: &ProtoExpression, pre: &mut String) -> Option<String> {
     if y.builds_wide_pointer() {
+        // Only the low 64 bits are read here, so compute just those when the
+        // tree allows it (see `emit_expr_low64`).
+        if let Some(s) = emit_expr_low64(y) {
+            return Some(s);
+        }
         let r = emit_wide_expr(y, pre)?;
         Some(format!("((const veryl_u64_ua*)({}))[0]", r.addr))
     } else {
@@ -3433,7 +3515,7 @@ fn clean_elide() -> bool {
 /// from.
 ///
 /// Soundness contract: an elided mask must leave the emitted C value
-/// BIT-IDENTICAL to the masked form (the VERYL_AOT_C_VALIDATE dual-run
+/// BIT-IDENTICAL to the masked form (the `--backend-validate` dual-run
 /// compares storage bytes against the JIT).  Every rule below mirrors the
 /// corresponding emitter arm's needs_clean=false emission; anything
 /// uncertain — width 0 / >64 results, dirty producers (~, unary/binary
@@ -4225,10 +4307,15 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
     }
     if let Some((hi, lo)) = a.select {
         let nbits = hi.checked_sub(lo)?.checked_add(1)?;
-        if nbits >= 64 {
+        if lo.checked_add(nbits)? > 64 {
             return None;
         }
-        let vmask = (1u64 << nbits) - 1;
+        // A full 64-bit select is legal: `[63:0]` on a 64-bit register.
+        let vmask = if nbits == 64 {
+            u64::MAX
+        } else {
+            (1u64 << nbits) - 1
+        };
         let pmask = vmask << lo;
         // RMW: read the dst slot (matches AssignStatement::eval_step reading
         // `self.dst`), merge [lo,hi], write dst if dual-slot, push merged.
@@ -7792,6 +7879,48 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
     }
 }
 
+thread_local! {
+    /// Loop indices whose C variable is in scope, innermost last:
+    /// `(storage, width, storage C type, C variable)`.  An emitted `for`
+    /// writes its index to storage once per iteration and the body reads it
+    /// back from there; `-fno-strict-aliasing` keeps gcc from forwarding the
+    /// store, so each read is a real load of a value the C loop variable
+    /// already holds.
+    static FOR_INDEX: RefCell<Vec<(VarOffset, usize, String, String)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// The C variable holding this load's value, when it is a live loop index.
+/// The width must match the loop's: the store truncates to the index's storage
+/// type, so a read of another width is not the same value.
+fn for_index_read(var_offset: &VarOffset, width: usize) -> Option<String> {
+    FOR_INDEX.with(|f| {
+        f.borrow()
+            .iter()
+            .rev()
+            .find(|(vo, w, _, _)| vo == var_offset && *w == width)
+            .map(|(_, _, cty, name)| format!("({cty}){name}"))
+    })
+}
+
+/// The substitution above holds only while the body leaves the index alone.
+fn writes_offset(body: &[ProtoStatement], vo: &VarOffset) -> bool {
+    body.iter().any(|s| match s {
+        ProtoStatement::Assign(a) => a.dst == *vo,
+        ProtoStatement::AssignDynamic(a) => a.dst_base == *vo,
+        ProtoStatement::If(x) => {
+            writes_offset(&x.true_side, vo) || writes_offset(&x.false_side, vo)
+        }
+        ProtoStatement::Case(x) => {
+            x.arms.iter().any(|a| writes_offset(&a.body, vo)) || writes_offset(&x.default, vo)
+        }
+        ProtoStatement::For(x) => x.var_offset == *vo || writes_offset(&x.body, vo),
+        ProtoStatement::SequentialBlock(b) => writes_offset(b, vo),
+        ProtoStatement::CompiledBlock(x) => writes_offset(&x.original_stmts, vo),
+        _ => false,
+    })
+}
+
 /// `ProtoStatement::For` → C `for` loop.  Covers Forward / Reverse ranges
 /// with constant or dynamic (≤64-bit) bounds and a loop var ≤ 64 bits;
 /// mirrors the Cranelift JIT gate (`ProtoForStatement::can_build_binary`).
@@ -7890,16 +8019,47 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
         VarOffset::Ff(o) => ("ff_values", o),
         VarOffset::Comb(o) => ("comb_values", o),
     };
+    // Depth-suffixed so a nested loop's variable does not shadow an enclosing
+    // one: the body may read either index.
+    let depth = FOR_INDEX.with(|f| f.borrow().len());
+    let itv = format!("_it{depth}");
+    let (init, cond, incr) = (
+        init.replace("_it", &itv),
+        cond.replace("_it", &itv),
+        incr.replace("_it", &itv),
+    );
 
     // Body pushes (FF write-log entries) execute once per iteration; scale the
     // reserve counters by the trip count.  A dynamic bound has no compile-time
     // trip count, so a body that pushes must fall back to the interpreter.
     let narrow_before = EVENT_NARROW_PUSHES.with(|c| c.get());
     let wide_before = EVENT_WIDE_PUSHES.with(|c| c.get());
+    let substitute = !writes_offset(&for_stmt.body, &for_stmt.var_offset);
+    if substitute {
+        FOR_INDEX.with(|f| {
+            f.borrow_mut().push((
+                for_stmt.var_offset,
+                for_stmt.var_width,
+                cty.to_string(),
+                itv.clone(),
+            ))
+        });
+    }
     let mut body = String::new();
     for s in &for_stmt.body {
-        body.push_str(&emit_stmt(s)?);
+        let emitted = emit_stmt(s);
+        if emitted.is_none() && substitute {
+            FOR_INDEX.with(|f| {
+                f.borrow_mut().pop();
+            });
+        }
+        body.push_str(&emitted?);
         body.push(' ');
+    }
+    if substitute {
+        FOR_INDEX.with(|f| {
+            f.borrow_mut().pop();
+        });
     }
     let narrow_body = EVENT_NARROW_PUSHES
         .with(|c| c.get())
@@ -7916,7 +8076,7 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     Some(format!(
         "{{ {var_ty} _lo = {lo}, _hi = {hi}; \
          for ({init}; {cond}; {incr}) {{ \
-            *(({cty}*)({buf} + {off:#x})) = ({cty})_it; \
+            *(({cty}*)({buf} + {off:#x})) = ({cty}){itv}; \
             {body} \
          }} }}",
     ))
@@ -9800,6 +9960,11 @@ fn emit_var_load(var_offset: &VarOffset, width: usize) -> Option<String> {
             nm = local_name(off)
         ));
     }
+    // Live loop index: read the C loop variable instead of the storage the
+    // emitted `for` mirrors it into (see `FOR_INDEX`).
+    if let Some(nm) = for_index_read(var_offset, width) {
+        return Some(format!("(({rt}){nm})", rt = result_ty));
+    }
     Some(format!(
         "(({rt})*((const {ct}*)({b} + {o:#x})))",
         rt = result_ty,
@@ -10435,6 +10600,25 @@ mod tests {
             .collect();
         let _ = fs::remove_dir_all(&tmp);
         Some(out)
+    }
+
+    #[test]
+    fn emit_event_ff_full_width_select_emits() {
+        // `ff64[63:0] <= v`: a select covering the whole 64-bit register must
+        // not bail on the mask width.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 64,
+            select: Some((63, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x0123_4567_89ab_cdef, 64),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_event_function(&[ProtoStatement::Assign(a)])
+            .expect("a full-width select must emit");
+        assert!(src.contains("0xffffffffffffffffULL"), "{src}");
     }
 
     #[test]
@@ -13191,7 +13375,7 @@ mod tests {
 
     // --- Clean-bits mask elision (expr_emits_clean) ---
     // A wrongly-elided mask stores dirty high bits (silent divergence from
-    // Cranelift, caught by VERYL_AOT_C_VALIDATE byte compares) — each rule
+    // Cranelift, caught by `--backend-validate` byte compares), so each rule
     // direction gets a direct emit-string test.
 
     #[test]
@@ -13336,11 +13520,71 @@ mod tests {
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
         assert!(s.contains("_lo = 0ULL, _hi = 8ULL"));
-        assert!(s.contains("uint64_t _it = _lo"));
-        assert!(s.contains("_it < _hi"));
-        assert!(s.contains("_it += 1ULL"));
+        assert!(s.contains("uint64_t _it0 = _lo"));
+        assert!(s.contains("_it0 < _hi"));
+        assert!(s.contains("_it0 += 1ULL"));
         assert!(s.contains("comb_values + 0x0"));
         assert!(s.contains("0xaULL"));
+    }
+
+    /// The body reads the loop index from the C variable, not from the storage
+    /// the loop mirrors it into: `-fno-strict-aliasing` stops gcc forwarding
+    /// that store, so every read would otherwise be a real load.
+    #[test]
+    fn emit_stmt_for_body_reads_the_index_from_the_c_variable() {
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(0x40),
+            var_width: 8,
+            var_native_bytes: 1,
+            var_signed: false,
+            token: TokenRange::default(),
+            range: ProtoForRange::Forward {
+                start: ProtoForBound::Const(0),
+                end: ProtoForBound::Const(8),
+                inclusive: false,
+                step: 1,
+            },
+            body: vec![comb_assign(
+                0x80,
+                8,
+                None,
+                var_expr(VarOffset::Comb(0x40), 8),
+            )],
+        };
+        let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
+        assert!(
+            !s.contains("(const uint32_t*)(comb_values + 0x40)"),
+            "still loads the index from storage: {s}"
+        );
+        assert!(s.contains("_it0"), "lost the loop variable: {s}");
+    }
+
+    /// A body that assigns the index must keep reading storage: the C loop
+    /// variable no longer holds what a later read in the same iteration sees.
+    #[test]
+    fn emit_stmt_for_body_writing_the_index_keeps_the_load() {
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(0x40),
+            var_width: 8,
+            var_native_bytes: 1,
+            var_signed: false,
+            token: TokenRange::default(),
+            range: ProtoForRange::Forward {
+                start: ProtoForBound::Const(0),
+                end: ProtoForBound::Const(8),
+                inclusive: false,
+                step: 1,
+            },
+            body: vec![
+                comb_assign(0x40, 8, None, const_expr(3, 8)),
+                comb_assign(0x80, 8, None, var_expr(VarOffset::Comb(0x40), 8)),
+            ],
+        };
+        let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
+        assert!(
+            s.contains("(const uint32_t*)(comb_values + 0x40)"),
+            "substituted an index the body overwrites: {s}"
+        );
     }
 
     #[test]
@@ -13383,9 +13627,9 @@ mod tests {
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
         assert!(s.contains("_lo = 0ULL"));
-        assert!(s.contains("uint64_t _it = _lo"));
-        assert!(s.contains("_it < _hi"));
-        assert!(s.contains("_it += 1ULL"));
+        assert!(s.contains("uint64_t _it0 = _lo"));
+        assert!(s.contains("_it0 < _hi"));
+        assert!(s.contains("_it0 += 1ULL"));
     }
 
     #[test]
@@ -13406,9 +13650,9 @@ mod tests {
             body: vec![],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("int64_t _it = _hi - 1"));
-        assert!(s.contains("_it >= _lo"));
-        assert!(s.contains("_it -= 1ULL"));
+        assert!(s.contains("int64_t _it0 = _hi - 1"));
+        assert!(s.contains("_it0 >= _lo"));
+        assert!(s.contains("_it0 -= 1ULL"));
     }
 
     #[test]
@@ -14220,6 +14464,54 @@ mod tests {
             !sets[0].contains(&0x10),
             "read-before-write (backward edge) must not localize"
         );
+    }
+
+    /// A wide XOR whose result reaches a one-bit field is emitted as scalar
+    /// C: the wide path would zero-fill a buffer per operand and call the
+    /// helpers, all to deliver one bit.
+    #[test]
+    fn narrow_field_store_of_a_wide_xor_stays_scalar() {
+        let xor = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x100), 1)),
+            op: Op::BitXor,
+            y: Box::new(var_expr(VarOffset::Comb(0x108), 1)),
+            width: 710,
+            expr_context: ctx(710, false),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((0, 0)), xor)).unwrap();
+        assert!(!c.contains("vw_"), "still calls a wide helper: {c}");
+        assert!(!c.contains("= {0}"), "still zero-fills a wide buffer: {c}");
+        assert!(c.contains('^'), "lost the xor: {c}");
+    }
+
+    /// The low bits of a shift depend on bits above them, so the narrowing
+    /// must decline and leave the wide path in place.
+    #[test]
+    fn narrow_field_store_of_a_wide_shift_keeps_the_wide_path() {
+        let shr = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x100), 710)),
+            op: Op::LogicShiftR,
+            y: Box::new(const_expr(4, 8)),
+            width: 710,
+            expr_context: ctx(710, false),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((0, 0)), shr)).unwrap();
+        assert!(c.contains("vw_"), "narrowed a shift: {c}");
+    }
+
+    /// A signed context sign-extends a narrow operand into the high words,
+    /// which a plain scalar read does not reproduce.
+    #[test]
+    fn narrow_field_store_of_a_signed_wide_add_keeps_the_wide_path() {
+        let add = ProtoExpression::Binary {
+            x: Box::new(var_expr_signed(VarOffset::Comb(0x100), 8)),
+            op: Op::Add,
+            y: Box::new(var_expr_signed(VarOffset::Comb(0x108), 8)),
+            width: 710,
+            expr_context: ctx(710, true),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((3, 0)), add)).unwrap();
+        assert!(c.contains("vw_"), "narrowed a signed add: {c}");
     }
 
     #[test]
