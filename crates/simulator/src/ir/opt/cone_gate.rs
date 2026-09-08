@@ -42,7 +42,7 @@ use veryl_analyzer::ir::VarId;
 /// FF-buffer ownership, held per uniformly strided RUN of elements rather
 /// than per element: memory arrays make the element count grow with the
 /// modelled depth while the array count does not.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FfOwner {
     /// `(start, stride, count, bytes)`, sorted by `start` and disjoint.  The
     /// run covers `[start, start + count * stride)`, of which each element
@@ -79,6 +79,14 @@ pub struct ConeGateInputs {
     /// Sorted disjoint-start `(start, end, node)` comb-buffer intervals.
     pub comb_owner: Vec<(usize, usize, u32)>,
     pub ff_owner: FfOwner,
+    /// Sorted disjoint `(start, end, node)` FF-buffer intervals, one per
+    /// variable: which instance an FF belongs to (the event gates attribute
+    /// an `always_ff` to its instance by the FFs it writes).
+    pub ff_node: Vec<(usize, usize, u32)>,
+    /// The comb-buffer counterpart, one interval per variable over ALL its
+    /// elements: `comb_owner` leaves the padding between a padded array's
+    /// elements to nobody, and the event gates need every read covered.
+    pub comb_var: Vec<(usize, usize, u32)>,
     /// Merged comb byte ranges any event statement can write.
     pub event_written_comb: Vec<(usize, usize)>,
 }
@@ -141,6 +149,8 @@ pub struct Group {
 /// `Group` in the FINAL storage space, over the `ConeSegment` list.
 #[derive(Clone, Debug)]
 pub struct ConeGroup {
+    /// The subtree's node in `ConeGateInputs`.
+    pub node: u32,
     pub segments: Vec<u32>,
     pub compare: Vec<(bool, u32, u32)>,
     pub off_decay: u32,
@@ -691,9 +701,37 @@ impl ConeGateInputs {
     /// Own comb storage allocated after `build_inputs`, given as
     /// `(from, to, bytes)` entries in the `Context::comb_reloc` shape, as the
     /// owner of `from`.
+    /// Follow a comb relayout: the comb intervals move with the units the
+    /// schedule placed, one becoming several where its bytes landed apart.
+    /// FF storage is never relaid.
+    pub fn relayout(&mut self, sched: &crate::ir::comb_layout::CombLayoutSchedule) {
+        let moved = |s: usize, e: usize| {
+            sched
+                .translate_range(s as isize, e as isize)
+                .into_iter()
+                .filter(|&(ns, ne)| ns >= 0 && ne > ns)
+                .map(|(ns, ne)| (ns as usize, ne as usize))
+        };
+        for owned in [&mut self.comb_owner, &mut self.comb_var] {
+            let mut out = Vec::with_capacity(owned.len());
+            for &(s, e, id) in owned.iter() {
+                out.extend(moved(s, e).map(|(ns, ne)| (ns, ne, id)));
+            }
+            out.sort_unstable();
+            *owned = out;
+        }
+        let mut written = Vec::with_capacity(self.event_written_comb.len());
+        for &(s, e) in &self.event_written_comb {
+            written.extend(moved(s, e));
+        }
+        merge_ranges(&mut written);
+        self.event_written_comb = written;
+    }
+
     pub fn adopt_relocations(&mut self, reloc: &[(isize, isize, usize)]) {
         let before = self.comb_owner.len();
         inherit_reloc_owners(&mut self.comb_owner, reloc);
+        inherit_reloc_owners(&mut self.comb_var, reloc);
         if diag() {
             eprintln!(
                 "[cone_gate] adopt_relocations: entries={} owned={}",
@@ -721,11 +759,15 @@ pub fn build_inputs(
     let mut comb_owner: Vec<(usize, usize, u32)> = Vec::new();
     let mut ff_runs: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut ff_elems: Vec<(usize, usize)> = Vec::new();
+    let mut ff_node: Vec<(usize, usize, u32)> = Vec::new();
+    let mut comb_var: Vec<(usize, usize, u32)> = Vec::new();
     let add_vars = |vars: &HashMap<VarId, VariableMeta>,
                     id: u32,
                     comb_owner: &mut Vec<(usize, usize, u32)>,
                     ff_runs: &mut Vec<(usize, usize, usize, usize)>,
-                    ff_elems: &mut Vec<(usize, usize)>| {
+                    ff_elems: &mut Vec<(usize, usize)>,
+                    ff_node: &mut Vec<(usize, usize, u32)>,
+                    comb_var: &mut Vec<(usize, usize, u32)>| {
         for vm in vars.values() {
             ff_elems.clear();
             // A variable past `MAX_TOTAL_COMPARE` can never join a compare set
@@ -738,6 +780,8 @@ pub fn build_inputs(
             let fold_var = comb_bytes > MAX_ELEMENT_OWNER_BYTES
                 || comb_span_bytes > crate::ir::big_array::FOLD_SPAN_BYTES;
             let mut comb_span: Option<(usize, usize)> = None;
+            let mut ff_ext: Option<(usize, usize)> = None;
+            let mut comb_ext: Option<(usize, usize)> = None;
             for el in &vm.elements {
                 let off = el.current.raw();
                 if off < 0 {
@@ -750,6 +794,12 @@ pub fn build_inputs(
                 let (off, nb) = (off as usize, value_size(el.native_bytes, use_4state));
                 if el.current.is_ff() {
                     ff_elems.push((off, nb));
+                    // A dual-slot FF is written at its next slot; the owner
+                    // span covers both so a write finds its instance.
+                    let end = (el.next_offset.max(off as isize) as usize) + nb;
+                    ff_ext = Some(ff_ext.map_or((off, end), |(s, e): (usize, usize)| {
+                        (s.min(off), e.max(end))
+                    }));
                 } else if fold_var {
                     comb_span = Some(match comb_span {
                         None => (off, off + nb),
@@ -758,14 +808,33 @@ pub fn build_inputs(
                 } else {
                     comb_owner.push((off, off + nb, id));
                 }
+                if !el.current.is_ff() {
+                    comb_ext = Some(comb_ext.map_or((off, off + nb), |(s, e): (usize, usize)| {
+                        (s.min(off), e.max(off + nb))
+                    }));
+                }
             }
             if let Some((s, e)) = comb_span {
                 comb_owner.push((s, e, id));
             }
+            if let Some((s, e)) = ff_ext {
+                ff_node.push((s, e, id));
+            }
+            if let Some((s, e)) = comb_ext {
+                comb_var.push((s, e, id));
+            }
             fold_ff_runs(ff_elems, ff_runs);
         }
     };
-    add_vars(top_vars, 0, &mut comb_owner, &mut ff_runs, &mut ff_elems);
+    add_vars(
+        top_vars,
+        0,
+        &mut comb_owner,
+        &mut ff_runs,
+        &mut ff_elems,
+        &mut ff_node,
+        &mut comb_var,
+    );
     let mut stack: Vec<(u32, &ModuleVariableMeta)> = Vec::new();
     for c in children {
         stack.push((0, c));
@@ -780,6 +849,8 @@ pub fn build_inputs(
             &mut comb_owner,
             &mut ff_runs,
             &mut ff_elems,
+            &mut ff_node,
+            &mut comb_var,
         );
         for c in &m.children {
             stack.push((id, c));
@@ -788,6 +859,8 @@ pub fn build_inputs(
     radix_sort_intervals(&mut comb_owner);
     let before = comb_owner.len();
     inherit_reloc_owners(&mut comb_owner, comb_reloc);
+    comb_var.sort_unstable();
+    inherit_reloc_owners(&mut comb_var, comb_reloc);
     if diag() {
         eprintln!(
             "[cone_gate] build_inputs: reloc entries={} owned={} comb_extent={}",
@@ -798,6 +871,7 @@ pub fn build_inputs(
     }
     ff_runs.sort_unstable();
     ff_runs.dedup();
+    ff_node.sort_unstable();
     debug_assert!(
         ff_runs
             .windows(2)
@@ -824,12 +898,14 @@ pub fn build_inputs(
         node_path,
         comb_owner,
         ff_owner: FfOwner { runs: ff_runs },
+        ff_node,
+        comb_var,
         event_written_comb,
     }
 }
 
 /// Does the statement (recursively) have effects a skip could lose?
-fn has_side_effects(s: &ProtoStatement) -> bool {
+pub(crate) fn has_side_effects(s: &ProtoStatement) -> bool {
     match s {
         ProtoStatement::Assign(_) | ProtoStatement::AssignDynamic(_) | ProtoStatement::Break => {
             false
@@ -1681,6 +1757,13 @@ fn build_groups(
         // input a settle late, and what the subtree computes from it later
         // in the settle is not covered either.
         if !late.is_empty() {
+            if diag() && members.len() >= 4 {
+                eprintln!(
+                    "[cone_gate] group-reject late segs={} {}",
+                    members.len(),
+                    inputs.node_path[a as usize]
+                );
+            }
             continue;
         }
         comb.extend(intersect_ranges(&inputs.event_written_comb, &in_comb));
@@ -1702,6 +1785,13 @@ fn build_groups(
             .collect();
         let bytes: usize = compare.iter().map(|&(_, s, e)| (e - s) as usize).sum();
         if bytes * 2 > child_bytes {
+            if diag() && members.len() >= 4 {
+                eprintln!(
+                    "[cone_gate] group-reject cost segs={} child_bytes={child_bytes} bytes={bytes} {}",
+                    members.len(),
+                    inputs.node_path[a as usize]
+                );
+            }
             continue;
         }
         let off_decay = (child_bytes / bytes.max(1)).saturating_sub(1).min(1 << 20) as u32;
@@ -1751,6 +1841,8 @@ mod tests {
                 .collect(),
             comb_owner: vec![(0, 8, 0), (8, 16, 2), (16, 24, 3), (24, 32, 4)],
             ff_owner: FfOwner { runs: vec![] },
+            comb_var: Vec::new(),
+            ff_node: Vec::new(),
             event_written_comb: vec![],
         };
         let info = |node: u32, ins: &[(usize, usize)], outs: &[(usize, usize)]| StmtInfo {

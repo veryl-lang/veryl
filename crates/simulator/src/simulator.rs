@@ -1166,21 +1166,8 @@ impl Simulator {
 
     pub fn set(&mut self, port: &str, value: Value) {
         let port = VarPath::from_str(port).unwrap();
-
-        if let Some(id) = self.ir.ports.get(&port)
-            && let Some(x) = self.ir.module_variables.variables.get_mut(id)
-        {
-            let mut value = value;
-            value.trunc(x.width);
-            unsafe {
-                write_native_value(
-                    x.current_values[0],
-                    x.native_bytes,
-                    self.ir.use_4state,
-                    &value,
-                );
-            }
-            self.comb_dirty = true;
+        if let Some(id) = self.ir.ports.get(&port).copied() {
+            self.set_var_by_id(&id, value);
         }
     }
 
@@ -1327,6 +1314,12 @@ impl Simulator {
 
     pub fn mark_comb_dirty(&mut self) {
         self.comb_dirty = true;
+    }
+
+    /// `mark_comb_dirty` for a testbench store that may reach FF storage.
+    pub fn mark_ff_written(&mut self) {
+        self.comb_dirty = true;
+        self.invalidate_event_gates();
     }
 
     pub fn get_clock(&self, port: &str) -> Option<Event> {
@@ -1633,10 +1626,22 @@ impl Simulator {
         self.components = components;
     }
 
+    /// Every event gate back to "must run": a write the gates cannot see (a
+    /// reset or initial fire, a testbench store) may have changed what a
+    /// gated subtree reads.
+    pub fn invalidate_event_gates(&mut self) {
+        for &off in &self.ir.event_gate_flags {
+            self.ir.comb_values[off as usize] = 0;
+        }
+    }
+
     /// Evaluate `event_statements[event]` into the write log without
     /// committing, so simultaneous events (master + gated clocks) share
     /// one pre-commit state and one commit.
     fn eval_event_stmts(&mut self, event: &Event) {
+        if !matches!(event, Event::Clock(_)) {
+            self.invalidate_event_gates();
+        }
         #[cfg(feature = "profile")]
         let event_start = Instant::now();
 
@@ -2332,9 +2337,12 @@ impl Simulator {
             cr_wide_count,
         );
 
-        let comb_diff = aot_comb
+        // Logic storage only: the gate state region at the tail (cone
+        // shadows, event-gate flags) is bookkeeping the AOT-C path alone keeps.
+        let logic = (self.ir.cone_state_base as usize).min(self.ir.comb_values.len());
+        let comb_diff = aot_comb[..logic]
             .iter()
-            .zip(self.ir.comb_values.iter())
+            .zip(self.ir.comb_values[..logic].iter())
             .filter(|(a, c)| a != c)
             .count();
         if comb_diff > 0 {
@@ -2343,7 +2351,11 @@ impl Simulator {
                 self.ir.name, self.last_event,
             );
             let mut shown = 0;
-            for (off, (a, c)) in aot_comb.iter().zip(self.ir.comb_values.iter()).enumerate() {
+            for (off, (a, c)) in aot_comb[..logic]
+                .iter()
+                .zip(self.ir.comb_values[..logic].iter())
+                .enumerate()
+            {
                 if a != c {
                     eprintln!("  comb off={off:#x}: aot={a:#04x} cranelift={c:#04x}");
                     shown += 1;
@@ -2395,18 +2407,25 @@ impl Simulator {
     /// Set a variable value by VarId. Used to write clock/reset signal values
     /// into the variable storage so they appear in wave dumps.
     pub fn set_var_by_id(&mut self, var_id: &VarId, val: Value) {
-        if let Some(x) = self.ir.module_variables.variables.get_mut(var_id) {
-            let mut val = val;
-            val.trunc(x.width);
-            unsafe {
-                write_native_value(
-                    x.current_values[0],
-                    x.native_bytes,
-                    self.ir.use_4state,
-                    &val,
-                );
-            }
-            self.comb_dirty = true;
+        let Some(x) = self.ir.module_variables.variables.get_mut(var_id) else {
+            return;
+        };
+        let mut val = val;
+        val.trunc(x.width);
+        unsafe {
+            write_native_value(
+                x.current_values[0],
+                x.native_bytes,
+                self.ir.use_4state,
+                &val,
+            );
+        }
+        self.comb_dirty = true;
+        // An FF store from outside any event; see `invalidate_event_gates`.
+        let ff = self.ir.ff_values.as_ptr() as usize;
+        let in_ff = (ff..ff + self.ir.ff_values.len()).contains(&(x.current_values[0] as usize));
+        if in_ff {
+            self.invalidate_event_gates();
         }
     }
 

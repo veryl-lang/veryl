@@ -1416,7 +1416,9 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             let flow = s.eval_step(&mut sim.mask_cache);
             // A statement that writes only testbench-private variables cannot
             // change a comb input, so the next read does not need a settle.
-            if !sim.tb_dirty.is_clean(s) {
+            if sim.tb_dirty.writes_ff(s) {
+                sim.mark_ff_written();
+            } else if !sim.tb_dirty.is_clean(s) {
                 sim.mark_comb_dirty();
             }
             if flow == ControlFlow::Break {

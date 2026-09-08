@@ -70,12 +70,20 @@ fn enabled() -> bool {
 #[derive(Default)]
 pub(crate) struct TbDirtyFilter {
     clean: HashSet<*const Statement>,
+    /// Statements that may store into FF storage: those also drop the event
+    /// gates' idle verdicts, which only see writes an event made.
+    ff_writers: HashSet<*const Statement>,
 }
 
 impl TbDirtyFilter {
     #[inline]
     pub(crate) fn is_clean(&self, stmt: &Statement) -> bool {
         !self.clean.is_empty() && self.clean.contains(&(stmt as *const Statement))
+    }
+
+    #[inline]
+    pub(crate) fn writes_ff(&self, stmt: &Statement) -> bool {
+        self.ff_writers.contains(&(stmt as *const Statement))
     }
 
     /// Classify one block; see `build_blocks`.
@@ -99,10 +107,12 @@ impl TbDirtyFilter {
             None => SpanTable::build(ir, &ir.comb_touched_offsets),
         };
         let mut clean = HashSet::default();
+        let mut ff_writers = HashSet::default();
         for stmts in blocks {
-            collect_clean(stmts, &spans, &mut clean);
+            collect_clean(stmts, &spans, &mut clean, &mut ff_writers);
         }
         filter.clean = clean;
+        filter.ff_writers = ff_writers;
         filter
     }
 
@@ -279,6 +289,10 @@ impl SpanTable {
         }
     }
 
+    pub(crate) fn is_ff_storage(&self, ptr: *mut u8) -> bool {
+        (self.ff_base..self.ff_base + self.ff_len).contains(&(ptr as usize))
+    }
+
     /// `true` when a write of `len` bytes at `ptr` may reach a comb read.
     /// Unresolvable destinations answer `true` — the caller must stay dirty.
     pub(crate) fn write_may_reach_comb(&self, ptr: *mut u8, len: usize) -> bool {
@@ -382,6 +396,7 @@ fn collect_clean(
     stmts: &[TestbenchStatement],
     spans: &SpanTable,
     clean: &mut HashSet<*const Statement>,
+    ff_writers: &mut HashSet<*const Statement>,
 ) {
     for tb in stmts {
         match tb {
@@ -389,21 +404,48 @@ fn collect_clean(
                 if is_clean_stmt(s, spans) {
                     clean.insert(s as *const Statement);
                 }
+                if writes_ff_stmt(s, spans) {
+                    ff_writers.insert(s as *const Statement);
+                }
             }
             TestbenchStatement::If {
                 then_block,
                 else_block,
                 ..
             } => {
-                collect_clean(then_block, spans, clean);
-                collect_clean(else_block, spans, clean);
+                collect_clean(then_block, spans, clean, ff_writers);
+                collect_clean(else_block, spans, clean, ff_writers);
             }
-            TestbenchStatement::For { body, .. } => collect_clean(body, spans, clean),
+            TestbenchStatement::For { body, .. } => collect_clean(body, spans, clean, ff_writers),
             // Clock/reset drive design nets; the rest either write through
             // paths this filter does not model or advance time.  All keep the
             // unconditional dirty mark at their own call sites.
             _ => {}
         }
+    }
+}
+
+/// A precompiled block cannot store into FF storage: it is built over
+/// testbench-private storage only.
+fn writes_ff_stmt(stmt: &Statement, spans: &SpanTable) -> bool {
+    match stmt {
+        Statement::Assign(a) => spans.is_ff_storage(a.dst),
+        Statement::AssignDynamic(a) => spans.is_ff_storage(a.dst_base_ptr),
+        Statement::If(x) => x
+            .true_side
+            .iter()
+            .chain(x.false_side.iter())
+            .any(|s| writes_ff_stmt(s, spans)),
+        Statement::Case(x) => x
+            .arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(x.default.iter())
+            .any(|s| writes_ff_stmt(s, spans)),
+        Statement::For(x) => x.body.iter().any(|s| writes_ff_stmt(s, spans)),
+        Statement::SequentialBlock(b) => b.iter().any(|s| writes_ff_stmt(s, spans)),
+        Statement::SystemFunctionCall(crate::ir::SystemFunctionCall::Readmemh { .. }) => true,
+        _ => false,
     }
 }
 

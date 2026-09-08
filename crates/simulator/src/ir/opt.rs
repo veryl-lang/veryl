@@ -11,6 +11,7 @@ pub(crate) mod cone_gate;
 pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dup_assign_dce;
+pub(crate) mod event_gate;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod field_unfuse;
 #[cfg(not(target_family = "wasm"))]

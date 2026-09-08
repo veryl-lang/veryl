@@ -165,6 +165,8 @@ pub struct Ir {
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// See `Module::cone_state_base`.
     pub cone_state_base: u32,
+    /// See `Module::event_gate_flags`.
+    pub event_gate_flags: Vec<u32>,
     /// See `Module::settle_info`.
     pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
     /// Cone-gate segments over `comb_statements`; empty when ungated.
@@ -285,6 +287,7 @@ impl Ir {
             closure_out_watch: module.closure_out_watch,
             event_comb_writes: module.event_comb_writes,
             cone_state_base: module.cone_state_base,
+            event_gate_flags: module.event_gate_flags,
             settle_info: module.settle_info,
             cone_segments: module.cone_segments,
             cone_gate_state: std::cell::RefCell::new(None),
