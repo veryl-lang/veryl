@@ -1280,6 +1280,24 @@ pub fn eval_type(
         None
     };
 
+    let non_const_cast = matches!(pos, TypePosition::Cast)
+        && path
+            .to_var_path()
+            .is_some_and(|x| context.var_paths.get(&x).is_some_and(|x| !x.1.is_const));
+    if non_const_cast {
+        let resolved = context.resolve_path(path.clone());
+        if let Ok(symbol) = symbol_table::resolve(&resolved) {
+            context.insert_error(AnalyzerError::mismatch_type(
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.found.token.to_string(),
+                    expected: "enum, union, struct, typedef or integer constant".to_string(),
+                    actual: symbol.found.kind.to_kind_name(),
+                },
+                &path.range,
+            ));
+        }
+    }
+
     let kind = if let Some(x) = path.to_var_path()
         && let Some(x) = context.var_paths.get(&x)
     {
