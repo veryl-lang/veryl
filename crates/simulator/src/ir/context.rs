@@ -63,10 +63,10 @@ pub struct CachedChunk {
     pub output_offsets: Vec<VarOffset>,
     /// Canonical (current) offsets for FF variables written by this function.
     pub ff_canonical_offsets: Vec<isize>,
-    pub stmt_deps: Vec<StmtDep>,
+    pub stmt_deps: Arc<Vec<StmtDep>>,
     /// Originals before JIT compilation; cache hits expand from these
     /// for fine-grained dependency analysis with offset deltas applied.
-    pub original_stmts: Vec<ProtoStatement>,
+    pub original_stmts: Arc<Vec<ProtoStatement>>,
 }
 
 /// Cache entry for a module type's compiled internal logic.  Stores

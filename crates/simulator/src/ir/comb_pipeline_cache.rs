@@ -57,6 +57,18 @@ pub struct CombPipeline {
     pub fused_offsets: Vec<isize>,
     /// Non-trivial SCC count (debug/test-only diagnostic; 0 in release).
     pub nontrivial_comb_scc: usize,
+    /// The comb half of the AOT-C localize info: also a pure function of
+    /// `pre_jit_stmts` (see `dead_var_dce::localize_comb_ranges`).
+    pub localize_comb_ranges: Vec<(isize, usize, isize)>,
+    /// Every comb offset `pre_jit_stmts` touches, kept so a hit does not
+    /// re-walk the shared DUT's comb list per test.
+    pub comb_touched_offsets: Arc<crate::HashSet<VarOffset>>,
+    /// What `field_unfuse` allocated and recorded in `Context::comb_reloc`.
+    /// The pass runs on the miss path only (the key pins its decisions by
+    /// their inputs), so a hit reserves the same span, which the cached
+    /// statements address, and restores the same ownership records.
+    pub unfuse_comb_bytes: usize,
+    pub unfuse_comb_reloc: Vec<(isize, isize, usize)>,
     /// Comb bytes the version-split pass reserved for its rename temps.
     /// The pipeline does not run on a hit, so the caller must reserve them
     /// itself — the cached statements address those offsets, and a key

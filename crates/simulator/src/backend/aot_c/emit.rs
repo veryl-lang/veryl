@@ -584,7 +584,7 @@ impl LocalAnalysis {
                 }
             }
             ProtoStatement::CompiledBlock(x) => {
-                for s in &x.original_stmts {
+                for s in x.original_stmts.iter() {
                     self.poison(s);
                 }
             }
@@ -2142,7 +2142,7 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
     }
     match stmt {
         ProtoStatement::CompiledBlock(cb) => {
-            for s in &cb.original_stmts {
+            for s in cb.original_stmts.iter() {
                 collect_uncovered(s, out);
             }
         }
@@ -2373,7 +2373,7 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
 fn diag_find_fail(stmt: &ProtoStatement) -> String {
     match stmt {
         ProtoStatement::CompiledBlock(cb) => {
-            for s in &cb.original_stmts {
+            for s in cb.original_stmts.iter() {
                 if emit_stmt(s).is_none() {
                     return format!("CB/{}", diag_find_fail(s));
                 }
@@ -7756,7 +7756,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // `cb.func` the inlined C must NOT re-add ff/comb_delta_bytes —
             // that double-counts and corrupts memory under alias-off reuse.
             let mut s = String::from("{ ");
-            for stmt in &cb.original_stmts {
+            for stmt in cb.original_stmts.iter() {
                 let inner = emit_stmt(stmt)?;
                 s.push_str(&inner);
                 s.push(' ');
@@ -12981,8 +12981,8 @@ mod tests {
             input_offsets: vec![],
             output_offsets: vec![],
             ff_canonical_offsets: vec![],
-            stmt_deps: vec![],
-            original_stmts: vec![inner_a, inner_b],
+            stmt_deps: std::sync::Arc::new(vec![]),
+            original_stmts: std::sync::Arc::new(vec![inner_a, inner_b]),
         };
         let s = emit_stmt(&ProtoStatement::CompiledBlock(cb)).unwrap();
         assert!(s.starts_with("{ "));
@@ -13016,8 +13016,8 @@ mod tests {
             input_offsets: vec![],
             output_offsets: vec![],
             ff_canonical_offsets: vec![],
-            stmt_deps: vec![],
-            original_stmts: vec![inner],
+            stmt_deps: std::sync::Arc::new(vec![]),
+            original_stmts: std::sync::Arc::new(vec![inner]),
         };
         let s = emit_stmt(&ProtoStatement::CompiledBlock(cb)).unwrap();
         assert!(s.contains("comb_values + 0x110")); // actual offset, verbatim
@@ -14520,8 +14520,8 @@ mod tests {
             input_offsets: vec![],
             output_offsets: vec![VarOffset::Comb(0x0), VarOffset::Comb(0x10)],
             ff_canonical_offsets: vec![],
-            stmt_deps: vec![],
-            original_stmts: vec![cdyn_write(0x0, 0x8, 3)],
+            stmt_deps: std::sync::Arc::new(vec![]),
+            original_stmts: std::sync::Arc::new(vec![cdyn_write(0x0, 0x8, 3)]),
         };
         let stmts = vec![
             ProtoStatement::CompiledBlock(cb),

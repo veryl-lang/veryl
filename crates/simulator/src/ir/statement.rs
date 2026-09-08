@@ -947,11 +947,14 @@ pub struct CompiledBlockStatement {
     pub ff_canonical_offsets: Vec<isize>,
     /// Per-statement (inputs, outputs) from the pre-JIT originals.
     /// `analyze_dependency` uses this for fine-grained DAG analysis to
-    /// avoid false combinational loops from coarse lumping.
-    pub stmt_deps: Vec<StmtDep>,
+    /// avoid false combinational loops from coarse lumping.  Shared for the
+    /// same reason as `original_stmts`: it is one entry per original statement.
+    pub stmt_deps: Arc<Vec<StmtDep>>,
     /// Pre-JIT originals, expanded by `analyze_dependency` when a
-    /// CompiledBlock causes a false cycle.
-    pub original_stmts: Vec<ProtoStatement>,
+    /// CompiledBlock causes a false cycle.  Shared: a cached subtree that
+    /// relocates by a zero delta hands the same list to every test rather than
+    /// deep-cloning the whole tree per test (`backend::inst::relocate_entry`).
+    pub original_stmts: Arc<Vec<ProtoStatement>>,
 }
 
 // `stmt_deps` and `original_stmts` are excluded from `Debug` and `Hash`: both are
@@ -1557,7 +1560,7 @@ impl ProtoStatement {
                 // → hazard_unit input appears as a comb cycle).
                 if !x.stmt_deps.is_empty() {
                     // Use fine-grained per-statement deps if available
-                    for (ins, outs) in &x.stmt_deps {
+                    for (ins, outs) in x.stmt_deps.iter() {
                         for &off in ins {
                             if !off.is_ff() {
                                 inputs.push(VarOffset::Comb(off.raw()));
@@ -1675,7 +1678,7 @@ impl ProtoStatement {
             },
             ProtoStatement::CompiledBlock(x) => {
                 if !x.stmt_deps.is_empty() {
-                    for (ins, _) in &x.stmt_deps {
+                    for (ins, _) in x.stmt_deps.iter() {
                         for &off in ins {
                             if !off.is_ff() {
                                 out.push((VarOffset::Comb(off.raw()), None));
@@ -1808,11 +1811,11 @@ impl ProtoStatement {
                 // cached base+last input_offsets / output_offsets if the
                 // originals weren't retained.
                 if !x.original_stmts.is_empty() {
-                    for s in &x.original_stmts {
+                    for s in x.original_stmts.iter() {
                         s.gather_variable_offsets_expanded(fold, inputs, outputs);
                     }
                 } else if !x.stmt_deps.is_empty() {
-                    for (ins, outs) in &x.stmt_deps {
+                    for (ins, outs) in x.stmt_deps.iter() {
                         for &off in ins {
                             inputs.push(fold.canon(off));
                         }
@@ -1912,7 +1915,7 @@ impl ProtoStatement {
                 // retained originals can name a foldable array.  A block
                 // reduced to its cache keeps its arrays expanded — safe,
                 // since the gather reads the same lists.
-                for s in &x.original_stmts {
+                for s in x.original_stmts.iter() {
                     s.collect_big_arrays(fold);
                 }
             }
@@ -1998,7 +2001,7 @@ impl ProtoStatement {
                 // exist (covered by the non-expanded read set), so nothing to
                 // add here.
                 if !x.original_stmts.is_empty() {
-                    for s in &x.original_stmts {
+                    for s in x.original_stmts.iter() {
                         s.gather_dynamic_read_ranges(ranges);
                     }
                 }

@@ -274,7 +274,7 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::CompiledBlock(x) => {
-            for s in &x.original_stmts {
+            for s in x.original_stmts.iter() {
                 walk_stmt_liveness(s, c);
             }
         }
@@ -408,12 +408,26 @@ pub fn collect_dead_offsets(slices: &[&[ProtoStatement]]) -> HashSet<VarOffset> 
     dead
 }
 
-/// Offsets the AOT-C emitter must NOT localize (`VERYL_AOT_C_LOCALIZE`):
-/// `blocklist` = comb offsets an event reads/writes (load-bearing across the
-/// comb→event boundary); `ranges` = runtime-indexed array ranges `(base, num,
-/// stride)` whose elements may be read dynamically elsewhere.
+/// The comb half of the AOT-C localize blocklist (`VERYL_AOT_C_LOCALIZE`):
+/// runtime-indexed array ranges `(base, num, stride)` the comb list carries.
+/// A pure function of the pipeline's statements, so a shared pipeline
+/// computes it once.
+pub fn localize_comb_ranges(comb: &[ProtoStatement]) -> Vec<(isize, usize, isize)> {
+    let mut c = Census::default();
+    for s in comb {
+        walk_stmt_liveness(s, &mut c);
+    }
+    c.ranges
+        .iter()
+        .filter(|r| !r.base.is_ff())
+        .map(|r| (r.base.raw(), r.num, r.stride))
+        .collect()
+}
+
+/// The event half: `blocklist` = comb offsets an event reads or writes
+/// (load-bearing across the comb→event boundary); `ranges` = the event side's
+/// runtime-indexed ranges.  The caller appends `localize_comb_ranges`.
 pub fn collect_localize_info(
-    comb: &[ProtoStatement],
     event_slices: &[&[ProtoStatement]],
 ) -> (HashSet<VarOffset>, Vec<(isize, usize, isize)>) {
     let mut ev = Census::default();
@@ -433,12 +447,8 @@ pub fn collect_localize_info(
             blocklist.insert(*off);
         }
     }
-    let mut comb_c = Census::default();
-    for s in comb {
-        walk_stmt_liveness(s, &mut comb_c);
-    }
     let mut ranges = Vec::new();
-    for r in ev.ranges.iter().chain(comb_c.ranges.iter()) {
+    for r in ev.ranges.iter() {
         if !r.base.is_ff() {
             ranges.push((r.base.raw(), r.num, r.stride));
         }

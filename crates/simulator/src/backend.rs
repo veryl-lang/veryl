@@ -34,7 +34,7 @@ pub mod validate;
 pub use aot_c::AotCBackend;
 #[cfg(not(target_family = "wasm"))]
 pub use cranelift::CraneliftBackend;
-pub use registry::{BackendRegistry, ChunkOutput};
+pub use registry::{BackendRegistry, ChunkOutput, ChunkPlan, compile_plans_parallel};
 
 /// A backend that may compile pre-JIT `ProtoStatement`s into native code.
 /// All compile methods return `Option` so a backend can decline any

@@ -91,6 +91,16 @@ pub(crate) fn whole_comb_fingerprint(
     h.finish_128()
 }
 
+/// `whole_comb_fingerprint` for a caller that hashed the statement list
+/// earlier than it builds the key.
+pub(crate) fn whole_comb_fingerprint_from(stmts_fp: u128, extra: u128) -> u128 {
+    let mut h = Fp128::new();
+    h.write_u128(stmts_fp);
+    h.write_u8(0xE5);
+    h.write_u128(extra);
+    h.finish_128()
+}
+
 /// Ordered collection of backends.  Whole-module backends should come
 /// before chunk backends so a successful whole-module compile elides
 /// the per-chunk grouping pass.
@@ -204,18 +214,32 @@ impl BackendRegistry {
         proto: Vec<ProtoStatement>,
         max_chunk_size: usize,
     ) -> Vec<ChunkOutput> {
+        let plans = self.plan_chunked(proto, max_chunk_size);
+        self.compile_plans(ctx, plans)
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    /// `build_chunked` without the compile step, so a caller with thousands of
+    /// chunks can spread the compiles over threads (`compile_plans_parallel`);
+    /// the cutting is a cheap walk.
+    pub fn plan_chunked(
+        &self,
+        proto: Vec<ProtoStatement>,
+        max_chunk_size: usize,
+    ) -> Vec<ChunkPlan> {
         let mut out = Vec::new();
         let mut current_jittable: Option<bool> = None;
         let mut current_group: Vec<ProtoStatement> = Vec::new();
 
-        let flush =
-            |group: Vec<ProtoStatement>, was_jittable: bool, this: &mut Self, out: &mut Vec<_>| {
-                if was_jittable {
-                    Self::compile_group(this, ctx, group, max_chunk_size, out);
-                } else {
-                    out.push(ChunkOutput::Interpreted(group));
-                }
-            };
+        let flush = |group: Vec<ProtoStatement>, was_jittable: bool, out: &mut Vec<ChunkPlan>| {
+            if was_jittable {
+                Self::plan_group(group, max_chunk_size, out);
+            } else {
+                out.push(ChunkPlan::Interpreted(group));
+            }
+        };
 
         for stmt in proto {
             let jittable = self.any_supports_stmt(&stmt);
@@ -224,16 +248,36 @@ impl BackendRegistry {
             } else {
                 if let Some(was_jittable) = current_jittable {
                     let group = std::mem::take(&mut current_group);
-                    flush(group, was_jittable, self, &mut out);
+                    flush(group, was_jittable, &mut out);
                 }
                 current_jittable = Some(jittable);
                 current_group.push(stmt);
             }
         }
         if let Some(was_jittable) = current_jittable {
-            flush(current_group, was_jittable, self, &mut out);
+            flush(current_group, was_jittable, &mut out);
         }
         out
+    }
+
+    /// One output list per plan: a chunk the backend bisects yields several
+    /// outputs, and a caller that planned several pieces must cut them apart.
+    pub fn compile_plans(
+        &mut self,
+        ctx: &CompileCtx,
+        plans: Vec<ChunkPlan>,
+    ) -> Vec<Vec<ChunkOutput>> {
+        plans
+            .into_iter()
+            .map(|plan| {
+                let mut out = Vec::new();
+                match plan {
+                    ChunkPlan::Interpreted(stmts) => out.push(ChunkOutput::Interpreted(stmts)),
+                    ChunkPlan::Compile(stmts) => self.compile_group_bisect(ctx, stmts, &mut out),
+                }
+                out
+            })
+            .collect()
     }
 
     /// Split `group` into chunks of at most `max_chunk_size` statements,
@@ -241,13 +285,7 @@ impl BackendRegistry {
     /// but a whole function to the backend.  One whose own tree exceeds the
     /// budget cannot be divided (that would duplicate its guard), so it lands
     /// alone and overshoots.
-    fn compile_group(
-        &mut self,
-        ctx: &CompileCtx,
-        group: Vec<ProtoStatement>,
-        max_chunk_size: usize,
-        out: &mut Vec<ChunkOutput>,
-    ) {
+    fn plan_group(group: Vec<ProtoStatement>, max_chunk_size: usize, out: &mut Vec<ChunkPlan>) {
         let diag = std::env::var("VERYL_JIT_CHUNK_DIAG").as_deref() == Ok("1");
         // `VERYL_JIT_CHUNK_BY_ENTRIES=1` restores the old unit so a design's
         // before/after can be measured from one binary.
@@ -259,7 +297,7 @@ impl BackendRegistry {
             // `mass > 0` keeps an oversized statement from flushing an empty
             // chunk ahead of itself; it lands alone and is reported.
             if mass > 0 && mass + m > max_chunk_size {
-                self.compile_group_bisect(ctx, std::mem::take(&mut cur), out);
+                out.push(ChunkPlan::Compile(std::mem::take(&mut cur)));
                 mass = 0;
             }
             if diag && m > max_chunk_size {
@@ -272,7 +310,7 @@ impl BackendRegistry {
             cur.push(stmt);
         }
         if !cur.is_empty() {
-            self.compile_group_bisect(ctx, cur, out);
+            out.push(ChunkPlan::Compile(cur));
         }
     }
 
@@ -355,6 +393,86 @@ fn classify_proto_stmt(s: &ProtoStatement) -> String {
 pub enum ChunkOutput {
     Compiled(Arc<ChunkArtifact>),
     Interpreted(Vec<ProtoStatement>),
+}
+
+/// One chunk as `plan_chunked` cut it, before any backend saw it.
+pub enum ChunkPlan {
+    Interpreted(Vec<ProtoStatement>),
+    Compile(Vec<ProtoStatement>),
+}
+
+/// `compile_plans` on helper threads, for the unified-comb JIT: it runs behind
+/// the comb-pipeline single-flight while every other test worker waits on it,
+/// so the helpers take cores that would otherwise idle.  Each helper gets its
+/// own registry; the backends keep no state of their own (the executable arena
+/// and the artifact cache are shared behind locks), so artifacts from any
+/// thread are interchangeable.  Results stay in plan order.
+pub fn compile_plans_parallel(
+    registry: &mut BackendRegistry,
+    ctx: &CompileCtx,
+    plans: Vec<ChunkPlan>,
+) -> Vec<Vec<ChunkOutput>> {
+    let to_compile = plans
+        .iter()
+        .filter(|p| matches!(p, ChunkPlan::Compile(_)))
+        .count();
+    let threads = jit_parallelism().min(to_compile);
+    if threads < 2 {
+        return registry.compile_plans(ctx, plans);
+    }
+
+    let n = plans.len();
+    let queue = Mutex::new(plans.into_iter().enumerate());
+    let mut done: Vec<Option<Vec<ChunkOutput>>> = (0..n).map(|_| None).collect();
+
+    // The compile recurses over statement trees like the workers do.
+    let parts: Vec<Vec<(usize, Vec<ChunkOutput>)>> = std::thread::scope(|s| {
+        let queue = &queue;
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                std::thread::Builder::new()
+                    .stack_size(crate::IR_WALK_STACK_BYTES)
+                    .spawn_scoped(s, move || {
+                        let mut local = BackendRegistry::for_config(ctx.config);
+                        let mut mine = Vec::new();
+                        loop {
+                            let Some((i, plan)) = queue.lock().unwrap().next() else {
+                                break;
+                            };
+                            let mut out = Vec::new();
+                            match plan {
+                                ChunkPlan::Interpreted(stmts) => {
+                                    out.push(ChunkOutput::Interpreted(stmts))
+                                }
+                                ChunkPlan::Compile(stmts) => {
+                                    local.compile_group_bisect(ctx, stmts, &mut out)
+                                }
+                            }
+                            mine.push((i, out));
+                        }
+                        mine
+                    })
+                    .expect("spawn chunk compiler")
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+
+    for (i, out) in parts.into_iter().flatten() {
+        done[i] = Some(out);
+    }
+    done.into_iter()
+        .map(|o| o.expect("every plan is claimed exactly once"))
+        .collect()
+}
+
+fn jit_parallelism() -> usize {
+    static N: LazyLock<usize> = LazyLock::new(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    });
+    *N
 }
 
 #[cfg(test)]
@@ -443,6 +561,43 @@ mod tests {
             chunks <= 2 * total.div_ceil(1024),
             "{chunks} chunks is too many"
         );
+    }
+
+    #[test]
+    fn parallel_compile_matches_the_sequential_chunking() {
+        // Planning then compiling on helper threads must hand back the same
+        // chunks, in the same order, as the one-thread path.
+        let config = Config {
+            use_jit: true,
+            aot_c: false,
+            ..Default::default()
+        };
+        let mut r = BackendRegistry::for_config(&config);
+        if r.is_empty() {
+            return; // wasm: no chunk backend
+        }
+        let ctx = CompileCtx {
+            config: &config,
+            use_4state: false,
+            contains_compiled_block: false,
+        };
+        let group: Vec<ProtoStatement> = (0..40).map(|_| fat_if(50)).collect();
+        let shape = |out: &[ChunkOutput]| -> Vec<(bool, u128)> {
+            out.iter()
+                .map(|o| match o {
+                    ChunkOutput::Compiled(a) => (true, a.content_fp.unwrap_or(0)),
+                    ChunkOutput::Interpreted(s) => (false, s.len() as u128),
+                })
+                .collect()
+        };
+        let sequential = shape(&r.build_chunked(&ctx, group.clone(), 512));
+        let plans = r.plan_chunked(group, 512);
+        let parallel: Vec<ChunkOutput> = compile_plans_parallel(&mut r, &ctx, plans)
+            .into_iter()
+            .flatten()
+            .collect();
+        assert!(sequential.len() > 1, "one chunk proves nothing");
+        assert_eq!(shape(&parallel), sequential);
     }
 
     /// A single statement bigger than the budget cannot be divided (splitting
