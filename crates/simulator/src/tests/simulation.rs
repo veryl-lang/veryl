@@ -4706,6 +4706,72 @@ fn concatenation_repeat() {
 }
 
 #[test]
+fn concatenation_bit_runs() {
+    // A repeated 1-bit element lowers to one negate-and-mask, both below a
+    // leading sign run and as a >64-bit run; the two must still line up
+    // with the element-by-element form.
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        b: input  logic,
+        c: output logic<16>,
+        d: output logic<80>,
+        e: output logic<80>,
+        f: output logic<200>,
+    ) {
+        assign c = {a[7] repeat 3, b repeat 5, a};
+        assign d = {b repeat 72, a};
+        assign e = {a, b repeat 70, a[1:0]};
+        assign f = {a[7] repeat 100, b repeat 92, a};
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for (a, b, c, d, e, f) in [
+            (
+                "8'h85",
+                "1'b1",
+                "16'hff85",
+                "80'hffffffffffffffffff85",
+                "80'h85fffffffffffffffffd",
+                "200'hffffffffffffffffffffffffffffffffffffffffffffffff85",
+            ),
+            (
+                "8'h85",
+                "1'b0",
+                "16'he085",
+                "80'h00000000000000000085",
+                "80'h85000000000000000001",
+                "200'hfffffffffffffffffffffffff0000000000000000000000085",
+            ),
+            (
+                "8'h06",
+                "1'b1",
+                "16'h1f06",
+                "80'hffffffffffffffffff06",
+                "80'h06fffffffffffffffffe",
+                "200'h0000000000000000000000000fffffffffffffffffffffff06",
+            ),
+        ] {
+            sim.set("a", Value::from_str(a).unwrap());
+            sim.set("b", Value::from_str(b).unwrap());
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (name, exp) in [("c", c), ("d", d), ("e", e), ("f", f)] {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::from_str(exp).unwrap(),
+                    "{name} for a={a} b={b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn concat_element_widening_cast() {
     // A widening `as` cast lowers to its operand, so the element contributed
     // the OPERAND's bits: `{8'hA5, a as 24, 8'h5A}` collapsed to 28, shifting
