@@ -131,7 +131,22 @@ fn resolve_stmt(
                     resolve_expr(arg, context, children)?;
                 }
             }
-            ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => {}
+            ProtoSystemFunctionCall::Readmemh {
+                elements,
+                width,
+                hier,
+                ..
+            } => {
+                if let Some(target) = hier.take() {
+                    let Some(meta) = find_target(children, &target.inst_path, &target.var_path)
+                    else {
+                        return Err(SimulatorError::unsupported_description(&target.token));
+                    };
+                    *width = meta.width;
+                    *elements = crate::ir::statement::readmemh_elements(meta);
+                }
+            }
+            ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::TbMethodCall { method, .. } => match method {
             crate::ir::statement::ProtoTbMethodKind::ClockNext { count, period } => {
