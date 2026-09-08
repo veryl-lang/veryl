@@ -44,3 +44,4 @@ veryl_testcase.*
 /crates/cosim/sv/xelab.*
 /crates/cosim/sv/xsim*
 /crates/cosim/sv/vc_hdrs.h
+/.ci-home
