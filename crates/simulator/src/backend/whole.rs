@@ -18,6 +18,7 @@ pub struct WholeCombShape<'a> {
     pub localize: Option<&'a LocalizeInfo>,
     pub const_unsafe: Option<&'a crate::HashSet<isize>>,
     pub cone_segments: &'a [crate::ir::opt::cone_gate::ConeSegment],
+    pub cone_groups: &'a [crate::ir::opt::cone_gate::ConeGroup],
 }
 
 pub fn compile_whole_comb(
@@ -49,7 +50,10 @@ pub fn compile_whole_comb(
         }
         #[cfg(not(target_family = "wasm"))]
         if !shape.cone_segments.is_empty() {
-            super::aot_c::emit::set_cone_segments(shape.cone_segments.to_vec());
+            super::aot_c::emit::set_cone_segments(
+                shape.cone_segments.to_vec(),
+                shape.cone_groups.to_vec(),
+            );
         }
         let r = backends.try_compile_whole_comb(&ctx, stmts);
         #[cfg(not(target_family = "wasm"))]

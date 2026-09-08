@@ -410,16 +410,23 @@ thread_local! {
     /// and guards the dispatcher's calls with the segment compares.
     static CONE_SEGMENTS: std::cell::RefCell<Vec<crate::ir::opt::cone_gate::ConeSegment>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    static CONE_GROUPS: std::cell::RefCell<Vec<crate::ir::opt::cone_gate::ConeGroup>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Install the cone-gate segments for the next comb emit.  Paired with
-/// `clear_cone_segments`.
-pub fn set_cone_segments(segs: Vec<crate::ir::opt::cone_gate::ConeSegment>) {
+/// Install the cone-gate segments and groups for the next comb emit.
+/// Paired with `clear_cone_segments`.
+pub fn set_cone_segments(
+    segs: Vec<crate::ir::opt::cone_gate::ConeSegment>,
+    groups: Vec<crate::ir::opt::cone_gate::ConeGroup>,
+) {
     CONE_SEGMENTS.with(|s| *s.borrow_mut() = segs);
+    CONE_GROUPS.with(|g| *g.borrow_mut() = groups);
 }
 
 pub fn clear_cone_segments() {
     CONE_SEGMENTS.with(|s| s.borrow_mut().clear());
+    CONE_GROUPS.with(|g| g.borrow_mut().clear());
 }
 
 fn clear_current_local() {
@@ -5758,7 +5765,7 @@ const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
 /// ahead of its prerun / pre-shadow / shadow / replay storage: `[0]` primed,
 /// `[1]` converged, `[2]` auto-off, `[3]` diagnostic reason, `[4..8)` the
 /// dirty streak as a `u32`.
-use crate::ir::opt::cone_gate::GUARD_STATE_HEADER_BYTES;
+use crate::ir::opt::cone_gate::{GROUP_STATE_HEADER_BYTES, GUARD_STATE_HEADER_BYTES};
 
 /// Epoch re-arm: every `rearm_mask + 1` evals, retry the auto-offed segments
 /// (mirrors `ConeGateState::tick_rearm`).  Zero the WHOLE header: an off
@@ -5918,6 +5925,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // gather below still cannot run: it permutes arbitrarily.
     let mut cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment> =
         CONE_SEGMENTS.with(|s| s.borrow().clone());
+    let cone_groups: Vec<crate::ir::opt::cone_gate::ConeGroup> =
+        CONE_GROUPS.with(|g| g.borrow().clone());
+    // Where each segment of the caller's list ends up below (a segment the
+    // split emptied is dropped), so the groups' member indices follow.
+    let mut seg_kept: Vec<Option<usize>> = (0..cone_segments.len()).map(Some).collect();
     if let Some((_, _, is_const)) = &const_part
         && !cone_segments.is_empty()
     {
@@ -5931,6 +5943,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             let hi_c = cb[s.stmt_hi.min(is_const.len())] as usize;
             s.stmt_lo = n_const_total + s.stmt_lo - lo_c;
             s.stmt_hi = n_const_total + s.stmt_hi - hi_c;
+        }
+        let mut kept = 0usize;
+        for (i, s) in cone_segments.iter().enumerate() {
+            seg_kept[i] = (s.stmt_lo < s.stmt_hi).then(|| {
+                kept += 1;
+                kept - 1
+            });
         }
         cone_segments.retain(|s| s.stmt_lo < s.stmt_hi);
     }
@@ -6148,6 +6167,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let len = (8 + be + pb + cb + rb).next_multiple_of(8);
                 v.push((s.state_off as isize, len));
             }
+            for g in &cone_groups {
+                let cb: usize = g.compare.iter().map(|&(_, a, x)| (x - a) as usize).sum();
+                let len = (GROUP_STATE_HEADER_BYTES + cb).next_multiple_of(8);
+                v.push((g.state_off as isize, len));
+            }
         });
     }
     let localize_sets: Vec<HashSet<isize>> = if localize_armed() {
@@ -6277,14 +6301,64 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             v
         };
         let cg_dbg = std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1");
+        let mut guard_of_seg: Vec<Option<usize>> = vec![None; cone_segments.len()];
         let guards: Vec<(usize, usize, &crate::ir::opt::cone_gate::ConeSegment)> = cone_segments
             .iter()
-            .filter_map(|s| {
+            .enumerate()
+            .filter_map(|(si, s)| {
                 let k1 = chunk_starts.iter().position(|&q| q == s.stmt_lo)?;
                 let k2 = chunk_starts.iter().position(|&q| q == s.stmt_hi)?;
-                (k1 < k2 && k1 >= const_chunks).then_some((k1, k2, s))
+                (k1 < k2 && k1 >= const_chunks).then(|| {
+                    guard_of_seg[si] = Some(guard_of_seg.iter().flatten().count());
+                    (k1, k2, s)
+                })
             })
             .collect();
+        // A group over the surviving guards: one check per settle ahead of
+        // its first member, and a clean verdict lets every member skip its
+        // own compare.  Groups arrive shallowest first, so a guard's innermost
+        // group claims it last.
+        struct EmitGroup {
+            first: usize,
+            state_off: u32,
+            parent: Option<usize>,
+            compare: Vec<(bool, u32, u32)>,
+            off_decay: u32,
+        }
+        let mut egroups: Vec<EmitGroup> = Vec::new();
+        let mut group_kept: Vec<Option<usize>> = Vec::with_capacity(cone_groups.len());
+        let mut group_of_guard: Vec<Option<usize>> = vec![None; guards.len()];
+        for g in &cone_groups {
+            let members: Vec<usize> = g
+                .segments
+                .iter()
+                .filter_map(|&si| seg_kept.get(si as usize).copied().flatten())
+                .filter_map(|si| guard_of_seg.get(si).copied().flatten())
+                .collect();
+            if members.len() < 2 {
+                group_kept.push(None);
+                continue;
+            }
+            let mut parent = g.parent;
+            while let Some(pi) = parent {
+                if group_kept[pi as usize].is_some() {
+                    break;
+                }
+                parent = cone_groups[pi as usize].parent;
+            }
+            let idx = egroups.len();
+            group_kept.push(Some(idx));
+            for &m in &members {
+                group_of_guard[m] = Some(idx);
+            }
+            egroups.push(EmitGroup {
+                first: members.iter().copied().min().unwrap_or(0),
+                state_off: g.state_off,
+                parent: parent.and_then(|pi| group_kept[pi as usize]),
+                compare: g.compare.clone(),
+                off_decay: g.off_decay,
+            });
+        }
         // Small compare ranges dominate by count, and __memcmp's call +
         // dispatch overhead there outweighs the scan; past the cutoff
         // libc's vector loop wins, so large ranges keep the call.
@@ -6364,6 +6438,27 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             f.push_str("    return 1;\n}\n\n");
             body.push_str(&f);
         }
+        for (g, eg) in egroups.iter().enumerate() {
+            let mut f = format!(
+                "static int cg_gcmp_{g}(const uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values) {{\n"
+            );
+            let shadow_abs = eg.state_off as usize + GROUP_STATE_HEADER_BYTES;
+            let mut acc = 0usize;
+            for &(is_ff, a, b) in &eg.compare {
+                let l = (b - a) as usize;
+                let buf = if is_ff { "ff_values" } else { "comb_values" };
+                emit_cmp_range(
+                    &mut f,
+                    format!("{buf} + {a:#x}"),
+                    format!("comb_values + {sh:#x}", sh = shadow_abs + acc),
+                    l,
+                    "return 0;",
+                );
+                acc += l;
+            }
+            f.push_str("    return 1;\n}\n\n");
+            body.push_str(&f);
+        }
         // The dispatcher is built as a list of independent top-level units —
         // one guarded cone segment or one bare chunk call each — so
         // `split_entry_function` can lay them out across several functions.
@@ -6375,14 +6470,17 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         if cg_dbg && !guards.is_empty() {
             entry_prologue.push_str(&format!(
                 "    static unsigned long long cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
+                 \x20   static unsigned long long cg_gsk[{ng}], cg_grn[{ng}];\n\
                  \x20   static const unsigned cg_stoff[{n}] = {{{offs}}};\n\
                  \x20   uint8_t *cg_st[{n}]; for (int z = 0; z < {n}; z++) cg_st[z] = comb_values + cg_stoff[z];\n\
                  \x20   if ((++cg_calls & 0x3fff) == 0) {{\n\
                  \x20     __builtin_printf(\"[cg] evals=%llu\", cg_calls);\n\
                  \x20     for (int z = 0; z < {n}; z++) __builtin_printf(\" %llu/%llu:c%u:f%u\", cg_sk[z], cg_rn[z], (unsigned)cg_st[z][1], (unsigned)cg_st[z][3]);\n\
+                 \x20     for (int z = 0; z < {ng}; z++) __builtin_printf(\" G%llu/%llu\", cg_gsk[z], cg_grn[z]);\n\
                  \x20     __builtin_printf(\"\\n\");\n\
                  \x20   }}\n",
                 n = guards.len(),
+                ng = egroups.len().max(1),
                 offs = guards
                     .iter()
                     .map(|&(_, _, s)| format!("{:#x}", s.state_off))
@@ -6396,6 +6494,66 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             let mut unit = String::new();
             if gi < guards.len() && guards[gi].0 == i {
                 let (k1, k2, s) = guards[gi];
+                for (g, eg) in egroups.iter().enumerate().filter(|(_, eg)| eg.first == gi) {
+                    let gst = eg.state_off as usize;
+                    let inherit = match eg.parent {
+                        Some(p) => format!("comb_values[{:#x}]", egroups[p].state_off as usize + 1),
+                        None => "0".to_string(),
+                    };
+                    // Clean: the boundary held, or the enclosing group's did.
+                    // Dirty: the shadow is taken now, as the members will see
+                    // the inputs; a later change dirties the next check.
+                    unit.push_str(&format!(
+                        "    {{ uint8_t *cgg = comb_values + {gst:#x};\n\
+                         \x20     int cg_gclean = {inherit};\n\
+                         \x20     if (!cg_gclean && !cgg[2]) {{\n\
+                         \x20       if (cgg[0] && cg_gcmp_{g}(ff_values, comb_values)) {{\n\
+                         \x20         cg_gclean = 1;\n\
+                         \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgg + 4, 4);\n\
+                         \x20           cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
+                         \x20           __builtin_memcpy(cgg + 4, &cg_stk, 4); }}\n",
+                        decay = eg.off_decay,
+                    ));
+                    if cg_dbg {
+                        unit.push_str(&format!("          cg_gsk[{g}]++;\n"));
+                    }
+                    unit.push_str(
+                        "        } else {\n\
+                         \x20         { uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgg + 4, 4);\n\
+                         \x20           if (++cg_stk >= 1024u) cgg[2] = 1;\n\
+                         \x20           __builtin_memcpy(cgg + 4, &cg_stk, 4); }\n",
+                    );
+                    let shadow_abs = gst + GROUP_STATE_HEADER_BYTES;
+                    let mut acc = 0usize;
+                    for &(is_ff, a, b) in &eg.compare {
+                        let l = (b - a) as usize;
+                        let buf = if is_ff { "ff_values" } else { "comb_values" };
+                        unit.push_str(&format!(
+                            "          __builtin_memcpy(comb_values + {dst:#x}, {buf} + {a:#x}, {l});\n",
+                            dst = shadow_abs + acc,
+                        ));
+                        acc += l;
+                    }
+                    if cg_dbg {
+                        unit.push_str(&format!("          cg_grn[{g}]++;\n"));
+                    }
+                    unit.push_str(
+                        "          cgg[0] = 1;\n\
+                         \x20       }\n\
+                         \x20     }\n\
+                         \x20     cgg[1] = (uint8_t)cg_gclean;\n\
+                         \x20   }\n",
+                    );
+                }
+                // A member skipped by its group's verdict paid no compare, so
+                // its own streak (that compare's economics) is left alone.
+                let group_clean = match group_of_guard[gi] {
+                    Some(g) => format!(
+                        "if (comb_values[{:#x}]) cg_run = 0; else ",
+                        egroups[g].state_off as usize + 1
+                    ),
+                    None => String::new(),
+                };
                 let st = s.state_off as usize;
                 let be: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
                 let pb: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
@@ -6412,32 +6570,34 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                      \x20     int cg_run = 1;\n\
                      \x20     int cg_off = cgst[2];\n\
                      \x20     if (!cg_off && cgst[0] && cgst[1]) {{\n\
-                     \x20       if (cg_cmp_{gi}(ff_values, comb_values)) {{\n\
+                     \x20       {group_clean}if (cg_cmp_{gi}(ff_values, comb_values)) {{\n\
                      \x20         cg_run = 0;\n\
                      \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
                      \x20           cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
-                     \x20           __builtin_memcpy(cgst + 4, &cg_stk, 4); }}\n",
+                     \x20           __builtin_memcpy(cgst + 4, &cg_stk, 4); }}\n\
+                     \x20       }} else {{\n\
+                     \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
+                     \x20         if (++cg_stk >= 1024u) cgst[2] = 1;\n\
+                     \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4);\n\
+                     \x20       }}\n\
+                     \x20     }}\n\
+                     \x20     if (!cg_run) {{\n",
                     decay = s.off_decay,
                 ));
                 if cg_dbg {
-                    unit.push_str(&format!("          cg_sk[{gi}]++;\n"));
+                    unit.push_str(&format!("        cg_sk[{gi}]++;\n"));
                 }
                 let mut acc = 0usize;
                 for &(a, b) in &s.replay {
                     let l = (b - a) as usize;
                     unit.push_str(&format!(
-                        "          __builtin_memcpy(comb_values + {a:#x}, comb_values + {src:#x}, {l});\n",
+                        "        __builtin_memcpy(comb_values + {a:#x}, comb_values + {src:#x}, {l});\n",
                         src = replay_abs + acc,
                     ));
                     acc += l;
                 }
                 unit.push_str(
-                    "        } else {\n\
-                     \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
-                     \x20         if (++cg_stk >= 1024u) cgst[2] = 1;\n\
-                     \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4);\n\
-                     \x20       }\n\
-                     \x20     }\n\
+                    "      }\n\
                      \x20     if (cg_run) {\n\
                      \x20       if (!cg_off) {\n",
                 );
@@ -6532,7 +6692,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                     v.next_power_of_two() - 1
                 }
             });
-        let state_offs: Vec<u32> = guards.iter().map(|&(_, _, s)| s.state_off).collect();
+        let state_offs: Vec<u32> = guards
+            .iter()
+            .map(|&(_, _, s)| s.state_off)
+            .chain(egroups.iter().map(|eg| eg.state_off))
+            .collect();
         let entry_preamble = cone_gate_rearm_preamble(&state_offs, rearm_mask);
         body.push_str(&split_entry_function(
             &entry_prologue,

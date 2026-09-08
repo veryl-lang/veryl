@@ -1585,7 +1585,7 @@ fn run_comb_pipeline(
     } else {
         Vec::new()
     };
-    let (comb_statements, cone_segments) = match &cone_plan {
+    let (comb_statements, cone_segments, cone_groups) = match &cone_plan {
         Some(plan) => {
             let mut bounds: Vec<usize> = plan
                 .segments
@@ -1595,74 +1595,74 @@ fn run_comb_pipeline(
             bounds.sort_unstable();
             bounds.dedup();
             let (ps, pieces) = try_jit_with_boundaries(context, unified_sorted, &bounds);
+            // Bring ranges into the FINAL storage space piecewise: a merged
+            // span can straddle relayout units that land apart.
+            let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
+                let mut out: Vec<(u32, u32)> = Vec::new();
+                for &(cs, ce) in v {
+                    match layout.as_deref() {
+                        Some(sched) => {
+                            for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
+                                out.push((ns as u32, ne as u32));
+                            }
+                        }
+                        None => out.push((cs, ce)),
+                    }
+                }
+                out.sort_unstable();
+                out
+            };
+            // Relayout scatters the whole-variable spans, leaving thousands
+            // of 4-8 byte memcmp/memcpy ranges whose per-span setup dwarfs
+            // the byte traffic.  Fuse ranges across small gaps: comparing a
+            // gap byte is at worst a spurious dirty, and replaying one is
+            // exact because the pre-run compare (`compare_pre` covers every
+            // replay range, gaps included) just proved it unchanged since
+            // the stored run.  The backedge ranges must stay exact: a gap
+            // byte the segment legitimately rewrites would read as
+            // non-convergence.
+            let coalesce = |v: &mut Vec<(u32, u32)>| {
+                let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
+                for &(cs, ce) in v.iter() {
+                    match out.last_mut() {
+                        Some(p) if cs <= p.1 + 32 => p.1 = p.1.max(ce),
+                        _ => out.push((cs, ce)),
+                    }
+                }
+                *v = out;
+            };
+            // FF storage is never relaid out.
+            let translate_compare = |v: &[(bool, u32, u32)]| -> Vec<(bool, u32, u32)> {
+                let mut ffs: Vec<(u32, u32)> = Vec::new();
+                let mut combs: Vec<(u32, u32)> = Vec::new();
+                for &(ff, cs, ce) in v {
+                    if ff {
+                        ffs.push((cs, ce));
+                    } else {
+                        combs.extend(translate_pairs(&[(cs, ce)]));
+                    }
+                }
+                ffs.sort_unstable();
+                combs.sort_unstable();
+                coalesce(&mut ffs);
+                coalesce(&mut combs);
+                combs
+                    .into_iter()
+                    .map(|(cs, ce)| (false, cs, ce))
+                    .chain(ffs.into_iter().map(|(cs, ce)| (true, cs, ce)))
+                    .collect()
+            };
             let mut segs: Vec<cone_gate::ConeSegment> = Vec::new();
+            // A segment whose start is not a chunk boundary is dropped, so
+            // the groups are re-indexed onto the segments kept.
+            let mut seg_index: Vec<Option<u32>> = Vec::with_capacity(plan.segments.len());
             for s in &plan.segments {
                 let Some(&(_, blo, bhi)) = pieces.iter().find(|&&(st, _, _)| st == s.start) else {
+                    seg_index.push(None);
                     continue;
                 };
-                // Bring the compare ranges into the FINAL storage space —
-                // piecewise, because a merged span can straddle relayout
-                // units that land apart.
-                let mut compare: Vec<(bool, u32, u32)> = Vec::new();
-                for &(ff, cs, ce) in &s.compare {
-                    match (ff, layout.as_deref()) {
-                        (false, Some(sched)) => {
-                            for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
-                                compare.push((false, ns as u32, ne as u32));
-                            }
-                        }
-                        _ => compare.push((ff, cs, ce)),
-                    }
-                }
-                compare.sort_unstable();
-                let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
-                    let mut out: Vec<(u32, u32)> = Vec::new();
-                    for &(cs, ce) in v {
-                        match layout.as_deref() {
-                            Some(sched) => {
-                                for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
-                                    out.push((ns as u32, ne as u32));
-                                }
-                            }
-                            None => out.push((cs, ce)),
-                        }
-                    }
-                    out.sort_unstable();
-                    out
-                };
-                // Relayout scatters the whole-variable spans, leaving
-                // thousands of 4-8 byte memcmp/memcpy ranges whose per-span
-                // setup dwarfs the byte traffic.  Fuse ranges across small
-                // gaps: comparing a gap byte is at worst a spurious dirty,
-                // and replaying one is exact because the pre-run compare
-                // (`compare_pre` covers every replay range, gaps included)
-                // just proved it unchanged since the stored run.  The
-                // backedge ranges must stay exact — a gap byte the segment
-                // legitimately rewrites would read as non-convergence.
-                let coalesce = |v: &mut Vec<(u32, u32)>| {
-                    let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
-                    for &(cs, ce) in v.iter() {
-                        match out.last_mut() {
-                            Some(p) if cs <= p.1 + 32 => p.1 = p.1.max(ce),
-                            _ => out.push((cs, ce)),
-                        }
-                    }
-                    *v = out;
-                };
-                {
-                    let mut ffs: Vec<(u32, u32)> = Vec::new();
-                    let mut combs: Vec<(u32, u32)> = Vec::new();
-                    for &(ff, cs, ce) in &compare {
-                        if ff { &mut ffs } else { &mut combs }.push((cs, ce));
-                    }
-                    coalesce(&mut ffs);
-                    coalesce(&mut combs);
-                    compare = combs
-                        .into_iter()
-                        .map(|(cs, ce)| (false, cs, ce))
-                        .chain(ffs.into_iter().map(|(cs, ce)| (true, cs, ce)))
-                        .collect();
-                }
+                seg_index.push(Some(segs.len() as u32));
+                let compare = translate_compare(&s.compare);
                 // A single-pass schedule reaches its fixpoint in one run, so
                 // every run is converged by construction and the backedge
                 // snapshot plus its post-run compare would only ever confirm
@@ -1692,11 +1692,41 @@ fn run_comb_pipeline(
                     cone: s.cone.clone(),
                 });
             }
-            (ps, segs)
+            let mut groups: Vec<cone_gate::ConeGroup> = Vec::new();
+            let mut group_index: Vec<Option<u32>> = Vec::with_capacity(plan.groups.len());
+            for g in &plan.groups {
+                let members: Vec<u32> = g
+                    .segments
+                    .iter()
+                    .filter_map(|&i| seg_index[i as usize])
+                    .collect();
+                if members.len() < 2 {
+                    group_index.push(None);
+                    continue;
+                }
+                // A dropped enclosing group hands its role to its own parent.
+                let mut parent = g.parent;
+                while let Some(pi) = parent {
+                    if group_index[pi as usize].is_some() {
+                        break;
+                    }
+                    parent = plan.groups[pi as usize].parent;
+                }
+                group_index.push(Some(groups.len() as u32));
+                groups.push(cone_gate::ConeGroup {
+                    segments: members,
+                    compare: translate_compare(&g.compare),
+                    off_decay: g.off_decay,
+                    parent: parent.and_then(|pi| group_index[pi as usize]),
+                    state_off: 0,
+                    cone: g.cone.clone(),
+                });
+            }
+            (ps, segs, groups)
         }
         None => {
             let a = try_jit_no_cache(context, unified_sorted);
-            (a, Vec::new())
+            (a, Vec::new(), Vec::new())
         }
     };
     Ok(comb_pipeline_cache::CombPipeline {
@@ -1717,6 +1747,7 @@ fn run_comb_pipeline(
             None => fused_offsets,
         },
         cone_segments: Arc::new(cone_segments),
+        cone_groups: Arc::new(cone_groups),
         layout,
         nontrivial_comb_scc,
         vsplit_temp_bytes,
@@ -5623,6 +5654,17 @@ impl Conv<&air::Module> for ProtoModule {
             }
             segs
         };
+        let cone_groups: Vec<crate::ir::opt::cone_gate::ConeGroup> = {
+            let mut groups: Vec<_> = cached.cone_groups.as_ref().clone();
+            for g in &mut groups {
+                let shadow: usize = g.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
+                let len = (crate::ir::opt::cone_gate::GROUP_STATE_HEADER_BYTES + shadow)
+                    .next_multiple_of(8);
+                g.state_off = context.comb_total_bytes as u32;
+                context.comb_total_bytes += len;
+            }
+            groups
+        };
         // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
         // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
         // of compiled chunks).
@@ -6250,6 +6292,7 @@ impl Conv<&air::Module> for ProtoModule {
                     localize: localize_info.as_ref(),
                     const_unsafe: const_unsafe_comb.as_ref(),
                     cone_segments: &cone_segments,
+                    cone_groups: &cone_groups,
                 },
             )
         };

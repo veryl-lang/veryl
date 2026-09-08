@@ -113,7 +113,48 @@ pub struct ConePlan {
     /// Permutation: `order[new_index] = old_index`.
     pub order: Vec<u32>,
     pub segments: Vec<Segment>,
+    /// Shallowest first, so a group's `parent` precedes it.
+    pub groups: Vec<Group>,
 }
+
+/// A subtree whose external inputs stand in for the compare sets of the
+/// segments below it: while they hold, every member skips on the one check,
+/// because an unchanged boundary keeps every wire inside a settled subtree
+/// unchanged too.
+#[derive(Clone, Debug)]
+pub struct Group {
+    pub node: u32,
+    /// Indices into `ConePlan::segments`, in schedule order.
+    pub segments: Vec<u32>,
+    /// Like `Segment::compare`: the subtree's external inputs, plus the
+    /// members' replay spans (outputs an outside writer shares).
+    pub compare: Vec<(bool, u32, u32)>,
+    pub bytes: usize,
+    /// See `Segment::off_decay`: one group compare buys the members' own
+    /// compares, so the break-even skip rate follows their byte ratio.
+    pub off_decay: u32,
+    /// The enclosing group, whose clean verdict covers this one.
+    pub parent: Option<u32>,
+    pub cone: String,
+}
+
+/// `Group` in the FINAL storage space, over the `ConeSegment` list.
+#[derive(Clone, Debug)]
+pub struct ConeGroup {
+    pub segments: Vec<u32>,
+    pub compare: Vec<(bool, u32, u32)>,
+    pub off_decay: u32,
+    pub parent: Option<u32>,
+    /// Byte offset of the group's gate state inside the comb buffer
+    /// (`GROUP_STATE_HEADER_BYTES`, then the compare shadow); zero until the
+    /// caller allocates the region.
+    pub state_off: u32,
+    pub cone: String,
+}
+
+/// Bytes a group's runtime state reserves ahead of its shadow: `[0]` primed,
+/// `[1]` clean this settle, `[2]` auto-off, `[4..8)` the dirty streak.
+pub(crate) const GROUP_STATE_HEADER_BYTES: usize = 8;
 
 /// A gated segment resolved to whole JIT blocks (chunking was split at its
 /// edges), with compare ranges in the FINAL (post-relayout) storage space.
@@ -1330,6 +1371,7 @@ fn finish_plan(
     let budget = compare_budget(n);
     let mut in_burst = vec![false; n];
     let mut segments: Vec<Segment> = Vec::new();
+    let mut seg_nodes: Vec<u32> = Vec::new();
     let mut total_bytes = 0usize;
     for &(sl, start, end) in &bursts {
         if sl == 0 || end - start < MIN_SEGMENT_STMTS {
@@ -1470,8 +1512,23 @@ fn finish_plan(
             off_decay,
             cone: inputs.node_path[cones[sl - 1] as usize].clone(),
         });
+        seg_nodes.push(cones[sl - 1]);
     }
+    let groups = build_groups(&segments, &seg_nodes, infos, inputs, writers, &order);
     if diag() {
+        for g in &groups {
+            eprintln!(
+                "[cone_gate] group segs={} child_bytes={} bytes={} parent={:?} {}",
+                g.segments.len(),
+                g.segments
+                    .iter()
+                    .map(|&i| segments[i as usize].bytes)
+                    .sum::<usize>(),
+                g.bytes,
+                g.parent,
+                g.cone,
+            );
+        }
         eprintln!(
             "[cone_gate] stmts={} cones={} segments={} gated_stmts={} compare_bytes={}/{}",
             n,
@@ -1495,12 +1552,307 @@ fn finish_plan(
     if segments.is_empty() {
         return None;
     }
-    Some(ConePlan { order, segments })
+    Some(ConePlan {
+        order,
+        segments,
+        groups,
+    })
+}
+
+/// See `Group`.  `seg_nodes[i]` is the cone node of `segments[i]`, `writers`
+/// the statements writing each owner span, `order` the schedule.  Every
+/// ancestor of a segment's node is a candidate, kept when it covers at least
+/// two segments, no statement outside the subtree writes one of its inputs
+/// between its first and last member, and its boundary costs less than half
+/// of what the members' own compares do.
+fn build_groups(
+    segments: &[Segment],
+    seg_nodes: &[u32],
+    infos: &[StmtInfo],
+    inputs: &ConeGateInputs,
+    writers: &[Vec<u32>],
+    order: &[u32],
+) -> Vec<Group> {
+    let mut pos = vec![0usize; infos.len()];
+    for (k, &oi) in order.iter().enumerate() {
+        pos[oi as usize] = k;
+    }
+    let parent = |m: u32| -> Option<u32> {
+        let p = inputs.node_parent[m as usize];
+        (p != u32::MAX).then_some(p)
+    };
+    let is_desc = |mut m: u32, a: u32| -> bool {
+        loop {
+            if m == a {
+                return true;
+            }
+            match parent(m) {
+                Some(p) => m = p,
+                None => return false,
+            }
+        }
+    };
+    let depth = |mut m: u32| -> usize {
+        let mut d = 0usize;
+        while let Some(p) = parent(m) {
+            d += 1;
+            m = p;
+        }
+        d
+    };
+    let mut cands: Vec<u32> = Vec::new();
+    for &sn in seg_nodes {
+        let mut m = sn;
+        loop {
+            cands.push(m);
+            match parent(m) {
+                Some(p) => m = p,
+                None => break,
+            }
+        }
+    }
+    cands.sort_unstable();
+    cands.dedup();
+    // Shallowest first: a group finds its enclosing group already built.
+    cands.sort_by_key(|&m| depth(m));
+    let mut groups: Vec<Group> = Vec::new();
+    for a in cands {
+        let members: Vec<u32> = (0..segments.len() as u32)
+            .filter(|&i| is_desc(seg_nodes[i as usize], a))
+            .collect();
+        if members.len() < 2 {
+            continue;
+        }
+        let child_bytes: usize = members.iter().map(|&i| segments[i as usize].bytes).sum();
+        let first = members
+            .iter()
+            .map(|&i| segments[i as usize].start)
+            .min()
+            .unwrap_or(0);
+        let last = members
+            .iter()
+            .map(|&i| segments[i as usize].end)
+            .max()
+            .unwrap_or(0);
+        let mut in_comb: Vec<(usize, usize)> = Vec::new();
+        let mut in_ff: Vec<(usize, usize)> = Vec::new();
+        let mut out_comb: Vec<(usize, usize)> = Vec::new();
+        let mut inside = vec![false; infos.len()];
+        for (i, info) in infos.iter().enumerate() {
+            if !is_desc(info.node, a) {
+                continue;
+            }
+            inside[i] = true;
+            in_comb.extend_from_slice(&info.in_comb);
+            in_ff.extend_from_slice(&info.in_ff);
+            out_comb.extend_from_slice(&info.out_comb);
+        }
+        merge_ranges(&mut in_comb);
+        merge_ranges(&mut in_ff);
+        merge_ranges(&mut out_comb);
+        let mut comb = subtract_ranges(&in_comb, &out_comb);
+        // The skip argument covers what the subtree computes itself.  A
+        // byte it reads that a statement outside it (or an event) also
+        // writes is an input even when a subtree statement writes it too,
+        // and `in − out` hides it.
+        let owner = &inputs.comb_owner;
+        let mut late: Vec<(usize, usize)> = Vec::new();
+        for &(s, e) in &in_comb {
+            let mut j = first_span(owner, s);
+            while j < owner.len() && owner[j].0 < e {
+                let (os, oe, _) = owner[j];
+                if oe > s {
+                    let outside = writers[j].iter().filter(|&&w| !inside[w as usize]);
+                    let mut any = false;
+                    for &w in outside {
+                        any = true;
+                        if (first..last).contains(&pos[w as usize]) {
+                            late.push((os.max(s), oe.min(e)));
+                        }
+                    }
+                    if any {
+                        comb.push((os.max(s), oe.min(e)));
+                    }
+                }
+                j += 1;
+            }
+        }
+        // The check runs ahead of the first member and would judge such an
+        // input a settle late, and what the subtree computes from it later
+        // in the settle is not covered either.
+        if !late.is_empty() {
+            continue;
+        }
+        comb.extend(intersect_ranges(&inputs.event_written_comb, &in_comb));
+        // A member output an outside writer also writes is an input as
+        // consumed (see `RtSegment::compare_pre`), which `in − out` hides.
+        for &i in &members {
+            comb.extend(
+                segments[i as usize]
+                    .replay
+                    .iter()
+                    .map(|&(s, e)| (s as usize, e as usize)),
+            );
+        }
+        merge_ranges(&mut comb);
+        let compare: Vec<(bool, u32, u32)> = comb
+            .iter()
+            .map(|&(s, e)| (false, s as u32, e as u32))
+            .chain(in_ff.iter().map(|&(s, e)| (true, s as u32, e as u32)))
+            .collect();
+        let bytes: usize = compare.iter().map(|&(_, s, e)| (e - s) as usize).sum();
+        if bytes * 2 > child_bytes {
+            continue;
+        }
+        let off_decay = (child_bytes / bytes.max(1)).saturating_sub(1).min(1 << 20) as u32;
+        let parent_group = groups
+            .iter()
+            .rposition(|g| is_desc(a, g.node))
+            .map(|p| p as u32);
+        // The same members under a tighter boundary: one group, the deeper.
+        if let Some(pi) = parent_group
+            && groups[pi as usize].segments == members
+        {
+            let pg = &mut groups[pi as usize];
+            if bytes <= pg.bytes {
+                pg.node = a;
+                pg.compare = compare;
+                pg.bytes = bytes;
+                pg.off_decay = off_decay;
+                pg.cone = inputs.node_path[a as usize].clone();
+            }
+            continue;
+        }
+        groups.push(Group {
+            node: a,
+            segments: members,
+            compare,
+            bytes,
+            off_decay,
+            parent: parent_group,
+            cone: inputs.node_path[a as usize].clone(),
+        });
+    }
+    groups
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn groups_cover_ancestors_of_several_segments_at_their_boundary() {
+        // root 0 { 1 { 2, 3 }, 4 }: x → [2] → y → [3] → z → [4] → w.
+        let inputs = ConeGateInputs {
+            node_parent: vec![u32::MAX, 0, 1, 1, 0],
+            node_path: ["top", "top.a", "top.a.p", "top.a.q", "top.b"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            comb_owner: vec![(0, 8, 0), (8, 16, 2), (16, 24, 3), (24, 32, 4)],
+            ff_owner: FfOwner { runs: vec![] },
+            event_written_comb: vec![],
+        };
+        let info = |node: u32, ins: &[(usize, usize)], outs: &[(usize, usize)]| StmtInfo {
+            node,
+            in_comb: ins.to_vec(),
+            in_ff: vec![],
+            out_comb: outs.to_vec(),
+            unbounded: false,
+        };
+        let infos = [
+            info(2, &[(0, 8)], &[(8, 16)]),
+            info(3, &[(8, 16)], &[(16, 24)]),
+            info(4, &[(16, 24)], &[(24, 32)]),
+        ];
+        let seg = |i: usize, compare: (u32, u32), replay: Vec<(u32, u32)>| Segment {
+            start: i,
+            end: i + 1,
+            compare: vec![(false, compare.0, compare.1)],
+            backedge: vec![],
+            replay,
+            bytes: 30,
+            off_decay: 0,
+            cone: String::new(),
+        };
+        let segments = [
+            seg(0, (0, 8), vec![(40, 48)]),
+            seg(1, (8, 16), vec![]),
+            seg(2, (16, 24), vec![]),
+        ];
+        // Owner spans x, y, z, w: written by nobody, [2], [3], [4].
+        let writers: Vec<Vec<u32>> = vec![vec![], vec![0], vec![1], vec![2]];
+        let order: Vec<u32> = (0..3).collect();
+        let groups = build_groups(&segments, &[2, 3, 4], &infos, &inputs, &writers, &order);
+        assert_eq!(groups.len(), 2, "{groups:?}");
+        // The root covers everything at its single external input.
+        assert_eq!(groups[0].segments, vec![0, 1, 2]);
+        assert_eq!(groups[0].compare, vec![(false, 0, 8), (false, 40, 48)]);
+        assert_eq!(groups[0].parent, None);
+        // `a` covers [2] and [3]; y is internal, the replay span joins.
+        assert_eq!(groups[1].node, 1);
+        assert_eq!(groups[1].segments, vec![0, 1]);
+        assert_eq!(groups[1].compare, vec![(false, 0, 8), (false, 40, 48)]);
+        assert_eq!(groups[1].parent, Some(0));
+        // Members identical to the enclosing group's collapse into one group
+        // at the deeper node.
+        let writers2: Vec<Vec<u32>> = vec![vec![], vec![0], vec![1], vec![]];
+        let same = build_groups(
+            &segments[..2],
+            &[2, 3],
+            &infos[..2],
+            &inputs,
+            &writers2,
+            &order[..2],
+        );
+        assert_eq!(same.len(), 1, "{same:?}");
+        assert_eq!((same[0].node, same[0].parent), (1, None));
+        // y is written inside `a` but also by [4] outside it: an input of
+        // `a` as consumed, so it stays in `a`'s boundary (not the root's,
+        // where both writers are inside).
+        let shared_writers: Vec<Vec<u32>> = vec![vec![], vec![0, 2], vec![1], vec![2]];
+        let shared = build_groups(
+            &segments,
+            &[2, 3, 4],
+            &infos,
+            &inputs,
+            &shared_writers,
+            &order,
+        );
+        assert_eq!(shared.len(), 2, "{shared:?}");
+        assert_eq!(shared[0].compare, vec![(false, 0, 8), (false, 40, 48)]);
+        assert_eq!(shared[1].compare, vec![(false, 0, 16), (false, 40, 48)]);
+        // The same, with [4] scheduled between `a`'s members: y is then
+        // written after `a`'s check, so `a` is not a group.
+        let mid: Vec<u32> = vec![0, 2, 1];
+        let mid_segments = [
+            seg(0, (0, 8), vec![(40, 48)]),
+            seg(2, (8, 16), vec![]),
+            seg(1, (16, 24), vec![]),
+        ];
+        let late = build_groups(
+            &mid_segments,
+            &[2, 3, 4],
+            &infos,
+            &inputs,
+            &shared_writers,
+            &mid,
+        );
+        assert_eq!(late.len(), 1, "{late:?}");
+        assert_eq!(late[0].node, 0);
+        // A boundary as wide as the members' own compares is not worth it.
+        let wide = [
+            seg(
+                0,
+                (0, 8),
+                (0..6).map(|k| (100 + 8 * k, 108 + 8 * k)).collect(),
+            ),
+            seg(1, (8, 16), vec![]),
+        ];
+        assert!(
+            build_groups(&wide, &[2, 3], &infos[..2], &inputs, &writers2, &order[..2]).is_empty()
+        );
+    }
 
     #[test]
     fn reloc_owners_follow_temp_chains() {
