@@ -330,6 +330,28 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 // Bound their materialization before cycle search gets a chance to run.
 const FUNCTION_SUMMARY_WORK: usize = 100_000;
 
+// Early returns and breaks retain every preceding guard prefix during SSA
+// evaluation, before graph-export budgets can apply. Charge those copies at
+// construction time and abandon the affected procedure if they exceed this.
+const PROCEDURE_GUARD_WORK: usize = 100_000;
+
+#[cfg(test)]
+thread_local! {
+    static GUARD_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(PROCEDURE_GUARD_WORK) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_procedure_guard_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
+    struct Reset(usize);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            GUARD_LIMIT.set(self.0);
+        }
+    }
+    let _reset = Reset(GUARD_LIMIT.replace(limit));
+    f()
+}
+
 pub(super) struct FunctionSummaries<'a> {
     pub(super) tracing: bool,
     module: &'a Module,
@@ -1049,6 +1071,7 @@ struct ProcedureAnalysis<'a, 's> {
     function_flows: Vec<FunctionFlow>,
     loop_flows: Vec<LoopFlow>,
     path_condition: PathCondition,
+    guard_work: Option<usize>,
     branch_namespace: usize,
     next_branch: usize,
     status: AnalysisStatus,
@@ -1057,7 +1080,7 @@ struct ProcedureAnalysis<'a, 's> {
     tracing: bool,
     active_assignment: Option<TokenRange>,
     repeatable: bool,
-    shared_call_branches: HashMap<SummaryInvocationKey, HashMap<BranchId, BranchId>>,
+    shared_call_branches: HashMap<SummaryInvocationKey, Rc<HashMap<BranchId, BranchId>>>,
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
@@ -1067,6 +1090,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         ctx: Context,
         module_scope_ids: Rc<HashSet<VarId>>,
     ) -> Self {
+        #[cfg(test)]
+        let guard_work = GUARD_LIMIT.get();
+        #[cfg(not(test))]
+        let guard_work = PROCEDURE_GUARD_WORK;
         Self {
             bit_part,
             module,
@@ -1081,6 +1108,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             function_flows: Vec::new(),
             loop_flows: Vec::new(),
             path_condition: PathCondition::default(),
+            guard_work: Some(guard_work),
             branch_namespace: 0,
             next_branch: 0,
             status: AnalysisStatus::Complete,
@@ -1125,6 +1153,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<RegionSource> {
         let versions = self.eval_reachable_expr(expression);
+        if self.guard_work.is_none() {
+            return Vec::new();
+        }
         let value = self.ssa.definition(versions);
         let mut sources = self
             .ssa
@@ -1198,15 +1229,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect::<Vec<_>>();
         roots.extend(write_versions.iter().map(|(_, version)| *version));
         let graph = this
-            .ssa
-            .try_dependency_dag(
-                &roots,
-                |key| {
-                    this.is_visible_source(key)
-                        || (key.call_frame.is_none() && formal_ids.contains(&key.node.0))
-                },
-                FUNCTION_SUMMARY_WORK,
-            )
+            .guard_work
+            .and_then(|_| {
+                this.ssa.try_dependency_dag(
+                    &roots,
+                    |key| {
+                        this.is_visible_source(key)
+                            || (key.call_frame.is_none() && formal_ids.contains(&key.node.0))
+                    },
+                    FUNCTION_SUMMARY_WORK,
+                )
+            })
             .unwrap_or_else(|| {
                 this.status = AnalysisStatus::Barrier;
                 DependencyDag {
@@ -1329,6 +1362,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn dependency_dag_for_nodes(&self, roots: &[VersionId]) -> DependencyDag<NodeKey> {
+        if self.guard_work.is_none() {
+            return DependencyDag {
+                nodes: Vec::new(),
+                edges: Vec::new(),
+                roots: vec![None; roots.len()],
+                domains: Vec::new(),
+                sites: HashMap::default(),
+            };
+        }
         let graph = self
             .ssa
             .dependency_dag(roots, |key| self.is_visible_source(key));
@@ -1974,7 +2016,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if flow.flow != ProcedureFlow::Return {
             function.returns.push(fallthrough);
         }
-        self.ssa.merge(&function.returns);
+        if self.guard_work.is_some() {
+            self.ssa.merge(&function.returns);
+        }
         self.path_condition = caller_condition;
     }
 
@@ -2011,6 +2055,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         branch
     }
 
+    fn reserve_guard_work(&mut self, cost: usize) -> bool {
+        self.guard_work = self.guard_work.and_then(|work| work.checked_sub(cost));
+        if self.guard_work.is_none() {
+            self.status = AnalysisStatus::Barrier;
+            self.path_condition = PathCondition::default();
+            return false;
+        }
+        true
+    }
+
+    fn choose_path(&mut self, parent: &PathCondition, branch: BranchId, arm: usize) -> bool {
+        if !self.reserve_guard_work(parent.branch_count().saturating_add(1)) {
+            return false;
+        }
+        self.path_condition = parent.with_choice(branch, arm);
+        true
+    }
+
     fn use_expression_namespace(&mut self, expression: &Expression) {
         if self.branch_namespace == 0 && self.next_branch == 0 {
             self.branch_namespace = std::ptr::from_ref(expression).addr();
@@ -2035,6 +2097,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn merge_flow_states(&mut self, states: &[FlowState]) {
+        let cost = states.iter().fold(0usize, |cost, state| {
+            cost.saturating_add(state.condition.branch_count())
+        });
+        if !self.reserve_guard_work(cost) {
+            return;
+        }
         self.ssa.merge(states.iter().map(|state| &state.state));
         self.path_condition =
             PathCondition::disjoin_all(states.iter().map(|state| &state.condition));
@@ -2055,6 +2123,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut active_controls = controls.to_vec();
         let mut continuation_controls = Vec::new();
         for statement in statements {
+            if self.guard_work.is_none() {
+                break;
+            }
             let result = self.eval_statement(statement, &active_controls);
             if result.flow != ProcedureFlow::Continue {
                 return result;
@@ -2146,6 +2217,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         branches: Vec<(FlowResult, BranchState<SsaKey>, PathCondition)>,
         branch_controls: &[VersionId],
     ) -> FlowResult {
+        let cost = branches.iter().fold(0usize, |cost, (_, _, condition)| {
+            cost.saturating_add(condition.branch_count())
+        });
+        if !self.reserve_guard_work(cost) {
+            return FlowResult::new(ProcedureFlow::Continue);
+        }
         let mut continuation = Vec::new();
         let mut continuation_conditions = Vec::new();
         let mut continuation_controls = Vec::new();
@@ -2201,13 +2278,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
         let branch = self.next_branch_id(2);
         let parent_condition = self.path_condition.clone();
-        self.path_condition = parent_condition.with_choice(branch, 0);
+        self.choose_path(&parent_condition, branch, 0);
         let checkpoint = self.ssa.checkpoint();
         let true_flow = self.eval_block(&statement.true_side, &nested_controls);
         let true_state = self.ssa.capture_and_rollback(checkpoint);
         let true_condition = self.path_condition.clone();
 
-        self.path_condition = parent_condition.with_choice(branch, 1);
+        self.choose_path(&parent_condition, branch, 1);
         let checkpoint = self.ssa.checkpoint();
         let false_flow = self.eval_block(&statement.false_side, &nested_controls);
         let false_state = self.ssa.capture_and_rollback(checkpoint);
@@ -2278,14 +2355,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let parent_condition = self.path_condition.clone();
             let mut states = Vec::with_capacity(possible.len() + usize::from(!has_definite_match));
             for index in possible {
-                self.path_condition = parent_condition.with_choice(branch, index);
+                if !self.choose_path(&parent_condition, branch, index) {
+                    break;
+                }
                 let checkpoint = self.ssa.checkpoint();
                 let flow = self.eval_block(&statement.arms[index].body, &nested_controls);
                 let state = self.ssa.capture_and_rollback(checkpoint);
                 states.push((flow, state, self.path_condition.clone()));
             }
             if !has_definite_match {
-                self.path_condition = parent_condition.with_choice(branch, statement.arms.len());
+                self.choose_path(&parent_condition, branch, statement.arms.len());
                 let checkpoint = self.ssa.checkpoint();
                 let flow = self.eval_block(&statement.default, &nested_controls);
                 let state = self.ssa.capture_and_rollback(checkpoint);
@@ -2299,13 +2378,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let parent_condition = self.path_condition.clone();
         let mut states = Vec::with_capacity(statement.arms.len() + 1);
         for (index, arm) in statement.arms.iter().enumerate() {
-            self.path_condition = parent_condition.with_choice(branch, index);
+            if !self.choose_path(&parent_condition, branch, index) {
+                break;
+            }
             let checkpoint = self.ssa.checkpoint();
             let flow = self.eval_block(&arm.body, &nested_controls);
             let state = self.ssa.capture_and_rollback(checkpoint);
             states.push((flow, state, self.path_condition.clone()));
         }
-        self.path_condition = parent_condition.with_choice(branch, statement.arms.len());
+        self.choose_path(&parent_condition, branch, statement.arms.len());
         let checkpoint = self.ssa.checkpoint();
         let flow = self.eval_block(&statement.default, &nested_controls);
         let state = self.ssa.capture_and_rollback(checkpoint);
@@ -2402,7 +2483,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.set_known_iterator_value(statement, value);
             let result = self.eval_block(&statement.body, &iteration_controls);
             flow = result.flow;
-            if flow != ProcedureFlow::Continue {
+            if flow != ProcedureFlow::Continue || self.guard_work.is_none() {
                 break;
             }
             for control in result.continuation_controls {
@@ -2413,6 +2494,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let fallthrough = self.ssa.capture_and_rollback(checkpoint);
+        if self.guard_work.is_none() {
+            self.path_condition = parent_condition;
+            return FlowResult::new(ProcedureFlow::Continue);
+        }
         if flow == ProcedureFlow::Continue {
             loop_flow.breaks.push(FlowState {
                 state: fallthrough,
@@ -2447,6 +2532,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let flow = self.eval_block(&statement.body, range_controls);
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
+        if self.guard_work.is_none() {
+            self.path_condition = parent_condition;
+            return FlowResult::new(ProcedureFlow::Continue);
+        }
         if flow.flow == ProcedureFlow::Continue {
             loop_flow.breaks.push(FlowState {
                 state: body_state,
@@ -2520,6 +2609,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         context: ExpressionContext,
         projection: &ProjectionContext,
     ) -> ExpressionSources {
+        if self.guard_work.is_none() {
+            return ExpressionSources::default();
+        }
         let requested_array = if matches!(expression, Expression::ArrayLiteral(_, _)) {
             requested_array
         } else {
@@ -2865,13 +2957,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             let parent_condition = self.path_condition.clone();
 
                             let checkpoint = self.ssa.checkpoint();
-                            self.path_condition = parent_condition.with_choice(branch, 0);
+                            self.choose_path(&parent_condition, branch, 0);
                             let right = self.eval_expr(right);
                             let right = self.ssa.definition_guarded(right, &self.path_condition);
                             let evaluated_state = self.ssa.capture_and_rollback(checkpoint);
 
                             let checkpoint = self.ssa.checkpoint();
-                            self.path_condition = parent_condition.with_choice(branch, 1);
+                            self.choose_path(&parent_condition, branch, 1);
                             let skipped_state = self.ssa.capture_and_rollback(checkpoint);
 
                             self.ssa.merge([&evaluated_state, &skipped_state]);
@@ -2905,7 +2997,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let parent_condition = self.path_condition.clone();
 
                         let checkpoint = self.ssa.checkpoint();
-                        self.path_condition = parent_condition.with_choice(branch, 0);
+                        self.choose_path(&parent_condition, branch, 0);
                         let left = self.eval_expr_in_context(
                             left,
                             requested_array,
@@ -2917,7 +3009,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let left_state = self.ssa.capture_and_rollback(checkpoint);
 
                         let checkpoint = self.ssa.checkpoint();
-                        self.path_condition = parent_condition.with_choice(branch, 1);
+                        self.choose_path(&parent_condition, branch, 1);
                         let right = self.eval_expr_in_context(
                             right,
                             requested_array,
@@ -3288,6 +3380,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         expression: &Expression,
         prune_constant_branches: bool,
     ) -> Vec<VersionId> {
+        if self.guard_work.is_none() {
+            return Vec::new();
+        }
         let mut reads = Vec::new();
         match expression {
             Expression::Term(factor) => self.eval_factor(factor, &mut reads),
@@ -3322,13 +3417,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let parent_condition = self.path_condition.clone();
 
                         let checkpoint = self.ssa.checkpoint();
-                        self.path_condition = parent_condition.with_choice(branch, 0);
+                        self.choose_path(&parent_condition, branch, 0);
                         let left = self.eval_expr_inner(left, prune_constant_branches);
                         let left = self.ssa.definition_guarded(left, &self.path_condition);
                         let left_state = self.ssa.capture_and_rollback(checkpoint);
 
                         let checkpoint = self.ssa.checkpoint();
-                        self.path_condition = parent_condition.with_choice(branch, 1);
+                        self.choose_path(&parent_condition, branch, 1);
                         let right = self.eval_expr_inner(right, prune_constant_branches);
                         let right = self.ssa.definition_guarded(right, &self.path_condition);
                         let right_state = self.ssa.capture_and_rollback(checkpoint);
@@ -3643,7 +3738,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         {
             branches.clone()
         } else {
-            let branches = self.instantiate_summary_branches(summary);
+            let branches = Rc::new(self.instantiate_summary_branches(summary));
             if let Some(key) = invocation {
                 self.shared_call_branches.insert(key, branches.clone());
             }
@@ -3663,6 +3758,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
 
+        let bindings = Rc::new(bindings);
         for (destination, root) in &summary.writes {
             let imported = self.ssa.imported(
                 summary.graph.clone(),

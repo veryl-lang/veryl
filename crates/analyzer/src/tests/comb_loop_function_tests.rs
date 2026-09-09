@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn function_outputs_and_captured_writes_share_invocation_bindings() {
+    use crate::comb_loop_detect::{import_binding_visits, reset_import_binding_visits};
+
+    for captured in [false, true] {
+        for size in [64, 256, 1024] {
+            let destination = if captured { "o" } else { "y" };
+            let output = if captured {
+                String::new()
+            } else {
+                format!(", y: output logic<{size}>")
+            };
+            let actual = if captured { "" } else { ", o" };
+            let writes = (0..size)
+                .map(|index| format!("{destination}[{index}] = x[{index}];"))
+                .collect::<String>();
+            let code = format!(
+                r#"
+                module Top (i: input logic<{size}>, o: output logic<{size}>) {{
+                    function copy (x: input logic<{size}>{output}) {{ {writes} }}
+                    always_comb {{ copy(i{actual}); }}
+                }}
+            "#
+            );
+            reset_import_binding_visits();
+            let errors = analyze(&code);
+            assert!(
+                errors.is_empty(),
+                "captured={captured}, size={size}: {errors:?}"
+            );
+            assert!(
+                import_binding_visits() <= size * 4,
+                "all output regions must share one invocation: {} binding visits for {size} outputs",
+                import_binding_visits()
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
 fn comb_loop_false_negative_early_return_controls_a_later_captured_write() {
     // update(stop) leaves value at zero on the return path and writes one on
     // the continuation path. Since stop = value, the captured write is in a

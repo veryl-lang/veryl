@@ -2,6 +2,72 @@
 use super::*;
 
 #[test]
+fn procedural_guard_limit_bounds_early_exits_and_preserves_independent_cycles() {
+    for kind in ["return", "break", "runtime_break"] {
+        for size in [2, 64, 256] {
+            let exits = (0..size)
+                .map(|index| {
+                    if kind == "return" {
+                        format!("if flags[{index}] {{ return data; }}")
+                    } else {
+                        format!("if flags[{index}] {{ break; }}")
+                    }
+                })
+                .collect::<String>();
+            let body = if kind == "return" {
+                format!(
+                    r#"
+                    function first (flags: input logic<{size}>, data: input logic) -> logic {{
+                        {exits}
+                        return 0;
+                    }}
+                    assign o = first(flags, data);
+                "#
+                )
+            } else {
+                let bound = if kind == "break" { "1" } else { "n" };
+                format!(
+                    r#"
+                    always_comb {{
+                        o = o;
+                        for _index in 0..{bound} {{ {exits} o = data; }}
+                        o = 0;
+                    }}
+                "#
+                )
+            };
+            let code = format!(
+                r#"
+                module Top (flags: input logic<{size}>, data: input logic,
+                            n: input logic<32>, o: output logic, independent: output logic) {{
+                    {body}
+                    assign independent = independent;
+                }}
+            "#
+            );
+            crate::comb_loop_detect::with_procedure_guard_limit(128, || {
+                assert_eq!(
+                    comb_loop_analysis_is_complete(&code),
+                    size == 2,
+                    "{kind}, {size}"
+                );
+                let errors = analyze(&code);
+                let loops = errors
+                    .iter()
+                    .filter_map(|error| match error {
+                        AnalyzerError::CombinationalLoop { identifier, .. } => {
+                            Some(identifier.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(loops, ["independent"], "{kind}, {size}: {errors:?}");
+            });
+        }
+    }
+}
+
+#[test]
 fn comb_loop_malformed_effect_is_a_causal_barrier() {
     // Why this case exists: a rejected statement may have unknown side
     // effects, so a cycle which crosses it is not proven. The malformed

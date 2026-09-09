@@ -13,6 +13,17 @@ use veryl_parser::token_range::TokenRange;
 thread_local! {
     static SOURCE_WALK_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static ITERATION_IMPORT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static IMPORT_BINDING_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_import_binding_visits() {
+    IMPORT_BINDING_VISITS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn import_binding_visits() -> usize {
+    IMPORT_BINDING_VISITS.get()
 }
 
 #[cfg(test)]
@@ -587,15 +598,15 @@ where
         &mut self,
         graph: Rc<DependencyDag<K>>,
         root: Option<usize>,
-        bindings: HashMap<K, Vec<(VersionId, PositionRelation)>>,
-        branches: HashMap<BranchId, BranchId>,
+        bindings: Rc<HashMap<K, Vec<(VersionId, PositionRelation)>>>,
+        branches: Rc<HashMap<BranchId, BranchId>>,
     ) -> VersionId {
         let version = self.versions.len();
         self.versions.push(Version::Imported {
             graph,
             root,
-            bindings: Rc::new(bindings),
-            branches: Rc::new(branches),
+            bindings,
+            branches,
         });
         version
     }
@@ -848,6 +859,7 @@ where
         K: Ord,
     {
         let mut states = HashSet::default();
+        let mut visited_bindings = HashSet::default();
         let mut queue = VecDeque::new();
         for &root in roots {
             if states.insert((root, false)) {
@@ -874,9 +886,16 @@ where
                     }
                 }
                 Version::Imported { bindings, .. } => {
-                    for sources in bindings.values() {
-                        for (source, _) in sources {
-                            enqueue((*source, true));
+                    // All output roots of a call share the same actuals.
+                    if visited_bindings.insert(Rc::as_ptr(bindings)) {
+                        #[cfg(test)]
+                        IMPORT_BINDING_VISITS.set(IMPORT_BINDING_VISITS.get() + bindings.len());
+                        work = work.checked_sub(bindings.len())?;
+                        for sources in bindings.values() {
+                            work = work.checked_sub(sources.len())?;
+                            for (source, _) in sources {
+                                enqueue((*source, true));
+                            }
                         }
                     }
                 }
@@ -890,13 +909,7 @@ where
         // distinct for checkpoint boundaries, runtime transfers and writes.
         let mut builder = dag::Builder::new();
         let mut mapped: HashMap<(VersionId, bool), Option<usize>> = HashMap::default();
-        type ImportKey<K> = (
-            usize,
-            Option<usize>,
-            Vec<(K, Vec<(usize, PositionRelation)>)>,
-            Vec<(BranchId, BranchId)>,
-        );
-        let mut imports: HashMap<ImportKey<K>, Option<usize>> = HashMap::default();
+        let mut imports = dag::Imports::default();
 
         let mut ordered = states.into_iter().collect::<Vec<_>>();
         ordered.sort_unstable();
@@ -949,48 +962,15 @@ where
                     root,
                     bindings,
                     branches,
-                } => {
-                    let mut mapped_bindings = bindings
-                        .iter()
-                        .map(|(&key, sources)| {
-                            let mut sources = sources
-                                .iter()
-                                .filter_map(|(source, relation)| {
-                                    mapped[&(*source, true)].map(|source| (source, *relation))
-                                })
-                                .collect::<Vec<_>>();
-                            sources.sort_unstable();
-                            sources.dedup();
-                            (key, sources)
-                        })
-                        .collect::<Vec<_>>();
-                    mapped_bindings.sort_unstable_by_key(|(key, _)| *key);
-                    let mut mapped_branches = branches
-                        .iter()
-                        .map(|(&source, &destination)| (source, destination))
-                        .collect::<Vec<_>>();
-                    mapped_branches.sort_unstable();
-                    let key = (
-                        Rc::as_ptr(graph) as usize,
-                        *root,
-                        mapped_bindings.clone(),
-                        mapped_branches,
-                    );
-                    if let Some(node) = imports.get(&key) {
-                        *node
-                    } else {
-                        let node = inline_dependency_dag(
-                            graph,
-                            *root,
-                            &mapped_bindings.into_iter().collect(),
-                            branches,
-                            &mut builder,
-                            &mut work,
-                        )?;
-                        imports.insert(key, node);
-                        node
-                    }
-                }
+                } => imports.inline(
+                    graph,
+                    *root,
+                    bindings,
+                    branches,
+                    &mapped,
+                    &mut builder,
+                    &mut work,
+                )?,
                 Version::Projected { source, domain } => {
                     let inputs = mapped[&(*source, true)]
                         .map(|source| {
@@ -1239,88 +1219,6 @@ where
         .collect()
 }
 
-fn inline_dependency_dag<K>(
-    graph: &DependencyDag<K>,
-    root: Option<usize>,
-    bindings: &HashMap<K, Vec<(usize, PositionRelation)>>,
-    branches: &HashMap<BranchId, BranchId>,
-    builder: &mut dag::Builder<K>,
-    work: &mut usize,
-) -> Option<Option<usize>>
-where
-    K: Copy + Eq + Hash,
-{
-    let Some(root) = root else {
-        return Some(None);
-    };
-    // Charge the existing child before allocating an import. Every distinct
-    // invocation can require distinct guards; cap that expansion separately
-    // from positional cycle search, including branch-condition payloads.
-    let cost = graph.edges.iter().fold(graph.nodes.len(), |cost, edge| {
-        cost.saturating_add(edge.condition.branch_count().saturating_add(1))
-    });
-    *work = work.checked_sub(cost)?;
-    let mut incoming = vec![Vec::new(); graph.nodes.len()];
-    for edge in &graph.edges {
-        incoming[edge.destination].push(edge);
-    }
-    let mut retained = HashSet::default();
-    let mut queue = VecDeque::from([root]);
-    retained.insert(root);
-    while let Some(node) = queue.pop_front() {
-        for edge in &incoming[node] {
-            if retained.insert(edge.source) {
-                queue.push_back(edge.source);
-            }
-        }
-    }
-
-    // Exported nodes are topologically ordered. Intern each child after its
-    // inputs are mapped so equivalent conversions and imported subgraphs use
-    // the same parent nodes, including when the actual bindings differ.
-    let mut mapped: HashMap<usize, usize> = HashMap::default();
-    for (child, child_node) in graph.nodes.iter().enumerate() {
-        if !retained.contains(&child) {
-            continue;
-        }
-        let mut inputs = incoming[child]
-            .iter()
-            .map(|edge| {
-                debug_assert!(edge.source < child);
-                (
-                    mapped[&edge.source],
-                    edge.relation,
-                    edge.condition.remapped(branches),
-                )
-            })
-            .collect::<Vec<_>>();
-        if let DependencyDagNode::External(key) = child_node {
-            inputs.extend(
-                bindings
-                    .get(key)
-                    .into_iter()
-                    .flatten()
-                    .map(|&(source, relation)| (source, relation, PathCondition::default())),
-            );
-        }
-        let site = graph.sites.get(&child).map(|site| DefinitionSite {
-            token: site.token,
-            data_inputs: site
-                .data_inputs
-                .iter()
-                .filter_map(|input| mapped.get(input).copied())
-                .collect(),
-        });
-        let node = if let DependencyDagNode::Replicated { stride } = child_node {
-            builder.replicated(inputs, graph.domains[child].clone(), site, *stride)
-        } else {
-            builder.internal(inputs, graph.domains[child].clone(), site)
-        };
-        mapped.insert(child, node);
-    }
-    Some(mapped.get(&root).copied())
-}
-
 fn merge_source<K>(
     destination: &mut SourceMap<K>,
     key: (K, PositionRelation),
@@ -1362,6 +1260,59 @@ fn merge_source_summaries<K>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multi_output_invocation_imports_shared_predecessors_once() {
+        for size in [64, 256, 1024] {
+            let mut callee = SsaStore::default();
+            let mut value = callee.definition(Vec::new());
+            let roots = (0..size)
+                .map(|key| {
+                    let input = callee.read(key);
+                    value = callee.definition(vec![value, input]);
+                    value
+                })
+                .collect::<Vec<_>>();
+            let graph = Rc::new(callee.dependency_dag(&roots, |_| true));
+            let mut caller = SsaStore::default();
+            let bindings = Rc::new(
+                (0..size)
+                    .map(|key| (key, vec![(caller.read(key), PositionRelation::default())]))
+                    .collect(),
+            );
+            let branches = Rc::default();
+            let roots = graph
+                .roots
+                .iter()
+                .map(|root| {
+                    caller.imported(
+                        graph.clone(),
+                        *root,
+                        Rc::clone(&bindings),
+                        Rc::clone(&branches),
+                    )
+                })
+                .collect::<Vec<_>>();
+            // Every output includes the preceding outputs. Both normalizing
+            // all actuals and walking that prefix per root would be quadratic.
+            let exported = caller
+                .try_dependency_dag(&roots, |_| true, size * 32)
+                .expect("one invocation must fit in a linear export budget");
+            assert_eq!(exported.nodes.len(), graph.nodes.len());
+            assert_eq!(exported.edges.len(), graph.edges.len());
+            for index in [0, size / 2, size - 1] {
+                let sources = dependency_dag_external_sources(
+                    &exported,
+                    exported.roots[index],
+                    PositionRelation::whole(),
+                )
+                .into_iter()
+                .map(|(key, _, _)| key)
+                .collect::<HashSet<_>>();
+                assert_eq!(sources, (0..=index).collect());
+            }
+        }
+    }
 
     #[test]
     fn definition_reports_live_on_entry_source() {
@@ -1617,8 +1568,9 @@ mod tests {
                     (1, vec![(unrelated, PositionRelation::default())]),
                 ]
                 .into_iter()
-                .collect(),
-                HashMap::default(),
+                .collect::<HashMap<_, _>>()
+                .into(),
+                Rc::default(),
             );
             caller.bind(CALLS + 1 + index, output);
         }
@@ -1630,8 +1582,9 @@ mod tests {
                 root,
                 [(1, vec![(unrelated, PositionRelation::default())])]
                     .into_iter()
-                    .collect(),
-                HashMap::default(),
+                    .collect::<HashMap<_, _>>()
+                    .into(),
+                Rc::default(),
             );
             caller.bind(CALLS * 2 + 1 + index, output);
         }
@@ -1769,8 +1722,9 @@ mod tests {
             graph.roots[0],
             [("input", vec![(input, PositionRelation::default())])]
                 .into_iter()
-                .collect(),
-            HashMap::default(),
+                .collect::<HashMap<_, _>>()
+                .into(),
+            Rc::default(),
         );
         reset_source_walk_visits();
         assert_eq!(
@@ -1795,8 +1749,9 @@ mod tests {
             graph.roots[0],
             [("input", vec![(input, PositionRelation::default())])]
                 .into_iter()
-                .collect(),
-            HashMap::default(),
+                .collect::<HashMap<_, _>>()
+                .into(),
+            Rc::default(),
         );
         let result = caller.dependency_dag(&[root], |key| *key == "actual");
         // The callee's external identity is an alias of the actual input.

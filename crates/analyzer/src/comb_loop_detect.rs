@@ -51,12 +51,18 @@ use region::{
 };
 use ssa::{BranchId, DependencyDagNode, PathCondition};
 #[cfg(test)]
-pub(crate) use ssa::{reset_source_walk_visits, source_walk_visits};
+pub(crate) use ssa::{
+    import_binding_visits, reset_import_binding_visits, reset_source_walk_visits,
+    source_walk_visits,
+};
 use summary::{ExpansionBudget, compute_module_summary};
 #[cfg(test)]
 pub(crate) use summary::{
     module_summary_work, reset_module_summary_work, with_module_summary_limit,
 };
+
+#[cfg(test)]
+pub(crate) use procedure::with_procedure_guard_limit;
 
 use crate::AnalyzerError;
 use crate::HashMap;

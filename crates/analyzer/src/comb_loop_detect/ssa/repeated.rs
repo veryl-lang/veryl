@@ -388,8 +388,9 @@ mod tests {
                         HashMap::from_iter([(
                             "source",
                             vec![(input, PositionRelation::default())],
-                        )]),
-                        HashMap::default(),
+                        )])
+                        .into(),
+                        Rc::default(),
                     )
                 } else {
                     let source = ssa.projected(

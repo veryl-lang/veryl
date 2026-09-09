@@ -2,6 +2,180 @@
 
 use super::*;
 
+type MappedBindings<K> = Rc<Vec<(K, Vec<(usize, PositionRelation)>)>>;
+
+#[derive(PartialEq, Eq, Hash)]
+struct InvocationKey<K> {
+    graph: usize,
+    bindings: MappedBindings<K>,
+    branches: Vec<(BranchId, BranchId)>,
+}
+
+struct Invocation<K> {
+    bindings: MappedBindings<K>,
+    mapped: HashMap<usize, usize>,
+}
+
+pub(super) struct Imports<K> {
+    incoming: HashMap<usize, Vec<Vec<usize>>>,
+    identities: HashMap<(usize, usize, usize), usize>,
+    equivalent: HashMap<InvocationKey<K>, usize>,
+    invocations: Vec<Invocation<K>>,
+}
+
+impl<K> Default for Imports<K> {
+    fn default() -> Self {
+        Self {
+            incoming: HashMap::default(),
+            identities: HashMap::default(),
+            equivalent: HashMap::default(),
+            invocations: Vec::new(),
+        }
+    }
+}
+
+impl<K: Copy + Eq + Hash + Ord> Imports<K> {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn inline(
+        &mut self,
+        graph: &Rc<DependencyDag<K>>,
+        root: Option<usize>,
+        bindings: &Rc<HashMap<K, Vec<(VersionId, PositionRelation)>>>,
+        branches: &Rc<HashMap<BranchId, BranchId>>,
+        parent: &HashMap<(VersionId, bool), Option<usize>>,
+        builder: &mut Builder<K>,
+        work: &mut usize,
+    ) -> Option<Option<usize>> {
+        let Some(root) = root else {
+            return Some(None);
+        };
+        let graph_id = Rc::as_ptr(graph) as usize;
+        let identity = (
+            graph_id,
+            Rc::as_ptr(bindings) as usize,
+            Rc::as_ptr(branches) as usize,
+        );
+        let invocation = if let Some(&invocation) = self.identities.get(&identity) {
+            invocation
+        } else {
+            // Normalize actuals once per call, not once per result region.
+            // Still recognize equivalent calls after SSA aliases collapse.
+            *work = work.checked_sub(bindings.len().saturating_add(branches.len()))?;
+            let mut mapped_bindings = Vec::with_capacity(bindings.len());
+            for (&key, sources) in bindings.iter() {
+                *work = work.checked_sub(sources.len())?;
+                let mut sources = sources
+                    .iter()
+                    .filter_map(|(source, relation)| {
+                        parent[&(*source, true)].map(|source| (source, *relation))
+                    })
+                    .collect::<Vec<_>>();
+                sources.sort_unstable();
+                sources.dedup();
+                mapped_bindings.push((key, sources));
+            }
+            mapped_bindings.sort_unstable_by_key(|(key, _)| *key);
+            let mut mapped_branches = branches
+                .iter()
+                .map(|(&source, &destination)| (source, destination))
+                .collect::<Vec<_>>();
+            mapped_branches.sort_unstable();
+            let key = InvocationKey {
+                graph: graph_id,
+                bindings: Rc::new(mapped_bindings),
+                branches: mapped_branches,
+            };
+            let invocation = *self.equivalent.entry(key).or_insert_with_key(|key| {
+                let invocation = self.invocations.len();
+                self.invocations.push(Invocation {
+                    bindings: key.bindings.clone(),
+                    mapped: HashMap::default(),
+                });
+                invocation
+            });
+            self.identities.insert(identity, invocation);
+            invocation
+        };
+        let invocation = &mut self.invocations[invocation];
+        if let Some(&node) = invocation.mapped.get(&root) {
+            return Some(Some(node));
+        }
+
+        let incoming = match self.incoming.entry(graph_id) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                *work = work.checked_sub(graph.nodes.len().saturating_add(graph.edges.len()))?;
+                let mut incoming = vec![Vec::new(); graph.nodes.len()];
+                for (index, edge) in graph.edges.iter().enumerate() {
+                    incoming[edge.destination].push(index);
+                }
+                entry.insert(incoming)
+            }
+        };
+        let mut retained = HashSet::default();
+        let mut queue = VecDeque::from([root]);
+        retained.insert(root);
+        while let Some(node) = queue.pop_front() {
+            // Charge only newly reached nodes, but include their guard and
+            // domain payloads before cloning. Other roots reuse this import.
+            *work = work.checked_sub(graph.domains[node].len().saturating_add(1))?;
+            for &index in &incoming[node] {
+                let edge = &graph.edges[index];
+                *work = work.checked_sub(edge.condition.branch_count().saturating_add(1))?;
+                if !invocation.mapped.contains_key(&edge.source) && retained.insert(edge.source) {
+                    queue.push_back(edge.source);
+                }
+            }
+        }
+        let mut retained = retained.into_iter().collect::<Vec<_>>();
+        retained.sort_unstable();
+        // Exported children are topologically ordered. Map each once across
+        // all roots, including shared predecessors and diagnostic sites.
+        for child in retained {
+            let mut inputs = incoming[child]
+                .iter()
+                .map(|&index| {
+                    let edge = &graph.edges[index];
+                    debug_assert!(edge.source < child);
+                    (
+                        invocation.mapped[&edge.source],
+                        edge.relation,
+                        edge.condition.remapped(branches),
+                    )
+                })
+                .collect::<Vec<_>>();
+            if let DependencyDagNode::External(key) = &graph.nodes[child]
+                && let Ok(index) = invocation
+                    .bindings
+                    .binary_search_by_key(key, |(key, _)| *key)
+            {
+                let sources = &invocation.bindings[index].1;
+                *work = work.checked_sub(sources.len())?;
+                inputs.extend(
+                    sources
+                        .iter()
+                        .map(|&(source, relation)| (source, relation, PathCondition::default())),
+                );
+            }
+            let site = graph.sites.get(&child).map(|site| DefinitionSite {
+                token: site.token,
+                data_inputs: site
+                    .data_inputs
+                    .iter()
+                    .filter_map(|input| invocation.mapped.get(input).copied())
+                    .collect(),
+            });
+            let node = if let DependencyDagNode::Replicated { stride } = graph.nodes[child] {
+                builder.replicated(inputs, graph.domains[child].clone(), site, stride)
+            } else {
+                builder.internal(inputs, graph.domains[child].clone(), site)
+            };
+            invocation.mapped.insert(child, node);
+        }
+        Some(invocation.mapped.get(&root).copied())
+    }
+}
+
 #[derive(PartialEq, Eq, Hash)]
 struct InternalNode {
     inputs: Vec<(usize, PositionRelation, PathCondition)>,
@@ -316,12 +490,13 @@ mod tests {
                                     )],
                                 )
                             })
-                            .collect(),
-                        if swapped {
+                            .collect::<HashMap<_, _>>()
+                            .into(),
+                        Rc::new(if swapped {
                             branch_map.clone()
                         } else {
                             HashMap::default()
-                        },
+                        }),
                     ),
                 );
             }
