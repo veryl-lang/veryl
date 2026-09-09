@@ -10,6 +10,7 @@ use veryl_metadata::WaveFormFormat;
 use veryl_metadata::{ComponentBackendKind, FilelistType, Metadata, SimType, WaveFormTarget};
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::text_table;
+use veryl_simulator::component::loader::native_loading_supported;
 use veryl_simulator::ir::{ComponentLibrary, Config, Ir, ProtoModuleCache, build_ir_cached};
 use veryl_simulator::output_buffer;
 use veryl_simulator::simulator::Simulator;
@@ -355,9 +356,15 @@ impl CmdTest {
             ..Config::default()
         };
         config.apply_env();
-        // Warn once if cc is requested but absent; the fallback is otherwise silent.
+        // Both fallbacks are otherwise silent. A statically linked build
+        // cannot load what it compiles, so a present compiler changes nothing.
         #[cfg(not(target_family = "wasm"))]
-        if config.aot_c && !veryl_simulator::backend::aot_c::cc_available() {
+        if config.aot_c && !native_loading_supported() {
+            warn!(
+                "--backend cc: {}; falling back to the Cranelift JIT backend",
+                static_build_reason()
+            );
+        } else if config.aot_c && !veryl_simulator::backend::aot_c::cc_available() {
             warn!(
                 "--backend cc: no C compiler found (set VERYL_AOT_CC, or install cc/gcc); \
                  falling back to the Cranelift JIT backend"
@@ -787,11 +794,31 @@ impl CmdTest {
 pub fn build_component_manifests(metadata: &Metadata) {
     if metadata.components.is_empty()
         || metadata.test.component_backend == Some(ComponentBackendKind::Wasm)
-        || !cargo_available()
     {
         return;
     }
     let project_root = metadata.project_path();
+    // With no way to read the interface out of a freshly built library, the
+    // committed manifest and the prebuilt wasm are the only sources left.
+    // Reporting anything wider would fire on every command of a project that
+    // works fine.
+    if !native_loading_supported() {
+        for def in &metadata.components {
+            let crate_dir = project_root.join(&def.path);
+            if def.wasm.is_none() && veryl_metadata::read_committed_manifests(&crate_dir).is_none()
+            {
+                warn!(
+                    "Component package ({}): {}; its components are unavailable",
+                    def.path.display(),
+                    static_build_reason()
+                );
+            }
+        }
+        return;
+    }
+    if !cargo_available() {
+        return;
+    }
     let target_dir = project_root.join("target/veryl-components");
     for def in &metadata.components {
         let crate_dir = project_root.join(&def.path);
@@ -813,6 +840,17 @@ fn cargo_available() -> bool {
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success())
+}
+
+/// NixOS gets its own hint because the released dynamically linked binary
+/// does not run there either, so the way out is a different install.
+pub(crate) fn static_build_reason() -> String {
+    let mut reason =
+        "this veryl build is statically linked and cannot load dynamic libraries".to_string();
+    if std::path::Path::new("/etc/NIXOS").exists() {
+        reason.push_str(" (on NixOS, install veryl from nixpkgs or enable `programs.nix-ld`)");
+    }
+    reason
 }
 
 /// Builds every `[[components]]` cargo package (release, shared target
@@ -869,6 +907,7 @@ fn build_component_libraries(
 
     let choice = metadata.test.component_backend;
     let cargo_available = cargo_available();
+    let native_available = native_loading_supported();
 
     let mut libraries = std::collections::HashMap::new();
     for ComponentJob {
@@ -881,7 +920,13 @@ fn build_component_libraries(
     } in jobs
     {
         let use_wasm = match choice {
-            Some(ComponentBackendKind::Native) => false,
+            Some(ComponentBackendKind::Native) => {
+                if !native_available {
+                    error!("Component package ({label}): {}", static_build_reason());
+                    continue;
+                }
+                false
+            }
             Some(ComponentBackendKind::Wasm) => {
                 if wasm.is_none() {
                     error!("Component package ({label}) declares no `wasm =` prebuilt binary");
@@ -890,7 +935,19 @@ fn build_component_libraries(
                 true
             }
             None => {
-                if cargo_available {
+                if !native_available {
+                    if wasm.is_none() {
+                        error!(
+                            "Component package ({label}): {}; declare a `wasm =` prebuilt to use it",
+                            static_build_reason()
+                        );
+                        continue;
+                    }
+                    info!(
+                        "Component package ({label}): statically linked veryl, using the prebuilt wasm"
+                    );
+                    true
+                } else if cargo_available {
                     false
                 } else if wasm.is_some() {
                     info!("Component package ({label}): cargo not found, using the prebuilt wasm");
@@ -1109,11 +1166,18 @@ pub(crate) fn build_component_artifact(
     // cannot survive through a stale file.
     let mut manifest_json = None;
     if !wasm && let Some(path) = &artifact {
-        manifest_json = veryl_simulator::component::loader::library_manifest(path);
-        if manifest_json.is_none() {
-            warn!(
-                "Component ({name}) library does not export a veryl manifest; analysis-time interface checks are disabled"
-            );
+        match veryl_simulator::component::loader::library_manifest(path) {
+            Ok(json) => {
+                manifest_json = json;
+                if manifest_json.is_none() {
+                    warn!(
+                        "Component ({name}) library does not export a veryl manifest; analysis-time interface checks are disabled"
+                    );
+                }
+            }
+            Err(e) => warn!(
+                "Component ({name}) library cannot be loaded ({e}); analysis-time interface checks are disabled"
+            ),
         }
         if let Some(sidecar) = veryl_metadata::component_crate_name(crate_dir)
             .map(|n| veryl_metadata::sidecar_manifest_path(target_dir, &n))

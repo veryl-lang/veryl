@@ -437,16 +437,18 @@ pub fn build_components(
         // manifest that exists but cannot be parsed is a load error; only
         // its absence skips the checks.
         let manifest = match library {
-            Some(path) => match crate::component::loader::library_manifest(path) {
-                Some(json) => {
-                    crate::component::loader::parse_library_manifest_json(&json, &type_name)
-                        .map_err(|reason| ComponentError::ManifestInvalid {
-                            inst: inst_name.clone(),
-                            reason,
-                        })?
+            Some(path) => {
+                match crate::component::loader::library_manifest(path).map_err(&in_instance)? {
+                    Some(json) => {
+                        crate::component::loader::parse_library_manifest_json(&json, &type_name)
+                            .map_err(|reason| ComponentError::ManifestInvalid {
+                                inst: inst_name.clone(),
+                                reason,
+                            })?
+                    }
+                    None => None,
                 }
-                None => None,
-            },
+            }
             None => match crate::component::loader::static_manifest(&type_name) {
                 Some(json) => Some(ComponentManifest::parse(&json).ok_or_else(|| {
                     ComponentError::ManifestParse {
