@@ -1336,6 +1336,27 @@ fn many_comb_declarations_build_the_module_context_once() {
 }
 
 #[test]
+fn independent_assignments_only_check_referenced_source_visibility() {
+    for count in [64, 256, 1_024] {
+        for ty in [format!("logic<{count}>"), format!("logic [{count}]")] {
+            let mut code = format!("module Top (i: input {ty}, o: output {ty}) {{\n");
+            for index in 0..count {
+                code.push_str(&format!("assign o[{index}] = i[{index}];\n"));
+            }
+            code.push_str("}\n");
+            crate::comb_loop_detect::reset_visible_source_probes();
+            assert!(analyze(&code).is_empty());
+            let probes = crate::comb_loop_detect::visible_source_probes();
+            assert!(
+                (count..=count * 4).contains(&probes),
+                "each declaration must inspect its own sources, not every module region: count={count}, probes={probes}"
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
 fn comb_loop_module_summary_preserves_if_expression_arm_exclusivity() {
     assert_comb_loop(
         "a child summary must not combine mutually exclusive expression arms",

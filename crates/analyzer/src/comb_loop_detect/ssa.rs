@@ -829,7 +829,7 @@ where
     pub(super) fn dependency_dag(
         &self,
         roots: &[VersionId],
-        allowed: &HashSet<K>,
+        allowed: impl Fn(&K) -> bool,
     ) -> DependencyDag<K>
     where
         K: Ord,
@@ -841,7 +841,7 @@ where
     pub(super) fn try_dependency_dag(
         &self,
         roots: &[VersionId],
-        allowed: &HashSet<K>,
+        allowed: impl Fn(&K) -> bool,
         mut work: usize,
     ) -> Option<DependencyDag<K>>
     where
@@ -912,7 +912,7 @@ where
             });
             let node = match &self.versions[version] {
                 Version::Entry(key) => {
-                    (include_entry && allowed.contains(key)).then(|| builder.external(*key))
+                    (include_entry && allowed(key)).then(|| builder.external(*key))
                 }
                 Version::Definition { sources, condition } => {
                     work = work.checked_sub(
@@ -1601,7 +1601,7 @@ mod tests {
         let unrelated = callee.read(1);
         let constant = callee.definition(Vec::new());
         let graph = Rc::new(
-            callee.dependency_dag(&[value, unrelated, constant], &[0, 1].into_iter().collect()),
+            callee.dependency_dag(&[value, unrelated, constant], |key| [0, 1].contains(key)),
         );
 
         let mut caller = SsaStore::default();
@@ -1761,7 +1761,7 @@ mod tests {
                 ),
             ]);
         }
-        let graph = Rc::new(callee.dependency_dag(&[value], &["input"].into_iter().collect()));
+        let graph = Rc::new(callee.dependency_dag(&[value], |key| *key == "input"));
         let mut caller = SsaStore::default();
         let input = caller.read("actual");
         let root = caller.imported(
@@ -1787,7 +1787,7 @@ mod tests {
         for _ in 0..20_000 {
             value = callee.definition(vec![value]);
         }
-        let graph = Rc::new(callee.dependency_dag(&[value], &["input"].into_iter().collect()));
+        let graph = Rc::new(callee.dependency_dag(&[value], |key| *key == "input"));
         let mut caller = SsaStore::default();
         let input = caller.read("actual");
         let root = caller.imported(
@@ -1798,7 +1798,7 @@ mod tests {
                 .collect(),
             HashMap::default(),
         );
-        let result = caller.dependency_dag(&[root], &["actual"].into_iter().collect());
+        let result = caller.dependency_dag(&[root], |key| *key == "actual");
         // The callee's external identity is an alias of the actual input.
         assert_eq!(result.nodes.len(), graph.nodes.len());
         assert_eq!(result.edges.len(), graph.edges.len());

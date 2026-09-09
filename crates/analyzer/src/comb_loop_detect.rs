@@ -26,7 +26,8 @@ pub(crate) use procedure::{
     function_result_region_probe_count, function_result_version_count,
     function_summary_graph_node_count, module_context_entries, reset_function_evaluation_count,
     reset_module_context_entries, reset_traced_procedure_evaluation_count,
-    traced_procedure_evaluation_count, write_footprint_statement_visits,
+    reset_visible_source_probes, traced_procedure_evaluation_count, visible_source_probes,
+    write_footprint_statement_visits,
 };
 
 use diagnostics::{DiagnosticReplayCache, TraceKind, check_graph};
@@ -51,9 +52,11 @@ use region::{
 use ssa::{BranchId, DependencyDagNode, PathCondition};
 #[cfg(test)]
 pub(crate) use ssa::{reset_source_walk_visits, source_walk_visits};
-use summary::compute_module_summary;
+use summary::{ExpansionBudget, compute_module_summary};
 #[cfg(test)]
-pub(crate) use summary::{module_summary_work, reset_module_summary_work};
+pub(crate) use summary::{
+    module_summary_work, reset_module_summary_work, with_module_summary_limit,
+};
 
 use crate::AnalyzerError;
 use crate::HashMap;
@@ -258,6 +261,9 @@ fn collect_instance_summary_spans(
     accesses: &mut HashMap<IdxKey, Vec<PackedSpan>>,
     ctx: &mut Context,
 ) {
+    // Use the same instance order and budget as graph construction. Skipped
+    // summaries must not expand the parent's partition before that check.
+    let mut budget = ExpansionBudget::new();
     for inst in walk_insts(module) {
         let Component::Module(child) = inst.component.as_ref() else {
             continue;
@@ -265,6 +271,9 @@ fn collect_instance_summary_spans(
         let Some(summary) = summaries.get(&child.signature) else {
             continue;
         };
+        if !budget.reserve(summary) {
+            continue;
+        }
         for node in &summary.nodes {
             let direction = match node.kind {
                 SummaryNodeKind::Input | SummaryNodeKind::Interface => Direction::Input,
@@ -640,6 +649,7 @@ struct ModuleGraphBuilder<'a> {
     ctx: Context,
     procedure_context: procedure::ProcedureContext,
     function_summaries: procedure::FunctionSummaries<'a>,
+    summary_budget: ExpansionBudget,
     trace_instances: bool,
     complete: bool,
 }
@@ -653,6 +663,7 @@ impl<'a> ModuleGraphBuilder<'a> {
             ctx,
             procedure_context: procedure::ProcedureContext::new(module),
             function_summaries: procedure::FunctionSummaries::new(module, bit_part),
+            summary_budget: ExpansionBudget::new(),
             trace_instances: false,
             complete: !module
                 .variables
@@ -683,6 +694,10 @@ impl<'a> ModuleGraphBuilder<'a> {
         child: &Module,
         summary: &ModuleCombSummary,
     ) {
+        if !self.summary_budget.reserve(summary) {
+            self.complete = false;
+            return;
+        }
         let bit_part = self.bit_part;
         let graph = &mut self.graph;
         let node_map = &mut self.node_map;
@@ -779,22 +794,24 @@ impl<'a> ModuleGraphBuilder<'a> {
         }
 
         let summary_branches = remap_module_summary_branches(summary, inst);
+        let positioned_sources = summary
+            .edges
+            .iter()
+            .filter(|edge| edge.kind.has_position())
+            .map(|edge| edge.source)
+            .collect::<HashSet<_>>();
         let mut mapped_nodes = Vec::with_capacity(summary.nodes.len());
         let mut endpoint_mappings = Vec::with_capacity(summary.nodes.len());
         for (index, node) in summary.nodes.iter().enumerate() {
             let (mapping, endpoint_mapping) = match node.kind {
                 SummaryNodeKind::Input => {
-                    let preserve_position = summary
-                        .edges
-                        .iter()
-                        .any(|edge| edge.source == index && edge.kind.has_position());
                     let mapping = map_instance_source_region(
                         graph,
                         node_map,
                         inst,
                         child,
                         node.region,
-                        preserve_position,
+                        positioned_sources.contains(&index),
                         input_reads.get(&node.region.id).map(Vec::as_slice),
                         bit_part,
                         ctx,

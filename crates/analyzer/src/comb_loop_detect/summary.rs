@@ -15,10 +15,59 @@ use std::collections::VecDeque;
 #[cfg(test)]
 mod tests;
 
+// Guarded and positional boundaries cannot always be contracted. Bound the
+// child structure copied into each parent before reserving or cloning it, so
+// a small hierarchy cannot expand into its exponentially large instance tree.
+const MODULE_SUMMARY_WORK: usize = 1_000_000;
+
 #[cfg(test)]
 thread_local! {
     static INPUT_EDGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static WALKED_EDGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SUMMARY_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(MODULE_SUMMARY_WORK) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_module_summary_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
+    struct Reset(usize);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            SUMMARY_LIMIT.set(self.0);
+        }
+    }
+    let _reset = Reset(SUMMARY_LIMIT.replace(limit));
+    f()
+}
+
+pub(super) struct ExpansionBudget {
+    remaining: usize,
+}
+
+impl ExpansionBudget {
+    pub(super) fn new() -> Self {
+        #[cfg(test)]
+        let remaining = SUMMARY_LIMIT.get();
+        #[cfg(not(test))]
+        let remaining = MODULE_SUMMARY_WORK;
+        Self { remaining }
+    }
+
+    pub(super) fn reserve(&mut self, summary: &ModuleCombSummary) -> bool {
+        let remaining = (|| {
+            let remaining = self.remaining.checked_sub(summary.nodes.len())?;
+            let mut remaining = remaining.checked_sub(summary.edges.len())?;
+            for node in &summary.nodes {
+                remaining = remaining.checked_sub(node.domains.len())?;
+            }
+            for edge in &summary.edges {
+                remaining = remaining.checked_sub(edge.condition.branch_count())?;
+            }
+            Some(remaining)
+        })();
+        // Stop retrying large summaries once the module's budget is exhausted.
+        self.remaining = remaining.unwrap_or(0);
+        remaining.is_some()
+    }
 }
 
 #[cfg(test)]

@@ -784,6 +784,7 @@ thread_local! {
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_SUMMARY_GRAPH_NODES: Cell<usize> = const { Cell::new(0) };
     static MODULE_CONTEXT_ENTRIES: Cell<usize> = const { Cell::new(0) };
+    static VISIBLE_SOURCE_PROBES: Cell<usize> = const { Cell::new(0) };
     static TRACED_PROCEDURE_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static WRITE_FOOTPRINT_STATEMENT_VISITS: Cell<usize> = const { Cell::new(0) };
 }
@@ -837,6 +838,16 @@ pub(crate) fn reset_module_context_entries() {
 #[cfg(test)]
 pub(crate) fn module_context_entries() -> usize {
     MODULE_CONTEXT_ENTRIES.get()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_visible_source_probes() {
+    VISIBLE_SOURCE_PROBES.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn visible_source_probes() -> usize {
+    VISIBLE_SOURCE_PROBES.get()
 }
 
 #[cfg(test)]
@@ -989,7 +1000,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         sources.normalize();
         let value = inner.ssa.related_definition(sources.sources);
         let value = inner.ssa.projected(value, position_domain(array, packed));
-        inner.dependency_dag_for_nodes(&[value], inner.module_scope_keys())
+        inner.dependency_dag_for_nodes(&[value])
     }
 
     pub(super) fn dependencies(&mut self) -> ProcedureResult {
@@ -1159,22 +1170,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.receiver_indices.pop();
         this.call_caches.pop();
 
-        let mut visible_keys = this.module_scope_keys();
-        visible_keys.extend(
-            formal_ids
-                .iter()
-                .flat_map(|formal| this.keys_for_id(*formal)),
-        );
-        visible_keys.sort_unstable();
-        visible_keys.dedup();
-        let allowed = visible_keys
-            .into_iter()
-            .map(|node| SsaKey {
-                node,
-                call_frame: None,
-            })
-            .collect::<HashSet<_>>();
-
         let result_versions: Vec<(ArraySpan, Vec<(PackedSpan, VersionId)>)> = body
             .ret
             .map(|ret| this.current_region_groups_for_id(ret))
@@ -1204,7 +1199,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         roots.extend(write_versions.iter().map(|(_, version)| *version));
         let graph = this
             .ssa
-            .try_dependency_dag(&roots, &allowed, FUNCTION_SUMMARY_WORK)
+            .try_dependency_dag(
+                &roots,
+                |key| {
+                    this.is_visible_source(key)
+                        || (key.call_frame.is_none() && formal_ids.contains(&key.node.0))
+                },
+                FUNCTION_SUMMARY_WORK,
+            )
             .unwrap_or_else(|| {
                 this.status = AnalysisStatus::Barrier;
                 DependencyDag {
@@ -1295,8 +1297,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 })
             })
             .collect::<Vec<_>>();
-        let allowed = self.module_scope_keys().into_iter().collect::<HashSet<_>>();
-        let graph = self.dependency_dag_for_nodes(&roots, allowed);
+        let graph = self.dependency_dag_for_nodes(&roots);
         let destinations = destinations
             .into_iter()
             .zip(graph.roots.iter().copied())
@@ -1327,19 +1328,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.ssa.bind(self.ssa_key(node), version);
     }
 
-    fn dependency_dag_for_nodes(
-        &self,
-        roots: &[VersionId],
-        allowed: impl IntoIterator<Item = NodeKey>,
-    ) -> DependencyDag<NodeKey> {
-        let allowed = allowed
-            .into_iter()
-            .map(|node| SsaKey {
-                node,
-                call_frame: None,
-            })
-            .collect::<HashSet<_>>();
-        let graph = self.ssa.dependency_dag(roots, &allowed);
+    fn dependency_dag_for_nodes(&self, roots: &[VersionId]) -> DependencyDag<NodeKey> {
+        let graph = self
+            .ssa
+            .dependency_dag(roots, |key| self.is_visible_source(key));
         DependencyDag {
             nodes: graph
                 .nodes
@@ -1366,15 +1358,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    fn module_scope_keys(&self) -> Vec<NodeKey> {
-        let mut keys = self
-            .module_scope_ids
-            .iter()
-            .flat_map(|&id| self.keys_for_id(id))
-            .collect::<Vec<_>>();
-        keys.sort_unstable();
-        keys.dedup();
-        keys
+    fn is_visible_source(&self, key: &SsaKey) -> bool {
+        // Only inspect entries reached by this export. Enumerating every
+        // module partition for every declaration makes sparse writes quadratic.
+        #[cfg(test)]
+        VISIBLE_SOURCE_PROBES.set(VISIBLE_SOURCE_PROBES.get() + 1);
+        key.call_frame.is_none() && self.is_module_scope_key(key.node)
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {

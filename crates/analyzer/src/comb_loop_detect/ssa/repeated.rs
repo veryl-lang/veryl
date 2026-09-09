@@ -380,7 +380,7 @@ mod tests {
                         },
                     );
                     let result = callee.replicated(source, domain, 2);
-                    let dag = callee.dependency_dag(&[result], &HashSet::default());
+                    let dag = callee.dependency_dag(&[result], |_| false);
                     let root = dag.roots[0];
                     ssa.imported(
                         Rc::new(dag),
@@ -407,7 +407,7 @@ mod tests {
                 ssa.close_repeated_transfer(&iteration, checkpoint, false, |_| Some(domain));
                 assert!(ssa.versions.len() - before < 20);
                 let value = ssa.read("value");
-                let dag = ssa.dependency_dag(&[value], &HashSet::default());
+                let dag = ssa.dependency_dag(&[value], |_| false);
                 assert!(dag.nodes.len() < 10);
                 let replicas = dag
                     .nodes
@@ -538,7 +538,7 @@ mod tests {
                 })
             });
             let roots = (0..KEYS).map(|key| ssa.read(key)).collect::<Vec<_>>();
-            let dag = ssa.dependency_dag(&roots, &(0..KEYS).collect());
+            let dag = ssa.dependency_dag(&roots, |key| *key < KEYS);
             let mut outgoing = vec![Vec::new(); dag.nodes.len()];
             for edge in &dag.edges {
                 outgoing[edge.source].push(edge);

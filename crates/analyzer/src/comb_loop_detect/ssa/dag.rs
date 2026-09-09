@@ -326,7 +326,7 @@ mod tests {
                 );
             }
         }
-        let shared = caller.dependency_dag(&roots, &[0, 1].into_iter().collect());
+        let shared = caller.dependency_dag(&roots, |key| [0, 1].contains(key));
         assert!(shared.nodes.len() < raw.nodes.len() * 2);
         for valuation in 0..16 {
             let choices = branches
