@@ -14,7 +14,8 @@ use crate::ir::VarId;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
     Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, Module, Op, Shape,
-    Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, VarIndex, VarPath, VarSelect,
+    Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex, VarPath,
+    VarSelect,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -1106,7 +1107,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         expression: &Expression,
         regions: &[SummaryRegion],
         context_width: usize,
-        context_array: &Shape,
+        context_type: &Type,
         work: usize,
     ) -> DependencyDag<NodeKey> {
         let inner = self.inner();
@@ -1119,7 +1120,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             variables: Some(HashMap::default()),
             ..EvaluationCache::default()
         }));
-        inner.eval_reachable_expr(expression);
+        inner.eval_expr_for_type(expression, context_type, true);
         let roots = regions
             .iter()
             .map(|region| {
@@ -1128,7 +1129,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
                     region.array,
                     region.packed,
                     context_width,
-                    context_array,
+                    &context_type.array,
                 );
                 sources.normalize();
                 let value = inner.ssa.related_definition(sources.sources);
@@ -2359,7 +2360,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // Evaluate RHS reads in expression order before destination
                 // selectors or any region writes. Keep each occurrence's value
                 // and index versions even if a later call or write changes them.
-                self.eval_expr(&assign.expr);
+                let sources = if let [destination] = assign.dst.as_slice() {
+                    self.eval_expr_for_type(&assign.expr, &destination.comptime.r#type, true)
+                } else {
+                    self.eval_expr(&assign.expr)
+                };
                 let widths: Vec<_> = assign
                     .dst
                     .iter()
@@ -2380,7 +2385,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         );
                     }
                 } else {
-                    let sources = self.eval_expr(&assign.expr);
                     for destination in &assign.dst {
                         self.write_destination(destination, &sources, controls);
                     }
@@ -3613,6 +3617,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.eval_expr_inner(expression, true)
     }
 
+    fn eval_expr_for_type(
+        &mut self,
+        expression: &Expression,
+        r#type: &Type,
+        prune_constant_branches: bool,
+    ) -> Vec<VersionId> {
+        // Literals retained in returns and actuals have placeholder types.
+        // Their nested initializers consume unpacked dimensions first, then
+        // packed dimensions, just as array-literal lowering does.
+        let shape = r#type
+            .array
+            .iter()
+            .chain(r#type.width().iter())
+            .copied()
+            .collect::<Vec<_>>();
+        self.eval_expr_shaped(expression, prune_constant_branches, &shape)
+    }
+
     fn guard_expression_sources(&mut self, mut sources: ExpressionSources) -> ExpressionSources {
         sources.normalize();
         if sources.is_empty() {
@@ -3706,14 +3728,28 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         expression: &Expression,
         prune_constant_branches: bool,
     ) -> Vec<VersionId> {
+        self.eval_expr_shaped(expression, prune_constant_branches, &[])
+    }
+
+    fn eval_expr_shaped(
+        &mut self,
+        expression: &Expression,
+        prune_constant_branches: bool,
+        shape: &[Option<usize>],
+    ) -> Vec<VersionId> {
         if self.guard_work.is_none() {
             return Vec::new();
         }
         let mut reads = Vec::new();
         match expression {
             Expression::Term(factor) => self.eval_factor(factor, &mut reads),
-            Expression::Unary(_, expression, _) => {
-                reads.extend(self.eval_expr_inner(expression, prune_constant_branches));
+            Expression::Unary(op, expression, _) => {
+                let shape = if op.unary_x_self_determined() {
+                    &[]
+                } else {
+                    shape
+                };
+                reads.extend(self.eval_expr_shaped(expression, prune_constant_branches, shape));
             }
             Expression::Binary(left, op @ (Op::LogicAnd | Op::LogicOr), right, _) => {
                 reads.extend(self.eval_short_circuit(
@@ -3724,9 +3760,29 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     prune_constant_branches,
                 ));
             }
-            Expression::Binary(left, _, right, _) => {
-                reads.extend(self.eval_expr_inner(left, prune_constant_branches));
+            Expression::Binary(left, Op::As, right, comptime) => {
+                reads.extend(self.eval_expr_for_type(
+                    left,
+                    &comptime.r#type,
+                    prune_constant_branches,
+                ));
                 reads.extend(self.eval_expr_inner(right, prune_constant_branches));
+            }
+            Expression::Binary(left, op, right, _) => {
+                let left_shape = if op.binary_op_self_determined() || op.binary_x_self_determined()
+                {
+                    &[]
+                } else {
+                    shape
+                };
+                let right_shape = if op.binary_op_self_determined() || op.binary_y_self_determined()
+                {
+                    &[]
+                } else {
+                    shape
+                };
+                reads.extend(self.eval_expr_shaped(left, prune_constant_branches, left_shape));
+                reads.extend(self.eval_expr_shaped(right, prune_constant_branches, right_shape));
             }
             Expression::Ternary(condition, left, right, _) => {
                 reads.extend(self.eval_expr_inner(condition, prune_constant_branches));
@@ -3735,10 +3791,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     .flatten()
                 {
                     Some(true) => {
-                        reads.extend(self.eval_expr_inner(left, prune_constant_branches));
+                        reads.extend(self.eval_expr_shaped(left, prune_constant_branches, shape));
                     }
                     Some(false) => {
-                        reads.extend(self.eval_expr_inner(right, prune_constant_branches));
+                        reads.extend(self.eval_expr_shaped(right, prune_constant_branches, shape));
                     }
                     None => {
                         let branch = self.expression_branch_id(expression);
@@ -3747,14 +3803,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 0);
                         let left_condition = self.path_condition.clone();
-                        let left = self.eval_expr_inner(left, prune_constant_branches);
+                        let left = self.eval_expr_shaped(left, prune_constant_branches, shape);
                         let left = self.ssa.definition_guarded(left, &self.path_condition);
                         let left_state = self.ssa.capture_and_rollback(checkpoint);
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 1);
                         let right_condition = self.path_condition.clone();
-                        let right = self.eval_expr_inner(right, prune_constant_branches);
+                        let right = self.eval_expr_shaped(right, prune_constant_branches, shape);
                         let right = self.ssa.definition_guarded(right, &self.path_condition);
                         let right_state = self.ssa.capture_and_rollback(checkpoint);
 
@@ -3773,36 +3829,88 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
             Expression::Concatenation(parts, _) => {
                 for (part, repeat) in parts {
-                    reads.extend(self.eval_expr_inner(part, prune_constant_branches));
+                    if self.repeat_count(repeat.as_ref()) != Some(0) {
+                        reads.extend(self.eval_expr_inner(part, prune_constant_branches));
+                    }
                     if let Some(repeat) = repeat {
                         reads.extend(self.eval_expr_inner(repeat, prune_constant_branches));
                     }
                 }
             }
             Expression::ArrayLiteral(items, _) => {
+                let shape = if shape.is_empty() {
+                    expression.comptime().r#type.array.as_slice()
+                } else {
+                    shape
+                };
+                let (length, item_shape) = shape
+                    .split_first()
+                    .map(|(length, shape)| (*length, shape))
+                    .unwrap_or((None, &[]));
+                let mut count = Some(0usize);
+                let mut default = None;
                 for item in items {
                     match item {
                         ArrayLiteralItem::Value(value, repeat) => {
-                            reads.extend(self.eval_expr_inner(value, prune_constant_branches));
+                            let repeat_count = self.repeat_count(repeat.as_deref());
+                            count = count
+                                .zip(repeat_count)
+                                .and_then(|(count, repeat)| count.checked_add(repeat));
+                            if repeat_count != Some(0) {
+                                reads.extend(self.eval_expr_shaped(
+                                    value,
+                                    prune_constant_branches,
+                                    item_shape,
+                                ));
+                            }
                             if let Some(repeat) = repeat {
                                 reads.extend(self.eval_expr_inner(repeat, prune_constant_branches));
                             }
                         }
                         ArrayLiteralItem::Defaul(value) => {
-                            reads.extend(self.eval_expr_inner(value, prune_constant_branches));
+                            default = Some(value);
                         }
                     }
                 }
+                // Defaults fill only the remaining elements, after explicit
+                // initializers, regardless of where the default was written.
+                if let Some(default) = default
+                    && length
+                        .zip(count)
+                        .is_none_or(|(length, count)| count < length)
+                {
+                    reads.extend(self.eval_expr_shaped(
+                        default,
+                        prune_constant_branches,
+                        item_shape,
+                    ));
+                }
             }
-            Expression::StructConstructor(_, fields, _) => {
-                for (_, value) in fields {
-                    reads.extend(self.eval_expr_inner(value, prune_constant_branches));
+            Expression::StructConstructor(r#type, fields, _) => {
+                for (name, value) in fields {
+                    if let Some(member) = r#type.get_member_type(*name) {
+                        reads.extend(self.eval_expr_for_type(
+                            value,
+                            &member,
+                            prune_constant_branches,
+                        ));
+                    } else {
+                        reads.extend(self.eval_expr_inner(value, prune_constant_branches));
+                    }
                 }
             }
         }
         reads.sort_unstable();
         reads.dedup();
         reads
+    }
+
+    fn repeat_count(&mut self, repeat: Option<&Expression>) -> Option<usize> {
+        repeat.map_or(Some(1), |repeat| {
+            repeat
+                .eval_value(&mut self.ctx)
+                .and_then(|value| value.to_usize())
+        })
     }
 
     fn constant_truth(&mut self, expression: &Expression) -> Option<bool> {
@@ -3986,7 +4094,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut input_bindings = Vec::new();
 
         for (path, actual) in &call.inputs {
-            actual_sources.extend(self.eval_expr(actual));
+            actual_sources.extend(self.eval_actual(actual, body.arg_map.get(path).copied()));
             let Some(&formal) = body.arg_map.get(path) else {
                 continue;
             };
@@ -4075,8 +4183,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             variables: Some(HashMap::default()),
             ..EvaluationCache::default()
         }));
-        for actual in call.inputs.values() {
-            self.eval_expr(actual);
+        for (path, actual) in &call.inputs {
+            self.eval_actual(actual, summary.arg_map.get(path).copied());
         }
         let invocation = self.summary_invocation_key(call, summary);
         let branch_map = if let Some(branches) = invocation
@@ -4367,6 +4475,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             group.push((span, self.read_key(key)));
         }
         groups
+    }
+
+    fn eval_actual(&mut self, actual: &Expression, formal: Option<VarId>) -> Vec<VersionId> {
+        let r#type = formal.and_then(|formal| {
+            self.ctx
+                .variables
+                .get(&formal)
+                .map(|variable| variable.r#type.clone())
+        });
+        if let Some(r#type) = r#type {
+            self.eval_expr_for_type(actual, &r#type, true)
+        } else {
+            self.eval_expr(actual)
+        }
     }
 
     fn eval_actual_for_formal_key(

@@ -21,6 +21,141 @@ fn assert_complete_comb_loop(code: &str, expected: bool) {
 }
 
 #[test]
+fn comb_loop_rhs_sampling_only_evaluates_used_initializers() {
+    for (ty, literal, used) in [
+        ("bit[2]", "'{0, 0, default: effect()}", false),
+        ("bit[2]", "'{default: effect(), 0, 0}", false),
+        ("bit[2]", "'{effect() repeat 0, 0, 0}", false),
+        ("bit[2]", "'{effect() repeat (1 - 1), 0, 0}", false),
+        ("bit<2>", "'{0, 0, default: effect()}", false),
+        (
+            "bit<2, 2>",
+            "'{'{0, 0}, '{0, 0}, default: '{effect(), 0}}",
+            false,
+        ),
+        ("bit<2>[2]", "'{'{0, 0, default: effect()}, '{0, 0}}", false),
+        (
+            "bit[2]",
+            "if enable ? '{0, 0, default: effect()} : '{0, 0}",
+            false,
+        ),
+        ("bit[2, 2]", "'{'{0, 0, default: effect()}, '{0, 0}}", false),
+        (
+            "bit[2, 2]",
+            "'{'{effect(), 0} repeat 0, '{0, 0} repeat 2}",
+            false,
+        ),
+        (
+            "bit[2, 2]",
+            "'{'{0, 0} repeat 2, default: '{effect(), 0}}",
+            false,
+        ),
+        ("bit[2]", "'{0, default: effect()}", true),
+        ("bit[2]", "'{effect() repeat 1, 0}", true),
+        ("bit[2]", "'{effect() repeat 2}", true),
+        ("bit[2, 2]", "'{'{0, default: effect()}, '{0, 0}}", true),
+        ("bit[2, 2]", "'{'{0, 0}, default: '{effect(), 0}}", true),
+        ("bit<2>", "{effect() repeat 0, 2'b0}", false),
+        ("bit<2>", "{effect() repeat 1, 1'b0}", true),
+    ] {
+        for boundary in ["return", "argument", "assignment"] {
+            for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                let (declaration, result_type, expression) = match boundary {
+                    "return" => (
+                        format!("function make() -> Value {{ return {literal}; }}"),
+                        "Value",
+                        "make()".to_string(),
+                    ),
+                    "argument" => (
+                        "function consume(value: input Value) -> bit { return 0; }".to_string(),
+                        "bit",
+                        format!("consume({literal})"),
+                    ),
+                    "assignment" => (String::new(), "Value", literal.to_string()),
+                    _ => unreachable!(),
+                };
+                let code = format!(
+                    r#"
+                    module Top(enable: input bit, o: output bit) {{
+                        type Value = {ty};
+                        var saved: bit;
+                        var result: {result_type};
+                        function effect() -> bit {{ saved = {effect}; return 0; }}
+                        {declaration}
+                        always_comb {{
+                            saved = {initial};
+                            result = {expression};
+                        }}
+                        assign o = saved;
+                    }}
+                    "#
+                );
+                assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_evaluates_defaults_after_explicit_elements() {
+    for (ty, literal, selection, expected) in [
+        ("bit[2]", "'{saved, default: clear()}", "[0]", true),
+        ("bit[2]", "'{default: clear(), saved}", "[0]", true),
+        ("bit[2]", "'{clear(), default: saved}", "[1]", false),
+        ("bit[2]", "'{default: saved, clear()}", "[1]", false),
+        (
+            "bit[2, 2]",
+            "'{'{saved, default: clear()}, '{0, 0}}",
+            "[0][0]",
+            true,
+        ),
+        (
+            "bit[2, 2]",
+            "'{'{default: saved, clear()}, '{0, 0}}",
+            "[0][1]",
+            false,
+        ),
+    ] {
+        let code = format!(
+            r#"
+            module Top(o: output bit) {{
+                type Value = {ty};
+                var saved: bit;
+                var result: Value;
+                function clear() -> bit {{ saved = 0; return 0; }}
+                function make() -> Value {{ return {literal}; }}
+                always_comb {{
+                    saved = o;
+                    result = make();
+                }}
+                assign o = result{selection};
+            }}
+            "#
+        );
+        assert_complete_comb_loop(&code, expected);
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_keeps_comparison_operands_before_destination_selectors() {
+    let code = r#"
+    module Top(o: output bit) {
+        var saved: bit;
+        var result: logic<2>;
+        function effect() -> bit { saved = o; return 0; }
+        function address() -> u32 { saved = 0; return 0; }
+        always_comb {
+            saved = 0;
+            result = 0;
+            result[address()] = 4'b0 == '{0, 0, default: effect()};
+        }
+        assign o = saved;
+    }
+    "#;
+    assert_complete_comb_loop(code, false);
+}
+
+#[test]
 fn comb_loop_assignment_reads_precede_all_region_writes() {
     for width in [3usize, 8] {
         for source_bit in 0..width {

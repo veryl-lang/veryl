@@ -1237,7 +1237,7 @@ impl InstanceActuals {
                 expression,
                 regions,
                 width,
-                &child.variables[&first.id].r#type.array,
+                &child.variables[&first.id].r#type,
                 budget.remaining(),
             );
             complete &= analysis.is_complete();
