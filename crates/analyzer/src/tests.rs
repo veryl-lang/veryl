@@ -21281,6 +21281,22 @@ fn cast_by_expression() {
 }
 
 #[test]
+fn cast_by_type_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA (
+        i_x: input  logic<16>,
+        o_y: output logic<32>,
+    ) {
+        assign o_y = i_x as (u32);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSizeType { .. }));
+}
+
+#[test]
 fn cast_by_non_constant_expression() {
     // https://github.com/veryl-lang/veryl/issues/3091
     let code = r#"
