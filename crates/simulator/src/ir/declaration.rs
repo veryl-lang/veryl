@@ -228,6 +228,21 @@ fn stable_topo_sort_impl(
     if n <= 1 {
         return (statements, Some(1), false);
     }
+    // `VERYL_STAGE_TIME=1`: which of the five sections below the sort spends
+    // its time in.  They have very different complexity in the number of
+    // WRITES per variable, so a design that splits finely can move the cost
+    // from one to another without changing the statement count much.
+    let time_stages = crate::ir::module::stage_time_enabled();
+    let mut t = std::time::Instant::now();
+    let mark = move |what: &str, t: &mut std::time::Instant| {
+        if time_stages {
+            log::info!(
+                "stage_time (sort n={n}): {what} {:.3}s",
+                t.elapsed().as_secs_f64()
+            );
+            *t = std::time::Instant::now();
+        }
+    };
 
     // writer_ranges values are in ascending statement order; the edge
     // rules below rely on it.
@@ -307,6 +322,8 @@ fn stable_topo_sort_impl(
         }
         split_driver.insert(*key);
     }
+
+    mark("gather+split_driver", &mut t);
 
     // --- Edge construction ---------------------------------------------
     let mut adj_sem: Vec<HashSet<usize>> = vec![HashSet::default(); n];
@@ -562,6 +579,8 @@ fn stable_topo_sort_impl(
         }
     }
 
+    mark("raw edges", &mut t);
+
     // A write cannot clobber a read that never happens in the same execution:
     // where reader and writer keep DIFFERENT branches of one conditional, the
     // edge is false.  Same tag does not qualify -- see [`branch_tag`].
@@ -588,12 +607,62 @@ fn stable_topo_sort_impl(
         }
     }
 
+    mark("war edges", &mut t);
+
     // WAW: order writers that can CLOBBER each other.  `split_driver` is
     // per-variable, so one overlapping pair anywhere would otherwise make
     // every disjoint pair chain for nothing.
     {
         let mut stack: Vec<usize> = Vec::new();
         let mut visited: HashSet<usize> = HashSet::default();
+        let mut waw_pairs: u64 = 0;
+        let mut waw_pops: u64 = 0;
+        let mut deferred: Vec<(usize, usize, VarOffset)> = Vec::new();
+        // "Can `next` reach `prev`?" is asked once per candidate pair, and
+        // answering it by walking the graph costs the WHOLE graph every time
+        // the answer is NO -- which is the common case, so the walk dominated
+        // elaboration on a large design.  A topological numbering of `adj_sem`
+        // answers NO in one comparison: in a DAG a node can only reach one that
+        // comes LATER, so `pos[prev] < pos[next]` rules the path out outright.
+        // The walk then runs only where the numbering cannot.
+        //
+        // A cycle keeps its nodes out of the Kahn order, and they carry
+        // `usize::MAX`.  The comparison stays exact anyway, because a numbered
+        // node's predecessors are ALL numbered: nothing unnumbered reaches a
+        // numbered one, so `prev` numbered and `next` not is a genuine NO, and
+        // the two cases with `prev` unnumbered fall through to the walk.
+        //
+        // An edge added forward in this numbering keeps it valid, so the
+        // numbering is never retaken; the deferred sweep does not consult it.
+        //
+        // ★ THE DEFERRED PAIRS ARE JUDGED AGAINST A GRAPH THAT ALREADY HOLDS
+        // the fast path's edges, where before every pair saw only the edges of
+        // the pairs before it.  More edges can only make more pairs reachable,
+        // so this blocks the exact-pass hint at least as often as before, never
+        // less.
+        let topo_positions = |adj: &[HashSet<usize>]| -> Vec<usize> {
+            let mut in_degree = vec![0usize; n];
+            for succs in adj.iter() {
+                for &v in succs {
+                    in_degree[v] += 1;
+                }
+            }
+            let mut queue: VecDeque<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
+            let mut pos = vec![usize::MAX; n];
+            let mut next_pos = 0usize;
+            while let Some(u) = queue.pop_front() {
+                pos[u] = next_pos;
+                next_pos += 1;
+                for &v in &adj[u] {
+                    in_degree[v] -= 1;
+                    if in_degree[v] == 0 {
+                        queue.push_back(v);
+                    }
+                }
+            }
+            pos
+        };
+        let pos = topo_positions(&adj_sem);
         // Bits each writer names, as one bounding span per statement (`None` =
         // full width).  Bounding rather than exact: a statement writing two
         // ranges of one variable keeps a single entry, and answering "can these
@@ -651,36 +720,54 @@ fn stable_topo_sort_impl(
                     None => prevs.push(writer_indices[i - 1]),
                 }
                 for &prev in &prevs {
-                    let mut reachable = false;
-                    stack.clear();
-                    stack.push(next);
-                    visited.clear();
-                    while let Some(node) = stack.pop() {
-                        if node == prev {
-                            reachable = true;
-                            break;
-                        }
-                        if visited.insert(node) {
-                            stack.extend(adj_sem[node].iter().copied());
-                        }
-                    }
-                    if !reachable {
+                    if pos[prev] < pos[next] {
                         adj_sem[prev].insert(next);
                         cause!(prev, next, "waw");
                     } else {
-                        // Two overlapping writes whose order the sort cannot
-                        // guarantee: never claim an exact one-pass schedule.
-                        if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
-                            log::info!(
-                                "pass_diag: hint blocked: WAW skip prev #{prev} next #{next} var {key:?}"
-                            );
-                        }
-                        hint_blocked = true;
+                        deferred.push((prev, next, *key));
                     }
                 }
             }
         }
+        // The pairs the numbering could not answer.  `writers` is a HashMap, so
+        // walking them in its order made the verdict depend on the hash: this
+        // sort is what makes the outcome the same on every run.
+        deferred.sort_unstable_by_key(|&(prev, next, _)| (prev, next));
+        for (prev, next, key) in deferred {
+            let mut reachable = false;
+            stack.clear();
+            stack.push(next);
+            visited.clear();
+            waw_pairs += 1;
+            while let Some(node) = stack.pop() {
+                waw_pops += 1;
+                if node == prev {
+                    reachable = true;
+                    break;
+                }
+                if visited.insert(node) {
+                    stack.extend(adj_sem[node].iter().copied());
+                }
+            }
+            if !reachable {
+                adj_sem[prev].insert(next);
+                cause!(prev, next, "waw");
+            } else {
+                // Two overlapping writes whose order the sort cannot
+                // guarantee: never claim an exact one-pass schedule.
+                if !hint_blocked && std::env::var("VERYL_PASS_DIAG").is_ok() {
+                    log::info!(
+                        "pass_diag: hint blocked: WAW skip prev #{prev} next #{next} var {key:?}"
+                    );
+                }
+                hint_blocked = true;
+            }
+        }
+        if time_stages {
+            log::info!("stage_time (sort n={n}): waw walked={waw_pairs} pops={waw_pops}");
+        }
     }
+    mark("waw edges", &mut t);
 
     // Best-effort edges duplicated in the semantic class are redundant;
     // dropping them must actually remove the constraint.
@@ -733,6 +820,8 @@ fn stable_topo_sort_impl(
         }
         (sorted_indices.len() == n).then_some(sorted_indices)
     };
+
+    mark("kahn", &mut t);
 
     let Some(sorted_indices) = order else {
         if std::env::var("VERYL_PASS_DIAG").is_ok() {

@@ -1440,6 +1440,46 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
     Some(out)
 }
 
+/// `VERYL_STAGE_TIME=1`: wall time per elaboration stage.
+///
+/// On a large design the build dwarfs the simulation, and nothing else measures
+/// it: the log lines between stages say what ran, never how long it took, so
+/// the only way to find the expensive one was to timestamp the log from outside
+/// and match lines up by eye.
+struct StageTimer {
+    on: bool,
+    last: std::time::Instant,
+    scope: String,
+}
+
+/// Whether `VERYL_STAGE_TIME` asked for stage timings.  Read once: the sort
+/// consults it per call, and there are thousands of calls on a large design.
+pub(crate) fn stage_time_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_STAGE_TIME").is_ok())
+}
+
+impl StageTimer {
+    fn new(scope: impl std::fmt::Display) -> Self {
+        Self {
+            on: stage_time_enabled(),
+            last: std::time::Instant::now(),
+            scope: scope.to_string(),
+        }
+    }
+
+    fn mark(&mut self, stage: &str) {
+        if self.on {
+            log::info!(
+                "stage_time ({}): {stage} {:.3}s",
+                self.scope,
+                self.last.elapsed().as_secs_f64()
+            );
+            self.last = std::time::Instant::now();
+        }
+    }
+}
+
 /// `all_event_statements` in place with the dead-var drop (mirroring the miss
 /// path); the returned `dead_offsets` let a cache hit reproduce that drop.
 #[allow(clippy::too_many_arguments)]
@@ -1453,6 +1493,7 @@ fn run_comb_pipeline(
     cone_inputs: Option<&cone_gate::ConeGateInputs>,
     module_name: StrId,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
+    let mut stage = StageTimer::new(module_name);
     dump_stmt_order("conv", module_name, &unified);
     // Version-split: fuse multi-write (versioned) comb chains into single
     // writers.  Module-level always_combs were already handled during conv
@@ -1493,6 +1534,7 @@ fn run_comb_pipeline(
         }
         unified
     };
+    stage.mark("version_split");
     dump_stmt_order("post-vsplit", module_name, &unified);
     let (unified_sorted, passes_hint) = {
         let use_4state = context.config.use_4state;
@@ -1507,6 +1549,7 @@ fn run_comb_pipeline(
         };
         analyze_dependency(unified, &mut alloc)?
     };
+    stage.mark("analyze_dependency");
     let vsplit_temp_bytes = context.comb_total_bytes - temps_before;
     dump_stmt_order("post-topo", module_name, &unified_sorted);
     // No DCE/inlining: unified list includes internal child comb that would be incorrectly removed.
@@ -1552,6 +1595,7 @@ fn run_comb_pipeline(
         nontrivial_comb_scc,
     );
 
+    stage.mark("required_passes");
     let unified_sorted = dce_aggressive(unified_sorted);
 
     // Dead Variable DCE: drop full-width `Assign`s whose dst has zero
@@ -1637,6 +1681,8 @@ fn run_comb_pipeline(
         (unified_sorted, Vec::new())
     };
 
+    stage.mark("dce+fusion");
+
     // Cone scheduling: cluster each qualifying module
     // subtree into few contiguous segments so the settle can skip them by
     // one compare each.  The reorder is a legal schedule of the same
@@ -1718,6 +1764,8 @@ fn run_comb_pipeline(
     if let Some(sched) = layout.as_deref() {
         comb_layout::apply_to_stmts(&mut unified_sorted, sched);
     }
+
+    stage.mark("cone_gate+layout");
 
     // Snapshot before JIT consumes it: the whole-comb backend needs the
     // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
@@ -1876,6 +1924,7 @@ fn run_comb_pipeline(
             (a, Vec::new(), Vec::new())
         }
     };
+    stage.mark("jit+aot_c");
     Ok(comb_pipeline_cache::CombPipeline {
         cone_inputs: cone_inputs.map(|ci| {
             let mut ci = ci.clone();
@@ -2090,10 +2139,14 @@ pub(crate) fn analyze_dependency(
             Ok(ret)
         };
 
+    let mut stage = StageTimer::new("analyze_dependency");
+
     // Phase 1: Try with CompiledBlocks as atomic nodes. The bipartite model
     // orders every reader after ALL writers of its inputs, so the schedule
     // settles in exactly one pass.
-    if let Ok(sorted) = try_topo_sort(&table) {
+    let phase1 = try_topo_sort(&table);
+    stage.mark("phase1");
+    if let Ok(sorted) = phase1 {
         pass_diag_phase("phase1: bipartite, CBs atomic");
         return Ok((sorted, Some(1)));
     }
@@ -2144,7 +2197,9 @@ pub(crate) fn analyze_dependency(
             id += 1;
         }
     }
-    if let Ok(sorted) = try_topo_sort(&fast) {
+    let phase2_fast = try_topo_sort(&fast);
+    stage.mark("phase2-fast");
+    if let Ok(sorted) = phase2_fast {
         pass_diag_phase("phase2-fast: hazard-flatten + bipartite");
         return Ok((sorted, Some(1)));
     }
@@ -2203,6 +2258,7 @@ pub(crate) fn analyze_dependency(
     let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
     let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
     let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+    stage.mark("phase2-full");
     if !fell_back {
         pass_diag_phase("phase2-full: flatten + stable_topo_sort");
         return Ok((sorted, passes_hint));
@@ -2255,11 +2311,13 @@ pub(crate) fn analyze_dependency(
         block_of = blocks;
     }
 
+    stage.mark("phase2-deep split");
     let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
     sorted_keys.sort();
     let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
     let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
     let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+    stage.mark("phase2-deep sort");
     if !fell_back {
         pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
         return Ok((sorted, passes_hint));
