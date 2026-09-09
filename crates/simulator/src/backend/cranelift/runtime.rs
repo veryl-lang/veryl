@@ -32,6 +32,9 @@ pub enum HelperSig {
     WriteLogGrowPushNarrow,
     /// `(buf, offset, src_ptr, nb) -> ()` — write-log grow+push (wide).
     WriteLogGrowPushWide,
+    /// `(log_buf, dst, src, amount, width | dst_width << 32, log_offset |
+    /// in_place << 32) -> ()`: wide window store.
+    WideWindowStore,
 }
 
 pub struct Context {
@@ -120,6 +123,11 @@ pub fn get_or_create_sig(
             sig.params.push(AbiParam::new(I32)); // offset
             sig.params.push(AbiParam::new(I64)); // src_ptr
             sig.params.push(AbiParam::new(I32)); // nb
+        }
+        HelperSig::WideWindowStore => {
+            for _ in 0..6 {
+                sig.params.push(AbiParam::new(I64));
+            }
         }
     }
 

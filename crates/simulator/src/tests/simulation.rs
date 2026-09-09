@@ -17471,6 +17471,146 @@ fn wide_dynamic_part_select_write() {
 }
 
 #[test]
+fn wide_window_store_shift_register() {
+    // A packed multi-dimensional delay line written window by window in
+    // `for` loops: the writes are dynamic windows into a 736-bit FF, which
+    // the JIT merges and logs per window rather than per value.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        din: input  logic<46, 2>,
+        q  : output logic<46, 2>,
+    ) {
+        var sr: logic<8, 46, 2>;
+        always_ff (clk, rst) {
+            if_reset {
+                for j in 0..8 {
+                    sr[j] = '0;
+                }
+            } else {
+                for j in 0..7 {
+                    sr[j + 1] = sr[j];
+                }
+                for i in 0..46 {
+                    sr[0][i] = din[i];
+                }
+            }
+        }
+        assign q = sr[7];
+    }
+    "#;
+    let dins: Vec<u128> = (1..=20u128)
+        .map(|k| {
+            (k << 80) | (0x0123_4567_89ab_cdefu128 ^ (k * 0x1111_1111_1111)) & ((1u128 << 92) - 1)
+        })
+        .collect();
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for (k, &d) in dins.iter().enumerate() {
+            sim.set("din", Value::from_u128(d, 0, 92, false));
+            sim.step(&clk);
+            sim.ensure_comb_updated();
+            // After step k (0-based), stage 7 holds the input of step k - 7.
+            let expect = if k >= 7 { dins[k - 7] } else { 0 };
+            assert_eq!(
+                sim.get("q").unwrap().payload_u128(),
+                expect,
+                "step {k} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_window_store_indexed_windows() {
+    // Runtime-indexed windows into large FFs: one written once per cycle
+    // (`p`) and one written twice with adjacent, word-crossing windows
+    // (`u`).  Windows may overhang the top of the value; the excess bits are
+    // dropped.
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        i  : input  logic<10>,
+        j  : input  logic<10>,
+        v  : input  logic<70>,
+        w  : input  logic<70>,
+        p  : output logic<800>,
+        u  : output logic<800>,
+    ) {
+        always_ff (clk, rst) {
+            if_reset {
+                p = 0;
+            } else {
+                p[i+:70] = v;
+            }
+        }
+        always_ff (clk, rst) {
+            if_reset {
+                u = 0;
+            } else {
+                u[i+:70] = v;
+                u[j+:70] = w;
+            }
+        }
+    }
+    "#;
+    let full = (BigUint::from(1u8) << 800u32) - 1u8;
+    let window =
+        |bits: u32, at: u64| -> BigUint { (((BigUint::from(1u8) << bits) - 1u8) << at) & &full };
+    let put = |acc: &BigUint, at: u64, val: u128| -> BigUint {
+        let m = window(70, at);
+        (acc & (&full ^ &m)) | ((BigUint::from(val) << at) & &m)
+    };
+    let v: u128 = (1u128 << 69) | (0xfedc_ba98_7654_3210u128 << 5) | 0x15;
+    let w: u128 = (1u128 << 69) | 0x0f0f_0f0f_0f0f_0f0f_0f0fu128;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        sim.set("v", Value::from_u128(v, 0, 70, false));
+        sim.set("w", Value::from_u128(w, 0, 70, false));
+        let mut p = BigUint::from(0u8);
+        let mut u = BigUint::from(0u8);
+        for (i, j) in [
+            (0u64, 70u64),
+            (60, 130),
+            (130, 60),
+            (700, 790),
+            (790, 3),
+            (250, 250),
+        ] {
+            sim.set("i", Value::new(i, 10, false));
+            sim.set("j", Value::new(j, 10, false));
+            sim.step(&clk);
+            sim.ensure_comb_updated();
+            p = put(&p, i, v);
+            u = put(&put(&u, i, v), j, w);
+            assert_eq!(
+                sim.get("p").unwrap(),
+                Value::new_biguint(p.clone(), 800, false),
+                "p i={i} {config:?}"
+            );
+            assert_eq!(
+                sim.get("u").unwrap(),
+                Value::new_biguint(u.clone(), 800, false),
+                "u i={i} j={j} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn comb_block_cycle_war_preserves_blocking_order() {
     // WAR: the forward read of `ext` in `o = a + ext` must not drag `o` past the
     // later `a = in1`, so o captures a's earlier value 0, not in1.
