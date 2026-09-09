@@ -1,6 +1,129 @@
 use super::*;
 
 #[test]
+fn comb_loop_nested_array_defaults_preserve_declared_shape() {
+    let cases: &[(&[usize], &str, &[usize])] = &[
+        (&[2, 2], "'{'{default: 0}, '{x, 0}}", &[2]),
+        (&[2, 2], "'{'{0, default: x}, '{default: 0}}", &[1]),
+        (&[2, 2], "'{'{default: 0}, default: '{0, x}}", &[3]),
+        (&[2, 2], "'{'{default: x} repeat 2}", &[0, 1, 2, 3]),
+        (&[3, 2], "'{'{default: 0} repeat 2, '{x, 0}}", &[4]),
+        (&[2, 3], "'{'{default: 0}, '{0, x, default: 0}}", &[4]),
+        (
+            &[2, 2, 2],
+            "'{'{'{default: 0}, '{default: 0}}, '{'{0, x}, '{default: 0}}}",
+            &[5],
+        ),
+    ];
+    for &(shape, literal, dependent) in cases {
+        let dimensions = shape
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        for index in 0..shape.iter().product() {
+            let mut remaining = index;
+            let mut selection = Vec::new();
+            for dimension in shape.iter().rev() {
+                selection.push(format!("[{}]", remaining % dimension));
+                remaining /= dimension;
+            }
+            let selection = selection.into_iter().rev().collect::<String>();
+            for boundary in ["return", "argument", "instance"] {
+                let actual = literal.replace('x', "feedback");
+                let body = match boundary {
+                    "return" => format!(
+                        "var result: Matrix;\n\
+                         function transform(x: input bit) -> Matrix {{ return {literal}; }}\n\
+                         assign result = transform(feedback);\n\
+                         assign feedback = result{selection};"
+                    ),
+                    "argument" => format!(
+                        "function pick(value: input Matrix) -> bit {{ return value{selection}; }}\n\
+                         assign feedback = pick({actual});"
+                    ),
+                    "instance" => format!("inst pick: Pick(i: {actual}, o: feedback);"),
+                    _ => unreachable!(),
+                };
+                let code = format!(
+                    r#"
+                    module Pick(i: input bit[{dimensions}], o: output bit) {{
+                        assign o = i{selection};
+                    }}
+                    module Top(o: output bit) {{
+                        type Matrix = bit[{dimensions}];
+                        var feedback: bit;
+                        {body}
+                        assign o = feedback;
+                    }}
+                    "#
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors
+                        .iter()
+                        .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    "{code}\n{errors:#?}"
+                );
+                assert_eq!(
+                    !errors.is_empty(),
+                    dependent.contains(&index),
+                    "{code}\n{errors:#?}"
+                );
+                assert!(comb_loop_analysis_is_complete(&code), "{code}");
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_struct_function_returns_truncate_field_dependencies() {
+    for width in [2, 8] {
+        let source_width = width * 2;
+        for source_bit in [0, width - 1, width, source_width - 1] {
+            for field in ["a", "b"] {
+                for result_bit in [0, width - 1] {
+                    for (expression, shift) in [
+                        ("x".to_string(), 0),
+                        ("x << 1".to_string(), 1),
+                        (format!("x as {width}"), 0),
+                    ] {
+                        let code = format!(
+                            r#"
+                            module Top(o: output bit) {{
+                                struct Pair {{ a: bit<{width}>, b: bit<{width}>, }}
+                                var feedback: bit;
+                                var source: bit<{source_width}>;
+                                var result: Pair;
+                                function transform(x: input bit<{source_width}>) -> Pair {{
+                                    return Pair'{{a: 0, b: {expression}}};
+                                }}
+                                assign source = (feedback as {source_width}) << {source_bit};
+                                assign result = transform(source);
+                                assign feedback = result.{field}[{result_bit}];
+                                assign o = feedback;
+                            }}
+                            "#
+                        );
+                        let expected = field == "b" && result_bit == source_bit + shift;
+                        let errors = analyze(&code);
+                        assert!(
+                            errors.iter().all(|error| matches!(
+                                error,
+                                AnalyzerError::CombinationalLoop { .. }
+                            )),
+                            "{code}\n{errors:#?}"
+                        );
+                        assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+                        assert!(comb_loop_analysis_is_complete(&code), "{code}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn comb_loop_array_function_returns_preserve_element_widths() {
     for width in [2, 8] {
         for left_shift in [0, 1, 2] {

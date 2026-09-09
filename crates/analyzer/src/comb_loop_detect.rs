@@ -1233,7 +1233,13 @@ impl InstanceActuals {
                 .expect("deferred inputs have known widths");
             let mut analysis =
                 procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
-            let dag = analysis.eval_regions(expression, regions, width, budget.remaining());
+            let dag = analysis.eval_regions(
+                expression,
+                regions,
+                width,
+                &child.variables[&first.id].r#type.array,
+                budget.remaining(),
+            );
             complete &= analysis.is_complete();
             analysis.restore(procedure_context);
             if !budget.reserve_dag(&dag) {

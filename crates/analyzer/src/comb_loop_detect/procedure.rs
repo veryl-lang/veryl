@@ -13,8 +13,8 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
-    Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, Module, Op, Statement,
-    SystemFunctionCall, SystemFunctionKind, TbMethod, VarIndex, VarPath, VarSelect,
+    Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, Module, Op, Shape,
+    Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, VarIndex, VarPath, VarSelect,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -1008,10 +1008,11 @@ struct ExpressionSources {
     sources: Vec<(VersionId, PositionRelation)>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct ProjectionContext {
     destination_index: Option<SampledAffineIndex>,
     destination_array: Option<ArraySpan>,
+    array_shape: Option<Shape>,
 }
 
 impl ExpressionSources {
@@ -1105,6 +1106,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         expression: &Expression,
         regions: &[SummaryRegion],
         context_width: usize,
+        context_array: &Shape,
         work: usize,
     ) -> DependencyDag<NodeKey> {
         let inner = self.inner();
@@ -1126,6 +1128,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
                     region.array,
                     region.packed,
                     context_width,
+                    context_array,
                 );
                 sources.normalize();
                 let value = inner.ssa.related_definition(sources.sources);
@@ -2145,6 +2148,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         &ProjectionContext {
                             destination_index: destination_index.clone(),
                             destination_array: Some(destination_region),
+                            array_shape: Some(destination.comptime.r#type.array.clone()),
                         },
                     )
                 } else {
@@ -2801,13 +2805,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         requested_array: ArraySpan,
         requested: PackedSpan,
         context_width: usize,
+        context_array: &Shape,
     ) -> ExpressionSources {
         self.eval_expr_requested_in(
             expression,
             requested_array,
             requested,
             context_width,
-            &ProjectionContext::default(),
+            &ProjectionContext {
+                array_shape: Some(context_array.clone()),
+                ..ProjectionContext::default()
+            },
         )
     }
 
@@ -3375,8 +3383,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let Some(requested_end) = requested_array.end() else {
                     return ExpressionSources::whole(self.eval_expr(expression));
                 };
-                let total = self
-                    .expression_array_extent(expression)
+                // Retained literals have placeholder types. Each nested item
+                // occupies one element of the declared outer dimension,
+                // including rows whose contents are supplied by a default.
+                let array_shape = projection.array_shape.as_ref().filter(|x| !x.is_empty());
+                let item_shape =
+                    array_shape.map(|shape| Shape::new(shape.iter().skip(1).copied().collect()));
+                let item_extent = item_shape.as_ref().and_then(Shape::total);
+                let item_projection = ProjectionContext {
+                    array_shape: item_shape,
+                    ..projection.clone()
+                };
+                let total = array_shape
+                    .and_then(Shape::total)
+                    .or_else(|| self.expression_array_extent(expression))
                     .unwrap_or(1)
                     .max(requested_end);
                 let mut cursor = 0usize;
@@ -3390,7 +3410,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         default = Some(value.as_ref());
                         continue;
                     };
-                    let item_length = self.expression_array_extent(value).unwrap_or(1);
+                    let item_length = item_extent
+                        .or_else(|| self.expression_array_extent(value))
+                        .unwrap_or(1);
                     let count = if let Some(repeat) = repeat {
                         let Some(count) = repeat
                             .eval_value(&mut self.ctx)
@@ -3424,7 +3446,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 },
                                 requested,
                                 context.width,
-                                projection,
+                                &item_projection,
                             );
                             if let Ok(output_start) = isize::try_from(output_start) {
                                 item.translate(PositionRelation {
@@ -3445,7 +3467,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 },
                                 requested,
                                 context.width,
-                                projection,
+                                &item_projection,
                             );
                             item.forget_array_position();
                             reads.extend(item);
@@ -3462,7 +3484,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if let Some(default) = default
                     && cursor < total
                 {
-                    let item_length = self.expression_array_extent(default).unwrap_or(1);
+                    let item_length = item_extent
+                        .or_else(|| self.expression_array_extent(default))
+                        .unwrap_or(1);
                     let remaining = total - cursor;
                     let count = remaining.div_ceil(item_length);
                     match project_repeated_span(
@@ -3486,7 +3510,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 },
                                 requested,
                                 context.width,
-                                projection,
+                                &item_projection,
                             );
                             if let Ok(output_start) = isize::try_from(output_start) {
                                 item.translate(PositionRelation {
@@ -3507,7 +3531,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 },
                                 requested,
                                 context.width,
-                                projection,
+                                &item_projection,
                             );
                             item.forget_array_position();
                             reads.extend(item);
@@ -3531,13 +3555,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             .intersection(window)
                             .and_then(|span| span.translated(low, 0))
                     {
-                        let mut field = self.eval_expr_requested_in(
+                        let field = self.eval_expr_requested_in(
                             value,
                             requested_array,
                             local,
                             width,
                             projection,
                         );
+                        // Restrict the field before placing it in the struct:
+                        // a coarse source can include bits the field discards.
+                        let source = self.expression_projection_source(field, projection);
+                        let source = self
+                            .ssa
+                            .projected(source, position_domain(requested_array, local));
+                        let mut field = ExpressionSources {
+                            sources: vec![(source, PositionRelation::default())],
+                        };
                         if let Ok(low) = isize::try_from(low) {
                             field.translate(PositionRelation {
                                 array: Some(0),
@@ -4351,13 +4384,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Some(span) = self.key_span(formal_key) else {
             return ExpressionSources::whole(self.eval_expr(actual));
         };
-        let context_width = self
+        let (context_width, context_array) = self
             .ctx
             .variables
             .get(&formal_key.0)
-            .and_then(|variable| variable.r#type.total_width())
-            .unwrap_or(span.end());
-        let sources = self.eval_expr_requested(actual, formal_key.1, span, context_width);
+            .map(|variable| {
+                (
+                    variable.r#type.total_width().unwrap_or(span.end()),
+                    variable.r#type.array.clone(),
+                )
+            })
+            .unwrap_or((span.end(), Shape::default()));
+        let sources =
+            self.eval_expr_requested(actual, formal_key.1, span, context_width, &context_array);
         // A source version can span more bits than the requested formal.
         // Copy-in stores only the formal region; a later widening return or
         // imported summary must not recover bits discarded at this boundary.
