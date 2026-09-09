@@ -1,13 +1,20 @@
-// `sample_c_module` is reached through an import, so the reference below is
-// spelled without the `sample_c::` qualification.
+// These imports must stay out of `sample_b_module.veryl`: the failure only
+// reproduces while the caller cannot see them.
 import sample_c::sample_c_module;
+import sample_c::sample_c_func;
 
 pub module sample_b_generic::<WIDTH: u32> (
     i_d: input  logic<WIDTH>,
     o_d: output logic<WIDTH>,
 ) {
+    var u_d: logic<WIDTH>;
+
     inst u: sample_c_module::<WIDTH> (
         i_d: i_d,
-        o_d: o_d,
+        o_d: u_d,
     );
+
+    always_comb {
+        o_d = sample_c_func::<WIDTH>(u_d);
+    }
 }
