@@ -46,7 +46,8 @@ pub use statement::{
     TbMethodCall,
 };
 pub use system_function::{
-    AssertKind, Input as SystemFunctionInput, SystemFunctionCall, SystemFunctionKind,
+    AssertKind, Input as SystemFunctionInput, Output as SystemFunctionOutput, SystemFunctionCall,
+    SystemFunctionKind,
 };
 pub use utils::convert_cast;
 pub use variable::{

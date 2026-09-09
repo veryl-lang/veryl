@@ -23,11 +23,12 @@ pub fn resolve_hier_refs(
     // The analyzer emits hierarchical references only inside initial/final
     // blocks; skipping RTL events also keeps this recursive walk away from
     // arbitrarily deep synthesizable expressions.
-    for event in [Event::Initial, Event::Final] {
-        if let Some(stmts) = event_statements.get_mut(&event) {
-            for stmt in stmts.iter_mut() {
-                resolve_stmt(stmt, context, children)?;
-            }
+    for (event, stmts) in event_statements.iter_mut() {
+        if !(event.is_initial() || *event == Event::Final) {
+            continue;
+        }
+        for stmt in stmts.iter_mut() {
+            resolve_stmt(stmt, context, children)?;
         }
     }
     Ok(())
@@ -131,7 +132,22 @@ fn resolve_stmt(
                     resolve_expr(arg, context, children)?;
                 }
             }
-            ProtoSystemFunctionCall::Readmemh { .. } | ProtoSystemFunctionCall::Finish => {}
+            ProtoSystemFunctionCall::Readmemh {
+                elements,
+                width,
+                hier,
+                ..
+            } => {
+                if let Some(target) = hier.take() {
+                    let Some(meta) = find_target(children, &target.inst_path, &target.var_path)
+                    else {
+                        return Err(SimulatorError::unsupported_description(&target.token));
+                    };
+                    *width = meta.width;
+                    *elements = crate::ir::statement::readmemh_elements(meta);
+                }
+            }
+            ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::TbMethodCall { method, .. } => match method {
             crate::ir::statement::ProtoTbMethodKind::ClockNext { count, period } => {

@@ -659,7 +659,7 @@ fn collect_summary_system_call_variables(
         }
         SystemFunctionKind::Readmemh(input, output) => {
             collect_summary_expression_variables(module, &input.0, ids);
-            for destination in &output.0 {
+            for destination in output.local() {
                 collect_summary_destination_variables(module, destination, ids);
             }
         }
@@ -1632,7 +1632,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
             SystemFunctionKind::Readmemh(input, output) => {
                 self.collect_expression_write_footprint(&input.0, keys, visited);
-                for destination in &output.0 {
+                for destination in output.local() {
                     self.collect_destination_write_footprint(destination, keys, visited);
                 }
             }
@@ -4171,7 +4171,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             | SystemFunctionKind::Unsigned(input) => self.eval_expr(&input.0),
             SystemFunctionKind::Readmemh(input, output) => {
                 let sources = self.eval_expr(&input.0);
-                for destination in &output.0 {
+                for destination in output.local() {
                     self.write_destination(destination, &sources, controls);
                 }
                 Vec::new()

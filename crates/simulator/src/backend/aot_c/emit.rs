@@ -9,6 +9,7 @@
 
 use crate::FuncPtr;
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
+use crate::ir::opt::event_gate::EventGate;
 use crate::ir::write_log::static_field_byte_span;
 use crate::ir::{
     ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
@@ -410,16 +411,23 @@ thread_local! {
     /// and guards the dispatcher's calls with the segment compares.
     static CONE_SEGMENTS: std::cell::RefCell<Vec<crate::ir::opt::cone_gate::ConeSegment>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    static CONE_GROUPS: std::cell::RefCell<Vec<crate::ir::opt::cone_gate::ConeGroup>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Install the cone-gate segments for the next comb emit.  Paired with
-/// `clear_cone_segments`.
-pub fn set_cone_segments(segs: Vec<crate::ir::opt::cone_gate::ConeSegment>) {
+/// Install the cone-gate segments and groups for the next comb emit.
+/// Paired with `clear_cone_segments`.
+pub fn set_cone_segments(
+    segs: Vec<crate::ir::opt::cone_gate::ConeSegment>,
+    groups: Vec<crate::ir::opt::cone_gate::ConeGroup>,
+) {
     CONE_SEGMENTS.with(|s| *s.borrow_mut() = segs);
+    CONE_GROUPS.with(|g| *g.borrow_mut() = groups);
 }
 
 pub fn clear_cone_segments() {
     CONE_SEGMENTS.with(|s| s.borrow_mut().clear());
+    CONE_GROUPS.with(|g| g.borrow_mut().clear());
 }
 
 fn clear_current_local() {
@@ -584,7 +592,7 @@ impl LocalAnalysis {
                 }
             }
             ProtoStatement::CompiledBlock(x) => {
-                for s in &x.original_stmts {
+                for s in x.original_stmts.iter() {
                     self.poison(s);
                 }
             }
@@ -1193,6 +1201,7 @@ fn emit_wide_select_rmw_store(
     lo: usize,
     nbits: usize,
     dst_width: usize,
+    chg: Option<&str>,
 ) -> String {
     let ws = lo / 64;
     let bs = lo % 64;
@@ -1223,6 +1232,13 @@ fn emit_wide_select_rmw_store(
         }
     };
     let t = next_wide_tmp();
+    let chg = chg.filter(|_| skip_unchanged());
+    let store = |k: usize, st: String| -> String {
+        match chg {
+            Some(c) => format!("{{ uint64_t _o = _d{t}[{k}]; {st}{c} |= (_d{t}[{k}] != _o); }} "),
+            None => st,
+        }
+    };
     let mut body = String::new();
     for k in (0..nw).rev() {
         let rm = range_mask(k);
@@ -1233,9 +1249,9 @@ fn emit_wide_select_rmw_store(
             // Untouched by the field; the width clamp may still bite.
             if keep != u64::MAX {
                 if keep == 0 {
-                    body.push_str(&format!("_d{t}[{k}] = 0; "));
+                    body.push_str(&store(k, format!("_d{t}[{k}] = 0; ")));
                 } else {
-                    body.push_str(&format!("_d{t}[{k}] &= {keep:#x}ULL; "));
+                    body.push_str(&store(k, format!("_d{t}[{k}] &= {keep:#x}ULL; ")));
                 }
             }
             continue;
@@ -1254,10 +1270,11 @@ fn emit_wide_select_rmw_store(
             format!("(_s{t}[{sk}] << {bs})")
         };
         if keep == 0 {
-            body.push_str(&format!("_d{t}[{k}] = {sexpr} & {em:#x}ULL; "));
+            body.push_str(&store(k, format!("_d{t}[{k}] = {sexpr} & {em:#x}ULL; ")));
         } else {
-            body.push_str(&format!(
-                "_d{t}[{k}] = (_d{t}[{k}] & {keep:#x}ULL) | ({sexpr} & {em:#x}ULL); "
+            body.push_str(&store(
+                k,
+                format!("_d{t}[{k}] = (_d{t}[{k}] & {keep:#x}ULL) | ({sexpr} & {em:#x}ULL); "),
             ));
         }
     }
@@ -1291,11 +1308,93 @@ fn emit_wide_operand_signed(
     Some(r)
 }
 
+/// The low 64 bits of a wide value as a scalar C expression, or `None` when
+/// they depend on higher bits.  Bitwise ops take each bit from the same bit
+/// of their operands and add, sub and negate carry only upward, so such a
+/// tree needs no wide buffers; shift, multiply, concatenation, comparison and
+/// cast can move high bits down and decline.  A wide node exceeds 128 bits
+/// (`is_wide_ptr`), so nothing here needs a sub-64-bit mask, and a narrow
+/// operand arrives masked to its width, which is the wide path's
+/// zero-extension; signed contexts decline because the wide path
+/// sign-extends it instead.
+fn emit_expr_low64(expr: &ProtoExpression) -> Option<String> {
+    if !expr.builds_wide_pointer() {
+        return emit_expr(expr);
+    }
+    match expr {
+        ProtoExpression::Binary {
+            x,
+            op,
+            y,
+            expr_context,
+            ..
+        } => {
+            if expr_context.signed {
+                return None;
+            }
+            let (x, y) = (emit_expr_low64(x)?, emit_expr_low64(y)?);
+            let c = match op {
+                Op::BitAnd => "&",
+                Op::BitOr => "|",
+                Op::BitXor => "^",
+                Op::Add => "+",
+                Op::Sub => "-",
+                Op::BitXnor => {
+                    return Some(format!("(~(((uint64_t)({x})) ^ ((uint64_t)({y}))))"));
+                }
+                _ => return None,
+            };
+            Some(format!("(((uint64_t)({x})) {c} ((uint64_t)({y})))"))
+        }
+        ProtoExpression::Unary {
+            op,
+            x,
+            expr_context,
+            ..
+        } => {
+            if expr_context.signed {
+                return None;
+            }
+            match op {
+                // Same meanings as `emit_wide_unary`.
+                Op::Add => emit_expr_low64(x),
+                Op::Sub => Some(format!("(-((uint64_t)({})))", emit_expr_low64(x)?)),
+                Op::BitNot => Some(format!("(~((uint64_t)({})))", emit_expr_low64(x)?)),
+                _ => None,
+            }
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            // `emit_wide_ternary` sign-extends both arms into the result width
+            // when both are signed and narrower; a scalar select does not.
+            if true_expr.expr_context().signed && false_expr.expr_context().signed {
+                return None;
+            }
+            Some(format!(
+                "((({c}) != 0) ? ((uint64_t)({t})) : ((uint64_t)({f})))",
+                c = emit_expr(cond)?,
+                t = emit_expr_low64(true_expr)?,
+                f = emit_expr_low64(false_expr)?,
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// Shift amount: the low 64 bits of `y` (Cranelift loads word 0 of the
 /// promoted operand).  A narrow scalar IS that low word; a wide `y` reads
 /// word 0 of its buffer.
 fn wide_shift_amount(y: &ProtoExpression, pre: &mut String) -> Option<String> {
     if y.builds_wide_pointer() {
+        // Only the low 64 bits are read here, so compute just those when the
+        // tree allows it (see `emit_expr_low64`).
+        if let Some(s) = emit_expr_low64(y) {
+            return Some(s);
+        }
         let r = emit_wide_expr(y, pre)?;
         Some(format!("((const veryl_u64_ua*)({}))[0]", r.addr))
     } else {
@@ -1315,6 +1414,7 @@ fn emit_wide_narrow_field_store(
     lo: usize,
     dst_width: usize,
     se_from: Option<usize>,
+    tail: Option<&str>,
     word_addr: impl Fn(usize) -> String,
 ) -> Option<String> {
     // Bits >= dst_width must be dropped — the reference paths do so (interpret
@@ -1351,10 +1451,16 @@ fn emit_wide_narrow_field_store(
         };
         let m = base_mask << b;
         let a0 = word_addr(k0);
-        Some(format!(
-            "{{ {pre}veryl_u64_ua* _d = {a0}; \
-                *_d = ((*_d) & ~{m:#x}ULL) | ((((uint64_t)({sv})) << {b}) & {m:#x}ULL); }}"
-        ))
+        let store =
+            format!("*_d = ((*_d) & ~{m:#x}ULL) | ((((uint64_t)({sv})) << {b}) & {m:#x}ULL); ");
+        let body = match tail {
+            Some(t) if skip_unchanged() => {
+                format!("uint64_t _o = *_d; {store}{}", guard_push("*_d != _o", t))
+            }
+            Some(t) => format!("{store}{t} "),
+            None => store,
+        };
+        Some(format!("{{ {pre}veryl_u64_ua* _d = {a0}; {body}}}"))
     } else {
         // Two words (k1 == k0 + 1): the low (64-b) field bits go to word k0
         // [b:63], the rest to word k1 [0:hi%64].  b >= 1 (b == 0 would keep the
@@ -1370,12 +1476,22 @@ fn emit_wide_narrow_field_store(
         let sh = 64 - b;
         let a0 = word_addr(k0);
         let a1 = word_addr(k1);
+        let store = format!(
+            "*_d0 = ((*_d0) & ~{m0:#x}ULL) | ((_sv << {b}) & {m0:#x}ULL); \
+             *_d1 = ((*_d1) & ~{m1:#x}ULL) | ((_sv >> {sh}) & {m1:#x}ULL); "
+        );
+        let body = match tail {
+            Some(t) if skip_unchanged() => format!(
+                "uint64_t _o0 = *_d0; uint64_t _o1 = *_d1; {store}{}",
+                guard_push("*_d0 != _o0 || *_d1 != _o1", t)
+            ),
+            Some(t) => format!("{store}{t} "),
+            None => store,
+        };
         Some(format!(
             "{{ {pre}uint64_t _sv = (uint64_t)({sv}); \
                 veryl_u64_ua* _d0 = {a0}; \
-                veryl_u64_ua* _d1 = {a1}; \
-                *_d0 = ((*_d0) & ~{m0:#x}ULL) | ((_sv << {b}) & {m0:#x}ULL); \
-                *_d1 = ((*_d1) & ~{m1:#x}ULL) | ((_sv >> {sh}) & {m1:#x}ULL); }}"
+                veryl_u64_ua* _d1 = {a1}; {body}}}"
         ))
     }
 }
@@ -1946,7 +2062,8 @@ fn emit_wide_log_chunks(src_ptr: &str, base_off: &str, nb: usize) -> String {
                 *(unsigned int*)(_ls + {o_off}) = (unsigned int)(({base}) + {w}u); \
                 *(unsigned char*)(_ls + {o_nb}) = (unsigned char){chunk}u; \
                 __builtin_memcpy(_ls + {o_pay}, ({src}) + {w}u, {chunk}u); \
-                *(unsigned int*)(_lb + {cnt}) = _lc + 1u; }} ",
+                *(unsigned int*)(_lb + {cnt}) {adv} }} ",
+            adv = LOG_ADVANCE,
             cnt = WRITE_LOG_WIDE_OFFSET_COUNT,
             eptr = WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
             esz = WRITE_LOG_WIDE_ENTRY_SIZE,
@@ -1974,6 +2091,7 @@ pub type AotCell = Arc<OnceLock<EmittedModule>>;
 use std::cell::Cell;
 thread_local! {
     static EVENT_MODE: Cell<bool> = const { Cell::new(false) };
+    static EVENT_SKIP_UNCHANGED: Cell<bool> = const { Cell::new(false) };
     // Worst-case narrow/wide pushes per `veryl_aot_eval` invocation,
     // accumulated during emission (const-loop bodies scaled by trip
     // count).  The event prologue reserves this much up front, so the
@@ -1986,6 +2104,43 @@ fn event_mode() -> bool {
 }
 fn set_event_mode(on: bool) {
     EVENT_MODE.with(|c| c.set(on));
+}
+
+/// Whether a wide FF write may leave the log unadvanced when the value it
+/// deposits is what its write slot already holds.  Wide only: a wide entry
+/// costs 64 bytes to push and to commit, a narrow one too little to be worth
+/// a compare at every write site.  Sound because the write slot carries the
+/// pending value: a dual-slot FF's next slot accumulates the step's writes,
+/// and a packed FF's current slot is written once per event and changed only
+/// by the commit.  Off for reset events: they fire after the clock events of
+/// the same step (`Simulator::eval_assertion_edges`, the derived reset
+/// batch), and a packed FF written by both must still take the reset value.
+fn skip_unchanged() -> bool {
+    EVENT_SKIP_UNCHANGED.with(|c| c.get())
+}
+
+fn changed_flag(name: &str, cond: &str) -> String {
+    if skip_unchanged() {
+        format!("int {name} = ({cond}); ")
+    } else {
+        String::new()
+    }
+}
+
+/// The count advance every log push ends with; `guard_push` rewrites it.
+const LOG_ADVANCE: &str = "= _lc + 1u;";
+
+/// `push` with its count advance conditional on `changed` (a C expression).
+/// The entry is still written, into a slot the next push then reuses: an
+/// event body runs straight through once per fire, so a branch around the
+/// push costs more in code than the stores it would save.
+fn guard_push(changed: &str, push: &str) -> String {
+    if skip_unchanged() {
+        debug_assert!(push.contains(LOG_ADVANCE));
+        push.replace(LOG_ADVANCE, &format!("= _lc + (({changed}) ? 1u : 0u);"))
+    } else {
+        push.to_string()
+    }
 }
 
 /// Inline narrow WriteLogEntry push.  `offset_expr` / `payload_expr`
@@ -2008,7 +2163,8 @@ fn emit_log_push(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
             *(unsigned short*)(_ls + {o_mask}) = 0; \
             *(unsigned short*)(_ls + {o_wc}) = (unsigned short){wc}u; \
             *(unsigned long long*)(_ls + {o_pay}) = (unsigned long long)({pay}); \
-            *(unsigned int*)(_lb + {cnt}) = _lc + 1u; }}",
+            *(unsigned int*)(_lb + {cnt}) {adv} }}",
+        adv = LOG_ADVANCE,
         cnt = WRITE_LOG_NARROW_OFFSET_COUNT,
         eptr = WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
         esz = WRITE_LOG_ENTRY_SIZE,
@@ -2142,7 +2298,7 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
     }
     match stmt {
         ProtoStatement::CompiledBlock(cb) => {
-            for s in &cb.original_stmts {
+            for s in cb.original_stmts.iter() {
                 collect_uncovered(s, out);
             }
         }
@@ -2373,7 +2529,7 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
 fn diag_find_fail(stmt: &ProtoStatement) -> String {
     match stmt {
         ProtoStatement::CompiledBlock(cb) => {
-            for s in &cb.original_stmts {
+            for s in cb.original_stmts.iter() {
                 if emit_stmt(s).is_none() {
                     return format!("CB/{}", diag_find_fail(s));
                 }
@@ -3433,7 +3589,7 @@ fn clean_elide() -> bool {
 /// from.
 ///
 /// Soundness contract: an elided mask must leave the emitted C value
-/// BIT-IDENTICAL to the masked form (the VERYL_AOT_C_VALIDATE dual-run
+/// BIT-IDENTICAL to the masked form (the `--backend-validate` dual-run
 /// compares storage bytes against the JIT).  Every rule below mirrors the
 /// corresponding emitter arm's needs_clean=false emission; anything
 /// uncertain — width 0 / >64 results, dirty producers (~, unary/binary
@@ -3659,8 +3815,15 @@ fn emit_event_ff_assign_wide(a: &ProtoAssignStatement, se_from: Option<usize>) -
             dst = dst_raw,
         )
     };
-    let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb);
-    Some(format!("{{ {pre}{store}{push} }}"))
+    let flag = changed_flag(
+        &format!("_c{d}"),
+        &format!("__builtin_memcmp((const uint8_t*)_w{d}, ff_values + {dst_raw:#x}, {nb}u) != 0"),
+    );
+    let push = guard_push(
+        &format!("_c{d}"),
+        &emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), &format!("{cur_off:#x}"), nb),
+    );
+    Some(format!("{{ {pre}{flag}{store}{push} }}"))
 }
 
 /// Read a wide FF into a fresh register and clear everything at or above its
@@ -3702,17 +3865,27 @@ fn emit_wide_ff_rmw_tail(
     cur_off: isize,
     span: Option<(usize, usize)>,
 ) -> String {
-    let mut out = String::new();
+    let (blo, blen) = span.unwrap_or((0, nb));
+    let flag = format!("{reg}c");
+    let mut out = changed_flag(
+        &flag,
+        &format!(
+            "__builtin_memcmp((const uint8_t*){reg} + {blo}u, ff_values + {:#x}, {blen}u) != 0",
+            dst_raw + blo as isize
+        ),
+    );
     if !packed {
         out.push_str(&format!(
             "vw_copy((uint8_t*)(ff_values + {dst_raw:#x}), (const uint8_t*){reg}, {nb}u); ",
         ));
     }
-    let (blo, blen) = span.unwrap_or((0, nb));
-    out.push_str(&emit_wide_log_chunks(
-        &format!("((uint8_t*){reg} + {blo}u)"),
-        &format!("{:#x}", cur_off + blo as isize),
-        blen,
+    out.push_str(&guard_push(
+        &flag,
+        &emit_wide_log_chunks(
+            &format!("((uint8_t*){reg} + {blo}u)"),
+            &format!("{:#x}", cur_off + blo as isize),
+            blen,
+        ),
     ));
     out
 }
@@ -3754,22 +3927,23 @@ fn emit_event_ff_assign_wide_field(
     // above the declared width, while `emit_wide_narrow_field_store` clips to
     // `[lo, dst_width)`.  A PACKED FF keeps it for the reasons in
     // `emit_event_ff_assign_wide_select`.
-    if !packed
-        && hi < a.dst_width
-        && let Some(store) = emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, |k| {
-            format!(
-                "(veryl_u64_ua*)(ff_values + {:#x})",
-                dst_raw + (k as isize) * 8
-            )
-        })
-    {
+    if !packed && hi < a.dst_width {
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
         let log = emit_wide_log_chunks(
             &format!("((uint8_t*)(ff_values + {dst_raw:#x}) + {blo}u)"),
             &format!("{:#x}", cur_off + blo as isize),
             blen,
         );
-        return Some(format!("{{ {store} {log} }}"));
+        if let Some(store) =
+            emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, Some(&log), |k| {
+                format!(
+                    "(veryl_u64_ua*)(ff_values + {:#x})",
+                    dst_raw + (k as isize) * 8
+                )
+            })
+        {
+            return Some(store);
+        }
     }
     let mut body = emit_wide_ff_rmw_prologue(
         &reg,
@@ -3881,12 +4055,30 @@ fn emit_event_ff_assign_wide_select(
     // making the aliasing unreachable.  Widen it and both go at once.
     if !packed {
         let dst = format!("(uint8_t*)(ff_values + {dst_raw:#x})");
-        let mut body = emit_wide_select_rmw_store(&src, pre, &dst, nw, lo, nbits, a.dst_width);
+        let flag = format!("_c{d}");
+        let mut body = if skip_unchanged() {
+            format!("int {flag} = 0; ")
+        } else {
+            String::new()
+        };
+        body.push_str(&emit_wide_select_rmw_store(
+            &src,
+            pre,
+            &dst,
+            nw,
+            lo,
+            nbits,
+            a.dst_width,
+            Some(&flag),
+        ));
         let (blo, blen) = static_field_byte_span(hi, lo, nb).unwrap_or((0, nb));
-        body.push_str(&emit_wide_log_chunks(
-            &format!("({dst} + {blo}u)"),
-            &format!("{:#x}", cur_off + blo as isize),
-            blen,
+        body.push_str(&guard_push(
+            &flag,
+            &emit_wide_log_chunks(
+                &format!("({dst} + {blo}u)"),
+                &format!("{:#x}", cur_off + blo as isize),
+                blen,
+            ),
         ));
         return Some(format!("{{ {body} }}"));
     }
@@ -3907,6 +4099,7 @@ fn emit_event_ff_assign_wide_select(
         lo,
         nbits,
         a.dst_width,
+        None,
     ));
     body.push_str(&emit_wide_ff_rmw_tail(
         &reg,
@@ -4136,12 +4329,21 @@ fn emit_event_ff_assign_wide_dynsel(
             dst = dst_raw,
         )
     };
-    let push = emit_wide_log_chunks(
-        &format!("(uint8_t*)_w{d}"),
-        &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
-        nb,
+    let flag = changed_flag(
+        &format!("_c{d}"),
+        &format!(
+            "__builtin_memcmp((const uint8_t*)_w{d}, ff_values + {dst_raw:#x} + _di{d} * {nb}u, {nb}u) != 0"
+        ),
     );
-    Some(format!("{{ {pre}{store}{push} }}"))
+    let push = guard_push(
+        &format!("_c{d}"),
+        &emit_wide_log_chunks(
+            &format!("(uint8_t*)_w{d}"),
+            &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
+            nb,
+        ),
+    );
+    Some(format!("{{ {pre}{flag}{store}{push} }}"))
 }
 
 /// Event-path FF write (static dst): pushes a WriteLogEntry at the
@@ -4225,10 +4427,15 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
     }
     if let Some((hi, lo)) = a.select {
         let nbits = hi.checked_sub(lo)?.checked_add(1)?;
-        if nbits >= 64 {
+        if lo.checked_add(nbits)? > 64 {
             return None;
         }
-        let vmask = (1u64 << nbits) - 1;
+        // A full 64-bit select is legal: `[63:0]` on a 64-bit register.
+        let vmask = if nbits == 64 {
+            u64::MAX
+        } else {
+            (1u64 << nbits) - 1
+        };
         let pmask = vmask << lo;
         // RMW: read the dst slot (matches AssignStatement::eval_step reading
         // `self.dst`), merge [lo,hi], write dst if dual-slot, push merged.
@@ -4439,6 +4646,7 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
                 lo,
                 nbits,
                 a.dst_width,
+                None,
             ));
         }
     }
@@ -4451,16 +4659,24 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
     } else {
         format!("vw_copy((uint8_t*)({elem}), (const uint8_t*)_w{d}, {nb}u); ")
     };
-    let push = emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), "_woff", nb);
+    let flag = changed_flag(
+        &format!("_c{d}"),
+        &format!("__builtin_memcmp((const uint8_t*)_w{d}, {elem}, {nb}u) != 0"),
+    );
+    let push = guard_push(
+        &format!("_c{d}"),
+        &emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), "_woff", nb),
+    );
     Some(format!(
         "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-            {pre}{store}\
+            {pre}{flag}{store}\
             unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
             {push} }}",
         idx = idx,
         max = max_idx,
         pre = pre,
+        flag = flag,
         store = store,
         cbase = cur_base,
         stride = a.dst_stride,
@@ -4612,15 +4828,211 @@ pub fn prepare_comb(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCel
 }
 
 /// Event-path `prepare_comb`.  Caller gates on `Config::aot_c_event`.
-pub fn prepare_event(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCell> {
-    let src = emit_event_function(stmts)?;
+pub fn prepare_event(
+    stmts: &[ProtoStatement],
+    async_mode: bool,
+    skip_unchanged: bool,
+    gates: &[EventGate],
+) -> Option<AotCell> {
+    let src = emit_event_function(stmts, skip_unchanged, gates)?;
     Some(compile_or_spawn(src, async_mode))
+}
+
+/// Consecutive dirty checks after which an event gate stops checking.
+const EVENT_GATE_AUTO_OFF_STREAK: u32 = 64;
+/// Fires an auto-offed gate stays off before it checks again; doubled on
+/// each further turn-off up to the cap, reset by a skip.
+const EVENT_GATE_REARM_FIRES: u32 = 1024;
+const EVENT_GATE_REARM_CAP: u32 = 1 << 16;
+
+/// The idle-subtree gates of `emit_event_function`, applied innermost first:
+/// each replaces its statement range with one unit that checks the gate and
+/// calls part functions holding the range, so an enclosing gate then sees it
+/// as one small unit of its own range.  Returns the part functions' C.
+fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
+    use crate::ir::opt::event_gate::GATE_STATE_HEADER_BYTES;
+    use crate::ir::write_log::{
+        WRITE_LOG_ENTRY_OFFSET_OFFSET, WRITE_LOG_ENTRY_OFFSET_PAYLOAD,
+        WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS, WRITE_LOG_ENTRY_SIZE,
+        WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR, WRITE_LOG_WIDE_ENTRY_OFFSET_NB,
+        WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET, WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD,
+        WRITE_LOG_WIDE_ENTRY_SIZE, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+    };
+    use crate::ir::write_log::{WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_COUNT};
+    let mut order: Vec<usize> = (0..gates.len()).collect();
+    order.sort_by_key(|&k| gates[k].hi - gates[k].lo);
+    let mut fns = String::new();
+    if !gates.is_empty() {
+        // Did every entry pushed since counts `n0` / `w0` repeat the value
+        // it would commit?  Narrow entries carry the whole slot, wide ones
+        // their chunk of it.
+        fns.push_str(&format!(
+            "static int veryl_evg_unchanged(const uint8_t *ff_values, uint64_t *write_log, unsigned int n0, unsigned int w0) {{
+               unsigned char *lb = (unsigned char*)write_log;
+               unsigned int n1 = *(unsigned int*)(lb + {ncnt}), w1 = *(unsigned int*)(lb + {wcnt});
+               unsigned char *ne = *(unsigned char**)(lb + {neptr});
+               for (unsigned int z = n0; z < n1; z++) {{
+                 unsigned char *e = ne + (unsigned long)z * {nesz};
+                 const uint8_t *cur = ff_values + *(unsigned int*)(e + {neoff});
+                 unsigned long long pay = *(unsigned long long*)(e + {nepay});
+                 switch (*(unsigned short*)(e + {newc})) {{
+                   case 1: if (*cur != (uint8_t)pay) return 0; break;
+                   case 2: if (*(const veryl_u16_ua*)cur != (uint16_t)pay) return 0; break;
+                   case 4: if (*(const veryl_u32_ua*)cur != (uint32_t)pay) return 0; break;
+                   default: if (*(const veryl_u64_ua*)cur != pay) return 0; break;
+                 }}
+               }}
+               unsigned char *we = *(unsigned char**)(lb + {weptr});
+               for (unsigned int z = w0; z < w1; z++) {{
+                 unsigned char *e = we + (unsigned long)z * {wesz};
+                 if (__builtin_memcmp(e + {wepay}, ff_values + *(unsigned int*)(e + {weoff}), *(unsigned char*)(e + {wenb})) != 0) return 0;
+               }}
+               return 1;
+             }}
+
+",
+            ncnt = WRITE_LOG_NARROW_OFFSET_COUNT,
+            wcnt = WRITE_LOG_WIDE_OFFSET_COUNT,
+            neptr = WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
+            nesz = WRITE_LOG_ENTRY_SIZE,
+            neoff = WRITE_LOG_ENTRY_OFFSET_OFFSET,
+            nepay = WRITE_LOG_ENTRY_OFFSET_PAYLOAD,
+            newc = WRITE_LOG_ENTRY_OFFSET_WIDTH_CLASS,
+            weptr = WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+            wesz = WRITE_LOG_WIDE_ENTRY_SIZE,
+            weoff = WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
+            wepay = WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD,
+            wenb = WRITE_LOG_WIDE_ENTRY_OFFSET_NB,
+        ));
+    }
+    for k in order {
+        let g = &gates[k];
+        let mut parts: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        for u in &units[g.lo..g.hi] {
+            cur.push_str(u);
+            if cur.len() >= ENTRY_PART_BYTES {
+                parts.push(std::mem::take(&mut cur));
+            }
+        }
+        if !cur.is_empty() {
+            parts.push(cur);
+        }
+        let mut calls = String::new();
+        for (m, part) in parts.iter().enumerate() {
+            fns.push_str(&format!(
+                "static __attribute__((noinline)) void veryl_evg_{k}_{m}{ENTRY_SIG} {{\n{part}}}\n\n"
+            ));
+            calls.push_str(&format!("        veryl_evg_{k}_{m}{ENTRY_ARGS};\n"));
+        }
+        let shadow = g.state_off as usize + GATE_STATE_HEADER_BYTES;
+        let (mut cmp, mut snap, mut acc) = (String::new(), String::new(), 0usize);
+        for &(is_ff, a, b) in &g.compare_spans() {
+            let l = (b - a) as usize;
+            let buf = if is_ff { "ff_values" } else { "comb_values" };
+            let sh = shadow + acc;
+            let word = match l {
+                1 => Some("uint8_t"),
+                2 => Some("veryl_u16_ua"),
+                4 => Some("veryl_u32_ua"),
+                8 => Some("veryl_u64_ua"),
+                _ => None,
+            };
+            // A mismatching span refreshes its shadow on the spot: the run
+            // that follows leaves the compared values as they are.
+            match word {
+                Some(t) => cmp.push_str(&format!(
+                    "        if (*(const {t}*)(comb_values + {sh:#x}) != *(const {t}*)({buf} + {a:#x})) {{ *({t}*)(comb_values + {sh:#x}) = *(const {t}*)({buf} + {a:#x}); eg_run = 1; }}\n"
+                )),
+                None => cmp.push_str(&format!(
+                    "        if (__builtin_memcmp(comb_values + {sh:#x}, {buf} + {a:#x}, {l}) != 0) {{ __builtin_memcpy(comb_values + {sh:#x}, {buf} + {a:#x}, {l}); eg_run = 1; }}\n"
+                )),
+            }
+            snap.push_str(&format!(
+                "        __builtin_memcpy(comb_values + {sh:#x}, {buf} + {a:#x}, {l});\n"
+            ));
+            acc += l;
+        }
+        // Direct comb writes: shadowed before the run, compared after, so a
+        // run that changed none of them counts as having written nothing.
+        let (mut osnap, mut ocmp) = (String::new(), String::new());
+        for &(a, b) in &g.out_comb {
+            let l = (b - a) as usize;
+            osnap.push_str(&format!(
+                "        __builtin_memcpy(comb_values + {:#x}, comb_values + {a:#x}, {l});\n",
+                shadow + acc
+            ));
+            ocmp.push_str(&format!(
+                " && __builtin_memcmp(comb_values + {:#x}, comb_values + {a:#x}, {l}) == 0",
+                shadow + acc
+            ));
+            acc += l;
+        }
+        // A gate that keeps running stops being checked after a streak of
+        // dirty checks: on an active subtree the compare is pure loss.
+        // Check mode: a skip becomes a run that must write nothing.
+        let check = if crate::ir::opt::event_gate::check() {
+            format!(
+                "      if (!eg_run) {{ unsigned char *ck_lb = (unsigned char*)write_log;\n\
+                 \x20       unsigned int ck_n0 = *(unsigned int*)(ck_lb + {ncnt}), ck_w0 = *(unsigned int*)(ck_lb + {wcnt});\n\
+                 {osnap}{calls}\
+                 \x20       if (!(veryl_evg_unchanged(ff_values, write_log, ck_n0, ck_w0){ocmp})) {{\n\
+                 \x20         static int ck_said; if (!ck_said) {{ ck_said = 1; __builtin_printf(\"[event_gate] WRONG SKIP gate {k} {cone}\\n\"); }}\n\
+                 \x20       }} }}\n",
+                ncnt = WRITE_LOG_NARROW_OFFSET_COUNT,
+                wcnt = WRITE_LOG_WIDE_OFFSET_COUNT,
+                cone = g.cone,
+            )
+        } else {
+            String::new()
+        };
+        // Off: the range runs plain until the re-arm period passes; the
+        // first fire after re-arming runs and takes a fresh snapshot.  On: a
+        // checked fire whose reads all matched skips; otherwise the range
+        // runs, and a run that turned out idle without having been checked
+        // snapshots its reads (a checked one refreshed them span by span).
+        // A dirty streak turns the gate off, for twice as long each time; a
+        // skip resets that.
+        units[g.lo] = format!(
+            "    {{ uint8_t *eg = comb_values + {st:#x};\n\
+             \x20     if (eg[2]) {{ uint32_t eg_n, eg_b; __builtin_memcpy(&eg_n, eg + 4, 4); __builtin_memcpy(&eg_b, eg + 8, 4);\n\
+             \x20       if (++eg_n >= eg_b) {{ eg[2] = 0; eg[0] = 0; eg_n = 0; }} __builtin_memcpy(eg + 4, &eg_n, 4);\n\
+             {calls}      }} else {{ int eg_run = 1, eg_chk = 0;\n\
+             \x20     if (eg[0]) {{ eg_run = 0; eg_chk = 1;\n{cmp}      }}\n{check}\
+             \x20     if (eg_run) {{\n\
+             \x20       uint32_t eg_stk; __builtin_memcpy(&eg_stk, eg + 4, 4);\n\
+             \x20       if (++eg_stk >= {streak}u) {{ uint32_t eg_b; __builtin_memcpy(&eg_b, eg + 8, 4);\n\
+             \x20         eg_b = eg_b ? (eg_b < {cap}u ? eg_b * 2 : {cap}u) : {rearm}u; __builtin_memcpy(eg + 8, &eg_b, 4); eg[2] = 1; eg_stk = 0; }}\n\
+             \x20       __builtin_memcpy(eg + 4, &eg_stk, 4);\n\
+             \x20       unsigned char *eg_lb = (unsigned char*)write_log;\n\
+             \x20       unsigned int eg_n0 = *(unsigned int*)(eg_lb + {ncnt}), eg_w0 = *(unsigned int*)(eg_lb + {wcnt});\n\
+             {osnap}{calls}\
+             \x20       int eg_idle = (veryl_evg_unchanged(ff_values, write_log, eg_n0, eg_w0){ocmp});\n\
+             \x20       if (eg_idle && !eg_chk) {{\n{snap}        }}\n\
+             \x20       eg[0] = (uint8_t)eg_idle;\n\
+             \x20     }} else {{ uint32_t eg_z = 0; __builtin_memcpy(eg + 4, &eg_z, 4); __builtin_memcpy(eg + 8, &eg_z, 4); }} }} }}\n",
+            rearm = EVENT_GATE_REARM_FIRES,
+            cap = EVENT_GATE_REARM_CAP,
+            st = g.state_off as usize,
+            streak = EVENT_GATE_AUTO_OFF_STREAK,
+            ncnt = WRITE_LOG_NARROW_OFFSET_COUNT,
+            wcnt = WRITE_LOG_WIDE_OFFSET_COUNT,
+        );
+        for u in &mut units[g.lo + 1..g.hi] {
+            u.clear();
+        }
+    }
+    fns
 }
 
 /// Emit one `veryl_aot_eval` function for an event statement sequence.
 /// FF-target assigns push WriteLogEntries via `write_log` (unused in
 /// the comb path).
-fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
+fn emit_event_function(
+    stmts: &[ProtoStatement],
+    skip_unchanged: bool,
+    gates: &[EventGate],
+) -> Option<String> {
     reset_wide_tmp();
     // Localization never applies to the event path; clear any residue a failed
     // comb emit may have left so event reads never hit `_cl_*`.
@@ -4629,6 +5041,7 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     EVENT_WIDE_PUSHES.with(|c| c.set(0));
     let diag = std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1");
     set_event_mode(true);
+    EVENT_SKIP_UNCHANGED.with(|c| c.set(skip_unchanged));
     let body_res = (|| {
         // One unit per top-level statement, so `split_entry_function` can lay
         // them over several part functions instead of one enormous body.
@@ -4736,7 +5149,9 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
         Some(units)
     })();
     set_event_mode(false);
-    let units = body_res?;
+    EVENT_SKIP_UNCHANGED.with(|c| c.set(false));
+    let mut units = body_res?;
+    let gate_fns = apply_event_gates(&mut units, gates);
     // > u32::MAX pushes per eval can't be reserved in one call; bail to
     // Cranelift (which checks per push) rather than under-reserving.
     let narrow_pushes = u32::try_from(EVENT_NARROW_PUSHES.with(|c| c.get())).ok()?;
@@ -4755,6 +5170,7 @@ fn emit_event_function(stmts: &[ProtoStatement]) -> Option<String> {
     src.push_str(WIDEOPS_C_DECLS);
     src.push_str(WIDEOPS_C_INLINE);
     src.push('\n');
+    src.push_str(&gate_fns);
     // The bulk reserve is the ENTRY PREAMBLE, not body text: split or not it
     // stays in `veryl_aot_eval` ahead of the parts, so it dominates every
     // unchecked push.
@@ -5671,7 +6087,7 @@ const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
 /// ahead of its prerun / pre-shadow / shadow / replay storage: `[0]` primed,
 /// `[1]` converged, `[2]` auto-off, `[3]` diagnostic reason, `[4..8)` the
 /// dirty streak as a `u32`.
-use crate::ir::opt::cone_gate::GUARD_STATE_HEADER_BYTES;
+use crate::ir::opt::cone_gate::{GROUP_STATE_HEADER_BYTES, GUARD_STATE_HEADER_BYTES};
 
 /// Epoch re-arm: every `rearm_mask + 1` evals, retry the auto-offed segments
 /// (mirrors `ConeGateState::tick_rearm`).  Zero the WHOLE header: an off
@@ -5699,6 +6115,10 @@ fn cone_gate_rearm_preamble(state_offs: &[u32], rearm_mask: u64) -> String {
     )
 }
 
+const ENTRY_SIG: &str = "(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, \
+                         uint64_t *__restrict__ write_log, intptr_t ff_delta)";
+const ENTRY_ARGS: &str = "(ff_values, comb_values, write_log, ff_delta)";
+
 /// Lay the dispatcher's top-level units out over one or more functions and
 /// return the C for all of them.
 fn split_entry_function(
@@ -5707,9 +6127,8 @@ fn split_entry_function(
     units: &[String],
     cg_dbg: bool,
 ) -> String {
-    const SIG: &str = "(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, \
-                       uint64_t *__restrict__ write_log, intptr_t ff_delta)";
-    const ARGS: &str = "(ff_values, comb_values, write_log, ff_delta)";
+    const SIG: &str = ENTRY_SIG;
+    const ARGS: &str = ENTRY_ARGS;
     let total: usize = units.iter().map(String::len).sum();
     // The debug prologue's counters are function-scope statics that the units
     // reference, so that build stays whole.  The entry preamble runs once per
@@ -5831,6 +6250,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // gather below still cannot run: it permutes arbitrarily.
     let mut cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment> =
         CONE_SEGMENTS.with(|s| s.borrow().clone());
+    let cone_groups: Vec<crate::ir::opt::cone_gate::ConeGroup> =
+        CONE_GROUPS.with(|g| g.borrow().clone());
+    // Where each segment of the caller's list ends up below (a segment the
+    // split emptied is dropped), so the groups' member indices follow.
+    let mut seg_kept: Vec<Option<usize>> = (0..cone_segments.len()).map(Some).collect();
     if let Some((_, _, is_const)) = &const_part
         && !cone_segments.is_empty()
     {
@@ -5844,6 +6268,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             let hi_c = cb[s.stmt_hi.min(is_const.len())] as usize;
             s.stmt_lo = n_const_total + s.stmt_lo - lo_c;
             s.stmt_hi = n_const_total + s.stmt_hi - hi_c;
+        }
+        let mut kept = 0usize;
+        for (i, s) in cone_segments.iter().enumerate() {
+            seg_kept[i] = (s.stmt_lo < s.stmt_hi).then(|| {
+                kept += 1;
+                kept - 1
+            });
         }
         cone_segments.retain(|s| s.stmt_lo < s.stmt_hi);
     }
@@ -6061,6 +6492,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let len = (8 + be + pb + cb + rb).next_multiple_of(8);
                 v.push((s.state_off as isize, len));
             }
+            for g in &cone_groups {
+                let cb: usize = g.compare.iter().map(|&(_, a, x)| (x - a) as usize).sum();
+                let len = (GROUP_STATE_HEADER_BYTES + cb).next_multiple_of(8);
+                v.push((g.state_off as isize, len));
+            }
         });
     }
     let localize_sets: Vec<HashSet<isize>> = if localize_armed() {
@@ -6190,14 +6626,64 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             v
         };
         let cg_dbg = std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1");
+        let mut guard_of_seg: Vec<Option<usize>> = vec![None; cone_segments.len()];
         let guards: Vec<(usize, usize, &crate::ir::opt::cone_gate::ConeSegment)> = cone_segments
             .iter()
-            .filter_map(|s| {
+            .enumerate()
+            .filter_map(|(si, s)| {
                 let k1 = chunk_starts.iter().position(|&q| q == s.stmt_lo)?;
                 let k2 = chunk_starts.iter().position(|&q| q == s.stmt_hi)?;
-                (k1 < k2 && k1 >= const_chunks).then_some((k1, k2, s))
+                (k1 < k2 && k1 >= const_chunks).then(|| {
+                    guard_of_seg[si] = Some(guard_of_seg.iter().flatten().count());
+                    (k1, k2, s)
+                })
             })
             .collect();
+        // A group over the surviving guards: one check per settle ahead of
+        // its first member, and a clean verdict lets every member skip its
+        // own compare.  Groups arrive shallowest first, so a guard's innermost
+        // group claims it last.
+        struct EmitGroup {
+            first: usize,
+            state_off: u32,
+            parent: Option<usize>,
+            compare: Vec<(bool, u32, u32)>,
+            off_decay: u32,
+        }
+        let mut egroups: Vec<EmitGroup> = Vec::new();
+        let mut group_kept: Vec<Option<usize>> = Vec::with_capacity(cone_groups.len());
+        let mut group_of_guard: Vec<Option<usize>> = vec![None; guards.len()];
+        for g in &cone_groups {
+            let members: Vec<usize> = g
+                .segments
+                .iter()
+                .filter_map(|&si| seg_kept.get(si as usize).copied().flatten())
+                .filter_map(|si| guard_of_seg.get(si).copied().flatten())
+                .collect();
+            if members.len() < 2 {
+                group_kept.push(None);
+                continue;
+            }
+            let mut parent = g.parent;
+            while let Some(pi) = parent {
+                if group_kept[pi as usize].is_some() {
+                    break;
+                }
+                parent = cone_groups[pi as usize].parent;
+            }
+            let idx = egroups.len();
+            group_kept.push(Some(idx));
+            for &m in &members {
+                group_of_guard[m] = Some(idx);
+            }
+            egroups.push(EmitGroup {
+                first: members.iter().copied().min().unwrap_or(0),
+                state_off: g.state_off,
+                parent: parent.and_then(|pi| group_kept[pi as usize]),
+                compare: g.compare.clone(),
+                off_decay: g.off_decay,
+            });
+        }
         // Small compare ranges dominate by count, and __memcmp's call +
         // dispatch overhead there outweighs the scan; past the cutoff
         // libc's vector loop wins, so large ranges keep the call.
@@ -6277,6 +6763,27 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             f.push_str("    return 1;\n}\n\n");
             body.push_str(&f);
         }
+        for (g, eg) in egroups.iter().enumerate() {
+            let mut f = format!(
+                "static int cg_gcmp_{g}(const uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values) {{\n"
+            );
+            let shadow_abs = eg.state_off as usize + GROUP_STATE_HEADER_BYTES;
+            let mut acc = 0usize;
+            for &(is_ff, a, b) in &eg.compare {
+                let l = (b - a) as usize;
+                let buf = if is_ff { "ff_values" } else { "comb_values" };
+                emit_cmp_range(
+                    &mut f,
+                    format!("{buf} + {a:#x}"),
+                    format!("comb_values + {sh:#x}", sh = shadow_abs + acc),
+                    l,
+                    "return 0;",
+                );
+                acc += l;
+            }
+            f.push_str("    return 1;\n}\n\n");
+            body.push_str(&f);
+        }
         // The dispatcher is built as a list of independent top-level units —
         // one guarded cone segment or one bare chunk call each — so
         // `split_entry_function` can lay them out across several functions.
@@ -6288,14 +6795,17 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         if cg_dbg && !guards.is_empty() {
             entry_prologue.push_str(&format!(
                 "    static unsigned long long cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
+                 \x20   static unsigned long long cg_gsk[{ng}], cg_grn[{ng}];\n\
                  \x20   static const unsigned cg_stoff[{n}] = {{{offs}}};\n\
                  \x20   uint8_t *cg_st[{n}]; for (int z = 0; z < {n}; z++) cg_st[z] = comb_values + cg_stoff[z];\n\
                  \x20   if ((++cg_calls & 0x3fff) == 0) {{\n\
                  \x20     __builtin_printf(\"[cg] evals=%llu\", cg_calls);\n\
                  \x20     for (int z = 0; z < {n}; z++) __builtin_printf(\" %llu/%llu:c%u:f%u\", cg_sk[z], cg_rn[z], (unsigned)cg_st[z][1], (unsigned)cg_st[z][3]);\n\
+                 \x20     for (int z = 0; z < {ng}; z++) __builtin_printf(\" G%llu/%llu\", cg_gsk[z], cg_grn[z]);\n\
                  \x20     __builtin_printf(\"\\n\");\n\
                  \x20   }}\n",
                 n = guards.len(),
+                ng = egroups.len().max(1),
                 offs = guards
                     .iter()
                     .map(|&(_, _, s)| format!("{:#x}", s.state_off))
@@ -6309,6 +6819,66 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             let mut unit = String::new();
             if gi < guards.len() && guards[gi].0 == i {
                 let (k1, k2, s) = guards[gi];
+                for (g, eg) in egroups.iter().enumerate().filter(|(_, eg)| eg.first == gi) {
+                    let gst = eg.state_off as usize;
+                    let inherit = match eg.parent {
+                        Some(p) => format!("comb_values[{:#x}]", egroups[p].state_off as usize + 1),
+                        None => "0".to_string(),
+                    };
+                    // Clean: the boundary held, or the enclosing group's did.
+                    // Dirty: the shadow is taken now, as the members will see
+                    // the inputs; a later change dirties the next check.
+                    unit.push_str(&format!(
+                        "    {{ uint8_t *cgg = comb_values + {gst:#x};\n\
+                         \x20     int cg_gclean = {inherit};\n\
+                         \x20     if (!cg_gclean && !cgg[2]) {{\n\
+                         \x20       if (cgg[0] && cg_gcmp_{g}(ff_values, comb_values)) {{\n\
+                         \x20         cg_gclean = 1;\n\
+                         \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgg + 4, 4);\n\
+                         \x20           cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
+                         \x20           __builtin_memcpy(cgg + 4, &cg_stk, 4); }}\n",
+                        decay = eg.off_decay,
+                    ));
+                    if cg_dbg {
+                        unit.push_str(&format!("          cg_gsk[{g}]++;\n"));
+                    }
+                    unit.push_str(
+                        "        } else {\n\
+                         \x20         { uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgg + 4, 4);\n\
+                         \x20           if (++cg_stk >= 1024u) cgg[2] = 1;\n\
+                         \x20           __builtin_memcpy(cgg + 4, &cg_stk, 4); }\n",
+                    );
+                    let shadow_abs = gst + GROUP_STATE_HEADER_BYTES;
+                    let mut acc = 0usize;
+                    for &(is_ff, a, b) in &eg.compare {
+                        let l = (b - a) as usize;
+                        let buf = if is_ff { "ff_values" } else { "comb_values" };
+                        unit.push_str(&format!(
+                            "          __builtin_memcpy(comb_values + {dst:#x}, {buf} + {a:#x}, {l});\n",
+                            dst = shadow_abs + acc,
+                        ));
+                        acc += l;
+                    }
+                    if cg_dbg {
+                        unit.push_str(&format!("          cg_grn[{g}]++;\n"));
+                    }
+                    unit.push_str(
+                        "          cgg[0] = 1;\n\
+                         \x20       }\n\
+                         \x20     }\n\
+                         \x20     cgg[1] = (uint8_t)cg_gclean;\n\
+                         \x20   }\n",
+                    );
+                }
+                // A member skipped by its group's verdict paid no compare, so
+                // its own streak (that compare's economics) is left alone.
+                let group_clean = match group_of_guard[gi] {
+                    Some(g) => format!(
+                        "if (comb_values[{:#x}]) cg_run = 0; else ",
+                        egroups[g].state_off as usize + 1
+                    ),
+                    None => String::new(),
+                };
                 let st = s.state_off as usize;
                 let be: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
                 let pb: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
@@ -6325,32 +6895,34 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                      \x20     int cg_run = 1;\n\
                      \x20     int cg_off = cgst[2];\n\
                      \x20     if (!cg_off && cgst[0] && cgst[1]) {{\n\
-                     \x20       if (cg_cmp_{gi}(ff_values, comb_values)) {{\n\
+                     \x20       {group_clean}if (cg_cmp_{gi}(ff_values, comb_values)) {{\n\
                      \x20         cg_run = 0;\n\
                      \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
                      \x20           cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
-                     \x20           __builtin_memcpy(cgst + 4, &cg_stk, 4); }}\n",
+                     \x20           __builtin_memcpy(cgst + 4, &cg_stk, 4); }}\n\
+                     \x20       }} else {{\n\
+                     \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
+                     \x20         if (++cg_stk >= 1024u) cgst[2] = 1;\n\
+                     \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4);\n\
+                     \x20       }}\n\
+                     \x20     }}\n\
+                     \x20     if (!cg_run) {{\n",
                     decay = s.off_decay,
                 ));
                 if cg_dbg {
-                    unit.push_str(&format!("          cg_sk[{gi}]++;\n"));
+                    unit.push_str(&format!("        cg_sk[{gi}]++;\n"));
                 }
                 let mut acc = 0usize;
                 for &(a, b) in &s.replay {
                     let l = (b - a) as usize;
                     unit.push_str(&format!(
-                        "          __builtin_memcpy(comb_values + {a:#x}, comb_values + {src:#x}, {l});\n",
+                        "        __builtin_memcpy(comb_values + {a:#x}, comb_values + {src:#x}, {l});\n",
                         src = replay_abs + acc,
                     ));
                     acc += l;
                 }
                 unit.push_str(
-                    "        } else {\n\
-                     \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
-                     \x20         if (++cg_stk >= 1024u) cgst[2] = 1;\n\
-                     \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4);\n\
-                     \x20       }\n\
-                     \x20     }\n\
+                    "      }\n\
                      \x20     if (cg_run) {\n\
                      \x20       if (!cg_off) {\n",
                 );
@@ -6445,7 +7017,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                     v.next_power_of_two() - 1
                 }
             });
-        let state_offs: Vec<u32> = guards.iter().map(|&(_, _, s)| s.state_off).collect();
+        let state_offs: Vec<u32> = guards
+            .iter()
+            .map(|&(_, _, s)| s.state_off)
+            .chain(egroups.iter().map(|eg| eg.state_off))
+            .collect();
         let entry_preamble = cone_gate_rearm_preamble(&state_offs, rearm_mask);
         body.push_str(&split_entry_function(
             &entry_prologue,
@@ -7087,6 +7663,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                             lo,
                             nbits2,
                             a.dst_width,
+                            None,
                         ));
                     }
                     let store = if nb <= f.nb {
@@ -7114,6 +7691,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                             lo,
                             a.dst_width,
                             se_from,
+                            None,
                             |k| {
                                 format!(
                                     "(veryl_u64_ua*)(comb_values + {:#x})",
@@ -7149,6 +7727,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                         lo,
                         nbits,
                         a.dst_width,
+                        None,
                     ));
                 }
                 // Bare signed RHS narrower than the wide destination:
@@ -7641,9 +8220,15 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     // <=64-bit field → scalar word RMW of the runtime-addressed
                     // element; see emit_wide_narrow_field_store.
                     if nbits <= 64 {
-                        emit_wide_narrow_field_store(&a.expr, hi, lo, a.dst_width, None, |k| {
-                            format!("(veryl_u64_ua*)(_pa + {})", k * 8)
-                        })?
+                        emit_wide_narrow_field_store(
+                            &a.expr,
+                            hi,
+                            lo,
+                            a.dst_width,
+                            None,
+                            None,
+                            |k| format!("(veryl_u64_ua*)(_pa + {})", k * 8),
+                        )?
                     } else {
                         // General multi-word field — runtime-addressed wide RMW:
                         //   new = (old & ~rangemask) | ((src << lo) & rangemask)
@@ -7756,7 +8341,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // `cb.func` the inlined C must NOT re-add ff/comb_delta_bytes —
             // that double-counts and corrupts memory under alias-off reuse.
             let mut s = String::from("{ ");
-            for stmt in &cb.original_stmts {
+            for stmt in cb.original_stmts.iter() {
                 let inner = emit_stmt(stmt)?;
                 s.push_str(&inner);
                 s.push(' ');
@@ -7790,6 +8375,48 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             None
         }
     }
+}
+
+thread_local! {
+    /// Loop indices whose C variable is in scope, innermost last:
+    /// `(storage, width, storage C type, C variable)`.  An emitted `for`
+    /// writes its index to storage once per iteration and the body reads it
+    /// back from there; `-fno-strict-aliasing` keeps gcc from forwarding the
+    /// store, so each read is a real load of a value the C loop variable
+    /// already holds.
+    static FOR_INDEX: RefCell<Vec<(VarOffset, usize, String, String)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// The C variable holding this load's value, when it is a live loop index.
+/// The width must match the loop's: the store truncates to the index's storage
+/// type, so a read of another width is not the same value.
+fn for_index_read(var_offset: &VarOffset, width: usize) -> Option<String> {
+    FOR_INDEX.with(|f| {
+        f.borrow()
+            .iter()
+            .rev()
+            .find(|(vo, w, _, _)| vo == var_offset && *w == width)
+            .map(|(_, _, cty, name)| format!("({cty}){name}"))
+    })
+}
+
+/// The substitution above holds only while the body leaves the index alone.
+fn writes_offset(body: &[ProtoStatement], vo: &VarOffset) -> bool {
+    body.iter().any(|s| match s {
+        ProtoStatement::Assign(a) => a.dst == *vo,
+        ProtoStatement::AssignDynamic(a) => a.dst_base == *vo,
+        ProtoStatement::If(x) => {
+            writes_offset(&x.true_side, vo) || writes_offset(&x.false_side, vo)
+        }
+        ProtoStatement::Case(x) => {
+            x.arms.iter().any(|a| writes_offset(&a.body, vo)) || writes_offset(&x.default, vo)
+        }
+        ProtoStatement::For(x) => x.var_offset == *vo || writes_offset(&x.body, vo),
+        ProtoStatement::SequentialBlock(b) => writes_offset(b, vo),
+        ProtoStatement::CompiledBlock(x) => writes_offset(&x.original_stmts, vo),
+        _ => false,
+    })
 }
 
 /// `ProtoStatement::For` → C `for` loop.  Covers Forward / Reverse ranges
@@ -7890,16 +8517,47 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
         VarOffset::Ff(o) => ("ff_values", o),
         VarOffset::Comb(o) => ("comb_values", o),
     };
+    // Depth-suffixed so a nested loop's variable does not shadow an enclosing
+    // one: the body may read either index.
+    let depth = FOR_INDEX.with(|f| f.borrow().len());
+    let itv = format!("_it{depth}");
+    let (init, cond, incr) = (
+        init.replace("_it", &itv),
+        cond.replace("_it", &itv),
+        incr.replace("_it", &itv),
+    );
 
     // Body pushes (FF write-log entries) execute once per iteration; scale the
     // reserve counters by the trip count.  A dynamic bound has no compile-time
     // trip count, so a body that pushes must fall back to the interpreter.
     let narrow_before = EVENT_NARROW_PUSHES.with(|c| c.get());
     let wide_before = EVENT_WIDE_PUSHES.with(|c| c.get());
+    let substitute = !writes_offset(&for_stmt.body, &for_stmt.var_offset);
+    if substitute {
+        FOR_INDEX.with(|f| {
+            f.borrow_mut().push((
+                for_stmt.var_offset,
+                for_stmt.var_width,
+                cty.to_string(),
+                itv.clone(),
+            ))
+        });
+    }
     let mut body = String::new();
     for s in &for_stmt.body {
-        body.push_str(&emit_stmt(s)?);
+        let emitted = emit_stmt(s);
+        if emitted.is_none() && substitute {
+            FOR_INDEX.with(|f| {
+                f.borrow_mut().pop();
+            });
+        }
+        body.push_str(&emitted?);
         body.push(' ');
+    }
+    if substitute {
+        FOR_INDEX.with(|f| {
+            f.borrow_mut().pop();
+        });
     }
     let narrow_body = EVENT_NARROW_PUSHES
         .with(|c| c.get())
@@ -7916,7 +8574,7 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     Some(format!(
         "{{ {var_ty} _lo = {lo}, _hi = {hi}; \
          for ({init}; {cond}; {incr}) {{ \
-            *(({cty}*)({buf} + {off:#x})) = ({cty})_it; \
+            *(({cty}*)({buf} + {off:#x})) = ({cty}){itv}; \
             {body} \
          }} }}",
     ))
@@ -9800,6 +10458,11 @@ fn emit_var_load(var_offset: &VarOffset, width: usize) -> Option<String> {
             nm = local_name(off)
         ));
     }
+    // Live loop index: read the C loop variable instead of the storage the
+    // emitted `for` mirrors it into (see `FOR_INDEX`).
+    if let Some(nm) = for_index_read(var_offset, width) {
+        return Some(format!("(({rt}){nm})", rt = result_ty));
+    }
     Some(format!(
         "(({rt})*((const {ct}*)({b} + {o:#x})))",
         rt = result_ty,
@@ -10394,23 +11057,49 @@ mod tests {
     /// Run an emitted event function over a hand-built `WriteLogBuffer` and
     /// return the wide entries it pushed, as `(offset, payload_bytes)`.
     fn run_wide_ff_event(src: &str, what: &str, ff: &mut [u8]) -> Option<Vec<(u32, Vec<u8>)>> {
+        let mut comb = vec![0u8; 256];
+        run_wide_ff_event_in(src, what, ff, &mut comb)
+    }
+
+    /// `run_wide_ff_event` over a caller-owned comb buffer (gate state lives
+    /// there).
+    fn run_wide_ff_event_in(
+        src: &str,
+        what: &str,
+        ff: &mut [u8],
+        comb: &mut [u8],
+    ) -> Option<Vec<(u32, Vec<u8>)>> {
         use crate::ir::write_log::{
-            WRITE_LOG_WIDE_ENTRY_OFFSET_NB, WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
-            WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_WIDE_ENTRY_SIZE,
-            WRITE_LOG_WIDE_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
+            WRITE_LOG_ENTRY_SIZE, WRITE_LOG_NARROW_OFFSET_CAPACITY,
+            WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR, WRITE_LOG_WIDE_ENTRY_OFFSET_NB,
+            WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET, WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD,
+            WRITE_LOG_WIDE_ENTRY_SIZE, WRITE_LOG_WIDE_OFFSET_CAPACITY, WRITE_LOG_WIDE_OFFSET_COUNT,
+            WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
         };
         let tmp = std::env::temp_dir().join(format!("veryl_aot_{what}_{}", std::process::id()));
         let module = compile_for_test(&tmp, src, what)?;
-        // The emitted push reads only the entries pointer and the count, so a
-        // stub buffer with those two fields set is enough to observe it.
+        // The emitted pushes read only the entries pointers and the counts,
+        // so a stub buffer with those fields set is enough to observe them.
+        // The capacities keep an event prologue's bulk reserve (a null fn
+        // pointer here) from being taken.
         let esz = WRITE_LOG_WIDE_ENTRY_SIZE as usize;
         let mut entries = vec![0u8; esz * 8];
+        let mut narrow = vec![0u8; WRITE_LOG_ENTRY_SIZE as usize * 8];
         let mut log = vec![0u8; 256];
         let eptr = entries.as_mut_ptr();
         log[WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR as usize
             ..WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR as usize + 8]
             .copy_from_slice(&(eptr as usize).to_le_bytes());
-        let mut comb = vec![0u8; 256];
+        let nptr = narrow.as_mut_ptr();
+        log[WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR as usize
+            ..WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR as usize + 8]
+            .copy_from_slice(&(nptr as usize).to_le_bytes());
+        for cap in [
+            WRITE_LOG_WIDE_OFFSET_CAPACITY,
+            WRITE_LOG_NARROW_OFFSET_CAPACITY,
+        ] {
+            log[cap as usize..cap as usize + 4].copy_from_slice(&8u32.to_le_bytes());
+        }
         unsafe {
             (module.func)(ff.as_mut_ptr(), comb.as_mut_ptr(), log.as_mut_ptr(), 0);
         }
@@ -10435,6 +11124,25 @@ mod tests {
             .collect();
         let _ = fs::remove_dir_all(&tmp);
         Some(out)
+    }
+
+    #[test]
+    fn emit_event_ff_full_width_select_emits() {
+        // `ff64[63:0] <= v`: a select covering the whole 64-bit register must
+        // not bail on the mask width.
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 64,
+            select: Some((63, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x0123_4567_89ab_cdef, 64),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_event_function(&[ProtoStatement::Assign(a)], false, &[])
+            .expect("a full-width select must emit");
+        assert!(src.contains("0xffffffffffffffffULL"), "{src}");
     }
 
     #[test]
@@ -10591,7 +11299,7 @@ mod tests {
                 })
             })
             .collect();
-        let src = emit_event_function(&stmts).expect("must emit as a function");
+        let src = emit_event_function(&stmts, false, &[]).expect("must emit as a function");
         assert!(
             src.contains("void veryl_aot_eval_p0"),
             "a body this large must split into part functions",
@@ -12981,8 +13689,8 @@ mod tests {
             input_offsets: vec![],
             output_offsets: vec![],
             ff_canonical_offsets: vec![],
-            stmt_deps: vec![],
-            original_stmts: vec![inner_a, inner_b],
+            stmt_deps: std::sync::Arc::new(vec![]),
+            original_stmts: std::sync::Arc::new(vec![inner_a, inner_b]),
         };
         let s = emit_stmt(&ProtoStatement::CompiledBlock(cb)).unwrap();
         assert!(s.starts_with("{ "));
@@ -13016,8 +13724,8 @@ mod tests {
             input_offsets: vec![],
             output_offsets: vec![],
             ff_canonical_offsets: vec![],
-            stmt_deps: vec![],
-            original_stmts: vec![inner],
+            stmt_deps: std::sync::Arc::new(vec![]),
+            original_stmts: std::sync::Arc::new(vec![inner]),
         };
         let s = emit_stmt(&ProtoStatement::CompiledBlock(cb)).unwrap();
         assert!(s.contains("comb_values + 0x110")); // actual offset, verbatim
@@ -13191,7 +13899,7 @@ mod tests {
 
     // --- Clean-bits mask elision (expr_emits_clean) ---
     // A wrongly-elided mask stores dirty high bits (silent divergence from
-    // Cranelift, caught by VERYL_AOT_C_VALIDATE byte compares) — each rule
+    // Cranelift, caught by `--backend-validate` byte compares), so each rule
     // direction gets a direct emit-string test.
 
     #[test]
@@ -13336,11 +14044,71 @@ mod tests {
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
         assert!(s.contains("_lo = 0ULL, _hi = 8ULL"));
-        assert!(s.contains("uint64_t _it = _lo"));
-        assert!(s.contains("_it < _hi"));
-        assert!(s.contains("_it += 1ULL"));
+        assert!(s.contains("uint64_t _it0 = _lo"));
+        assert!(s.contains("_it0 < _hi"));
+        assert!(s.contains("_it0 += 1ULL"));
         assert!(s.contains("comb_values + 0x0"));
         assert!(s.contains("0xaULL"));
+    }
+
+    /// The body reads the loop index from the C variable, not from the storage
+    /// the loop mirrors it into: `-fno-strict-aliasing` stops gcc forwarding
+    /// that store, so every read would otherwise be a real load.
+    #[test]
+    fn emit_stmt_for_body_reads_the_index_from_the_c_variable() {
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(0x40),
+            var_width: 8,
+            var_native_bytes: 1,
+            var_signed: false,
+            token: TokenRange::default(),
+            range: ProtoForRange::Forward {
+                start: ProtoForBound::Const(0),
+                end: ProtoForBound::Const(8),
+                inclusive: false,
+                step: 1,
+            },
+            body: vec![comb_assign(
+                0x80,
+                8,
+                None,
+                var_expr(VarOffset::Comb(0x40), 8),
+            )],
+        };
+        let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
+        assert!(
+            !s.contains("(const uint32_t*)(comb_values + 0x40)"),
+            "still loads the index from storage: {s}"
+        );
+        assert!(s.contains("_it0"), "lost the loop variable: {s}");
+    }
+
+    /// A body that assigns the index must keep reading storage: the C loop
+    /// variable no longer holds what a later read in the same iteration sees.
+    #[test]
+    fn emit_stmt_for_body_writing_the_index_keeps_the_load() {
+        let for_stmt = ProtoForStatement {
+            var_offset: VarOffset::Comb(0x40),
+            var_width: 8,
+            var_native_bytes: 1,
+            var_signed: false,
+            token: TokenRange::default(),
+            range: ProtoForRange::Forward {
+                start: ProtoForBound::Const(0),
+                end: ProtoForBound::Const(8),
+                inclusive: false,
+                step: 1,
+            },
+            body: vec![
+                comb_assign(0x40, 8, None, const_expr(3, 8)),
+                comb_assign(0x80, 8, None, var_expr(VarOffset::Comb(0x40), 8)),
+            ],
+        };
+        let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
+        assert!(
+            s.contains("(const uint32_t*)(comb_values + 0x40)"),
+            "substituted an index the body overwrites: {s}"
+        );
     }
 
     #[test]
@@ -13383,9 +14151,9 @@ mod tests {
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
         assert!(s.contains("_lo = 0ULL"));
-        assert!(s.contains("uint64_t _it = _lo"));
-        assert!(s.contains("_it < _hi"));
-        assert!(s.contains("_it += 1ULL"));
+        assert!(s.contains("uint64_t _it0 = _lo"));
+        assert!(s.contains("_it0 < _hi"));
+        assert!(s.contains("_it0 += 1ULL"));
     }
 
     #[test]
@@ -13406,9 +14174,9 @@ mod tests {
             body: vec![],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("int64_t _it = _hi - 1"));
-        assert!(s.contains("_it >= _lo"));
-        assert!(s.contains("_it -= 1ULL"));
+        assert!(s.contains("int64_t _it0 = _hi - 1"));
+        assert!(s.contains("_it0 >= _lo"));
+        assert!(s.contains("_it0 -= 1ULL"));
     }
 
     #[test]
@@ -14222,6 +14990,54 @@ mod tests {
         );
     }
 
+    /// A wide XOR whose result reaches a one-bit field is emitted as scalar
+    /// C: the wide path would zero-fill a buffer per operand and call the
+    /// helpers, all to deliver one bit.
+    #[test]
+    fn narrow_field_store_of_a_wide_xor_stays_scalar() {
+        let xor = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x100), 1)),
+            op: Op::BitXor,
+            y: Box::new(var_expr(VarOffset::Comb(0x108), 1)),
+            width: 710,
+            expr_context: ctx(710, false),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((0, 0)), xor)).unwrap();
+        assert!(!c.contains("vw_"), "still calls a wide helper: {c}");
+        assert!(!c.contains("= {0}"), "still zero-fills a wide buffer: {c}");
+        assert!(c.contains('^'), "lost the xor: {c}");
+    }
+
+    /// The low bits of a shift depend on bits above them, so the narrowing
+    /// must decline and leave the wide path in place.
+    #[test]
+    fn narrow_field_store_of_a_wide_shift_keeps_the_wide_path() {
+        let shr = ProtoExpression::Binary {
+            x: Box::new(var_expr(VarOffset::Comb(0x100), 710)),
+            op: Op::LogicShiftR,
+            y: Box::new(const_expr(4, 8)),
+            width: 710,
+            expr_context: ctx(710, false),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((0, 0)), shr)).unwrap();
+        assert!(c.contains("vw_"), "narrowed a shift: {c}");
+    }
+
+    /// A signed context sign-extends a narrow operand into the high words,
+    /// which a plain scalar read does not reproduce.
+    #[test]
+    fn narrow_field_store_of_a_signed_wide_add_keeps_the_wide_path() {
+        let add = ProtoExpression::Binary {
+            x: Box::new(var_expr_signed(VarOffset::Comb(0x100), 8)),
+            op: Op::Add,
+            y: Box::new(var_expr_signed(VarOffset::Comb(0x108), 8)),
+            width: 710,
+            expr_context: ctx(710, true),
+        };
+        let c = emit_stmt(&comb_assign(0x200, 710, Some((3, 0)), add)).unwrap();
+        assert!(c.contains("vw_"), "narrowed a signed add: {c}");
+    }
+
     #[test]
     fn localize_skips_partial_write() {
         // A bit-select write only updates part of the word; the rest comes from
@@ -14520,8 +15336,8 @@ mod tests {
             input_offsets: vec![],
             output_offsets: vec![VarOffset::Comb(0x0), VarOffset::Comb(0x10)],
             ff_canonical_offsets: vec![],
-            stmt_deps: vec![],
-            original_stmts: vec![cdyn_write(0x0, 0x8, 3)],
+            stmt_deps: std::sync::Arc::new(vec![]),
+            original_stmts: std::sync::Arc::new(vec![cdyn_write(0x0, 0x8, 3)]),
         };
         let stmts = vec![
             ProtoStatement::CompiledBlock(cb),
@@ -14538,6 +15354,7 @@ mod tests {
                 filename: "x.hex".into(),
                 elements: vec![],
                 width: 32,
+                hier: None,
             }),
         ];
         assert!(const_cone_partition(&stmts, &HashSet::default()).is_none());
@@ -14855,5 +15672,207 @@ mod tests {
         let stmt = dt_case(sel, arms, vec![cassign(0x80, 8, const_expr(0xff, 8))]);
         assert!(emit_stmt(&stmt).unwrap().contains("static const"));
         assert!(!decode_table_enabled() || std::env::var("VERYL_AOT_C_DECODE_TABLE").is_err());
+    }
+
+    #[test]
+    fn emit_event_clock_wide_write_skips_the_log_push_of_an_unchanged_value() {
+        // A clock-event wide write compares against its write slot and
+        // advances the log only when the value differs; a reset event, and a
+        // narrow write on any event, keep the unconditional push.
+        let wide = || ProtoAssignStatement {
+            dst: VarOffset::Ff(32),
+            dst_width: 200,
+            select: Some((34, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x5_a5a5_a5a5, 35),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let narrow = || ProtoAssignStatement {
+            dst: VarOffset::Ff(0x40),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 32),
+            dst_ff_current_offset: 0x40,
+            token: dummy_token(),
+        };
+        let emit = |a: ProtoAssignStatement, clock: bool| {
+            emit_event_function(&[ProtoStatement::Assign(a)], clock, &[]).unwrap()
+        };
+        assert!(emit(wide(), true).contains("? 1u : 0u"));
+        assert!(!emit(wide(), false).contains("? 1u : 0u"));
+        assert!(!emit(narrow(), true).contains("? 1u : 0u"));
+        assert!(emit(narrow(), true).contains("_lc + 1u"));
+    }
+
+    #[test]
+    fn emit_event_dual_slot_wide_field_write_logs_only_a_change() {
+        // `ff200[34:0] <= v` into a dual-slot FF (write slot at current + 32):
+        // the in-place field merge logs the field's byte span when it changed
+        // the slot, and nothing once the slot already holds the value.
+        if !cc_available() {
+            eprintln!("emit_event_dual_slot_wide_field_write_logs_only_a_change: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(32),
+            dst_width: 200,
+            select: Some((34, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x5_a5a5_a5a5, 35),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_event_function(&[ProtoStatement::Assign(a)], true, &[]).expect("must emit");
+        let mut ff = vec![0u8; 64];
+        let Some(entries) = run_wide_ff_event(&src, "wff_skip_changed", &mut ff) else {
+            return;
+        };
+        assert_eq!(entries.len(), 1, "a changed field is logged");
+        assert_eq!(entries[0].0, 0, "logged at the current offset");
+        assert_eq!(entries[0].1.len(), 5, "[34:0] spans bytes 0..=4");
+        let entries = run_wide_ff_event(&src, "wff_skip_unchanged", &mut ff).unwrap();
+        assert!(
+            entries.is_empty(),
+            "an unchanged write must not be logged: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn emit_event_gate_skips_an_idle_subtree_and_reruns_on_a_changed_read() {
+        // One gated FF write.  The gate skips only when its idle flag was
+        // set by a fire that advanced no log and the compared read matches
+        // the shadow taken at the last run.
+        if !cc_available() {
+            eprintln!("emit_event_gate_skips_an_idle_subtree_and_reruns_on_a_changed_read: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(32),
+            dst_width: 200,
+            select: Some((34, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x5_a5a5_a5a5, 35),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let gate = EventGate {
+            lo: 0,
+            hi: 1,
+            state_off: 0x90,
+            compare: vec![(false, 0x40, 0x44)],
+            out_comb: Vec::new(),
+            cone: String::new(),
+        };
+        let src =
+            emit_event_function(&[ProtoStatement::Assign(a)], true, &[gate]).expect("must emit");
+        assert!(src.contains("veryl_evg_0_0"), "{src}");
+        let mut ff = vec![0u8; 64];
+        let mut comb = vec![0u8; 256];
+        // Not idle yet: the fire runs, changes the slot, and stays not idle.
+        let Some(e) = run_wide_ff_event_in(&src, "evg_run1", &mut ff, &mut comb) else {
+            return;
+        };
+        assert_eq!(e.len(), 1, "first fire writes");
+        assert_eq!(comb[0x90], 0, "a fire that advanced the log is not idle");
+        // Same write again: nothing advances, so the gate turns idle.
+        let e = run_wide_ff_event_in(&src, "evg_run2", &mut ff, &mut comb).expect("compiles");
+        assert!(e.is_empty());
+        assert_eq!(comb[0x90], 1, "a fire that advanced nothing is idle");
+        // Idle gate, unchanged read: skipped.  Disturbing the slot proves
+        // it, since a run would push the write back.
+        ff[32] ^= 0xff;
+        let e = run_wide_ff_event_in(&src, "evg_skip", &mut ff, &mut comb).expect("compiles");
+        assert!(e.is_empty(), "skipped fire pushes nothing: {e:?}");
+        // A changed extra read reruns the range and refreshes the shadow.
+        comb[0x41] = 7;
+        let e = run_wide_ff_event_in(&src, "evg_rerun", &mut ff, &mut comb).expect("compiles");
+        assert_eq!(e.len(), 1, "a changed read reruns the fire");
+        assert_eq!(
+            comb[0x90 + crate::ir::opt::event_gate::GATE_STATE_HEADER_BYTES + 1],
+            7,
+            "the shadow follows the run"
+        );
+        // An off gate runs whatever it reads; with its period over it
+        // re-arms, and the next idle fire snapshots so the one after skips.
+        comb[0x92] = 1;
+        ff[32] ^= 0xff;
+        let e = run_wide_ff_event_in(&src, "evg_off", &mut ff, &mut comb).expect("compiles");
+        assert_eq!(e.len(), 1, "an off gate reruns the fire");
+        assert_eq!(comb[0x92], 0, "the period passed: re-armed");
+        comb[0x41] = 9;
+        let e = run_wide_ff_event_in(&src, "evg_rearm_idle", &mut ff, &mut comb).expect("compiles");
+        assert!(e.is_empty(), "same write after re-arming: idle");
+        assert_eq!(comb[0x90], 1);
+        ff[32] ^= 0xff;
+        let e = run_wide_ff_event_in(&src, "evg_rearm_skip", &mut ff, &mut comb).expect("compiles");
+        assert!(
+            e.is_empty(),
+            "the unchecked idle run snapshotted, so this skips: {e:?}"
+        );
+    }
+
+    #[test]
+    fn emit_event_gate_judges_a_narrow_write_by_the_entry_it_pushed() {
+        // A narrow write always pushes; the gate reads the entry back and
+        // holds the range idle only when the pushed value is what the slot
+        // already holds.
+        if !cc_available() {
+            eprintln!("emit_event_gate_judges_a_narrow_write_by_the_entry_it_pushed: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(0x44),
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 32),
+            dst_ff_current_offset: 0x40,
+            token: dummy_token(),
+        };
+        let gate = EventGate {
+            lo: 0,
+            hi: 1,
+            state_off: 0x90,
+            compare: vec![(false, 0x40, 0x44)],
+            out_comb: Vec::new(),
+            cone: String::new(),
+        };
+        let src =
+            emit_event_function(&[ProtoStatement::Assign(a)], true, &[gate]).expect("must emit");
+        let mut ff = vec![0u8; 128];
+        let mut comb = vec![0u8; 256];
+        let next = |ff: &[u8]| u32::from_le_bytes(ff[0x44..0x48].try_into().unwrap());
+        // The pushed value differs from the current slot: not idle.
+        let Some(_) = run_wide_ff_event_in(&src, "evgn_run1", &mut ff, &mut comb) else {
+            return;
+        };
+        assert_eq!(
+            next(&ff),
+            0x1234,
+            "the dual-slot write lands in the next slot"
+        );
+        assert_eq!(comb[0x90], 0, "a changed value is not idle");
+        // Once committed, the same write pushes an entry that repeats the
+        // current value: idle.
+        ff[0x40..0x44].copy_from_slice(&0x1234u32.to_le_bytes());
+        run_wide_ff_event_in(&src, "evgn_run2", &mut ff, &mut comb).unwrap();
+        assert_eq!(comb[0x90], 1, "a repeated value is idle");
+        // Idle and the compared read unchanged: skipped, so a disturbed next
+        // slot stays disturbed.
+        ff[0x44] ^= 0xff;
+        run_wide_ff_event_in(&src, "evgn_skip", &mut ff, &mut comb).unwrap();
+        assert_eq!(next(&ff), 0x1234 ^ 0xff, "a skipped fire writes nothing");
+        // A changed read reruns the range, which restores the slot.
+        comb[0x41] = 7;
+        run_wide_ff_event_in(&src, "evgn_rerun", &mut ff, &mut comb).unwrap();
+        assert_eq!(next(&ff), 0x1234, "a changed read reruns the fire");
+        assert_eq!(comb[0x90], 1, "the rerun repeated the current value");
     }
 }
