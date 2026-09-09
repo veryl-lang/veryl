@@ -8,7 +8,7 @@ BIN_NAMES = veryl veryl-ls
 
 export VERSION
 
-.PHONY: all test clean lint release_lnx release_win release_mac
+.PHONY: all test clean lint build_lnx build_lnx_aarch64 release_lnx release_lnx_aarch64 release_win release_mac
 
 all:
 	cargo build
@@ -23,17 +23,26 @@ lint:
 	cargo fmt --check
 	cargo clippy -- -D warnings
 
+# The published binaries must stay dynamically linked: a static binary carries
+# no dynamic loader, so it can neither dlopen a native verification component
+# nor load the object the AOT-C backend compiles. Building is split from
+# packaging because the release workflow runs it in an old-glibc container;
+# running it on the host would raise the baseline to whatever the host has.
+build_lnx:
+	cargo build --locked --release --target=x86_64-unknown-linux-gnu $(addprefix --bin , ${BIN_NAMES})
+	cargo build --locked --release --target=x86_64-unknown-linux-gnu --manifest-path ./support/sourcemap-resolver/Cargo.toml
+
 release_lnx:
-	cargo build --locked --release --target=x86_64-unknown-linux-musl $(addprefix --bin , ${BIN_NAMES})
-	cargo build --locked --release --target=x86_64-unknown-linux-musl --manifest-path ./support/sourcemap-resolver/Cargo.toml
-	zip -j ${ZIP_NAME}-x86_64-linux.zip $(addprefix target/x86_64-unknown-linux-musl/release/, ${BIN_NAMES}) \
-		                                ./support/sourcemap-resolver/target/x86_64-unknown-linux-musl/release/sourcemap-resolver
+	zip -j ${ZIP_NAME}-x86_64-linux.zip $(addprefix target/x86_64-unknown-linux-gnu/release/, ${BIN_NAMES}) \
+		                                ./support/sourcemap-resolver/target/x86_64-unknown-linux-gnu/release/sourcemap-resolver
+
+build_lnx_aarch64:
+	cargo build --locked --release --target=aarch64-unknown-linux-gnu $(addprefix --bin , ${BIN_NAMES})
+	cargo build --locked --release --target=aarch64-unknown-linux-gnu --manifest-path ./support/sourcemap-resolver/Cargo.toml
 
 release_lnx_aarch64:
-	cargo build --locked --release --target=aarch64-unknown-linux-musl $(addprefix --bin , ${BIN_NAMES})
-	cargo build --locked --release --target=aarch64-unknown-linux-musl --manifest-path ./support/sourcemap-resolver/Cargo.toml
-	zip -j ${ZIP_NAME}-aarch64-linux.zip $(addprefix target/aarch64-unknown-linux-musl/release/, ${BIN_NAMES}) \
-		                                ./support/sourcemap-resolver/target/aarch64-unknown-linux-musl/release/sourcemap-resolver
+	zip -j ${ZIP_NAME}-aarch64-linux.zip $(addprefix target/aarch64-unknown-linux-gnu/release/, ${BIN_NAMES}) \
+		                                 ./support/sourcemap-resolver/target/aarch64-unknown-linux-gnu/release/sourcemap-resolver
 
 release_win:
 	cargo build --locked --release --target=x86_64-pc-windows-msvc $(addprefix --bin , ${BIN_NAMES})
@@ -61,11 +70,6 @@ release_mac:
 
 release_version:
 	echo "$(VERSION)" > version
-
-release_rpm:
-	mkdir -p target
-	cargo rpm build
-	cp target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64/* ./
 
 watch:
 	cargo watch -i crates/parser/src/generated -x test -x bench

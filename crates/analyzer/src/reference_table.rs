@@ -1,4 +1,5 @@
 use crate::AnalyzerError;
+use crate::HashSet;
 use crate::generic_inference_table;
 use crate::namespace::{DefineContext, Namespace};
 use crate::scope;
@@ -9,7 +10,7 @@ use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
-use veryl_parser::resource_table::TokenId;
+use veryl_parser::resource_table::{StrId, TokenId};
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::{
     ExpressionIdentifier, GenericArgIdentifier, HierarchicalIdentifier, Identifier,
@@ -518,6 +519,24 @@ impl ReferenceTable {
             id: None,
             map: target.generic_table(&instance_path.arguments),
         });
+
+        // A design reaches the same instance from every use site, and the
+        // walk below only re-derives what it registered the first time.  The
+        // scope is part of the identity: the mangled name alone does not tell
+        // apart instances bound under different enclosing generics.  The
+        // registrations above stay: a global function is emitted into its
+        // caller's namespace, so each caller records its own affiliation.
+        let first_time = EXPANDED.with(|e| {
+            e.borrow_mut().insert((
+                token.text,
+                symbol.scope,
+                scope::intern_namespace(namespace),
+                affiliation_symbol.map(|x| x.id),
+            ))
+        });
+        if !first_time {
+            return;
+        }
         Self::insert_subordinate_generic_instances(
             namespace,
             target,
@@ -585,7 +604,21 @@ impl ReferenceTable {
 
             path.apply_map(generic_maps);
             path.unalias(None);
-            path.append_namespace_path(namespace, &target.namespace);
+            // The subordinate path is written inside `target`, so it must be
+            // qualified from `target`'s inner namespace: the caller's namespace
+            // neither sees `target`'s imports nor tells whether the referred
+            // symbol lives in another project.
+            // A global function is emitted into the namespace that refers to
+            // it, not the one that declares it.
+            let refers_global_function =
+                symbol_table::resolve((&path.generic_path(), target_namespace))
+                    .is_ok_and(|x| x.found.is_global_function());
+            let ref_namespace = if is_global_func || refers_global_function {
+                namespace
+            } else {
+                target_namespace
+            };
+            path.append_namespace_path(ref_namespace, &target.namespace);
 
             if let Ok(path_symbol) = symbol_table::resolve((&path.generic_path(), target_namespace))
             {
@@ -764,6 +797,7 @@ impl ReferenceTable {
 
     pub fn apply(&mut self) -> Vec<AnalyzerError> {
         symbol_table::suppress_cache_clear();
+        EXPANDED.with(|e| e.borrow_mut().clear());
         let candidates: Vec<_> = std::mem::take(&mut self.candidates);
 
         for x in &candidates {
@@ -897,6 +931,13 @@ impl ReferenceTable {
         symbol.inner_namespace()
     }
 }
+
+/// `(mangled name, instance scope, namespace, affiliation)`.
+type ExpansionKey = (StrId, scope::ScopeId, scope::ScopeId, Option<SymbolId>);
+
+thread_local!(
+    static EXPANDED: RefCell<HashSet<ExpansionKey>> = RefCell::new(HashSet::default())
+);
 
 thread_local!(static REFERENCE_TABLE: RefCell<ReferenceTable> = RefCell::new(ReferenceTable::new()));
 

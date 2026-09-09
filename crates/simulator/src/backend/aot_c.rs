@@ -81,13 +81,19 @@ impl Backend for AotCBackend {
     fn compile_whole_event(
         &mut self,
         ctx: &CompileCtx,
-        _event: &Event,
+        event: &Event,
         stmts: &[ProtoStatement],
+        gates: &[crate::ir::opt::event_gate::EventGate],
     ) -> Option<Arc<dyn CompiledWhole>> {
         if ctx.use_4state || !self.event_enabled {
             return None;
         }
-        let cell = emit::prepare_event(stmts, self.async_mode)?;
+        let cell = emit::prepare_event(
+            stmts,
+            self.async_mode,
+            matches!(event, Event::Clock(_)),
+            gates,
+        )?;
         Some(Arc::new(AotCWhole {
             cell,
             localized: Arc::new(Vec::new()),

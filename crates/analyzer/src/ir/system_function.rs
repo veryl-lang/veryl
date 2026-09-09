@@ -3,8 +3,8 @@ use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::FfTable;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, IrResult, Shape, Type, TypeKind, ValueVariant,
-    VarPathSelect,
+    AssignDestination, Comptime, Expression, Factor, HierVarRef, IrResult, Shape, Type, TypeKind,
+    ValueVariant, VarPathSelect,
 };
 use crate::symbol::Affiliation;
 use crate::value::Value;
@@ -23,17 +23,39 @@ impl fmt::Display for Input {
 }
 
 #[derive(Clone, Debug)]
-pub struct Output(pub Vec<AssignDestination>);
+pub enum Output {
+    /// Destinations in the calling scope.
+    Local(Vec<AssignDestination>),
+    /// A whole variable inside an instance (`$readmemh(path, u_dut.mem)`),
+    /// resolved by the IR conversion once the instance tree exists.
+    Hier(Box<HierVarRef>),
+}
+
+impl Output {
+    pub fn local(&self) -> &[AssignDestination] {
+        match self {
+            Output::Local(x) => x,
+            Output::Hier(_) => &[],
+        }
+    }
+}
 
 impl fmt::Display for Output {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let dst = match self {
+            Output::Local(x) => x,
+            Output::Hier(x) => {
+                let path: Vec<String> = x.inst_path.iter().map(|x| x.to_string()).collect();
+                return format!("{}.{}", path.join("."), x.var_path).fmt(f);
+            }
+        };
         let mut ret = String::new();
 
-        if self.0.len() == 1 {
-            ret.push_str(&format!("{}", self.0[0]));
-        } else if !self.0.is_empty() {
-            ret.push_str(&format!("{{{}", self.0[0]));
-            for d in &self.0[1..] {
+        if dst.len() == 1 {
+            ret.push_str(&format!("{}", dst[0]));
+        } else if !dst.is_empty() {
+            ret.push_str(&format!("{{{}", dst[0]));
+            for d in &dst[1..] {
                 ret.push_str(&format!(", {}", d));
             }
             ret.push_str("}}");
@@ -114,7 +136,7 @@ fn create_output(
 ) -> Output {
     let (mut expr, dst, token) = arg;
 
-    let dst = dst
+    let dst: Vec<AssignDestination> = dst
         .into_iter()
         .filter_map(|x| x.to_assign_destination(context, false))
         .collect();
@@ -130,7 +152,19 @@ fn create_output(
         }
     }
 
-    Output(dst)
+    // `find_path` only sees the calling scope, so a hierarchical target has no
+    // local destination; the expression form of the argument carries the
+    // resolved instance path instead.  A part of the variable is not a target.
+    if dst.is_empty()
+        && let Expression::Term(factor) = &expr
+        && let Factor::HierVariable(hier) = factor.as_ref()
+        && hier.index.0.is_empty()
+        && hier.select.is_empty()
+    {
+        return Output::Hier(hier.clone());
+    }
+
+    Output::Local(dst)
 }
 
 impl SystemFunctionCall {
@@ -446,7 +480,7 @@ impl SystemFunctionCall {
         assign_context: AssignContext,
     ) {
         if let SystemFunctionKind::Readmemh(_, x) = &self.kind {
-            for x in &x.0 {
+            for x in x.local() {
                 x.eval_assign(context, assign_table, assign_context);
             }
         }

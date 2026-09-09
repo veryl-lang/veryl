@@ -131,7 +131,7 @@ pub fn collect_stmt_deps(stmt: &ProtoStatement, deps: &mut StmtDeps) {
         }
         ProtoStatement::CompiledBlock(x) => {
             if !x.original_stmts.is_empty() {
-                for s in &x.original_stmts {
+                for s in x.original_stmts.iter() {
                     collect_stmt_deps(s, deps);
                 }
             } else {

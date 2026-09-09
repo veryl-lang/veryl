@@ -8,6 +8,7 @@ use crate::ir::{
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use crate::wave_dumper::WaveDumper;
+use smallvec::SmallVec;
 use veryl_analyzer::ir::{AssertKind, ControlFlow};
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
@@ -483,10 +484,15 @@ fn convert_stmts(
 }
 
 pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestResult {
+    run_testbench_blocks(sim, &[stmts])
+}
+
+/// Run a test module's `initial` blocks, one process each.
+pub fn run_testbench_blocks(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> TestResult {
     assert_buffer::reset();
     crate::file_table::reset();
     crate::random_table::reset(sim.ir.seed);
-    let result: TestResult = exec(sim, stmts).into();
+    let result: TestResult = run_processes(sim, blocks).into();
     // End-of-test component hooks may still record failures.
     sim.finish_components();
     let component_failures = sim.take_component_failures();
@@ -519,25 +525,35 @@ pub fn run_testbench(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> TestR
 /// What a run needs before its first cycle that the ELABORATED DESIGN alone
 /// fixes — build work that merely happens to be done here.  One call, so the
 /// boundary is a fact about the code and not about where a timer sits.
+///
+/// One statement list per `initial` block, in declaration order.
 fn derive_testbench(
     sim: &mut Simulator,
     module_name: &str,
-) -> Result<Vec<TestbenchStatement>, SimulatorError> {
+) -> Result<Vec<Vec<TestbenchStatement>>, SimulatorError> {
     let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);
 
     let token = sim.ir.token;
-    let initial_stmts = sim
+    let mut initials: Vec<(u32, &Vec<Statement>)> = sim
         .ir
         .event_statements
-        .get(&Event::Initial)
-        .ok_or_else(|| SimulatorError::no_initial_block(module_name, &token))?;
-
-    let tb_stmts = convert_initial_to_testbench(initial_stmts, &event_map, &clock_periods, 3);
+        .iter()
+        .filter_map(|(event, stmts)| event.initial_index().map(|i| (i, stmts)))
+        .collect();
+    initials.sort_by_key(|(i, _)| *i);
+    if initials.is_empty() {
+        return Err(SimulatorError::no_initial_block(module_name, &token));
+    }
+    let blocks: Vec<Vec<TestbenchStatement>> = initials
+        .iter()
+        .map(|(_, stmts)| convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3))
+        .collect();
     // Statements that write only testbench-private state do not have to
     // re-settle the design; see `tb_dirty`.
-    sim.tb_dirty = crate::tb_dirty::TbDirtyFilter::build(&sim.ir, &tb_stmts);
-    Ok(tb_stmts)
+    let slices: Vec<&[TestbenchStatement]> = blocks.iter().map(Vec::as_slice).collect();
+    sim.tb_dirty = crate::tb_dirty::TbDirtyFilter::build_blocks(&sim.ir, &slices);
+    Ok(blocks)
 }
 
 /// Run a native testbench from a simulator IR.
@@ -589,12 +605,15 @@ pub fn run_native_testbench_timed(
     // so the derivation span is measured off-wasm only.
     #[cfg(not(target_family = "wasm"))]
     let t_derive = std::time::Instant::now();
-    let tb_stmts = derive_testbench(&mut sim, &module_name)?;
+    let blocks = derive_testbench(&mut sim, &module_name)?;
     #[cfg(not(target_family = "wasm"))]
     let derive_el = t_derive.elapsed();
     #[cfg(target_family = "wasm")]
     let derive_el = std::time::Duration::ZERO;
-    let result = run_testbench(&mut sim, &tb_stmts);
+    // `tb_dirty` keys on the statements' addresses: `blocks` stays put
+    // until the run is over.
+    let slices: Vec<&[TestbenchStatement]> = blocks.iter().map(Vec::as_slice).collect();
+    let result = run_testbench_blocks(&mut sim, &slices);
 
     #[cfg(feature = "profile")]
     {
@@ -650,120 +669,731 @@ pub fn run_native_testbench_timed(
     Ok((result, derive_el))
 }
 
-fn exec(sim: &mut Simulator, stmts: &[TestbenchStatement]) -> ExecResult {
-    for stmt in stmts {
-        let result = exec_one(sim, stmt);
-        if result.should_stop() {
-            return result;
-        }
-        if assert_buffer::has_fatal() {
-            return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
-        }
-    }
-    ExecResult::Continue
+/// One `initial` block's control state.  The statement tree is walked with
+/// an explicit frame stack rather than recursion so that a `clk.next()`
+/// reached inside `for` / `if` bodies can suspend the process and resume it
+/// after the edge.
+struct Process<'a> {
+    frames: Vec<Frame<'a>>,
 }
 
-fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
-    match stmt {
-        TestbenchStatement::Stmt(s) => {
-            sim.ensure_comb_updated();
-            let flow = s.eval_step(&mut sim.mask_cache);
-            // A statement that writes only testbench-private variables cannot
-            // change a comb input, so the next read does not need a settle.
-            if !sim.tb_dirty.is_clean(s) {
-                sim.mark_comb_dirty();
+struct Frame<'a> {
+    stmts: &'a [TestbenchStatement],
+    pc: usize,
+    /// `Some` for a `for` body: how the loop advances when the body runs off
+    /// its end.
+    repeat: Option<Repeat<'a>>,
+}
+
+enum Repeat<'a> {
+    /// Fixed-count loop: iterations still to run after the current one.
+    Count(u64),
+    /// Loop over a testbench variable, mirroring the emitted SV `for`: `i`
+    /// is the current value, `bound` the exclusive end (or the inclusive
+    /// lower bound of a reverse loop).
+    Var {
+        lv: &'a LoopVariable,
+        i: i64,
+        bound: i64,
+    },
+}
+
+/// Why a process stopped running.
+enum ProcStep<'a> {
+    /// Blocked on a clock: resume once the edges have been taken.
+    Wait(Wait<'a>),
+    /// Ran off the end of its block (or broke out of it).
+    Done,
+    /// `$finish`, or a component asked to finish.
+    Finished,
+    Fail(String),
+}
+
+enum Wait<'a> {
+    Clock {
+        clock: &'a Event,
+        count: u64,
+        high_time: u64,
+        low_time: u64,
+    },
+    Reset {
+        reset: &'a Event,
+        clock: &'a Event,
+        duration: u64,
+        high_time: u64,
+        low_time: u64,
+    },
+}
+
+fn write_loop_var(lv: &LoopVariable, i: u64) {
+    let val = Value::new(i, lv.width, lv.signed);
+    // SAFETY: the loop variable's storage lives in the IR's buffers for the
+    // whole run, and the testbench runs on one thread.
+    unsafe {
+        write_native_value(lv.ptr, lv.native_bytes, lv.use_4state, &val);
+    }
+}
+
+impl<'a> Process<'a> {
+    fn new(stmts: &'a [TestbenchStatement]) -> Self {
+        Process {
+            frames: vec![Frame {
+                stmts,
+                pc: 0,
+                repeat: None,
+            }],
+        }
+    }
+
+    /// Push the body frame unless the loop runs zero times.
+    fn enter_for(
+        &mut self,
+        sim: &mut Simulator,
+        count: u64,
+        body: &'a [TestbenchStatement],
+        loop_var: &'a Option<LoopVariable>,
+    ) {
+        let repeat = match loop_var {
+            Some(lv) => {
+                let r = &lv.range;
+                let start = r.start.eval(&mut sim.mask_cache);
+                let mut end = r.end.eval(&mut sim.mask_cache);
+                if r.inclusive {
+                    end = end.saturating_add(1);
+                }
+                if r.reverse {
+                    // Mirror the emitted SV `for (int i = hi - 1; i >= lo;
+                    // i -= step)`; i64 makes underflow past lo terminate.
+                    let i = end as i64 - 1;
+                    let lo = start as i64;
+                    if i < lo {
+                        return;
+                    }
+                    write_loop_var(lv, i as u64);
+                    Repeat::Var { lv, i, bound: lo }
+                } else {
+                    if start >= end {
+                        return;
+                    }
+                    write_loop_var(lv, start);
+                    Repeat::Var {
+                        lv,
+                        i: start as i64,
+                        bound: end as i64,
+                    }
+                }
             }
-            if flow == ControlFlow::Break {
-                ExecResult::Break
-            } else {
-                ExecResult::Continue
+            None => {
+                if count == 0 {
+                    return;
+                }
+                Repeat::Count(count - 1)
+            }
+        };
+        self.frames.push(Frame {
+            stmts: body,
+            pc: 0,
+            repeat: Some(repeat),
+        });
+    }
+
+    /// Advance a loop whose body just ran off its end: true to run the body
+    /// again (the variable is already updated), false when it is exhausted.
+    fn advance(repeat: &mut Repeat<'a>) -> bool {
+        match repeat {
+            Repeat::Count(remaining) => {
+                if *remaining == 0 {
+                    return false;
+                }
+                *remaining -= 1;
+                true
+            }
+            Repeat::Var { lv, i, bound } => {
+                let r = &lv.range;
+                if r.reverse {
+                    *i -= r.step as i64;
+                    if *i < *bound {
+                        return false;
+                    }
+                } else if let Some(op) = r.op {
+                    // Progress guard: a stalled or faulting step would spin
+                    // forever (const-bound cases are rejected at analysis;
+                    // runtime bounds reach here).
+                    match op.eval(*i as usize, r.step as usize) {
+                        Some(n) if n as i64 > *i => *i = n as i64,
+                        _ => return false,
+                    }
+                    if *i >= *bound {
+                        return false;
+                    }
+                } else {
+                    *i += r.step as i64;
+                    if *i >= *bound {
+                        return false;
+                    }
+                }
+                write_loop_var(lv, *i as u64);
+                true
             }
         }
-        TestbenchStatement::ClockNext {
+    }
+
+    /// `break`: leave the innermost `for`.  Outside any loop the block ends.
+    fn unwind_break(&mut self) {
+        while let Some(frame) = self.frames.pop() {
+            if frame.repeat.is_some() {
+                return;
+            }
+        }
+    }
+
+    /// Run until the process blocks on a clock, ends, or fails.
+    fn run(&mut self, sim: &mut Simulator) -> ProcStep<'a> {
+        loop {
+            let Some(frame) = self.frames.last_mut() else {
+                return ProcStep::Done;
+            };
+            if frame.pc >= frame.stmts.len() {
+                let again = match &mut frame.repeat {
+                    Some(repeat) => Self::advance(repeat),
+                    None => false,
+                };
+                if again {
+                    frame.pc = 0;
+                } else {
+                    self.frames.pop();
+                }
+                continue;
+            }
+            let stmt = &frame.stmts[frame.pc];
+            frame.pc += 1;
+            match stmt {
+                TestbenchStatement::If {
+                    condition,
+                    then_block,
+                    else_block,
+                } => {
+                    sim.ensure_comb_updated();
+                    let val = condition.eval(&mut sim.mask_cache);
+                    let branch = if val.payload_u64() != 0 {
+                        then_block
+                    } else {
+                        else_block
+                    };
+                    self.frames.push(Frame {
+                        stmts: branch,
+                        pc: 0,
+                        repeat: None,
+                    });
+                }
+                TestbenchStatement::For {
+                    count,
+                    body,
+                    loop_var,
+                } => self.enter_for(sim, *count, body, loop_var),
+                TestbenchStatement::ClockNext {
+                    clock,
+                    count,
+                    high_time,
+                    low_time,
+                } => {
+                    let count = if let Some(expr) = count {
+                        sim.ensure_comb_updated();
+                        let val = expr.eval(&mut sim.mask_cache);
+                        // count 0 must advance 0 cycles (SV `repeat(0)`); don't
+                        // clamp.  The no-arg form is the `else` branch below.
+                        val.payload_u64()
+                    } else {
+                        1
+                    };
+                    return ProcStep::Wait(Wait::Clock {
+                        clock,
+                        count,
+                        high_time: *high_time,
+                        low_time: *low_time,
+                    });
+                }
+                TestbenchStatement::ResetAssert {
+                    reset,
+                    clock,
+                    duration,
+                    high_time,
+                    low_time,
+                } => {
+                    return ProcStep::Wait(Wait::Reset {
+                        reset,
+                        clock,
+                        duration: *duration,
+                        high_time: *high_time,
+                        low_time: *low_time,
+                    });
+                }
+                TestbenchStatement::Finish => return ProcStep::Finished,
+                other => match exec_simple(sim, other) {
+                    ExecResult::Continue => {}
+                    ExecResult::Break => self.unwind_break(),
+                    ExecResult::Finished => return ProcStep::Finished,
+                    ExecResult::Fail(msg) => return ProcStep::Fail(msg),
+                },
+            }
+            if assert_buffer::has_fatal() {
+                return ProcStep::Fail(assert_buffer::take_failure().unwrap_or_default());
+            }
+        }
+    }
+}
+
+/// A `$tb::clock_gen` some process has waited on.
+struct TbClock<'a> {
+    event: &'a Event,
+    high_time: u64,
+    low_time: u64,
+    /// Simulated time of its next posedge.  A clock nobody waits on does
+    /// not advance, so this may lie in the past; the edge is then taken at
+    /// the current time.
+    next_edge: u64,
+}
+
+/// A `rst.assert` in progress: the level is held while its process waits
+/// for the clock, and the first of those edges carries the assertion.
+struct ResetHold<'a> {
+    reset: &'a Event,
+    assertion_pending: bool,
+}
+
+enum TaskState<'a> {
+    /// Runs when simulated time reaches `at`.
+    Runnable {
+        at: u64,
+    },
+    /// Waiting for `remaining` more posedges of `clocks[clock]`.
+    Waiting {
+        clock: usize,
+        remaining: u64,
+        reset: Option<ResetHold<'a>>,
+    },
+    Done,
+}
+
+struct Task<'a> {
+    process: Process<'a>,
+    state: TaskState<'a>,
+}
+
+/// The scheduler's next thing to do, earliest time first; at one instant a
+/// clock's falling edge (waveform only) is recorded first, then the runnable
+/// processes execute, then the posedges are taken -- statements between two
+/// `next` calls run before the edge they lead up to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Due {
+    Negedge(u64),
+    Run(u64),
+    Edge(u64),
+}
+
+impl Due {
+    fn time(self) -> u64 {
+        match self {
+            Due::Negedge(t) | Due::Run(t) | Due::Edge(t) => t,
+        }
+    }
+
+    /// Time first, then the order within an instant.
+    fn key(self) -> (u64, u8) {
+        match self {
+            Due::Negedge(t) => (t, 0),
+            Due::Run(t) => (t, 1),
+            Due::Edge(t) => (t, 2),
+        }
+    }
+}
+
+/// Run the blocks as concurrent processes: at one instant the runnable ones
+/// execute in declaration order, each until it waits on a clock or ends;
+/// time then advances to the earliest posedge being waited on, and every
+/// clock due at that instant fires in one step so domains that rise together
+/// read each other's pre-edge values.  A `$finish` anywhere ends the run.
+fn run_processes(sim: &mut Simulator, blocks: &[&[TestbenchStatement]]) -> ExecResult {
+    if let [block] = blocks {
+        return run_single_process(sim, Process::new(block));
+    }
+    let mut tasks: Vec<Task> = blocks
+        .iter()
+        .map(|block| Task {
+            process: Process::new(block),
+            state: TaskState::Runnable { at: sim.time },
+        })
+        .collect();
+    let mut clocks: Vec<TbClock> = Vec::new();
+    // Pending falling edges `(time, clock)`, kept only for the waveform.
+    let mut negedges: Vec<(u64, usize)> = Vec::new();
+    let result = loop {
+        // Once the other processes have ended, the survivor no longer needs
+        // the scheduler: at its next run point it is handed to the
+        // single-process loop, which steps the clock in place at a fraction
+        // of the cost per edge.  Only while at most one clock has been waited
+        // on, so every later edge lands at the time the scheduler would have
+        // given it.
+        if negedges.is_empty() && clocks.len() <= 1 {
+            let mut live = tasks
+                .iter_mut()
+                .filter(|task| !matches!(task.state, TaskState::Done));
+            if let (Some(task), None) = (live.next(), live.next())
+                && let TaskState::Runnable { at } = task.state
+            {
+                sim.time = at;
+                let process = std::mem::replace(&mut task.process, Process::new(&[]));
+                break run_single_process(sim, process);
+            }
+        }
+        let now = sim.time;
+        let mut due: Option<Due> = None;
+        let mut consider = |d: Due| {
+            if due.is_none_or(|cur| d.key() < cur.key()) {
+                due = Some(d);
+            }
+        };
+        if let Some(&(t, _)) = negedges.iter().min_by_key(|(t, _)| *t) {
+            consider(Due::Negedge(t));
+        }
+        for task in &tasks {
+            match task.state {
+                TaskState::Runnable { at } => consider(Due::Run(at)),
+                TaskState::Waiting { clock, .. } => {
+                    consider(Due::Edge(clocks[clock].next_edge.max(now)));
+                }
+                TaskState::Done => {}
+            }
+        }
+        let Some(due) = due else {
+            break ExecResult::Continue;
+        };
+        sim.time = due.time();
+        match due {
+            Due::Negedge(t) => {
+                for &(_, clock) in negedges.iter().filter(|(tt, _)| *tt == t) {
+                    if let Some(id) = clocks[clock].event.var_id() {
+                        sim.set_var_by_id(&id, Value::new(0, 1, false));
+                    }
+                }
+                negedges.retain(|(tt, _)| *tt != t);
+                sim.dump_variables();
+            }
+            Due::Run(t) => {
+                let mut stop = None;
+                for task in tasks.iter_mut() {
+                    if !matches!(task.state, TaskState::Runnable { at } if at == t) {
+                        continue;
+                    }
+                    let result = run_task(sim, task, &mut clocks);
+                    if result.should_stop() {
+                        stop = Some(result);
+                        break;
+                    }
+                }
+                if let Some(result) = stop {
+                    break result;
+                }
+            }
+            Due::Edge(t) => {
+                let fired: SmallVec<[usize; 4]> = (0..clocks.len())
+                    .filter(|&i| {
+                        clocks[i].next_edge.max(now) == t
+                            && tasks
+                                .iter()
+                                .any(|task| matches!(task.state, TaskState::Waiting { clock, .. } if clock == i))
+                    })
+                    .collect();
+                let result = take_edges(sim, &mut tasks, &mut clocks, &fired, &mut negedges);
+                if result.should_stop() {
+                    break result;
+                }
+            }
+        }
+    };
+    // The waveform still gets the falling edges of the last step.
+    negedges.sort_unstable();
+    for (t, clock) in negedges {
+        sim.time = t;
+        if let Some(id) = clocks[clock].event.var_id() {
+            sim.set_var_by_id(&id, Value::new(0, 1, false));
+        }
+        sim.dump_variables();
+    }
+    result
+}
+
+/// The one-process case needs no scheduler: its clocks are stepped in place
+/// as each wait is reached, which is also the cheapest path for the
+/// `clk.next(1)` per cycle testbenches that dominate.
+fn run_single_process(sim: &mut Simulator, mut process: Process<'_>) -> ExecResult {
+    loop {
+        match process.run(sim) {
+            ProcStep::Wait(wait) => {
+                let result = take_edges_alone(sim, wait);
+                if result.should_stop() {
+                    return result;
+                }
+                if assert_buffer::has_fatal() {
+                    return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
+                }
+            }
+            ProcStep::Done => return ExecResult::Continue,
+            ProcStep::Finished => return ExecResult::Finished,
+            ProcStep::Fail(msg) => return ExecResult::Fail(msg),
+        }
+    }
+}
+
+/// Take the edges the only process is waiting for, one step each.
+fn take_edges_alone(sim: &mut Simulator, wait: Wait<'_>) -> ExecResult {
+    let has_dump = sim.dump.is_some();
+    let has_components = !sim.components.is_empty();
+    let (clock, count, high_time, low_time, reset) = match wait {
+        Wait::Clock {
             clock,
             count,
             high_time,
             low_time,
-        } => {
-            let n = if let Some(expr) = count {
-                sim.ensure_comb_updated();
-                let val = expr.eval(&mut sim.mask_cache);
-                // count 0 must advance 0 cycles (SV `repeat(0)`); don't clamp.
-                // The no-arg form is the `else` branch below.
-                val.payload_u64()
-            } else {
-                1
-            };
-            let has_dump = sim.dump.is_some();
-            let has_components = !sim.components.is_empty();
-            for _ in 0..n {
-                if has_dump && let Some(id) = clock.var_id() {
-                    sim.set_var_by_id(&id, Value::new(1, 1, false));
-                }
-                sim.step(clock);
-                sim.time += high_time;
-                if has_dump {
-                    if let Some(id) = clock.var_id() {
-                        sim.set_var_by_id(&id, Value::new(0, 1, false));
-                    }
-                    sim.dump_variables();
-                }
-                sim.time += low_time;
-                // Component-requested termination, checked at cycle end
-                // (after commit and dump).
-                if has_components {
-                    if sim.components_failed() {
-                        return ExecResult::Fail(sim.take_component_failures().join("\n"));
-                    }
-                    if sim.component_finish_requested() {
-                        return ExecResult::Finished;
-                    }
-                }
-                // Stop once the optional clock-cycle cap is reached.
-                if let Some(limit) = sim.cycle_limit {
-                    sim.cycle_count += 1;
-                    if sim.cycle_count >= limit {
-                        return ExecResult::Finished;
-                    }
-                }
-            }
-            ExecResult::Continue
-        }
-        TestbenchStatement::ResetAssert {
+        } => (clock, count, high_time, low_time, None),
+        Wait::Reset {
             reset,
             clock,
             duration,
             high_time,
             low_time,
-        } => {
-            // Hold the net asserted and take `duration` ordinary clock edges:
-            // the rest of the design keeps clocking through the window, as it
-            // does in SystemVerilog, and a reset derived from that net reaches
-            // its own `if_reset` too.
-            let has_dump = sim.dump.is_some();
-            let reset_id = reset.var_id();
-            if let Some(id) = &reset_id {
-                sim.set_reset_level(id, true);
-            }
-            for i in 0..*duration {
-                if has_dump && let Some(id) = clock.var_id() {
-                    sim.set_var_by_id(&id, Value::new(1, 1, false));
-                }
-                sim.step_in_reset(clock, reset, i == 0);
-                sim.time += high_time;
-                if has_dump {
-                    if let Some(id) = clock.var_id() {
-                        sim.set_var_by_id(&id, Value::new(0, 1, false));
-                    }
-                    sim.dump_variables();
-                }
-                sim.time += low_time;
-            }
-            if let Some(id) = &reset_id {
-                sim.set_reset_level(id, false);
-            }
-            ExecResult::Continue
+        } => (clock, duration, high_time, low_time, Some(reset)),
+    };
+    // Hold the net asserted and take `duration` ordinary clock edges: the
+    // rest of the design keeps clocking through the window, as it does in
+    // SystemVerilog, and a reset derived from that net reaches its own
+    // `if_reset` too.
+    if let Some(id) = reset.and_then(Event::var_id) {
+        sim.set_reset_level(&id, true);
+    }
+    let mut result = ExecResult::Continue;
+    for i in 0..count {
+        if has_dump && let Some(id) = clock.var_id() {
+            sim.set_var_by_id(&id, Value::new(1, 1, false));
         }
+        match reset {
+            Some(reset) => sim.step_in_reset(clock, reset, i == 0),
+            None => sim.step(clock),
+        }
+        sim.time += high_time;
+        if has_dump {
+            if let Some(id) = clock.var_id() {
+                sim.set_var_by_id(&id, Value::new(0, 1, false));
+            }
+            sim.dump_variables();
+        }
+        sim.time += low_time;
+        // Component-requested termination, checked at cycle end (after
+        // commit and dump).
+        if has_components {
+            if sim.components_failed() {
+                result = ExecResult::Fail(sim.take_component_failures().join("\n"));
+                break;
+            }
+            if sim.component_finish_requested() {
+                result = ExecResult::Finished;
+                break;
+            }
+        }
+        // Stop once the optional clock-cycle cap is reached.
+        if let Some(limit) = sim.cycle_limit {
+            sim.cycle_count += 1;
+            if sim.cycle_count >= limit {
+                result = ExecResult::Finished;
+                break;
+            }
+        }
+    }
+    if let Some(id) = reset.and_then(Event::var_id) {
+        sim.set_reset_level(&id, false);
+    }
+    result
+}
+
+/// Run one process until it waits on a clock, ends, or stops the run.
+fn run_task<'a>(
+    sim: &mut Simulator,
+    task: &mut Task<'a>,
+    clocks: &mut Vec<TbClock<'a>>,
+) -> ExecResult {
+    loop {
+        match task.process.run(sim) {
+            ProcStep::Wait(Wait::Clock {
+                clock,
+                count,
+                high_time,
+                low_time,
+            }) => {
+                // count 0 advances 0 cycles (SV `repeat(0)`): the process
+                // just carries on.
+                if count == 0 {
+                    continue;
+                }
+                task.state = TaskState::Waiting {
+                    clock: clock_index(clocks, clock, high_time, low_time),
+                    remaining: count,
+                    reset: None,
+                };
+                return ExecResult::Continue;
+            }
+            ProcStep::Wait(Wait::Reset {
+                reset,
+                clock,
+                duration,
+                high_time,
+                low_time,
+            }) => {
+                // The window holds the net asserted while ordinary clock
+                // edges are taken; see `take_edges_alone`.
+                if let Some(id) = reset.var_id() {
+                    sim.set_reset_level(&id, true);
+                }
+                if duration == 0 {
+                    if let Some(id) = reset.var_id() {
+                        sim.set_reset_level(&id, false);
+                    }
+                    continue;
+                }
+                task.state = TaskState::Waiting {
+                    clock: clock_index(clocks, clock, high_time, low_time),
+                    remaining: duration,
+                    reset: Some(ResetHold {
+                        reset,
+                        assertion_pending: true,
+                    }),
+                };
+                return ExecResult::Continue;
+            }
+            ProcStep::Done => {
+                task.state = TaskState::Done;
+                return ExecResult::Continue;
+            }
+            ProcStep::Finished => return ExecResult::Finished,
+            ProcStep::Fail(msg) => return ExecResult::Fail(msg),
+        }
+    }
+}
+
+fn clock_index<'a>(
+    clocks: &mut Vec<TbClock<'a>>,
+    event: &'a Event,
+    high_time: u64,
+    low_time: u64,
+) -> usize {
+    if let Some(i) = clocks.iter().position(|c| c.event == event) {
+        return i;
+    }
+    clocks.push(TbClock {
+        event,
+        high_time,
+        low_time,
+        next_edge: 0,
+    });
+    clocks.len() - 1
+}
+
+/// Take the posedges of `fired` as one step and release the processes whose
+/// wait they complete.
+fn take_edges<'a>(
+    sim: &mut Simulator,
+    tasks: &mut [Task<'a>],
+    clocks: &mut [TbClock<'a>],
+    fired: &[usize],
+    negedges: &mut Vec<(u64, usize)>,
+) -> ExecResult {
+    let has_dump = sim.dump.is_some();
+    let events: SmallVec<[Event; 4]> = fired.iter().map(|&i| clocks[i].event.clone()).collect();
+    let mut windows: SmallVec<[crate::simulator::ResetWindow; 2]> = SmallVec::new();
+    for task in tasks.iter_mut() {
+        if let TaskState::Waiting {
+            clock,
+            reset: Some(hold),
+            ..
+        } = &mut task.state
+            && fired.contains(clock)
+        {
+            windows.push(crate::simulator::ResetWindow {
+                clock: clocks[*clock].event.clone(),
+                reset: hold.reset.clone(),
+                assertion_edge: hold.assertion_pending,
+            });
+            hold.assertion_pending = false;
+        }
+    }
+    if has_dump {
+        for &i in fired {
+            if let Some(id) = clocks[i].event.var_id() {
+                sim.set_var_by_id(&id, Value::new(1, 1, false));
+            }
+        }
+    }
+    sim.step_events(&events, &windows);
+    let t = sim.time;
+    for &i in fired {
+        let clock = &mut clocks[i];
+        clock.next_edge = t + clock.high_time + clock.low_time;
+        if has_dump {
+            negedges.push((t + clock.high_time, i));
+        }
+    }
+    for task in tasks.iter_mut() {
+        let TaskState::Waiting {
+            clock,
+            remaining,
+            reset,
+        } = &mut task.state
+        else {
+            continue;
+        };
+        if !fired.contains(clock) {
+            continue;
+        }
+        *remaining -= 1;
+        if *remaining > 0 {
+            continue;
+        }
+        if let Some(hold) = reset
+            && let Some(id) = hold.reset.var_id()
+        {
+            sim.set_reset_level(&id, false);
+        }
+        // Resumes once the cycle is over, just before the next edge.
+        task.state = TaskState::Runnable {
+            at: clocks[*clock].next_edge,
+        };
+    }
+    if assert_buffer::has_fatal() {
+        return ExecResult::Fail(assert_buffer::take_failure().unwrap_or_default());
+    }
+    // Component-requested termination, checked at cycle end (after commit
+    // and dump).
+    if !sim.components.is_empty() {
+        if sim.components_failed() {
+            return ExecResult::Fail(sim.take_component_failures().join("\n"));
+        }
+        if sim.component_finish_requested() {
+            return ExecResult::Finished;
+        }
+    }
+    // Stop once the optional clock-cycle cap is reached.
+    if let Some(limit) = sim.cycle_limit {
+        sim.cycle_count += 1;
+        if sim.cycle_count >= limit {
+            return ExecResult::Finished;
+        }
+    }
+    ExecResult::Continue
+}
+
+/// A statement that neither branches nor waits: runs to completion in zero
+/// simulated time.
+fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
+    match stmt {
         TestbenchStatement::Assert {
             kind,
             condition,
@@ -781,101 +1411,21 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             }
             ExecResult::Continue
         }
-        TestbenchStatement::If {
-            condition,
-            then_block,
-            else_block,
-        } => {
+        TestbenchStatement::Stmt(s) => {
             sim.ensure_comb_updated();
-            let val = condition.eval(&mut sim.mask_cache);
-            if val.payload_u64() != 0 {
-                exec(sim, then_block)
-            } else {
-                exec(sim, else_block)
+            let flow = s.eval_step(&mut sim.mask_cache);
+            // A statement that writes only testbench-private variables cannot
+            // change a comb input, so the next read does not need a settle.
+            if sim.tb_dirty.writes_ff(s) {
+                sim.mark_ff_written();
+            } else if !sim.tb_dirty.is_clean(s) {
+                sim.mark_comb_dirty();
             }
-        }
-        TestbenchStatement::For {
-            count,
-            body,
-            loop_var,
-        } => {
-            if let Some(lv) = loop_var {
-                let r = &lv.range;
-                let start = r.start.eval(&mut sim.mask_cache);
-                let mut end = r.end.eval(&mut sim.mask_cache);
-                if r.inclusive {
-                    end = end.saturating_add(1);
-                }
-                let step = r.step;
-                let op = r.op;
-                let reverse = r.reverse;
-                let mut step_body = |i: u64| -> ExecResult {
-                    let val = Value::new(i, lv.width, lv.signed);
-                    unsafe {
-                        write_native_value(lv.ptr, lv.native_bytes, lv.use_4state, &val);
-                    }
-                    exec(sim, body)
-                };
-                let mut loop_result = ExecResult::Continue;
-                if reverse {
-                    // Mirror the emitted SV `for (int i = hi - 1; i >= lo;
-                    // i -= step)`; i64 makes underflow past lo terminate.
-                    let mut i = end as i64 - 1;
-                    let lo = start as i64;
-                    let step = step as i64;
-                    while i >= lo {
-                        let result = step_body(i as u64);
-                        if result.should_stop() {
-                            loop_result = result;
-                            break;
-                        }
-                        i -= step;
-                    }
-                } else if let Some(op) = op {
-                    let mut i = start;
-                    while i < end {
-                        let result = step_body(i);
-                        if result.should_stop() {
-                            loop_result = result;
-                            break;
-                        }
-                        // Progress guard: a stalled or faulting step would
-                        // spin forever (const-bound cases are rejected at
-                        // analysis; runtime bounds reach here).
-                        match op.eval(i as usize, step as usize) {
-                            Some(n) if n as u64 > i => i = n as u64,
-                            _ => break,
-                        }
-                    }
-                } else {
-                    let mut i = start;
-                    while i < end {
-                        let result = step_body(i);
-                        if result.should_stop() {
-                            loop_result = result;
-                            break;
-                        }
-                        i += step;
-                    }
-                }
-                if matches!(loop_result, ExecResult::Break) {
-                    return ExecResult::Continue;
-                }
-                if loop_result.should_stop() {
-                    return loop_result;
-                }
+            if flow == ControlFlow::Break {
+                ExecResult::Break
             } else {
-                for _ in 0..*count {
-                    let result = exec(sim, body);
-                    if matches!(result, ExecResult::Break) {
-                        break;
-                    }
-                    if result.should_stop() {
-                        return result;
-                    }
-                }
+                ExecResult::Continue
             }
-            ExecResult::Continue
         }
         TestbenchStatement::FileOpen {
             handle,
@@ -997,6 +1547,12 @@ fn exec_one(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             }
             ExecResult::Continue
         }
-        TestbenchStatement::Finish => ExecResult::Finished,
+        TestbenchStatement::ClockNext { .. }
+        | TestbenchStatement::ResetAssert { .. }
+        | TestbenchStatement::If { .. }
+        | TestbenchStatement::For { .. }
+        | TestbenchStatement::Finish => {
+            unreachable!("control statements are executed by `Process::run`")
+        }
     }
 }

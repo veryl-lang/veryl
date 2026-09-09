@@ -1,0 +1,24 @@
+module HierReadmemhMem {
+    // Loaded by the testbench's hierarchical `$readmemh`; nothing here drives it.
+    #[allow(unassign_variable)]
+    var mem: logic<32> [4];
+    var sum: logic<32>    ;
+    always_comb {
+        sum = mem[0] + mem[1] + mem[2] + mem[3];
+    }
+}
+
+#[test(test_hier_readmemh)]
+module test_hier_readmemh {
+    inst dut: HierReadmemhMem;
+
+    initial {
+        // The path is relative to `crates/tests`, where this harness runs.
+        $readmemh("../../testcases/native_test/src/hier_readmemh.hex", dut.mem);
+        $assert(dut.mem[0] == 32'h00000001);
+        $assert(dut.mem[3] == 32'h00000004);
+        // The comb settles on the loaded values.
+        $assert(dut.sum == 32'h0000000a);
+        $finish();
+    }
+}
