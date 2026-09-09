@@ -54,13 +54,29 @@ impl VcdId {
 pub struct WaveDumper {
     kind: WaveDumperKind,
     path: Option<PathBuf>,
-    /// The storage bytes behind each `DumpVar` as last written, so a step
-    /// reads and formats only what moved.  Comparing the storage rather than
-    /// the value keeps the unchanged case free of a `Value` per variable.
+    /// The storage bytes as last written, block by block, so a step reads and
+    /// formats only what moved.  Comparing the storage rather than the value
+    /// keeps the unchanged case free of a `Value` per variable.
     shadow: Vec<u8>,
-    /// Start of each `DumpVar`'s bytes in `shadow`, with its end last.
-    shadow_at: Vec<usize>,
+    blocks: Vec<ScanBlock>,
+    /// `DumpVar` indices, grouped by block and ordered by storage address.
+    order: Vec<u32>,
+    /// Start of each `DumpVar`'s bytes in `shadow`, indexed as `dump_vars` is.
+    at: Vec<usize>,
 }
+
+/// A stretch of storage holding several `DumpVar`s, compared in one go so an
+/// untouched stretch costs a `memcmp` rather than a lookup per variable.
+struct ScanBlock {
+    ptr: *const u8,
+    off: usize,
+    len: u32,
+    first: u32,
+    count: u32,
+}
+
+// SAFETY: Same as DumpVar.
+unsafe impl Send for ScanBlock {}
 
 enum WaveDumperKind {
     Vcd(VcdDumper),
@@ -128,7 +144,9 @@ impl WaveDumper {
             }),
             path: None,
             shadow: Vec::new(),
-            shadow_at: Vec::new(),
+            blocks: Vec::new(),
+            order: Vec::new(),
+            at: Vec::new(),
         }
     }
 
@@ -143,7 +161,9 @@ impl WaveDumper {
         let header = fst_writer::open_fst(path, &info).expect("failed to create FST file");
         WaveDumper {
             shadow: Vec::new(),
-            shadow_at: Vec::new(),
+            blocks: Vec::new(),
+            order: Vec::new(),
+            at: Vec::new(),
             kind: WaveDumperKind::Fst(Box::new(FstDumper {
                 state: FstState::Header(header),
             })),
@@ -317,65 +337,115 @@ impl WaveDumper {
         self.upscope();
     }
 
+    /// Group the variables into stretches of storage that can be compared in
+    /// one go, and size the shadow to match.
+    fn build_scan(&mut self, dump_vars: &[DumpVar], use_4state: bool) {
+        // A stretch may swallow small gaps: the variables sit every 8 bytes in
+        // the arenas, so insisting on adjacency would leave one block each.
+        const GAP_MAX: usize = 8;
+        const BLOCK_MAX: usize = 256;
+
+        let span = |nb: usize| if use_4state { nb * 2 } else { nb };
+        let mut sorted: Vec<u32> = (0..dump_vars.len() as u32).collect();
+        sorted.sort_unstable_by_key(|&i| dump_vars[i as usize].ptr as usize);
+
+        self.blocks.clear();
+        self.order.clear();
+        self.at.clear();
+        self.at.resize(dump_vars.len(), 0);
+        for i in sorted {
+            let entry = &dump_vars[i as usize];
+            let ptr = entry.ptr as usize;
+            let len = span(entry.native_bytes);
+            let grown = self.blocks.last_mut().and_then(|b| {
+                let base = b.ptr as usize;
+                let end = base + b.len as usize;
+                (ptr >= end && ptr - end <= GAP_MAX && ptr + len - base <= BLOCK_MAX).then(|| {
+                    b.len = (ptr + len - base) as u32;
+                    b.count += 1;
+                    b.off + (ptr - base)
+                })
+            });
+            self.at[i as usize] = grown.unwrap_or_else(|| {
+                let off = self.blocks.last().map_or(0, |b| b.off + b.len as usize);
+                self.blocks.push(ScanBlock {
+                    ptr: entry.ptr,
+                    off,
+                    len: len as u32,
+                    first: self.order.len() as u32,
+                    count: 1,
+                });
+                off
+            });
+            self.order.push(i);
+        }
+        let total = self.blocks.last().map_or(0, |b| b.off + b.len as usize);
+        self.shadow.clear();
+        self.shadow.resize(total, 0);
+    }
+
     /// Write the variables whose storage moved since the last call.  `force`
     /// writes all of them, as the opening `$dumpvars` must.
     pub fn dump_all_vars(&mut self, dump_vars: &[DumpVar], use_4state: bool, force: bool) {
-        // 4-state keeps the x/z mask right behind the payload; both decide the
-        // value, so both belong to the compare.
-        let span = |nb: usize| if use_4state { nb * 2 } else { nb };
-        let force = force || self.shadow_at.len() != dump_vars.len() + 1;
+        let force = force || self.at.len() != dump_vars.len();
         if force {
-            self.shadow_at.clear();
-            let mut at = 0usize;
-            for entry in dump_vars {
-                self.shadow_at.push(at);
-                at += span(entry.native_bytes);
-            }
-            self.shadow_at.push(at);
-            self.shadow.clear();
-            self.shadow.resize(at, 0);
+            self.build_scan(dump_vars, use_4state);
         }
         let Self {
             kind,
             shadow,
-            shadow_at,
+            blocks,
+            order,
+            at,
             ..
         } = self;
-        for (i, entry) in dump_vars.iter().enumerate() {
-            let (lo, hi) = (shadow_at[i], shadow_at[i + 1]);
-            // SAFETY: `ptr` is the variable's storage, valid for `span` bytes
-            // (`read_native_value` reads the same range).
-            let cur = unsafe { std::slice::from_raw_parts(entry.ptr, hi - lo) };
-            if !force && held(&shadow[lo..hi], cur) {
+        for block in blocks.iter() {
+            let (off, len) = (block.off, block.len as usize);
+            // SAFETY: the block spans the storage its variables point into,
+            // built from their `ptr` and native size.
+            let cur = unsafe { std::slice::from_raw_parts(block.ptr, len) };
+            if !force && cur == &shadow[off..off + len] {
                 continue;
             }
-            shadow[lo..hi].copy_from_slice(cur);
-            let nb = entry.native_bytes;
-            match &mut *kind {
-                WaveDumperKind::Vcd(v) => {
-                    let VarHandle::Vcd(id) = &entry.handle else {
-                        panic!("VCD dumper received non-VCD handle");
-                    };
-                    let (payload, mask_xz) = if use_4state {
-                        let (p, m) = cur.split_at(nb);
-                        (p, Some(m))
-                    } else {
-                        (cur, None)
-                    };
-                    push_change(&mut v.line, payload, mask_xz, entry.width, id);
-                    if v.line.len() >= LINE_BUF_CAPACITY {
-                        v.writer.writer().write_all(&v.line).unwrap();
-                        v.line.clear();
+            let members = block.first as usize..(block.first + block.count) as usize;
+            for &i in &order[members] {
+                let entry = &dump_vars[i as usize];
+                // 4-state keeps the x/z mask right behind the payload; both
+                // decide the value, so both belong to the compare.
+                let nb = entry.native_bytes;
+                let lo = at[i as usize];
+                let hi = lo + if use_4state { nb * 2 } else { nb };
+                let cur = &cur[lo - off..hi - off];
+                if !force && held(&shadow[lo..hi], cur) {
+                    continue;
+                }
+                match &mut *kind {
+                    WaveDumperKind::Vcd(v) => {
+                        let VarHandle::Vcd(id) = &entry.handle else {
+                            panic!("VCD dumper received non-VCD handle");
+                        };
+                        let (payload, mask_xz) = if use_4state {
+                            let (p, m) = cur.split_at(nb);
+                            (p, Some(m))
+                        } else {
+                            (cur, None)
+                        };
+                        push_change(&mut v.line, payload, mask_xz, entry.width, id);
+                        if v.line.len() >= LINE_BUF_CAPACITY {
+                            v.writer.writer().write_all(&v.line).unwrap();
+                            v.line.clear();
+                        }
+                    }
+                    fst @ WaveDumperKind::Fst(_) => {
+                        let mut value = unsafe {
+                            read_native_value(entry.ptr, nb, use_4state, entry.width as u32, false)
+                        };
+                        value.trunc(entry.width);
+                        fst.change_vector(entry.handle, &value);
                     }
                 }
-                fst @ WaveDumperKind::Fst(_) => {
-                    let mut value = unsafe {
-                        read_native_value(entry.ptr, nb, use_4state, entry.width as u32, false)
-                    };
-                    value.trunc(entry.width);
-                    fst.change_vector(entry.handle, &value);
-                }
             }
+            shadow[off..off + len].copy_from_slice(cur);
         }
         if let WaveDumperKind::Vcd(v) = &mut self.kind {
             v.flush_line();
