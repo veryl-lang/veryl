@@ -837,6 +837,7 @@ where
             .collect()
     }
 
+    #[cfg(test)]
     pub(super) fn dependency_dag(
         &self,
         roots: &[VersionId],
@@ -1594,8 +1595,8 @@ mod tests {
         caller.close_repeated_transfer(&iteration, checkpoint, false, |_| None);
         assert!(caller.versions.len() - before < CALLS * (STAGES + 8));
         assert!(
-            ITERATION_IMPORT_VISITS.get() <= graph.nodes.len() + graph.edges.len(),
-            "shared imports must index edges once and visit each selected node once: {}",
+            ITERATION_IMPORT_VISITS.get() <= (CALLS + 1) * graph.nodes.len() + graph.edges.len(),
+            "imports must index edges once and visit each selected node once per invocation: {}",
             ITERATION_IMPORT_VISITS.get(),
         );
         for index in 0..CALLS {

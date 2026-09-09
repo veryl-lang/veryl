@@ -2,6 +2,42 @@
 use super::*;
 
 #[test]
+fn instance_actual_expansion_limit_keeps_independent_cycles() {
+    for stages in [4, 64] {
+        let stages_code = "y = !y;".repeat(stages);
+        let code = format!(
+            r#"
+            module Child (i: input logic, o: output logic) {{ assign o = i; }}
+            module Top (i: input logic, o: output logic, independent: output logic) {{
+                function chain (x: input logic) -> logic {{
+                    var y: logic;
+                    y = x;
+                    {stages_code}
+                    return y;
+                }}
+                inst child: Child (i: chain(i), o: o);
+                assign independent = independent;
+            }}
+        "#
+        );
+        crate::comb_loop_detect::with_module_summary_limit(128, || {
+            assert_eq!(comb_loop_analysis_is_complete(&code), stages == 4);
+            let errors = analyze(&code);
+            let loops = errors
+                .iter()
+                .filter_map(|error| match error {
+                    AnalyzerError::CombinationalLoop { identifier, .. } => {
+                        Some(identifier.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(loops, ["independent"], "stages={stages}: {errors:?}");
+        });
+    }
+}
+
+#[test]
 fn procedural_guard_limit_bounds_early_exits_and_preserves_independent_cycles() {
     for kind in ["return", "break", "runtime_break"] {
         for size in [2, 64, 256] {

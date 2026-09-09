@@ -711,6 +711,7 @@ impl<'a> ModuleGraphBuilder<'a> {
         let ctx = &mut self.ctx;
         let procedure_context = &mut self.procedure_context;
         let function_summaries = &mut self.function_summaries;
+        let mut actuals = InstanceActuals::default();
         let mut complete = true;
         let mut input_reads: HashMap<VarId, Vec<procedure::RegionSource>> = HashMap::default();
         for inp in &inst.inputs {
@@ -821,8 +822,8 @@ impl<'a> ModuleGraphBuilder<'a> {
                         input_reads.get(&node.region.id).map(Vec::as_slice),
                         bit_part,
                         ctx,
-                        procedure_context,
-                        function_summaries,
+                        &mut actuals,
+                        &mut self.summary_budget,
                     );
                     (mapping, None)
                 }
@@ -910,8 +911,8 @@ impl<'a> ModuleGraphBuilder<'a> {
                                     .map(Vec::as_slice),
                                 bit_part,
                                 ctx,
-                                procedure_context,
-                                function_summaries,
+                                &mut actuals,
+                                &mut self.summary_budget,
                             );
                             let destinations = resolve_instance_mapping(
                                 graph,
@@ -964,6 +965,17 @@ impl<'a> ModuleGraphBuilder<'a> {
             );
         }
         graph.active_summary = None;
+        complete &= actuals.resolve(
+            graph,
+            node_map,
+            bit_part,
+            inst,
+            child,
+            &input_reads,
+            procedure_context,
+            function_summaries,
+            &mut self.summary_budget,
+        );
         self.complete &= complete;
     }
 }
@@ -1105,7 +1117,7 @@ fn add_procedure_graph(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn map_instance_source_region<'a>(
+fn map_instance_source_region(
     graph: &mut DependencyGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     inst: &InstDeclaration,
@@ -1113,10 +1125,10 @@ fn map_instance_source_region<'a>(
     region: SummaryRegion,
     preserve_position: bool,
     allowed: Option<&[procedure::RegionSource]>,
-    bit_part: &'a BitPartition,
+    bit_part: &BitPartition,
     ctx: &mut Context,
-    procedure_context: &mut procedure::ProcedureContext,
-    function_summaries: &mut procedure::FunctionSummaries<'a>,
+    actuals: &mut InstanceActuals,
+    budget: &mut ExpansionBudget,
 ) -> ResolvedInstanceRegionMapping {
     let parent_sources = instance_region_mapping(
         inst,
@@ -1138,42 +1150,118 @@ fn map_instance_source_region<'a>(
     let Some(input) = inst.inputs.iter().find(|input| input.id == region.id) else {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
-    let Some(expression) = input.single() else {
+    let Some(_) = input.single() else {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
     let Some(variable) = child.variables.get(&region.id) else {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
-    let Some(width) = variable.total_width() else {
+    let Some(_) = variable.total_width() else {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
-    let dag = analyze_instance_actual_region(
-        bit_part,
-        expression,
-        region,
-        width,
-        procedure_context,
-        function_summaries,
-    );
-    let root = dag.roots[0];
-    let allowed = allowed
-        .into_iter()
-        .flatten()
-        .map(|source| source.key)
-        .collect::<HashSet<_>>();
-    let mapped = add_dependency_dag(graph, node_map, bit_part, dag, region, |key| {
-        allowed.contains(&key)
-    });
-    ResolvedInstanceRegionMapping {
-        nodes: root
-            .and_then(|root| mapped[root])
-            .into_iter()
-            .map(|node| ResolvedMappedNode {
-                node,
-                offset: Some((0, 0)),
-                condition: PathCondition::default(),
-            })
-            .collect(),
+    actuals.defer(graph, region, budget)
+}
+
+#[derive(Default)]
+struct InstanceActuals {
+    roots: HashMap<SummaryRegion, NodeIndex>,
+    exhausted: bool,
+}
+
+impl InstanceActuals {
+    fn defer(
+        &mut self,
+        graph: &mut DependencyGraph,
+        region: SummaryRegion,
+        budget: &mut ExpansionBudget,
+    ) -> ResolvedInstanceRegionMapping {
+        let root = if let Some(&root) = self.roots.get(&region) {
+            Some(root)
+        } else if budget.reserve_work(2) {
+            // Resolve all projections together after the child edges have
+            // supplied their requested regions. The exported root supplies
+            // the bounds; this placeholder only connects its consumers.
+            let root = graph.add_node(GraphNode {
+                region,
+                domains: Vec::new(),
+                diagnostic: None,
+            });
+            self.roots.insert(region, root);
+            Some(root)
+        } else {
+            self.exhausted = true;
+            None
+        };
+        ResolvedInstanceRegionMapping {
+            nodes: root
+                .into_iter()
+                .map(|node| ResolvedMappedNode {
+                    node,
+                    offset: Some((0, 0)),
+                    condition: PathCondition::default(),
+                })
+                .collect(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn resolve<'a>(
+        self,
+        graph: &mut DependencyGraph,
+        node_map: &mut HashMap<NodeKey, NodeIndex>,
+        bit_part: &'a BitPartition,
+        inst: &InstDeclaration,
+        child: &Module,
+        input_reads: &HashMap<VarId, Vec<procedure::RegionSource>>,
+        procedure_context: &mut procedure::ProcedureContext,
+        summaries: &mut procedure::FunctionSummaries<'a>,
+        budget: &mut ExpansionBudget,
+    ) -> bool {
+        let mut complete = !self.exhausted;
+        let mut regions = self.roots.keys().copied().collect::<Vec<_>>();
+        regions.sort_unstable();
+        for regions in regions.chunk_by(|left, right| left.id == right.id) {
+            let first = regions[0];
+            let expression = inst
+                .inputs
+                .iter()
+                .find(|input| input.id == first.id)
+                .and_then(|input| input.single())
+                .expect("deferred inputs have one actual");
+            let width = child.variables[&first.id]
+                .total_width()
+                .expect("deferred inputs have known widths");
+            let mut analysis =
+                procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
+            let dag = analysis.eval_regions(expression, regions, width, budget.remaining());
+            complete &= analysis.is_complete();
+            analysis.restore(procedure_context);
+            if !budget.reserve_dag(&dag) {
+                complete = false;
+                continue;
+            }
+            let allowed = input_reads
+                .get(&first.id)
+                .into_iter()
+                .flatten()
+                .map(|source| source.key)
+                .collect::<HashSet<_>>();
+            let roots = dag.roots.clone();
+            let mapped = add_dependency_dag(graph, node_map, bit_part, dag, first, |key| {
+                allowed.contains(&key)
+            });
+            for (region, root) in regions.iter().zip(roots) {
+                if let Some(root) = root.and_then(|root| mapped[root]) {
+                    add_dependency_edge(
+                        graph,
+                        root,
+                        self.roots[region],
+                        GraphDependency::unconditional(BitDependency::identity()),
+                    );
+                }
+            }
+        }
+        complete
     }
 }
 
@@ -1563,7 +1651,13 @@ fn analyze_instance_actual<'a>(
     Option<procedure::ProcedureResult>,
     bool,
 ) {
-    let mut analysis = InstanceActualAnalysis::new(bit_part, ctx, procedure_context, summaries);
+    let mut analysis = InstanceActualAnalysis::new(
+        bit_part,
+        ctx,
+        procedure_context,
+        summaries,
+        std::ptr::from_ref(expression).addr(),
+    );
     analysis.eval(expression);
     analysis.finish()
 }
@@ -1579,7 +1673,13 @@ fn analyze_instance_destination<'a>(
     Option<procedure::ProcedureResult>,
     bool,
 ) {
-    let mut analysis = InstanceActualAnalysis::new(bit_part, ctx, procedure_context, summaries);
+    let mut analysis = InstanceActualAnalysis::new(
+        bit_part,
+        ctx,
+        procedure_context,
+        summaries,
+        std::ptr::from_ref(destination).addr(),
+    );
     for expression in destination
         .index
         .0
@@ -1594,20 +1694,6 @@ fn analyze_instance_destination<'a>(
     analysis.finish()
 }
 
-fn analyze_instance_actual_region<'a>(
-    bit_part: &'a BitPartition,
-    expression: &Expression,
-    region: SummaryRegion,
-    context_width: usize,
-    procedure_context: &mut procedure::ProcedureContext,
-    summaries: &mut procedure::FunctionSummaries<'a>,
-) -> ssa::DependencyDag<NodeKey> {
-    let mut analysis = procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
-    let graph = analysis.eval_region(expression, region.array, region.packed, context_width);
-    analysis.restore(procedure_context);
-    graph
-}
-
 struct InstanceActualAnalysis<'a, 's, 'c> {
     bit_part: &'a BitPartition,
     ctx: &'c mut Context,
@@ -1615,6 +1701,7 @@ struct InstanceActualAnalysis<'a, 's, 'c> {
     summaries: Option<&'s mut procedure::FunctionSummaries<'a>>,
     procedure: Option<procedure::ExpressionAnalysis<'a, 's>>,
     reads: Vec<procedure::RegionSource>,
+    namespace: usize,
 }
 
 impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
@@ -1623,6 +1710,7 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
         ctx: &'c mut Context,
         procedure_context: &'c mut procedure::ProcedureContext,
         summaries: &'s mut procedure::FunctionSummaries<'a>,
+        namespace: usize,
     ) -> Self {
         Self {
             bit_part,
@@ -1631,6 +1719,7 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
             summaries: Some(summaries),
             procedure: None,
             reads: Vec::new(),
+            namespace,
         }
     }
 
@@ -1668,11 +1757,12 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::FunctionCall(_) => {
                     let summaries = self.summaries.take().expect("initialized once");
-                    let procedure = procedure::ExpressionAnalysis::new(
+                    let mut procedure = procedure::ExpressionAnalysis::new(
                         self.bit_part,
                         self.procedure_context,
                         summaries,
                     );
+                    procedure.use_namespace(self.namespace);
                     self.procedure = Some(procedure);
                     self.eval(expression);
                 }
@@ -1721,11 +1811,12 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
             }
             Expression::Ternary(_, _, _, _) => {
                 let summaries = self.summaries.take().expect("initialized once");
-                let procedure = procedure::ExpressionAnalysis::new(
+                let mut procedure = procedure::ExpressionAnalysis::new(
                     self.bit_part,
                     self.procedure_context,
                     summaries,
                 );
+                procedure.use_namespace(self.namespace);
                 self.procedure = Some(procedure);
                 self.eval(expression);
             }

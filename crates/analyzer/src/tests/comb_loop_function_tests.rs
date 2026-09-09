@@ -1,6 +1,81 @@
 use super::*;
 
 #[test]
+fn comb_loop_instance_actual_projections_preserve_call_guard_identities() {
+    for child in ["assign o = i;", "assign o[0] = i[0]; assign o[1] = i[1];"] {
+        for (actual, expected) in [
+            ("{choose(sa, value[0], 0), choose(sb, 0, value[1])}", true),
+            ("route(sa, value)", false),
+        ] {
+            let code = format!(
+                r#"
+                module Child (i: input logic<2>, o: output logic<2>) {{ {child} }}
+                module Top (sa: input logic, sb: input logic, o: output logic<2>) {{
+                    var value: logic<2>;
+                    function choose (s: input logic, a: input logic, b: input logic) -> logic {{
+                        if s {{ return a; }} else {{ return b; }}
+                    }}
+                    function route (s: input logic, x: input logic<2>) -> logic<2> {{
+                        if s {{ return {{x[0], 1'b0}}; }} else {{ return {{1'b0, x[1]}}; }}
+                    }}
+                    inst child: Child (i: {actual}, o: value);
+                    assign o = value;
+                }}
+            "#
+            );
+            // Independent calls can take opposite arms and close the cycle.
+            // Two projections of one call must keep its arms exclusive.
+            assert_comb_loop(actual, &code, expected);
+            assert!(comb_loop_analysis_is_complete(&code), "{actual}");
+        }
+    }
+}
+
+#[test]
+fn comb_loop_split_instance_actual_imports_one_function_graph() {
+    use crate::comb_loop_detect::{
+        function_evaluation_count, module_summary_work, reset_function_evaluation_count,
+        reset_module_summary_work,
+    };
+    for size in [64, 256, 1024] {
+        let chain = (1..size)
+            .map(|index| format!("y[{index}] = !y[{}];", index - 1))
+            .collect::<String>();
+        let child = (0..size)
+            .map(|index| format!("assign o[{index}] = i[{index}];"))
+            .collect::<String>();
+        let code = format!(
+            r#"
+            module Child (i: input logic<{size}>, o: output logic<{size}>) {{ {child} }}
+            module Top (i: input logic, o: output logic<{size}>) {{
+                function prefix (x: input logic) -> logic<{size}> {{
+                    var y: logic<{size}>;
+                    y[0] = x;
+                    {chain}
+                    return y;
+                }}
+                inst child: Child (i: prefix(i), o: o);
+            }}
+        "#
+        );
+        reset_function_evaluation_count();
+        reset_module_summary_work();
+        let errors = analyze(&code);
+        assert!(errors.is_empty(), "size={size}: {errors:?}");
+        assert!(
+            function_evaluation_count() <= 2,
+            "each actual needs one source evaluation and one shared projection evaluation"
+        );
+        assert!(
+            module_summary_work().0 <= size * 32,
+            "shared output prefixes must contribute linear graph storage: {:?}",
+            module_summary_work()
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
 fn function_outputs_and_captured_writes_share_invocation_bindings() {
     use crate::comb_loop_detect::{import_binding_visits, reset_import_binding_visits};
 

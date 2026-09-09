@@ -68,6 +68,29 @@ impl ExpansionBudget {
         self.remaining = remaining.unwrap_or(0);
         remaining.is_some()
     }
+
+    pub(super) fn remaining(&self) -> usize {
+        self.remaining
+    }
+
+    pub(super) fn reserve_dag<K>(&mut self, graph: &super::ssa::DependencyDag<K>) -> bool {
+        let cost = graph
+            .domains
+            .iter()
+            .fold(graph.nodes.len(), |cost, domains| {
+                cost.saturating_add(domains.len())
+            });
+        let cost = graph.edges.iter().fold(cost, |cost, edge| {
+            cost.saturating_add(edge.condition.branch_count().saturating_add(1))
+        });
+        self.reserve_work(cost)
+    }
+
+    pub(super) fn reserve_work(&mut self, cost: usize) -> bool {
+        let remaining = self.remaining.checked_sub(cost);
+        self.remaining = remaining.unwrap_or(0);
+        remaining.is_some()
+    }
 }
 
 #[cfg(test)]

@@ -23,10 +23,9 @@ struct TransferNode {
 
 type TransferGraph = Graph<TransferNode, PositionRelation>;
 
-/// Share ancestor queries across calls, but resolve actual versions per call.
+/// Index each child once; ancestor traversal is shared by all roots of a call.
 struct ImportIndex {
     incoming: Vec<Vec<usize>>,
-    nodes_by_root: HashMap<usize, Vec<usize>>,
 }
 
 impl ImportIndex {
@@ -37,29 +36,7 @@ impl ImportIndex {
             ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
             incoming[edge.destination].push(index);
         }
-        Self {
-            incoming,
-            nodes_by_root: HashMap::default(),
-        }
-    }
-
-    fn retain<K>(&mut self, graph: &DependencyDag<K>, root: usize) {
-        self.nodes_by_root.entry(root).or_insert_with(|| {
-            let mut visited = HashSet::default();
-            let mut queue = VecDeque::from([root]);
-            visited.insert(root);
-            while let Some(node) = queue.pop_front() {
-                #[cfg(test)]
-                ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
-                for &edge in &self.incoming[node] {
-                    let source = graph.edges[edge].source;
-                    if visited.insert(source) {
-                        queue.push_back(source);
-                    }
-                }
-            }
-            visited.into_iter().collect()
-        });
+        Self { incoming }
     }
 }
 
@@ -80,6 +57,7 @@ impl TransferBuilder {
 
     fn copy_iteration<K: Copy + Eq + Hash>(&mut self, ssa: &SsaStore<K>, start: usize) {
         let mut imports = HashMap::default();
+        let mut invocations: HashMap<_, HashMap<usize, NodeIndex>> = HashMap::default();
         while let Some(version) = self.pending.pop_front() {
             let node = self.versions[&version];
             if version < start || matches!(ssa.versions[version], Version::Entry(_)) {
@@ -130,10 +108,20 @@ impl TransferBuilder {
                     let index = imports
                         .entry(Rc::as_ptr(graph))
                         .or_insert_with(|| ImportIndex::new(graph));
-                    index.retain(graph, *root);
-                    let retained = &index.nodes_by_root[root];
-                    let mut mapped = HashMap::default();
-                    for &child in retained {
+                    // Guards are discarded for runtime iterations, but actual
+                    // bindings still distinguish calls. Keep one mapped child
+                    // per invocation instead of copying every output prefix.
+                    let mapped = invocations
+                        .entry((Rc::as_ptr(graph), Rc::as_ptr(bindings)))
+                        .or_default();
+                    let mut pending = VecDeque::from([*root]);
+                    let mut retained = Vec::new();
+                    while let Some(child) = pending.pop_front() {
+                        if mapped.contains_key(&child) {
+                            continue;
+                        }
+                        #[cfg(test)]
+                        ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
                         let copied = self.graph.add_node(TransferNode {
                             input: None,
                             domains: graph.domains[child].clone(),
@@ -143,6 +131,12 @@ impl TransferBuilder {
                             },
                         });
                         mapped.insert(child, copied);
+                        retained.push(child);
+                        pending.extend(
+                            index.incoming[child]
+                                .iter()
+                                .map(|&edge| graph.edges[edge].source),
+                        );
                         if let DependencyDagNode::External(key) = graph.nodes[child] {
                             for &(source, relation) in bindings.get(&key).into_iter().flatten() {
                                 let source = self.version(source);
@@ -150,7 +144,7 @@ impl TransferBuilder {
                             }
                         }
                     }
-                    for &child in retained {
+                    for child in retained {
                         for &edge in &index.incoming[child] {
                             let edge = &graph.edges[edge];
                             self.graph.add_edge(
@@ -355,6 +349,51 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_transfer_shares_prefixes_across_all_outputs_of_each_call() {
+        for size in [64, 256, 1024] {
+            let mut callee = SsaStore::default();
+            let mut value = callee.read(0);
+            let roots = (0..size)
+                .map(|_| {
+                    value = callee.definition(vec![value]);
+                    value
+                })
+                .collect::<Vec<_>>();
+            let graph = Rc::new(callee.dependency_dag(&roots, |_| true));
+            let mut ssa = SsaStore::default();
+            let actuals = [ssa.read(0), ssa.read(1)];
+            let start = ssa.versions.len();
+            let mut builder = TransferBuilder::default();
+            let branches = Rc::default();
+            let mut outputs = Vec::new();
+            for actual in actuals {
+                let bindings = Rc::new(HashMap::from_iter([(
+                    0,
+                    vec![(actual, PositionRelation::default())],
+                )]));
+                for &root in &graph.roots {
+                    let output =
+                        ssa.imported(graph.clone(), root, bindings.clone(), Rc::clone(&branches));
+                    outputs.push(builder.version(output));
+                }
+            }
+            builder.copy_iteration(&ssa, start);
+            assert!(builder.graph.node_count() <= size * 4 + 4);
+            assert!(builder.graph.edge_count() <= size * 4 + 4);
+            let mapped = condense(&mut ssa, &builder.graph);
+            for actual in 0..actuals.len() {
+                for index in [0, size / 2, size - 1] {
+                    let output = outputs[actual * size + index];
+                    assert_eq!(
+                        ssa.root_sources(mapped[output.index()]),
+                        HashSet::from_iter([actual])
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn repeated_transfer_retains_acyclic_packed_replication_at_scale() {

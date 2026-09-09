@@ -1,5 +1,6 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
+use super::model::SummaryRegion;
 use super::region::{
     ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
@@ -236,7 +237,7 @@ struct CallResult {
 // call nodes in a cloned callee body must never enter the caller's cache.
 #[derive(Default)]
 struct EvaluationCache {
-    calls: HashMap<*const FunctionCall, CallResult>,
+    calls: HashMap<*const FunctionCall, Rc<CallResult>>,
     expression_branches: HashMap<*const Expression, BranchId>,
 }
 
@@ -1009,20 +1010,43 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         self.inner().eval_expression_sources(expression)
     }
 
-    pub(super) fn eval_region(
+    pub(super) fn use_namespace(&mut self, namespace: usize) {
+        self.inner().branch_namespace = namespace;
+    }
+
+    pub(super) fn eval_regions(
         &mut self,
         expression: &Expression,
-        array: ArraySpan,
-        packed: PackedSpan,
+        regions: &[SummaryRegion],
         context_width: usize,
+        work: usize,
     ) -> DependencyDag<NodeKey> {
         let inner = self.inner();
         inner.use_expression_namespace(expression);
-        let mut sources = inner.eval_expr_requested(expression, array, packed, context_width);
-        sources.normalize();
-        let value = inner.ssa.related_definition(sources.sources);
-        let value = inner.ssa.projected(value, position_domain(array, packed));
-        inner.dependency_dag_for_nodes(&[value])
+        // Sample calls in expression order once. Every requested region then
+        // reuses their values and branch identities, including distinct calls
+        // in different concatenation elements. Export all roots together so
+        // shared function predecessors are imported only once as well.
+        inner.call_caches.push(Some(EvaluationCache::default()));
+        inner.eval_reachable_expr(expression);
+        let roots = regions
+            .iter()
+            .map(|region| {
+                let mut sources = inner.eval_expr_requested(
+                    expression,
+                    region.array,
+                    region.packed,
+                    context_width,
+                );
+                sources.normalize();
+                let value = inner.ssa.related_definition(sources.sources);
+                inner
+                    .ssa
+                    .projected(value, position_domain(region.array, region.packed))
+            })
+            .collect::<Vec<_>>();
+        inner.call_caches.pop();
+        inner.dependency_dag_for_nodes(&roots, work)
     }
 
     pub(super) fn dependencies(&mut self) -> ProcedureResult {
@@ -1330,7 +1354,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 })
             })
             .collect::<Vec<_>>();
-        let graph = self.dependency_dag_for_nodes(&roots);
+        let graph = self.dependency_dag_for_nodes(&roots, usize::MAX);
         let destinations = destinations
             .into_iter()
             .zip(graph.roots.iter().copied())
@@ -1361,8 +1385,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.ssa.bind(self.ssa_key(node), version);
     }
 
-    fn dependency_dag_for_nodes(&self, roots: &[VersionId]) -> DependencyDag<NodeKey> {
-        if self.guard_work.is_none() {
+    fn dependency_dag_for_nodes(
+        &mut self,
+        roots: &[VersionId],
+        work: usize,
+    ) -> DependencyDag<NodeKey> {
+        let graph = self.guard_work.and_then(|_| {
+            self.ssa
+                .try_dependency_dag(roots, |key| self.is_visible_source(key), work)
+        });
+        let Some(graph) = graph else {
+            self.status = AnalysisStatus::Barrier;
             return DependencyDag {
                 nodes: Vec::new(),
                 edges: Vec::new(),
@@ -1370,10 +1403,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 domains: Vec::new(),
                 sites: HashMap::default(),
             };
-        }
-        let graph = self
-            .ssa
-            .dependency_dag(roots, |key| self.is_visible_source(key));
+        };
         DependencyDag {
             nodes: graph
                 .nodes
@@ -3533,7 +3563,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let evaluated = self.eval_call_uncached(call, controls);
         let result = self.select_call_result(&evaluated, requested);
         if let Some(Some(cache)) = self.call_caches.last_mut() {
-            cache.calls.insert(cache_key, evaluated);
+            cache.calls.insert(cache_key, Rc::new(evaluated));
         }
         #[cfg(test)]
         FUNCTION_RESULT_VERSIONS.set(FUNCTION_RESULT_VERSIONS.get() + result.len());
