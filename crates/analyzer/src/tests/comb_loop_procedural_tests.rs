@@ -8,6 +8,102 @@ fn assert_comb_loop(case: &str, code: &str, expected: bool) {
     assert_eq!(actual, expected, "{case}: {errors:?}");
 }
 
+fn assert_complete_comb_loop(code: &str, expected: bool) {
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{code}\n{errors:#?}"
+    );
+    assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+    assert!(comb_loop_analysis_is_complete(code), "{code}");
+}
+
+#[test]
+fn comb_loop_assignment_reads_precede_all_region_writes() {
+    for width in [3usize, 8] {
+        for source_bit in 0..width {
+            for result_bit in 0..width {
+                for (operator, expected_bit) in [
+                    ("<<", Some(source_bit + 1)),
+                    (">>", source_bit.checked_sub(1)),
+                ] {
+                    for compound in [false, true] {
+                        let assignment = if compound {
+                            format!("value {operator}= 1;")
+                        } else {
+                            format!("value = value {operator} 1;")
+                        };
+                        let code = format!(
+                            r#"
+                            module Top(o: output bit) {{
+                                var value: bit<{width}>;
+                                always_comb {{
+                                    value = (o as {width}) << {source_bit};
+                                    {assignment}
+                                }}
+                                assign o = value[{result_bit}];
+                            }}
+                            "#
+                        );
+                        // A whole-vector assignment shifts every bit once,
+                        // regardless of the regions introduced by later reads.
+                        assert_complete_comb_loop(&code, expected_bit == Some(result_bit));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_concatenated_assignment_preserves_rhs_before_any_write() {
+    for source_bit in 0..4 {
+        for result_bit in 0..4 {
+            let code = format!(
+                r#"
+                module Top(o: output bit) {{
+                    var value: bit<4>;
+                    always_comb {{
+                        value = (o as 4) << {source_bit};
+                        {{value[1:0], value[3:2]}} = value;
+                    }}
+                    assign o = value[{result_bit}];
+                }}
+                "#
+            );
+            assert_complete_comb_loop(&code, result_bit == (source_bit + 2) % 4);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_assignment_samples_rhs_in_expression_order() {
+    for (expression, result_bit, expected) in [
+        ("{saved, clear()}", 1, true),
+        ("{clear(), saved}", 0, false),
+        ("(saved as 2) | clear()", 0, true),
+        ("clear() | (saved as 2)", 0, false),
+    ] {
+        let code = format!(
+            r#"
+            module Top(o: output bit) {{
+                var saved: bit;
+                var result: bit<2>;
+                function clear() -> bit {{ saved = 0; return 0; }}
+                always_comb {{
+                    saved = o;
+                    result = {expression};
+                }}
+                assign o = result[{result_bit}];
+            }}
+            "#
+        );
+        assert_complete_comb_loop(&code, expected);
+    }
+}
+
 #[test]
 fn comb_loop_core_semantics_and_region_regressions_2_block_ring_assign_b_c_a_assign_c_b_1() {
     // 2-block ring: assign b = c + a; assign c = b + 1

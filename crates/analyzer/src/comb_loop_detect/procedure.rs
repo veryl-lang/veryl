@@ -296,7 +296,7 @@ struct SampledVariable {
 struct EvaluationCache {
     calls: HashMap<*const FunctionCall, Rc<CallResult>>,
     expression_branches: HashMap<*const Expression, BranchId>,
-    // Batch projections first sample the entire actual in expression order.
+    // Batch projections first sample the entire expression in evaluation order.
     // Each variable occurrence must retain its own value and selector reads.
     variables: Option<HashMap<*const Factor, Rc<SampledVariable>>>,
 }
@@ -2352,21 +2352,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Statement::Assign(assign) => {
                 let previous_assignment = self.active_assignment;
                 self.active_assignment = self.tracing.then_some(assign.token);
-                let sample_rhs = assign.dst.iter().any(|destination| {
-                    !self
-                        .receiver_index(destination.id, &destination.index)
-                        .is_const()
-                });
                 self.call_caches.push(Some(EvaluationCache {
-                    variables: sample_rhs.then(HashMap::default),
+                    variables: Some(HashMap::default()),
                     ..EvaluationCache::default()
                 }));
-                if sample_rhs {
-                    // The RHS is evaluated before destination selectors. Keep
-                    // each read's value and index versions if a later call (or
-                    // another destination) changes a selector before the write.
-                    self.eval_expr(&assign.expr);
-                }
+                // Evaluate RHS reads in expression order before destination
+                // selectors or any region writes. Keep each occurrence's value
+                // and index versions even if a later call or write changes them.
+                self.eval_expr(&assign.expr);
                 let widths: Vec<_> = assign
                     .dst
                     .iter()

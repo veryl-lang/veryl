@@ -1419,8 +1419,8 @@ fn comb_loop_split_destination_reuses_one_function_evaluation() {
     );
     assert_eq!(
         crate::comb_loop_detect::function_result_version_count(),
-        WIDTH,
-        "each split destination must request only its matching return region"
+        WIDTH + 1,
+        "sample the RHS once, then request only each destination's matching return region"
     );
     assert!(
         crate::comb_loop_detect::function_result_region_probe_count() <= WIDTH * 12,
