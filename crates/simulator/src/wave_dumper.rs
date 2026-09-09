@@ -26,8 +26,12 @@ pub enum VarHandle {
 pub struct WaveDumper {
     kind: WaveDumperKind,
     path: Option<PathBuf>,
-    /// Last value written per `DumpVar`, so a step emits only what moved.
-    shadow: Vec<Value>,
+    /// The storage bytes behind each `DumpVar` as last written, so a step
+    /// reads and formats only what moved.  Comparing the storage rather than
+    /// the value keeps the unchanged case free of a `Value` per variable.
+    shadow: Vec<u8>,
+    /// Start of each `DumpVar`'s bytes in `shadow`, with its end last.
+    shadow_at: Vec<usize>,
 }
 
 enum WaveDumperKind {
@@ -57,6 +61,7 @@ impl WaveDumper {
             }),
             path: None,
             shadow: Vec::new(),
+            shadow_at: Vec::new(),
         }
     }
 
@@ -71,6 +76,7 @@ impl WaveDumper {
         let header = fst_writer::open_fst(path, &info).expect("failed to create FST file");
         WaveDumper {
             shadow: Vec::new(),
+            shadow_at: Vec::new(),
             kind: WaveDumperKind::Fst(Box::new(FstDumper {
                 state: FstState::Header(header),
             })),
@@ -263,15 +269,33 @@ impl WaveDumper {
         self.upscope();
     }
 
-    /// Write the variables whose value moved since the last call.  `force`
+    /// Write the variables whose storage moved since the last call.  `force`
     /// writes all of them, as the opening `$dumpvars` must.
     pub fn dump_all_vars(&mut self, dump_vars: &[DumpVar], use_4state: bool, force: bool) {
-        let force = force || self.shadow.len() != dump_vars.len();
+        // 4-state keeps the x/z mask right behind the payload; both decide the
+        // value, so both belong to the compare.
+        let span = |nb: usize| if use_4state { nb * 2 } else { nb };
+        let force = force || self.shadow_at.len() != dump_vars.len() + 1;
         if force {
+            self.shadow_at.clear();
+            let mut at = 0usize;
+            for entry in dump_vars {
+                self.shadow_at.push(at);
+                at += span(entry.native_bytes);
+            }
+            self.shadow_at.push(at);
             self.shadow.clear();
-            self.shadow.reserve(dump_vars.len());
+            self.shadow.resize(at, 0);
         }
         for (i, entry) in dump_vars.iter().enumerate() {
+            let (lo, hi) = (self.shadow_at[i], self.shadow_at[i + 1]);
+            // SAFETY: `ptr` is the variable's storage, valid for `span` bytes
+            // (`read_native_value` reads the same range).
+            let cur = unsafe { std::slice::from_raw_parts(entry.ptr, hi - lo) };
+            if !force && held(&self.shadow[lo..hi], cur) {
+                continue;
+            }
+            self.shadow[lo..hi].copy_from_slice(cur);
             let mut value = unsafe {
                 read_native_value(
                     entry.ptr,
@@ -282,13 +306,6 @@ impl WaveDumper {
                 )
             };
             value.trunc(entry.width);
-            if force {
-                self.shadow.push(value.clone());
-            } else if self.shadow[i] == value {
-                continue;
-            } else {
-                self.shadow[i] = value.clone();
-            }
             self.change_vector(entry.handle, &value);
         }
     }
@@ -305,6 +322,26 @@ impl Drop for FstDumper {
 
 fn sanitize_wave_name(name: &str) -> String {
     name.replace("::<", "_").replace(">", "").replace("::", "_")
+}
+
+/// Most variables are a machine word or less, and this runs for every one of
+/// them at every step, so the common widths take a typed load instead of the
+/// call a slice compare comes down to.
+#[inline]
+fn held(a: &[u8], b: &[u8]) -> bool {
+    match a.len() {
+        1 => a[0] == b[0],
+        2 => u16::from_ne_bytes([a[0], a[1]]) == u16::from_ne_bytes([b[0], b[1]]),
+        4 => {
+            u32::from_ne_bytes(a[..4].try_into().unwrap())
+                == u32::from_ne_bytes(b[..4].try_into().unwrap())
+        }
+        8 => {
+            u64::from_ne_bytes(a[..8].try_into().unwrap())
+                == u64::from_ne_bytes(b[..8].try_into().unwrap())
+        }
+        _ => a == b,
+    }
 }
 
 pub struct DumpVar {
