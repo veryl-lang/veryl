@@ -9,6 +9,97 @@ fn assert_comb_loop(case: &str, code: &str, expected: bool) {
 }
 
 #[test]
+fn comb_loop_cast_width_boundary_preserves_signed_extension() {
+    for (source_type, expression, source_bit, result_bit, expected) in [
+        ("i8", "value as 4", 3, 7, true),
+        ("i8", "value as 4", 2, 7, false),
+        ("i8", "value as 4", 7, 7, false),
+        ("i8", "value as 4", 3, 3, true),
+        ("u8", "value as 4", 3, 7, false),
+        ("i16", "value as i8", 7, 15, true),
+        ("i16", "value as i8", 15, 15, false),
+        ("u16", "value as i8", 7, 15, true),
+        ("i16", "value as u8", 7, 15, false),
+        ("i8", "(value as 4) | 8'b0", 3, 7, false),
+        ("i8", "(value as 4) | 8'sh00", 3, 7, true),
+        ("i8", "~(value as 4)", 3, 7, true),
+        ("i8", "(value as 4) << 1", 3, 7, true),
+        ("i8", "(value as 4) >> 1", 3, 15, false),
+        ("i8", "(value as 4) >>> 1", 3, 15, true),
+    ] {
+        let code = format!(
+            r#"
+            module Top(o: output bit) {{
+                var feedback: bit;
+                var value: {source_type};
+                var result: u16;
+                assign value = (feedback as {source_type}) << {source_bit};
+                assign result = {expression};
+                assign feedback = result[{result_bit}];
+                assign o = feedback;
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "{code}\n{errors:#?}"
+        );
+        assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{code}");
+    }
+}
+
+#[test]
+fn comb_loop_function_copyin_preserves_formal_width_boundary() {
+    for signed in [false, true] {
+        let prefix = if signed { "i" } else { "u" };
+        for (source_bit, result_bit) in [(12, 12), (8, 8), (4, 4), (7, 7), (7, 15), (4, 15)] {
+            for shift in [0, 4] {
+                for nested in [false, true] {
+                    let actual = if shift == 0 {
+                        "value".to_string()
+                    } else {
+                        format!("value >> {shift}")
+                    };
+                    let callee = if nested { "wrap" } else { "widen" };
+                    let bit = source_bit + shift;
+                    let code = format!(
+                        r#"
+                        module Top(o: output bit) {{
+                            var feedback: bit;
+                            var value: {prefix}32;
+                            var result: {prefix}16;
+                            function widen(v: input {prefix}8) -> {prefix}16 {{ return v; }}
+                            function wrap(v: input {prefix}32) -> {prefix}16 {{ return widen(v); }}
+                            assign value = (feedback as {prefix}32) << {bit};
+                            assign result = {callee}({actual});
+                            assign feedback = result[{result_bit}];
+                            assign o = feedback;
+                        }}
+                        "#
+                    );
+                    let expected = source_bit < 8
+                        && (source_bit == result_bit
+                            || (signed && source_bit == 7 && result_bit >= 8));
+                    let errors = analyze(&code);
+                    assert!(
+                        errors
+                            .iter()
+                            .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                        "{code}\n{errors:#?}"
+                    );
+                    assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+                    assert!(comb_loop_analysis_is_complete(&code), "{code}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn comb_loop_dynamic_selector_arithmetic_preserves_wrapping_and_narrowing() {
     for (index_type, destination, source, dst_size, src_size, dst, src) in [
         ("bit<2>", "index as 1", "index", 2, 4, 0, 2),

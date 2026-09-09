@@ -4359,7 +4359,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .get(&formal_key.0)
             .and_then(|variable| variable.r#type.total_width())
             .unwrap_or(span.end());
-        self.eval_expr_requested(actual, formal_key.1, span, context_width)
+        let sources = self.eval_expr_requested(actual, formal_key.1, span, context_width);
+        // A source version can span more bits than the requested formal.
+        // Copy-in stores only the formal region; a later widening return or
+        // imported summary must not recover bits discarded at this boundary.
+        let version = self.ssa.related_definition(sources.sources);
+        let version = self
+            .ssa
+            .projected(version, position_domain(formal_key.1, span));
+        ExpressionSources {
+            sources: vec![(version, PositionRelation::default())],
+        }
     }
 
     fn expression_projection_source(

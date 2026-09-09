@@ -17274,23 +17274,25 @@ fn unary_binds_tighter_than_cast() {
     }
 }
 
-// Regression: a numeric-width `as <N>` cast yields an UNSIGNED result at
-// RUNTIME (`x as N` is an unsigned `logic<N>` like the emitted SV); a stray
-// signed flag on the cast would sign-extend it when widened / arithmetic-
-// shifted. The operand is a RUNTIME input (const operands fold via the separate
-// path `comptime_widening_cast_sign_extends` covers), exercising the signedness
-// `gather_context` computes. With the bug: wid=0xff80, asr=0xc0.
+// A numeric-width cast inherits its operand's signedness, not the width
+// literal's. Exercise runtime inputs so constant folding cannot hide an
+// incorrect flag, including narrowing a signed value before extending it.
 #[test]
-fn runtime_numeric_width_cast_is_unsigned() {
+fn runtime_numeric_width_cast_preserves_operand_signedness() {
     let code = r#"
     module Top (
         a:   input  logic<8> ,
+        s:   input  i8,
         wid: output logic<16>,
         asr: output logic<8> ,
+        signed_wid: output i16,
+        signed_asr: output i16,
     ) {
         always_comb {
             wid = (a as 8) as 16;
             asr = (a as 8) >>> 1;
+            signed_wid = s as 4;
+            signed_asr = (s as 4) >>> 1;
         }
     }
     "#;
@@ -17301,6 +17303,7 @@ fn runtime_numeric_width_cast_is_unsigned() {
         let mut sim = Simulator::new(ir, None);
         // a = 0x80: MSB set, so a signed-vs-unsigned interpretation diverges.
         sim.set("a", Value::new(0x80, 8, false));
+        sim.set("s", Value::new(0x08, 8, true));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(
             sim.get("wid").unwrap().payload_u128(),
@@ -17311,6 +17314,16 @@ fn runtime_numeric_width_cast_is_unsigned() {
             sim.get("asr").unwrap().payload_u128(),
             0x40,
             "(a as 8) >>> 1 must not sign-fill, {config:?}",
+        );
+        assert_eq!(
+            sim.get("signed_wid").unwrap().payload_u128(),
+            0xfff8,
+            "s as 4 must extend the truncated sign bit, {config:?}",
+        );
+        assert_eq!(
+            sim.get("signed_asr").unwrap().payload_u128(),
+            0xfffc,
+            "(s as 4) >>> 1 must sign-fill, {config:?}",
         );
     }
 }
