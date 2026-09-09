@@ -3925,8 +3925,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
             Expression::Concatenation(parts, _) => {
                 for (part, repeat) in parts {
+                    // IEEE 1800 11.4.12.1 evaluates packed replication operands
+                    // exactly once. A zero count contributes side effects and
+                    // no value bits to the concatenation.
+                    let sources = self.eval_expr_inner(part, prune_constant_branches);
                     if self.repeat_count(repeat.as_ref()) != Some(0) {
-                        reads.extend(self.eval_expr_inner(part, prune_constant_branches));
+                        reads.extend(sources);
                     }
                     if let Some(repeat) = repeat {
                         reads.extend(self.eval_expr_inner(repeat, prune_constant_branches));

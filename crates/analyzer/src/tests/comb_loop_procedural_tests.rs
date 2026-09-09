@@ -21,7 +21,7 @@ fn assert_complete_comb_loop(code: &str, expected: bool) {
 }
 
 #[test]
-fn comb_loop_rhs_sampling_only_evaluates_used_initializers() {
+fn comb_loop_rhs_sampling_preserves_initializer_side_effects() {
     for (ty, literal, used) in [
         ("bit[2]", "'{0, 0, default: effect()}", false),
         ("bit[2]", "'{default: effect(), 0, 0}", false),
@@ -65,7 +65,9 @@ fn comb_loop_rhs_sampling_only_evaluates_used_initializers() {
         ("bit[2]", "'{effect() repeat 2}", true),
         ("bit[2, 2]", "'{'{0, default: effect()}, '{0, 0}}", true),
         ("bit[2, 2]", "'{'{0, 0}, default: '{effect(), 0}}", true),
-        ("bit<2>", "{effect() repeat 0, 2'b0}", false),
+        // Packed repetition evaluates its operand even when it contributes no bits.
+        ("bit<2>", "{effect() repeat 0, 2'b0}", true),
+        ("bit<2>", "{effect() repeat (1 - 1), 2'b0}", true),
         ("bit<2>", "{effect() repeat 1, 1'b0}", true),
     ] {
         for boundary in ["return", "argument", "assignment"] {
@@ -101,6 +103,83 @@ fn comb_loop_rhs_sampling_only_evaluates_used_initializers() {
                     "#
                 );
                 assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_evaluates_packed_repeats_once() {
+    for count in [0, 1, 3] {
+        let literal = format!("{{advance() repeat {count}, 1'b0}}");
+        for boundary in ["assignment", "argument", "return"] {
+            let (declaration, expression) = match boundary {
+                "assignment" => (String::new(), literal.clone()),
+                "argument" => (
+                    "function consume(x: input bit<4>) -> bit<4> { return 0; }".to_string(),
+                    format!("consume({literal})"),
+                ),
+                "return" => (
+                    format!("function make() -> bit<4> {{ return {literal}; }}"),
+                    "make()".to_string(),
+                ),
+                _ => unreachable!(),
+            };
+            let code = format!(
+                r#"
+                module Top(o: output bit) {{
+                    var saved: bit<2>;
+                    var result: bit<4>;
+                    function advance() -> bit {{ saved = saved << 1; return 0; }}
+                    {declaration}
+                    always_comb {{
+                        saved = o;
+                        result = {expression};
+                    }}
+                    assign o = saved[1];
+                }}
+                "#
+            );
+            // Exactly one shift moves feedback into bit 1. Skipping the call
+            // or executing it again would incorrectly remove this loop.
+            assert_complete_comb_loop(&code, true);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_discards_zero_repeat_value_dependencies() {
+    for count in [0, 1] {
+        for operand in ["value", "read()"] {
+            for suffix in ["", " + 2'b0"] {
+                let literal = format!("{{1'b0, {operand} repeat {count}}}{suffix}");
+                for boundary in ["assignment", "argument", "return"] {
+                    let (declaration, expression) = match boundary {
+                        "assignment" => (String::new(), literal.clone()),
+                        "argument" => (
+                            "function identity(x: input bit<2>) -> bit<2> { return x; }"
+                                .to_string(),
+                            format!("identity({literal})"),
+                        ),
+                        "return" => (
+                            format!("function make() -> bit<2> {{ return {literal}; }}"),
+                            "make()".to_string(),
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let code = format!(
+                        r#"
+                        module Top(o: output bit<2>) {{
+                            var value: bit;
+                            function read() -> bit {{ return value; }}
+                            {declaration}
+                            assign value = o[0];
+                            always_comb {{ o = {expression}; }}
+                        }}
+                        "#
+                    );
+                    assert_complete_comb_loop(&code, count != 0);
+                }
             }
         }
     }
