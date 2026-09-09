@@ -833,6 +833,7 @@ thread_local! {
     static FUNCTION_RESULT_REGION_PROBES: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_SUMMARY_GRAPH_NODES: Cell<usize> = const { Cell::new(0) };
+    static FUNCTION_SUMMARY_GRAPH_EDGES: Cell<usize> = const { Cell::new(0) };
     static MODULE_CONTEXT_ENTRIES: Cell<usize> = const { Cell::new(0) };
     static VISIBLE_SOURCE_PROBES: Cell<usize> = const { Cell::new(0) };
     static TRACED_PROCEDURE_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
@@ -846,6 +847,7 @@ pub(crate) fn reset_function_evaluation_count() {
     FUNCTION_RESULT_REGION_PROBES.set(0);
     FUNCTION_BARRIER_EVALUATIONS.set(0);
     FUNCTION_SUMMARY_GRAPH_NODES.set(0);
+    FUNCTION_SUMMARY_GRAPH_EDGES.set(0);
     MODULE_CONTEXT_ENTRIES.set(0);
     WRITE_FOOTPRINT_STATEMENT_VISITS.set(0);
 }
@@ -873,6 +875,11 @@ pub(crate) fn function_barrier_evaluation_count() -> usize {
 #[cfg(test)]
 pub(crate) fn function_summary_graph_node_count() -> usize {
     FUNCTION_SUMMARY_GRAPH_NODES.get()
+}
+
+#[cfg(test)]
+pub(crate) fn function_summary_graph_edge_count() -> usize {
+    FUNCTION_SUMMARY_GRAPH_EDGES.get()
 }
 
 #[cfg(test)]
@@ -1319,6 +1326,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let graph = Rc::new(graph);
         #[cfg(test)]
         FUNCTION_SUMMARY_GRAPH_NODES.set(FUNCTION_SUMMARY_GRAPH_NODES.get().max(graph.nodes.len()));
+        #[cfg(test)]
+        FUNCTION_SUMMARY_GRAPH_EDGES.set(FUNCTION_SUMMARY_GRAPH_EDGES.get().max(graph.edges.len()));
         let mut root = graph.roots.iter().copied();
         let result = result_versions
             .into_iter()
@@ -2367,6 +2376,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.ssa.merge(&continuation);
         if has_continue {
             self.path_condition = PathCondition::disjoin_all(&continuation_conditions);
+            // Share the guarded alternatives across subsequent statements.
+            // Copying every continuing arm into each later write would make
+            // a wide case followed by a long block quadratic in storage.
+            // The join preserves each input's guard, including correlations.
+            if continuation_controls.len() > 1 {
+                let control = self.ssa.definition(continuation_controls);
+                continuation_controls = vec![control];
+            }
             FlowResult {
                 flow: ProcedureFlow::Continue,
                 continuation_controls,
@@ -3932,7 +3949,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) -> CallResult {
         self.status = self.status.max(summary.status);
         self.repeatable &= summary.repeatable;
-        self.call_caches.push(Some(EvaluationCache::default()));
+        // Later actuals can overwrite variables or selectors read by earlier
+        // ones. Formal-region projections must reuse each occurrence's value
+        // from copy-in evaluation, while captured storage sees the final state.
+        self.call_caches.push(Some(EvaluationCache {
+            variables: Some(HashMap::default()),
+            ..EvaluationCache::default()
+        }));
         for actual in call.inputs.values() {
             self.eval_expr(actual);
         }

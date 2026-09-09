@@ -174,6 +174,109 @@ fn comb_loop_instance_actual_short_circuit_controls_captured_writes() {
 }
 
 #[test]
+fn comb_loop_function_actuals_preserve_sampled_values() {
+    for (initial, replacement, expected) in [("feedback", "0", true), ("0", "feedback", false)] {
+        for call in ["first(value, change())", "first(identity(value), change())"] {
+            let code = format!(
+                r#"
+                module Top(o: output logic) {{
+                    var value: logic;
+                    var feedback: logic;
+                    function change() -> logic {{ value = {replacement}; return 0; }}
+                    function identity(x: input logic) -> logic {{ return x; }}
+                    function first(x: input logic, unused: input logic) -> logic {{ return x; }}
+                    always_comb {{ value = {initial}; o = {call}; }}
+                    assign feedback = o;
+                }}
+                "#
+            );
+            assert_comb_loop(
+                &format!("{initial}, {replacement}, {call}"),
+                &code,
+                expected,
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
+fn comb_loop_function_actuals_preserve_sampled_selectors() {
+    for data_type in ["logic<2>", "logic[2]"] {
+        for (initial, replacement, expected) in [("feedback", "0", true), ("0", "feedback", false)]
+        {
+            let code = format!(
+                r#"
+                module Top(data: input {data_type}, o: output logic) {{
+                    var index: logic;
+                    var feedback: logic;
+                    function change() -> logic {{ index = {replacement}; return 0; }}
+                    function first(x: input logic, unused: input logic) -> logic {{ return x; }}
+                    always_comb {{ index = {initial}; o = first(data[index], change()); }}
+                    assign feedback = o;
+                }}
+                "#
+            );
+            assert_comb_loop(
+                &format!("{data_type}, {initial}, {replacement}"),
+                &code,
+                expected,
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
+fn case_exit_continuations_share_control_dependencies() {
+    use crate::comb_loop_detect::{
+        function_summary_graph_edge_count, reset_function_evaluation_count,
+    };
+
+    for count in [32, 64, 128] {
+        let arms = (0..count)
+            .map(|index| {
+                if index == 0 {
+                    "0: { return 0; }".to_owned()
+                } else {
+                    format!("{index}: {{}}")
+                }
+            })
+            .collect::<String>();
+        for (selector, data, expected) in [
+            ("sel", "x", false),
+            ("sel", "feedback", true),
+            ("feedback as u32", "x", true),
+        ] {
+            let code = format!(
+                r#"
+                module Top(sel: input u32, x: input logic, o: output logic) {{
+                    function gate(sel: input u32, x: input logic) -> logic {{
+                        case sel {{ {arms} default: {{}} }}
+                        var v: logic;
+                        v = x;
+                        for _index in 0..{count} {{ v = !v; }}
+                        return v;
+                    }}
+                    var feedback: logic;
+                    assign feedback = o;
+                    assign o = gate({selector}, {data});
+                }}
+                "#
+            );
+            let case = format!("count={count}, selector={selector}, data={data}");
+            reset_function_evaluation_count();
+            assert_comb_loop(&case, &code, expected);
+            let edges = function_summary_graph_edge_count();
+            // Sequential statements must share the continuation dependencies,
+            // rather than each importing one edge for every continuing arm.
+            assert!(edges <= count * 40, "{case}: {edges} summary edges");
+            assert!(comb_loop_analysis_is_complete(&code), "{case}");
+        }
+    }
+}
+
+#[test]
 fn comb_loop_instance_actual_projections_preserve_sampled_variable_values() {
     for (actual, selection, expected) in [
         ("{feedback, clear(), feedback}", "i[2]", true),
