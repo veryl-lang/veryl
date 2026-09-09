@@ -6137,6 +6137,150 @@ fn interface_parameter_override() {
 }
 
 #[test]
+fn a_parameter_typed_by_another_parameter_takes_the_override() {
+    // Regression: a parameter whose declared width names another parameter was
+    // sized with that parameter's DEFAULT, so `#(W: 5, V: 16)` on
+    // `param V: logic<W>` read 0. The emitted SystemVerilog was correct, so
+    // only the native simulator saw it.
+    // `Guarded` is the shape an exact namespace comparison misses: the
+    // `#[ifdef]` puts a define context on the parameter's namespace that the
+    // component's own namespace does not carry.
+    let code = r#"
+    package Pkg {
+        struct info_t {
+            size: logic<12>,
+            tag : logic<4>,
+        }
+        const InfoDefault: info_t = info_t'{size: 8, tag: 0};
+    }
+
+    module Direct #(
+        param W: u32      = 3,
+        param V: logic<W> = 0,
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = V as 8;
+    }
+
+    module Indirect #(
+        param A: u32      = 2,
+        param B: u32      = A * 2,
+        param V: logic<B> = 0,
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = V as 8;
+    }
+
+    module Member #(
+        param Info: Pkg::info_t          = Pkg::InfoDefault,
+        param D:    logic<Info.size * 2> = 0,
+    ) (
+        o: output logic<32>,
+    ) {
+        assign o = D as 32;
+    }
+
+    module Guarded #(
+        #[ifndef(NOT_DEFINED)]
+        param W: u32      = 3,
+        param V: logic<W> = 0,
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = V as 8;
+    }
+
+    module Top (
+        out_direct:   output logic<8>,
+        out_indirect: output logic<8>,
+        out_member:   output logic<32>,
+        out_guarded:  output logic<8>,
+    ) {
+        inst u_direct: Direct #( W: 5, V: 16 ) ( o: out_direct );
+        inst u_indirect: Indirect #( A: 4, V: 255 ) ( o: out_indirect );
+        inst u_guarded: Guarded #( W: 6, V: 31 ) ( o: out_guarded );
+        inst u_member: Member #(
+            Info: Pkg::info_t'{ size: 16, tag: 1 },
+            D: 32'h00012345,
+        ) ( o: out_member );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // Together, so a partial fix shows which shapes it missed.
+        assert_eq!(
+            (
+                sim.get("out_direct").unwrap(),
+                sim.get("out_indirect").unwrap(),
+                sim.get("out_member").unwrap(),
+                sim.get("out_guarded").unwrap(),
+            ),
+            (
+                Value::new(16, 8, false),
+                Value::new(255, 8, false),
+                Value::new(0x00012345, 32, false),
+                Value::new(31, 8, false),
+            )
+        );
+    }
+}
+
+#[test]
+fn a_parameter_width_is_not_taken_from_the_instantiating_module() {
+    // Regression: the instantiation sized the callee's declared parameter type
+    // in its own scope, where its variables resolve first, so `ResetValue` was
+    // sized with the caller's `Width` instead of the callee's. The value and
+    // the variable's width were both right; only the value's REPRESENTATION was
+    // 1600 bits, and storing that into a 6-bit variable is an elaboration panic
+    // rather than a wrong answer. `out_mid` guards the other direction: sizing
+    // in the callee's scope must not cost the caller its own value.
+    let code = r#"
+    module Leaf #(
+        param Width:      u32          = 1,
+        param ResetValue: logic<Width> = 0,
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = ResetValue as 8;
+    }
+
+    module Mid #(
+        param Width: u32 = 1600,
+    ) (
+        o:    output logic<8>,
+        wide: output logic<11>,
+    ) {
+        inst u: Leaf #( Width: 6, ResetValue: 31 ) ( o );
+        assign wide = Width as 11;
+    }
+
+    module Top (
+        out_leaf: output logic<8>,
+        out_mid:  output logic<11>,
+    ) {
+        inst u_mid: Mid ( o: out_leaf, wide: out_mid );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            (sim.get("out_leaf").unwrap(), sim.get("out_mid").unwrap()),
+            (Value::new(31, 8, false), Value::new(1600, 11, false))
+        );
+    }
+}
+
+#[test]
 fn interface_function() {
     let code = r#"
     interface BusIf {
