@@ -22567,3 +22567,28 @@ fn invalid_select_scalar() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn tb_component_in_inactive_ifdef() {
+    // https://github.com/veryl-lang/veryl/issues/3370
+    // An inactive `ifdef` branch is still emitted, so a `$tb` component in a
+    // non-test module has to be rejected rather than reaching the emitter.
+    let code = r#"
+    module ModuleA (
+        o_clk: output clock,
+    ) {
+        #[ifdef(SIM)]
+        {
+            inst u_clk: $tb::clock_gen ();
+            assign o_clk = u_clk;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidTbUsage { .. }))
+    );
+}
