@@ -537,11 +537,12 @@ fn ff_statement_after_if_reset() {
     // Regression: statements placed after the `if_reset` block in an always_ff
     // must still execute. They previously got dropped by the simulator IR
     // conversion (only the if_reset itself was kept), so `b` stayed at its
-    // reset value instead of tracking `a`.
+    // reset value instead of tracking `a`. Use an explicitly synchronous reset
+    // so these following statements are also valid for synthesis.
     let code = r#"
     module Top (
         clk: input  clock,
-        rst: input  reset,
+        rst: input  reset_sync_low,
         b  : output logic<8>,
     ) {
         var a: logic<8>;

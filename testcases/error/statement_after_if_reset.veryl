@@ -1,0 +1,19 @@
+module statement_after_if_reset (
+    clk: input  clock,
+    rst: input  reset,
+    a  : input  logic,
+    b  : input  logic,
+    x  : output logic,
+    y  : output logic,
+) {
+    always_ff (clk, rst) {
+        if_reset {
+            x = 0;
+        } else {
+            x = a;
+        }
+        if b {
+            y = 1;
+        }
+    }
+}
