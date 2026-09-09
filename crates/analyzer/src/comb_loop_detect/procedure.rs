@@ -85,6 +85,43 @@ impl AffineIndex {
     fn destination_offset_from(&self, source: &Self) -> Option<isize> {
         (self.terms == source.terms).then(|| self.constant.checked_sub(source.constant))?
     }
+
+    fn fits(&self, width: usize, signed: bool, ctx: &Context) -> Option<()> {
+        let (allowed_min, allowed_max) = integer_range(width, signed)?;
+        let mut min = self.constant as i128;
+        let mut max = min;
+        for &(id, coefficient) in &self.terms {
+            let ty = &ctx.variables.get(&id)?.r#type;
+            let (low, high) = integer_range(ty.total_width()?, ty.signed)?;
+            let coefficient = coefficient as i128;
+            let low = low.checked_mul(coefficient)?;
+            let high = high.checked_mul(coefficient)?;
+            min = min.checked_add(low.min(high))?;
+            max = max.checked_add(low.max(high))?;
+        }
+        (allowed_min <= min && max <= allowed_max).then_some(())
+    }
+}
+
+fn integer_range(width: usize, signed: bool) -> Option<(i128, i128)> {
+    let magnitude_bits = width.checked_sub(usize::from(signed))?;
+    let magnitude = 1i128.checked_shl(u32::try_from(magnitude_bits).ok()?)?;
+    (magnitude > 0).then(|| (if signed { -magnitude } else { 0 }, magnitude - 1))
+}
+
+#[derive(Clone)]
+struct SampledAffineIndex {
+    index: AffineIndex,
+    versions: Vec<VersionId>,
+}
+
+impl SampledAffineIndex {
+    fn destination_offset_from(&self, source: &Self) -> Option<isize> {
+        if self.versions != source.versions {
+            return None;
+        }
+        self.index.destination_offset_from(&source.index)
+    }
 }
 
 fn affine_constant(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
@@ -99,13 +136,18 @@ fn affine_constant(expression: &Expression, ctx: &mut Context) -> Option<AffineI
 }
 
 fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
-    match expression {
+    if expression.comptime().is_const {
+        return affine_constant(expression, ctx);
+    }
+    if expression.comptime().r#type.kind.is_float() {
+        return None;
+    }
+    let result = match expression {
         Expression::Term(factor) => match factor.as_ref() {
             Factor::Variable(id, index, select, _) if index.0.is_empty() && select.is_empty() => {
                 Some(AffineIndex::variable(*id))
             }
             Factor::Value(_) => affine_constant(expression, ctx),
-            _ if expression.comptime().is_const => affine_constant(expression, ctx),
             _ => None,
         },
         Expression::Unary(Op::Add, expression, _) => affine_index(expression, ctx),
@@ -134,10 +176,19 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
                 None
             }
         }
-        Expression::Binary(left, Op::As, _, _) => affine_index(left, ctx),
-        _ if expression.comptime().is_const => affine_constant(expression, ctx),
+        Expression::Binary(left, Op::As, _, comptime) => {
+            let result = affine_index(left, ctx)?;
+            result.fits(comptime.r#type.total_width()?, comptime.r#type.signed, ctx)?;
+            Some(result)
+        }
         _ => None,
-    }
+    }?;
+    // Affine coordinates use integers. Every intermediate operation and
+    // operand coercion must preserve that interpretation before cancelling
+    // terms or comparing offsets; bit-vector overflow and casts need not.
+    let context = expression.comptime().expr_context;
+    result.fits(context.width, context.signed, ctx)?;
+    Some(result)
 }
 
 fn affine_bound(bound: &ForBound, ctx: &mut Context) -> Option<AffineIndex> {
@@ -235,6 +286,7 @@ struct CallResult {
 struct SampledVariable {
     values: HashMap<NodeKey, VersionId>,
     selectors: Vec<VersionId>,
+    index: Option<SampledAffineIndex>,
 }
 
 // Region-split writes query one RHS several times, but a function call in that
@@ -958,7 +1010,7 @@ struct ExpressionSources {
 
 #[derive(Default)]
 struct ProjectionContext {
-    destination_index: Option<AffineIndex>,
+    destination_index: Option<SampledAffineIndex>,
     destination_array: Option<ArraySpan>,
 }
 
@@ -1865,8 +1917,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if index.dimension() != variable.r#type.array.dims() {
             return None;
         }
-        let flattened = variable.r#type.array.calc_index_expr(&index.0)?;
-        affine_index(&flattened, &mut self.ctx)
+        let dimensions = variable.r#type.array.clone();
+        let mut result = AffineIndex::default();
+        let mut stride = 1isize;
+        // Validate the original bit-vector expressions before flattening.
+        // Layout strides are integer coordinate arithmetic, not synthetic
+        // expressions with missing width/signedness metadata.
+        for (expression, dimension) in index.0.iter().zip(dimensions.iter()).rev() {
+            let coordinate = affine_index(expression, &mut self.ctx)?;
+            result.add_scaled(&coordinate, stride)?;
+            stride = stride.checked_mul(isize::try_from((*dimension)?).ok()?)?;
+        }
+        Some(result)
+    }
+
+    fn sample_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<SampledAffineIndex> {
+        let index = self.flattened_affine_index(id, index)?;
+        let mut versions = Vec::new();
+        for &(id, _) in &index.terms {
+            versions.extend(self.read_variable(id, &VarIndex::default(), &VarSelect::default()));
+        }
+        Some(SampledAffineIndex { index, versions })
     }
 
     fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
@@ -1930,7 +2001,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .into_iter()
             .map(|key| (key, self.read_key(key)))
             .collect();
-        let sampled = Rc::new(SampledVariable { values, selectors });
+        let index = self.sample_affine_index(*id, index);
+        let sampled = Rc::new(SampledVariable {
+            values,
+            selectors,
+            index,
+        });
         self.call_caches
             .last_mut()
             .and_then(Option::as_mut)
@@ -2007,6 +2083,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         expression_context_width: usize,
         controls: &[VersionId],
     ) {
+        let selectors = self.eval_destination_selectors(destination);
         let variable = self.ctx.variables.get(&destination.id).cloned();
         let selected = if destination.select.is_const_with_range() {
             variable.as_ref().and_then(|variable| {
@@ -2031,33 +2108,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     packed: Some(signed_difference(low, expression_offset)?),
                 })
             });
-        let destination_index = self.flattened_affine_index(destination.id, &destination.index);
+        let destination_index = self.sample_affine_index(destination.id, &destination.index);
         let keys = self.write_keys(destination);
         let dynamic_array = !destination.index.is_const();
         let dynamic_packed = !destination.select.is_const_with_range();
         let dynamic = dynamic_array || dynamic_packed;
         for key in keys {
             let mut whole = controls.to_vec();
-            for selector in destination
-                .index
-                .0
-                .iter()
-                .chain(destination.select.0.iter())
-            {
-                whole.extend(self.eval_expr(selector));
-            }
-            if let Some((_, selector)) = &destination.select.1 {
-                whole.extend(self.eval_expr(selector));
-            }
+            whole.extend_from_slice(&selectors);
             let mut sources = if let (Some(destination_array), Some((_, low)), Some(key_span)) =
                 (destination_array, selected, self.key_span(key))
             {
                 let destination_region = key.1.intersection(destination_array);
                 let expression_array = destination_region.and_then(|array| {
-                    if destination_index
-                        .as_ref()
-                        .is_some_and(|index| !index.terms.is_empty())
-                    {
+                    if dynamic_array {
+                        // Each candidate destination receives the scalar RHS,
+                        // including when no affine correspondence is proven.
                         Some(ArraySpan {
                             start: 0,
                             length: array.length,
@@ -2282,7 +2348,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Statement::Assign(assign) => {
                 let previous_assignment = self.active_assignment;
                 self.active_assignment = self.tracing.then_some(assign.token);
-                self.call_caches.push(Some(EvaluationCache::default()));
+                let sample_rhs = assign.dst.iter().any(|destination| {
+                    !self
+                        .receiver_index(destination.id, &destination.index)
+                        .is_const()
+                });
+                self.call_caches.push(Some(EvaluationCache {
+                    variables: sample_rhs.then(HashMap::default),
+                    ..EvaluationCache::default()
+                }));
+                if sample_rhs {
+                    // The RHS is evaluated before destination selectors. Keep
+                    // each read's value and index versions if a later call (or
+                    // another destination) changes a selector before the write.
+                    self.eval_expr(&assign.expr);
+                }
                 let widths: Vec<_> = assign
                     .dst
                     .iter()
@@ -2877,10 +2957,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let accesses = var_reads(*id, &receiver, select, &mut self.ctx);
                         let dynamic_array_offset = projection
                             .destination_index
-                            .clone()
-                            .filter(|destination| !destination.terms.is_empty())
+                            .as_ref()
+                            .filter(|destination| !destination.index.terms.is_empty())
                             .and_then(|destination| {
-                                let source = self.flattened_affine_index(*id, index)?;
+                                let source = if let Some(sampled) = &sampled {
+                                    sampled.index.clone()
+                                } else {
+                                    self.sample_affine_index(*id, index)
+                                }?;
                                 destination.destination_offset_from(&source)
                             });
                         let position_preserving =
@@ -4286,7 +4370,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if projection
             .destination_index
             .as_ref()
-            .is_some_and(|index| !index.terms.is_empty())
+            .is_some_and(|index| !index.index.terms.is_empty())
         {
             // Affine reads can use destination array coordinates. Dynamic
             // writes already forget array correspondence, so discard only

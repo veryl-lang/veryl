@@ -9,6 +9,185 @@ fn assert_comb_loop(case: &str, code: &str, expected: bool) {
 }
 
 #[test]
+fn comb_loop_dynamic_selector_arithmetic_preserves_wrapping_and_narrowing() {
+    for (index_type, destination, source, dst_size, src_size, dst, src) in [
+        ("bit<2>", "index as 1", "index", 2, 4, 0, 2),
+        ("bit<127>", "index as 1", "index", 2, 4, 0, 2),
+        ("bit<2>", "index", "index as 1", 4, 2, 2, 0),
+        ("bit", "index + 1'b1", "index", 2, 2, 0, 1),
+        ("bit<2>", "index - 2'b01", "index", 4, 4, 3, 0),
+        ("bit<2>", "index * 2'b10", "index * 4'b0010", 4, 8, 0, 4),
+        ("bit<2>", "-index", "4'b0 - index", 4, 16, 3, 15),
+    ] {
+        for feedback_bit in [0, 1] {
+            let initializers = (0..src_size)
+                .map(|element| {
+                    if element == src {
+                        format!("assign b[{element}] = {{1'b0, a[{dst}][{feedback_bit}]}};")
+                    } else {
+                        format!("assign b[{element}] = 0;")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let code = format!(
+                r#"
+                module Top(index: input {index_type}, o: output logic) {{
+                    var a: logic<2>[{dst_size}];
+                    var b: logic<2>[{src_size}];
+                    always_comb {{
+                        a = '{{default: 0}};
+                        a[{destination}] = b[{source}];
+                    }}
+                    {initializers}
+                    assign o = a[{dst}][0];
+                }}
+                "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{code}\n{errors:#?}"
+            );
+            assert_eq!(!errors.is_empty(), feedback_bit == 0, "{code}\n{errors:#?}");
+            assert!(comb_loop_analysis_is_complete(&code), "{code}");
+        }
+    }
+}
+
+#[test]
+fn comb_loop_dynamic_selector_mutation_during_rhs_keeps_feedback() {
+    for expression in ["b[index] | clear_index()", "b[index] | clear_indirectly()"] {
+        for in_function in [false, true] {
+            for feedback_bit in [0, 1] {
+                let body = format!("index = sel; a = '{{default: 0}}; a[index] = {expression};");
+                let process = if in_function {
+                    format!("function update() {{ {body} }} always_comb {{ update(); }}")
+                } else {
+                    format!("always_comb {{ {body} }}")
+                };
+                let code = format!(
+                    r#"
+                    module Top(sel: input logic, o: output logic) {{
+                        var index: logic;
+                        var a: logic<2>[2];
+                        var b: logic<2>[2];
+                        function clear_index() -> logic<2> {{
+                            index = 0;
+                            return 0;
+                        }}
+                        function clear_indirectly() -> logic<2> {{
+                            return clear_index();
+                        }}
+                        {process}
+                        assign b[0] = 0;
+                        assign b[1] = {{1'b0, a[0][{feedback_bit}]}};
+                        assign o = a[0][0];
+                    }}
+                    "#
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors
+                        .iter()
+                        .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    "{code}\n{errors:#?}"
+                );
+                assert_eq!(!errors.is_empty(), feedback_bit == 0, "{code}\n{errors:#?}");
+                assert!(comb_loop_analysis_is_complete(&code), "{code}");
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_dynamic_selector_bound_equality_respects_expression_widths() {
+    for (index_type, start, end, expected) in [
+        ("bit<2>", "index as 1", "index", true),
+        ("bit", "index + 1'b1", "index + 2'b01", true),
+        ("bit<2>", "index as 4", "index", false),
+        ("bit<2>", "index + 1", "1 + index", false),
+    ] {
+        let code = format!(
+            r#"
+            module Top(index: input {index_type}, o: output logic) {{
+                var feedback: logic;
+                assign feedback = o;
+                always_comb {{
+                    o = 0;
+                    for _iteration in ({start})..({end}) {{
+                        o = feedback;
+                    }}
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "{code}\n{errors:#?}"
+        );
+        assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{code}");
+    }
+}
+
+#[test]
+fn comb_loop_dynamic_selector_stable_values_keep_safe_offsets() {
+    for (destination, source) in [
+        ("index", "b[index]"),
+        ("index as 2", "b[index]"),
+        ("index", "b[index as 2]"),
+        ("index + 1", "b[index]"),
+        ("index", "b[index] | passthrough(sel)"),
+    ] {
+        let code = format!(
+            r#"
+            module Top(sel: input logic, o: output logic) {{
+                var index: logic;
+                var a: logic<2>[3];
+                var b: logic<2>[2];
+                function passthrough(value: input logic) -> logic<2> {{
+                    return value as 2;
+                }}
+                always_comb {{
+                    index = sel;
+                    a = '{{default: 0}};
+                    a[{destination}] = {source};
+                }}
+                assign b[0] = 0;
+                assign b[1] = a[0];
+                assign o = a[0][0];
+            }}
+            "#
+        );
+        assert!(analyze(&code).is_empty(), "{code}");
+        assert!(comb_loop_analysis_is_complete(&code), "{code}");
+    }
+
+    let code = r#"
+        module Top(i: input bit, j: input bit, o: output logic) {
+            var a: logic[2, 2];
+            var b: logic[2, 2];
+            always_comb {
+                a = '{default: 0};
+                a[i][j] = b[i][j];
+            }
+            assign b[0] = '{default: 0};
+            assign b[1][0] = 0;
+            assign b[1][1] = a[0][0];
+            assign o = a[0][0];
+        }
+    "#;
+    assert!(analyze(code).is_empty());
+    assert!(comb_loop_analysis_is_complete(code));
+}
+
+#[test]
 fn comb_loop_false_negative_constant_dead_logical_rhs_overwrites_feedback() {
     assert_comb_loop(
         "a function in a constant-dead logical RHS cannot overwrite feedback",
