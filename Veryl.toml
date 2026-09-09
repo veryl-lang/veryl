@@ -31,5 +31,6 @@ compile_args = ["-full64"]
 veryl_sample  = {version = "0.16.0", github = "veryl-lang/sample"}
 veryl_sample2 = {version = "0.17.0", project = "veryl_sample", github = "veryl-lang/sample"}
 veryl_sample3 = {version = "0.18.0", project = "veryl_sample", git = "https://github.com/veryl-lang/sample"}
-veryl_sample4 = {path = "testcases/sample", properties = {QUX_0 = 16}}
-veryl_sample5 = {path = "testcases/sample", properties = {QUX_1 = true}}
+veryl_sample4 = {path = "testcases/sample_projects/sample_a", properties = {QUX_0 = 16}}
+veryl_sample5 = {path = "testcases/sample_projects/sample_a", properties = {QUX_1 = true}}
+veryl_sample_b = {path = "testcases/sample_projects/sample_b"}

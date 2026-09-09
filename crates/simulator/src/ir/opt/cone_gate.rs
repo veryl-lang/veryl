@@ -42,6 +42,7 @@ use veryl_analyzer::ir::VarId;
 /// FF-buffer ownership, held per uniformly strided RUN of elements rather
 /// than per element: memory arrays make the element count grow with the
 /// modelled depth while the array count does not.
+#[derive(Clone, Default)]
 pub struct FfOwner {
     /// `(start, stride, count, bytes)`, sorted by `start` and disjoint.  The
     /// run covers `[start, start + count * stride)`, of which each element
@@ -69,6 +70,7 @@ impl FfOwner {
 
 /// Node tables of the module-instance tree plus storage-ownership intervals,
 /// prepared by the caller (`ProtoModule::conv`) from `ModuleVariableMeta`.
+#[derive(Clone)]
 pub struct ConeGateInputs {
     /// Parent per node; the root's parent is `u32::MAX`.
     pub node_parent: Vec<u32>,
@@ -77,6 +79,14 @@ pub struct ConeGateInputs {
     /// Sorted disjoint-start `(start, end, node)` comb-buffer intervals.
     pub comb_owner: Vec<(usize, usize, u32)>,
     pub ff_owner: FfOwner,
+    /// Sorted disjoint `(start, end, node)` FF-buffer intervals, one per
+    /// variable: which instance an FF belongs to (the event gates attribute
+    /// an `always_ff` to its instance by the FFs it writes).
+    pub ff_node: Vec<(usize, usize, u32)>,
+    /// The comb-buffer counterpart, one interval per variable over ALL its
+    /// elements: `comb_owner` leaves the padding between a padded array's
+    /// elements to nobody, and the event gates need every read covered.
+    pub comb_var: Vec<(usize, usize, u32)>,
     /// Merged comb byte ranges any event statement can write.
     pub event_written_comb: Vec<(usize, usize)>,
 }
@@ -111,7 +121,50 @@ pub struct ConePlan {
     /// Permutation: `order[new_index] = old_index`.
     pub order: Vec<u32>,
     pub segments: Vec<Segment>,
+    /// Shallowest first, so a group's `parent` precedes it.
+    pub groups: Vec<Group>,
 }
+
+/// A subtree whose external inputs stand in for the compare sets of the
+/// segments below it: while they hold, every member skips on the one check,
+/// because an unchanged boundary keeps every wire inside a settled subtree
+/// unchanged too.
+#[derive(Clone, Debug)]
+pub struct Group {
+    pub node: u32,
+    /// Indices into `ConePlan::segments`, in schedule order.
+    pub segments: Vec<u32>,
+    /// Like `Segment::compare`: the subtree's external inputs, plus the
+    /// members' replay spans (outputs an outside writer shares).
+    pub compare: Vec<(bool, u32, u32)>,
+    pub bytes: usize,
+    /// See `Segment::off_decay`: one group compare buys the members' own
+    /// compares, so the break-even skip rate follows their byte ratio.
+    pub off_decay: u32,
+    /// The enclosing group, whose clean verdict covers this one.
+    pub parent: Option<u32>,
+    pub cone: String,
+}
+
+/// `Group` in the FINAL storage space, over the `ConeSegment` list.
+#[derive(Clone, Debug)]
+pub struct ConeGroup {
+    /// The subtree's node in `ConeGateInputs`.
+    pub node: u32,
+    pub segments: Vec<u32>,
+    pub compare: Vec<(bool, u32, u32)>,
+    pub off_decay: u32,
+    pub parent: Option<u32>,
+    /// Byte offset of the group's gate state inside the comb buffer
+    /// (`GROUP_STATE_HEADER_BYTES`, then the compare shadow); zero until the
+    /// caller allocates the region.
+    pub state_off: u32,
+    pub cone: String,
+}
+
+/// Bytes a group's runtime state reserves ahead of its shadow: `[0]` primed,
+/// `[1]` clean this settle, `[2]` auto-off, `[4..8)` the dirty streak.
+pub(crate) const GROUP_STATE_HEADER_BYTES: usize = 8;
 
 /// A gated segment resolved to whole JIT blocks (chunking was split at its
 /// edges), with compare ranges in the FINAL (post-relayout) storage space.
@@ -490,7 +543,9 @@ const COMPARE_BYTES_PER_STMT: usize = 8;
 fn compare_budget(comb_stmts: usize) -> usize {
     comb_stmts.saturating_mul(COMPARE_BYTES_PER_STMT)
 }
-/// A segment smaller than this is not worth its dispatch branch.
+/// A segment smaller than this is not worth its dispatch branch: on cones
+/// that fragment into short bursts the per-segment guard costs more than the
+/// statements it skips.
 const MIN_SEGMENT_STMTS: usize = 64;
 /// A subtree carrying fewer statements than this is not worth a cone of its
 /// own; its statements gate as part of an ancestor's, or not at all.
@@ -607,39 +662,90 @@ fn comb_extent(elements: &[VariableElement], use_4state: bool) -> (usize, usize)
     (bytes, hi.saturating_sub(lo))
 }
 
-/// Assemble the node tables from the pre-instantiation variable-meta tree.
-/// `event_written` holds every comb offset the event statements can write
-/// (element-expanded); the covering variable spans join each segment's
-/// compare set so an event overwrite wakes the segment.
-/// Give each function-local comb copy the owner of the storage it was copied
-/// from (`Context::comb_reloc`): the copy is private to the same instance, so
-/// the original's owner is exactly right, and without one the statement reads
-/// as `unbounded` and pins itself to the root.  `comb_owner` must be sorted on
-/// entry; an unowned original adds nothing.
+/// Give each function-local comb copy and rename temp the owner of the storage
+/// it stands in for (`Context::comb_reloc`): the copy is private to the same
+/// instance, so the original's owner is exactly right, and without one the
+/// statement reads as `unbounded` and pins itself to the root.  `comb_owner`
+/// must be sorted on entry; an unowned original adds nothing.  Entries chain
+/// (a temp renaming another temp), so passes repeat until none resolves.
 fn inherit_reloc_owners(
     comb_owner: &mut Vec<(usize, usize, u32)>,
     comb_reloc: &[(isize, isize, usize)],
 ) {
-    let mut extra: Vec<(usize, usize, u32)> = Vec::new();
-    for &(old, new, bytes) in comb_reloc {
-        if old < 0 || new < 0 || bytes == 0 {
-            continue;
+    let mut pending: Vec<(usize, usize, usize)> = comb_reloc
+        .iter()
+        .filter(|&&(old, new, bytes)| old >= 0 && new >= 0 && bytes > 0)
+        .map(|&(old, new, bytes)| (old as usize, new as usize, bytes))
+        .collect();
+    loop {
+        let mut extra: Vec<(usize, usize, u32)> = Vec::new();
+        pending.retain(|&(old, new, bytes)| {
+            let i = comb_owner.partition_point(|&(s, _, _)| s <= old);
+            match i.checked_sub(1) {
+                Some(i) if comb_owner[i].0 <= old && old < comb_owner[i].1 => {
+                    extra.push((new, new + bytes, comb_owner[i].2));
+                    false
+                }
+                _ => true,
+            }
+        });
+        if extra.is_empty() {
+            return;
         }
-        let x = old as usize;
-        let i = comb_owner.partition_point(|&(s, _, _)| s <= x);
-        if let Some(i) = i.checked_sub(1)
-            && comb_owner[i].0 <= x
-            && x < comb_owner[i].1
-        {
-            extra.push((new as usize, new as usize + bytes, comb_owner[i].2));
-        }
-    }
-    if !extra.is_empty() {
         comb_owner.extend(extra);
         radix_sort_intervals(comb_owner);
     }
 }
 
+impl ConeGateInputs {
+    /// Own comb storage allocated after `build_inputs`, given as
+    /// `(from, to, bytes)` entries in the `Context::comb_reloc` shape, as the
+    /// owner of `from`.
+    /// Follow a comb relayout: the comb intervals move with the units the
+    /// schedule placed, one becoming several where its bytes landed apart.
+    /// FF storage is never relaid.
+    pub fn relayout(&mut self, sched: &crate::ir::comb_layout::CombLayoutSchedule) {
+        let moved = |s: usize, e: usize| {
+            sched
+                .translate_range(s as isize, e as isize)
+                .into_iter()
+                .filter(|&(ns, ne)| ns >= 0 && ne > ns)
+                .map(|(ns, ne)| (ns as usize, ne as usize))
+        };
+        for owned in [&mut self.comb_owner, &mut self.comb_var] {
+            let mut out = Vec::with_capacity(owned.len());
+            for &(s, e, id) in owned.iter() {
+                out.extend(moved(s, e).map(|(ns, ne)| (ns, ne, id)));
+            }
+            out.sort_unstable();
+            *owned = out;
+        }
+        let mut written = Vec::with_capacity(self.event_written_comb.len());
+        for &(s, e) in &self.event_written_comb {
+            written.extend(moved(s, e));
+        }
+        merge_ranges(&mut written);
+        self.event_written_comb = written;
+    }
+
+    pub fn adopt_relocations(&mut self, reloc: &[(isize, isize, usize)]) {
+        let before = self.comb_owner.len();
+        inherit_reloc_owners(&mut self.comb_owner, reloc);
+        inherit_reloc_owners(&mut self.comb_var, reloc);
+        if diag() {
+            eprintln!(
+                "[cone_gate] adopt_relocations: entries={} owned={}",
+                reloc.len(),
+                self.comb_owner.len() - before,
+            );
+        }
+    }
+}
+
+/// Assemble the node tables from the pre-instantiation variable-meta tree.
+/// `event_written` holds every comb offset the event statements can write
+/// (element-expanded); the covering variable spans join each segment's
+/// compare set so an event overwrite wakes the segment.
 pub fn build_inputs(
     top_name: &str,
     top_vars: &HashMap<VarId, VariableMeta>,
@@ -653,11 +759,15 @@ pub fn build_inputs(
     let mut comb_owner: Vec<(usize, usize, u32)> = Vec::new();
     let mut ff_runs: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut ff_elems: Vec<(usize, usize)> = Vec::new();
+    let mut ff_node: Vec<(usize, usize, u32)> = Vec::new();
+    let mut comb_var: Vec<(usize, usize, u32)> = Vec::new();
     let add_vars = |vars: &HashMap<VarId, VariableMeta>,
                     id: u32,
                     comb_owner: &mut Vec<(usize, usize, u32)>,
                     ff_runs: &mut Vec<(usize, usize, usize, usize)>,
-                    ff_elems: &mut Vec<(usize, usize)>| {
+                    ff_elems: &mut Vec<(usize, usize)>,
+                    ff_node: &mut Vec<(usize, usize, u32)>,
+                    comb_var: &mut Vec<(usize, usize, u32)>| {
         for vm in vars.values() {
             ff_elems.clear();
             // A variable past `MAX_TOTAL_COMPARE` can never join a compare set
@@ -670,6 +780,8 @@ pub fn build_inputs(
             let fold_var = comb_bytes > MAX_ELEMENT_OWNER_BYTES
                 || comb_span_bytes > crate::ir::big_array::FOLD_SPAN_BYTES;
             let mut comb_span: Option<(usize, usize)> = None;
+            let mut ff_ext: Option<(usize, usize)> = None;
+            let mut comb_ext: Option<(usize, usize)> = None;
             for el in &vm.elements {
                 let off = el.current.raw();
                 if off < 0 {
@@ -682,6 +794,12 @@ pub fn build_inputs(
                 let (off, nb) = (off as usize, value_size(el.native_bytes, use_4state));
                 if el.current.is_ff() {
                     ff_elems.push((off, nb));
+                    // A dual-slot FF is written at its next slot; the owner
+                    // span covers both so a write finds its instance.
+                    let end = (el.next_offset.max(off as isize) as usize) + nb;
+                    ff_ext = Some(ff_ext.map_or((off, end), |(s, e): (usize, usize)| {
+                        (s.min(off), e.max(end))
+                    }));
                 } else if fold_var {
                     comb_span = Some(match comb_span {
                         None => (off, off + nb),
@@ -690,14 +808,33 @@ pub fn build_inputs(
                 } else {
                     comb_owner.push((off, off + nb, id));
                 }
+                if !el.current.is_ff() {
+                    comb_ext = Some(comb_ext.map_or((off, off + nb), |(s, e): (usize, usize)| {
+                        (s.min(off), e.max(off + nb))
+                    }));
+                }
             }
             if let Some((s, e)) = comb_span {
                 comb_owner.push((s, e, id));
             }
+            if let Some((s, e)) = ff_ext {
+                ff_node.push((s, e, id));
+            }
+            if let Some((s, e)) = comb_ext {
+                comb_var.push((s, e, id));
+            }
             fold_ff_runs(ff_elems, ff_runs);
         }
     };
-    add_vars(top_vars, 0, &mut comb_owner, &mut ff_runs, &mut ff_elems);
+    add_vars(
+        top_vars,
+        0,
+        &mut comb_owner,
+        &mut ff_runs,
+        &mut ff_elems,
+        &mut ff_node,
+        &mut comb_var,
+    );
     let mut stack: Vec<(u32, &ModuleVariableMeta)> = Vec::new();
     for c in children {
         stack.push((0, c));
@@ -712,15 +849,29 @@ pub fn build_inputs(
             &mut comb_owner,
             &mut ff_runs,
             &mut ff_elems,
+            &mut ff_node,
+            &mut comb_var,
         );
         for c in &m.children {
             stack.push((id, c));
         }
     }
     radix_sort_intervals(&mut comb_owner);
+    let before = comb_owner.len();
     inherit_reloc_owners(&mut comb_owner, comb_reloc);
+    comb_var.sort_unstable();
+    inherit_reloc_owners(&mut comb_var, comb_reloc);
+    if diag() {
+        eprintln!(
+            "[cone_gate] build_inputs: reloc entries={} owned={} comb_extent={}",
+            comb_reloc.len(),
+            comb_owner.len() - before,
+            comb_owner.last().map_or(0, |&(_, e, _)| e),
+        );
+    }
     ff_runs.sort_unstable();
     ff_runs.dedup();
+    ff_node.sort_unstable();
     debug_assert!(
         ff_runs
             .windows(2)
@@ -747,12 +898,14 @@ pub fn build_inputs(
         node_path,
         comb_owner,
         ff_owner: FfOwner { runs: ff_runs },
+        ff_node,
+        comb_var,
         event_written_comb,
     }
 }
 
 /// Does the statement (recursively) have effects a skip could lose?
-fn has_side_effects(s: &ProtoStatement) -> bool {
+pub(crate) fn has_side_effects(s: &ProtoStatement) -> bool {
     match s {
         ProtoStatement::Assign(_) | ProtoStatement::AssignDynamic(_) | ProtoStatement::Break => {
             false
@@ -1294,6 +1447,7 @@ fn finish_plan(
     let budget = compare_budget(n);
     let mut in_burst = vec![false; n];
     let mut segments: Vec<Segment> = Vec::new();
+    let mut seg_nodes: Vec<u32> = Vec::new();
     let mut total_bytes = 0usize;
     for &(sl, start, end) in &bursts {
         if sl == 0 || end - start < MIN_SEGMENT_STMTS {
@@ -1434,8 +1588,23 @@ fn finish_plan(
             off_decay,
             cone: inputs.node_path[cones[sl - 1] as usize].clone(),
         });
+        seg_nodes.push(cones[sl - 1]);
     }
+    let groups = build_groups(&segments, &seg_nodes, infos, inputs, writers, &order);
     if diag() {
+        for g in &groups {
+            eprintln!(
+                "[cone_gate] group segs={} child_bytes={} bytes={} parent={:?} {}",
+                g.segments.len(),
+                g.segments
+                    .iter()
+                    .map(|&i| segments[i as usize].bytes)
+                    .sum::<usize>(),
+                g.bytes,
+                g.parent,
+                g.cone,
+            );
+        }
         eprintln!(
             "[cone_gate] stmts={} cones={} segments={} gated_stmts={} compare_bytes={}/{}",
             n,
@@ -1459,12 +1628,333 @@ fn finish_plan(
     if segments.is_empty() {
         return None;
     }
-    Some(ConePlan { order, segments })
+    Some(ConePlan {
+        order,
+        segments,
+        groups,
+    })
+}
+
+/// See `Group`.  `seg_nodes[i]` is the cone node of `segments[i]`, `writers`
+/// the statements writing each owner span, `order` the schedule.  Every
+/// ancestor of a segment's node is a candidate, kept when it covers at least
+/// two segments, no statement outside the subtree writes one of its inputs
+/// between its first and last member, and its boundary costs less than half
+/// of what the members' own compares do.
+fn build_groups(
+    segments: &[Segment],
+    seg_nodes: &[u32],
+    infos: &[StmtInfo],
+    inputs: &ConeGateInputs,
+    writers: &[Vec<u32>],
+    order: &[u32],
+) -> Vec<Group> {
+    let mut pos = vec![0usize; infos.len()];
+    for (k, &oi) in order.iter().enumerate() {
+        pos[oi as usize] = k;
+    }
+    let parent = |m: u32| -> Option<u32> {
+        let p = inputs.node_parent[m as usize];
+        (p != u32::MAX).then_some(p)
+    };
+    let is_desc = |mut m: u32, a: u32| -> bool {
+        loop {
+            if m == a {
+                return true;
+            }
+            match parent(m) {
+                Some(p) => m = p,
+                None => return false,
+            }
+        }
+    };
+    let depth = |mut m: u32| -> usize {
+        let mut d = 0usize;
+        while let Some(p) = parent(m) {
+            d += 1;
+            m = p;
+        }
+        d
+    };
+    let mut cands: Vec<u32> = Vec::new();
+    for &sn in seg_nodes {
+        let mut m = sn;
+        loop {
+            cands.push(m);
+            match parent(m) {
+                Some(p) => m = p,
+                None => break,
+            }
+        }
+    }
+    cands.sort_unstable();
+    cands.dedup();
+    // Shallowest first: a group finds its enclosing group already built.
+    cands.sort_by_key(|&m| depth(m));
+    let mut groups: Vec<Group> = Vec::new();
+    for a in cands {
+        let members: Vec<u32> = (0..segments.len() as u32)
+            .filter(|&i| is_desc(seg_nodes[i as usize], a))
+            .collect();
+        if members.len() < 2 {
+            continue;
+        }
+        let child_bytes: usize = members.iter().map(|&i| segments[i as usize].bytes).sum();
+        let first = members
+            .iter()
+            .map(|&i| segments[i as usize].start)
+            .min()
+            .unwrap_or(0);
+        let last = members
+            .iter()
+            .map(|&i| segments[i as usize].end)
+            .max()
+            .unwrap_or(0);
+        let mut in_comb: Vec<(usize, usize)> = Vec::new();
+        let mut in_ff: Vec<(usize, usize)> = Vec::new();
+        let mut out_comb: Vec<(usize, usize)> = Vec::new();
+        let mut inside = vec![false; infos.len()];
+        for (i, info) in infos.iter().enumerate() {
+            if !is_desc(info.node, a) {
+                continue;
+            }
+            inside[i] = true;
+            in_comb.extend_from_slice(&info.in_comb);
+            in_ff.extend_from_slice(&info.in_ff);
+            out_comb.extend_from_slice(&info.out_comb);
+        }
+        merge_ranges(&mut in_comb);
+        merge_ranges(&mut in_ff);
+        merge_ranges(&mut out_comb);
+        let mut comb = subtract_ranges(&in_comb, &out_comb);
+        // The skip argument covers what the subtree computes itself.  A
+        // byte it reads that a statement outside it (or an event) also
+        // writes is an input even when a subtree statement writes it too,
+        // and `in − out` hides it.
+        let owner = &inputs.comb_owner;
+        let mut late: Vec<(usize, usize)> = Vec::new();
+        for &(s, e) in &in_comb {
+            let mut j = first_span(owner, s);
+            while j < owner.len() && owner[j].0 < e {
+                let (os, oe, _) = owner[j];
+                if oe > s {
+                    let outside = writers[j].iter().filter(|&&w| !inside[w as usize]);
+                    let mut any = false;
+                    for &w in outside {
+                        any = true;
+                        if (first..last).contains(&pos[w as usize]) {
+                            late.push((os.max(s), oe.min(e)));
+                        }
+                    }
+                    if any {
+                        comb.push((os.max(s), oe.min(e)));
+                    }
+                }
+                j += 1;
+            }
+        }
+        // The check runs ahead of the first member and would judge such an
+        // input a settle late, and what the subtree computes from it later
+        // in the settle is not covered either.
+        if !late.is_empty() {
+            if diag() && members.len() >= 4 {
+                eprintln!(
+                    "[cone_gate] group-reject late segs={} {}",
+                    members.len(),
+                    inputs.node_path[a as usize]
+                );
+            }
+            continue;
+        }
+        comb.extend(intersect_ranges(&inputs.event_written_comb, &in_comb));
+        // A member output an outside writer also writes is an input as
+        // consumed (see `RtSegment::compare_pre`), which `in − out` hides.
+        for &i in &members {
+            comb.extend(
+                segments[i as usize]
+                    .replay
+                    .iter()
+                    .map(|&(s, e)| (s as usize, e as usize)),
+            );
+        }
+        merge_ranges(&mut comb);
+        let compare: Vec<(bool, u32, u32)> = comb
+            .iter()
+            .map(|&(s, e)| (false, s as u32, e as u32))
+            .chain(in_ff.iter().map(|&(s, e)| (true, s as u32, e as u32)))
+            .collect();
+        let bytes: usize = compare.iter().map(|&(_, s, e)| (e - s) as usize).sum();
+        if bytes * 2 > child_bytes {
+            if diag() && members.len() >= 4 {
+                eprintln!(
+                    "[cone_gate] group-reject cost segs={} child_bytes={child_bytes} bytes={bytes} {}",
+                    members.len(),
+                    inputs.node_path[a as usize]
+                );
+            }
+            continue;
+        }
+        let off_decay = (child_bytes / bytes.max(1)).saturating_sub(1).min(1 << 20) as u32;
+        let parent_group = groups
+            .iter()
+            .rposition(|g| is_desc(a, g.node))
+            .map(|p| p as u32);
+        // The same members under a tighter boundary: one group, the deeper.
+        if let Some(pi) = parent_group
+            && groups[pi as usize].segments == members
+        {
+            let pg = &mut groups[pi as usize];
+            if bytes <= pg.bytes {
+                pg.node = a;
+                pg.compare = compare;
+                pg.bytes = bytes;
+                pg.off_decay = off_decay;
+                pg.cone = inputs.node_path[a as usize].clone();
+            }
+            continue;
+        }
+        groups.push(Group {
+            node: a,
+            segments: members,
+            compare,
+            bytes,
+            off_decay,
+            parent: parent_group,
+            cone: inputs.node_path[a as usize].clone(),
+        });
+    }
+    groups
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn groups_cover_ancestors_of_several_segments_at_their_boundary() {
+        // root 0 { 1 { 2, 3 }, 4 }: x → [2] → y → [3] → z → [4] → w.
+        let inputs = ConeGateInputs {
+            node_parent: vec![u32::MAX, 0, 1, 1, 0],
+            node_path: ["top", "top.a", "top.a.p", "top.a.q", "top.b"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            comb_owner: vec![(0, 8, 0), (8, 16, 2), (16, 24, 3), (24, 32, 4)],
+            ff_owner: FfOwner { runs: vec![] },
+            comb_var: Vec::new(),
+            ff_node: Vec::new(),
+            event_written_comb: vec![],
+        };
+        let info = |node: u32, ins: &[(usize, usize)], outs: &[(usize, usize)]| StmtInfo {
+            node,
+            in_comb: ins.to_vec(),
+            in_ff: vec![],
+            out_comb: outs.to_vec(),
+            unbounded: false,
+        };
+        let infos = [
+            info(2, &[(0, 8)], &[(8, 16)]),
+            info(3, &[(8, 16)], &[(16, 24)]),
+            info(4, &[(16, 24)], &[(24, 32)]),
+        ];
+        let seg = |i: usize, compare: (u32, u32), replay: Vec<(u32, u32)>| Segment {
+            start: i,
+            end: i + 1,
+            compare: vec![(false, compare.0, compare.1)],
+            backedge: vec![],
+            replay,
+            bytes: 30,
+            off_decay: 0,
+            cone: String::new(),
+        };
+        let segments = [
+            seg(0, (0, 8), vec![(40, 48)]),
+            seg(1, (8, 16), vec![]),
+            seg(2, (16, 24), vec![]),
+        ];
+        // Owner spans x, y, z, w: written by nobody, [2], [3], [4].
+        let writers: Vec<Vec<u32>> = vec![vec![], vec![0], vec![1], vec![2]];
+        let order: Vec<u32> = (0..3).collect();
+        let groups = build_groups(&segments, &[2, 3, 4], &infos, &inputs, &writers, &order);
+        assert_eq!(groups.len(), 2, "{groups:?}");
+        // The root covers everything at its single external input.
+        assert_eq!(groups[0].segments, vec![0, 1, 2]);
+        assert_eq!(groups[0].compare, vec![(false, 0, 8), (false, 40, 48)]);
+        assert_eq!(groups[0].parent, None);
+        // `a` covers [2] and [3]; y is internal, the replay span joins.
+        assert_eq!(groups[1].node, 1);
+        assert_eq!(groups[1].segments, vec![0, 1]);
+        assert_eq!(groups[1].compare, vec![(false, 0, 8), (false, 40, 48)]);
+        assert_eq!(groups[1].parent, Some(0));
+        // Members identical to the enclosing group's collapse into one group
+        // at the deeper node.
+        let writers2: Vec<Vec<u32>> = vec![vec![], vec![0], vec![1], vec![]];
+        let same = build_groups(
+            &segments[..2],
+            &[2, 3],
+            &infos[..2],
+            &inputs,
+            &writers2,
+            &order[..2],
+        );
+        assert_eq!(same.len(), 1, "{same:?}");
+        assert_eq!((same[0].node, same[0].parent), (1, None));
+        // y is written inside `a` but also by [4] outside it: an input of
+        // `a` as consumed, so it stays in `a`'s boundary (not the root's,
+        // where both writers are inside).
+        let shared_writers: Vec<Vec<u32>> = vec![vec![], vec![0, 2], vec![1], vec![2]];
+        let shared = build_groups(
+            &segments,
+            &[2, 3, 4],
+            &infos,
+            &inputs,
+            &shared_writers,
+            &order,
+        );
+        assert_eq!(shared.len(), 2, "{shared:?}");
+        assert_eq!(shared[0].compare, vec![(false, 0, 8), (false, 40, 48)]);
+        assert_eq!(shared[1].compare, vec![(false, 0, 16), (false, 40, 48)]);
+        // The same, with [4] scheduled between `a`'s members: y is then
+        // written after `a`'s check, so `a` is not a group.
+        let mid: Vec<u32> = vec![0, 2, 1];
+        let mid_segments = [
+            seg(0, (0, 8), vec![(40, 48)]),
+            seg(2, (8, 16), vec![]),
+            seg(1, (16, 24), vec![]),
+        ];
+        let late = build_groups(
+            &mid_segments,
+            &[2, 3, 4],
+            &infos,
+            &inputs,
+            &shared_writers,
+            &mid,
+        );
+        assert_eq!(late.len(), 1, "{late:?}");
+        assert_eq!(late[0].node, 0);
+        // A boundary as wide as the members' own compares is not worth it.
+        let wide = [
+            seg(
+                0,
+                (0, 8),
+                (0..6).map(|k| (100 + 8 * k, 108 + 8 * k)).collect(),
+            ),
+            seg(1, (8, 16), vec![]),
+        ];
+        assert!(
+            build_groups(&wide, &[2, 3], &infos[..2], &inputs, &writers2, &order[..2]).is_empty()
+        );
+    }
+
+    #[test]
+    fn reloc_owners_follow_temp_chains() {
+        // Node 1 owns [0, 8); the temp at 8 stands in for it and the temp at
+        // 16 for that temp, listed before its parent resolves.  An entry whose
+        // original nobody owns adds nothing.
+        let mut owner = vec![(0usize, 8usize, 1u32)];
+        inherit_reloc_owners(&mut owner, &[(8, 16, 8), (0, 8, 8), (100, 24, 8)]);
+        assert_eq!(owner, vec![(0, 8, 1), (8, 16, 1), (16, 24, 1)]);
+    }
 
     #[test]
     fn rearm_retries_offed_segments_each_epoch() {

@@ -1,0 +1,5 @@
+pub function sample_c_func::<WIDTH: u32> (
+    i_d: input logic<WIDTH>,
+) -> logic<WIDTH> {
+    return i_d;
+}

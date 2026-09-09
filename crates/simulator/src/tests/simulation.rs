@@ -23500,6 +23500,271 @@ fn cone_gate_skips_only_when_the_result_is_unchanged() {
 }
 
 #[test]
+fn cone_gate_group_skips_both_cones_and_reruns_them_on_a_change() {
+    // Two flat cones fed by the same input sit under one group at the top:
+    // its boundary is that input, cheaper than the two compares it replaces.
+    // Holding the input lets the group go clean and both cones skip; a change
+    // must reach all four outputs on the very next settle.
+    const T: usize = 400;
+    let cone = |name: &str, salt: u64| -> String {
+        let decls: String = (0..T)
+            .map(|i| format!("        var t{i}: logic<16>;\n        var s{i}: logic<16>;\n        var x{i}: logic<16>;\n"))
+            .collect();
+        // Every temp feeds two statements, so single-reader inlining keeps
+        // one statement per element and the cone clears its floor; the two
+        // accumulator chains read each other for the same reason.  Chains
+        // rather than one wide expression keep every tree shallow.
+        let mut body = String::new();
+        for i in 0..T {
+            if i.is_multiple_of(2) {
+                body.push_str(&format!(
+                    "        assign t{i} = a + 16'd{};\n",
+                    i as u64 + salt
+                ));
+            } else {
+                body.push_str(&format!(
+                    "        assign t{i} = a ^ 16'd{};\n",
+                    3 * i as u64 + salt
+                ));
+            }
+        }
+        body.push_str("        assign s0 = t0 ^ t1;\n        assign x0 = t0 ^ t1;\n");
+        for i in 1..T {
+            let j = (i + 1) % T;
+            body.push_str(&format!(
+                "        assign s{i} = s{p} + (t{i} ^ t{j}) + x{p};\n        assign x{i} = x{p} ^ (t{i} ^ t{j}) ^ s{p};\n",
+                p = i - 1
+            ));
+        }
+        format!(
+            r#"
+    module {name} (
+        a:  input  logic<16>,
+        y:  output logic<16>,
+        y2: output logic<16>,
+    ) {{
+{decls}
+{body}
+        assign y = s{last};
+        assign y2 = x{last};
+    }}
+"#,
+            last = T - 1
+        )
+    };
+    let code = format!(
+        r#"
+    module Top (
+        sel: input  logic<16>,
+        o:   output logic<16>,
+        oo:  output logic<16>,
+        o3:  output logic<16>,
+        oo3: output logic<16>,
+    ) {{
+        inst u: ConeA (a: sel, y: o, y2: oo);
+        inst v: ConeB (a: sel, y: o3, y2: oo3);
+    }}
+{}{}"#,
+        cone("ConeA", 0),
+        cone("ConeB", 7)
+    );
+    let expect = |a: u64, salt: u64| -> (u64, u64) {
+        let m = 0xffffu64;
+        let t: Vec<u64> = (0..T)
+            .map(|i| {
+                if i.is_multiple_of(2) {
+                    (a + i as u64 + salt) & m
+                } else {
+                    a ^ (3 * i as u64 + salt)
+                }
+            })
+            .collect();
+        let p = |i: usize| t[i] ^ t[(i + 1) % T];
+        let (mut s, mut x) = (p(0), p(0));
+        for i in 1..T {
+            let (ns, nx) = ((s + p(i) + x) & m, x ^ p(i) ^ s);
+            s = ns;
+            x = nx;
+        }
+        (s, x)
+    };
+    let mut armed = 0;
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        armed += usize::from(ir.cone_segments.len() >= 2);
+        let mut sim = Simulator::new(ir, None);
+        for (sel, repeats) in [(0u64, 4), (1, 1), (1, 6), (0xbeef, 3), (0, 1), (0xbeef, 2)] {
+            sim.set("sel", Value::new(sel, 16, false));
+            for rep in 0..repeats {
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                let mut get = |n: &str| sim.get(n).unwrap().payload_u64();
+                let got = [get("o"), get("oo"), get("o3"), get("oo3")];
+                let (y, y2) = expect(sel, 0);
+                let (y3, y4) = expect(sel, 7);
+                assert_eq!(
+                    got,
+                    [y, y2, y3, y4],
+                    "sel={sel:#x} rep={rep} config={config:?}"
+                );
+            }
+        }
+    }
+    assert!(armed >= 4, "too few configs planned two segments: {armed}");
+}
+
+#[test]
+fn event_gate_skips_an_idle_subtree_and_follows_its_inputs() {
+    // One child holds its registers while `en` is low, the other counts every
+    // edge (on a reset net of its own, so the two reset dispatches are not
+    // fused into one statement), and only the first child's `always_ff`
+    // earns a gate.  The gate must turn idle while `en` is low and rerun the
+    // moment `en` or the reset moves, never holding a value the inputs have
+    // left behind.
+    const N: usize = 64;
+    let (mut decls, mut resets, mut steps) = (String::new(), String::new(), String::new());
+    for i in 0..N {
+        decls.push_str(&format!("        var r{i}: logic<16>;\n"));
+        resets.push_str(&format!("                r{i} = 0;\n"));
+    }
+    steps.push_str("                r0 = r0 + 16'd1;\n");
+    for i in 1..N {
+        steps.push_str(&format!("                r{i} = r{p} + r{i};\n", p = i - 1));
+    }
+    let code = format!(
+        r#"
+    module Idle (
+        clk: input  clock,
+        rst: input  reset,
+        en:  input  logic,
+        o:   output logic<16>,
+        om:  output logic<16>,
+    ) {{
+{decls}
+        always_ff {{
+            if_reset {{
+{resets}
+            }} else if en {{
+{steps}
+            }}
+        }}
+        assign o  = r{last};
+        assign om = r{mid};
+    }}
+
+    module Busy (
+        clk: input  clock,
+        rst: input  reset,
+        o:   output logic<16>,
+    ) {{
+        var c: logic<16>;
+        always_ff {{
+            if_reset {{
+                c = 0;
+            }} else {{
+                c = c + 16'd1;
+            }}
+        }}
+        assign o = c;
+    }}
+
+    module Top (
+        clk:    input  clock,
+        rst:    input  reset,
+        rst2:   input  reset,
+        en:     input  logic,
+        o_idle: output logic<16>,
+        o_mid:  output logic<16>,
+        o_busy: output logic<16>,
+    ) {{
+        inst u: Idle (clk, rst, en, o: o_idle, om: o_mid);
+        inst v: Busy (clk, rst: rst2, o: o_busy);
+    }}
+"#,
+        last = N - 1,
+        mid = N / 2
+    );
+    // The reference: every register reads the pre-edge values (NBA).
+    let tick = |r: &mut [u16; N], en: bool| {
+        if en {
+            let old = *r;
+            r[0] = old[0].wrapping_add(1);
+            for i in 1..N {
+                r[i] = old[i - 1].wrapping_add(old[i]);
+            }
+        }
+    };
+    let mut planned = 0;
+    for mut config in Config::all() {
+        config.aot_c_min_stmts = 0;
+        let ir = analyze(&code, &config);
+        planned += usize::from(!ir.event_gate_flags.is_empty());
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        let rst2 = sim.get_reset("rst2").unwrap();
+        let mut r = [0u16; N];
+        let mut busy = 0u16;
+        let check = |sim: &mut Simulator, r: &[u16; N], busy: u16, what: &str| {
+            let got = [
+                sim.get("o_idle").unwrap().payload_u64(),
+                sim.get("o_mid").unwrap().payload_u64(),
+                sim.get("o_busy").unwrap().payload_u64(),
+            ];
+            let want = [r[N - 1] as u64, r[N / 2] as u64, busy as u64];
+            assert_eq!(got, want, "{what}, {config:?}");
+        };
+        sim.set("en", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+        sim.step_reset(&clk, &rst2);
+        for (phase, (en, cycles)) in [(false, 8), (true, 3), (false, 5), (true, 2)]
+            .into_iter()
+            .enumerate()
+        {
+            sim.set("en", Value::new(u64::from(en), 1, false));
+            for cycle in 0..cycles {
+                sim.step(&clk);
+                tick(&mut r, en);
+                busy = busy.wrapping_add(1);
+                check(&mut sim, &r, busy, &format!("phase {phase} cycle {cycle}"));
+            }
+            // Only a compiled event runs the gates; the other configs, and
+            // a host where the artifact does not load, only plan them.
+            let gates_run = !sim.ir.event_gate_flags.is_empty()
+                && sim.ir.whole_event_dispatch[0].load(std::sync::atomic::Ordering::Relaxed) > 0;
+            if gates_run && !en {
+                let idle = sim
+                    .ir
+                    .event_gate_flags
+                    .iter()
+                    .any(|&off| sim.ir.comb_values[off as usize] == 1);
+                assert!(idle, "phase {phase} left no gate idle, {config:?}");
+            }
+        }
+        // A reset fire reaches an idle gate too.
+        sim.set("en", Value::new(0, 1, false));
+        sim.step(&clk);
+        busy = busy.wrapping_add(1);
+        sim.step_reset(&clk, &rst);
+        r = [0; N];
+        busy = busy.wrapping_add(1);
+        check(&mut sim, &r, busy, "after the reset");
+        sim.set("en", Value::new(1, 1, false));
+        for cycle in 0..3 {
+            sim.step(&clk);
+            tick(&mut r, true);
+            busy = busy.wrapping_add(1);
+            check(
+                &mut sim,
+                &r,
+                busy,
+                &format!("after the reset, cycle {cycle}"),
+            );
+        }
+    }
+    assert!(planned >= 4, "too few configs planned a gate: {planned}");
+}
+
+#[test]
 fn wide_concat_element_placement() {
     // A >128-bit concatenation places each element into the word it lands in,
     // so the two shapes that stress the position arithmetic are one element per

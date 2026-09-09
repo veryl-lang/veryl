@@ -1,5 +1,7 @@
 use crate::backend::inst::next_test_top_id;
-use crate::backend::{ChunkOutput, CompileCtx, CompiledWhole, whole};
+use crate::backend::{
+    ChunkOutput, ChunkPlan, CompileCtx, CompiledWhole, compile_plans_parallel, whole,
+};
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
@@ -73,6 +75,16 @@ pub struct Module {
     /// Passes of `derived_clock_eval_stmts` needed for the closure to
     /// converge — the `required_comb_passes` of that chunk.
     pub derived_clock_eval_passes: usize,
+    /// One-function compile of the derived-clock closure, the counterpart of
+    /// `whole_comb` for `partial_settle`. `None` leaves it on
+    /// `derived_clock_eval_stmts`.
+    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
+    /// The closure statements a master input clock can change (see
+    /// `derived_clock::master_downstream`): what `partial_settle_master` runs
+    /// right after the master toggles, the rest of the design being settled.
+    pub derived_clock_master_stmts: Vec<Statement>,
+    pub derived_clock_master_passes: usize,
+    pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
     /// Diagnostic: number of non-trivial strongly-connected components in
     /// the pre-JIT `unified_sorted` dataflow graph.  Real RTL combinational
     /// loops are rejected up-front by `analyze_dependency`, so any non-zero
@@ -102,6 +114,16 @@ pub struct Module {
     /// per test does not deep-clone the whole set.  The testbench uses it to
     /// decide which of its own statements really invalidate the comb.
     pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// `comb_touched_offsets` without what only the derived-clock closure
+    /// touches: the settle filter's read set.  The closure is re-evaluated
+    /// on its own at every step, so an input only it reads never calls for
+    /// a full settle; what it writes for the rest of the comb is watched
+    /// through `closure_out_watch`.
+    pub settle_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// Comb byte ranges `(offset, len)` the derived-clock closure writes and
+    /// a statement outside it reads: a change of one after a closure
+    /// evaluation dirties the comb.
+    pub closure_out_watch: Vec<(u32, u32)>,
     pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
     /// Per event, the comb byte offsets its statements can write, or `None`
     /// when unboundable (`event_comb_write_offsets`).  The simulator's
@@ -111,6 +133,9 @@ pub struct Module {
     /// First byte of the cone-gate state region at the comb buffer's tail;
     /// logic storage ends here.
     pub cone_state_base: u32,
+    /// Comb-buffer offsets of the event gates' idle flags (`event_gate`),
+    /// cleared by writes the gates cannot see.
+    pub event_gate_flags: Vec<u32>,
     /// Lazily built settle-filter layout info, shared (`Arc::clone`) by
     /// every `Module`/`Ir` from one `ProtoModule` — the products are
     /// offset-based and instantiation-invariant.
@@ -141,6 +166,14 @@ pub struct ProtoModule {
     pub derived_clock_eval: ProtoStatements,
     /// See `Module::derived_clock_eval_passes`.
     pub derived_clock_eval_passes: usize,
+    /// See `Module::whole_derived_clock`.  Built in `conv()` and shared
+    /// (`Arc::clone`) with every `Module` produced by `instantiate()`.
+    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
+    /// Pre-JIT form of `Module::derived_clock_master_stmts`, with its pass
+    /// count and whole-module compile.
+    pub derived_clock_master_eval: ProtoStatements,
+    pub derived_clock_master_passes: usize,
+    pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
     /// See `Module::whole_comb`.  Built in `conv()` and shared
@@ -157,6 +190,10 @@ pub struct ProtoModule {
     pub fused_comb_offsets: Vec<isize>,
     /// See `Module::comb_touched_offsets`.
     pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// See `Module::settle_touched_offsets`.
+    pub settle_touched_offsets: Arc<HashSet<VarOffset>>,
+    /// See `Module::closure_out_watch`.
+    pub closure_out_watch: Vec<(u32, u32)>,
     /// Cone-gate segments in BLOCK space (`comb_statements.0` indices) with
     /// their state offsets assigned; `instantiate` maps them to the flat
     /// statement space.
@@ -165,6 +202,9 @@ pub struct ProtoModule {
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// See `Module::cone_state_base`.
     pub cone_state_base: u32,
+    /// Comb-buffer offsets of the event gates' idle flags (`event_gate`),
+    /// cleared by writes the gates cannot see.
+    pub event_gate_flags: Vec<u32>,
     /// See `Module::settle_info`.
     pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
 }
@@ -436,17 +476,21 @@ impl ProtoModule {
             comb_flat
         };
 
-        let derived_clock_eval_stmts = if self.derived_clock_eval.0.is_empty() {
-            Vec::new()
-        } else {
-            batch_compiled_statements(self.derived_clock_eval.to_statements(
-                ff_ptr,
-                ff_len,
-                comb_ptr,
-                comb_len,
-                self.use_4state,
-            ))
+        let closure_stmts = |protos: &ProtoStatements| -> Vec<Statement> {
+            if protos.0.is_empty() {
+                Vec::new()
+            } else {
+                batch_compiled_statements(protos.to_statements(
+                    ff_ptr,
+                    ff_len,
+                    comb_ptr,
+                    comb_len,
+                    self.use_4state,
+                ))
+            }
         };
+        let derived_clock_eval_stmts = closure_stmts(&self.derived_clock_eval);
+        let derived_clock_master_stmts = closure_stmts(&self.derived_clock_master_eval);
 
         #[cfg(debug_assertions)]
         self.validate_offsets();
@@ -459,6 +503,10 @@ impl ProtoModule {
             module_variables,
             derived_clock_eval_stmts,
             derived_clock_eval_passes: self.derived_clock_eval_passes,
+            whole_derived_clock: self.whole_derived_clock.clone(),
+            derived_clock_master_stmts,
+            derived_clock_master_passes: self.derived_clock_master_passes,
+            whole_derived_clock_master: self.whole_derived_clock_master.clone(),
 
             event_statements,
             comb_statements,
@@ -479,9 +527,12 @@ impl ProtoModule {
             rtl_driven: self.rtl_driven.clone(),
             fused_comb_offsets: self.fused_comb_offsets.clone(),
             comb_touched_offsets: Arc::clone(&self.comb_touched_offsets),
+            settle_touched_offsets: Arc::clone(&self.settle_touched_offsets),
+            closure_out_watch: self.closure_out_watch.clone(),
             cone_segments,
             event_comb_writes: self.event_comb_writes.clone(),
             cone_state_base: self.cone_state_base,
+            event_gate_flags: self.event_gate_flags.clone(),
             settle_info: Arc::clone(&self.settle_info),
         }
     }
@@ -599,6 +650,12 @@ fn validate_meta_offsets(
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
 const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
 
+/// Domain separator folded into the derived-clock closure's whole-compile key,
+/// so a closure can never collide with a comb list of the same shape.
+const DERIVED_CLOCK_KEY_DOMAIN: u128 = 0xD3C1_0CE0_D3C1_0CE0_D3C1_0CE0_D3C1_0CE0;
+/// Same for the closure's master-toggle subset.
+const DERIVED_CLOCK_MASTER_KEY_DOMAIN: u128 = 0x3A57_E2C1_3A57_E2C1_3A57_E2C1_3A57_E2C1;
+
 fn jit_chunk_size() -> usize {
     std::env::var("VERYL_JIT_CHUNK_SIZE")
         .ok()
@@ -622,6 +679,24 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
         return ProtoStatements(blocks);
     }
     build_chunked_via_registry(context, proto, /* contains_compiled_block= */ false)
+}
+
+/// Appends a declaration's statements for `event`.  `initial` blocks, a
+/// nested instance's included, are not concatenated but keyed apart so the
+/// testbench can run each as its own process.
+pub(crate) fn merge_event_statements(
+    all: &mut HashMap<Event, Vec<ProtoStatement>>,
+    event: Event,
+    mut stmts: Vec<ProtoStatement>,
+) {
+    let event = if event.is_initial() {
+        Event::next_initial(all.keys().filter(|e| e.is_initial()).count() as u32)
+    } else {
+        event
+    };
+    all.entry(event)
+        .and_modify(|v| v.append(&mut stmts))
+        .or_insert(stmts);
 }
 
 /// Offsets a testbench-body chunk may write: those of the testbench's own
@@ -765,8 +840,8 @@ fn precompile_tb_bodies(
                         input_offsets: inputs.clone(),
                         output_offsets: outputs.clone(),
                         ff_canonical_offsets: Vec::new(),
-                        stmt_deps: Vec::new(),
-                        original_stmts: originals.clone(),
+                        stmt_deps: std::sync::Arc::new(Vec::new()),
+                        original_stmts: std::sync::Arc::new(originals.clone()),
                     }));
                 }
                 ProtoStatementBlock::Interpreted(stmts) => out.extend(stmts),
@@ -802,7 +877,62 @@ fn precompile_tb_bodies(
 /// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
 /// between loads, so load_cache CSE is disabled in the emitted chunks.
 fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    build_chunked_via_registry(context, proto, /* contains_compiled_block= */ true)
+    let mut pieces = jit_pieces_in_parallel(context, vec![proto]);
+    ProtoStatements(pieces.pop().unwrap_or_default())
+}
+
+/// Chunks every piece of one unified comb list and compiles the lot on helper
+/// threads.  Planning is per piece, so a cone segment still maps to whole
+/// blocks; the compiles pool across pieces.  Only this path parallelises: it
+/// runs once per component behind the comb-pipeline single-flight, while the
+/// per-test chunk paths run on workers that are already busy.
+fn jit_pieces_in_parallel(
+    context: &mut Context,
+    pieces: Vec<Vec<ProtoStatement>>,
+) -> Vec<Vec<ProtoStatementBlock>> {
+    if context.backends.is_empty() {
+        return pieces
+            .into_iter()
+            .map(|p| {
+                if p.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![ProtoStatementBlock::Interpreted(p)]
+                }
+            })
+            .collect();
+    }
+    let max_chunk_size = jit_chunk_size();
+    let mut plans: Vec<ChunkPlan> = Vec::new();
+    // Plans per piece, so the flat output list can be cut back apart.
+    let mut counts: Vec<usize> = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        let planned = context.backends.plan_chunked(piece, max_chunk_size);
+        counts.push(planned.len());
+        plans.extend(planned);
+    }
+    let outputs = {
+        let ctx = CompileCtx {
+            config: &context.config,
+            use_4state: context.config.use_4state,
+            contains_compiled_block: true,
+        };
+        compile_plans_parallel(&mut context.backends, &ctx, plans)
+    };
+    let mut outputs = outputs.into_iter();
+    counts
+        .into_iter()
+        .map(|n| {
+            let mut blocks = Vec::new();
+            for out in outputs.by_ref().take(n).flatten() {
+                blocks.push(match out {
+                    ChunkOutput::Compiled(artifact) => ProtoStatementBlock::Compiled(artifact),
+                    ChunkOutput::Interpreted(stmts) => ProtoStatementBlock::Interpreted(stmts),
+                });
+            }
+            blocks
+        })
+        .collect()
 }
 
 /// `try_jit_no_cache` with chunk splits forced at `boundaries` (sorted pre-JIT
@@ -832,14 +962,13 @@ fn try_jit_with_boundaries(
         debug_assert!(e >= s);
     }
     tails.reverse();
-    for (start, piece) in tails {
-        if piece.is_empty() {
-            pieces.push((start, blocks.len(), blocks.len()));
-            continue;
-        }
+    let (starts, bodies): (Vec<usize>, Vec<Vec<ProtoStatement>>) = tails.into_iter().unzip();
+    for (start, piece_blocks) in starts
+        .into_iter()
+        .zip(jit_pieces_in_parallel(context, bodies))
+    {
         let lo = blocks.len();
-        let ps = build_chunked_via_registry(context, piece, true);
-        blocks.extend(ps.0);
+        blocks.extend(piece_blocks);
         pieces.push((start, lo, blocks.len()));
     }
     (ProtoStatements(blocks), pieces)
@@ -892,13 +1021,21 @@ fn pass_diag_phase(phase: &str) {
 /// are the only inputs, besides the comb list, that dead-var DCE reads, so a key
 /// match guarantees the memoised pipeline reproduces the exact result. Token-
 /// and pointer-agnostic (see `ProtoAssignStatement`/`ChunkArtifact` `Debug`).
+///
+/// `unified_fp` fingerprints the comb list before `expand_compiled_blocks` and
+/// `field_unfuse`, where a reused child is still one `CompiledBlock` hashed by
+/// its content fingerprint instead of a walk of its tree.  Both transforms are
+/// deterministic in that list and in what `unfuse_inputs_digest` covers (the
+/// blocklist, the census of the event statements, the allocator's start), so
+/// the pair pins the pipeline's input as tightly as hashing the transformed
+/// list did, and is known before the pass runs.
 fn comb_pipeline_key(
-    use_4state: bool,
-    unified: &[ProtoStatement],
+    unified_fp: u128,
+    unfuse_inputs_digest: u128,
     events: &HashMap<Event, Vec<ProtoStatement>>,
     protect: &HashSet<VarOffset>,
 ) -> u128 {
-    use crate::backend::registry::whole_comb_fingerprint;
+    use crate::backend::registry::whole_comb_fingerprint_from;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
@@ -914,7 +1051,8 @@ fn comb_pipeline_key(
     let mut h = DefaultHasher::new();
     evt.hash(&mut h);
     prot_offs.hash(&mut h);
-    whole_comb_fingerprint(use_4state, unified, h.finish() as u128)
+    unfuse_inputs_digest.hash(&mut h);
+    whole_comb_fingerprint_from(unified_fp, h.finish() as u128)
 }
 
 /// Run the comb pipeline: `analyze_dependency` → `reorder_by_level` →
@@ -1222,16 +1360,22 @@ fn run_comb_pipeline(
     // covers every comb temp this function allocates, the scheduler's version
     // renames included).
     let temps_before = context.comb_total_bytes;
+    // The temps allocated below have no `VariableMeta`; the cone plan adopts
+    // each as storage of the variable it stands in for (see
+    // `ConeGateInputs::adopt_relocations`).
+    let mut temp_reloc: Vec<(isize, isize, usize)> = Vec::new();
     let unified = {
         let mut unified = unified;
         if version_split::pass_enabled(context.config.use_4state) {
             let use_4state = context.config.use_4state;
             let before = context.comb_total_bytes;
             let comb_total = &mut context.comb_total_bytes;
-            let mut alloc = |width: usize| -> isize {
+            let mut alloc = |width: usize, from: isize| -> isize {
                 let nb = crate::ir::variable::native_bytes(width);
+                let vs = crate::ir::variable::value_size(nb, use_4state);
                 let off = *comb_total as isize;
-                *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                *comb_total += vs;
+                temp_reloc.push((from, off, vs));
                 off
             };
             let stats = version_split::run(&mut unified, &mut alloc);
@@ -1248,10 +1392,12 @@ fn run_comb_pipeline(
     let (unified_sorted, passes_hint) = {
         let use_4state = context.config.use_4state;
         let comb_total = &mut context.comb_total_bytes;
-        let mut alloc = |width: usize| -> isize {
+        let mut alloc = |width: usize, from: isize| -> isize {
             let nb = crate::ir::variable::native_bytes(width);
+            let vs = crate::ir::variable::value_size(nb, use_4state);
             let off = *comb_total as isize;
-            *comb_total += crate::ir::variable::value_size(nb, use_4state);
+            *comb_total += vs;
+            temp_reloc.push((from, off, vs));
             off
         };
         analyze_dependency(unified, &mut alloc)?
@@ -1394,6 +1540,12 @@ fn run_comb_pipeline(
     // way, checked on the permutation itself: that is what decides whether an
     // exact one-pass hint still describes the order that actually runs.
     let mut cone_kept_edge_directions = false;
+    let adopted_inputs = cone_inputs.filter(|_| !temp_reloc.is_empty()).map(|ci| {
+        let mut ci = ci.clone();
+        ci.adopt_relocations(&temp_reloc);
+        ci
+    });
+    let cone_inputs = adopted_inputs.as_ref().or(cone_inputs);
     let (unified_sorted, cone_plan) = match cone_inputs {
         Some(ci) => match cone_gate::plan(&unified_sorted, ci) {
             Some(plan) => {
@@ -1451,8 +1603,8 @@ fn run_comb_pipeline(
             &unified_sorted,
             all_event_statements,
             &li.extra_offsets,
-            // NOT li.comb_total: version_split just bump-allocated its rename
-            // temps above that Conv-time figure, and they need units too.
+            // The live total, not the Conv-time one: version_split just
+            // bump-allocated its rename temps above it, and they need units too.
             context.comb_total_bytes,
         )
         .map(Arc::new)
@@ -1465,7 +1617,16 @@ fn run_comb_pipeline(
     // Snapshot before JIT consumes it: the whole-comb backend needs the
     // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
     let pre_jit_stmts = Arc::new(unified_sorted.clone());
-    let (comb_statements, cone_segments) = match &cone_plan {
+    let comb_touched_offsets = Arc::new(collect_comb_touched_offsets(&pre_jit_stmts));
+    #[cfg(target_family = "wasm")]
+    let localize_comb_ranges = Vec::new();
+    #[cfg(not(target_family = "wasm"))]
+    let localize_comb_ranges = if crate::backend::aot_c::emit::localize_enabled() {
+        dead_var_dce::localize_comb_ranges(&pre_jit_stmts)
+    } else {
+        Vec::new()
+    };
+    let (comb_statements, cone_segments, cone_groups) = match &cone_plan {
         Some(plan) => {
             let mut bounds: Vec<usize> = plan
                 .segments
@@ -1475,75 +1636,83 @@ fn run_comb_pipeline(
             bounds.sort_unstable();
             bounds.dedup();
             let (ps, pieces) = try_jit_with_boundaries(context, unified_sorted, &bounds);
+            // Bring ranges into the FINAL storage space piecewise: a merged
+            // span can straddle relayout units that land apart.
+            let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
+                let mut out: Vec<(u32, u32)> = Vec::new();
+                for &(cs, ce) in v {
+                    match layout.as_deref() {
+                        Some(sched) => {
+                            for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
+                                out.push((ns as u32, ne as u32));
+                            }
+                        }
+                        None => out.push((cs, ce)),
+                    }
+                }
+                out.sort_unstable();
+                out
+            };
+            // Relayout scatters the whole-variable spans, leaving thousands
+            // of 4-8 byte memcmp/memcpy ranges whose per-span setup dwarfs
+            // the byte traffic.  Fuse ranges across small gaps: comparing a
+            // gap byte is at worst a spurious dirty, and replaying one is
+            // exact because the pre-run compare (`compare_pre` covers every
+            // replay range, gaps included) just proved it unchanged since
+            // the stored run.  The backedge ranges must stay exact: a gap
+            // byte the segment legitimately rewrites would read as
+            // non-convergence.
+            let coalesce = |v: &mut Vec<(u32, u32)>| {
+                let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
+                for &(cs, ce) in v.iter() {
+                    match out.last_mut() {
+                        Some(p) if cs <= p.1 + 32 => p.1 = p.1.max(ce),
+                        _ => out.push((cs, ce)),
+                    }
+                }
+                *v = out;
+            };
+            // FF storage is never relaid out.
+            let translate_compare = |v: &[(bool, u32, u32)]| -> Vec<(bool, u32, u32)> {
+                let mut ffs: Vec<(u32, u32)> = Vec::new();
+                let mut combs: Vec<(u32, u32)> = Vec::new();
+                for &(ff, cs, ce) in v {
+                    if ff {
+                        ffs.push((cs, ce));
+                    } else {
+                        combs.extend(translate_pairs(&[(cs, ce)]));
+                    }
+                }
+                ffs.sort_unstable();
+                combs.sort_unstable();
+                coalesce(&mut ffs);
+                coalesce(&mut combs);
+                combs
+                    .into_iter()
+                    .map(|(cs, ce)| (false, cs, ce))
+                    .chain(ffs.into_iter().map(|(cs, ce)| (true, cs, ce)))
+                    .collect()
+            };
             let mut segs: Vec<cone_gate::ConeSegment> = Vec::new();
+            // A segment whose start is not a chunk boundary is dropped, so
+            // the groups are re-indexed onto the segments kept.
+            let mut seg_index: Vec<Option<u32>> = Vec::with_capacity(plan.segments.len());
             for s in &plan.segments {
                 let Some(&(_, blo, bhi)) = pieces.iter().find(|&&(st, _, _)| st == s.start) else {
+                    seg_index.push(None);
                     continue;
                 };
-                // Bring the compare ranges into the FINAL storage space —
-                // piecewise, because a merged span can straddle relayout
-                // units that land apart.
-                let mut compare: Vec<(bool, u32, u32)> = Vec::new();
-                for &(ff, cs, ce) in &s.compare {
-                    match (ff, layout.as_deref()) {
-                        (false, Some(sched)) => {
-                            for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
-                                compare.push((false, ns as u32, ne as u32));
-                            }
-                        }
-                        _ => compare.push((ff, cs, ce)),
-                    }
-                }
-                compare.sort_unstable();
-                let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
-                    let mut out: Vec<(u32, u32)> = Vec::new();
-                    for &(cs, ce) in v {
-                        match layout.as_deref() {
-                            Some(sched) => {
-                                for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
-                                    out.push((ns as u32, ne as u32));
-                                }
-                            }
-                            None => out.push((cs, ce)),
-                        }
-                    }
-                    out.sort_unstable();
-                    out
+                seg_index.push(Some(segs.len() as u32));
+                let compare = translate_compare(&s.compare);
+                // A single-pass schedule reaches its fixpoint in one run, so
+                // every run is converged by construction and the backedge
+                // snapshot plus its post-run compare would only ever confirm
+                // that; an empty set skips both.
+                let backedge = if required_comb_passes == 1 {
+                    Vec::new()
+                } else {
+                    translate_pairs(&s.backedge)
                 };
-                // Relayout scatters the whole-variable spans, leaving
-                // thousands of 4-8 byte memcmp/memcpy ranges whose per-span
-                // setup dwarfs the byte traffic.  Fuse ranges across small
-                // gaps: comparing a gap byte is at worst a spurious dirty,
-                // and replaying one is exact because the pre-run compare
-                // (`compare_pre` covers every replay range, gaps included)
-                // just proved it unchanged since the stored run.  The
-                // backedge ranges must stay exact — a gap byte the segment
-                // legitimately rewrites would read as non-convergence.
-                let coalesce = |v: &mut Vec<(u32, u32)>| {
-                    let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
-                    for &(cs, ce) in v.iter() {
-                        match out.last_mut() {
-                            Some(p) if cs <= p.1 + 32 => p.1 = p.1.max(ce),
-                            _ => out.push((cs, ce)),
-                        }
-                    }
-                    *v = out;
-                };
-                {
-                    let mut ffs: Vec<(u32, u32)> = Vec::new();
-                    let mut combs: Vec<(u32, u32)> = Vec::new();
-                    for &(ff, cs, ce) in &compare {
-                        if ff { &mut ffs } else { &mut combs }.push((cs, ce));
-                    }
-                    coalesce(&mut ffs);
-                    coalesce(&mut combs);
-                    compare = combs
-                        .into_iter()
-                        .map(|(cs, ce)| (false, cs, ce))
-                        .chain(ffs.into_iter().map(|(cs, ce)| (true, cs, ce)))
-                        .collect();
-                }
-                let backedge = translate_pairs(&s.backedge);
                 let mut replay = translate_pairs(&s.replay);
                 coalesce(&mut replay);
                 // The plan guarantees `compare_pre == replay`; keep the
@@ -1564,14 +1733,57 @@ fn run_comb_pipeline(
                     cone: s.cone.clone(),
                 });
             }
-            (ps, segs)
+            let mut groups: Vec<cone_gate::ConeGroup> = Vec::new();
+            let mut group_index: Vec<Option<u32>> = Vec::with_capacity(plan.groups.len());
+            for g in &plan.groups {
+                let members: Vec<u32> = g
+                    .segments
+                    .iter()
+                    .filter_map(|&i| seg_index[i as usize])
+                    .collect();
+                if members.len() < 2 {
+                    group_index.push(None);
+                    continue;
+                }
+                // A dropped enclosing group hands its role to its own parent.
+                let mut parent = g.parent;
+                while let Some(pi) = parent {
+                    if group_index[pi as usize].is_some() {
+                        break;
+                    }
+                    parent = plan.groups[pi as usize].parent;
+                }
+                group_index.push(Some(groups.len() as u32));
+                groups.push(cone_gate::ConeGroup {
+                    node: g.node,
+                    segments: members,
+                    compare: translate_compare(&g.compare),
+                    off_decay: g.off_decay,
+                    parent: parent.and_then(|pi| group_index[pi as usize]),
+                    state_off: 0,
+                    cone: g.cone.clone(),
+                });
+            }
+            (ps, segs, groups)
         }
         None => {
             let a = try_jit_no_cache(context, unified_sorted);
-            (a, Vec::new())
+            (a, Vec::new(), Vec::new())
         }
     };
     Ok(comb_pipeline_cache::CombPipeline {
+        cone_inputs: cone_inputs.map(|ci| {
+            let mut ci = ci.clone();
+            if let Some(sched) = layout.as_deref() {
+                ci.relayout(sched);
+            }
+            Arc::new(ci)
+        }),
+        comb_touched_offsets,
+        localize_comb_ranges,
+        // Filled in by the caller, which owns the unfuse it ran before this.
+        unfuse_comb_bytes: 0,
+        unfuse_comb_reloc: Vec::new(),
         pre_jit_stmts,
         required_comb_passes,
         comb_statements,
@@ -1584,6 +1796,7 @@ fn run_comb_pipeline(
             None => fused_offsets,
         },
         cone_segments: Arc::new(cone_segments),
+        cone_groups: Arc::new(cone_groups),
         layout,
         nontrivial_comb_scc,
         vsplit_temp_bytes,
@@ -1593,9 +1806,11 @@ fn run_comb_pipeline(
 /// Returns the scheduled statements plus an exact required-pass hint when the
 /// block-aware sort could derive one (see `stable_topo_sort_with_blocks`);
 /// `None` means the caller must fall back to `compute_required_passes`.
+/// `alloc(width, from)` reserves a version-rename temp standing in for the
+/// comb variable at offset `from` (see `rename_versions`).
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
-    alloc: &mut dyn FnMut(usize) -> isize,
+    alloc: &mut dyn FnMut(usize, isize) -> isize,
 ) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
@@ -1793,7 +2008,9 @@ pub(crate) fn analyze_dependency(
                 if block_has_reorder_hazard(&cb.original_stmts) {
                     out.push(ProtoStatement::CompiledBlock(cb));
                 } else {
-                    for sub in cb.original_stmts {
+                    for sub in std::sync::Arc::try_unwrap(cb.original_stmts)
+                        .unwrap_or_else(|a| (*a).clone())
+                    {
                         hazard_flatten(sub, out);
                     }
                 }
@@ -1833,7 +2050,9 @@ pub(crate) fn analyze_dependency(
     fn flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
         match stmt {
             ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-                for sub in cb.original_stmts {
+                for sub in
+                    std::sync::Arc::try_unwrap(cb.original_stmts).unwrap_or_else(|a| (*a).clone())
+                {
                     flatten(sub, out);
                 }
             }
@@ -2937,7 +3156,7 @@ fn unmodelled_spans(stmt: &ProtoStatement, out: &mut Vec<UnmodelledSpan>) {
             }
         }
         ProtoStatement::CompiledBlock(cb) => {
-            for s in &cb.original_stmts {
+            for s in cb.original_stmts.iter() {
                 unmodelled_spans(s, out);
             }
         }
@@ -3035,7 +3254,9 @@ fn pass_diag_unmodelled_decline(key: &VarOffset, why: &str) {
 fn flatten_blocks(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
     match stmt {
         ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-            for sub in cb.original_stmts {
+            for sub in
+                std::sync::Arc::try_unwrap(cb.original_stmts).unwrap_or_else(|a| (*a).clone())
+            {
                 flatten_blocks(sub, out);
             }
         }
@@ -3422,7 +3643,7 @@ pub(crate) fn gather_bit_aware_outputs(
                 // would let `stable_topo_sort`'s RAW/WAR edges manufacture
                 // false comb cycles through registers.
                 let mut inner = vec![];
-                for s in &x.original_stmts {
+                for s in x.original_stmts.iter() {
                     gather_bit_aware_outputs(s, &mut inner);
                 }
                 out.extend(inner.into_iter().filter(|(off, _)| !off.is_ff()));
@@ -4611,7 +4832,7 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         match stmt {
             ProtoStatement::CompiledBlock(x) => {
                 if !x.stmt_deps.is_empty() {
-                    for (ins, outs) in &x.stmt_deps {
+                    for (ins, outs) in x.stmt_deps.iter() {
                         inputs.extend_from_slice(ins);
                         outputs.extend_from_slice(outs);
                     }
@@ -4998,11 +5219,8 @@ impl Conv<&air::Module> for ProtoModule {
         for decl in declarations {
             let mut proto_decl: ProtoDeclaration = Conv::conv(context, decl)?;
 
-            for (event, mut stmts) in proto_decl.event_statements {
-                all_event_statements
-                    .entry(event)
-                    .and_modify(|v| v.append(&mut stmts))
-                    .or_insert(stmts);
+            for (event, stmts) in proto_decl.event_statements {
+                merge_event_statements(&mut all_event_statements, event, stmts);
             }
             // Move (not clone): `proto_decl` is dropped after this iteration, so
             // draining its comb list avoids a full deep-copy of the child subtree
@@ -5071,35 +5289,39 @@ impl Conv<&air::Module> for ProtoModule {
             .chain(all_post_comb_fns)
             .collect();
 
+        // Before the expansion below splices a reused child's tree in; see
+        // `comb_pipeline_key` for why this still pins the pipeline's input.
+        let unified_fp = crate::backend::registry::whole_comb_fingerprint(
+            context.config.use_4state,
+            &unified,
+            0,
+        );
+
         // Baked inst-chunk artifacts would freeze their spans into rigid
         // units (see `expand_compiled_blocks`) — expand them BEFORE the key
         // so the memoised pipeline and every hit see the same statements.
+        // `unified` is expanded on the miss path only: a hit drops it unread.
         if comb_layout::enabled(context.config.use_4state) {
-            comb_layout::expand_compiled_blocks(&mut unified);
             for stmts in all_event_statements.values_mut() {
                 comb_layout::expand_compiled_blocks(stmts);
             }
         }
-        // Field unfuse (see `opt::field_unfuse`).  Runs BEFORE the pipeline
-        // key and the cone-gate node tables: the rewritten statements flavor
-        // the key, and the field storage inherits its packed variable's cone
-        // owner through `Context::comb_reloc`.  The allocations sit outside
-        // the memoised pipeline, so a cache hit replays them identically.
-        let mut unfuse_field_offsets: Vec<isize> = Vec::new();
-        let unified = {
-            let mut unified = unified;
-            if field_unfuse::enabled(context.config.use_4state) {
-                // Offsets the statement census cannot see: the testbench-facing
-                // top-level surface (`Simulator::set`/`get`, wavedrom), external
-                // component connects, derived-clock candidates, and storage
-                // whose initial value is not zero (a split field starts at
-                // zero, so a conditionally-written non-zero-initial field
-                // would read differently before its first write).
-                let mut blocklist: HashSet<isize> = HashSet::default();
-                let explain = field_unfuse::explain_offsets();
-                let note_meta = |vars: &HashMap<VarId, VariableMeta>,
-                                 top: bool,
-                                 blocklist: &mut HashSet<isize>| {
+        // Field unfuse (see `opt::field_unfuse`) runs on the miss path, but
+        // its blocklist is built here, ahead of the key that pins the pass by
+        // its inputs.  The field storage inherits its packed variable's cone
+        // owner through `Context::comb_reloc`, and a hit replays the
+        // allocation.
+        let unfuse_blocklist: HashSet<isize> = if field_unfuse::enabled(context.config.use_4state) {
+            // Offsets the statement census cannot see: the testbench-facing
+            // top-level surface (`Simulator::set`/`get`, wavedrom), external
+            // component connects, derived-clock candidates, and storage
+            // whose initial value is not zero (a split field starts at
+            // zero, so a conditionally-written non-zero-initial field
+            // would read differently before its first write).
+            let mut blocklist: HashSet<isize> = HashSet::default();
+            let explain = field_unfuse::explain_offsets();
+            let note_meta =
+                |vars: &HashMap<VarId, VariableMeta>, top: bool, blocklist: &mut HashSet<isize>| {
                     for meta in vars.values() {
                         let nonzero_init = meta.initial_values.iter().any(|v| !v.is_zero());
                         if !(top || nonzero_init) {
@@ -5110,8 +5332,8 @@ impl Conv<&air::Module> for ProtoModule {
                                 if explain.contains(&o) {
                                     eprintln!(
                                         "[field_unfuse] explain off={o}: blocklisted by meta \
-                                         path={} top={top} nonzero_init={nonzero_init} \
-                                         initial_values={:?}",
+                                     path={} top={top} nonzero_init={nonzero_init} \
+                                     initial_values={:?}",
                                         meta.path,
                                         meta.initial_values.iter().take(4).collect::<Vec<_>>()
                                     );
@@ -5121,49 +5343,47 @@ impl Conv<&air::Module> for ProtoModule {
                         }
                     }
                 };
-                note_meta(&variable_meta, true, &mut blocklist);
-                let mut stack: Vec<&ModuleVariableMeta> = all_child_modules.iter().collect();
-                while let Some(m) = stack.pop() {
-                    note_meta(&m.variable_meta, false, &mut blocklist);
-                    stack.extend(m.children.iter());
-                }
-                for (_, off, _, _, _) in &nested_derived_clock_candidates {
-                    if let VarOffset::Comb(o) = off {
-                        blocklist.insert(*o);
-                    }
-                }
-                let mut ins = vec![];
-                for external in &all_external_components {
-                    for connect in &external.connects {
-                        connect.expr.gather_variable_offsets(&mut ins);
-                    }
-                }
-                for o in &ins {
-                    if let VarOffset::Comb(x) = o {
-                        blocklist.insert(*x);
-                    }
-                }
-                let use_4state = context.config.use_4state;
-                let context = &mut *context;
-                let comb_total = &mut context.comb_total_bytes;
-                let mut alloc = |width: usize| -> isize {
-                    let nb = crate::ir::variable::native_bytes(width);
-                    let off = *comb_total as isize;
-                    *comb_total += crate::ir::variable::value_size(nb, use_4state);
-                    off
-                };
-                let (stats, field_offsets) = field_unfuse::run(
-                    &mut unified,
-                    &all_event_statements,
-                    &blocklist,
-                    &mut alloc,
-                    &mut context.comb_reloc,
-                    use_4state,
-                );
-                unfuse_field_offsets = field_offsets;
-                log::info!("field_unfuse ({}): {stats:?}", src.name);
+            note_meta(&variable_meta, true, &mut blocklist);
+            let mut stack: Vec<&ModuleVariableMeta> = all_child_modules.iter().collect();
+            while let Some(m) = stack.pop() {
+                note_meta(&m.variable_meta, false, &mut blocklist);
+                stack.extend(m.children.iter());
             }
-            unified
+            for (_, off, _, _, _) in &nested_derived_clock_candidates {
+                if let VarOffset::Comb(o) = off {
+                    blocklist.insert(*o);
+                }
+            }
+            let mut ins = vec![];
+            for external in &all_external_components {
+                for connect in &external.connects {
+                    connect.expr.gather_variable_offsets(&mut ins);
+                }
+            }
+            for o in &ins {
+                if let VarOffset::Comb(x) = o {
+                    blocklist.insert(*x);
+                }
+            }
+            blocklist
+        } else {
+            HashSet::default()
+        };
+
+        // Pins the pass by its inputs; the statements go in through `unified_fp`.
+        let unfuse_inputs_digest: u128 = if field_unfuse::enabled(context.config.use_4state) {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut offs: Vec<isize> = unfuse_blocklist.iter().copied().collect();
+            offs.sort_unstable();
+            let mut h = DefaultHasher::new();
+            offs.hash(&mut h);
+            context.comb_total_bytes.hash(&mut h);
+            field_unfuse::event_census_digest(&all_event_statements).hash(&mut h);
+            // The high bit keeps an enabled pass apart from the 0 of a disabled one.
+            u128::from(h.finish()) | (1u128 << 64)
+        } else {
+            0
         };
 
         // Dead-var DCE protect set (also folded into the cache key): offsets
@@ -5214,7 +5434,8 @@ impl Conv<&air::Module> for ProtoModule {
         // the fusion must not inline the defs they read.  Gathered while the
         // meta structures still hold the plain bump layout.  Folded into the
         // pipeline key below so a cache hit implies the same transforms.
-        let aux_extra_offsets: Option<Vec<VarOffset>> =
+        // The unfused field defs join on the miss path, once the pass has run.
+        let aux_extra_base: Option<Vec<VarOffset>> =
             if comb_layout::enabled(context.config.use_4state)
                 || comb_fusion::enabled(context.config.use_4state)
             {
@@ -5228,16 +5449,11 @@ impl Conv<&air::Module> for ProtoModule {
                         connect.expr.gather_variable_offsets(&mut extra_offsets);
                     }
                 }
-                // Unfused field defs stay materialized by default (see
-                // `field_unfuse::inline_fields`).
-                if !field_unfuse::inline_fields() {
-                    extra_offsets.extend(unfuse_field_offsets.iter().map(|&o| VarOffset::Comb(o)));
-                }
                 Some(extra_offsets)
             } else {
                 None
             };
-        let layout_inputs: Option<comb_layout::LayoutInputs> =
+        let layout_meta_units: Option<Vec<(isize, isize)>> =
             if comb_layout::enabled(context.config.use_4state) {
                 let mut meta_units: Vec<(isize, isize)> = Vec::new();
                 comb_layout::collect_meta_units_map(
@@ -5252,14 +5468,12 @@ impl Conv<&air::Module> for ProtoModule {
                         &mut meta_units,
                     );
                 }
-                Some(comb_layout::LayoutInputs {
-                    meta_units,
-                    extra_offsets: aux_extra_offsets.clone().unwrap_or_default(),
-                    comb_total: context.comb_total_bytes,
-                })
+                Some(meta_units)
             } else {
                 None
             };
+        // Where the unfuse allocator will start; a hit reserves the same span.
+        let comb_total_pre_unfuse = context.comb_total_bytes;
 
         // Whole comb pipeline (analyze_dependency + reorder + DCE + JIT),
         // memoised across tests that share a DUT.  A hit returns the pre-JIT
@@ -5273,7 +5487,7 @@ impl Conv<&air::Module> for ProtoModule {
         // Cone-gate inputs: node tables from the meta tree plus the
         // event-writable comb set.  `None` (also when the event writes cannot
         // be bounded) leaves the pipeline ungated.
-        let cone_inputs: Option<cone_gate::ConeGateInputs> = if cone_gate::enabled() {
+        let cone_event_written: Option<HashSet<isize>> = if cone_gate::enabled() {
             collect_event_written_comb(&all_event_statements).map(|mut evt| {
                 // External components write their output connects into comb
                 // storage between settles — outside both the comb list and
@@ -5294,85 +5508,139 @@ impl Conv<&air::Module> for ProtoModule {
                         }
                     }
                 }
-                cone_gate::build_inputs(
-                    &src.name.to_string(),
-                    &variable_meta,
-                    &all_child_modules,
-                    &evt,
-                    &context.comb_reloc,
-                    context.config.use_4state,
-                )
+                evt
             })
         } else {
             None
         };
         let key = {
             let base = comb_pipeline_key(
-                context.config.use_4state,
-                &unified,
+                unified_fp,
+                unfuse_inputs_digest,
                 &all_event_statements,
                 &dce_protect,
             );
-            if layout_inputs.is_some()
+            if layout_meta_units.is_some()
                 || comb_fusion::enabled(context.config.use_4state)
-                || cone_inputs.is_some()
+                || cone_event_written.is_some()
             {
                 use std::collections::hash_map::DefaultHasher;
                 use std::hash::{Hash, Hasher};
                 let mut h = DefaultHasher::new();
                 comb_fusion::enabled(context.config.use_4state).hash(&mut h);
-                cone_inputs.is_some().hash(&mut h);
-                if let Some(extra) = &aux_extra_offsets {
+                cone_event_written.is_some().hash(&mut h);
+                if let Some(extra) = &aux_extra_base {
                     extra.hash(&mut h);
                 }
-                if let Some(li) = &layout_inputs {
-                    li.meta_units.hash(&mut h);
-                    li.comb_total.hash(&mut h);
+                if let Some(units) = &layout_meta_units {
+                    units.hash(&mut h);
+                    comb_total_pre_unfuse.hash(&mut h);
                 }
                 base ^ (h.finish() as u128)
             } else {
                 base
             }
         };
-        let cached: Arc<comb_pipeline_cache::CombPipeline> =
-            match comb_pipeline_cache::try_get_or_claim(key, context.config.dut_reuse) {
-                comb_pipeline_cache::Outcome::Hit(cached) => {
-                    // The pipeline (incl. the in-place event DCE) did not run for
-                    // this test; reproduce the dead-var drop on its events.
-                    let dead: HashSet<VarOffset> = cached.dead_offsets.iter().copied().collect();
-                    if !dead.is_empty() {
-                        for stmts in all_event_statements.values_mut() {
-                            let taken = std::mem::take(stmts);
-                            *stmts = dead_var_dce::apply_counting(taken, &dead).0;
-                        }
-                    }
-                    // ...nor did the version-split pass, whose rename temps the
-                    // cached statements address.  A key match implies the same
-                    // layout, so reserving the same span puts them back where
-                    // the compiled code expects them.
-                    context.comb_total_bytes += cached.vsplit_temp_bytes;
-                    cached
-                }
-                // Compute (single-flight claim) or Disabled (reuse off): run the
-                // pipeline once (it DCEs the events in place), then publish via
-                // the guard or just wrap the result.
-                other => {
-                    let result = run_comb_pipeline(
-                        context,
-                        unified,
-                        &mut all_event_statements,
-                        &dce_protect,
-                        layout_inputs.as_ref(),
-                        aux_extra_offsets.as_deref(),
-                        cone_inputs.as_ref(),
-                        src.name,
-                    )?;
-                    match other {
-                        comb_pipeline_cache::Outcome::Compute(guard) => guard.store(result),
-                        _ => Arc::new(result),
+        let claimed = comb_pipeline_cache::try_get_or_claim(key, context.config.dut_reuse);
+        let cached: Arc<comb_pipeline_cache::CombPipeline> = match claimed {
+            comb_pipeline_cache::Outcome::Hit(cached) => {
+                // The pipeline (incl. the in-place event DCE) did not run for
+                // this test; reproduce the dead-var drop on its events.
+                let dead: HashSet<VarOffset> = cached.dead_offsets.iter().copied().collect();
+                if !dead.is_empty() {
+                    for stmts in all_event_statements.values_mut() {
+                        let taken = std::mem::take(stmts);
+                        *stmts = dead_var_dce::apply_counting(taken, &dead).0;
                     }
                 }
-            };
+                // ...nor did field unfuse or the version-split pass, whose
+                // storage the cached statements address.  A key match implies
+                // the same layout, so reserving the same spans puts them back
+                // where the compiled code expects them.
+                context.comb_total_bytes += cached.unfuse_comb_bytes;
+                context
+                    .comb_reloc
+                    .extend(cached.unfuse_comb_reloc.iter().copied());
+                context.comb_total_bytes += cached.vsplit_temp_bytes;
+                cached
+            }
+            // Compute (single-flight claim) or Disabled (reuse off): expand and
+            // unfuse the comb list, run the pipeline once (it DCEs the events
+            // in place) and publish.
+            other => {
+                if comb_layout::enabled(context.config.use_4state) {
+                    comb_layout::expand_compiled_blocks(&mut unified);
+                }
+                let reloc_before = context.comb_reloc.len();
+                let mut unfuse_field_offsets: Vec<isize> = Vec::new();
+                if field_unfuse::enabled(context.config.use_4state) {
+                    let use_4state = context.config.use_4state;
+                    let context = &mut *context;
+                    let comb_total = &mut context.comb_total_bytes;
+                    let mut alloc = |width: usize| -> isize {
+                        let nb = crate::ir::variable::native_bytes(width);
+                        let off = *comb_total as isize;
+                        *comb_total += crate::ir::variable::value_size(nb, use_4state);
+                        off
+                    };
+                    let (stats, field_offsets) = field_unfuse::run(
+                        &mut unified,
+                        &all_event_statements,
+                        &unfuse_blocklist,
+                        &mut alloc,
+                        &mut context.comb_reloc,
+                        use_4state,
+                    );
+                    unfuse_field_offsets = field_offsets;
+                    log::info!("field_unfuse ({}): {stats:?}", src.name);
+                }
+                let unfuse_comb_bytes = context.comb_total_bytes - comb_total_pre_unfuse;
+                let unfuse_comb_reloc: Vec<(isize, isize, usize)> =
+                    context.comb_reloc[reloc_before..].to_vec();
+
+                let aux_extra_offsets: Option<Vec<VarOffset>> = aux_extra_base.map(|mut v| {
+                    // Unfused field defs stay materialized by default (see
+                    // `field_unfuse::inline_fields`).
+                    if !field_unfuse::inline_fields() {
+                        v.extend(unfuse_field_offsets.iter().map(|&o| VarOffset::Comb(o)));
+                    }
+                    v
+                });
+                let layout_inputs: Option<comb_layout::LayoutInputs> =
+                    layout_meta_units.map(|meta_units| comb_layout::LayoutInputs {
+                        meta_units,
+                        extra_offsets: aux_extra_offsets.clone().unwrap_or_default(),
+                    });
+                let cone_inputs: Option<cone_gate::ConeGateInputs> =
+                    cone_event_written.map(|evt| {
+                        cone_gate::build_inputs(
+                            &src.name.to_string(),
+                            &variable_meta,
+                            &all_child_modules,
+                            &evt,
+                            &context.comb_reloc,
+                            context.config.use_4state,
+                        )
+                    });
+
+                let mut result = run_comb_pipeline(
+                    context,
+                    unified,
+                    &mut all_event_statements,
+                    &dce_protect,
+                    layout_inputs.as_ref(),
+                    aux_extra_offsets.as_deref(),
+                    cone_inputs.as_ref(),
+                    src.name,
+                )?;
+                result.unfuse_comb_bytes = unfuse_comb_bytes;
+                result.unfuse_comb_reloc = unfuse_comb_reloc;
+                match other {
+                    comb_pipeline_cache::Outcome::Compute(guard) => guard.store(result),
+                    _ => Arc::new(result),
+                }
+            }
+        };
 
         // Comb relayout replay: the pipeline rewrote (or the cache carries)
         // the memoised comb statements through the schedule; every
@@ -5431,6 +5699,17 @@ impl Conv<&air::Module> for ProtoModule {
                 context.comb_total_bytes += len;
             }
             segs
+        };
+        let cone_groups: Vec<crate::ir::opt::cone_gate::ConeGroup> = {
+            let mut groups: Vec<_> = cached.cone_groups.as_ref().clone();
+            for g in &mut groups {
+                let shadow: usize = g.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
+                let len = (crate::ir::opt::cone_gate::GROUP_STATE_HEADER_BYTES + shadow)
+                    .next_multiple_of(8);
+                g.state_off = context.comb_total_bytes as u32;
+                context.comb_total_bytes += len;
+            }
+            groups
         };
         // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
         // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
@@ -5528,7 +5807,7 @@ impl Conv<&air::Module> for ProtoModule {
                 // Testbench-side writes (e.g. initialization in `initial`)
                 // are not RTL drivers; a component may drive such a
                 // variable.
-                if matches!(event, Event::Initial | Event::Final) {
+                if event.is_initial() || *event == Event::Final {
                     continue;
                 }
                 for stmt in stmts {
@@ -5609,8 +5888,9 @@ impl Conv<&air::Module> for ProtoModule {
                 .values()
                 .map(|v| v.as_slice())
                 .collect();
-            let (mut block_vo, ranges) =
-                crate::ir::opt::dead_var_dce::collect_localize_info(&pre_jit_stmts, &event_slices);
+            let (mut block_vo, mut ranges) =
+                crate::ir::opt::dead_var_dce::collect_localize_info(&event_slices);
+            ranges.extend(cached.localize_comb_ranges.iter().copied());
             // Protect externally-visible comb offsets (mirrors the
             // dead_var_dce protect set): a parent module's comb or a
             // testbench reads these from comb_values, bypassing any local.
@@ -5746,13 +6026,6 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
 
-        // AOT-C event path: compile each event's FF-next + write-log to C,
-        // keyed by Event.  `prepare_event` returns None on any uncovered stmt,
-        // so the map holds only fully-emittable events; the rest stay on
-        // Cranelift.  Built before `all_event_statements` is consumed below.
-        // Only engage whole-module backends on big-enough modules — see
-        // Config::aot_c_min_stmts.  Below threshold, per-chunk Cranelift
-        // wins on compile latency.
         let size_ok = {
             let n = pre_jit_stmts.len()
                 + all_event_statements
@@ -5761,59 +6034,7 @@ impl Conv<&air::Module> for ProtoModule {
                     .sum::<usize>();
             n >= context.config.aot_c_min_stmts
         };
-        let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !size_ok {
-            HashMap::default()
-        } else {
-            let ctx = CompileCtx {
-                config: &context.config,
-                use_4state: context.config.use_4state,
-                contains_compiled_block: false,
-            };
-            let mut map = HashMap::default();
-            for (event, stmts) in all_event_statements.iter() {
-                if let Some(whole) = context.backends.try_compile_whole_event(&ctx, event, stmts) {
-                    map.insert(event.clone(), whole);
-                }
-            }
-            map
-        };
-
-        if std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1") {
-            for (event, stmts) in all_event_statements.iter() {
-                eprintln!(
-                    "[aot_event_module] module={:?} event={:?} top_stmts={} aot_c={}",
-                    src.name,
-                    event,
-                    stmts.len(),
-                    whole_events.contains_key(event),
-                );
-                // Census of EVERY uncovered statement, not just the first, so
-                // one fix does not simply surface the next bail.
-                #[cfg(not(target_family = "wasm"))]
-                if !whole_events.contains_key(event) {
-                    let census = crate::backend::aot_c::emit::event_uncovered_census(stmts);
-                    let mut counts: HashMap<String, usize> = Default::default();
-                    for c in census {
-                        *counts.entry(c).or_default() += 1;
-                    }
-                    let mut v: Vec<_> = counts.into_iter().collect();
-                    v.sort_by_key(|x| std::cmp::Reverse(x.1));
-                    eprintln!(
-                        "[aot_event_census] {} distinct uncovered event stmts:",
-                        v.len()
-                    );
-                    for (k, n) in v.iter().take(40) {
-                        eprintln!("  {n:6}x  {k}");
-                    }
-                }
-            }
-        }
-
-        // Event statements preserve source order (no topological sorting).
-        // NBA semantics: reads come from current, writes go to next, then
-        // ff_commit copies next → current. Source order must be preserved
-        // for sequential writes to the same variable.
-        let comb_touched_offsets = Arc::new(collect_comb_touched_offsets(&pre_jit_stmts));
+        let comb_touched_offsets = Arc::clone(&cached.comb_touched_offsets);
         // No chunk backend on wasm, so the pre-chunking below would be an
         // identity transform.
         #[cfg(not(target_family = "wasm"))]
@@ -5822,19 +6043,6 @@ impl Conv<&air::Module> for ProtoModule {
             .iter()
             .map(|(e, stmts)| (e.clone(), event_comb_write_offsets(stmts)))
             .collect();
-        let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
-            .into_iter()
-            .map(|(event, stmts)| {
-                #[cfg(not(target_family = "wasm"))]
-                let stmts = if event == Event::Initial {
-                    precompile_tb_bodies(context, stmts, &tb_private)
-                } else {
-                    stmts
-                };
-                (event, try_jit(context, stmts))
-            })
-            .collect();
-
         // Collect derived clocks + input-clock offsets BEFORE
         // `variable_meta` moves into `module_variable_meta`.  We must look
         // at both the top module's own clock vars AND any clock vars
@@ -5872,7 +6080,7 @@ impl Conv<&air::Module> for ProtoModule {
             for (vid, var) in &src.variables {
                 if !var.r#type.is_reset()
                     || port_var_set.contains(vid)
-                    || !event_statements.contains_key(&Event::Reset(*vid))
+                    || !all_event_statements.contains_key(&Event::Reset(*vid))
                 {
                     continue;
                 }
@@ -5967,24 +6175,199 @@ impl Conv<&air::Module> for ProtoModule {
 
         // Derived-clock eval is a separate `try_jit` chunk so the main
         // comb JIT/AOT-C blob stays intact while partial_settle is fast.
-        let (derived_clock_schedule, derived_clock_eval, derived_clock_eval_passes) =
-            if derived_clock_vars.is_empty() {
-                (DerivedClockSchedule::default(), ProtoStatements(vec![]), 1)
-            } else {
-                let (sched, eval_indices) = build_derived_clock_schedule(
-                    &derived_clock_vars,
-                    &pre_jit_stmts,
-                    &input_clock_offsets,
+        let mut settle_touched_offsets = Arc::clone(&comb_touched_offsets);
+        let mut closure_out_watch: Vec<(u32, u32)> = Vec::new();
+        let (
+            derived_clock_schedule,
+            derived_clock_eval,
+            derived_clock_eval_passes,
+            whole_derived_clock,
+            derived_clock_master_eval,
+            derived_clock_master_passes,
+            whole_derived_clock_master,
+            closure_touched,
+        ) = if derived_clock_vars.is_empty() {
+            (
+                DerivedClockSchedule::default(),
+                ProtoStatements(vec![]),
+                1,
+                None,
+                ProtoStatements(vec![]),
+                1,
+                None,
+                crate::HashSet::default(),
+            )
+        } else {
+            let (sched, eval_indices, master_indices) = build_derived_clock_schedule(
+                &derived_clock_vars,
+                &pre_jit_stmts,
+                &input_clock_offsets,
+            );
+            let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
+            let closure_touched = collect_comb_touched_offsets(&eval_protos);
+            if let Some(split) = closure_settle_split(
+                &pre_jit_stmts,
+                &eval_indices,
+                &eval_protos,
+                context.comb_total_bytes,
+            ) {
+                settle_touched_offsets = Arc::new(split.touched);
+                closure_out_watch = split.out_watch;
+            }
+            // The closure keeps `unified_sorted`'s relative order, which is
+            // only single-pass when that order linearized; where it did not,
+            // one pass reads a producer that runs later and the gated clock
+            // is computed from the previous step's value.
+            let passes = compute_required_passes("derived-clock-closure", &eval_protos);
+            // The closure runs on every master edge, so it gets the
+            // whole-module backend the comb gets; its own fingerprint lets
+            // the tests sharing a DUT compile it once.
+            let mut compile_closure = |protos: &[ProtoStatement], domain: u128| {
+                if !size_ok || protos.is_empty() {
+                    return None;
+                }
+                let key = crate::backend::registry::whole_comb_fingerprint(
+                    context.config.use_4state,
+                    protos,
+                    domain,
                 );
-                let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
-                // The closure keeps `unified_sorted`'s relative order, which is
-                // only single-pass when that order linearized; where it did not,
-                // one pass reads a producer that runs later and the gated clock
-                // is computed from the previous step's value.
-                let passes = compute_required_passes("derived-clock-closure", &eval_protos);
-                let eval = try_jit(context, eval_protos);
-                (sched, eval, passes)
+                whole::compile_whole_comb(
+                    &mut context.backends,
+                    &context.config,
+                    key,
+                    context.config.dut_reuse,
+                    protos,
+                    whole::WholeCombShape::default(),
+                )
             };
+            let whole = compile_closure(&eval_protos, DERIVED_CLOCK_KEY_DOMAIN);
+            // The master-toggle subset runs on every master edge too.
+            let master_protos = extract_eval_proto_stmts(&master_indices, &pre_jit_stmts);
+            let master_passes = compute_required_passes("derived-clock-master", &master_protos);
+            let whole_master = compile_closure(&master_protos, DERIVED_CLOCK_MASTER_KEY_DOMAIN);
+            let eval = try_jit(context, eval_protos);
+            let master_eval = try_jit(context, master_protos);
+            (
+                sched,
+                eval,
+                passes,
+                whole,
+                master_eval,
+                master_passes,
+                whole_master,
+                closure_touched,
+            )
+        };
+
+        // Idle-subtree gates over the clock events; see `event_gate`.
+        let mut event_gates: HashMap<Event, Vec<crate::ir::opt::event_gate::EventGate>> =
+            HashMap::default();
+        let mut event_gate_flags: Vec<u32> = Vec::new();
+        if let Some(ci) = cached.cone_inputs.as_deref()
+            && crate::ir::opt::event_gate::enabled()
+        {
+            for (event, stmts) in all_event_statements.iter() {
+                if !matches!(event, Event::Clock(_)) {
+                    continue;
+                }
+                let mut gates = crate::ir::opt::event_gate::plan(
+                    stmts,
+                    ci,
+                    &pre_jit_stmts[..],
+                    &closure_touched,
+                    &comb_touched_offsets,
+                    &format!("{event:?}"),
+                );
+                for g in &mut gates {
+                    let shadow = g.shadow_bytes();
+                    let len = (crate::ir::opt::event_gate::GATE_STATE_HEADER_BYTES + shadow)
+                        .next_multiple_of(8);
+                    g.state_off = context.comb_total_bytes as u32;
+                    context.comb_total_bytes += len;
+                    event_gate_flags.push(g.state_off);
+                }
+                if !gates.is_empty() {
+                    event_gates.insert(event.clone(), gates);
+                }
+            }
+        }
+
+        // AOT-C event path: compile each event's FF-next + write-log to C,
+        // keyed by Event.  `prepare_event` returns None on any uncovered stmt,
+        // so the map holds only fully-emittable events; the rest stay on
+        // Cranelift.  Built before `all_event_statements` is consumed below.
+        // Only engage whole-module backends on big-enough modules — see
+        // Config::aot_c_min_stmts.  Below threshold, per-chunk Cranelift
+        // wins on compile latency.
+        let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !size_ok {
+            HashMap::default()
+        } else {
+            let ctx = CompileCtx {
+                config: &context.config,
+                use_4state: context.config.use_4state,
+                contains_compiled_block: false,
+            };
+            let mut map = HashMap::default();
+            for (event, stmts) in all_event_statements.iter() {
+                if let Some(whole) = context.backends.try_compile_whole_event(
+                    &ctx,
+                    event,
+                    stmts,
+                    event_gates.get(event).map_or(&[][..], |v| v.as_slice()),
+                ) {
+                    map.insert(event.clone(), whole);
+                }
+            }
+            map
+        };
+
+        if std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1") {
+            for (event, stmts) in all_event_statements.iter() {
+                eprintln!(
+                    "[aot_event_module] module={:?} event={:?} top_stmts={} aot_c={}",
+                    src.name,
+                    event,
+                    stmts.len(),
+                    whole_events.contains_key(event),
+                );
+                // Census of EVERY uncovered statement, not just the first, so
+                // one fix does not simply surface the next bail.
+                #[cfg(not(target_family = "wasm"))]
+                if !whole_events.contains_key(event) {
+                    let census = crate::backend::aot_c::emit::event_uncovered_census(stmts);
+                    let mut counts: HashMap<String, usize> = Default::default();
+                    for c in census {
+                        *counts.entry(c).or_default() += 1;
+                    }
+                    let mut v: Vec<_> = counts.into_iter().collect();
+                    v.sort_by_key(|x| std::cmp::Reverse(x.1));
+                    eprintln!(
+                        "[aot_event_census] {} distinct uncovered event stmts:",
+                        v.len()
+                    );
+                    for (k, n) in v.iter().take(40) {
+                        eprintln!("  {n:6}x  {k}");
+                    }
+                }
+            }
+        }
+
+        // Event statements preserve source order (no topological sorting).
+        // NBA semantics: reads come from current, writes go to next, then
+        // ff_commit copies next → current. Source order must be preserved
+        // for sequential writes to the same variable.
+        let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
+            .into_iter()
+            .map(|(event, stmts)| {
+                #[cfg(not(target_family = "wasm"))]
+                let stmts = if event.is_initial() {
+                    precompile_tb_bodies(context, stmts, &tb_private)
+                } else {
+                    stmts
+                };
+                (event, try_jit(context, stmts))
+            })
+            .collect();
 
         // Whole-comb backend (today: AOT-C) — when registered + size_ok,
         // try compile_whole_comb; backends that decline (4-state,
@@ -6008,6 +6391,7 @@ impl Conv<&air::Module> for ProtoModule {
                     localize: localize_info.as_ref(),
                     const_unsafe: const_unsafe_comb.as_ref(),
                     cone_segments: &cone_segments,
+                    cone_groups: &cone_groups,
                 },
             )
         };
@@ -6064,6 +6448,10 @@ impl Conv<&air::Module> for ProtoModule {
             derived_clock_schedule,
             derived_clock_eval,
             derived_clock_eval_passes,
+            whole_derived_clock,
+            derived_clock_master_eval,
+            derived_clock_master_passes,
+            whole_derived_clock_master,
             nontrivial_comb_scc,
             whole_comb,
             whole_events,
@@ -6072,8 +6460,11 @@ impl Conv<&air::Module> for ProtoModule {
             fused_comb_offsets: cached.fused_offsets.clone(),
             cone_segments,
             comb_touched_offsets,
+            settle_touched_offsets,
+            closure_out_watch,
             event_comb_writes,
             cone_state_base,
+            event_gate_flags,
             settle_info: Default::default(),
         })
     }
@@ -6400,6 +6791,60 @@ fn merge_reset_dispatch(
 /// would silently skip a required settle, leaving a stale comb value to be
 /// read as settled.
 pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<VarOffset> {
+    let mut acc = HashSet::default();
+    walk_touched_offsets(stmts, &mut acc);
+    acc
+}
+
+/// What `closure_settle_split` derives for the settle filter.
+struct ClosureSettleSplit {
+    /// The comb's touched offsets with the derived-clock closure left out.
+    touched: HashSet<VarOffset>,
+    /// Closure outputs the rest of the comb reads, `(offset, len)` in comb
+    /// bytes.
+    out_watch: Vec<(u32, u32)>,
+}
+
+/// `None` when a closure write cannot be bounded or lies outside the comb
+/// buffer: the filter then keeps the whole comb as its read set.
+fn closure_settle_split(
+    all: &[ProtoStatement],
+    eval_indices: &[usize],
+    eval_protos: &[ProtoStatement],
+    comb_bytes: usize,
+) -> Option<ClosureSettleSplit> {
+    let closure: HashSet<usize> = eval_indices.iter().copied().collect();
+    let mut touched = HashSet::default();
+    for (i, s) in all.iter().enumerate() {
+        if !closure.contains(&i) {
+            walk_touched_offsets(std::slice::from_ref(s), &mut touched);
+        }
+    }
+    let mut outer_comb: Vec<isize> = touched
+        .iter()
+        .filter_map(|o| match o {
+            VarOffset::Comb(x) => Some(*x),
+            VarOffset::Ff(_) => None,
+        })
+        .collect();
+    outer_comb.sort_unstable();
+    let mut watch = Vec::new();
+    for (lo, hi) in event_comb_write_offsets(eval_protos)? {
+        if lo < 0 || hi < lo || hi as usize >= comb_bytes {
+            return None;
+        }
+        let i = outer_comb.partition_point(|&x| x < lo);
+        if outer_comb.get(i).is_some_and(|&x| x <= hi) {
+            watch.push((lo as u32, (hi - lo + 1) as u32));
+        }
+    }
+    Some(ClosureSettleSplit {
+        touched,
+        out_watch: watch,
+    })
+}
+
+fn walk_touched_offsets(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) {
     fn walk(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) {
         let mut ins: Vec<VarOffset> = Vec::new();
         let mut outs: Vec<VarOffset> = Vec::new();
@@ -6432,7 +6877,7 @@ pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<
                 ProtoStatement::CompiledBlock(x) => {
                     acc.extend(x.input_offsets.iter().copied());
                     acc.extend(x.output_offsets.iter().copied());
-                    for (dep_ins, dep_outs) in &x.stmt_deps {
+                    for (dep_ins, dep_outs) in x.stmt_deps.iter() {
                         acc.extend(dep_ins.iter().copied());
                         acc.extend(dep_outs.iter().copied());
                     }
@@ -6444,9 +6889,7 @@ pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<
             acc.extend(outs.drain(..));
         }
     }
-    let mut acc = HashSet::default();
-    walk(stmts, &mut acc);
-    acc
+    walk(stmts, acc);
 }
 
 /// Give the readers that sit BETWEEN two writes of one comb variable their own
@@ -6461,7 +6904,7 @@ fn rename_versions(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
     groups: &mut Vec<usize>,
-    alloc: &mut dyn FnMut(usize) -> isize,
+    alloc: &mut dyn FnMut(usize, isize) -> isize,
 ) -> usize {
     // Offsets any dynamic access touches: a temp sized for one variable cannot
     // stand in for a base that names a whole array.
@@ -6551,7 +6994,7 @@ fn rename_versions(
             declined += 1;
             continue;
         }
-        let to = VarOffset::Comb(alloc(width));
+        let to = VarOffset::Comb(alloc(width, off.raw()));
         plans.push(Plan {
             after,
             readers: mids,
@@ -6871,6 +7314,7 @@ mod event_written_comb_tests {
                     },
                 ],
                 width: 32,
+                hier: None,
             },
         )];
         let out = collect_event_written_comb(&events(stmts)).unwrap();
@@ -6892,8 +7336,8 @@ mod event_written_comb_tests {
                 input_offsets: vec![],
                 output_offsets: vec![VarOffset::Comb(0x0), VarOffset::Comb(0x10)],
                 ff_canonical_offsets: vec![],
-                stmt_deps: vec![],
-                original_stmts: originals,
+                stmt_deps: std::sync::Arc::new(vec![]),
+                original_stmts: std::sync::Arc::new(originals),
             })
         }
         // The originals\u2019 dynamic write taints the middle element the
@@ -6944,6 +7388,7 @@ mod event_written_comb_tests {
                         next_offset: None,
                     }],
                     width: 32,
+                    hier: None,
                 }
             )]),
             None

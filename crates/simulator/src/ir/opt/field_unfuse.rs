@@ -375,7 +375,7 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
         // Executes a pre-compiled artifact with baked offsets; the original
         // statements say what it touches, and none of that may move.
         ProtoStatement::CompiledBlock(x) => {
-            for s in &x.original_stmts {
+            for s in x.original_stmts.iter() {
                 census_stmt(s, c, true);
             }
         }
@@ -715,6 +715,40 @@ impl Rewriter<'_> {
 pub fn inline_fields() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("VERYL_FIELD_UNFUSE_INLINE").as_deref() == Ok("1"))
+}
+
+/// Digest of the census this pass takes of the event statements, which is all
+/// it reads of them.  Hashing the accesses rather than the statements keeps
+/// per-test `$readmemh` paths and `$display` strings, which cannot change a
+/// split decision, out of the key.
+pub fn event_census_digest(events: &HashMap<crate::ir::Event, Vec<ProtoStatement>>) -> u128 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut c = Census::default();
+    for stmts in events.values() {
+        for s in stmts {
+            census_stmt(s, &mut c, true);
+        }
+    }
+    let mut vars: Vec<(&isize, &VarInfo)> = c.vars.iter().collect();
+    vars.sort_unstable_by_key(|(o, _)| **o);
+    let mut h = DefaultHasher::new();
+    c.bail.hash(&mut h);
+    for (off, v) in vars {
+        off.hash(&mut h);
+        v.full_width.hash(&mut h);
+        v.width_conflict.hash(&mut h);
+        v.write_ranges.hash(&mut h);
+        v.read_ranges.hash(&mut h);
+        v.whole_write.hash(&mut h);
+        v.disqualified.hash(&mut h);
+        v.self_ref.hash(&mut h);
+        v.nonconst_write.hash(&mut h);
+    }
+    let mut spans = c.dyn_spans.clone();
+    spans.sort_unstable();
+    spans.hash(&mut h);
+    u128::from(h.finish())
 }
 
 /// Run the pass over the unified comb list.  `event_statements` (the initial

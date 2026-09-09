@@ -107,7 +107,11 @@ pub fn totals_line() -> String {
 
 /// Rewrite multi-write comb variables inside each `SequentialBlock` into
 /// single-writer select chains.  Returns per-shape statistics.
-pub fn run(stmts: &mut [ProtoStatement], alloc: &mut dyn FnMut(usize) -> isize) -> RunStats {
+///
+/// `alloc(width, from)` reserves a rename temp of `width` bits standing in
+/// for the fused variable at comb offset `from`, so the caller can attribute
+/// the temp's storage to that variable's owner.
+pub fn run(stmts: &mut [ProtoStatement], alloc: &mut dyn FnMut(usize, isize) -> isize) -> RunStats {
     let mut stats = RunStats::default();
     for stmt in stmts.iter_mut() {
         if let ProtoStatement::SequentialBlock(body) = stmt {
@@ -443,7 +447,7 @@ fn contains_block_break(stmt: &ProtoStatement) -> bool {
 fn split_block(
     body: &mut Vec<ProtoStatement>,
     stats: &mut RunStats,
-    alloc: &mut dyn FnMut(usize) -> isize,
+    alloc: &mut dyn FnMut(usize, isize) -> isize,
 ) {
     // A block-scoped `Break` aborts the remaining statements when it fires;
     // fusing would move earlier write sites to the last-write position,
@@ -543,13 +547,21 @@ fn split_block(
         // Fold the writer statements (program order, deduped) into one RHS.
         let mut writer_stmts: Vec<usize> = evs.iter().map(|e| e.stmt_idx).collect();
         writer_stmts.dedup();
-        let folded = fold_var(body, &writer_stmts, dst, width, alloc, evs[0].token);
+        let mut alloc_for = |w: usize| -> isize { alloc(w, dst as isize) };
+        let folded = fold_var(
+            body,
+            &writer_stmts,
+            dst,
+            width,
+            &mut alloc_for,
+            evs[0].token,
+        );
         match folded {
             Some((temps, expr)) => {
                 // The fold's rename temps stay: a surviving leaf expression
                 // may read a snapshot; unreferenced ones are dead stores.
                 let (temps, expr) = if lut_enabled() {
-                    match try_lut_compress(&expr, width, alloc, evs[0].token)
+                    match try_lut_compress(&expr, width, &mut alloc_for, evs[0].token)
                         .filter(|_| lut_budget_ok())
                     {
                         Some((lut_temps, lut_expr)) => {
@@ -2004,7 +2016,7 @@ mod tests {
         // untouched, a large cap must fuse it.
         let block = || vec![cond_write(0x100, 0x0, 8, 1), cond_write(0x108, 0x0, 8, 2)];
         let mut alloc_at = 0x1000isize;
-        let mut alloc = |w: usize| -> isize {
+        let mut alloc = |w: usize, _: isize| -> isize {
             let off = alloc_at;
             alloc_at += crate::ir::variable::native_bytes(w) as isize;
             off
@@ -2051,7 +2063,7 @@ mod tests {
             ),
         ];
         let mut alloc_at = 0x1000isize;
-        let mut alloc = |w: usize| -> isize {
+        let mut alloc = |w: usize, _: isize| -> isize {
             let off = alloc_at;
             alloc_at += crate::ir::variable::native_bytes(w) as isize;
             off
@@ -2092,7 +2104,7 @@ mod tests {
             })
             .collect();
         let mut alloc_at = 0x1000isize;
-        let mut alloc = |w: usize| -> isize {
+        let mut alloc = |w: usize, _: isize| -> isize {
             let off = alloc_at;
             alloc_at += crate::ir::variable::native_bytes(w) as isize;
             off
