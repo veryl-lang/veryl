@@ -2,6 +2,88 @@
 use super::*;
 
 #[test]
+fn nested_runtime_loop_copy_limit_preserves_independent_cycles() {
+    for imported in [false, true] {
+        for kind in ["block", "overwritten", "function"] {
+            for depth in [1, 16] {
+                let destination = if kind == "function" {
+                    "_discarded"
+                } else {
+                    "o"
+                };
+                let statements = if imported {
+                    format!("{destination} = gate(1'b1, i);")
+                } else {
+                    format!(
+                        "{destination} = i; {}",
+                        format!("{destination} = !{destination};").repeat(32)
+                    )
+                };
+                let loops = (0..depth).rev().fold(statements, |body, index| {
+                    format!("for _iteration{index} in 0..n {{ {body} }}")
+                });
+                let body = if kind == "function" {
+                    format!(
+                        "function run () -> logic {{
+                            var _discarded: logic;
+                            _discarded = 0; {loops} return 0;
+                         }}
+                         assign o = run();"
+                    )
+                } else {
+                    let overwrite = if kind == "overwritten" { "o = 0;" } else { "" };
+                    format!("always_comb {{ o = 0; {loops} {overwrite} }}")
+                };
+                let function = if imported {
+                    "function gate (s: input logic, x: input logic) -> logic {
+                        var v: logic;
+                        v = x;
+                        for _index in 0..8 { if s { v = !v; } else { v = 0; } }
+                        return v;
+                     }"
+                } else {
+                    ""
+                };
+                let code = format!(
+                    "module Top (i: input logic, n: input u32,
+                                 o: output logic, independent: output logic) {{
+                        {function} {body}
+                        assign independent = independent;
+                     }}"
+                );
+                // The inner loop fits. Enclosing loops must also charge for
+                // copying its generated SSA, even after imports are condensed
+                // or when the final result is overwritten or discarded.
+                crate::comb_loop_detect::with_procedure_import_limit(1024, || {
+                    let case = format!("imported={imported}, {kind}, depth={depth}");
+                    assert_eq!(comb_loop_analysis_is_complete(&code), depth == 1, "{case}");
+                    let errors = analyze(&code);
+                    assert!(
+                        errors.iter().all(|error| match error {
+                            AnalyzerError::CombinationalLoop { .. } => true,
+                            AnalyzerError::UnassignVariable { identifier, .. } =>
+                                identifier == "independent",
+                            _ => false,
+                        }),
+                        "{case}: {errors:?}"
+                    );
+                    let loops = errors
+                        .iter()
+                        .filter_map(|error| match error {
+                            AnalyzerError::CombinationalLoop { identifier, .. } => {
+                                Some(identifier.as_str())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(loops, ["independent"], "{case}: {errors:?}");
+                });
+            }
+        }
+    }
+}
+
+#[test]
 fn runtime_loop_import_limit_preserves_independent_cycles() {
     for kind in ["block", "overwritten", "separate", "function"] {
         for calls in [1, 16] {

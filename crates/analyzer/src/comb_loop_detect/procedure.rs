@@ -340,8 +340,8 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 const FUNCTION_SUMMARY_WORK: usize = 100_000;
 
 // Ordinary procedures can import many individually bounded summaries. Limit
-// their combined expansion, including runtime-loop transfers, independently
-// of the directly written SSA graph.
+// their combined expansion, including repeated copies of runtime-loop
+// transfers, independently of the directly written SSA graph.
 const PROCEDURE_IMPORT_WORK: usize = 100_000;
 
 // Early returns and breaks retain every preceding guard prefix during SSA

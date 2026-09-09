@@ -49,11 +49,42 @@ struct TransferBuilder {
 }
 
 impl TransferBuilder {
-    fn version(&mut self, version: VersionId) -> NodeIndex {
-        *self.versions.entry(version).or_insert_with(|| {
-            self.pending.push_back(version);
-            self.graph.add_node(TransferNode::default())
-        })
+    fn version<K>(
+        &mut self,
+        ssa: &SsaStore<K>,
+        version: VersionId,
+        start: usize,
+        work: &mut usize,
+    ) -> Option<NodeIndex> {
+        if let Some(&node) = self.versions.get(&version) {
+            return Some(node);
+        }
+        let range = ssa
+            .repeated_versions
+            .partition_point(|range| range.end <= version);
+        if version >= start
+            && ssa
+                .repeated_versions
+                .get(range)
+                .is_some_and(|range| range.start <= version)
+        {
+            // An inner loop has already converted its transfer (including any
+            // imports) to ordinary SSA. Charge every later copy before adding
+            // its node, edges or domains. Pre-loop inputs are only references;
+            // directly written SSA remains independent of this expansion cap.
+            let payload = match &ssa.versions[version] {
+                Version::Definition { sources, .. } => sources.len(),
+                Version::Phi(inputs) => inputs.len(),
+                Version::Guarded { .. } => 1,
+                Version::Projected { .. } | Version::Replicated { .. } => 2,
+                Version::Entry(_) | Version::Imported { .. } => 0,
+            };
+            *work = work.checked_sub(payload.saturating_add(1))?;
+        }
+        let node = self.graph.add_node(TransferNode::default());
+        self.versions.insert(version, node);
+        self.pending.push_back(version);
+        Some(node)
     }
 
     fn copy_iteration<K: Copy + Eq + Hash>(
@@ -77,25 +108,25 @@ impl TransferBuilder {
                 Version::Entry(_) => unreachable!("entries are handled above"),
                 Version::Definition { sources, .. } => {
                     for &(source, relation) in sources {
-                        let source = self.version(source);
+                        let source = self.version(ssa, source, start, import_work)?;
                         self.graph.add_edge(source, node, relation);
                     }
                 }
                 Version::Phi(inputs) => {
                     for &source in inputs {
-                        let source = self.version(source);
+                        let source = self.version(ssa, source, start, import_work)?;
                         self.graph
                             .add_edge(source, node, PositionRelation::default());
                     }
                 }
                 Version::Guarded { source, .. } => {
-                    let source = self.version(*source);
+                    let source = self.version(ssa, *source, start, import_work)?;
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
                 }
                 Version::Projected { source, domain } => {
                     self.graph[node].domains.push(*domain);
-                    let source = self.version(*source);
+                    let source = self.version(ssa, *source, start, import_work)?;
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
                 }
@@ -106,7 +137,7 @@ impl TransferBuilder {
                 } => {
                     self.graph[node].domains.push(*domain);
                     self.graph[node].replication = Some(*stride);
-                    let source = self.version(*source);
+                    let source = self.version(ssa, *source, start, import_work)?;
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
                 }
@@ -164,7 +195,7 @@ impl TransferBuilder {
                             let sources = bindings.get(&key).map(Vec::as_slice).unwrap_or_default();
                             *import_work = import_work.checked_sub(sources.len())?;
                             for &(source, relation) in sources {
-                                let source = self.version(source);
+                                let source = self.version(ssa, source, start, import_work)?;
                                 self.graph.add_edge(source, copied, relation);
                             }
                         }
@@ -203,8 +234,8 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
         .iter()
         .map(|(&key, &output)| {
             let entry = ssa.read(key);
-            let input = builder.version(entry);
-            let value = builder.version(output);
+            let input = builder.version(ssa, entry, checkpoint.version_start, import_work)?;
+            let value = builder.version(ssa, output, checkpoint.version_start, import_work)?;
             let domains = domain(key).into_iter().collect::<Vec<_>>();
             let root = builder.graph.add_node(TransferNode {
                 input: None,
@@ -214,9 +245,9 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             builder
                 .graph
                 .add_edge(value, root, PositionRelation::default());
-            (key, entry, input, root, domains)
+            Some((key, entry, input, root, domains))
         })
-        .collect::<Vec<_>>();
+        .collect::<Option<Vec<_>>>()?;
     builder.copy_iteration(ssa, checkpoint.version_start, import_work)?;
 
     let mut unrestricted = HashSet::default();
@@ -245,6 +276,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             .add_edge(*root, *input, PositionRelation::default());
     }
 
+    let generated_start = ssa.versions.len();
     let mapped = condense(ssa, &builder.graph);
     for (key, entry, _, root, domains) in outputs {
         let mut output = mapped[root.index()];
@@ -256,6 +288,10 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             ]);
         }
         ssa.bind(key, output);
+    }
+    if generated_start < ssa.versions.len() {
+        ssa.repeated_versions
+            .push(generated_start..ssa.versions.len());
     }
     Some(())
 }
@@ -379,6 +415,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nested_repeated_transfer_stops_before_materializing_an_over_budget_copy() {
+        let mut ssa = SsaStore::default();
+        let input = ssa.read("input");
+        let initial = ssa.definition(Vec::new());
+        ssa.bind("output", initial);
+        let domain = PositionDomain {
+            array_start: 0,
+            array_length: 1,
+            packed_start: 0,
+            packed_length: 8,
+        };
+        let outer = ssa.checkpoint();
+        let inner = ssa.checkpoint();
+        let mut value = input;
+        for _ in 0..32 {
+            value = ssa.related_definition(vec![(value, PositionRelation::default())]);
+            value = ssa.projected(value, domain);
+        }
+        ssa.bind("output", value);
+        let iteration = ssa.capture_and_rollback(inner);
+        let mut work = 0;
+        ssa.try_close_repeated_transfer(&iteration, inner, true, &mut work, |_| Some(domain))
+            .expect("directly written SSA does not consume the copy budget");
+
+        let iteration = ssa.capture_and_rollback(outer);
+        let before = ssa.versions.len();
+        let mut work = 64;
+        assert!(
+            ssa.try_close_repeated_transfer(&iteration, outer, true, &mut work, |_| Some(domain))
+                .is_none()
+        );
+        assert_eq!(ssa.versions.len(), before, "reject before SSA condensation");
+        assert_eq!(ssa.read("output"), initial, "no partial output binding");
+
+        let mut work = 1024;
+        ssa.try_close_repeated_transfer(&iteration, outer, true, &mut work, |_| Some(domain))
+            .expect("a bounded nested transfer still preserves its dependencies");
+        let output = ssa.read("output");
+        assert_eq!(
+            ssa.root_source_relations(output),
+            HashMap::from_iter([("input", PositionRelation::default())])
+        );
+    }
+
+    #[test]
     fn repeated_transfer_shares_prefixes_across_all_outputs_of_each_call() {
         for size in [64, 256, 1024] {
             let mut callee = SsaStore::default();
@@ -396,6 +477,7 @@ mod tests {
             let mut builder = TransferBuilder::default();
             let branches = Rc::default();
             let mut outputs = Vec::new();
+            let mut work = size * 16;
             for actual in actuals {
                 let bindings = Rc::new(HashMap::from_iter([(
                     0,
@@ -404,11 +486,11 @@ mod tests {
                 for &root in &graph.roots {
                     let output =
                         ssa.imported(graph.clone(), root, bindings.clone(), Rc::clone(&branches));
-                    outputs.push(builder.version(output));
+                    outputs.push(builder.version(&ssa, output, start, &mut work).unwrap());
                 }
             }
             builder
-                .copy_iteration(&ssa, start, &mut (size * 16))
+                .copy_iteration(&ssa, start, &mut work)
                 .expect("shared imports must fit in a linear budget");
             assert!(builder.graph.node_count() <= size * 4 + 4);
             assert!(builder.graph.edge_count() <= size * 4 + 4);
