@@ -1,6 +1,59 @@
 use super::*;
 
 #[test]
+fn comb_loop_instance_actual_projections_preserve_sampled_variable_values() {
+    for (actual, selection, expected) in [
+        ("{feedback, clear(), feedback}", "i[2]", true),
+        ("{feedback, clear(), feedback}", "i[0]", false),
+        ("{feedback, clear(), feedback}", "i[2] | i[0]", true),
+        ("{identity(feedback), clear(), feedback}", "i[2]", true),
+        ("{clear(), feedback, feedback}", "i[1] | i[0]", false),
+        ("{2'b00, feedback | clear()}", "i[0]", true),
+    ] {
+        let code = format!(
+            r#"
+            module Child (i: input logic<3>, o: output logic) {{ assign o = {selection}; }}
+            module Top (o: output logic) {{
+                var feedback: logic;
+                function clear () -> logic {{ feedback = 0; return 0; }}
+                function identity (x: input logic) -> logic {{ return x; }}
+                inst child: Child (i: {actual}, o: feedback);
+                assign o = feedback;
+            }}
+            "#
+        );
+        // Different occurrences of feedback observe different SSA versions;
+        // projections must reuse the value each occurrence originally read.
+        assert_comb_loop(&format!("{actual}: {selection}"), &code, expected);
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_instance_actual_projections_preserve_sampled_selectors() {
+    for data_type in ["logic<2>", "logic[2]"] {
+        for (actual, selection, expected) in [
+            ("{data[feedback], clear()}", "i[1]", true),
+            ("{clear(), data[feedback]}", "i[0]", false),
+        ] {
+            let code = format!(
+                r#"
+                module Child (i: input logic<2>, o: output logic) {{ assign o = {selection}; }}
+                module Top (data: input {data_type}, o: output logic) {{
+                    var feedback: logic;
+                    function clear () -> logic {{ feedback = 0; return 0; }}
+                    inst child: Child (i: {actual}, o: feedback);
+                    assign o = feedback;
+                }}
+                "#
+            );
+            assert_comb_loop(&format!("{data_type}: {actual}"), &code, expected);
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
 fn comb_loop_instance_actual_projections_preserve_call_guard_identities() {
     for child in ["assign o = i;", "assign o[0] = i[0]; assign o[1] = i[1];"] {
         for (actual, expected) in [

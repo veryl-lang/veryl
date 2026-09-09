@@ -232,6 +232,11 @@ struct CallResult {
     opaque_sources: Vec<VersionId>,
 }
 
+struct SampledVariable {
+    values: HashMap<NodeKey, VersionId>,
+    selectors: Vec<VersionId>,
+}
+
 // Region-split writes query one RHS several times, but a function call in that
 // RHS is one procedural evaluation. `None` is an invocation barrier: temporary
 // call nodes in a cloned callee body must never enter the caller's cache.
@@ -239,6 +244,9 @@ struct CallResult {
 struct EvaluationCache {
     calls: HashMap<*const FunctionCall, Rc<CallResult>>,
     expression_branches: HashMap<*const Expression, BranchId>,
+    // Batch projections first sample the entire actual in expression order.
+    // Each variable occurrence must retain its own value and selector reads.
+    variables: Option<HashMap<*const Factor, Rc<SampledVariable>>>,
 }
 
 type CallCache = Option<EvaluationCache>;
@@ -1023,11 +1031,14 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
     ) -> DependencyDag<NodeKey> {
         let inner = self.inner();
         inner.use_expression_namespace(expression);
-        // Sample calls in expression order once. Every requested region then
-        // reuses their values and branch identities, including distinct calls
-        // in different concatenation elements. Export all roots together so
+        // Sample reads and calls in expression order once. Every requested
+        // region then reuses those values and branch identities, even when a
+        // later call overwrites an earlier read. Export all roots together so
         // shared function predecessors are imported only once as well.
-        inner.call_caches.push(Some(EvaluationCache::default()));
+        inner.call_caches.push(Some(EvaluationCache {
+            variables: Some(HashMap::default()),
+            ..EvaluationCache::default()
+        }));
         inner.eval_reachable_expr(expression);
         let roots = regions
             .iter()
@@ -1852,6 +1863,37 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .into_iter()
             .map(|key| self.read_key(key))
             .collect()
+    }
+
+    fn sample_variable(&mut self, factor: &Factor) -> Option<Rc<SampledVariable>> {
+        let cache = self.call_caches.last()?.as_ref()?.variables.as_ref()?;
+        let cache_key = std::ptr::from_ref(factor);
+        if let Some(sampled) = cache.get(&cache_key) {
+            return Some(Rc::clone(sampled));
+        }
+        let Factor::Variable(id, index, select, _) = factor else {
+            return None;
+        };
+        let mut selectors = Vec::new();
+        for expression in index.0.iter().chain(select.0.iter()) {
+            selectors.extend(self.eval_expr(expression));
+        }
+        if let Some((_, expression)) = &select.1 {
+            selectors.extend(self.eval_expr(expression));
+        }
+        let values = self
+            .read_keys(*id, index, select)
+            .into_iter()
+            .map(|key| (key, self.read_key(key)))
+            .collect();
+        let sampled = Rc::new(SampledVariable { values, selectors });
+        self.call_caches
+            .last_mut()
+            .and_then(Option::as_mut)
+            .and_then(|cache| cache.variables.as_mut())
+            .expect("variable sampling cache remains active")
+            .insert(cache_key, Rc::clone(&sampled));
+        Some(sampled)
     }
 
     fn eval_destination_selectors(&mut self, destination: &AssignDestination) -> Vec<VersionId> {
@@ -2729,13 +2771,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::Variable(id, index, select, _) => {
-                    let mut selector_sources = Vec::new();
-                    for expression in index.0.iter().chain(select.0.iter()) {
-                        selector_sources.extend(self.eval_expr(expression));
-                    }
-                    if let Some((_, expression)) = &select.1 {
-                        selector_sources.extend(self.eval_expr(expression));
-                    }
+                    let sampled = self.sample_variable(factor);
+                    let mut selector_sources = if let Some(sampled) = &sampled {
+                        sampled.selectors.clone()
+                    } else {
+                        let mut sources = Vec::new();
+                        for expression in index.0.iter().chain(select.0.iter()) {
+                            sources.extend(self.eval_expr(expression));
+                        }
+                        if let Some((_, expression)) = &select.1 {
+                            sources.extend(self.eval_expr(expression));
+                        }
+                        sources
+                    };
                     let variable = self.ctx.variables.get(id).cloned();
                     let selected = if select.is_const_with_range() {
                         variable.as_ref().and_then(|variable| {
@@ -2788,7 +2836,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                         source_array,
                                         source_span,
                                     ) {
-                                        reads.push(self.read_key(key));
+                                        if let Some(sampled) = &sampled {
+                                            reads.extend(sampled.values.get(&key).copied());
+                                        } else {
+                                            reads.push(self.read_key(key));
+                                        }
                                     }
                                 }
                             }
@@ -2811,7 +2863,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         sources.extend_whole(selector_sources);
                         sources
                     } else {
-                        selector_sources.extend(self.read_variable(*id, index, select));
+                        if let Some(sampled) = &sampled {
+                            selector_sources.extend(sampled.values.values().copied());
+                        } else {
+                            selector_sources.extend(self.read_variable(*id, index, select));
+                        }
                         ExpressionSources::whole(selector_sources)
                     }
                 }
@@ -3509,6 +3565,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn eval_factor(&mut self, factor: &Factor, reads: &mut Vec<VersionId>) {
         match factor {
             Factor::Variable(id, index, select, _) => {
+                if let Some(sampled) = self.sample_variable(factor) {
+                    reads.extend(sampled.selectors.iter().copied());
+                    reads.extend(sampled.values.values().copied());
+                    return;
+                }
                 for expression in index.0.iter().chain(select.0.iter()) {
                     reads.extend(self.eval_expr(expression));
                 }
