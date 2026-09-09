@@ -19,8 +19,36 @@ impl Write for SharedVec {
 
 #[derive(Clone, Copy)]
 pub enum VarHandle {
-    Vcd(vcd::IdCode),
+    Vcd(VcdId),
     Fst(fst_writer::FstSignalId),
+}
+
+/// A VCD identifier together with the bytes it is written as, so a value line
+/// is assembled without formatting the `IdCode` again at every change.
+#[derive(Clone, Copy)]
+pub struct VcdId {
+    code: vcd::IdCode,
+    bytes: [u8; 8],
+    len: u8,
+}
+
+impl VcdId {
+    fn new(code: vcd::IdCode) -> Self {
+        let text = code.to_string();
+        let src = text.as_bytes();
+        let mut bytes = [0u8; 8];
+        bytes[..src.len()].copy_from_slice(src);
+        VcdId {
+            code,
+            bytes,
+            len: src.len() as u8,
+        }
+    }
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
 }
 
 pub struct WaveDumper {
@@ -39,8 +67,46 @@ enum WaveDumperKind {
     Fst(Box<FstDumper>),
 }
 
+impl WaveDumperKind {
+    fn change_vector(&mut self, handle: VarHandle, value: &Value) {
+        match self {
+            WaveDumperKind::Vcd(v) => {
+                let VarHandle::Vcd(id) = handle else {
+                    panic!("VCD dumper received non-VCD handle");
+                };
+                v.flush_line();
+                v.writer.change_vector(id.code, value).unwrap();
+            }
+            WaveDumperKind::Fst(f) => {
+                let VarHandle::Fst(id) = handle else {
+                    panic!("FST dumper received non-FST handle");
+                };
+                match &mut f.state {
+                    FstState::Body(b) => {
+                        let bits = value.to_fst_bits();
+                        b.signal_change(id, &bits).unwrap();
+                    }
+                    _ => panic!("FST: change_vector called before header finished"),
+                }
+            }
+        }
+    }
+}
+
 struct VcdDumper {
     writer: vcd::Writer<Box<dyn Write + Send>>,
+    /// Value lines are assembled here and handed to the sink in blocks, which
+    /// keeps the per-variable work free of dynamic dispatch.
+    line: Vec<u8>,
+}
+
+impl VcdDumper {
+    fn flush_line(&mut self) {
+        if !self.line.is_empty() {
+            self.writer.writer().write_all(&self.line).unwrap();
+            self.line.clear();
+        }
+    }
 }
 
 struct FstDumper {
@@ -58,6 +124,7 @@ impl WaveDumper {
         WaveDumper {
             kind: WaveDumperKind::Vcd(VcdDumper {
                 writer: vcd::Writer::new(io),
+                line: Vec::with_capacity(LINE_BUF_CAPACITY),
             }),
             path: None,
             shadow: Vec::new(),
@@ -126,7 +193,7 @@ impl WaveDumper {
         match &mut self.kind {
             WaveDumperKind::Vcd(v) => {
                 let code = v.writer.add_wire(width, name).unwrap();
-                VarHandle::Vcd(code)
+                VarHandle::Vcd(VcdId::new(code))
             }
             WaveDumperKind::Fst(f) => match &mut f.state {
                 FstState::Header(h) => {
@@ -215,26 +282,7 @@ impl WaveDumper {
     }
 
     pub fn change_vector(&mut self, handle: VarHandle, value: &Value) {
-        match &mut self.kind {
-            WaveDumperKind::Vcd(v) => {
-                let VarHandle::Vcd(code) = handle else {
-                    panic!("VCD dumper received non-VCD handle");
-                };
-                v.writer.change_vector(code, value).unwrap();
-            }
-            WaveDumperKind::Fst(f) => {
-                let VarHandle::Fst(id) = handle else {
-                    panic!("FST dumper received non-FST handle");
-                };
-                match &mut f.state {
-                    FstState::Body(b) => {
-                        let bits = value.to_fst_bits();
-                        b.signal_change(id, &bits).unwrap();
-                    }
-                    _ => panic!("FST: change_vector called before header finished"),
-                }
-            }
-        }
+        self.kind.change_vector(handle, value);
     }
 
     pub fn setup_module(&mut self, module_vars: &ModuleVariables, dump_vars: &mut Vec<DumpVar>) {
@@ -287,26 +335,50 @@ impl WaveDumper {
             self.shadow.clear();
             self.shadow.resize(at, 0);
         }
+        let Self {
+            kind,
+            shadow,
+            shadow_at,
+            ..
+        } = self;
         for (i, entry) in dump_vars.iter().enumerate() {
-            let (lo, hi) = (self.shadow_at[i], self.shadow_at[i + 1]);
+            let (lo, hi) = (shadow_at[i], shadow_at[i + 1]);
             // SAFETY: `ptr` is the variable's storage, valid for `span` bytes
             // (`read_native_value` reads the same range).
             let cur = unsafe { std::slice::from_raw_parts(entry.ptr, hi - lo) };
-            if !force && held(&self.shadow[lo..hi], cur) {
+            if !force && held(&shadow[lo..hi], cur) {
                 continue;
             }
-            self.shadow[lo..hi].copy_from_slice(cur);
-            let mut value = unsafe {
-                read_native_value(
-                    entry.ptr,
-                    entry.native_bytes,
-                    use_4state,
-                    entry.width as u32,
-                    false,
-                )
-            };
-            value.trunc(entry.width);
-            self.change_vector(entry.handle, &value);
+            shadow[lo..hi].copy_from_slice(cur);
+            let nb = entry.native_bytes;
+            match &mut *kind {
+                WaveDumperKind::Vcd(v) => {
+                    let VarHandle::Vcd(id) = &entry.handle else {
+                        panic!("VCD dumper received non-VCD handle");
+                    };
+                    let (payload, mask_xz) = if use_4state {
+                        let (p, m) = cur.split_at(nb);
+                        (p, Some(m))
+                    } else {
+                        (cur, None)
+                    };
+                    push_change(&mut v.line, payload, mask_xz, entry.width, id);
+                    if v.line.len() >= LINE_BUF_CAPACITY {
+                        v.writer.writer().write_all(&v.line).unwrap();
+                        v.line.clear();
+                    }
+                }
+                fst @ WaveDumperKind::Fst(_) => {
+                    let mut value = unsafe {
+                        read_native_value(entry.ptr, nb, use_4state, entry.width as u32, false)
+                    };
+                    value.trunc(entry.width);
+                    fst.change_vector(entry.handle, &value);
+                }
+            }
+        }
+        if let WaveDumperKind::Vcd(v) = &mut self.kind {
+            v.flush_line();
         }
     }
 }
@@ -342,6 +414,73 @@ fn held(a: &[u8], b: &[u8]) -> bool {
         }
         _ => a == b,
     }
+}
+
+/// The eight ASCII bit characters of a byte, MSB first, packed so a whole
+/// byte of a 2-state value becomes one store.
+const BIT_CHARS: [u64; 256] = bit_chars();
+
+const fn bit_chars() -> [u64; 256] {
+    let mut table = [0u64; 256];
+    let mut b = 0usize;
+    while b < 256 {
+        let mut packed = 0u64;
+        let mut i = 0;
+        while i < 8 {
+            let bit = ((b >> (7 - i)) & 1) as u64;
+            packed |= (b'0' as u64 + bit) << (8 * i);
+            i += 1;
+        }
+        table[b] = packed;
+        b += 1;
+    }
+    table
+}
+
+/// Size at which the assembled value lines are handed to the sink.
+const LINE_BUF_CAPACITY: usize = 1 << 15;
+
+#[inline]
+fn bit_char(payload: u8, mask_xz: u8, k: usize) -> u8 {
+    let p = (payload >> k) & 1;
+    if (mask_xz >> k) & 1 == 1 {
+        if p == 1 { b'z' } else { b'x' }
+    } else {
+        b'0' + p
+    }
+}
+
+/// Append one value change, written from the variable's storage rather than
+/// through a `Value` and its `Display`.
+fn push_change(
+    out: &mut Vec<u8>,
+    payload: &[u8],
+    mask_xz: Option<&[u8]>,
+    width: usize,
+    id: &VcdId,
+) {
+    if width == 1 {
+        out.push(bit_char(payload[0], mask_xz.map_or(0, |m| m[0]), 0));
+    } else {
+        out.push(b'b');
+        let full = width / 8;
+        for k in (0..width % 8).rev() {
+            out.push(bit_char(payload[full], mask_xz.map_or(0, |m| m[full]), k));
+        }
+        for i in (0..full).rev() {
+            match mask_xz {
+                Some(m) if m[i] != 0 => {
+                    for k in (0..8).rev() {
+                        out.push(bit_char(payload[i], m[i], k));
+                    }
+                }
+                _ => out.extend_from_slice(&BIT_CHARS[payload[i] as usize].to_le_bytes()),
+            }
+        }
+        out.push(b' ');
+    }
+    out.extend_from_slice(id.as_bytes());
+    out.push(b'\n');
 }
 
 pub struct DumpVar {

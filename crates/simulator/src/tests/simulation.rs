@@ -3862,6 +3862,66 @@ fn inlined_function_per_callsite_scratch_in_continuous_assign() {
 }
 
 #[test]
+fn dump_vcd_value_line_shapes() {
+    // The value lines are written straight from the storage bytes, so pin the
+    // shapes that path has to get right: a scalar, a vector wider than a
+    // machine word, and an x within one.
+    let code = r#"
+    module Top (
+        a: input  logic,
+        b: input  logic<96>,
+        c: output logic<96>,
+    ) {
+        assign c = b;
+    }
+    "#;
+
+    const WIDE: &str = "000000000000000100000000000000000000000000000000000000000000000000000000000000000001001000110100";
+    const WIDE_X: &str = "00000000000000010000000000000000000000000000000000000000000000000000000000000000000100100011x100";
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+
+        use crate::wave_dumper::WaveDumper;
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(crate::wave_dumper::SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        let wide = (1u128 << 80) | 0x1234;
+        sim.set("a", Value::new(1, 1, false));
+        sim.set("b", Value::from_u128(wide, 0, 96, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        sim.time += 1;
+
+        sim.set("a", Value::from_u128(0, 1, 1, false));
+        sim.set("b", Value::from_u128(wide, 1 << 3, 96, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        sim.time += 1;
+
+        drop(sim);
+        let dump = String::from_utf8(
+            std::sync::Arc::try_unwrap(dump_buf)
+                .unwrap()
+                .into_inner()
+                .unwrap(),
+        )
+        .unwrap();
+        let body = dump.split("$enddefinitions $end\n").nth(1).unwrap();
+        let has = |line: &str| body.lines().any(|l| l == line);
+
+        assert!(has("1!"), "scalar, {config:?}\n{body}");
+        assert!(has(&format!("b{WIDE} \"")), "wide, {config:?}\n{body}");
+        // x/z reach the waveform only where the storage carries the mask.
+        if config.use_4state {
+            assert!(has("x!"), "scalar x, {config:?}\n{body}");
+            assert!(has(&format!("b{WIDE_X} \"")), "wide x, {config:?}\n{body}");
+        } else {
+            assert!(has("0!"), "scalar, {config:?}\n{body}");
+        }
+    }
+}
+
+#[test]
 fn dump_vcd_writes_only_what_moved() {
     // VCD carries a value until the next one for that signal, so a step
     // rewriting every variable is pure volume.  `hold` keeps its value while
