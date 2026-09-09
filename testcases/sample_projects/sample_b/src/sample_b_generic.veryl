@@ -1,0 +1,13 @@
+// `sample_c_module` is reached through an import, so the reference below is
+// spelled without the `sample_c::` qualification.
+import sample_c::sample_c_module;
+
+pub module sample_b_generic::<WIDTH: u32> (
+    i_d: input  logic<WIDTH>,
+    o_d: output logic<WIDTH>,
+) {
+    inst u: sample_c_module::<WIDTH> (
+        i_d: i_d,
+        o_d: o_d,
+    );
+}
