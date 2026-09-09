@@ -2187,7 +2187,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn choose_path(&mut self, parent: &PathCondition, branch: BranchId, arm: usize) -> bool {
-        if !self.reserve_guard_work(parent.branch_count().saturating_add(1)) {
+        if !self.reserve_guard_work(parent.work_size().saturating_add(1)) {
             return false;
         }
         self.path_condition = parent.with_choice(branch, arm);
@@ -2217,16 +2217,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         branch
     }
 
-    fn merge_flow_states(&mut self, states: &[FlowState]) {
-        let cost = states.iter().fold(0usize, |cost, state| {
-            cost.saturating_add(state.condition.branch_count())
-        });
-        if !self.reserve_guard_work(cost) {
-            return;
+    fn disjoin_paths<'c>(
+        &mut self,
+        conditions: impl IntoIterator<Item = &'c PathCondition>,
+    ) -> Option<PathCondition> {
+        let condition = self
+            .guard_work
+            .as_mut()
+            .and_then(|work| PathCondition::try_disjoin_all(conditions, work));
+        if condition.is_none() {
+            self.exhaust_work();
         }
+        condition
+    }
+
+    fn merge_flow_states(&mut self, states: &[FlowState]) {
+        let Some(condition) = self.disjoin_paths(states.iter().map(|state| &state.condition))
+        else {
+            return;
+        };
         self.ssa.merge(states.iter().map(|state| &state.state));
-        self.path_condition =
-            PathCondition::disjoin_all(states.iter().map(|state| &state.condition));
+        self.path_condition = condition;
     }
 
     fn is_return_assignment(&self, destinations: &[AssignDestination]) -> bool {
@@ -2338,14 +2349,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         branches: Vec<(FlowResult, BranchState<SsaKey>, PathCondition)>,
         branch_controls: &[VersionId],
     ) -> FlowResult {
-        let cost = branches.iter().fold(0usize, |cost, (_, _, condition)| {
-            cost.saturating_add(condition.branch_count())
-        });
-        if !self.reserve_guard_work(cost) {
+        let Some(continuation_condition) = self.disjoin_paths(
+            branches
+                .iter()
+                .filter(|(result, _, _)| result.flow == ProcedureFlow::Continue)
+                .map(|(_, _, condition)| condition),
+        ) else {
             return FlowResult::new(ProcedureFlow::Continue);
-        }
+        };
         let mut continuation = Vec::new();
-        let mut continuation_conditions = Vec::new();
         let mut continuation_controls = Vec::new();
         let mut has_continue = false;
         let mut has_break = false;
@@ -2365,7 +2377,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         continuation_controls
                             .push(self.ssa.definition_guarded(controls, &condition));
                     }
-                    continuation_conditions.push(condition);
                 }
                 ProcedureFlow::Break => {
                     has_break = true;
@@ -2375,7 +2386,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         self.ssa.merge(&continuation);
         if has_continue {
-            self.path_condition = PathCondition::disjoin_all(&continuation_conditions);
+            self.path_condition = continuation_condition;
             // Share the guarded alternatives across subsequent statements.
             // Copying every continuing arm into each later write would make
             // a wide case followed by a long block quadratic in storage.
@@ -3520,7 +3531,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             count.saturating_add(state.len())
         });
         let guards = states.iter().fold(0usize, |count, (_, condition)| {
-            count.saturating_add(condition.branch_count())
+            count.saturating_add(condition.work_size())
         });
         if !self.reserve_guard_work(bindings.saturating_mul(guards)) {
             return;

@@ -192,6 +192,15 @@ impl PathCondition {
         self.constraints.len()
     }
 
+    /// Count a constraint and its first arm range as one work unit, preserving
+    /// the cost of compact guards. Every additional disjoint range costs
+    /// another unit, so a single branch cannot hide an unbounded payload.
+    pub(super) fn work_size(&self) -> usize {
+        self.constraints.iter().fold(0usize, |cost, constraint| {
+            cost.saturating_add(constraint.allowed.ranges.len().max(1))
+        })
+    }
+
     pub(super) fn is_unconditional(&self) -> bool {
         self.constraints.is_empty()
     }
@@ -218,16 +227,22 @@ impl PathCondition {
 
     /// Joins alternative paths into the least Cartesian condition that covers
     /// every input condition.
-    pub(super) fn disjoin_all<'a>(conditions: impl IntoIterator<Item = &'a Self>) -> Self {
+    pub(super) fn try_disjoin_all<'a>(
+        conditions: impl IntoIterator<Item = &'a Self>,
+        work: &mut usize,
+    ) -> Option<Self> {
         let mut conditions = conditions.into_iter();
         let Some(first) = conditions.next() else {
-            return Self::default();
+            return Some(Self::default());
         };
         let mut combined = first.clone();
         for condition in conditions {
+            // The accumulated union can grow at each step even when every
+            // input has just one range. Charge before allocating its copy.
+            reserve_guard_work(work, [&combined, condition])?;
             combined = combined.disjoin(condition);
         }
-        combined
+        Some(combined)
     }
 
     pub(super) fn conjoin_if_compatible(&self, other: &Self) -> Option<Self> {
@@ -1046,7 +1061,7 @@ where
                     work = work.checked_sub(
                         sources
                             .len()
-                            .saturating_mul(condition.branch_count().saturating_add(1)),
+                            .saturating_mul(condition.work_size().saturating_add(1)),
                     )?;
                     let inputs = sources
                         .iter()
@@ -1073,7 +1088,7 @@ where
                     Some(builder.internal(inputs, Vec::new(), site))
                 }
                 Version::Guarded { source, condition } => {
-                    work = work.checked_sub(condition.branch_count().saturating_add(1))?;
+                    work = work.checked_sub(condition.work_size().saturating_add(1))?;
                     let inputs = mapped[&(*source, include_entry)]
                         .map(|source| (source, PositionRelation::default(), condition.clone()))
                         .into_iter()
@@ -1199,7 +1214,7 @@ where
                                condition: PathCondition,
                                work: &mut usize| {
                 let changed = if let Some(existing) = reached.get_mut(&next) {
-                    reserve_source_guard_work(work, [&*existing, &condition])?;
+                    reserve_guard_work(work, [&*existing, &condition])?;
                     let widened = existing.disjoin(&condition);
                     if *existing == widened {
                         false
@@ -1227,7 +1242,7 @@ where
                     sources,
                     condition: definition_condition,
                 } => {
-                    reserve_source_guard_work(work, [&condition, definition_condition])?;
+                    reserve_guard_work(work, [&condition, definition_condition])?;
                     let Some(condition) = condition.conjoin_if_compatible(definition_condition)
                     else {
                         continue;
@@ -1249,7 +1264,7 @@ where
                     source,
                     condition: guard,
                 } => {
-                    reserve_source_guard_work(work, [&condition, guard])?;
+                    reserve_guard_work(work, [&condition, guard])?;
                     if let Some(condition) = condition.conjoin_if_compatible(guard) {
                         enqueue((*source, include_entry, relation), condition, work)?;
                     }
@@ -1263,9 +1278,9 @@ where
                     for (key, imported_relation, imported_condition) in
                         dependency_dag_external_sources(graph, *root, initial_relation, work)?
                     {
-                        reserve_source_guard_work(work, [&imported_condition])?;
+                        reserve_guard_work(work, [&imported_condition])?;
                         let imported_condition = imported_condition.remapped(branches);
-                        reserve_source_guard_work(work, [&condition, &imported_condition])?;
+                        reserve_guard_work(work, [&condition, &imported_condition])?;
                         let Some(condition) = condition.conjoin_if_compatible(&imported_condition)
                         else {
                             continue;
@@ -1352,13 +1367,13 @@ where
             relation
         };
         for edge in incoming.get(&node).into_iter().flatten() {
-            reserve_source_guard_work(work, [&condition, &edge.condition])?;
+            reserve_guard_work(work, [&condition, &edge.condition])?;
             let Some(next_condition) = condition.conjoin_if_compatible(&edge.condition) else {
                 continue;
             };
             let next = (edge.source, relation.compose(edge.relation));
             let changed = if let Some(existing) = reached.get_mut(&next) {
-                reserve_source_guard_work(work, [&*existing, &next_condition])?;
+                reserve_guard_work(work, [&*existing, &next_condition])?;
                 let merged = existing.disjoin(&next_condition);
                 if *existing == merged {
                     false
@@ -1383,21 +1398,18 @@ where
     )
 }
 
-/// Source walks can accumulate a quadratic number of guard constraints from
-/// a linear DAG. Charge each allocating operation before combining/remapping
-/// conditions, including fragmented arm ranges. Rc clones and unguarded
-/// traversals do not allocate guard payloads and need no additional budget.
-fn reserve_source_guard_work<'a>(
+/// Joins and source walks can accumulate quadratic guard payloads. Charge each
+/// allocating operation before combining/remapping conditions, including
+/// fragmented arm ranges. Rc clones and unguarded traversals need no extra work.
+fn reserve_guard_work<'a>(
     work: &mut usize,
     conditions: impl IntoIterator<Item = &'a PathCondition>,
 ) -> Option<()> {
-    let cost = conditions
-        .into_iter()
-        .flat_map(|condition| condition.constraints.iter())
-        .fold(0usize, |cost, constraint| {
-            cost.saturating_add(1)
-                .saturating_add(constraint.allowed.ranges.len())
-        });
+    let cost = conditions.into_iter().fold(0usize, |cost, condition| {
+        // Allocating joins visit the constraints as well as their range data.
+        cost.saturating_add(condition.branch_count())
+            .saturating_add(condition.work_size())
+    });
     *work = work.checked_sub(cost)?;
     Some(())
 }
@@ -1412,7 +1424,7 @@ where
     K: Copy + Eq + Hash,
 {
     if let Some(existing) = destination.get_mut(&key) {
-        reserve_source_guard_work(work, [&*existing, &condition])?;
+        reserve_guard_work(work, [&*existing, &condition])?;
         *existing = existing.disjoin(&condition);
     } else {
         destination.insert(key, condition);
@@ -1436,7 +1448,7 @@ where
             prefix.map_or(relation, |prefix| prefix.compose(relation)),
         );
         let condition = if let Some(guard) = guard {
-            reserve_source_guard_work(work, [condition, guard])?;
+            reserve_guard_work(work, [condition, guard])?;
             let Some(condition) = condition.conjoin_if_compatible(guard) else {
                 continue;
             };
@@ -1900,6 +1912,77 @@ mod tests {
 
         assert_eq!(lower.disjoin(&upper), PathCondition::default());
         assert!(lower.conjoin_if_compatible(&upper).is_none());
+    }
+
+    #[test]
+    fn fragmented_arm_joins_charge_accumulated_ranges() {
+        let branch = BranchId::new(1, 0, 129);
+        for stride in [1, 2] {
+            let conditions = (0..64)
+                .map(|arm| PathCondition::default().with_choice(branch, arm * stride))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                PathCondition::try_disjoin_all(&conditions, &mut 512).is_some(),
+                stride == 1
+            );
+            // Retrying with enough work must retain exactly the allowed arms,
+            // including the gaps that made the smaller budget insufficient.
+            let joined = PathCondition::try_disjoin_all(&conditions, &mut 8192).unwrap();
+            for arm in 0..branch.arms() {
+                let choice = PathCondition::default().with_choice(branch, arm);
+                assert_eq!(
+                    joined.conjoin_if_compatible(&choice).is_some(),
+                    arm < 64 * stride && arm % stride == 0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fragmented_guards_bound_dependency_exports_and_imports() {
+        let branch = BranchId::new(1, 0, 129);
+        for stride in [1, 2] {
+            let conditions = (0..64)
+                .map(|arm| PathCondition::default().with_choice(branch, arm * stride))
+                .collect::<Vec<_>>();
+            let condition = PathCondition::try_disjoin_all(&conditions, &mut 8192).unwrap();
+            let mut callee = SsaStore::default();
+            let input = callee.read("input");
+            let output = callee.definition_guarded(vec![input], &condition);
+            assert_eq!(
+                callee.try_dependency_dag(&[output], |_| true, 64).is_some(),
+                stride == 1
+            );
+            let graph = Rc::new(callee.dependency_dag(&[output], |_| true));
+
+            let mut caller = SsaStore::default();
+            let actual = caller.read("actual");
+            let imported = caller.imported(
+                graph.clone(),
+                graph.roots[0],
+                [("input", vec![(actual, PositionRelation::default())])]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>()
+                    .into(),
+                [(branch, BranchId::new(2, 0, branch.arms()))]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>()
+                    .into(),
+            );
+            for limit in [64, 256] {
+                assert_eq!(
+                    caller
+                        .try_dependency_dag_with_import_limit(
+                            &[imported],
+                            |_| true,
+                            usize::MAX,
+                            limit,
+                        )
+                        .is_some(),
+                    stride == 1 || limit == 256
+                );
+            }
+        }
     }
 
     #[test]

@@ -121,7 +121,7 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
             *work = work.checked_sub(graph.domains[node].len().saturating_add(1))?;
             for &index in &incoming[node] {
                 let edge = &graph.edges[index];
-                *work = work.checked_sub(edge.condition.branch_count().saturating_add(1))?;
+                *work = work.checked_sub(edge.condition.work_size().saturating_add(1))?;
                 if !invocation.mapped.contains_key(&edge.source) && retained.insert(edge.source) {
                     queue.push_back(edge.source);
                 }

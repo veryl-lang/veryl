@@ -336,6 +336,72 @@ fn instance_actual_expansion_limit_keeps_independent_cycles() {
 }
 
 #[test]
+fn procedural_guard_limit_counts_fragmented_case_ranges() {
+    for fragmented in [false, true] {
+        for iterations in [0, 64] {
+            let arms = (0..64)
+                .map(|index| {
+                    let returns = if fragmented {
+                        index % 2 == 0
+                    } else {
+                        index < 32
+                    };
+                    let body = if returns { "return 0;" } else { "" };
+                    format!("{index}: {{ {body} }}")
+                })
+                .collect::<String>();
+            let code = format!(
+                "module Top (sel: input u32, s: input logic, x: input logic,
+                             o: output logic, independent: output logic) {{
+                    function gate (sel: input u32, s: input logic, x: input logic) -> logic {{
+                        case sel {{ {arms} default: {{}} }}
+                        var v: logic;
+                        v = x;
+                        for _i in 0..{iterations} {{
+                            if s {{ v = !v; }} else {{ v = 0; }}
+                        }}
+                        return v;
+                    }}
+                    assign o = gate(sel, s, x);
+                    assign independent = independent;
+                 }}"
+            );
+            // Both continuations constrain only one case branch. Alternating
+            // returns leave many disjoint ranges that each later if must copy;
+            // contiguous returns leave just one range. The case join alone fits.
+            crate::comb_loop_detect::with_procedure_guard_limit(4096, || {
+                let case = format!("fragmented={fragmented}, iterations={iterations}");
+                assert_eq!(
+                    comb_loop_analysis_is_complete(&code),
+                    !fragmented || iterations == 0,
+                    "{case}"
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors.iter().all(|error| match error {
+                        AnalyzerError::CombinationalLoop { .. } => true,
+                        AnalyzerError::UnassignVariable { identifier, .. } =>
+                            identifier == "independent",
+                        _ => false,
+                    }),
+                    "{case}: {errors:?}"
+                );
+                let loops = errors
+                    .iter()
+                    .filter_map(|error| match error {
+                        AnalyzerError::CombinationalLoop { identifier, .. } => {
+                            Some(identifier.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(loops, ["independent"], "{case}: {errors:?}");
+            });
+        }
+    }
+}
+
+#[test]
 fn procedural_guard_limit_bounds_early_exits_and_preserves_independent_cycles() {
     for kind in ["return", "break", "runtime_break"] {
         for size in [2, 64, 256] {

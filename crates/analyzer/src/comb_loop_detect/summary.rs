@@ -60,7 +60,7 @@ impl ExpansionBudget {
                 remaining = remaining.checked_sub(node.domains.len())?;
             }
             for edge in &summary.edges {
-                remaining = remaining.checked_sub(edge.condition.branch_count())?;
+                remaining = remaining.checked_sub(edge.condition.work_size())?;
             }
             Some(remaining)
         })();
@@ -81,7 +81,7 @@ impl ExpansionBudget {
                 cost.saturating_add(domains.len())
             });
         let cost = graph.edges.iter().fold(cost, |cost, edge| {
-            cost.saturating_add(edge.condition.branch_count().saturating_add(1))
+            cost.saturating_add(edge.condition.work_size().saturating_add(1))
         });
         self.reserve_work(cost)
     }

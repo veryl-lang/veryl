@@ -296,8 +296,8 @@ impl SearchBudget {
 
     fn spend_conditions(&mut self, left: &PathCondition, right: &PathCondition) -> bool {
         self.spend(
-            left.branch_count()
-                .saturating_add(right.branch_count())
+            left.work_size()
+                .saturating_add(right.work_size())
                 .saturating_add(1),
         )
     }
@@ -321,7 +321,7 @@ fn cycle_state_scan_work<R>(
     size: impl Fn(&R) -> usize,
 ) -> usize {
     states.iter().fold(1usize, |work, (r, c)| {
-        let choices = c.branch_count().saturating_add(condition.branch_count());
+        let choices = c.work_size().saturating_add(condition.work_size());
         work.saturating_add(size(r).saturating_mul(size(relation)))
             .saturating_add(choices.saturating_pow(2).max(1))
     })
