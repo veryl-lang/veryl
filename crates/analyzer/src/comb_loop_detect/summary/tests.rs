@@ -206,6 +206,83 @@ fn domain_boundaries_are_kept_even_on_identity_chains() {
     assert_eq!(result.nodes[1].domains, graph[middle].domains);
 }
 
+#[test]
+fn identical_domain_boundaries_contract_without_losing_guards() {
+    let mut graph = DependencyGraph::new();
+    let input = node(&mut graph);
+    let domain = PositionDomain {
+        array_start: 0,
+        array_length: 1,
+        packed_start: 0,
+        packed_length: 16,
+    };
+    graph[input].domains.push(domain);
+    let condition = PathCondition::default().with_choice(BranchId::new(0, 0, 2), 1);
+    let mut previous = input;
+    for index in 0..1024 {
+        let next = node(&mut graph);
+        graph[next].domains.push(domain);
+        graph.add_edge(
+            previous,
+            next,
+            GraphDependency {
+                kind: BitDependency::identity(),
+                condition: if index == 0 {
+                    condition.clone()
+                } else {
+                    PathCondition::default()
+                },
+            },
+        );
+        previous = next;
+    }
+    let result = summary(&graph, input, previous);
+    assert_eq!(result.nodes.len(), 2);
+    assert_eq!(result.edges.len(), 1);
+    assert_eq!(result.edges[0].kind, BitDependency::identity());
+    assert_eq!(result.edges[0].condition, condition);
+    assert_eq!(module_summary_work().1, graph.edge_count());
+}
+
+#[test]
+fn equal_bounds_still_clip_shifted_and_whole_dependencies() {
+    for kind in [
+        BitDependency {
+            array: Some(1),
+            packed: Some(0),
+        },
+        BitDependency {
+            array: Some(0),
+            packed: Some(1),
+        },
+        BitDependency {
+            array: None,
+            packed: None,
+        },
+    ] {
+        let mut graph = DependencyGraph::new();
+        let input = node(&mut graph);
+        let middle = node(&mut graph);
+        let output = node(&mut graph);
+        let domain = PositionDomain {
+            array_start: 0,
+            array_length: 1,
+            packed_start: 0,
+            packed_length: 16,
+        };
+        graph[input].domains.push(domain);
+        graph[middle].domains.push(domain);
+        graph.add_edge(input, middle, GraphDependency::unconditional(kind));
+        wire(&mut graph, middle, output);
+        let result = summary(&graph, input, output);
+        // The output is unbounded, so removing the middle would let the
+        // preceding operation escape the input's array or packed bounds.
+        assert_eq!(result.nodes.len(), 3);
+        assert_eq!(result.nodes[1].domains, vec![domain]);
+        assert_eq!(result.edges[0].kind, kind);
+    }
+}
+
 type Adjacency = Vec<Vec<(usize, BitDependency, PathCondition)>>;
 
 // Independently expand a small bounded bit graph for each branch valuation.

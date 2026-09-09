@@ -101,9 +101,22 @@ fn summarize_graph(
                 edge.weight().kind == BitDependency::identity()
                     && edge.weight().condition.is_unconditional()
             });
+            // An identity copy can repeat bounds already enforced by its
+            // predecessor. Keep shifted and whole-value boundaries: those
+            // operations can escape the predecessor's domain.
+            let domains = &graph[retained[*node].0].domains;
+            let redundant_domain = domains.is_empty()
+                || (incoming == 1
+                    && retained
+                        .edges_directed(*node, Direction::Incoming)
+                        .next()
+                        .is_some_and(|edge| {
+                            edge.weight().kind == BitDependency::identity()
+                                && *domains == graph[retained[edge.source()].0].domains
+                        }));
             retained[*node].1 != SummaryNodeKind::Internal
                 || cyclic.contains(node)
-                || !graph[retained[*node].0].domains.is_empty()
+                || !redundant_domain
                 || incoming != 1
                 || outgoing != 1
                 // Keep dependency operations and guards as graph structure.

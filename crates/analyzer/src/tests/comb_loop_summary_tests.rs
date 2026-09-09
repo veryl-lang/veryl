@@ -177,6 +177,67 @@ fn dangling_recurrences_remain_bounded_through_module_hierarchy() {
 }
 
 #[test]
+fn wire_hierarchy_summaries_grow_linearly() {
+    for ty in ["logic<16>", "logic [16]"] {
+        for depth in [4, 8, 24, 32] {
+            let mut code =
+                format!("module Leaf (i: input {ty}, o: output {ty}) {{ assign o = i; }}\n");
+            let mut previous = "Leaf".to_string();
+            for level in 0..depth {
+                code.push_str(&format!(
+                    r#"
+                    module Wrapper{level} (i: input {ty}, o: output {ty}) {{
+                        var middle: {ty};
+                        inst left: {previous} (i: i, o: middle);
+                        inst right: {previous} (i: middle, o: o);
+                    }}
+                    "#
+                ));
+                previous = format!("Wrapper{level}");
+            }
+            check(&code, false);
+            let (input_edges, _) = module_summary_work();
+            assert!(
+                input_edges <= 16 * (depth + 1),
+                "wire summaries must not expand the instance tree: depth={depth}, edges={input_edges}"
+            );
+
+            code.push_str(&format!(
+                "module Top (o: output {ty}) {{ inst child: {previous} (i: o, o: o); }}\n"
+            ));
+            check(&code, true);
+            let (input_edges, _) = module_summary_work();
+            assert!(input_edges <= 16 * (depth + 2));
+        }
+    }
+}
+
+#[test]
+fn wire_summary_contraction_preserves_narrowing() {
+    for feedback in ["{z, 15'b0}", "{15'b0, z}"] {
+        check(
+            &format!(
+                r#"
+                module Child (i: input logic<16>, o: output logic<16>) {{
+                    var narrowed: logic<8>;
+                    var copied: logic<8>;
+                    assign narrowed = i;
+                    assign copied = narrowed;
+                    assign o = copied;
+                }}
+                module Top (z: output logic) {{
+                    var value: logic<16>;
+                    inst child: Child (i: {feedback}, o: value);
+                    assign z = |value;
+                }}
+                "#
+            ),
+            feedback == "{15'b0, z}",
+        );
+    }
+}
+
+#[test]
 fn unused_local_feedback_is_diagnosed_without_an_input_output_path() {
     check(
         r#"
