@@ -302,6 +302,15 @@ impl SearchBudget {
         )
     }
 
+    fn spend_guard_comparison(&mut self, left: &PathCondition, right: &PathCondition) -> bool {
+        self.spend(
+            left.work_size()
+                .saturating_add(right.work_size())
+                .saturating_pow(2)
+                .max(1),
+        )
+    }
+
     fn spend(&mut self, work: usize) -> bool {
         if self.exhausted || work > self.remaining {
             self.exhausted = true;
@@ -312,19 +321,6 @@ impl SearchBudget {
         SEARCH_WORK.set(SEARCH_WORK.get().saturating_add(work));
         true
     }
-}
-
-fn cycle_state_scan_work<R>(
-    states: &[(R, PathCondition)],
-    relation: &R,
-    condition: &PathCondition,
-    size: impl Fn(&R) -> usize,
-) -> usize {
-    states.iter().fold(1usize, |work, (r, c)| {
-        let choices = c.work_size().saturating_add(condition.work_size());
-        work.saturating_add(size(r).saturating_mul(size(relation)))
-            .saturating_add(choices.saturating_pow(2).max(1))
-    })
 }
 
 /// Insert a relation/guard state, merging only exact unions at the same
@@ -339,37 +335,87 @@ fn insert_cycle_state<R: Clone + Eq>(
     budget: &mut SearchBudget,
 ) -> Option<PathCondition> {
     let mut condition = condition;
-    if !budget.spend(cycle_state_scan_work(states, relation, &condition, &size)) {
-        return None;
-    }
-    if states
-        .iter()
-        .any(|(r, c)| covers(r, relation) && c.covers(&condition))
-    {
-        return None;
-    }
-    loop {
-        if !budget.spend(cycle_state_scan_work(states, relation, &condition, &size)) {
+    let relation_size = size(relation);
+    let comparison_work = |r: &R| size(r).saturating_mul(relation_size).saturating_add(1);
+    // Different translations usually cannot dominate or merge. Charge guard
+    // comparisons only after the positional check admits them, and stop
+    // charging a scan as soon as its result is known.
+    for (r, c) in states.iter() {
+        if !budget.spend(comparison_work(r)) {
             return None;
         }
-        let merge = states.iter().enumerate().find_map(|(index, (r, c))| {
-            (r == relation)
-                .then(|| c.disjoin_exact(&condition))
-                .flatten()
-                .map(|c| (index, c))
-        });
+        if covers(r, relation) {
+            if !budget.spend_guard_comparison(c, &condition) {
+                return None;
+            }
+            if c.covers(&condition) {
+                return None;
+            }
+        }
+    }
+    loop {
+        let mut merge = None;
+        for (index, (r, c)) in states.iter().enumerate() {
+            if !budget.spend(comparison_work(r)) {
+                return None;
+            }
+            if r == relation {
+                if !budget.spend_guard_comparison(c, &condition) {
+                    return None;
+                }
+                if let Some(merged) = c.disjoin_exact(&condition) {
+                    merge = Some((index, merged));
+                    break;
+                }
+            }
+        }
         let Some((index, merged)) = merge else {
             break;
         };
         states.swap_remove(index);
         condition = merged;
     }
-    if !budget.spend(cycle_state_scan_work(states, relation, &condition, &size)) {
+    let mut index = 0;
+    while index < states.len() {
+        let (r, c) = &states[index];
+        if !budget.spend(comparison_work(r)) {
+            return None;
+        }
+        if covers(relation, r) {
+            if !budget.spend_guard_comparison(&condition, c) {
+                return None;
+            }
+            if condition.covers(c) {
+                states.swap_remove(index);
+                continue;
+            }
+        }
+        index += 1;
+    }
+    if !budget.spend(relation_size.saturating_add(1)) {
         return None;
     }
-    states.retain(|(r, c)| !covers(relation, r) || !condition.covers(c));
     states.push((relation.clone(), condition.clone()));
     Some(condition)
+}
+
+fn try_cycle_witness(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) -> bool {
+    // A few first returns may already close a positional loop while other
+    // paths keep generating states. Bound this optional check separately so
+    // a difficult partial set cannot consume the entire decision budget.
+    let allowance = (budget.remaining / 16).min(16_384);
+    if allowance == 0 {
+        return false;
+    }
+    let mut witness_budget = SearchBudget {
+        remaining: allowance,
+        exhausted: false,
+    };
+    let found = guarded_cycle_displacements_cancel(cycles, &mut witness_budget);
+    // Work was charged by witness_budget; retain that cost without treating
+    // its local cutoff as exhaustion of the complete search.
+    budget.remaining -= allowance - witness_budget.remaining;
+    found
 }
 
 pub(super) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Option<bool> {
@@ -507,10 +553,20 @@ fn has_compatible_cycle_with_budget(
                     if next_relation.intersects_identity() {
                         return true;
                     }
-                    cycles.insert(GuardedCycle {
+                    let inserted = cycles.insert(GuardedCycle {
                         relation: next_relation,
                         condition: next_condition,
                     });
+                    // Check geometrically growing prefixes without waiting
+                    // for every first-return path through the other loops.
+                    if inserted
+                        && !queue.is_empty()
+                        && cycles.len() >= 2
+                        && cycles.len().is_power_of_two()
+                        && try_cycle_witness(&cycles, budget)
+                    {
+                        return true;
+                    }
                     continue;
                 }
                 if let Some(condition) = insert_cycle_state(

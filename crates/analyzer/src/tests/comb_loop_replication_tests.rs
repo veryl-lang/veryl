@@ -138,6 +138,64 @@ fn assert_replication_feedback(code: &str, expected: bool) {
 }
 
 #[test]
+fn comb_loop_repeated_shifts_complete_with_other_guarded_paths() {
+    for width in [20, 24, 32] {
+        for feedback in ["a", "data"] {
+            let code = format!(
+                r#"
+                module Top(sel: input bit<2>, data: input bit<{width}>, o: output bit<{width}>) {{
+                    var a: bit<{width}>;
+                    var next_a: bit<{width}>;
+                    var b: bit<{width}>;
+                    var next_b: bit<{width}>;
+                    assign next_a = if sel[0] ?
+                        (({{b[13:2] repeat 2}} << 1) | ({{{feedback}[19:8] repeat 2}} << 3)) : 0;
+                    assign a = next_a;
+                    assign next_b = if sel[1] ? (a << 3) : 0;
+                    assign b = next_b;
+                    assign o = a;
+                }}
+                "#
+            );
+            // With feedback, a[19:8] cycles through shifts of +7 and -5.
+            // The path through b only shifts upward by +2 or +14 and must
+            // neither hide that cycle nor invent one when feedback is cut.
+            assert_replication_feedback(&code, feedback == "a");
+        }
+    }
+}
+
+#[test]
+fn comb_loop_repeated_shifts_find_a_cycle_before_all_paths_are_explored() {
+    let code = r#"
+        module Top(sel: input bit<3>, data: input bit<24>, o: output bit<24>) {
+            var a: bit<24>;
+            var next_a: bit<24>;
+            var b: bit<24>;
+            var next_b: bit<24>;
+            var c: bit<24>;
+            var next_c: bit<24>;
+            assign next_a = if sel[0] ?
+                (({a[10:9] repeat 3} << 5) | (a >> 19) | ({a[19:14] repeat 5} << 7)) :
+                (({a[16:16] repeat 3} << 8) | (b << 10));
+            assign a = next_a;
+            assign next_b = if sel[1] ?
+                (({c[21:17] repeat 5} << 3) | ({data[23:23] repeat 3} << 7)) :
+                ((data << 17) | (c << 8) | (c >> 17));
+            assign b = next_b;
+            assign next_c = if sel[2] ?
+                (({c[19:12] repeat 3} << 5) | (a << 2)) : ((data << 13) | (a << 4));
+            assign c = next_c;
+            assign o = a;
+        }
+    "#;
+    // For sel[0] = 1, the first repeat maps a[9] back to itself. Further paths
+    // through the other repeats must not consume the budget before that
+    // already discovered cycle is checked.
+    assert_replication_feedback(code, true);
+}
+
+#[test]
 fn comb_loop_replication_survives_calls_modules_and_runtime_transfers() {
     for (width, expression, bits) in [
         (8, "x >>> 1", [(0, false), (5, false), (6, true), (7, true)]),
