@@ -44,7 +44,9 @@ impl VerylGrammarTrait for CheckStatement {
         match self.point {
             HandlerPoint::Before => {
                 let attrs = attribute_table::get(&arg.module.module_token.token);
-                self.in_test_module = attrs.iter().any(|a| matches!(a, Attribute::Test(..)));
+                self.in_test_module = attrs
+                    .iter()
+                    .any(|a| matches!(a, Attribute::Test(..) | Attribute::Testbench));
             }
             HandlerPoint::After => {
                 self.in_test_module = false;
