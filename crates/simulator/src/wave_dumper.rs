@@ -1,7 +1,7 @@
 use crate::ir::{ModuleVariables, Value, read_native_value};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use vcd::{self, SimulationCommand, TimescaleUnit};
 
 /// Write adapter backed by a shared `Vec<u8>`, used in tests to capture VCD output.
@@ -54,29 +54,130 @@ impl VcdId {
 pub struct WaveDumper {
     kind: WaveDumperKind,
     path: Option<PathBuf>,
-    /// The storage bytes as last written, block by block, so a step reads and
-    /// formats only what moved.  Comparing the storage rather than the value
-    /// keeps the unchanged case free of a `Value` per variable.
+    /// Each region's storage bytes as last written: what the waveform carries,
+    /// and for a region the write log does not describe, the compare state.
     shadow: Vec<u8>,
-    blocks: Vec<ScanBlock>,
-    /// `DumpVar` indices, grouped by block and ordered by storage address.
+    regions: Vec<ScanRegion>,
+    /// `DumpVar` indices, grouped by region and ordered by storage address.
     order: Vec<u32>,
-    /// Start of each `DumpVar`'s bytes in `shadow`, indexed as `dump_vars` is.
-    at: Vec<usize>,
+    dirty: DirtyMap,
+    /// The granules a step has to look at, refilled per region.
+    marks: Vec<u32>,
+    /// `DIRECT_WRITES` as of the last step.
+    direct_writes: u64,
 }
 
-/// A stretch of storage holding several `DumpVar`s, compared in one go so an
-/// untouched stretch costs a `memcmp` rather than a lookup per variable.
-struct ScanBlock {
-    ptr: *const u8,
+/// A stretch of storage holding the variables of one arena.  A step decides
+/// it a granule at a time, so an untouched granule costs a bit or a word
+/// compare rather than a lookup per variable.
+struct ScanRegion {
+    base: *const u8,
+    len: usize,
+    /// Start of the region's mirror in `shadow`.
     off: usize,
-    len: u32,
+    /// `[first, first + count)` into `order`.
     first: u32,
     count: u32,
+    /// The `order` range of the variables overlapping each granule.
+    granule: Vec<(u32, u32)>,
+    /// Whether the write log describes every move of this region.
+    logged: bool,
+    /// The region's first granule in the write log's map.
+    arena_g0: usize,
 }
 
 // SAFETY: Same as DumpVar.
-unsafe impl Send for ScanBlock {}
+unsafe impl Send for ScanRegion {}
+
+/// A bit per granule of the FF arena, set where a write changed bytes since
+/// the last step.  A granule no bit covers cannot have moved, so the step
+/// skips it without reading it; a bit that turns out to cover nothing new
+/// costs one compare, which is what the step did anyway.
+#[derive(Default)]
+struct DirtyMap {
+    base: usize,
+    len: usize,
+    bits: Vec<u64>,
+}
+
+/// Variables sit every 8 bytes in the arenas, so a bit per 8 bytes is what
+/// keeps a marked granule down to the one variable that moved.
+const GRANULE_LOG2: usize = 3;
+
+impl DirtyMap {
+    /// Point the map at the arena the write log addresses, everything marked:
+    /// nothing is known about what moved before the first step.
+    fn cover(&mut self, base: *const u8, len: usize) {
+        self.base = base as usize;
+        self.len = len;
+        self.bits.clear();
+        self.bits.resize((len >> GRANULE_LOG2) / 64 + 1, !0);
+    }
+
+    #[inline]
+    fn mark(&mut self, off: usize, len: usize) {
+        if len == 0 || off >= self.len {
+            return;
+        }
+        let lo = off >> GRANULE_LOG2;
+        let hi = ((off + len).min(self.len) - 1) >> GRANULE_LOG2;
+        for g in lo..=hi {
+            self.bits[g >> 6] |= 1u64 << (g & 63);
+        }
+    }
+
+    fn mark_all(&mut self) {
+        self.bits.fill(!0);
+    }
+
+    fn clear(&mut self) {
+        self.bits.fill(0);
+    }
+
+    /// The marked granules of `[g0, g0 + n)`, numbered from `g0`.
+    fn collect_marked(&self, g0: usize, n: usize, out: &mut Vec<u32>) {
+        let end = (g0 + n).min(self.bits.len() * 64);
+        if end <= g0 {
+            return;
+        }
+        for wi in (g0 >> 6)..end.div_ceil(64) {
+            let mut word = self.bits[wi];
+            if wi == g0 >> 6 {
+                word &= !0u64 << (g0 & 63);
+            }
+            if wi == (end - 1) >> 6 && end & 63 != 0 {
+                word &= !0u64 >> (64 - (end & 63));
+            }
+            while word != 0 {
+                out.push((wi * 64 + word.trailing_zeros() as usize - g0) as u32);
+                word &= word - 1;
+            }
+        }
+    }
+}
+
+/// Bumped by the paths that write variable storage without a log entry: a
+/// memory image load, a component write-back.  They are rare and nothing else
+/// could tell the gate their bytes moved, so a step that sees this move
+/// compares everything again.
+static DIRECT_WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn note_direct_write() {
+    DIRECT_WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// `VERYL_WAVE_GATE=0` compares every granule as before; `VERYL_WAVE_GATE_CHECK=1`
+/// fails on a variable that moved without its granule marked, which is what
+/// proves the write log describes every move of the FF arena.
+fn wave_gate() -> (bool, bool) {
+    static MODE: OnceLock<(bool, bool)> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        (
+            std::env::var("VERYL_WAVE_GATE").as_deref() != Ok("0"),
+            std::env::var("VERYL_WAVE_GATE_CHECK").as_deref() == Ok("1"),
+        )
+    })
+}
 
 enum WaveDumperKind {
     Vcd(VcdDumper),
@@ -144,9 +245,11 @@ impl WaveDumper {
             }),
             path: None,
             shadow: Vec::new(),
-            blocks: Vec::new(),
+            regions: Vec::new(),
             order: Vec::new(),
-            at: Vec::new(),
+            dirty: DirtyMap::default(),
+            marks: Vec::new(),
+            direct_writes: 0,
         }
     }
 
@@ -161,9 +264,11 @@ impl WaveDumper {
         let header = fst_writer::open_fst(path, &info).expect("failed to create FST file");
         WaveDumper {
             shadow: Vec::new(),
-            blocks: Vec::new(),
+            regions: Vec::new(),
             order: Vec::new(),
-            at: Vec::new(),
+            dirty: DirtyMap::default(),
+            marks: Vec::new(),
+            direct_writes: 0,
             kind: WaveDumperKind::Fst(Box::new(FstDumper {
                 state: FstState::Header(header),
             })),
@@ -337,49 +442,108 @@ impl WaveDumper {
         self.upscope();
     }
 
-    /// Group the variables into stretches of storage that can be compared in
-    /// one go, and size the shadow to match.
+    /// Name the FF arena the write log addresses; the gate applies to the
+    /// regions inside it and nowhere else.
+    pub fn set_gate_arena(&mut self, arena: &[u8]) {
+        self.dirty.cover(arena.as_ptr(), arena.len());
+    }
+
+    /// Mark a byte range of the FF arena the commit changed.
+    #[inline]
+    pub fn mark_ff(&mut self, off: usize, len: usize) {
+        self.dirty.mark(off, len);
+    }
+
+    /// Mark a write that did not go through the log.
+    pub fn mark_written(&mut self, ptr: *const u8, len: usize) {
+        let p = ptr as usize;
+        if p >= self.dirty.base {
+            self.dirty.mark(p - self.dirty.base, len);
+        }
+    }
+
+    /// Group the variables into the storage regions they live in and index
+    /// each region's variables by granule.
     fn build_scan(&mut self, dump_vars: &[DumpVar], use_4state: bool) {
-        // A stretch may swallow small gaps: the variables sit every 8 bytes in
-        // the arenas, so insisting on adjacency would leave one block each.
-        const GAP_MAX: usize = 8;
-        const BLOCK_MAX: usize = 256;
+        // Wider than any padding between two variables and far narrower than
+        // the distance between two arenas, so the regions come out as the
+        // arenas themselves.
+        const REGION_GAP: usize = 4096;
 
-        let span = |nb: usize| if use_4state { nb * 2 } else { nb };
-        let mut sorted: Vec<u32> = (0..dump_vars.len() as u32).collect();
-        sorted.sort_unstable_by_key(|&i| dump_vars[i as usize].ptr as usize);
-
-        self.blocks.clear();
+        let span = |e: &DumpVar| {
+            if use_4state {
+                e.native_bytes * 2
+            } else {
+                e.native_bytes
+            }
+        };
         self.order.clear();
-        self.at.clear();
-        self.at.resize(dump_vars.len(), 0);
-        for i in sorted {
+        self.order.extend(0..dump_vars.len() as u32);
+        self.order
+            .sort_unstable_by_key(|&i| dump_vars[i as usize].ptr as usize);
+
+        self.regions.clear();
+        for (k, &i) in self.order.iter().enumerate() {
             let entry = &dump_vars[i as usize];
             let ptr = entry.ptr as usize;
-            let len = span(entry.native_bytes);
-            let grown = self.blocks.last_mut().and_then(|b| {
-                let base = b.ptr as usize;
-                let end = base + b.len as usize;
-                (ptr >= end && ptr - end <= GAP_MAX && ptr + len - base <= BLOCK_MAX).then(|| {
-                    b.len = (ptr + len - base) as u32;
-                    b.count += 1;
-                    b.off + (ptr - base)
-                })
-            });
-            self.at[i as usize] = grown.unwrap_or_else(|| {
-                let off = self.blocks.last().map_or(0, |b| b.off + b.len as usize);
-                self.blocks.push(ScanBlock {
-                    ptr: entry.ptr,
-                    off,
-                    len: len as u32,
-                    first: self.order.len() as u32,
+            let end = ptr + span(entry);
+            match self.regions.last_mut() {
+                Some(r) if ptr <= r.base as usize + r.len + REGION_GAP => {
+                    r.len = r.len.max(end - r.base as usize);
+                    r.count += 1;
+                }
+                _ => self.regions.push(ScanRegion {
+                    base: entry.ptr,
+                    len: end - ptr,
+                    off: 0,
+                    first: k as u32,
                     count: 1,
-                });
-                off
-            });
-            self.order.push(i);
+                    granule: Vec::new(),
+                    logged: false,
+                    arena_g0: 0,
+                }),
+            }
         }
-        let total = self.blocks.last().map_or(0, |b| b.off + b.len as usize);
+
+        let (arena, arena_len) = (self.dirty.base, self.dirty.len);
+        let mut shadow_off = 0usize;
+        for r in &mut self.regions {
+            let base = r.base as usize;
+            r.logged = arena_len != 0 && base >= arena && base + r.len <= arena + arena_len;
+            if r.logged {
+                // The map's granules are cut from the arena's start, so the
+                // region has to begin on one of them for a mark to name the
+                // same bytes here.
+                let back = (base - arena) & ((1 << GRANULE_LOG2) - 1);
+                r.base = unsafe { r.base.sub(back) };
+                r.len += back;
+                r.arena_g0 = (r.base as usize - arena) >> GRANULE_LOG2;
+            }
+            r.off = shadow_off;
+            shadow_off += r.len;
+            let base = r.base as usize;
+            // A variable straddling a boundary belongs to both granules, which
+            // is why the ranges overlap.
+            let (mut lo, mut hi) = (r.first as usize, r.first as usize);
+            let last = (r.first + r.count) as usize;
+            for g in 0..r.len.div_ceil(1 << GRANULE_LOG2) {
+                let start = base + (g << GRANULE_LOG2);
+                let end = start + (1 << GRANULE_LOG2);
+                while lo < last && {
+                    let e = &dump_vars[self.order[lo] as usize];
+                    e.ptr as usize + span(e) <= start
+                } {
+                    lo += 1;
+                }
+                hi = hi.max(lo);
+                while hi < last && (dump_vars[self.order[hi] as usize].ptr as usize) < end {
+                    hi += 1;
+                }
+                r.granule.push((lo as u32, hi as u32));
+            }
+        }
+
+        let total = self.regions.last().map_or(0, |r| r.off + r.len);
         self.shadow.clear();
         self.shadow.resize(total, 0);
     }
@@ -387,69 +551,92 @@ impl WaveDumper {
     /// Write the variables whose storage moved since the last call.  `force`
     /// writes all of them, as the opening `$dumpvars` must.
     pub fn dump_all_vars(&mut self, dump_vars: &[DumpVar], use_4state: bool, force: bool) {
-        let force = force || self.at.len() != dump_vars.len();
+        let force = force || self.order.len() != dump_vars.len();
         if force {
             self.build_scan(dump_vars, use_4state);
+        }
+        let direct = DIRECT_WRITES.load(std::sync::atomic::Ordering::Relaxed);
+        if direct != self.direct_writes {
+            self.direct_writes = direct;
+            self.dirty.mark_all();
         }
         let Self {
             kind,
             shadow,
-            blocks,
+            regions,
             order,
-            at,
+            dirty,
+            marks,
             ..
         } = self;
-        for block in blocks.iter() {
-            let (off, len) = (block.off, block.len as usize);
-            // SAFETY: the block spans the storage its variables point into,
+        let (gate, check) = wave_gate();
+        for r in regions.iter() {
+            // SAFETY: the region spans the storage its variables point into,
             // built from their `ptr` and native size.
-            let cur = unsafe { std::slice::from_raw_parts(block.ptr, len) };
-            if !force && cur == &shadow[off..off + len] {
+            let cur = unsafe { std::slice::from_raw_parts(r.base, r.len) };
+            let old = &mut shadow[r.off..r.off + r.len];
+            let members = r.first as usize..(r.first + r.count) as usize;
+            if force {
+                for &i in &order[members.clone()] {
+                    emit_if_moved(kind, old, r.base, &dump_vars[i as usize], use_4state, true);
+                }
+                old.copy_from_slice(cur);
                 continue;
             }
-            let members = block.first as usize..(block.first + block.count) as usize;
-            for &i in &order[members] {
-                let entry = &dump_vars[i as usize];
-                // 4-state keeps the x/z mask right behind the payload; both
-                // decide the value, so both belong to the compare.
-                let nb = entry.native_bytes;
-                let lo = at[i as usize];
-                let hi = lo + if use_4state { nb * 2 } else { nb };
-                let cur = &cur[lo - off..hi - off];
-                if !force && held(&shadow[lo..hi], cur) {
-                    continue;
-                }
-                match &mut *kind {
-                    WaveDumperKind::Vcd(v) => {
-                        let VarHandle::Vcd(id) = &entry.handle else {
-                            panic!("VCD dumper received non-VCD handle");
-                        };
-                        let (payload, mask_xz) = if use_4state {
-                            let (p, m) = cur.split_at(nb);
-                            (p, Some(m))
-                        } else {
-                            (cur, None)
-                        };
-                        push_change(&mut v.line, payload, mask_xz, entry.width, id);
-                        if v.line.len() >= LINE_BUF_CAPACITY {
-                            v.writer.writer().write_all(&v.line).unwrap();
-                            v.line.clear();
-                        }
-                    }
-                    fst @ WaveDumperKind::Fst(_) => {
-                        let mut value = unsafe {
-                            read_native_value(entry.ptr, nb, use_4state, entry.width as u32, false)
-                        };
-                        value.trunc(entry.width);
-                        fst.change_vector(entry.handle, &value);
+            let logged = gate && r.logged;
+            marks.clear();
+            if logged {
+                dirty.collect_marked(r.arena_g0, r.granule.len(), marks);
+                if check {
+                    // Only the bytes a variable covers matter: the padding
+                    // between them moves without the log saying so, and the
+                    // waveform never reads it.
+                    for &i in &order[members.clone()] {
+                        let e = &dump_vars[i as usize];
+                        let lo = e.ptr as usize - r.base as usize;
+                        let hi = lo
+                            + if use_4state {
+                                e.native_bytes * 2
+                            } else {
+                                e.native_bytes
+                            };
+                        assert!(
+                            cur[lo..hi] == old[lo..hi]
+                                || ((lo >> GRANULE_LOG2)..=((hi - 1) >> GRANULE_LOG2))
+                                    .any(|g| marks.contains(&(g as u32))),
+                            "wave gate missed a write at {:#x}",
+                            r.base as usize + lo,
+                        );
                     }
                 }
+            } else {
+                diff_granules(cur, old, marks);
             }
-            shadow[off..off + len].copy_from_slice(cur);
+            // A variable straddling a boundary is in every granule it
+            // touches, and the granules come in order, so a cursor over
+            // `order` is what keeps it to one visit.
+            let mut cursor = 0u32;
+            for &g in marks.iter() {
+                let (lo, hi) = r.granule[g as usize];
+                for &i in &order[lo.max(cursor) as usize..hi as usize] {
+                    emit_if_moved(kind, old, r.base, &dump_vars[i as usize], use_4state, false);
+                }
+                cursor = cursor.max(hi);
+            }
+            if logged {
+                for &g in marks.iter() {
+                    let lo = (g as usize) << GRANULE_LOG2;
+                    let hi = (lo + (1 << GRANULE_LOG2)).min(r.len);
+                    old[lo..hi].copy_from_slice(&cur[lo..hi]);
+                }
+            } else {
+                old.copy_from_slice(cur);
+            }
         }
         if let WaveDumperKind::Vcd(v) = &mut self.kind {
             v.flush_line();
         }
+        self.dirty.clear();
     }
 }
 
@@ -464,6 +651,91 @@ impl Drop for FstDumper {
 
 fn sanitize_wave_name(name: &str) -> String {
     name.replace("::<", "_").replace(">", "").replace("::", "_")
+}
+
+/// Write one variable if its storage moved.  The mirror is refreshed by the
+/// caller once the granule is walked, so variables that alias one another's
+/// storage all see the values the waveform last carried.
+fn emit_if_moved(
+    kind: &mut WaveDumperKind,
+    old: &[u8],
+    base: *const u8,
+    entry: &DumpVar,
+    use_4state: bool,
+    force: bool,
+) {
+    // 4-state keeps the x/z mask right behind the payload; both decide the
+    // value, so both belong to the compare.
+    let nb = entry.native_bytes;
+    let span = if use_4state { nb * 2 } else { nb };
+    let lo = entry.ptr as usize - base as usize;
+    // SAFETY: `ptr` is the variable's storage, valid for its native span.
+    let cur = unsafe { std::slice::from_raw_parts(entry.ptr, span) };
+    if !force && held(&old[lo..lo + span], cur) {
+        return;
+    }
+    match kind {
+        WaveDumperKind::Vcd(v) => {
+            let VarHandle::Vcd(id) = &entry.handle else {
+                panic!("VCD dumper received non-VCD handle");
+            };
+            let (payload, mask_xz) = if use_4state {
+                let (p, m) = cur.split_at(nb);
+                (p, Some(m))
+            } else {
+                (cur, None)
+            };
+            push_change(&mut v.line, payload, mask_xz, entry.width, id);
+            if v.line.len() >= LINE_BUF_CAPACITY {
+                v.writer.writer().write_all(&v.line).unwrap();
+                v.line.clear();
+            }
+        }
+        fst @ WaveDumperKind::Fst(_) => {
+            let mut value =
+                unsafe { read_native_value(entry.ptr, nb, use_4state, entry.width as u32, false) };
+            value.trunc(entry.width);
+            fst.change_vector(entry.handle, &value);
+        }
+    }
+}
+
+/// The granules of `cur` that differ from `old`, checked eight at a time so an
+/// untouched stretch costs one vector compare.
+fn diff_granules(cur: &[u8], old: &[u8], out: &mut Vec<u32>) {
+    const CHUNK: usize = 8;
+    let word = |b: &[u8], g: usize| {
+        u64::from_ne_bytes(
+            b[g << GRANULE_LOG2..(g + 1) << GRANULE_LOG2]
+                .try_into()
+                .unwrap(),
+        )
+    };
+    let full = cur.len() >> GRANULE_LOG2;
+    let mut g = 0;
+    while g + CHUNK <= full {
+        let mut acc = 0u64;
+        for k in 0..CHUNK {
+            acc |= word(cur, g + k) ^ word(old, g + k);
+        }
+        if acc != 0 {
+            for k in g..g + CHUNK {
+                if word(cur, k) != word(old, k) {
+                    out.push(k as u32);
+                }
+            }
+        }
+        g += CHUNK;
+    }
+    for k in g..full {
+        if word(cur, k) != word(old, k) {
+            out.push(k as u32);
+        }
+    }
+    let rest = full << GRANULE_LOG2;
+    if rest < cur.len() && cur[rest..] != old[rest..] {
+        out.push(full as u32);
+    }
 }
 
 /// Most variables are a machine word or less, and this runs for every one of
