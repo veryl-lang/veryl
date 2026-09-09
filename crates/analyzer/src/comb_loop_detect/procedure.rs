@@ -2863,12 +2863,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // Assignment context reaches arithmetic, shifts, bitwise operations
         // and conditional arms before they are evaluated. Casts, concatenation
         // and other self-determined values are extended only after evaluation.
+        // Array literals retained in function returns carry a placeholder
+        // packed type; their element width comes from the assignment context.
         let context_determined = match expression {
             Expression::Unary(op, _, _) => !op.unary_x_self_determined(),
             Expression::Binary(_, op, _, _) => {
                 *op != Op::As && !op.binary_x_self_determined() && !op.binary_op_self_determined()
             }
-            Expression::Ternary(..) => true,
+            Expression::Ternary(..) | Expression::ArrayLiteral(..) => true,
             _ => false,
         };
         let expression_width = if context_determined {
@@ -3078,13 +3080,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Expression::Binary(left, op, right, comptime) => match op {
                 Op::As => {
                     let context_width = comptime.r#type.total_width().unwrap_or(requested.end());
-                    self.eval_expr_requested_in(
+                    let sources = self.eval_expr_requested_in(
                         left,
                         requested_array,
                         requested,
                         context_width,
                         projection,
-                    )
+                    );
+                    // A source region can be wider than the cast. Keep its
+                    // discarded bits out of a later element-width extension.
+                    let Some(span) = PackedSpan::whole(context_width) else {
+                        return ExpressionSources::default();
+                    };
+                    let source = self.expression_projection_source(sources, projection);
+                    let source = self
+                        .ssa
+                        .projected(source, position_domain(requested_array, span));
+                    ExpressionSources {
+                        sources: vec![(source, PositionRelation::default())],
+                    }
                 }
                 Op::LogicShiftL | Op::ArithShiftL => {
                     let shift = right
@@ -3409,11 +3423,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     length,
                                 },
                                 requested,
-                                value
-                                    .comptime()
-                                    .r#type
-                                    .total_width()
-                                    .unwrap_or(requested.length),
+                                context.width,
                                 projection,
                             );
                             if let Ok(output_start) = isize::try_from(output_start) {
@@ -3434,11 +3444,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     length: item_length,
                                 },
                                 requested,
-                                value
-                                    .comptime()
-                                    .r#type
-                                    .total_width()
-                                    .unwrap_or(requested.length),
+                                context.width,
                                 projection,
                             );
                             item.forget_array_position();
@@ -3479,11 +3485,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     length,
                                 },
                                 requested,
-                                default
-                                    .comptime()
-                                    .r#type
-                                    .total_width()
-                                    .unwrap_or(requested.length),
+                                context.width,
                                 projection,
                             );
                             if let Ok(output_start) = isize::try_from(output_start) {
@@ -3504,11 +3506,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     length: item_length,
                                 },
                                 requested,
-                                default
-                                    .comptime()
-                                    .r#type
-                                    .total_width()
-                                    .unwrap_or(requested.length),
+                                context.width,
                                 projection,
                             );
                             item.forget_array_position();

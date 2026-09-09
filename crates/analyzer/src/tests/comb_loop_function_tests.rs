@@ -1,6 +1,102 @@
 use super::*;
 
 #[test]
+fn comb_loop_array_function_returns_preserve_element_widths() {
+    for width in [2, 8] {
+        for left_shift in [0, 1, 2] {
+            for nested in [false, true] {
+                let (shape, value, output) = if nested {
+                    (
+                        "2, 2",
+                        format!("'{{'{{x[1][1] >> 1, 0}}, '{{0, x[0][0] << {left_shift}}}}}"),
+                        "value[0][0]",
+                    )
+                } else {
+                    (
+                        "2",
+                        format!("'{{x[1] >> 1, x[0] << {left_shift}}}"),
+                        "value[0]",
+                    )
+                };
+                let code = format!(
+                    r#"
+                    module Top(o: output bit<{width}>) {{
+                        type Values = bit<{width}>[{shape}];
+                        var value: Values;
+                        var result: Values;
+                        function transform(x: input Values) -> Values {{ return {value}; }}
+                        assign result = transform(value);
+                        assign value = result;
+                        assign o = {output};
+                    }}
+                    "#
+                );
+                // Only equal, opposing shifts return to the original bit.
+                let errors = analyze(&code);
+                assert!(
+                    errors
+                        .iter()
+                        .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    "{code}\n{errors:#?}"
+                );
+                assert_eq!(!errors.is_empty(), left_shift == 1, "{code}\n{errors:#?}");
+                assert!(comb_loop_analysis_is_complete(&code), "{code}");
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_array_function_elements_use_assignment_width() {
+    for (source_type, element_type, expression, source_bit, result_bit, expected) in [
+        ("u8", "u16", "x << 8", 0, 8, true),
+        ("u8", "u16", "x << 8", 1, 8, false),
+        ("i8", "i16", "x", 7, 15, true),
+        ("u8", "u16", "x", 7, 15, false),
+        ("i16", "i16", "x as 8", 7, 15, true),
+        ("i16", "i16", "x as 8", 15, 15, false),
+    ] {
+        for literal in ["explicit", "repeat", "default", "nested"] {
+            let (shape, value, selection) = match literal {
+                "explicit" => ("2", format!("'{{0, {expression}}}"), "[1]"),
+                "repeat" => ("2", format!("'{{{expression} repeat 2}}"), "[1]"),
+                "default" => ("2", format!("'{{0, default: {expression}}}"), "[1]"),
+                "nested" => (
+                    "2, 2",
+                    format!("'{{'{{0, {expression}}}, '{{default: 0}}}}"),
+                    "[0][1]",
+                ),
+                _ => unreachable!(),
+            };
+            let code = format!(
+                r#"
+                module Top(o: output bit) {{
+                    type Values = {element_type}[{shape}];
+                    var feedback: bit;
+                    var source: {source_type};
+                    var result: Values;
+                    function transform(x: input {source_type}) -> Values {{ return {value}; }}
+                    assign source = (feedback as {source_type}) << {source_bit};
+                    assign result = transform(source);
+                    assign feedback = result{selection}[{result_bit}];
+                    assign o = feedback;
+                }}
+                "#
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{code}\n{errors:#?}"
+            );
+            assert_eq!(!errors.is_empty(), expected, "{code}\n{errors:#?}");
+            assert!(comb_loop_analysis_is_complete(&code), "{code}");
+        }
+    }
+}
+
+#[test]
 fn comb_loop_ternary_captured_writes_preserve_branch_guards() {
     for arm in ["then", "else", "both"] {
         for condition in ["s", "1'b0", "1'b1"] {
