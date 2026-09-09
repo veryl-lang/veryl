@@ -3,7 +3,7 @@ use crate::ir::{Config, ProtoStatement, VarOffset};
 use crate::{HashMap, HashSet};
 use cranelift::codegen::control::ControlPlane;
 use cranelift::codegen::ir::{AbiParam, Function, SigRef, Signature, StackSlotData, UserFuncName};
-use cranelift::codegen::isa::{self, CallConv};
+use cranelift::codegen::isa::CallConv;
 use cranelift::codegen::{self, settings};
 use cranelift::frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift::prelude::types::{I32, I64};
@@ -634,7 +634,9 @@ fn build_binary_inner(
     }
     let flags = settings::Flags::new(settings_builder);
 
-    let isa = match isa::lookup(Triple::host()) {
+    // Host feature detection turns on BMI2 shifts, andn and lzcnt; a plain
+    // lookup targets baseline x86-64.
+    let isa = match cranelift_native::builder() {
         Err(err) => panic!("Error looking up target: {}", err),
         Ok(isa_builder) => isa_builder.finish(flags).unwrap(),
     };
