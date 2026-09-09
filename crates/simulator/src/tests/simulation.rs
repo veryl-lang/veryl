@@ -17471,6 +17471,60 @@ fn wide_dynamic_part_select_write() {
 }
 
 #[test]
+fn a_runtime_bounded_loop_writing_windows_keeps_every_window() {
+    // The shape that loses writes on a single slot: a runtime-bounded `for`,
+    // which is not unrolled, whose windows share a 64-bit word.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        n  : input  u32,
+        o0 : output logic<64>,
+        o1 : output logic<64>,
+        b0 : output logic<64>,
+    ) {
+        var p: logic<736>;
+        var b: logic<64>;
+        always_ff {
+            for i in 0..n {
+                p[i * 2 +: 2] = 2'b11;
+            }
+            for i in 0..n {
+                b[i] = 1;
+            }
+        }
+        assign o0 = p[63:0];
+        assign o1 = p[127:64];
+        assign b0 = b;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+
+        sim.set("n", Value::new(64, 32, false));
+        sim.step(&clk);
+        let got = [
+            sim.get("o0").unwrap().payload_u64(),
+            sim.get("o1").unwrap().payload_u64(),
+            sim.get("b0").unwrap().payload_u64(),
+        ];
+        assert_eq!(got, [u64::MAX; 3], "after the first edge, {config:?}");
+
+        // The windows hold once the loop stops covering them.
+        sim.set("n", Value::new(0, 32, false));
+        sim.step(&clk);
+        let held = [
+            sim.get("o0").unwrap().payload_u64(),
+            sim.get("o1").unwrap().payload_u64(),
+            sim.get("b0").unwrap().payload_u64(),
+        ];
+        assert_eq!(held, [u64::MAX; 3], "after an idle edge, {config:?}");
+    }
+}
+
+#[test]
 fn wide_window_store_shift_register() {
     // A packed multi-dimensional delay line written window by window in
     // `for` loops: the writes are dynamic windows into a 736-bit FF, which

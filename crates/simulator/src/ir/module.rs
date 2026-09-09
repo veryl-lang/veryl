@@ -6590,6 +6590,10 @@ impl Conv<&air::Module> for ProtoModule {
 /// analysis.  Used by the `VERYL_FF_MULTI_WRITE_DIAG=1` diag block (above)
 /// to corroborate the analyzer-IR multi_write_analysis result against the
 /// post-build ProtoStatement view.  Not on the hot path.
+///
+/// This counts a loop as one iteration throughout, where the analyzer side
+/// raises a partial write inside a runtime-bounded loop
+/// (`multi_write_analysis::add_dst_write`), so the two differ there by design.
 fn collect_max_writes(stmts: &[ProtoStatement]) -> HashMap<u32, u32> {
     let mut acc: HashMap<u32, u32> = HashMap::default();
     for s in stmts {
