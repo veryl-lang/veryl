@@ -1,6 +1,82 @@
 use super::*;
 
 #[test]
+fn comb_loop_instance_actual_short_circuit_preserves_skipped_writes() {
+    for op in ["&&", "||"] {
+        for condition in ["s", "1'b0", "1'b1"] {
+            let expected = condition == "s"
+                || (op == "&&" && condition == "1'b0")
+                || (op == "||" && condition == "1'b1");
+            for prefix in ["feedback", "1'b0"] {
+                let code = format!(
+                    r#"
+                    module Child (i: input logic<3>, o: output logic) {{ assign o = i[0]; }}
+                    module Top (s: input logic, o: output logic) {{
+                        var feedback: logic;
+                        function clear () -> logic {{ feedback = 0; return 0; }}
+                        inst child: Child (
+                            i: {{{prefix}, ({condition} {op} clear()), feedback}}, o: feedback,
+                        );
+                        assign o = feedback;
+                    }}
+                    "#
+                );
+                assert_comb_loop(
+                    &format!("{condition} {op}, prefix={prefix}"),
+                    &code,
+                    expected,
+                );
+                assert!(comb_loop_analysis_is_complete(&code));
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_instance_actual_short_circuit_keeps_paths_exclusive() {
+    for op in ["&&", "||"] {
+        let code = format!(
+            r#"
+            module Child (i: input logic<2>, o: output logic<2>) {{
+                assign o[0] = i[1];
+                assign o[1] = i[0];
+            }}
+            module Top (s: input logic, o: output logic<2>) {{
+                var value: logic<2>;
+                function clear () -> logic {{ value[0] = 0; return value[1]; }}
+                inst child: Child (i: {{(s {op} clear()), value[0]}}, o: value);
+                assign o = value;
+            }}
+            "#
+        );
+        // value[1] reaches value[0] only when clear executes. The reverse
+        // dependency exists only when that same call is skipped.
+        assert_comb_loop(op, &code, false);
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_instance_actual_short_circuit_controls_captured_writes() {
+    for op in ["&&", "||"] {
+        let code = format!(
+            r#"
+            module Sink (i: input logic<2>) {{}}
+            module Top (feedback: output logic) {{
+                var value: logic;
+                function initialize () -> logic {{ value = 0; return 0; }}
+                function set () -> logic {{ value = 1; return 0; }}
+                inst sink: Sink (i: {{initialize(), (feedback {op} set())}});
+                assign feedback = value;
+            }}
+            "#
+        );
+        assert_comb_loop(op, &code, true);
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
 fn comb_loop_instance_actual_projections_preserve_sampled_variable_values() {
     for (actual, selection, expected) in [
         ("{feedback, clear(), feedback}", "i[2]", true),

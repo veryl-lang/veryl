@@ -339,6 +339,10 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 // Bound their materialization before cycle search gets a chance to run.
 const FUNCTION_SUMMARY_WORK: usize = 100_000;
 
+// Ordinary procedures can import many individually bounded summaries. Limit
+// their combined expansion independently of the directly written SSA graph.
+const PROCEDURE_IMPORT_WORK: usize = 100_000;
+
 // Early returns and breaks retain every preceding guard prefix during SSA
 // evaluation, before graph-export budgets can apply. Charge those copies at
 // construction time and abandon the affected procedure if they exceed this.
@@ -347,6 +351,19 @@ const PROCEDURE_GUARD_WORK: usize = 100_000;
 #[cfg(test)]
 thread_local! {
     static GUARD_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(PROCEDURE_GUARD_WORK) };
+    static IMPORT_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(PROCEDURE_IMPORT_WORK) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_procedure_import_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
+    struct Reset(usize);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            IMPORT_LIMIT.set(self.0);
+        }
+    }
+    let _reset = Reset(IMPORT_LIMIT.replace(limit));
+    f()
 }
 
 #[cfg(test)]
@@ -1401,9 +1418,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         roots: &[VersionId],
         work: usize,
     ) -> DependencyDag<NodeKey> {
+        #[cfg(test)]
+        let import_work = IMPORT_LIMIT.get();
+        #[cfg(not(test))]
+        let import_work = PROCEDURE_IMPORT_WORK;
         let graph = self.guard_work.and_then(|_| {
-            self.ssa
-                .try_dependency_dag(roots, |key| self.is_visible_source(key), work)
+            self.ssa.try_dependency_dag_with_import_limit(
+                roots,
+                |key| self.is_visible_source(key),
+                work,
+                import_work,
+            )
         });
         let Some(graph) = graph else {
             self.status = AnalysisStatus::Barrier;
@@ -3028,37 +3053,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     ));
                     reads
                 }
-                Op::LogicAnd | Op::LogicOr => {
-                    let mut reads = ExpressionSources::whole(self.eval_expr(left));
-                    let execute_right = match (op, self.constant_truth(left)) {
-                        (Op::LogicAnd, Some(false)) | (Op::LogicOr, Some(true)) => Some(false),
-                        (Op::LogicAnd, Some(true)) | (Op::LogicOr, Some(false)) => Some(true),
-                        _ => None,
-                    };
-                    match execute_right {
-                        Some(false) => {}
-                        Some(true) => reads.extend_whole(self.eval_expr(right)),
-                        None => {
-                            let branch = self.expression_branch_id(expression);
-                            let parent_condition = self.path_condition.clone();
-
-                            let checkpoint = self.ssa.checkpoint();
-                            self.choose_path(&parent_condition, branch, 0);
-                            let right = self.eval_expr(right);
-                            let right = self.ssa.definition_guarded(right, &self.path_condition);
-                            let evaluated_state = self.ssa.capture_and_rollback(checkpoint);
-
-                            let checkpoint = self.ssa.checkpoint();
-                            self.choose_path(&parent_condition, branch, 1);
-                            let skipped_state = self.ssa.capture_and_rollback(checkpoint);
-
-                            self.ssa.merge([&evaluated_state, &skipped_state]);
-                            self.path_condition = parent_condition;
-                            reads.push(right, PositionRelation::whole());
-                        }
-                    }
-                    reads
-                }
+                Op::LogicAnd | Op::LogicOr => ExpressionSources::whole(
+                    self.eval_short_circuit(expression, left, *op, right, true),
+                ),
                 _ => ExpressionSources::whole(self.eval_expr(expression)),
             },
             Expression::Ternary(condition, left, right, _) => {
@@ -3461,6 +3458,65 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.eval_expr_inner(expression, true)
     }
 
+    fn eval_short_circuit(
+        &mut self,
+        expression: &Expression,
+        left: &Expression,
+        op: Op,
+        right: &Expression,
+        prune_constant_branches: bool,
+    ) -> Vec<VersionId> {
+        let mut reads = self.eval_expr_inner(left, prune_constant_branches);
+        let truth = prune_constant_branches
+            .then(|| self.constant_truth(left))
+            .flatten();
+        let execute_right = match (op, truth) {
+            (Op::LogicAnd, Some(false)) | (Op::LogicOr, Some(true)) => Some(false),
+            (Op::LogicAnd, Some(true)) | (Op::LogicOr, Some(false)) => Some(true),
+            _ => None,
+        };
+        match execute_right {
+            Some(false) => {}
+            Some(true) => reads.extend(self.eval_expr_inner(right, prune_constant_branches)),
+            None => {
+                let branch = self.expression_branch_id(expression);
+                let parent_condition = self.path_condition.clone();
+                if !self.choose_path(&parent_condition, branch, 0) {
+                    return reads;
+                }
+                let taken = self.path_condition.clone();
+                let checkpoint = self.ssa.checkpoint();
+                let right = self.eval_expr_inner(right, prune_constant_branches);
+                let right = self.ssa.definition_guarded(right, &self.path_condition);
+                let evaluated_state = self.ssa.capture_and_rollback(checkpoint);
+                if self.choose_path(&parent_condition, branch, 1) {
+                    let skipped = self.path_condition.clone();
+                    let cost = evaluated_state.len().saturating_mul(
+                        taken.branch_count().saturating_add(skipped.branch_count()),
+                    );
+                    if self.reserve_guard_work(cost) {
+                        let bit_part = self.bit_part;
+                        self.ssa.merge_conditional(
+                            &evaluated_state,
+                            &taken,
+                            &skipped,
+                            &reads,
+                            |key| {
+                                bit_part
+                                    .ranges_of((key.node.0, key.node.1))
+                                    .get(key.node.2)
+                                    .map(|packed| position_domain(key.node.1, *packed))
+                            },
+                        );
+                    }
+                }
+                self.path_condition = parent_condition;
+                reads.push(right);
+            }
+        }
+        reads
+    }
+
     fn eval_expr_inner(
         &mut self,
         expression: &Expression,
@@ -3475,16 +3531,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Expression::Unary(_, expression, _) => {
                 reads.extend(self.eval_expr_inner(expression, prune_constant_branches));
             }
-            Expression::Binary(left, op, right, _) => {
+            Expression::Binary(left, op @ (Op::LogicAnd | Op::LogicOr), right, _) => {
+                reads.extend(self.eval_short_circuit(
+                    expression,
+                    left,
+                    *op,
+                    right,
+                    prune_constant_branches,
+                ));
+            }
+            Expression::Binary(left, _, right, _) => {
                 reads.extend(self.eval_expr_inner(left, prune_constant_branches));
-                let evaluate_right = match (prune_constant_branches, op) {
-                    (true, Op::LogicAnd) => self.constant_truth(left) != Some(false),
-                    (true, Op::LogicOr) => self.constant_truth(left) != Some(true),
-                    _ => true,
-                };
-                if evaluate_right {
-                    reads.extend(self.eval_expr_inner(right, prune_constant_branches));
-                }
+                reads.extend(self.eval_expr_inner(right, prune_constant_branches));
             }
             Expression::Ternary(condition, left, right, _) => {
                 reads.extend(self.eval_expr_inner(condition, prune_constant_branches));

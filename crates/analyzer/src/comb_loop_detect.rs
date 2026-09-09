@@ -62,7 +62,7 @@ pub(crate) use summary::{
 };
 
 #[cfg(test)]
-pub(crate) use procedure::with_procedure_guard_limit;
+pub(crate) use procedure::{with_procedure_guard_limit, with_procedure_import_limit};
 
 use crate::AnalyzerError;
 use crate::HashMap;
@@ -1734,16 +1734,13 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
             .sort_unstable_by_key(|source| (source.key, source.condition.clone()));
         self.reads
             .dedup_by(|left, right| left.key == right.key && left.condition == right.condition);
-        let complete = self
-            .procedure
-            .as_ref()
-            .is_none_or(procedure::ExpressionAnalysis::is_complete);
-        let dependencies = if let Some(mut procedure) = self.procedure.take() {
+        let (dependencies, complete) = if let Some(mut procedure) = self.procedure.take() {
             let dependencies = Some(procedure.dependencies());
+            let complete = procedure.is_complete();
             procedure.restore(self.procedure_context);
-            dependencies
+            (dependencies, complete)
         } else {
-            None
+            (None, true)
         };
         (self.reads, dependencies, complete)
     }
@@ -1798,18 +1795,8 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
                 _ => {}
             },
             Expression::Unary(_, operand, _) => self.eval(operand),
-            Expression::Binary(left, op, right, _) => {
-                self.eval(left);
-                let evaluate_right = match op {
-                    Op::LogicAnd => constant_truth(left, self.ctx) != Some(false),
-                    Op::LogicOr => constant_truth(left, self.ctx) != Some(true),
-                    _ => true,
-                };
-                if evaluate_right {
-                    self.eval(right);
-                }
-            }
-            Expression::Ternary(_, _, _, _) => {
+            Expression::Binary(_, Op::LogicAnd | Op::LogicOr, _, _)
+            | Expression::Ternary(_, _, _, _) => {
                 let summaries = self.summaries.take().expect("initialized once");
                 let mut procedure = procedure::ExpressionAnalysis::new(
                     self.bit_part,
@@ -1819,6 +1806,10 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
                 procedure.use_namespace(self.namespace);
                 self.procedure = Some(procedure);
                 self.eval(expression);
+            }
+            Expression::Binary(left, _, right, _) => {
+                self.eval(left);
+                self.eval(right);
             }
             Expression::Concatenation(parts, _) => {
                 for (part, repeat) in parts {
@@ -1848,13 +1839,6 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
             }
         }
     }
-}
-
-fn constant_truth(expression: &Expression, ctx: &mut Context) -> Option<bool> {
-    expression
-        .eval_value(ctx)
-        .and_then(|value| value.to_usize())
-        .map(|value| value != 0)
 }
 
 fn collect_factor_node_keys(

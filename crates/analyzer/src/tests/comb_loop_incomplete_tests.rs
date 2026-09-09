@@ -2,6 +2,89 @@
 use super::*;
 
 #[test]
+fn procedural_import_limit_preserves_independent_cycles() {
+    for kind in ["procedure", "instance_side_effect"] {
+        for calls in [1, 16] {
+            let body = if kind == "procedure" {
+                let assignments = (0..calls)
+                    .map(|index| format!("o[{index}] = gate(1'b1, i);"))
+                    .collect::<String>();
+                format!("always_comb {{ {assignments} }}")
+            } else {
+                let functions = (0..calls)
+                    .map(|index| format!(
+                        "function sample{index} () -> logic {{ o[{index}] = gate(1'b1, i); return 0; }}"
+                    ))
+                    .collect::<String>();
+                let actual = (0..calls)
+                    .map(|index| format!("sample{index}()"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("{functions} inst sink: Sink (i: {{{actual}}});")
+            };
+            let code = format!(
+                r#"
+                module Sink (i: input logic<{calls}>) {{}}
+                module Top (i: input logic, o: output logic<{calls}>, independent: output logic) {{
+                    function gate (s: input logic, x: input logic) -> logic {{
+                        var v: logic;
+                        v = x;
+                        for _index in 0..8 {{ if s {{ v = !v; }} else {{ v = 0; }} }}
+                        return v;
+                    }}
+                    {body}
+                    assign independent = independent;
+                }}
+                "#
+            );
+            crate::comb_loop_detect::with_procedure_import_limit(1024, || {
+                assert_eq!(
+                    comb_loop_analysis_is_complete(&code),
+                    calls == 1,
+                    "{kind}, calls={calls}"
+                );
+                let errors = analyze(&code);
+                assert!(
+                    errors.iter().all(|error| match error {
+                        AnalyzerError::CombinationalLoop { .. }
+                        | AnalyzerError::UnusedVariable { .. } => true,
+                        AnalyzerError::UnassignVariable { identifier, .. } =>
+                            identifier == "independent"
+                                || (kind == "instance_side_effect" && identifier == "o"),
+                        _ => false,
+                    }),
+                    "{kind}, calls={calls}: {errors:?}"
+                );
+                let loops = errors
+                    .iter()
+                    .filter_map(|error| match error {
+                        AnalyzerError::CombinationalLoop { identifier, .. } => {
+                            Some(identifier.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(loops, ["independent"], "{kind}, calls={calls}: {errors:?}");
+            });
+        }
+    }
+}
+
+#[test]
+fn procedural_import_limit_does_not_limit_direct_assignments() {
+    let assignments = (0..1024)
+        .map(|index| format!("o[{index}] = i;"))
+        .collect::<String>();
+    let code = format!(
+        "module Top (i: input logic, o: output logic<1024>) {{ always_comb {{ {assignments} }} }}"
+    );
+    crate::comb_loop_detect::with_procedure_import_limit(0, || {
+        assert!(comb_loop_analysis_is_complete(&code));
+        assert!(analyze(&code).is_empty());
+    });
+}
+
+#[test]
 fn instance_actual_expansion_limit_keeps_independent_cycles() {
     for stages in [4, 64] {
         let stages_code = "y = !y;".repeat(stages);

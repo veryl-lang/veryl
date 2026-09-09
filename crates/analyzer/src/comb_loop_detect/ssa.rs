@@ -61,6 +61,10 @@ enum Version<K> {
         condition: PathCondition,
     },
     Phi(Vec<VersionId>),
+    Guarded {
+        source: VersionId,
+        condition: PathCondition,
+    },
     Imported {
         graph: Rc<DependencyDag<K>>,
         root: Option<usize>,
@@ -478,6 +482,10 @@ pub(super) struct BranchState<K> {
 }
 
 impl<K> BranchState<K> {
+    pub(super) fn len(&self) -> usize {
+        self.bindings.len()
+    }
+
     #[cfg(test)]
     pub(super) fn unchanged() -> Self {
         Self {
@@ -660,6 +668,7 @@ where
                     queue.extend(sources.iter().map(|(source, _)| *source));
                 }
                 Version::Phi(inputs) => queue.extend(inputs.iter().copied()),
+                Version::Guarded { source, .. } => queue.push_back(*source),
                 Version::Entry(_) => {}
             }
         }
@@ -760,6 +769,44 @@ where
         }
     }
 
+    /// Merge an optional evaluation with its skipped path. Both the new and
+    /// retained values need explicit guards, and each conditional write also
+    /// depends on the expression that decides whether evaluation happens.
+    pub(super) fn merge_conditional(
+        &mut self,
+        state: &BranchState<K>,
+        taken: &PathCondition,
+        skipped: &PathCondition,
+        controls: &[VersionId],
+        domain: impl Fn(K) -> Option<PositionDomain>,
+    ) {
+        if state.bindings.is_empty() {
+            return;
+        }
+        let control = self.definition(controls.to_vec());
+        for (&key, &value) in &state.bindings {
+            let fallback = self.read(key);
+            let inputs = [(value, taken), (fallback, skipped)]
+                .into_iter()
+                .map(|(value, condition)| {
+                    let source = self.phi(vec![value, control]);
+                    let version = self.versions.len();
+                    // A guard is an alias, not a read. Bare entry versions
+                    // retained on the skipped path must remain state retention
+                    // until another expression actually reads the merged value.
+                    self.versions.push(Version::Guarded {
+                        source,
+                        condition: condition.clone(),
+                    });
+                    version
+                })
+                .collect();
+            let version = self.phi(inputs);
+            let version = domain(key).map_or(version, |domain| self.projected(version, domain));
+            self.bind(key, version);
+        }
+    }
+
     /// Apply the transitive closure of a runtime loop's may-dependency
     /// transfer without enumerating runtime iterator values or iterations.
     ///
@@ -854,7 +901,20 @@ where
         &self,
         roots: &[VersionId],
         allowed: impl Fn(&K) -> bool,
+        work: usize,
+    ) -> Option<DependencyDag<K>>
+    where
+        K: Ord,
+    {
+        self.try_dependency_dag_with_import_limit(roots, allowed, work, usize::MAX)
+    }
+
+    pub(super) fn try_dependency_dag_with_import_limit(
+        &self,
+        roots: &[VersionId],
+        allowed: impl Fn(&K) -> bool,
         mut work: usize,
+        mut import_work: usize,
     ) -> Option<DependencyDag<K>>
     where
         K: Ord,
@@ -886,6 +946,7 @@ where
                         enqueue((*input, include_entry));
                     }
                 }
+                Version::Guarded { source, .. } => enqueue((*source, include_entry)),
                 Version::Imported { bindings, .. } => {
                     // All output roots of a call share the same actuals.
                     if visited_bindings.insert(Rc::as_ptr(bindings)) {
@@ -958,20 +1019,36 @@ where
                         .collect();
                     Some(builder.internal(inputs, Vec::new(), site))
                 }
+                Version::Guarded { source, condition } => {
+                    work = work.checked_sub(condition.branch_count().saturating_add(1))?;
+                    let inputs = mapped[&(*source, include_entry)]
+                        .map(|source| (source, PositionRelation::default(), condition.clone()))
+                        .into_iter()
+                        .collect();
+                    Some(builder.internal(inputs, Vec::new(), site))
+                }
                 Version::Imported {
                     graph,
                     root,
                     bindings,
                     branches,
-                } => imports.inline(
-                    graph,
-                    *root,
-                    bindings,
-                    branches,
-                    &mapped,
-                    &mut builder,
-                    &mut work,
-                )?,
+                } => {
+                    let available = work.min(import_work);
+                    let mut remaining = available;
+                    let node = imports.inline(
+                        graph,
+                        *root,
+                        bindings,
+                        branches,
+                        &mapped,
+                        &mut builder,
+                        &mut remaining,
+                    )?;
+                    let spent = available - remaining;
+                    work -= spent;
+                    import_work -= spent;
+                    node
+                }
                 Version::Projected { source, domain } => {
                     let inputs = mapped[&(*source, true)]
                         .map(|source| {
@@ -1098,6 +1175,14 @@ where
                 Version::Phi(inputs) => {
                     for input in inputs {
                         enqueue((*input, include_entry, relation), condition.clone());
+                    }
+                }
+                Version::Guarded {
+                    source,
+                    condition: guard,
+                } => {
+                    if let Some(condition) = condition.conjoin_if_compatible(guard) {
+                        enqueue((*source, include_entry, relation), condition);
                     }
                 }
                 Version::Imported {

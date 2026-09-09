@@ -82,6 +82,11 @@ impl TransferBuilder {
                             .add_edge(source, node, PositionRelation::default());
                     }
                 }
+                Version::Guarded { source, .. } => {
+                    let source = self.version(*source);
+                    self.graph
+                        .add_edge(source, node, PositionRelation::default());
+                }
                 Version::Projected { source, domain } => {
                     self.graph[node].domains.push(*domain);
                     let source = self.version(*source);
