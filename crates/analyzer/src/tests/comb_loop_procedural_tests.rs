@@ -97,6 +97,127 @@ fn comb_loop_rhs_sampling_only_evaluates_used_initializers() {
 }
 
 #[test]
+fn comb_loop_rhs_sampling_preserves_operand_width_before_narrowing() {
+    for width in [1, 2, 4, 8] {
+        for count in [2, 4] {
+            for operator in ["|", "^", "&", "+"] {
+                let literal = format!("'{{0 repeat {count}, default: effect()}}");
+                for expression in [
+                    format!("4'b0 {operator} {literal}"),
+                    format!("{literal} {operator} 4'b0"),
+                ] {
+                    let used = count < width.max(4);
+                    for (initial, effect, expected) in [("0", "o", used), ("o", "0", !used)] {
+                        let code = format!(
+                            r#"
+                            module Top(o: output bit) {{
+                                var saved: bit;
+                                var result: bit;
+                                function effect() -> bit {{ saved = {effect}; return 0; }}
+                                function consume(x: input logic<{width}>) -> bit {{ return 0; }}
+                                always_comb {{
+                                    saved = {initial};
+                                    result = consume({expression});
+                                }}
+                                assign o = saved;
+                            }}
+                            "#
+                        );
+                        assert_complete_comb_loop(&code, expected);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_preserves_width_boundaries_and_array_shapes() {
+    for (ty, expression, used) in [
+        ("logic<1>", "~(4'b0 | '{0, 0, default: effect()})", true),
+        ("logic<1>", "-(4'b0 | '{0, 0, default: effect()})", true),
+        (
+            "logic<1>",
+            "if 1'b1 ? '{0, 0, default: effect()} : 4'b0",
+            true,
+        ),
+        (
+            "logic<1>",
+            "if 1'b0 ? '{0, 0, default: effect()} : 4'b0",
+            false,
+        ),
+        ("logic<1>", "(4'b0 | '{0, 0, default: effect()}) as 1", true),
+        ("logic<8>", "'{0, 0, default: effect()} as 2", false),
+        (
+            "logic<8>",
+            "4'b0 == '{0 repeat 4, default: effect()}",
+            false,
+        ),
+        (
+            "logic<8>",
+            "|(4'b0 | '{0 repeat 4, default: effect()})",
+            false,
+        ),
+        (
+            "logic<8>",
+            "4'b0 << (4'b0 | '{0 repeat 4, default: effect()})",
+            false,
+        ),
+        (
+            "logic<8>",
+            "{(4'b0 | '{0 repeat 4, default: effect()}), 1'b0}",
+            false,
+        ),
+        (
+            "logic<1>[8]",
+            "'{4'b0 | '{0, 0, default: effect()}, 0 repeat 7}",
+            true,
+        ),
+        (
+            "logic<1>[8]",
+            "'{4'b0 | '{0 repeat 4, default: effect()}, 0 repeat 7}",
+            false,
+        ),
+    ] {
+        for boundary in ["return", "argument", "assignment"] {
+            for (initial, effect, expected) in [("0", "o", used), ("o", "0", !used)] {
+                let (declaration, result_type, expression) = match boundary {
+                    "return" => (
+                        format!("function make() -> Value {{ return {expression}; }}"),
+                        "Value",
+                        "make()".to_string(),
+                    ),
+                    "argument" => (
+                        "function consume(x: input Value) -> bit { return 0; }".to_string(),
+                        "bit",
+                        format!("consume({expression})"),
+                    ),
+                    "assignment" => (String::new(), "Value", expression.to_string()),
+                    _ => unreachable!(),
+                };
+                let code = format!(
+                    r#"
+                    module Top(o: output bit) {{
+                        type Value = {ty};
+                        var saved: bit;
+                        var result: {result_type};
+                        function effect() -> bit {{ saved = {effect}; return 0; }}
+                        {declaration}
+                        always_comb {{
+                            saved = {initial};
+                            result = {expression};
+                        }}
+                        assign o = saved;
+                    }}
+                    "#
+                );
+                assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn comb_loop_rhs_sampling_evaluates_defaults_after_explicit_elements() {
     for (ty, literal, selection, expected) in [
         ("bit[2]", "'{saved, default: clear()}", "[0]", true),

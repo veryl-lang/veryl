@@ -304,6 +304,24 @@ struct EvaluationCache {
 
 type CallCache = Option<EvaluationCache>;
 
+#[derive(Clone, Copy, Default)]
+struct EvaluationShape<'a> {
+    array: &'a [Option<usize>],
+    packed: &'a [Option<usize>],
+}
+
+impl<'a> EvaluationShape<'a> {
+    fn element(self) -> (Option<usize>, Self) {
+        if let Some((length, array)) = self.array.split_first() {
+            (*length, Self { array, ..self })
+        } else if let Some((length, packed)) = self.packed.split_first() {
+            (*length, Self { packed, ..self })
+        } else {
+            (None, self)
+        }
+    }
+}
+
 // Module and interface storage is shared by every call. Function-owned
 // storage is automatic, so its SSA identity also includes the invocation.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -3623,16 +3641,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         r#type: &Type,
         prune_constant_branches: bool,
     ) -> Vec<VersionId> {
-        // Literals retained in returns and actuals have placeholder types.
-        // Their nested initializers consume unpacked dimensions first, then
-        // packed dimensions, just as array-literal lowering does.
-        let shape = r#type
-            .array
-            .iter()
-            .chain(r#type.width().iter())
-            .copied()
-            .collect::<Vec<_>>();
-        self.eval_expr_shaped(expression, prune_constant_branches, &shape)
+        let shape = EvaluationShape {
+            array: r#type.array.as_slice(),
+            packed: r#type.width().as_slice(),
+        };
+        self.eval_expr_shaped(expression, prune_constant_branches, shape)
     }
 
     fn guard_expression_sources(&mut self, mut sources: ExpressionSources) -> ExpressionSources {
@@ -3728,24 +3741,58 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         expression: &Expression,
         prune_constant_branches: bool,
     ) -> Vec<VersionId> {
-        self.eval_expr_shaped(expression, prune_constant_branches, &[])
+        self.eval_expr_shaped(
+            expression,
+            prune_constant_branches,
+            EvaluationShape::default(),
+        )
     }
 
     fn eval_expr_shaped(
         &mut self,
         expression: &Expression,
         prune_constant_branches: bool,
-        shape: &[Option<usize>],
+        shape: EvaluationShape<'_>,
     ) -> Vec<VersionId> {
         if self.guard_work.is_none() {
             return Vec::new();
         }
+        let comptime = expression.comptime();
+        // Operands are evaluated before assignment/argument truncation. The
+        // recorded context can therefore be wider than the destination's
+        // packed shape. Keep unpacked dimensions separate: they count array
+        // elements and must not participate in packed-width comparisons.
+        let context_width = comptime.expr_context.width;
+        let packed = [Some(context_width)];
+        let shape_width = shape
+            .packed
+            .iter()
+            .try_fold(1usize, |width, dimension| width.checked_mul((*dimension)?));
+        let shape = EvaluationShape {
+            // Unary/binary operators consume packed values. Lowered array
+            // assignments can still carry the whole array's destination type.
+            array: if matches!(expression, Expression::Unary(..) | Expression::Binary(..)) {
+                &[]
+            } else if shape.array.is_empty() && shape.packed.is_empty() {
+                comptime.r#type.array.as_slice()
+            } else {
+                shape.array
+            },
+            packed: if context_width != 0
+                && (shape.packed.is_empty()
+                    || shape_width.is_some_and(|width| width < context_width))
+            {
+                &packed
+            } else {
+                shape.packed
+            },
+        };
         let mut reads = Vec::new();
         match expression {
             Expression::Term(factor) => self.eval_factor(factor, &mut reads),
             Expression::Unary(op, expression, _) => {
                 let shape = if op.unary_x_self_determined() {
-                    &[]
+                    EvaluationShape::default()
                 } else {
                     shape
                 };
@@ -3771,13 +3818,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Expression::Binary(left, op, right, _) => {
                 let left_shape = if op.binary_op_self_determined() || op.binary_x_self_determined()
                 {
-                    &[]
+                    EvaluationShape::default()
                 } else {
                     shape
                 };
                 let right_shape = if op.binary_op_self_determined() || op.binary_y_self_determined()
                 {
-                    &[]
+                    EvaluationShape::default()
                 } else {
                     shape
                 };
@@ -3838,15 +3885,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
             }
             Expression::ArrayLiteral(items, _) => {
-                let shape = if shape.is_empty() {
-                    expression.comptime().r#type.array.as_slice()
-                } else {
-                    shape
-                };
-                let (length, item_shape) = shape
-                    .split_first()
-                    .map(|(length, shape)| (*length, shape))
-                    .unwrap_or((None, &[]));
+                // Retained literals have placeholder types. Consume the
+                // declared unpacked dimensions before packed dimensions,
+                // matching array-literal lowering.
+                let (length, item_shape) = shape.element();
                 let mut count = Some(0usize);
                 let mut default = None;
                 for item in items {
