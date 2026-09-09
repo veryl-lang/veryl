@@ -184,7 +184,9 @@ fn create_wave_dumper(
             let file = std::fs::File::create(&path).map_err(|e| SimulatorError::IoError {
                 message: format!("failed to create waveform file {}: {e}", path.display()),
             })?;
-            WaveDumper::new_vcd(Box::new(file))
+            // The `vcd` crate writes straight through, so an unbuffered file
+            // turns every value into its own write syscall.
+            WaveDumper::new_vcd(Box::new(std::io::BufWriter::with_capacity(1 << 20, file)))
         }
         WaveFormFormat::Fst => WaveDumper::new_fst(&path_str),
     };

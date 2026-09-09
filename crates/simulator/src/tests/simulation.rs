@@ -3862,6 +3862,55 @@ fn inlined_function_per_callsite_scratch_in_continuous_assign() {
 }
 
 #[test]
+fn dump_vcd_writes_only_what_moved() {
+    // VCD carries a value until the next one for that signal, so a step
+    // rewriting every variable is pure volume.  `hold` keeps its value while
+    // `a` moves, and must appear once.
+    let code = r#"
+    module Top (
+        a:    input  logic<8>,
+        hold: input  logic<8>,
+        c:    output logic<8>,
+    ) {
+        assign c = a;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+
+        use crate::wave_dumper::WaveDumper;
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(crate::wave_dumper::SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        sim.set("hold", Value::new(7, 8, false));
+        for a in [1u64, 2, 2, 3] {
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            sim.time += 1;
+        }
+
+        drop(sim);
+        let dump = String::from_utf8(
+            std::sync::Arc::try_unwrap(dump_buf)
+                .unwrap()
+                .into_inner()
+                .unwrap(),
+        )
+        .unwrap();
+        let body = dump.split("$enddefinitions $end\n").nth(1).unwrap();
+        let count = |id: &str| body.lines().filter(|l| l.ends_with(id)).count();
+        // `hold` never moves after the opening dump; `a` and `c` repeat one
+        // value, so they move twice over four steps.
+        assert_eq!(count(" \""), 1, "hold, {config:?}\n{body}");
+        assert_eq!(count(" !"), 3, "a, {config:?}\n{body}");
+        assert_eq!(count(" #"), 3, "c, {config:?}\n{body}");
+        assert_eq!(body.lines().filter(|l| l.starts_with('#')).count(), 4);
+    }
+}
+
+#[test]
 fn dump_vcd_generic_function() {
     let code = r#"
     module Top (

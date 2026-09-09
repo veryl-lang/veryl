@@ -26,6 +26,8 @@ pub enum VarHandle {
 pub struct WaveDumper {
     kind: WaveDumperKind,
     path: Option<PathBuf>,
+    /// Last value written per `DumpVar`, so a step emits only what moved.
+    shadow: Vec<Value>,
 }
 
 enum WaveDumperKind {
@@ -54,6 +56,7 @@ impl WaveDumper {
                 writer: vcd::Writer::new(io),
             }),
             path: None,
+            shadow: Vec::new(),
         }
     }
 
@@ -67,6 +70,7 @@ impl WaveDumper {
         };
         let header = fst_writer::open_fst(path, &info).expect("failed to create FST file");
         WaveDumper {
+            shadow: Vec::new(),
             kind: WaveDumperKind::Fst(Box::new(FstDumper {
                 state: FstState::Header(header),
             })),
@@ -259,8 +263,15 @@ impl WaveDumper {
         self.upscope();
     }
 
-    pub fn dump_all_vars(&mut self, dump_vars: &[DumpVar], use_4state: bool) {
-        for entry in dump_vars {
+    /// Write the variables whose value moved since the last call.  `force`
+    /// writes all of them, as the opening `$dumpvars` must.
+    pub fn dump_all_vars(&mut self, dump_vars: &[DumpVar], use_4state: bool, force: bool) {
+        let force = force || self.shadow.len() != dump_vars.len();
+        if force {
+            self.shadow.clear();
+            self.shadow.reserve(dump_vars.len());
+        }
+        for (i, entry) in dump_vars.iter().enumerate() {
             let mut value = unsafe {
                 read_native_value(
                     entry.ptr,
@@ -271,6 +282,13 @@ impl WaveDumper {
                 )
             };
             value.trunc(entry.width);
+            if force {
+                self.shadow.push(value.clone());
+            } else if self.shadow[i] == value {
+                continue;
+            } else {
+                self.shadow[i] = value.clone();
+            }
             self.change_vector(entry.handle, &value);
         }
     }

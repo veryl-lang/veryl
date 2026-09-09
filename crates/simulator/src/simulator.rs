@@ -2528,7 +2528,7 @@ impl Simulator {
     pub fn dump_start(&mut self) {
         if let Some(dump) = &mut self.dump {
             dump.begin_dumpvars();
-            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
+            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state, true);
             Self::dump_trace_vars(dump, &self.trace_dump_vars, &self.components);
             dump.end_dumpvars();
         }
@@ -2542,7 +2542,7 @@ impl Simulator {
             }
             let dump = self.dump.as_mut().unwrap();
             dump.timestamp(self.time);
-            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
+            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state, false);
             Self::dump_trace_vars(dump, &self.trace_dump_vars, &self.components);
         }
     }
