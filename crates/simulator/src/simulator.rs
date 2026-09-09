@@ -1,6 +1,7 @@
 use crate::backend::{CompiledWhole, DispatchOutcome};
 use crate::component::loader::ComponentError;
 use crate::component::runtime::{RuntimeComponent, build_components};
+use crate::ir::opt::event_gate::{GateEntry, RtEventGates};
 use crate::ir::write_log::{
     WriteLogBuffer, clear_event_write_log, ff_commit_from_log, ff_commit_from_log_watched,
     set_event_write_log,
@@ -62,6 +63,9 @@ pub struct Simulator {
     pub(crate) tb_dirty: crate::tb_dirty::TbDirtyFilter,
     last_event: Option<Event>,
     last_event_stmts: *const Vec<Statement>,
+    /// `last_event`'s gates, cached like `last_event_stmts`; null when it
+    /// has none.
+    last_event_gates: *const RtEventGates,
     /// Whole-event AOT-C handle for `last_event`, cached alongside
     /// `last_event_stmts` (same predicate, same post-construction-immutable
     /// `whole_events` invariant) so the hot path skips a per-cycle
@@ -407,6 +411,86 @@ impl WriteLogDiag {
     }
 }
 
+/// The per-statement event path under its gates (`event_gate`): a range
+/// whose subtree held since its last fire is skipped.
+fn run_event_gated(
+    ir: &Ir,
+    mask_cache: &mut MaskCache,
+    statements: &[Statement],
+    gates: &RtEventGates,
+) {
+    run_gate_children(
+        ir,
+        mask_cache,
+        statements,
+        gates,
+        &gates.roots,
+        0,
+        statements.len(),
+    );
+}
+
+/// `[lo, hi)` of the statements, with each of the `children` gates in place.
+fn run_gate_children(
+    ir: &Ir,
+    mask_cache: &mut MaskCache,
+    statements: &[Statement],
+    gates: &RtEventGates,
+    children: &[usize],
+    lo: usize,
+    hi: usize,
+) {
+    let mut pos = lo;
+    for &gi in children {
+        let g = &gates.gates[gi];
+        for s in &statements[pos..g.lo] {
+            dispatch_stmt_fast(s, mask_cache);
+        }
+        run_gate(ir, mask_cache, statements, gates, gi);
+        pos = g.hi;
+    }
+    for s in &statements[pos..hi] {
+        dispatch_stmt_fast(s, mask_cache);
+    }
+}
+
+fn run_gate(
+    ir: &Ir,
+    mask_cache: &mut MaskCache,
+    statements: &[Statement],
+    gates: &RtEventGates,
+    gi: usize,
+) {
+    let g = &gates.gates[gi];
+    let ff = ir.ff_values.as_ptr();
+    let comb = ir.comb_values.as_ptr() as *mut u8;
+    // SAFETY: the planner laid the gate's state and shadows inside the comb
+    // buffer and its spans inside the two buffers; the log's entries name FF
+    // bytes.  The log is re-borrowed after each run, which pushes to it.
+    let entry = unsafe { g.enter(ff, comb, &ir.write_log_buffer) };
+    match entry {
+        GateEntry::Plain => {
+            run_gate_children(ir, mask_cache, statements, gates, &g.children, g.lo, g.hi);
+        }
+        GateEntry::Skip => {
+            ir.event_gate_skips.set(ir.event_gate_skips.get() + 1);
+            if crate::ir::opt::event_gate::check() {
+                let (n0, w0) = (
+                    ir.write_log_buffer.narrow_count,
+                    ir.write_log_buffer.wide_count,
+                );
+                unsafe { g.snapshot_out_comb(comb) };
+                run_gate_children(ir, mask_cache, statements, gates, &g.children, g.lo, g.hi);
+                unsafe { g.check_skip(ff, comb, &ir.write_log_buffer, n0, w0) };
+            }
+        }
+        GateEntry::Run { n0, w0, checked } => {
+            run_gate_children(ir, mask_cache, statements, gates, &g.children, g.lo, g.hi);
+            unsafe { g.exit(ff, comb, &ir.write_log_buffer, n0, w0, checked) };
+        }
+    }
+}
+
 impl Simulator {
     pub fn new(ir: Ir, dump: Option<WaveDumper>) -> Self {
         let n_derived = ir.derived_clock_schedule.clocks.len();
@@ -423,6 +507,7 @@ impl Simulator {
             tb_dirty: Default::default(),
             last_event: None,
             last_event_stmts: std::ptr::null(),
+            last_event_gates: std::ptr::null(),
             last_whole_event: None,
             prev_derived_clock_values: vec![0u8; n_derived],
             derived_clock_high: vec![0u8; n_derived],
@@ -1662,6 +1747,10 @@ impl Simulator {
                 self.ir.whole_events.get(event).map(Arc::as_ptr);
             self.last_event = Some(event.clone());
             self.last_event_stmts = ptr;
+            self.last_event_gates = match self.ir.event_gates.get(event) {
+                Some(g) => g as *const _,
+                None => std::ptr::null(),
+            };
             self.last_whole_event = wptr;
             // An event absent from the classification must fail CLOSED: a
             // future path firing an unclassified event gets a settle, not a
@@ -1756,8 +1845,15 @@ impl Simulator {
         if !dispatched && !stmts_ptr.is_null() {
             // SAFETY: event_statements is never mutated after Ir construction.
             let statements: &Vec<Statement> = unsafe { &*stmts_ptr };
-            for x in statements {
-                dispatch_stmt_fast(x, &mut self.mask_cache);
+            if self.last_event_gates.is_null() {
+                for x in statements {
+                    dispatch_stmt_fast(x, &mut self.mask_cache);
+                }
+            } else {
+                // SAFETY: as `stmts_ptr`; `event_gates` is never mutated after
+                // `Ir` construction.
+                let gates: &RtEventGates = unsafe { &*self.last_event_gates };
+                run_event_gated(&self.ir, &mut self.mask_cache, statements, gates);
             }
         }
 
