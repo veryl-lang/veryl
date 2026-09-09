@@ -440,7 +440,7 @@ fn has_compatible_cycle_with_budget(
         return false;
     }
     let mut nodes: HashSet<_> = scc.iter().copied().collect();
-    if has_zero_dependency_cycle(graph, scc, &nodes, budget) {
+    if has_zero_dependency_cycle(graph, scc, budget) {
         return true;
     }
     // Prefer finite self-edge anchors: their translations go straight to the
@@ -677,6 +677,60 @@ fn domain_area(node: &GraphNode) -> usize {
 }
 
 fn has_zero_dependency_cycle(
+    graph: &DependencyGraph,
+    scc: &[NodeIndex],
+    budget: &mut SearchBudget,
+) -> bool {
+    // Identity paths can cycle only within an SCC of the identity-only
+    // subgraph. Starting at every node of an acyclic identity chain would
+    // spend quadratic work before the positional search reaches its shifts.
+    if !budget.spend(scc.len()) {
+        return false;
+    }
+    let mut identity = Graph::new();
+    let mapped = scc
+        .iter()
+        .map(|&node| (node, identity.add_node(node)))
+        .collect::<HashMap<_, _>>();
+    for &node in scc {
+        for edge in graph.edges(node) {
+            if !budget.spend(1) {
+                return false;
+            }
+            if dependency_is_identity(edge.weight().kind)
+                && let Some(&destination) = mapped.get(&edge.target())
+            {
+                identity.add_edge(mapped[&node], destination, ());
+            }
+        }
+    }
+    if !budget.spend(identity.node_count().saturating_add(identity.edge_count())) {
+        return false;
+    }
+    for component in kosaraju_scc(&identity) {
+        if component.len() == 1
+            && !identity
+                .edges(component[0])
+                .any(|edge| edge.target() == component[0])
+        {
+            continue;
+        }
+        let component = component
+            .into_iter()
+            .map(|node| identity[node])
+            .collect::<Vec<_>>();
+        let nodes = component.iter().copied().collect();
+        if has_zero_dependency_cycle_in_component(graph, &component, &nodes, budget) {
+            return true;
+        }
+        if budget.exhausted {
+            return false;
+        }
+    }
+    false
+}
+
+fn has_zero_dependency_cycle_in_component(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
     nodes: &HashSet<NodeIndex>,

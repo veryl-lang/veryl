@@ -929,6 +929,90 @@ fn zero_offset_cycle_is_not_hidden_by_parallel_shifted_paths() {
 }
 
 #[test]
+fn comb_loop_procedural_assignments_clip_before_reduction() {
+    // A whole-value read must see the stored intermediate, including bits
+    // discarded by a shift or a narrower assignment. Exercise both discarded
+    // and surviving feedback bits, also through a function summary.
+    for (width, expression, feedback, expected_loop) in [
+        (4, "a << 1", "{z, 3'b0}", false),
+        (4, "a << 1", "{3'b0, z}", true),
+        (4, "a >> 1", "{3'b0, z}", false),
+        (4, "a >> 1", "{z, 3'b0}", true),
+        (2, "a", "{z, 3'b0}", false),
+        (2, "a", "{3'b0, z}", true),
+    ] {
+        for through_function in [false, true] {
+            let procedure = if through_function {
+                format!(
+                    "function reduce(a: input logic<4>) -> logic {{
+                        var t: logic<{width}>;
+                        t = {expression};
+                        return |t;
+                    }}
+                    assign z = reduce(a);"
+                )
+            } else {
+                format!(
+                    "var t: logic<{width}>;
+                    always_comb {{ t = {expression}; z = |t; }}"
+                )
+            };
+            let code = format!(
+                "module Top (o: output logic) {{
+                    var a: logic<4>;
+                    var z: logic;
+                    {procedure}
+                    assign a = {feedback};
+                    assign o = z;
+                }}"
+            );
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .all(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{code}\n{errors:#?}"
+            );
+            assert_eq!(!errors.is_empty(), expected_loop, "{code}\n{errors:#?}");
+            assert!(comb_loop_analysis_is_complete(&code), "{code}");
+        }
+    }
+}
+
+#[test]
+fn comb_loop_positional_ring_keeps_budget_for_shifted_edges() {
+    for count in [100, 500, 1_000] {
+        let mut code = "module Top (o: output logic<2>) {\n".to_string();
+        for index in 0..count {
+            code.push_str(&format!("var v{index}: logic<2>;\n"));
+        }
+        code.push_str(&format!(
+            "assign v0 = v{} >> 1;\nassign v1 = v0 << 1;\n",
+            count - 1
+        ));
+        for index in 2..count {
+            code.push_str(&format!("assign v{index} = v{};\n", index - 1));
+        }
+        code.push_str("assign o = v0;\n}");
+
+        // The identity edges alone form a DAG, but v0[0] feeds v1[1] and
+        // returns through the right shift after traversing the entire ring.
+        crate::comb_loop_detect::reset_cycle_search_work();
+        assert_comb_loop(
+            "a positional ring retains its shifted feedback",
+            &code,
+            true,
+        );
+        let work = crate::comb_loop_detect::cycle_search_work();
+        assert!(
+            work < count * 100,
+            "identity-only paths must not consume quadratic work: count={count}, work={work}"
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
 fn comb_loop_independent_diamonds_merge_without_enumerating_branch_choices() {
     const COUNT: usize = 32;
     let transfers = (0..COUNT)

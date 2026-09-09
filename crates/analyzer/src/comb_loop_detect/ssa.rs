@@ -606,6 +606,18 @@ where
         version
     }
 
+    /// Export into a destination that already enforces `domain`. Other SSA
+    /// readers retain the original projection and its intermediate bounds.
+    pub(super) fn root_in_domain(&self, version: VersionId, domain: PositionDomain) -> VersionId {
+        match &self.versions[version] {
+            Version::Projected {
+                source,
+                domain: projected,
+            } if *projected == domain => *source,
+            _ => version,
+        }
+    }
+
     pub(super) fn replicated(
         &mut self,
         source: VersionId,

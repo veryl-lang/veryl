@@ -1284,7 +1284,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         destinations.sort_unstable();
         let roots = destinations
             .iter()
-            .map(|destination| self.read_key(*destination))
+            .map(|destination| {
+                let version = self.read_key(*destination);
+                // The circuit's destination node supplies these bounds.
+                // Keep the stored projection for reads within the procedure,
+                // but avoid a duplicate boundary on its final output edge.
+                self.key_span(*destination).map_or(version, |packed| {
+                    self.ssa
+                        .root_in_domain(version, position_domain(destination.1, packed))
+                })
+            })
             .collect::<Vec<_>>();
         let allowed = self.module_scope_keys().into_iter().collect::<HashSet<_>>();
         let graph = self.dependency_dag_for_nodes(&roots, allowed);
@@ -1745,6 +1754,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
+        // Later statements read this version without passing through the
+        // circuit graph's variable node. Keep its storage bounds in SSA so
+        // discarded bits cannot reach a subsequent whole-value read.
+        let version = if let Some(packed) = self.key_span(key) {
+            self.ssa.projected(version, position_domain(key.1, packed))
+        } else {
+            version
+        };
         if dynamic {
             let key = self.ssa_key(key);
             self.ssa.weak_bind(key, version);
