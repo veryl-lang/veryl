@@ -52,6 +52,8 @@ use ssa::{BranchId, DependencyDagNode, PathCondition};
 #[cfg(test)]
 pub(crate) use ssa::{reset_source_walk_visits, source_walk_visits};
 use summary::compute_module_summary;
+#[cfg(test)]
+pub(crate) use summary::{module_summary_work, reset_module_summary_work};
 
 use crate::AnalyzerError;
 use crate::HashMap;

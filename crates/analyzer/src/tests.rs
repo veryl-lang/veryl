@@ -36,6 +36,8 @@ mod constant_evaluation_tests;
 
 mod comb_loop_sparse_tests;
 
+mod comb_loop_summary_tests;
+
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();

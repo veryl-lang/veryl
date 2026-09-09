@@ -1,23 +1,55 @@
 //! Bottom-up finite module dependency-graph summaries.
 
-use super::graph::{DependencyGraph, strongly_connected_components};
-use super::model::{ModuleCombSummary, SummaryDependency, SummaryNode, SummaryNodeKind};
+use super::graph::DependencyGraph;
+use super::model::{
+    BitDependency, ModuleCombSummary, SummaryDependency, SummaryNode, SummaryNodeKind,
+};
 use crate::ir::{Module, VarKind};
 use crate::{HashMap, HashSet};
 use daggy::petgraph::Direction;
-use daggy::petgraph::graph::NodeIndex;
+use daggy::petgraph::algo::kosaraju_scc;
+use daggy::petgraph::graph::{Graph, NodeIndex};
 use daggy::petgraph::visit::EdgeRef;
 use std::collections::VecDeque;
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+thread_local! {
+    static INPUT_EDGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static WALKED_EDGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_module_summary_work() {
+    INPUT_EDGES.set(0);
+    WALKED_EDGES.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn module_summary_work() -> (usize, usize) {
+    (INPUT_EDGES.get(), WALKED_EDGES.get())
+}
 
 pub(super) fn compute_module_summary(
     module: &Module,
     graph: &DependencyGraph,
 ) -> ModuleCombSummary {
+    summarize_graph(graph, |node| node_kind(module, &graph[node]))
+}
+
+fn summarize_graph(
+    graph: &DependencyGraph,
+    kind: impl Fn(NodeIndex) -> SummaryNodeKind,
+) -> ModuleCombSummary {
+    #[cfg(test)]
+    INPUT_EDGES.set(INPUT_EDGES.get() + graph.edge_count());
     let sources = graph
         .node_indices()
         .filter(|&node| {
             matches!(
-                node_kind(module, &graph[node]),
+                kind(node),
                 SummaryNodeKind::Input | SummaryNodeKind::Interface
             )
         })
@@ -26,7 +58,7 @@ pub(super) fn compute_module_summary(
         .node_indices()
         .filter(|&node| {
             matches!(
-                node_kind(module, &graph[node]),
+                kind(node),
                 SummaryNodeKind::Output | SummaryNodeKind::Interface
             )
         })
@@ -34,40 +66,50 @@ pub(super) fn compute_module_summary(
 
     let forward = reachable(graph, sources, Direction::Outgoing);
     let backward = reachable(graph, destinations, Direction::Incoming);
-    let retained = graph
+    // Degree tests, cycle retention and contraction must all use this same
+    // induced graph. Walking the original graph can enter a discarded cycle
+    // or DAG and enumerate arbitrarily many positional paths there.
+    let mut retained = Graph::new();
+    let mapped = graph
         .node_indices()
         .filter(|node| forward.contains(node) && backward.contains(node))
-        .collect::<HashSet<_>>();
+        .map(|node| (node, retained.add_node((node, kind(node)))))
+        .collect::<HashMap<_, _>>();
+    for edge in graph.edge_references() {
+        if let (Some(&source), Some(&destination)) =
+            (mapped.get(&edge.source()), mapped.get(&edge.target()))
+        {
+            retained.add_edge(source, destination, edge.weight());
+        }
+    }
     let mut cyclic = HashSet::default();
-    for scc in strongly_connected_components(graph) {
+    for scc in kosaraju_scc(&retained) {
         if scc.len() > 1
             || scc
                 .first()
-                .is_some_and(|&node| graph.edges(node).any(|edge| edge.target() == node))
+                .is_some_and(|&node| retained.edges(node).any(|edge| edge.target() == node))
         {
             cyclic.extend(scc);
         }
     }
-    let kept = graph
+    let kept = retained
         .node_indices()
         .filter(|node| {
-            let incoming = graph
-                .edges_directed(*node, Direction::Incoming)
-                .filter(|edge| retained.contains(&edge.source()))
-                .count();
-            let outgoing = graph
-                .edges_directed(*node, Direction::Outgoing)
-                .filter(|edge| retained.contains(&edge.target()))
-                .count();
-            retained.contains(node)
-                && (node_kind(module, &graph[*node]) != SummaryNodeKind::Internal
-                    || cyclic.contains(node)
-                    || !graph[*node].domains.is_empty()
-                    // Collapse only a linear series node. Eliminating a
-                    // branch or join would enumerate path combinations and
-                    // can make a compact dependency DAG exponential.
-                    || incoming != 1
-                    || outgoing != 1)
+            let incoming = retained.edges_directed(*node, Direction::Incoming).count();
+            let outgoing = retained.edges_directed(*node, Direction::Outgoing).count();
+            let transparent = retained.edges(*node).next().is_some_and(|edge| {
+                edge.weight().kind == BitDependency::identity()
+                    && edge.weight().condition.is_unconditional()
+            });
+            retained[*node].1 != SummaryNodeKind::Internal
+                || cyclic.contains(node)
+                || !graph[retained[*node].0].domains.is_empty()
+                || incoming != 1
+                || outgoing != 1
+                // Keep dependency operations and guards as graph structure.
+                // In particular, accumulating independent guards along a
+                // chain would repeatedly copy a growing condition vector.
+                || !transparent
         })
         .collect::<Vec<_>>();
     let indices = kept
@@ -79,50 +121,46 @@ pub(super) fn compute_module_summary(
     let nodes = kept
         .iter()
         .map(|&node| SummaryNode {
-            region: graph[node].region,
-            domains: graph[node].domains.clone(),
-            kind: node_kind(module, &graph[node]),
+            region: graph[retained[node].0].region,
+            domains: graph[retained[node].0].domains.clone(),
+            kind: retained[node].1,
         })
         .collect();
     let mut edges = Vec::new();
+    #[cfg(test)]
+    let mut visited = HashSet::default();
+    // An omitted node is acyclic, has one incoming edge and has one
+    // unconditional identity edge leaving it. Thus these chains cannot fork,
+    // merge or cycle, and each retained edge is visited at most once in total.
+    // No offset closure, path-condition accumulation or fixed point is needed.
     for &source in &kept {
-        let mut reached = HashMap::default();
-        let mut queued = HashSet::default();
-        let mut queue = VecDeque::new();
-        for edge in graph.edges(source) {
-            enqueue_if_changed(
-                &mut reached,
-                &mut queued,
-                &mut queue,
-                (edge.target(), edge.weight().kind),
-                edge.weight().condition.clone(),
-            );
-        }
-        while let Some(state @ (node, dependency)) = queue.pop_front() {
-            queued.remove(&state);
-            let condition = reached[&state].clone();
-            if let Some(&destination) = indices.get(&node) {
-                edges.push(SummaryDependency {
-                    source: indices[&source],
-                    destination,
-                    kind: dependency,
-                    condition,
-                });
-                continue;
+        for edge in retained.edges(source) {
+            #[cfg(test)]
+            {
+                assert!(visited.insert(edge.id()), "summary chains must be disjoint");
+                WALKED_EDGES.set(WALKED_EDGES.get() + 1);
             }
-            for edge in graph.edges(node) {
-                let Some(condition) = condition.conjoin_if_compatible(&edge.weight().condition)
-                else {
-                    continue;
-                };
-                enqueue_if_changed(
-                    &mut reached,
-                    &mut queued,
-                    &mut queue,
-                    (edge.target(), dependency.compose(edge.weight().kind)),
-                    condition,
-                );
+            let mut node = edge.target();
+            while !indices.contains_key(&node) {
+                let next = retained
+                    .edges(node)
+                    .next()
+                    .expect("an omitted series node has one outgoing edge");
+                debug_assert_eq!(next.weight().kind, BitDependency::identity());
+                debug_assert!(next.weight().condition.is_unconditional());
+                #[cfg(test)]
+                {
+                    assert!(visited.insert(next.id()), "summary chains must be disjoint");
+                    WALKED_EDGES.set(WALKED_EDGES.get() + 1);
+                }
+                node = next.target();
             }
+            edges.push(SummaryDependency {
+                source: indices[&source],
+                destination: indices[&node],
+                kind: edge.weight().kind,
+                condition: edge.weight().condition.clone(),
+            });
         }
     }
     edges.sort_unstable_by_key(|edge| {
@@ -144,30 +182,6 @@ pub(super) fn compute_module_summary(
         nodes,
         edges,
         complete: true,
-    }
-}
-
-fn enqueue_if_changed(
-    reached: &mut HashMap<(NodeIndex, super::model::BitDependency), super::ssa::PathCondition>,
-    queued: &mut HashSet<(NodeIndex, super::model::BitDependency)>,
-    queue: &mut VecDeque<(NodeIndex, super::model::BitDependency)>,
-    state: (NodeIndex, super::model::BitDependency),
-    condition: super::ssa::PathCondition,
-) {
-    let changed = if let Some(existing) = reached.get_mut(&state) {
-        let merged = existing.disjoin(&condition);
-        if *existing == merged {
-            false
-        } else {
-            *existing = merged;
-            true
-        }
-    } else {
-        reached.insert(state, condition);
-        true
-    };
-    if changed && queued.insert(state) {
-        queue.push_back(state);
     }
 }
 
