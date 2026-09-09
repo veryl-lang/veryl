@@ -26350,6 +26350,159 @@ fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
     }
 }
 
+#[test]
+fn a_sliced_boundary_copy_is_cut_per_source_write() {
+    // Array-of-instances geometry: each `Core` drives element `bank` of the
+    // request array, so the de-aliased boundary copy is a SLICE of its
+    // destination.  Left whole, every bit of the bundle reads as depending on
+    // every other and the pair closes a ring -- `go` reaches `ack`, `ack`
+    // reaches `done`, `go` reads `done` -- that no bit takes: `done` comes
+    // from `arm`, and `arm` comes from a port.
+    //
+    // `pad` keeps `Core` over the DUT size floor (VERYL_DUT_REUSE_MIN_BYTES),
+    // and `ShallowTop` shares it so the boundary de-aliases at all.
+    let code = r#"
+    package slice_pkg {
+        struct Req {
+            go : logic      ,
+            arm: logic      ,
+            pad: logic<2048>,
+        }
+    }
+
+    module Core (
+        rsp_i: input  logic<2>      ,
+        en   : input  logic         ,
+        req_o: output slice_pkg::Req,
+    ) {
+        assign req_o = slice_pkg::Req'{
+            go : ~rsp_i[0],
+            arm: en       ,
+            pad: 2048'd0  ,
+        };
+    }
+
+    module Macro (
+        req_i: input  slice_pkg::Req<2>,
+        rsp_o: output logic<2>      [2],
+    ) {
+        always_comb {
+            for i in 0..2 {
+                rsp_o[i][1] = req_i[i].go;
+                rsp_o[i][0] = req_i[i].arm;
+            }
+        }
+    }
+
+    module DeepTop (
+        en: input  logic,
+        q : output logic,
+    ) {
+        var req: slice_pkg::Req<2>;
+        var rsp: logic<2>      [2];
+
+        for bank in 0..2 :g_bank {
+            inst u: Core (
+                rsp_i: rsp[bank],
+                en              ,
+                req_o: req[bank],
+            );
+        }
+        inst m: Macro (
+            req_i: req,
+            rsp_o: rsp,
+        );
+
+        assign q = rsp[0][1] ^ rsp[1][0];
+    }
+
+    module ShallowTop (
+        rsp_i: input  logic<2>      ,
+        en   : input  logic         ,
+        req_o: output slice_pkg::Req,
+    ) {
+        inst u: Core (
+            rsp_i,
+            en   ,
+            req_o,
+        );
+    }
+    "#;
+
+    let air_ir = analyze_air(code);
+    let config = Config {
+        dut_reuse: true,
+        ..Default::default()
+    };
+    crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
+
+    let ir = build_ir(&air_ir, "DeepTop".into(), &config).unwrap();
+    assert_eq!(
+        ir.required_comb_passes, 1,
+        "a sliced boundary copy carries bits, not bundles"
+    );
+}
+
+#[test]
+fn a_bundle_mux_is_cut_per_source_write() {
+    // `o = s ? a : b` carries bit k of the arms to bit k of the result and
+    // nothing else, so the select does not make one field depend on another.
+    // Read as a single node it does: `a.down` reads `o.up`, and the pair then
+    // looks like a ring the design does not have -- `o.down` comes from
+    // `a.down`, `o.up` from `a.up`, and `a.up` from a port.
+    let code = r#"
+    module Top (
+        s : input  logic,
+        en: input  logic,
+        q : output logic,
+    ) {
+        struct Bus {
+            up  : logic    ,
+            mid : logic<32>,
+            down: logic    ,
+        }
+
+        var a: Bus;
+        var b: Bus;
+        var o: Bus;
+
+        assign o = if s ? a : b;
+
+        assign a.up   = en;
+        assign a.mid  = 32'd0;
+        assign a.down = o.up;
+        assign b.up   = 1'b0;
+        assign b.mid  = 32'd0;
+        assign b.down = 1'b0;
+        assign q      = o.down;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a bundle mux carries bits, not bundles (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("s", Value::new(1, 1, false));
+        sim.set("en", Value::new(1, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // s picks `a`: o.up = a.up = en = 1, a.down = o.up = 1, o.down = 1.
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
 /// A DUT shared across tests de-aliases wherever it sits, including under a
 /// per-test wrapper no other top instantiates.  The boundary copy that
 /// introduces is cut per written range, so the packed struct crossing it closes

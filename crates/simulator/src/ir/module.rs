@@ -2814,7 +2814,7 @@ type SortOutcome = Result<(Vec<ProtoStatement>, Option<usize>), (Vec<ProtoStatem
 /// Sort `stmts`, then verify no cycle survives a bit- and branch-aware
 /// reading of the result.
 fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> SortOutcome {
-    let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, blocks);
+    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, blocks);
     // Verify no genuine combinational loop remains.  One `VarOffset` is a
     // whole struct and a conditional's reads are the union over its
     // branches, so key by bits AND by per-branch piece; `sorted` still runs.
@@ -2927,6 +2927,17 @@ fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> Sort
         }
     }
     if cnt == n {
+        // The sort refused to linearize, so `sorted` is the UNSORTED input and
+        // every reader that precedes its writer costs a settle pass.  The pass
+        // count alone does not distinguish that from a design that really has
+        // a loop.
+        if fell_back {
+            log::warn!(
+                "no cycle survives a bit-aware reading of the order, but the sort \
+                 could not linearize it: the statements run in source order and \
+                 settle in several passes"
+            );
+        }
         return Ok((sorted, passes_hint));
     }
     // `deg > 0` includes the cycle's downstream cone; isolate just the
@@ -3018,25 +3029,29 @@ fn split_copies_by_source_writes(
     }
 }
 
-/// Every variable a bit-parallel expression reads.  A leaf must be the WHOLE
-/// variable, or its cuts land in a different coordinate space from the
-/// destination's.
-fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<VarOffset>) -> bool {
+/// Every variable a bit-parallel expression reads, with where bit 0 of the
+/// value sits in that variable: a leaf may be a SLICE, and its cuts then need
+/// translating into the expression's coordinates before they can be used.
+/// Reading the same `base` [`ProtoExpression::bit_parallel_window`] uses keeps
+/// the two in step.
+fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<(VarOffset, usize)>) -> bool {
     let width = expr.width();
     match expr {
         ProtoExpression::Variable {
             var_offset,
-            select: None,
+            select,
             dynamic_select: None,
             width: w,
             var_full_width,
             ..
         } => {
-            let ok = w == var_full_width;
-            if ok {
-                out.push(*var_offset);
-            }
-            ok
+            let base = match select {
+                None if w == var_full_width => 0,
+                Some((shi, slo)) if shi >= slo && *w == shi - slo + 1 => *slo,
+                _ => return false,
+            };
+            out.push((*var_offset, base));
+            true
         }
         ProtoExpression::Unary {
             op: Op::BitNot, x, ..
@@ -3052,13 +3067,31 @@ fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<VarOffset>) -> boo
                 && bit_parallel_sources(x, out)
                 && bit_parallel_sources(y, out)
         }
+        // The condition is scalar: every window reads it whole, so it offers no
+        // cut and imposes none.  Only the arms carry bits across.
+        ProtoExpression::Ternary {
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            true_expr.width() == width
+                && false_expr.width() == width
+                && bit_parallel_sources(true_expr, out)
+                && bit_parallel_sources(false_expr, out)
+        }
         _ => false,
     }
 }
 
-/// One statement, split per source write when it copies a whole variable:
-/// the parts tile the destination and each names the matching window of every
-/// operand, so the value is identical.
+/// One statement, split per source write when it copies bit-parallel data:
+/// the parts tile the destination window and each names the matching window of
+/// every operand, so the value is identical.
+///
+/// The window need not be the whole variable on either side.  An instance in a
+/// generate loop drives one ELEMENT of a bundle array, so its boundary copy is
+/// a slice; refusing those left every bit of one bundle reading as if it
+/// depended on every bit of the other, which closes a ring through a
+/// request/response pair no wire connects.
 fn split_one_copy(
     stmt: ProtoStatement,
     bounds: &HashMap<VarOffset, Option<Vec<usize>>>,
@@ -3069,28 +3102,49 @@ fn split_one_copy(
         out.push(stmt);
         return;
     };
-    if a.select.is_some()
-        || a.dynamic_select.is_some()
-        || a.rhs_select.is_some()
-        || a.expr.width() != a.dst_width
-    {
+    // Where bit 0 of the value sits in the destination, and how wide it is.
+    let (dst_base, width) = match a.select {
+        None => (0, a.dst_width),
+        Some((hi, lo)) if hi >= lo => (lo, hi - lo + 1),
+        Some(_) => {
+            out.push(ProtoStatement::Assign(a));
+            return;
+        }
+    };
+    if a.dynamic_select.is_some() || a.rhs_select.is_some() || a.expr.width() != width {
         out.push(ProtoStatement::Assign(a));
         return;
     }
-    let mut sources: Vec<VarOffset> = Vec::new();
+    let mut sources: Vec<(VarOffset, usize)> = Vec::new();
     if !bit_parallel_sources(&a.expr, &mut sources) {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    // A copy that reads its own destination carries no bits between two
+    // variables, so there is no weld to break.  Splitting one buys nothing and
+    // costs a writer per part: the carry-over a version split leaves behind
+    // covers a whole bundle, and cutting it per field turns one writer of that
+    // variable into dozens.
+    if sources.iter().any(|(src, _)| *src == a.dst) {
         out.push(ProtoStatement::Assign(a));
         return;
     }
     // A source written with unknown bits contributes no cut, but it does not
     // stop the others from cutting: each part still reads it whole, so the
     // dependency it carries is unchanged.
-    let mut cuts: Vec<usize> = vec![0, a.dst_width];
+    let mut cuts: Vec<usize> = vec![0, width];
     let mut any_known = false;
-    for src in &sources {
+    for (src, base) in &sources {
         if let Some(Some(known)) = bounds.get(src) {
             any_known = true;
-            cuts.extend(known.iter().copied().filter(|b| *b <= a.dst_width));
+            // Boundaries are in the source variable's coordinates; a boundary
+            // outside the window read is not a cut of this copy.
+            cuts.extend(
+                known
+                    .iter()
+                    .filter_map(|b| b.checked_sub(*base))
+                    .filter(|b| *b <= width),
+            );
         }
     }
     cuts.sort_unstable();
@@ -3111,7 +3165,7 @@ fn split_one_copy(
         parts.push(ProtoStatement::Assign(ProtoAssignStatement {
             dst: a.dst,
             dst_width: a.dst_width,
-            select: Some((hi, lo)),
+            select: Some((dst_base + hi, dst_base + lo)),
             dynamic_select: None,
             rhs_select: None,
             expr,

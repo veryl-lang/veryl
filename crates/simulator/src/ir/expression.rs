@@ -515,6 +515,26 @@ impl ProtoExpression {
                 width: out_width,
                 expr_context: ctx(expr_context.signed),
             }),
+            // A select is scalar, so it picks the same arm for every bit: each
+            // window keeps the whole condition and narrows only the arms.  The
+            // condition is then evaluated once per window -- `max_parts` at the
+            // caller is what bounds that, and it is what a bundle mux costs to
+            // stop carrying every bit into every other.
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                expr_context,
+                ..
+            } if true_expr.width() == width && false_expr.width() == width => {
+                Some(ProtoExpression::Ternary {
+                    cond: cond.clone(),
+                    true_expr: Box::new(true_expr.bit_parallel_window(hi, lo)?),
+                    false_expr: Box::new(false_expr.bit_parallel_window(hi, lo)?),
+                    width: out_width,
+                    expr_context: ctx(expr_context.signed),
+                })
+            }
             _ => None,
         }
     }
