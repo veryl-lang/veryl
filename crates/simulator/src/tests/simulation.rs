@@ -533,6 +533,93 @@ fn ff_to_ff() {
 }
 
 #[test]
+fn ff_read_as_index_from_other_block() {
+    let code = r#"
+    module Top (
+        clk : input  clock,
+        rst : input  reset,
+        en  : input  logic,
+        addr: output logic<2>,
+        sel : output logic<2>,
+        q   : output logic<8>,
+        r   : output logic<8>,
+    ) {
+        var mem : logic<8> [4];
+        var word: logic<32>;
+        assign mem[0] = 8'h10;
+        assign mem[1] = 8'h11;
+        assign mem[2] = 8'h12;
+        assign mem[3] = 8'h13;
+        assign word   = 32'h44332211;
+
+        always_ff {
+            if_reset {
+                addr = 0;
+                sel  = 0;
+            } else if en {
+                addr = addr + 1;
+                sel  = sel + 1;
+            }
+        }
+        always_ff {
+            if en {
+                q = mem[addr];
+                r = word[sel * 8+:8];
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.set("en", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+        sim.set("en", Value::new(1, 1, false));
+
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("addr").unwrap(),
+            Value::new(1, 2, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x10, 8, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0x11, 8, false),
+            "config={config:?}"
+        );
+
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("addr").unwrap(),
+            Value::new(2, 2, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0x11, 8, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0x22, 8, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn ff_statement_after_if_reset() {
     // Regression: statements placed after the `if_reset` block in an always_ff
     // must still execute. They previously got dropped by the simulator IR
