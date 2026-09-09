@@ -345,8 +345,9 @@ const FUNCTION_SUMMARY_WORK: usize = 100_000;
 const PROCEDURE_IMPORT_WORK: usize = 100_000;
 
 // Early returns and breaks retain every preceding guard prefix during SSA
-// evaluation, before graph-export budgets can apply. Charge those copies at
-// construction time and abandon the affected procedure if they exceed this.
+// evaluation; source queries can accumulate new prefixes while walking shared
+// DAGs. Charge both before allocation and abandon the affected procedure if
+// their combined work exceeds this budget.
 const PROCEDURE_GUARD_WORK: usize = 100_000;
 
 #[cfg(test)]
@@ -1216,9 +1217,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return Vec::new();
         }
         let value = self.ssa.definition(versions);
-        let mut sources = self
-            .ssa
-            .root_source_keys_guarded(value)
+        let Some(sources) = self
+            .guard_work
+            .as_mut()
+            .and_then(|work| self.ssa.try_root_source_keys_guarded(value, work))
+        else {
+            self.exhaust_work();
+            return Vec::new();
+        };
+        let mut sources = sources
             .into_iter()
             .filter_map(|(source, condition)| {
                 source.call_frame.is_none().then_some(RegionSource {
@@ -4162,7 +4169,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     .projected(version, position_domain(requested_array, requested_packed)),
             ];
         }
-        let sources = self.ssa.root_source_relations_guarded(version);
+        let Some(sources) = self
+            .guard_work
+            .as_mut()
+            .and_then(|work| self.ssa.try_root_source_relations_guarded(version, work))
+        else {
+            self.exhaust_work();
+            return Vec::new();
+        };
         if sources.is_empty() {
             return vec![version];
         }

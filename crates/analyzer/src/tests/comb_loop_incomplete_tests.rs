@@ -2,6 +2,63 @@
 use super::*;
 
 #[test]
+fn instance_source_guard_limit_preserves_independent_cycles() {
+    for selector in [false, true] {
+        for stages in [4, 64] {
+            let ports = if selector {
+                "i: i, o: o[gate(flags, i)]"
+            } else {
+                "i: gate(flags, i), o: o"
+            };
+            let width = if selector { 2 } else { 1 };
+            let code = format!(
+                "module Child (i: input logic, o: output logic) {{ assign o = i; }}
+                 module Top (flags: input logic<{stages}>, i: input logic,
+                             o: output logic<{width}>, independent: output logic) {{
+                    function gate (s: input logic<{stages}>, x: input logic) -> logic {{
+                        var v: logic;
+                        v = x;
+                        for index in 0..{stages} {{
+                            if s[index] {{ v = !v; }} else {{ v = 0; }}
+                        }}
+                        return v;
+                    }}
+                    inst child: Child ({ports});
+                    assign independent = independent;
+                 }}"
+            );
+            // Each assignment has only one guard, so construction fits in
+            // either case. Walking back from the result accumulates a growing
+            // prefix and must share the guard budget with its caller.
+            crate::comb_loop_detect::with_procedure_guard_limit(1024, || {
+                let case = format!("selector={selector}, stages={stages}");
+                assert_eq!(comb_loop_analysis_is_complete(&code), stages == 4, "{case}");
+                let errors = analyze(&code);
+                assert!(
+                    errors.iter().all(|error| match error {
+                        AnalyzerError::CombinationalLoop { .. } => true,
+                        AnalyzerError::UnassignVariable { identifier, .. } =>
+                            identifier == "independent",
+                        _ => false,
+                    }),
+                    "{case}: {errors:?}"
+                );
+                let loops = errors
+                    .iter()
+                    .filter_map(|error| match error {
+                        AnalyzerError::CombinationalLoop { identifier, .. } => {
+                            Some(identifier.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(loops, ["independent"], "{case}: {errors:?}");
+            });
+        }
+    }
+}
+
+#[test]
 fn nested_runtime_loop_copy_limit_preserves_independent_cycles() {
     for imported in [false, true] {
         for kind in ["block", "overwritten", "function"] {

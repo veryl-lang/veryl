@@ -875,39 +875,66 @@ where
         sources
     }
 
+    #[cfg(test)]
     pub(super) fn root_source_relations_guarded(
         &self,
         version: VersionId,
     ) -> Vec<(K, PositionRelation, PathCondition)> {
-        self.root_source_relations_guarded_cached(version, &mut SourceCache::default())
+        let mut work = usize::MAX;
+        self.try_root_source_relations_guarded(version, &mut work)
+            .expect("unlimited source query")
+    }
+
+    pub(super) fn try_root_source_relations_guarded(
+        &self,
+        version: VersionId,
+        work: &mut usize,
+    ) -> Option<Vec<(K, PositionRelation, PathCondition)>> {
+        self.try_root_source_relations_guarded_cached(version, &mut SourceCache::default(), work)
+    }
+
+    #[cfg(test)]
+    pub(super) fn root_source_keys_guarded(&self, version: VersionId) -> Vec<(K, PathCondition)> {
+        let mut work = usize::MAX;
+        self.try_root_source_keys_guarded(version, &mut work)
+            .expect("unlimited source query")
     }
 
     /// Whole-value reads need source identities and guards, not every possible
     /// sum of shifts through an imported DAG. Forget positions before walking.
-    pub(super) fn root_source_keys_guarded(&self, version: VersionId) -> Vec<(K, PathCondition)> {
+    pub(super) fn try_root_source_keys_guarded(
+        &self,
+        version: VersionId,
+        work: &mut usize,
+    ) -> Option<Vec<(K, PathCondition)>> {
         let mut cache = SourceCache {
             ignore_position: true,
             ..SourceCache::default()
         };
-        self.root_source_relations_guarded_cached(version, &mut cache)
-            .into_iter()
-            .map(|(key, _, condition)| (key, condition))
-            .collect()
+        Some(
+            self.try_root_source_relations_guarded_cached(version, &mut cache, work)?
+                .into_iter()
+                .map(|(key, _, condition)| (key, condition))
+                .collect(),
+        )
     }
 
-    pub(super) fn root_source_relations_guarded_cached(
+    fn try_root_source_relations_guarded_cached(
         &self,
         version: VersionId,
         cache: &mut SourceCache<K>,
-    ) -> Vec<(K, PositionRelation, PathCondition)> {
+        work: &mut usize,
+    ) -> Option<Vec<(K, PositionRelation, PathCondition)>> {
         // SSA versions form a DAG. Summarize each (version, relation) once and
         // combine branch alternatives at the join instead of re-walking the
         // same suffix for every feasible path.
-        let sources = self.source_summary(version, false, cache);
-        sources
-            .iter()
-            .map(|(&(source, relation), condition)| (source, relation, condition.clone()))
-            .collect()
+        let sources = self.source_summary(version, false, cache, work)?;
+        Some(
+            sources
+                .iter()
+                .map(|(&(source, relation), condition)| (source, relation, condition.clone()))
+                .collect(),
+        )
     }
 
     #[cfg(test)]
@@ -1129,10 +1156,11 @@ where
         version: VersionId,
         include_entry: bool,
         cache: &mut SourceCache<K>,
-    ) -> Rc<SourceMap<K>> {
+        work: &mut usize,
+    ) -> Option<Rc<SourceMap<K>>> {
         let cache_key = (version, include_entry);
         if let Some(sources) = cache.summaries.get(&cache_key) {
-            return sources.clone();
+            return Some(sources.clone());
         }
 
         let mut sources = HashMap::default();
@@ -1157,13 +1185,21 @@ where
             if current != version
                 && let Some(cached) = cache.summaries.get(&(current, include_entry))
             {
-                merge_source_summaries(&mut sources, cached, Some(&condition), Some(relation));
+                merge_source_summaries(
+                    &mut sources,
+                    cached,
+                    Some(&condition),
+                    Some(relation),
+                    work,
+                )?;
                 continue;
             }
 
             let mut enqueue = |next: (VersionId, bool, PositionRelation),
-                               condition: PathCondition| {
+                               condition: PathCondition,
+                               work: &mut usize| {
                 let changed = if let Some(existing) = reached.get_mut(&next) {
+                    reserve_source_guard_work(work, [&*existing, &condition])?;
                     let widened = existing.disjoin(&condition);
                     if *existing == widened {
                         false
@@ -1178,37 +1214,44 @@ where
                 if changed && queued.insert(next) {
                     queue.push_back(next);
                 }
+                Some(())
             };
 
             match &self.versions[current] {
                 Version::Entry(key) => {
                     if include_entry {
-                        merge_source(&mut sources, (*key, relation), condition);
+                        merge_source(&mut sources, (*key, relation), condition, work)?;
                     }
                 }
                 Version::Definition {
                     sources,
                     condition: definition_condition,
                 } => {
+                    reserve_source_guard_work(work, [&condition, definition_condition])?;
                     let Some(condition) = condition.conjoin_if_compatible(definition_condition)
                     else {
                         continue;
                     };
                     for (input, offset) in sources {
-                        enqueue((*input, true, relation.compose(*offset)), condition.clone());
+                        enqueue(
+                            (*input, true, relation.compose(*offset)),
+                            condition.clone(),
+                            work,
+                        )?;
                     }
                 }
                 Version::Phi(inputs) => {
                     for input in inputs {
-                        enqueue((*input, include_entry, relation), condition.clone());
+                        enqueue((*input, include_entry, relation), condition.clone(), work)?;
                     }
                 }
                 Version::Guarded {
                     source,
                     condition: guard,
                 } => {
+                    reserve_source_guard_work(work, [&condition, guard])?;
                     if let Some(condition) = condition.conjoin_if_compatible(guard) {
-                        enqueue((*source, include_entry, relation), condition);
+                        enqueue((*source, include_entry, relation), condition, work)?;
                     }
                 }
                 Version::Imported {
@@ -1218,9 +1261,11 @@ where
                     branches,
                 } => {
                     for (key, imported_relation, imported_condition) in
-                        dependency_dag_external_sources(graph, *root, initial_relation)
+                        dependency_dag_external_sources(graph, *root, initial_relation, work)?
                     {
+                        reserve_source_guard_work(work, [&imported_condition])?;
                         let imported_condition = imported_condition.remapped(branches);
+                        reserve_source_guard_work(work, [&condition, &imported_condition])?;
                         let Some(condition) = condition.conjoin_if_compatible(&imported_condition)
                         else {
                             continue;
@@ -1235,12 +1280,13 @@ where
                                         .compose(imported_relation),
                                 ),
                                 condition.clone(),
-                            );
+                                work,
+                            )?;
                         }
                     }
                 }
                 Version::Projected { source, .. } => {
-                    enqueue((*source, true, relation), condition);
+                    enqueue((*source, true, relation), condition, work)?;
                 }
                 Version::Replicated { source, .. } => {
                     // Scalar source queries cannot represent periodic positions.
@@ -1255,13 +1301,14 @@ where
                             },
                         ),
                         condition,
-                    );
+                        work,
+                    )?;
                 }
             }
         }
         let sources = Rc::new(sources);
         cache.summaries.insert(cache_key, sources.clone());
-        sources
+        Some(sources)
     }
 }
 
@@ -1269,12 +1316,13 @@ fn dependency_dag_external_sources<K>(
     graph: &DependencyDag<K>,
     root: Option<usize>,
     initial_relation: PositionRelation,
-) -> Vec<(K, PositionRelation, PathCondition)>
+    work: &mut usize,
+) -> Option<Vec<(K, PositionRelation, PathCondition)>>
 where
     K: Copy + Eq + Hash,
 {
     let Some(root) = root else {
-        return Vec::new();
+        return Some(Vec::new());
     };
     let mut incoming: HashMap<usize, Vec<&DependencyDagEdge>> = HashMap::default();
     for edge in &graph.edges {
@@ -1292,7 +1340,7 @@ where
         queued.remove(&state);
         let condition = reached[&state].clone();
         if let DependencyDagNode::External(key) = graph.nodes[node] {
-            merge_source(&mut sources, (key, relation), condition);
+            merge_source(&mut sources, (key, relation), condition, work)?;
             continue;
         }
         let relation = if matches!(graph.nodes[node], DependencyDagNode::Replicated { .. }) {
@@ -1304,11 +1352,13 @@ where
             relation
         };
         for edge in incoming.get(&node).into_iter().flatten() {
+            reserve_source_guard_work(work, [&condition, &edge.condition])?;
             let Some(next_condition) = condition.conjoin_if_compatible(&edge.condition) else {
                 continue;
             };
             let next = (edge.source, relation.compose(edge.relation));
             let changed = if let Some(existing) = reached.get_mut(&next) {
+                reserve_source_guard_work(work, [&*existing, &next_condition])?;
                 let merged = existing.disjoin(&next_condition);
                 if *existing == merged {
                     false
@@ -1325,23 +1375,49 @@ where
             }
         }
     }
-    sources
+    Some(
+        sources
+            .into_iter()
+            .map(|((key, relation), condition)| (key, relation, condition))
+            .collect(),
+    )
+}
+
+/// Source walks can accumulate a quadratic number of guard constraints from
+/// a linear DAG. Charge each allocating operation before combining/remapping
+/// conditions, including fragmented arm ranges. Rc clones and unguarded
+/// traversals do not allocate guard payloads and need no additional budget.
+fn reserve_source_guard_work<'a>(
+    work: &mut usize,
+    conditions: impl IntoIterator<Item = &'a PathCondition>,
+) -> Option<()> {
+    let cost = conditions
         .into_iter()
-        .map(|((key, relation), condition)| (key, relation, condition))
-        .collect()
+        .flat_map(|condition| condition.constraints.iter())
+        .fold(0usize, |cost, constraint| {
+            cost.saturating_add(1)
+                .saturating_add(constraint.allowed.ranges.len())
+        });
+    *work = work.checked_sub(cost)?;
+    Some(())
 }
 
 fn merge_source<K>(
     destination: &mut SourceMap<K>,
     key: (K, PositionRelation),
     condition: PathCondition,
-) where
+    work: &mut usize,
+) -> Option<()>
+where
     K: Copy + Eq + Hash,
 {
-    destination
-        .entry(key)
-        .and_modify(|existing| *existing = existing.disjoin(&condition))
-        .or_insert(condition);
+    if let Some(existing) = destination.get_mut(&key) {
+        reserve_source_guard_work(work, [&*existing, &condition])?;
+        *existing = existing.disjoin(&condition);
+    } else {
+        destination.insert(key, condition);
+    }
+    Some(())
 }
 
 fn merge_source_summaries<K>(
@@ -1349,7 +1425,9 @@ fn merge_source_summaries<K>(
     sources: &SourceMap<K>,
     guard: Option<&PathCondition>,
     prefix: Option<PositionRelation>,
-) where
+    work: &mut usize,
+) -> Option<()>
+where
     K: Copy + Eq + Hash,
 {
     for (&(source, relation), condition) in sources {
@@ -1358,6 +1436,7 @@ fn merge_source_summaries<K>(
             prefix.map_or(relation, |prefix| prefix.compose(relation)),
         );
         let condition = if let Some(guard) = guard {
+            reserve_source_guard_work(work, [condition, guard])?;
             let Some(condition) = condition.conjoin_if_compatible(guard) else {
                 continue;
             };
@@ -1365,13 +1444,79 @@ fn merge_source_summaries<K>(
         } else {
             condition.clone()
         };
-        merge_source(destination, key, condition);
+        merge_source(destination, key, condition, work)?;
     }
+    Some(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guarded_source_queries_do_not_cache_partial_results() {
+        for imported in [false, true] {
+            let mut ssa = SsaStore::default();
+            let mut value = ssa.read("input");
+            let mut expected = PathCondition::default();
+            for local in 0..64 {
+                let branch = BranchId::new(1, local, 2);
+                let condition = PathCondition::default().with_choice(branch, 0);
+                expected = expected.with_choice(branch, 0);
+                value = ssa.related_definition_guarded(
+                    vec![(value, PositionRelation::default())],
+                    &condition,
+                );
+            }
+            let other = ssa.read("other");
+            let root = ssa.related_definition(vec![
+                (value, PositionRelation::default()),
+                (other, PositionRelation::default()),
+            ]);
+            let (ssa, root) = if imported {
+                let graph = Rc::new(ssa.dependency_dag(&[root], |_| true));
+                let mut caller = SsaStore::default();
+                let bindings = ["input", "other"]
+                    .into_iter()
+                    .map(|key| (key, vec![(caller.read(key), PositionRelation::default())]))
+                    .collect::<HashMap<_, _>>();
+                let root = caller.imported(
+                    Rc::clone(&graph),
+                    graph.roots[0],
+                    Rc::new(bindings),
+                    Rc::default(),
+                );
+                (caller, root)
+            } else {
+                (ssa, root)
+            };
+            let mut cache = SourceCache::default();
+            let mut work = 1024;
+            assert!(
+                ssa.try_root_source_relations_guarded_cached(root, &mut cache, &mut work)
+                    .is_none(),
+                "imported={imported}"
+            );
+            assert!(cache.summaries.is_empty(), "discard partial source results");
+
+            let mut work = 100_000;
+            let mut sources = ssa
+                .try_root_source_relations_guarded_cached(root, &mut cache, &mut work)
+                .expect("a complete query preserves its guards and positions");
+            sources.sort_unstable_by_key(|(key, _, _)| *key);
+            assert_eq!(
+                sources,
+                [
+                    ("input", PositionRelation::default(), expected),
+                    (
+                        "other",
+                        PositionRelation::default(),
+                        PathCondition::default()
+                    ),
+                ]
+            );
+        }
+    }
 
     #[test]
     fn multi_output_invocation_imports_shared_predecessors_once() {
@@ -1413,11 +1558,14 @@ mod tests {
             assert_eq!(exported.nodes.len(), graph.nodes.len());
             assert_eq!(exported.edges.len(), graph.edges.len());
             for index in [0, size / 2, size - 1] {
+                let mut work = 0;
                 let sources = dependency_dag_external_sources(
                     &exported,
                     exported.roots[index],
                     PositionRelation::whole(),
+                    &mut work,
                 )
+                .expect("unguarded source walks need no guard budget")
                 .into_iter()
                 .map(|(key, _, _)| key)
                 .collect::<HashSet<_>>();
@@ -1790,7 +1938,11 @@ mod tests {
         for _ in 0..100_000 {
             version = ssa.definition(vec![version]);
         }
-        assert_eq!(ssa.root_sources(version), ["source"].into_iter().collect());
+        let mut work = 0;
+        assert_eq!(
+            ssa.try_root_source_keys_guarded(version, &mut work),
+            Some(vec![("source", PathCondition::default())])
+        );
     }
     #[test]
     fn exact_condition_union_preserves_correlations() {
