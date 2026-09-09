@@ -23933,10 +23933,12 @@ fn event_gate_skips_an_idle_subtree_and_follows_its_inputs() {
                 busy = busy.wrapping_add(1);
                 check(&mut sim, &r, busy, &format!("phase {phase} cycle {cycle}"));
             }
-            // Only a compiled event runs the gates; the other configs, and
-            // a host where the artifact does not load, only plan them.
-            let gates_run = !sim.ir.event_gate_flags.is_empty()
-                && sim.ir.whole_event_dispatch[0].load(std::sync::atomic::Ordering::Relaxed) > 0;
+            // A compiled event runs the gates, and so does the 2-state
+            // per-statement path; 4-state only plans them.
+            let whole_ran =
+                sim.ir.whole_event_dispatch[0].load(std::sync::atomic::Ordering::Relaxed) > 0;
+            let gates_run =
+                !sim.ir.event_gate_flags.is_empty() && (whole_ran || !config.use_4state);
             if gates_run && !en {
                 let idle = sim
                     .ir
@@ -23944,6 +23946,10 @@ fn event_gate_skips_an_idle_subtree_and_follows_its_inputs() {
                     .iter()
                     .any(|&off| sim.ir.comb_values[off as usize] == 1);
                 assert!(idle, "phase {phase} left no gate idle, {config:?}");
+                if !whole_ran && cycles > 2 {
+                    let skips = sim.ir.event_gate_skips.get();
+                    assert!(skips > 0, "phase {phase} skipped nothing, {config:?}");
+                }
             }
         }
         // A reset fire reaches an idle gate too.

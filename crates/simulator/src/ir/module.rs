@@ -54,6 +54,9 @@ pub struct Module {
     pub module_variables: ModuleVariables,
 
     pub event_statements: HashMap<Event, Vec<Statement>>,
+    /// The idle-subtree gates over each event's statements (`event_gate`),
+    /// for the per-statement path.
+    pub event_gates: HashMap<Event, crate::ir::opt::event_gate::RtEventGates>,
     /// Unified comb statements: all port connections, child comb, and internal
     /// comb combined into a single dependency-sorted list.
     pub comb_statements: Vec<Statement>,
@@ -151,6 +154,8 @@ pub struct ProtoModule {
     pub module_variable_meta: ModuleVariableMeta,
 
     pub event_statements: HashMap<Event, ProtoStatements>,
+    /// See `Module::event_gates`; the gates with the block ranges they chunk to.
+    pub event_gates: HashMap<Event, Vec<crate::ir::opt::event_gate::ChunkedGate>>,
     /// Unified comb statements: all port connections, child comb, and internal
     /// comb combined into a single dependency-sorted list.
     pub comb_statements: ProtoStatements,
@@ -370,12 +375,34 @@ impl ProtoModule {
         let ff_len = self.ff_bytes;
         let comb_len = self.comb_bytes;
 
+        let mut event_gates: HashMap<Event, crate::ir::opt::event_gate::RtEventGates> =
+            HashMap::default();
         let event_statements = self
             .event_statements
             .iter()
             .map(|(event, stmts)| {
-                let s = stmts.to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
-                let s = batch_compiled_statements(s);
+                let s = match self.event_gates.get(event) {
+                    Some(chunked) if !chunked.is_empty() => {
+                        let (s, gates) = lower_gated_event(
+                            stmts,
+                            chunked,
+                            ff_ptr,
+                            ff_len,
+                            comb_ptr,
+                            comb_len,
+                            self.use_4state,
+                        );
+                        event_gates.insert(event.clone(), gates);
+                        s
+                    }
+                    _ => batch_compiled_statements(stmts.to_statements(
+                        ff_ptr,
+                        ff_len,
+                        comb_ptr,
+                        comb_len,
+                        self.use_4state,
+                    )),
+                };
                 (event.clone(), s)
             })
             .collect();
@@ -509,6 +536,7 @@ impl ProtoModule {
             whole_derived_clock_master: self.whole_derived_clock_master.clone(),
 
             event_statements,
+            event_gates,
             comb_statements,
             required_comb_passes: self.required_comb_passes,
             site_table: self.site_table.clone(),
@@ -681,6 +709,78 @@ fn try_jit(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements
     build_chunked_via_registry(context, proto, /* contains_compiled_block= */ false)
 }
 
+/// Chunking cut at every gate boundary, so each gate's statements are whole
+/// blocks.
+fn try_jit_gated(
+    context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    gates: Vec<crate::ir::opt::event_gate::EventGate>,
+) -> (
+    ProtoStatements,
+    Vec<crate::ir::opt::event_gate::ChunkedGate>,
+) {
+    let mut bounds: Vec<usize> = gates.iter().flat_map(|g| [g.lo, g.hi]).collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+    let stmt_count = proto.len();
+    let (stmts, pieces) = try_jit_with_boundaries(context, proto, &bounds, false);
+    // A piece is named by the statement it starts at; the list's end closes
+    // the last gate's range.
+    let mut block_at: HashMap<usize, usize> = HashMap::default();
+    for &(start, lo, _) in &pieces {
+        block_at.insert(start, lo);
+    }
+    block_at.insert(stmt_count, stmts.0.len());
+    let chunked = gates
+        .into_iter()
+        .map(|gate| crate::ir::opt::event_gate::ChunkedGate {
+            blocks: (block_at[&gate.lo], block_at[&gate.hi]),
+            gate,
+        })
+        .collect();
+    (stmts, chunked)
+}
+
+/// Lower an event's blocks with the batching cut at every gate boundary, so
+/// each gate maps to a range of the runtime statements.
+fn lower_gated_event(
+    stmts: &ProtoStatements,
+    chunked: &[crate::ir::opt::event_gate::ChunkedGate],
+    ff_ptr: *mut u8,
+    ff_len: usize,
+    comb_ptr: *mut u8,
+    comb_len: usize,
+    use_4state: bool,
+) -> (Vec<Statement>, crate::ir::opt::event_gate::RtEventGates) {
+    let mut bounds: Vec<usize> = chunked
+        .iter()
+        .flat_map(|g| [g.blocks.0, g.blocks.1])
+        .chain([0, stmts.0.len()])
+        .collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+    let mut out = Vec::new();
+    let mut stmt_at: HashMap<usize, usize> = HashMap::default();
+    for w in bounds.windows(2) {
+        stmt_at.insert(w[0], out.len());
+        let segment = crate::ir::statement::blocks_to_statements(
+            &stmts.0[w[0]..w[1]],
+            ff_ptr,
+            ff_len,
+            comb_ptr,
+            comb_len,
+            use_4state,
+        );
+        out.extend(batch_compiled_statements(segment));
+    }
+    stmt_at.insert(stmts.0.len(), out.len());
+    let gates = crate::ir::opt::event_gate::RtEventGates::new(
+        chunked
+            .iter()
+            .map(|g| (&g.gate, (stmt_at[&g.blocks.0], stmt_at[&g.blocks.1]))),
+    );
+    (out, gates)
+}
 /// Appends a declaration's statements for `event`.  `initial` blocks, a
 /// nested instance's included, are not concatenated but keyed apart so the
 /// testbench can run each as its own process.
@@ -877,7 +977,7 @@ fn precompile_tb_bodies(
 /// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
 /// between loads, so load_cache CSE is disabled in the emitted chunks.
 fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    let mut pieces = jit_pieces_in_parallel(context, vec![proto]);
+    let mut pieces = jit_pieces_in_parallel(context, vec![proto], true);
     ProtoStatements(pieces.pop().unwrap_or_default())
 }
 
@@ -889,6 +989,7 @@ fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoS
 fn jit_pieces_in_parallel(
     context: &mut Context,
     pieces: Vec<Vec<ProtoStatement>>,
+    contains_compiled_block: bool,
 ) -> Vec<Vec<ProtoStatementBlock>> {
     if context.backends.is_empty() {
         return pieces
@@ -915,7 +1016,7 @@ fn jit_pieces_in_parallel(
         let ctx = CompileCtx {
             config: &context.config,
             use_4state: context.config.use_4state,
-            contains_compiled_block: true,
+            contains_compiled_block,
         };
         compile_plans_parallel(&mut context.backends, &ctx, plans)
     };
@@ -935,14 +1036,17 @@ fn jit_pieces_in_parallel(
         .collect()
 }
 
-/// `try_jit_no_cache` with chunk splits forced at `boundaries` (sorted pre-JIT
-/// statement indices), so a gated cone segment maps to a whole number of
-/// blocks.  Returns, per boundary-delimited piece, its `[lo, hi)` block range
-/// in the produced `ProtoStatements`.
+/// Chunking with the splits forced at `boundaries` (sorted pre-JIT statement
+/// indices), so a gated cone segment or event-gate range maps to a whole
+/// number of blocks.  Returns, per boundary-delimited piece, its `[lo, hi)`
+/// block range in the produced `ProtoStatements`.  `contains_compiled_block`
+/// as in `CompileCtx`: the unified comb embeds inst chunks and so disables
+/// load-cache CSE, an event list does not.
 fn try_jit_with_boundaries(
     context: &mut Context,
     mut proto: Vec<ProtoStatement>,
     boundaries: &[usize],
+    contains_compiled_block: bool,
 ) -> (
     ProtoStatements,
     Vec<(usize, usize, usize)>, // (piece_start_stmt, block_lo, block_hi)
@@ -963,10 +1067,11 @@ fn try_jit_with_boundaries(
     }
     tails.reverse();
     let (starts, bodies): (Vec<usize>, Vec<Vec<ProtoStatement>>) = tails.into_iter().unzip();
-    for (start, piece_blocks) in starts
-        .into_iter()
-        .zip(jit_pieces_in_parallel(context, bodies))
-    {
+    for (start, piece_blocks) in starts.into_iter().zip(jit_pieces_in_parallel(
+        context,
+        bodies,
+        contains_compiled_block,
+    )) {
         let lo = blocks.len();
         blocks.extend(piece_blocks);
         pieces.push((start, lo, blocks.len()));
@@ -1635,7 +1740,7 @@ fn run_comb_pipeline(
                 .collect();
             bounds.sort_unstable();
             bounds.dedup();
-            let (ps, pieces) = try_jit_with_boundaries(context, unified_sorted, &bounds);
+            let (ps, pieces) = try_jit_with_boundaries(context, unified_sorted, &bounds, true);
             // Bring ranges into the FINAL storage space piecewise: a merged
             // span can straddle relayout units that land apart.
             let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
@@ -6356,6 +6461,8 @@ impl Conv<&air::Module> for ProtoModule {
         // NBA semantics: reads come from current, writes go to next, then
         // ff_commit copies next → current. Source order must be preserved
         // for sequential writes to the same variable.
+        let mut event_gate_chunks: HashMap<Event, Vec<crate::ir::opt::event_gate::ChunkedGate>> =
+            HashMap::default();
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
             .map(|(event, stmts)| {
@@ -6365,7 +6472,15 @@ impl Conv<&air::Module> for ProtoModule {
                 } else {
                     stmts
                 };
-                (event, try_jit(context, stmts))
+                let stmts = match event_gates.remove(&event) {
+                    Some(gates) if !context.config.use_4state => {
+                        let (stmts, chunked) = try_jit_gated(context, stmts, gates);
+                        event_gate_chunks.insert(event.clone(), chunked);
+                        stmts
+                    }
+                    _ => try_jit(context, stmts),
+                };
+                (event, stmts)
             })
             .collect();
 
@@ -6465,6 +6580,7 @@ impl Conv<&air::Module> for ProtoModule {
             event_comb_writes,
             cone_state_base,
             event_gate_flags,
+            event_gates: event_gate_chunks,
             settle_info: Default::default(),
         })
     }

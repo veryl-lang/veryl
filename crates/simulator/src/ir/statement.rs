@@ -143,32 +143,45 @@ impl ProtoStatements {
         comb_len: usize,
         use_4state: bool,
     ) -> Vec<Statement> {
-        let mut result = Vec::new();
-        for block in &self.0 {
-            match block {
-                ProtoStatementBlock::Interpreted(proto) => {
-                    for s in proto {
-                        result.push(unsafe {
-                            s.apply_values_ptr(ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
-                        });
-                    }
-                }
-                ProtoStatementBlock::Compiled(artifact) => {
-                    // log_buf populated by `Ir::install_write_log_ptr` after
-                    // WriteLogBuffer allocation; null until then.
-                    result.push(Statement::Compiled(CompiledStmt {
-                        artifact: Arc::clone(artifact),
-                        ff: ff_ptr as *const u8,
-                        comb: comb_ptr as *const u8,
-                        log_buf: std::ptr::null_mut(),
-                        ff_delta: 0,
-                        outputs: None,
-                    }));
+        blocks_to_statements(&self.0, ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
+    }
+}
+
+/// Lower a run of blocks, so a caller that cuts an event at gate boundaries
+/// can lower the pieces apart.
+pub(crate) fn blocks_to_statements(
+    blocks: &[ProtoStatementBlock],
+    ff_ptr: *mut u8,
+    ff_len: usize,
+    comb_ptr: *mut u8,
+    comb_len: usize,
+    use_4state: bool,
+) -> Vec<Statement> {
+    let mut result = Vec::new();
+    for block in blocks {
+        match block {
+            ProtoStatementBlock::Interpreted(proto) => {
+                for s in proto {
+                    result.push(unsafe {
+                        s.apply_values_ptr(ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
+                    });
                 }
             }
+            ProtoStatementBlock::Compiled(artifact) => {
+                // log_buf populated by `Ir::install_write_log_ptr` after
+                // WriteLogBuffer allocation; null until then.
+                result.push(Statement::Compiled(CompiledStmt {
+                    artifact: Arc::clone(artifact),
+                    ff: ff_ptr as *const u8,
+                    comb: comb_ptr as *const u8,
+                    log_buf: std::ptr::null_mut(),
+                    ff_delta: 0,
+                    outputs: None,
+                }));
+            }
         }
-        result
     }
+    result
 }
 
 #[derive(Clone, Debug, Hash)]
