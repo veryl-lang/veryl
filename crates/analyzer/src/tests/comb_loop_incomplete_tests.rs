@@ -2,6 +2,75 @@
 use super::*;
 
 #[test]
+fn runtime_loop_import_limit_preserves_independent_cycles() {
+    for kind in ["block", "overwritten", "separate", "function"] {
+        for calls in [1, 16] {
+            let destination = if kind == "function" {
+                "_discarded"
+            } else {
+                "o"
+            };
+            let assignments = (0..calls)
+                .map(|index| format!("{destination}[{index}] = gate(1'b1, i);"))
+                .collect::<Vec<_>>();
+            let loops = if kind == "separate" {
+                assignments
+                    .iter()
+                    .map(|assign| format!("for _iteration in 0..n {{ {assign} }}"))
+                    .collect::<String>()
+            } else {
+                format!("for _iteration in 0..n {{ {} }}", assignments.join("\n"))
+            };
+            let body = if kind == "function" {
+                format!(
+                    "function run () -> logic {{
+                        var _discarded: logic<{calls}>;
+                        _discarded = 0; {loops} return 0;
+                     }}
+                     assign o = run();"
+                )
+            } else {
+                let overwrite = if kind == "overwritten" { "o = 0;" } else { "" };
+                format!("always_comb {{ o = 0; {loops} {overwrite} }}")
+            };
+            let code = format!(
+                r#"
+                module Top (i: input logic, n: input u32,
+                            o: output logic<{calls}>, independent: output logic) {{
+                    function gate (s: input logic, x: input logic) -> logic {{
+                        var v: logic;
+                        v = x;
+                        for _index in 0..8 {{ if s {{ v = !v; }} else {{ v = 0; }} }}
+                        return v;
+                    }}
+                    {body}
+                    assign independent = independent;
+                }}
+                "#
+            );
+            crate::comb_loop_detect::with_procedure_import_limit(1024, || {
+                assert_eq!(
+                    comb_loop_analysis_is_complete(&code),
+                    calls == 1,
+                    "{kind}, calls={calls}"
+                );
+                let errors = analyze(&code);
+                let loops = errors
+                    .iter()
+                    .filter_map(|error| match error {
+                        AnalyzerError::CombinationalLoop { identifier, .. } => {
+                            Some(identifier.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(loops, ["independent"], "{kind}, calls={calls}: {errors:?}");
+            });
+        }
+    }
+}
+
+#[test]
 fn procedural_import_limit_preserves_independent_cycles() {
     for kind in ["procedure", "instance_side_effect"] {
         for calls in [1, 16] {
@@ -75,13 +144,20 @@ fn procedural_import_limit_does_not_limit_direct_assignments() {
     let assignments = (0..1024)
         .map(|index| format!("o[{index}] = i;"))
         .collect::<String>();
-    let code = format!(
-        "module Top (i: input logic, o: output logic<1024>) {{ always_comb {{ {assignments} }} }}"
-    );
-    crate::comb_loop_detect::with_procedure_import_limit(0, || {
-        assert!(comb_loop_analysis_is_complete(&code));
-        assert!(analyze(&code).is_empty());
-    });
+    for runtime_loop in [false, true] {
+        let body = if runtime_loop {
+            format!("o = 0; for _iteration in 0..n {{ {assignments} }}")
+        } else {
+            assignments.clone()
+        };
+        let code = format!(
+            "module Top (i: input logic, n: input u32, o: output logic<1024>) {{ always_comb {{ {body} }} }}"
+        );
+        crate::comb_loop_detect::with_procedure_import_limit(0, || {
+            assert!(comb_loop_analysis_is_complete(&code));
+            assert!(analyze(&code).is_empty());
+        });
+    }
 }
 
 #[test]

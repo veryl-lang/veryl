@@ -1,6 +1,103 @@
 use super::*;
 
 #[test]
+fn comb_loop_ternary_captured_writes_preserve_branch_guards() {
+    for arm in ["then", "else", "both"] {
+        for condition in ["s", "1'b0", "1'b1"] {
+            for preserve in [false, true] {
+                let (left, right) = match arm {
+                    "then" => ("clear()", "0"),
+                    "else" => ("0", "clear()"),
+                    _ => ("clear()", "clear()"),
+                };
+                let value = if preserve { "a" } else { "0" };
+                let code = format!(
+                    r#"
+                    module Top (s: input logic, o: output logic<2>) {{
+                        var a: logic; var b: logic; var tmp: logic;
+                        var first: logic; var second: logic;
+                        function clear () -> logic {{ tmp = {value}; return b; }}
+                        always_comb {{
+                            tmp = a;
+                            first = if {condition} ? {left} : {right};
+                            second = tmp;
+                        }}
+                        assign a = first;
+                        assign b = second;
+                        assign o = {{a, b}};
+                    }}
+                    "#
+                );
+                // With a clearing write, first reads b only on the arm that
+                // removes second's dependency on a. A preserving write makes
+                // both dependencies feasible together on that arm.
+                let executed = arm == "both"
+                    || condition == "s"
+                    || (arm == "then" && condition == "1'b1")
+                    || (arm == "else" && condition == "1'b0");
+                let case = format!("{arm}, {condition}, preserve={preserve}");
+                assert_comb_loop(&case, &code, preserve && executed);
+                assert!(comb_loop_analysis_is_complete(&code), "{case}");
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_ternary_instance_actual_preserves_branch_guards() {
+    for expression in ["if s ? clear() : 0", "if s ? 0 : clear()"] {
+        let code = format!(
+            r#"
+            module Child (i: input logic<2>, o: output logic<2>) {{
+                assign o[0] = i[1];
+                assign o[1] = i[0];
+            }}
+            module Top (s: input logic, o: output logic<2>) {{
+                var value: logic<2>;
+                function clear () -> logic {{ value[0] = 0; return value[1]; }}
+                inst child: Child (i: {{({expression}), value[0]}}, o: value);
+                assign o = value;
+            }}
+            "#
+        );
+        assert_comb_loop(expression, &code, false);
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn comb_loop_ternary_condition_controls_captured_writes() {
+    for expression in ["if feedback ? set() : 0", "if feedback ? 0 : set()"] {
+        for instance in [false, true] {
+            let body = if instance {
+                format!(
+                    "function initialize () -> logic {{ value = 0; return 0; }}
+                     inst sink: Sink (i: {{initialize(), ({expression})}});"
+                )
+            } else {
+                format!(
+                    "var _ignored: logic;
+                     always_comb {{ value = 0; _ignored = {expression}; }}"
+                )
+            };
+            let code = format!(
+                r#"
+                module Sink (i: input logic<2>) {{}}
+                module Top (feedback: output logic) {{
+                    var value: logic;
+                    function set () -> logic {{ value = 1; return 0; }}
+                    {body}
+                    assign feedback = value;
+                }}
+                "#
+            );
+            assert_comb_loop(expression, &code, true);
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    }
+}
+
+#[test]
 fn comb_loop_instance_actual_short_circuit_preserves_skipped_writes() {
     for op in ["&&", "||"] {
         for condition in ["s", "1'b0", "1'b1"] {

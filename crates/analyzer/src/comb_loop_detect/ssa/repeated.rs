@@ -29,14 +29,15 @@ struct ImportIndex {
 }
 
 impl ImportIndex {
-    fn new<K>(graph: &DependencyDag<K>) -> Self {
+    fn try_new<K>(graph: &DependencyDag<K>, work: &mut usize) -> Option<Self> {
+        *work = work.checked_sub(graph.nodes.len().saturating_add(graph.edges.len()))?;
         let mut incoming = vec![Vec::new(); graph.nodes.len()];
         for (index, edge) in graph.edges.iter().enumerate() {
             #[cfg(test)]
             ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
             incoming[edge.destination].push(index);
         }
-        Self { incoming }
+        Some(Self { incoming })
     }
 }
 
@@ -55,7 +56,12 @@ impl TransferBuilder {
         })
     }
 
-    fn copy_iteration<K: Copy + Eq + Hash>(&mut self, ssa: &SsaStore<K>, start: usize) {
+    fn copy_iteration<K: Copy + Eq + Hash>(
+        &mut self,
+        ssa: &SsaStore<K>,
+        start: usize,
+        import_work: &mut usize,
+    ) -> Option<()> {
         let mut imports = HashMap::default();
         let mut invocations: HashMap<_, HashMap<usize, NodeIndex>> = HashMap::default();
         while let Some(version) = self.pending.pop_front() {
@@ -110,9 +116,15 @@ impl TransferBuilder {
                     bindings,
                     ..
                 } => {
-                    let index = imports
-                        .entry(Rc::as_ptr(graph))
-                        .or_insert_with(|| ImportIndex::new(graph));
+                    // Charge the root edge and all imported storage before
+                    // allocation. These copies precede DAG-export budgets.
+                    *import_work = import_work.checked_sub(1)?;
+                    let index = match imports.entry(Rc::as_ptr(graph)) {
+                        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            entry.insert(ImportIndex::try_new(graph, import_work)?)
+                        }
+                    };
                     // Guards are discarded for runtime iterations, but actual
                     // bindings still distinguish calls. Keep one mapped child
                     // per invocation instead of copying every output prefix.
@@ -125,6 +137,12 @@ impl TransferBuilder {
                         if mapped.contains_key(&child) {
                             continue;
                         }
+                        *import_work = import_work.checked_sub(
+                            graph.domains[child]
+                                .len()
+                                .saturating_add(index.incoming[child].len())
+                                .saturating_add(1),
+                        )?;
                         #[cfg(test)]
                         ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
                         let copied = self.graph.add_node(TransferNode {
@@ -143,7 +161,9 @@ impl TransferBuilder {
                                 .map(|&edge| graph.edges[edge].source),
                         );
                         if let DependencyDagNode::External(key) = graph.nodes[child] {
-                            for &(source, relation) in bindings.get(&key).into_iter().flatten() {
+                            let sources = bindings.get(&key).map(Vec::as_slice).unwrap_or_default();
+                            *import_work = import_work.checked_sub(sources.len())?;
+                            for &(source, relation) in sources {
                                 let source = self.version(source);
                                 self.graph.add_edge(source, copied, relation);
                             }
@@ -165,16 +185,18 @@ impl TransferBuilder {
                 Version::Imported { root: None, .. } => {}
             }
         }
+        Some(())
     }
 }
 
-pub(super) fn close<K: Copy + Eq + Hash>(
+pub(super) fn try_close<K: Copy + Eq + Hash>(
     ssa: &mut SsaStore<K>,
     iteration: &BranchState<K>,
     checkpoint: Checkpoint,
     may_skip: bool,
+    import_work: &mut usize,
     domain: impl Fn(K) -> Option<PositionDomain>,
-) {
+) -> Option<()> {
     let mut builder = TransferBuilder::default();
     let outputs = iteration
         .bindings
@@ -195,7 +217,7 @@ pub(super) fn close<K: Copy + Eq + Hash>(
             (key, entry, input, root, domains)
         })
         .collect::<Vec<_>>();
-    builder.copy_iteration(ssa, checkpoint.version_start);
+    builder.copy_iteration(ssa, checkpoint.version_start, import_work)?;
 
     let mut unrestricted = HashSet::default();
     for (_, entry, input, root, domains) in &outputs {
@@ -235,6 +257,7 @@ pub(super) fn close<K: Copy + Eq + Hash>(
         }
         ssa.bind(key, output);
     }
+    Some(())
 }
 
 fn project<K: Copy + Eq + Hash>(
@@ -384,7 +407,9 @@ mod tests {
                     outputs.push(builder.version(output));
                 }
             }
-            builder.copy_iteration(&ssa, start);
+            builder
+                .copy_iteration(&ssa, start, &mut (size * 16))
+                .expect("shared imports must fit in a linear budget");
             assert!(builder.graph.node_count() <= size * 4 + 4);
             assert!(builder.graph.edge_count() <= size * 4 + 4);
             let mapped = condense(&mut ssa, &builder.graph);

@@ -486,7 +486,6 @@ impl<K> BranchState<K> {
         self.bindings.len()
     }
 
-    #[cfg(test)]
     pub(super) fn unchanged() -> Self {
         Self {
             bindings: HashMap::default(),
@@ -769,26 +768,28 @@ where
         }
     }
 
-    /// Merge an optional evaluation with its skipped path. Both the new and
-    /// retained values need explicit guards, and each conditional write also
-    /// depends on the expression that decides whether evaluation happens.
+    /// Merge both expression arms, including bindings retained by either arm.
+    /// Each conditional write also depends on the condition's value.
     pub(super) fn merge_conditional(
         &mut self,
-        state: &BranchState<K>,
-        taken: &PathCondition,
-        skipped: &PathCondition,
+        states: [(&BranchState<K>, &PathCondition); 2],
         controls: &[VersionId],
         domain: impl Fn(K) -> Option<PositionDomain>,
     ) {
-        if state.bindings.is_empty() {
+        let keys = states
+            .iter()
+            .flat_map(|(state, _)| state.bindings.keys().copied())
+            .collect::<HashSet<_>>();
+        if keys.is_empty() {
             return;
         }
         let control = self.definition(controls.to_vec());
-        for (&key, &value) in &state.bindings {
+        for key in keys {
             let fallback = self.read(key);
-            let inputs = [(value, taken), (fallback, skipped)]
+            let inputs = states
                 .into_iter()
-                .map(|(value, condition)| {
+                .map(|(state, condition)| {
+                    let value = state.bindings.get(&key).copied().unwrap_or(fallback);
                     let source = self.phi(vec![value, control]);
                     let version = self.versions.len();
                     // A guard is an alias, not a read. Bare entry versions
@@ -816,6 +817,25 @@ where
     /// graph. Condensing its recurrence components models arbitrary positive
     /// iteration counts without enumerating positions or paths. `may_skip`
     /// additionally retains each key's loop-entry version.
+    pub(super) fn try_close_repeated_transfer(
+        &mut self,
+        single_iteration: &BranchState<K>,
+        iteration_checkpoint: Checkpoint,
+        may_skip: bool,
+        import_work: &mut usize,
+        domain: impl Fn(K) -> Option<PositionDomain>,
+    ) -> Option<()> {
+        repeated::try_close(
+            self,
+            single_iteration,
+            iteration_checkpoint,
+            may_skip,
+            import_work,
+            domain,
+        )
+    }
+
+    #[cfg(test)]
     pub(super) fn close_repeated_transfer(
         &mut self,
         single_iteration: &BranchState<K>,
@@ -823,13 +843,15 @@ where
         may_skip: bool,
         domain: impl Fn(K) -> Option<PositionDomain>,
     ) {
-        repeated::close(
-            self,
+        let mut import_work = usize::MAX;
+        self.try_close_repeated_transfer(
             single_iteration,
             iteration_checkpoint,
             may_skip,
+            &mut import_work,
             domain,
-        );
+        )
+        .expect("unlimited runtime transfer construction");
     }
 
     #[cfg(test)]

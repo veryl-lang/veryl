@@ -340,7 +340,8 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 const FUNCTION_SUMMARY_WORK: usize = 100_000;
 
 // Ordinary procedures can import many individually bounded summaries. Limit
-// their combined expansion independently of the directly written SSA graph.
+// their combined expansion, including runtime-loop transfers, independently
+// of the directly written SSA graph.
 const PROCEDURE_IMPORT_WORK: usize = 100_000;
 
 // Early returns and breaks retain every preceding guard prefix during SSA
@@ -1124,6 +1125,7 @@ struct ProcedureAnalysis<'a, 's> {
     loop_flows: Vec<LoopFlow>,
     path_condition: PathCondition,
     guard_work: Option<usize>,
+    import_work: usize,
     branch_namespace: usize,
     next_branch: usize,
     status: AnalysisStatus,
@@ -1146,6 +1148,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let guard_work = GUARD_LIMIT.get();
         #[cfg(not(test))]
         let guard_work = PROCEDURE_GUARD_WORK;
+        #[cfg(test)]
+        let import_work = IMPORT_LIMIT.get();
+        #[cfg(not(test))]
+        let import_work = PROCEDURE_IMPORT_WORK;
         Self {
             bit_part,
             module,
@@ -1161,6 +1167,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             loop_flows: Vec::new(),
             path_condition: PathCondition::default(),
             guard_work: Some(guard_work),
+            import_work,
             branch_namespace: 0,
             next_branch: 0,
             status: AnalysisStatus::Complete,
@@ -1418,16 +1425,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         roots: &[VersionId],
         work: usize,
     ) -> DependencyDag<NodeKey> {
-        #[cfg(test)]
-        let import_work = IMPORT_LIMIT.get();
-        #[cfg(not(test))]
-        let import_work = PROCEDURE_IMPORT_WORK;
         let graph = self.guard_work.and_then(|_| {
             self.ssa.try_dependency_dag_with_import_limit(
                 roots,
                 |key| self.is_visible_source(key),
                 work,
-                import_work,
+                self.import_work,
             )
         });
         let Some(graph) = graph else {
@@ -2155,11 +2158,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn reserve_guard_work(&mut self, cost: usize) -> bool {
         self.guard_work = self.guard_work.and_then(|work| work.checked_sub(cost));
         if self.guard_work.is_none() {
-            self.status = AnalysisStatus::Barrier;
-            self.path_condition = PathCondition::default();
+            self.exhaust_work();
             return false;
         }
         true
+    }
+
+    fn exhaust_work(&mut self) {
+        self.status = AnalysisStatus::Barrier;
+        self.guard_work = None;
+        self.path_condition = PathCondition::default();
     }
 
     fn choose_path(&mut self, parent: &PathCondition, branch: BranchId, arm: usize) -> bool {
@@ -2645,13 +2653,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // body or enumerating runtime iterator values.
         let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
         let bit_part = self.bit_part;
-        self.ssa
-            .close_repeated_transfer(&transfer, checkpoint, may_execute_zero_times, |key| {
-                bit_part
-                    .ranges_of((key.node.0, key.node.1))
-                    .get(key.node.2)
-                    .map(|packed| position_domain(key.node.1, *packed))
-            });
+        if self
+            .ssa
+            .try_close_repeated_transfer(
+                &transfer,
+                checkpoint,
+                may_execute_zero_times,
+                &mut self.import_work,
+                |key| {
+                    bit_part
+                        .ranges_of((key.node.0, key.node.1))
+                        .get(key.node.2)
+                        .map(|packed| position_domain(key.node.1, *packed))
+                },
+            )
+            .is_none()
+        {
+            self.exhaust_work();
+        }
         FlowResult::new(ProcedureFlow::Continue)
     }
 
@@ -3059,7 +3078,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 _ => ExpressionSources::whole(self.eval_expr(expression)),
             },
             Expression::Ternary(condition, left, right, _) => {
-                let mut reads = ExpressionSources::whole(self.eval_expr(condition));
+                let controls = self.eval_expr(condition);
+                let mut reads = ExpressionSources::default();
+                reads.extend_whole(controls.iter().copied());
                 match self.constant_truth(condition) {
                     Some(true) => reads.extend(self.eval_expr_in_context(
                         left,
@@ -3081,6 +3102,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 0);
+                        let left_condition = self.path_condition.clone();
                         let left = self.eval_expr_in_context(
                             left,
                             requested_array,
@@ -3093,6 +3115,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 1);
+                        let right_condition = self.path_condition.clone();
                         let right = self.eval_expr_in_context(
                             right,
                             requested_array,
@@ -3103,7 +3126,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let right = self.guard_expression_sources(right);
                         let right_state = self.ssa.capture_and_rollback(checkpoint);
 
-                        self.ssa.merge([&left_state, &right_state]);
+                        self.merge_expression_states(
+                            [
+                                (&left_state, &left_condition),
+                                (&right_state, &right_condition),
+                            ],
+                            &controls,
+                        );
                         self.path_condition = parent_condition;
                         reads.extend(left);
                         reads.extend(right);
@@ -3458,6 +3487,29 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.eval_expr_inner(expression, true)
     }
 
+    fn merge_expression_states(
+        &mut self,
+        states: [(&BranchState<SsaKey>, &PathCondition); 2],
+        controls: &[VersionId],
+    ) {
+        let bindings = states.iter().fold(0usize, |count, (state, _)| {
+            count.saturating_add(state.len())
+        });
+        let guards = states.iter().fold(0usize, |count, (_, condition)| {
+            count.saturating_add(condition.branch_count())
+        });
+        if !self.reserve_guard_work(bindings.saturating_mul(guards)) {
+            return;
+        }
+        let bit_part = self.bit_part;
+        self.ssa.merge_conditional(states, controls, |key| {
+            bit_part
+                .ranges_of((key.node.0, key.node.1))
+                .get(key.node.2)
+                .map(|packed| position_domain(key.node.1, *packed))
+        });
+    }
+
     fn eval_short_circuit(
         &mut self,
         expression: &Expression,
@@ -3491,24 +3543,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let evaluated_state = self.ssa.capture_and_rollback(checkpoint);
                 if self.choose_path(&parent_condition, branch, 1) {
                     let skipped = self.path_condition.clone();
-                    let cost = evaluated_state.len().saturating_mul(
-                        taken.branch_count().saturating_add(skipped.branch_count()),
+                    self.merge_expression_states(
+                        [
+                            (&evaluated_state, &taken),
+                            (&BranchState::unchanged(), &skipped),
+                        ],
+                        &reads,
                     );
-                    if self.reserve_guard_work(cost) {
-                        let bit_part = self.bit_part;
-                        self.ssa.merge_conditional(
-                            &evaluated_state,
-                            &taken,
-                            &skipped,
-                            &reads,
-                            |key| {
-                                bit_part
-                                    .ranges_of((key.node.0, key.node.1))
-                                    .get(key.node.2)
-                                    .map(|packed| position_domain(key.node.1, *packed))
-                            },
-                        );
-                    }
                 }
                 self.path_condition = parent_condition;
                 reads.push(right);
@@ -3562,17 +3603,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 0);
+                        let left_condition = self.path_condition.clone();
                         let left = self.eval_expr_inner(left, prune_constant_branches);
                         let left = self.ssa.definition_guarded(left, &self.path_condition);
                         let left_state = self.ssa.capture_and_rollback(checkpoint);
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 1);
+                        let right_condition = self.path_condition.clone();
                         let right = self.eval_expr_inner(right, prune_constant_branches);
                         let right = self.ssa.definition_guarded(right, &self.path_condition);
                         let right_state = self.ssa.capture_and_rollback(checkpoint);
 
-                        self.ssa.merge([&left_state, &right_state]);
+                        self.merge_expression_states(
+                            [
+                                (&left_state, &left_condition),
+                                (&right_state, &right_condition),
+                            ],
+                            &reads,
+                        );
                         self.path_condition = parent_condition;
                         reads.push(left);
                         reads.push(right);
