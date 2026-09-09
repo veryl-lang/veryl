@@ -720,6 +720,10 @@ pub fn eval_assign_statement(
 
             let mut dst = dst.clone();
             dst.index.append(&index);
+            // The emitted RHS initializes the indexed element. Preserve only
+            // dimensions not consumed by this lowering; explicit LHS indices
+            // have already been removed from the destination type.
+            dst.comptime.r#type.array.drain(0..index.dimension());
             dst.select = select;
 
             let statement = ir::Statement::Assign(ir::AssignStatement {

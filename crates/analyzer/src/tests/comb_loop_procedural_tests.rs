@@ -35,6 +35,16 @@ fn comb_loop_rhs_sampling_only_evaluates_used_initializers() {
         ),
         ("bit<2>[2]", "'{'{0, 0, default: effect()}, '{0, 0}}", false),
         (
+            "bit<2>[3]",
+            "'{(if enable ? '{0, 0, default: effect()} : '{0, 0, default: effect()}), 0, 0}",
+            false,
+        ),
+        (
+            "bit<2>[3]",
+            "'{(if enable ? '{0, default: effect()} : '{0, default: effect()}), 0, 0}",
+            true,
+        ),
+        (
             "bit[2]",
             "if enable ? '{0, 0, default: effect()} : '{0, 0}",
             false,
@@ -85,6 +95,78 @@ fn comb_loop_rhs_sampling_only_evaluates_used_initializers() {
                         always_comb {{
                             saved = {initial};
                             result = {expression};
+                        }}
+                        assign o = saved;
+                    }}
+                    "#
+                );
+                assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_uses_lowered_array_element_shapes() {
+    for condition in ["enable", "1'b1", "1'b0"] {
+        for count in [1, 2] {
+            let packed = format!("'{{0 repeat {count}, default: effect()}}");
+            let element = format!("(if {condition} ? {packed} : {packed})");
+            let row = format!("'{{{element}, 0 repeat 2}}");
+            let inner = format!("'{{{packed}, 0 repeat 3}}");
+            let partial =
+                format!("'{{(if {condition} ? {inner} : {inner}), '{{0 repeat 4}} repeat 2}}");
+            // Lowering can consume one or several dimensions, leave an inner
+            // array intact, or start after explicit indices/ranges. Dimensions
+            // already selected from the destination must not be removed again.
+            for (ty, select, expression) in [
+                ("bit<2>[3]", "", row.clone()),
+                ("bit<2>[2, 3]", "[1]", row.clone()),
+                ("bit<2>[2, 3]", "", format!("'{{{row} repeat 2}}")),
+                ("bit<2>[4, 3]", "[1+:2]", format!("'{{{row} repeat 2}}")),
+                ("bit<2>[3, 4]", "", partial.clone()),
+                ("bit<2>[2, 3, 4]", "[1]", partial),
+                ("bit<2>[3]", "", format!("if {condition} ? {row} : {row}")),
+            ] {
+                let used = count < 2;
+                for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                    let code = format!(
+                        r#"
+                        module Top(enable: input bit, o: output bit) {{
+                            var saved: bit;
+                            var result: {ty};
+                            function effect() -> bit {{ saved = {effect}; return 0; }}
+                            always_comb {{
+                                saved = {initial};
+                                result = '{{default: 0}};
+                                result{select} = {expression};
+                            }}
+                            assign o = saved;
+                        }}
+                        "#
+                    );
+                    assert_complete_comb_loop(&code, expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_preserves_lowered_element_operand_width() {
+    for condition in ["1'b1", "1'b0"] {
+        for count in [2, 4] {
+            let used = condition == "1'b1" && count < 4;
+            for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                let code = format!(
+                    r#"
+                    module Top(o: output bit) {{
+                        var saved: bit;
+                        var result: bit<4>[5];
+                        function effect() -> bit {{ saved = {effect}; return 0; }}
+                        always_comb {{
+                            saved = {initial};
+                            result = '{{(if {condition} ? '{{0 repeat {count}, default: effect()}} : 4'b0), 0 repeat 4}};
                         }}
                         assign o = saved;
                     }}
