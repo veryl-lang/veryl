@@ -1000,7 +1000,7 @@ pub fn eval_const_assign(
     {
         comptime.value = ValueVariant::Numeric(value);
     }
-    let comptime = comptime.clone();
+    let mut comptime = comptime.clone();
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
     let token = expr.token_range();
@@ -1019,20 +1019,6 @@ pub fn eval_const_assign(
         _ => {
             match &comptime.value {
                 ValueVariant::Numeric(value) => {
-                    let id = context.insert_var_path(path.clone(), comptime.clone());
-
-                    for x in r#type.expand_struct_union(path, &[], None) {
-                        let r#type = x.part_select.last().unwrap().r#type.clone();
-                        let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
-                        comptime.is_const = true;
-                        let path = x.path.clone();
-                        // Carry the field's bit offset so a member read selects
-                        // that field instead of truncating the whole struct to
-                        // its lowest field.
-                        comptime.part_select = Some(x);
-                        context.insert_var_path_with_id(path, id, comptime);
-                    }
-
                     let mut value = value.clone();
                     if !comptime.r#type.is_string() {
                         let total_width = comptime
@@ -1048,6 +1034,26 @@ pub fn eval_const_assign(
                         }
                         value.trunc(total_width);
                         value.set_signed(r#type.signed);
+                    }
+
+                    // Keep constant metadata consistent with the stored Variable:
+                    // later folds can also read the value without a variable table.
+                    comptime.value = ValueVariant::Numeric(value.clone());
+                    // A later reference has its own expression context, not the
+                    // initializer's width/signedness cached by eval_expr.
+                    comptime.evaluated = false;
+                    let id = context.insert_var_path(path.clone(), comptime);
+
+                    for x in r#type.expand_struct_union(path, &[], None) {
+                        let r#type = x.part_select.last().unwrap().r#type.clone();
+                        let mut comptime = Comptime::from_type(r#type, ClockDomain::None, token);
+                        comptime.is_const = true;
+                        let path = x.path.clone();
+                        // Carry the field's bit offset so a member read selects
+                        // that field instead of truncating the whole struct to
+                        // its lowest field.
+                        comptime.part_select = Some(x);
+                        context.insert_var_path_with_id(path, id, comptime);
                     }
 
                     let array_limit = context.config.evaluate_array_limit;
