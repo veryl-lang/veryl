@@ -132,6 +132,110 @@ fn comb_loop_rhs_sampling_preserves_operand_width_before_narrowing() {
 }
 
 #[test]
+fn comb_loop_rhs_sampling_uses_selected_destination_width() {
+    for (select, width) in [
+        ("[0]", 1),
+        ("[1:0]", 2),
+        ("[0+:2]", 2),
+        ("[3-:2]", 2),
+        ("[1 step 2]", 2),
+        ("[7:0]", 8),
+        ("", 8),
+    ] {
+        for operator in ["|", "^", "&", "+"] {
+            for count in [2, 4] {
+                let used = count < width.max(4);
+                for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                    let code = format!(
+                        r#"
+                        module Top(o: output bit) {{
+                            var saved: bit;
+                            var result: logic<8>;
+                            function effect() -> bit {{ saved = {effect}; return 0; }}
+                            always_comb {{
+                                saved = {initial};
+                                result = 0;
+                                result{select} = 4'b0 {operator} '{{0 repeat {count}, default: effect()}};
+                            }}
+                            assign o = saved;
+                        }}
+                        "#
+                    );
+                    assert_complete_comb_loop(&code, expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_preserves_selected_packed_dimensions() {
+    for (ty, select) in [
+        ("logic<8, 2>", "[1:0]"),
+        ("logic<8, 2>", "[0+:2]"),
+        ("logic<8, 2>", "[3-:2]"),
+        ("logic<8, 2, 2>", "[0]"),
+    ] {
+        for count in [1, 2] {
+            let literal = format!("'{{'{{0, 0}} repeat {count}, default: '{{effect(), 0}}}}");
+            let used = count < 2;
+            for (initial, effect, expected) in [("o", "0", !used), ("0", "o", used)] {
+                let code = format!(
+                    r#"
+                    module Top(enable: input bit, o: output bit) {{
+                        var saved: bit;
+                        var result: {ty};
+                        function effect() -> bit {{ saved = {effect}; return 0; }}
+                        always_comb {{
+                            saved = {initial};
+                            result = 0;
+                            result{select} = if enable ? {literal} : {literal};
+                        }}
+                        assign o = saved;
+                    }}
+                    "#
+                );
+                assert_complete_comb_loop(&code, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn comb_loop_rhs_sampling_precedes_selector_side_effects() {
+    for select in [
+        "[address()]",
+        "[address()+:2]",
+        "[address()+1-:2]",
+        "[address() step 2]",
+    ] {
+        for count in [2, 4] {
+            let code = format!(
+                r#"
+                module Top(o: output bit) {{
+                    var saved: bit;
+                    var observed: bit;
+                    var result: logic<8>;
+                    function effect() -> bit {{ saved = o; return 0; }}
+                    function address() -> u32 {{ observed = saved; saved = 0; return 0; }}
+                    always_comb {{
+                        saved = 0;
+                        observed = 0;
+                        result = 0;
+                        result{select} = 4'b0 | '{{0 repeat {count}, default: effect()}};
+                    }}
+                    assign o = observed;
+                }}
+                "#
+            );
+            // The selector observes the initializer's write only when its
+            // default is used, before clearing the captured storage again.
+            assert_complete_comb_loop(&code, count < 4);
+        }
+    }
+}
+
+#[test]
 fn comb_loop_rhs_sampling_preserves_width_boundaries_and_array_shapes() {
     for (ty, expression, used) in [
         ("logic<1>", "~(4'b0 | '{0, 0, default: effect()})", true),

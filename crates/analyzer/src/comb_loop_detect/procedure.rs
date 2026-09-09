@@ -15,10 +15,11 @@ use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
     Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, Module, Op, Shape,
     Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex, VarPath,
-    VarSelect,
+    VarSelect, VarSelectOp,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
+use std::borrow::Cow;
 use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
 
@@ -320,6 +321,46 @@ impl<'a> EvaluationShape<'a> {
             (None, self)
         }
     }
+}
+
+fn destination_packed_shape(destination: &AssignDestination) -> Cow<'_, [Option<usize>]> {
+    let packed = destination.comptime.r#type.width().as_slice();
+    let select = &destination.select;
+    if select.is_empty() {
+        return Cow::Borrowed(packed);
+    }
+
+    // The position of a bit/indexed select does not affect its shape. Read
+    // only recorded constants for range sizes; evaluating selector expressions
+    // here would run their side effects before the RHS has been sampled.
+    let constant = |expression: &Expression| {
+        expression
+            .comptime()
+            .get_value()
+            .ok()
+            .and_then(|value| value.to_usize())
+    };
+    let length = match &select.1 {
+        None => Some(1),
+        Some((VarSelectOp::Colon, end)) => select
+            .0
+            .last()
+            .and_then(constant)
+            .zip(constant(end))
+            .and_then(|(beg, end)| beg.checked_sub(end)?.checked_add(1)),
+        Some((_, width)) => constant(width),
+    };
+    let mut shape = packed
+        .get(select.dimension()..)
+        .unwrap_or_default()
+        .to_vec();
+    if length != Some(1) {
+        shape.insert(0, length);
+    }
+    if shape.is_empty() {
+        shape.push(Some(1));
+    }
+    Cow::Owned(shape)
 }
 
 // Module and interface storage is shared by every call. Function-owned
@@ -2379,7 +2420,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // selectors or any region writes. Keep each occurrence's value
                 // and index versions even if a later call or write changes them.
                 let sources = if let [destination] = assign.dst.as_slice() {
-                    self.eval_expr_for_type(&assign.expr, &destination.comptime.r#type, true)
+                    let packed = destination_packed_shape(destination);
+                    self.eval_expr_shaped(
+                        &assign.expr,
+                        true,
+                        EvaluationShape {
+                            array: destination.comptime.r#type.array.as_slice(),
+                            packed: packed.as_ref(),
+                        },
+                    )
                 } else {
                     self.eval_expr(&assign.expr)
                 };
