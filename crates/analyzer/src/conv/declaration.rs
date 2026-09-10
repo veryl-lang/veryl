@@ -459,7 +459,10 @@ impl Conv<&WithParameterItem> for () {
             };
 
             // Get overridden parameter if it exists
-            let mut expr = context.get_override(&path).cloned().unwrap_or(expr);
+            let mut expr = context
+                .get_override(&symbol.found.namespace, &path)
+                .cloned()
+                .unwrap_or(expr);
 
             let dst = ir::AssignDestination {
                 id: VarId::default(),
@@ -1634,7 +1637,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 sig.add_parameter(x.name, value.0.value.clone());
             }
         }
-        context.push_override(overridden_params);
+        context.push_override(symbol.inner_namespace(), overridden_params);
         let modport_signatures = context.collect_modport_signatures(value);
 
         // The interfaces connected to this instance's modport ports are part of
