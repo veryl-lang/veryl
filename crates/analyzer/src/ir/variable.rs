@@ -848,6 +848,19 @@ impl VarSelect {
             return Some((total_width.saturating_sub(1), 0));
         }
 
+        // A width select addresses BITS, so the innermost stride is the scalar
+        // element's own width, which lives in `kind` and not in the width
+        // shape: `logic<N, W>` has shape [N, W] and element width 1, while
+        // `some_enum<N>` has shape [N] and element width $bits(enum).
+        // An array select addresses ELEMENTS, so its stride is 1; and a
+        // struct/union select arrives already remapped to bits by
+        // `eval_width_select`, so scaling it again would count twice.
+        let elem_width = if is_array || r#type.is_struct_union() {
+            1
+        } else {
+            r#type.kind.width()?
+        };
+
         let r#type = if is_array {
             &r#type.array
         } else {
@@ -856,7 +869,7 @@ impl VarSelect {
 
         let mut beg = 0;
         let mut end = 0;
-        let mut base = 1;
+        let mut base = elem_width;
 
         let dim = self.dimension();
         if r#type.dims() < dim {
