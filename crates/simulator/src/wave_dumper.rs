@@ -285,8 +285,22 @@ impl WaveDumper {
         self.path.as_ref()
     }
 
-    pub fn into_path(self) -> Option<PathBuf> {
+    pub fn into_path(mut self) -> Option<PathBuf> {
+        self.finish();
         self.path
+    }
+
+    /// Flush what is buffered.  The sink's `Drop` would do it too, but it
+    /// discards the error, and a waveform truncated by a full disk has to be
+    /// as loud as it was before the buffer went in.
+    pub fn finish(&mut self) {
+        if let WaveDumperKind::Vcd(v) = &mut self.kind {
+            v.flush_line();
+            v.writer
+                .writer()
+                .flush()
+                .expect("failed to write the waveform");
+        }
     }
 
     pub fn timescale(&mut self) {
