@@ -28687,3 +28687,39 @@ fn unsized_all_ones_compares_equal_above_128_bits() {
         );
     }
 }
+
+#[test]
+fn display_string_argument_renders_text() {
+    // `%s` rendered its argument with `format_dec`, so a string came out as
+    // the decimal of its bytes; and a `string` const reached the expression
+    // conversion as a variable reference, which panicked looking for a
+    // `VariableMeta` that a string never has. Verilator prints the three
+    // lines below verbatim.
+    let code = r#"
+    package Pkg {
+        const NAME: string = "world";
+    }
+    module Top (
+        i_clk: input clock,
+    ) {
+        const HERE: string = "here";
+        initial {
+            $write("[%s]", "inline");
+            $write("[%s]", HERE);
+            $write("[%s]", Pkg::NAME);
+            // A non-string argument still renders as characters, not a
+            // number: `%s` of 8'd65 is "A" in SystemVerilog too.
+            $write("[%s]", 8'd65);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(output, "[inline][here][world][A]");
+    }
+}

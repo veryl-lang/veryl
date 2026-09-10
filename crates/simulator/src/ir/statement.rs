@@ -25,7 +25,7 @@ use veryl_analyzer::ir::{
     AssertKind, SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant,
 };
 use veryl_analyzer::ir::{ControlFlow, FunctionCall, VarId};
-use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue};
+use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue, byte_value_to_string_lossy};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -709,7 +709,7 @@ fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
                     }
                     's' | 'S' => {
                         if let Some(v) = values.get(arg_idx) {
-                            result.push_str(&v.format_dec());
+                            result.push_str(&byte_value_to_string_lossy(v));
                         }
                         arg_idx += 1;
                     }
@@ -3332,11 +3332,39 @@ fn extract_display_args(
     }
 
     for input in iter {
-        let proto: ProtoExpression = Conv::conv(context, &input.0).ok()?;
+        // A `string` exists only at elaboration and has no simulator variable
+        // behind it, so its bytes are taken here. Converting it as a variable
+        // reference looks for a `VariableMeta` that was never created.
+        let proto = if let Some(x) = string_arg_expression(&input.0) {
+            x
+        } else {
+            Conv::conv(context, &input.0).ok()?
+        };
         exprs.push(proto);
     }
 
     Some((format_str, exprs))
+}
+
+/// A constant `string` argument, as the byte value `%s` renders.
+fn string_arg_expression(expr: &air::Expression) -> Option<ProtoExpression> {
+    let air::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let comptime = factor_comptime(factor.as_ref())?;
+    if comptime.r#type.kind != TypeKind::String {
+        return None;
+    }
+    let ValueVariant::Numeric(value) = &comptime.value else {
+        return None;
+    };
+    Some(ProtoExpression::Value {
+        value: value.clone(),
+        // The value's own width, not the type's: a `string` type carries no
+        // usable width (`total_width()` is 1 for it).
+        width: value.width(),
+        expr_context: (&comptime.expr_context).into(),
+    })
 }
 
 fn factor_comptime(factor: &air::Factor) -> Option<&veryl_analyzer::ir::Comptime> {
