@@ -3396,7 +3396,11 @@ impl VerylWalker for Emitter {
                         self.scalar_type_emitted = true;
                     }
                 }
-                _ => {}
+                // The analyzer resolves every identifier before emission, so a
+                // resolvable path failing here means the symbol table and the
+                // emitted code disagree. Emitting nothing would silently produce
+                // broken SystemVerilog -- an empty type or an empty expression.
+                _ => unreachable!(),
             }
         }
     }

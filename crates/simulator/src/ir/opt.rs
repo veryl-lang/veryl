@@ -11,6 +11,7 @@ pub(crate) mod cone_gate;
 pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dup_assign_dce;
+pub(crate) mod event_gate;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod field_unfuse;
 #[cfg(not(target_family = "wasm"))]
@@ -86,6 +87,9 @@ pub(crate) mod field_unfuse {
     pub fn explain_offsets() -> &'static [isize] {
         &[]
     }
+    pub fn event_census_digest(_events: &HashMap<Event, Vec<ProtoStatement>>) -> u128 {
+        0
+    }
     pub fn run(
         _unified: &mut [ProtoStatement],
         _event_statements: &HashMap<Event, Vec<ProtoStatement>>,
@@ -119,8 +123,10 @@ pub(crate) mod dead_var_dce {
     ) -> (Vec<ProtoStatement>, usize) {
         (stmts, 0)
     }
+    pub fn localize_comb_ranges(_comb: &[ProtoStatement]) -> Vec<(isize, usize, isize)> {
+        Vec::new()
+    }
     pub fn collect_localize_info(
-        _comb: &[ProtoStatement],
         _event_slices: &[&[ProtoStatement]],
     ) -> (HashSet<VarOffset>, Vec<(isize, usize, isize)>) {
         (HashSet::default(), Vec::new())
@@ -137,7 +143,10 @@ pub(crate) mod version_split {
     pub fn pass_enabled(_use_4state: bool) -> bool {
         false
     }
-    pub fn run(_stmts: &mut [ProtoStatement], _alloc: &mut dyn FnMut(usize) -> isize) -> RunStats {
+    pub fn run(
+        _stmts: &mut [ProtoStatement],
+        _alloc: &mut dyn FnMut(usize, isize) -> isize,
+    ) -> RunStats {
         RunStats
     }
     pub fn accumulate(_s: &RunStats) {}

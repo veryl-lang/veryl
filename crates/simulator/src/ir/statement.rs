@@ -13,8 +13,7 @@ use crate::ir::variable::{
     VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
 };
 use crate::ir::write_log::{
-    WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, event_write_log_push_static, event_write_log_push_wide,
-    static_field_byte_span,
+    event_write_log_push_static, event_write_log_push_wide_range, static_field_byte_span,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
@@ -144,32 +143,45 @@ impl ProtoStatements {
         comb_len: usize,
         use_4state: bool,
     ) -> Vec<Statement> {
-        let mut result = Vec::new();
-        for block in &self.0 {
-            match block {
-                ProtoStatementBlock::Interpreted(proto) => {
-                    for s in proto {
-                        result.push(unsafe {
-                            s.apply_values_ptr(ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
-                        });
-                    }
-                }
-                ProtoStatementBlock::Compiled(artifact) => {
-                    // log_buf populated by `Ir::install_write_log_ptr` after
-                    // WriteLogBuffer allocation; null until then.
-                    result.push(Statement::Compiled(CompiledStmt {
-                        artifact: Arc::clone(artifact),
-                        ff: ff_ptr as *const u8,
-                        comb: comb_ptr as *const u8,
-                        log_buf: std::ptr::null_mut(),
-                        ff_delta: 0,
-                        outputs: None,
-                    }));
+        blocks_to_statements(&self.0, ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
+    }
+}
+
+/// Lower a run of blocks, so a caller that cuts an event at gate boundaries
+/// can lower the pieces apart.
+pub(crate) fn blocks_to_statements(
+    blocks: &[ProtoStatementBlock],
+    ff_ptr: *mut u8,
+    ff_len: usize,
+    comb_ptr: *mut u8,
+    comb_len: usize,
+    use_4state: bool,
+) -> Vec<Statement> {
+    let mut result = Vec::new();
+    for block in blocks {
+        match block {
+            ProtoStatementBlock::Interpreted(proto) => {
+                for s in proto {
+                    result.push(unsafe {
+                        s.apply_values_ptr(ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
+                    });
                 }
             }
+            ProtoStatementBlock::Compiled(artifact) => {
+                // log_buf populated by `Ir::install_write_log_ptr` after
+                // WriteLogBuffer allocation; null until then.
+                result.push(Statement::Compiled(CompiledStmt {
+                    artifact: Arc::clone(artifact),
+                    ff: ff_ptr as *const u8,
+                    comb: comb_ptr as *const u8,
+                    log_buf: std::ptr::null_mut(),
+                    ff_delta: 0,
+                    outputs: None,
+                }));
+            }
         }
-        result
     }
+    result
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -855,6 +867,8 @@ impl SystemFunctionCall {
                     i += 1;
                     true
                 });
+                // A waveform's gate hears about writes only through the log.
+                crate::wave_dumper::note_direct_write();
             }
             SystemFunctionCall::Assert {
                 kind,
@@ -909,6 +923,10 @@ pub enum ProtoSystemFunctionCall {
         filename: String,
         elements: Vec<ReadmemhElement>,
         width: usize,
+        /// A target inside an instance.  Its offsets exist only once the
+        /// instance tree is assembled, so `elements` and `width` stay empty
+        /// until `resolve_hier_refs` fills them and clears this.
+        hier: Option<Box<ProtoReadmemhHier>>,
     },
     Assert {
         kind: AssertKind,
@@ -917,6 +935,42 @@ pub enum ProtoSystemFunctionCall {
         args: Vec<ProtoExpression>,
     },
     Finish,
+}
+
+pub fn readmemh_elements(meta: &crate::ir::variable::VariableMeta) -> Vec<ReadmemhElement> {
+    meta.elements
+        .iter()
+        .map(|elem| ReadmemhElement {
+            current: elem.current,
+            next_offset: if elem.is_ff() {
+                Some(elem.next_offset)
+            } else {
+                None
+            },
+        })
+        .collect()
+}
+
+/// `$readmemh(path, u_dut.mem)` before `resolve_hier_refs` finds the target.
+#[derive(Clone, Debug)]
+pub struct ProtoReadmemhHier {
+    /// Instance names from the testbench down to the target's module.
+    pub inst_path: Vec<StrId>,
+    pub var_path: air::VarPath,
+    pub token: TokenRange,
+}
+
+// `token` is a per-test source position, excluded as in `ProtoHierVariable`.
+impl std::hash::Hash for ProtoReadmemhHier {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ProtoReadmemhHier {
+            inst_path,
+            var_path,
+            token: _,
+        } = self;
+        inst_path.hash(state);
+        var_path.hash(state);
+    }
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -947,11 +1001,14 @@ pub struct CompiledBlockStatement {
     pub ff_canonical_offsets: Vec<isize>,
     /// Per-statement (inputs, outputs) from the pre-JIT originals.
     /// `analyze_dependency` uses this for fine-grained DAG analysis to
-    /// avoid false combinational loops from coarse lumping.
-    pub stmt_deps: Vec<StmtDep>,
+    /// avoid false combinational loops from coarse lumping.  Shared for the
+    /// same reason as `original_stmts`: it is one entry per original statement.
+    pub stmt_deps: Arc<Vec<StmtDep>>,
     /// Pre-JIT originals, expanded by `analyze_dependency` when a
-    /// CompiledBlock causes a false cycle.
-    pub original_stmts: Vec<ProtoStatement>,
+    /// CompiledBlock causes a false cycle.  Shared: a cached subtree that
+    /// relocates by a zero delta hands the same list to every test rather than
+    /// deep-cloning the whole tree per test (`backend::inst::relocate_entry`).
+    pub original_stmts: Arc<Vec<ProtoStatement>>,
 }
 
 // `stmt_deps` and `original_stmts` are excluded from `Debug` and `Hash`: both are
@@ -1557,7 +1614,7 @@ impl ProtoStatement {
                 // → hazard_unit input appears as a comb cycle).
                 if !x.stmt_deps.is_empty() {
                     // Use fine-grained per-statement deps if available
-                    for (ins, outs) in &x.stmt_deps {
+                    for (ins, outs) in x.stmt_deps.iter() {
                         for &off in ins {
                             if !off.is_ff() {
                                 inputs.push(VarOffset::Comb(off.raw()));
@@ -1675,7 +1732,7 @@ impl ProtoStatement {
             },
             ProtoStatement::CompiledBlock(x) => {
                 if !x.stmt_deps.is_empty() {
-                    for (ins, _) in &x.stmt_deps {
+                    for (ins, _) in x.stmt_deps.iter() {
                         for &off in ins {
                             if !off.is_ff() {
                                 out.push((VarOffset::Comb(off.raw()), None));
@@ -1808,11 +1865,11 @@ impl ProtoStatement {
                 // cached base+last input_offsets / output_offsets if the
                 // originals weren't retained.
                 if !x.original_stmts.is_empty() {
-                    for s in &x.original_stmts {
+                    for s in x.original_stmts.iter() {
                         s.gather_variable_offsets_expanded(fold, inputs, outputs);
                     }
                 } else if !x.stmt_deps.is_empty() {
-                    for (ins, outs) in &x.stmt_deps {
+                    for (ins, outs) in x.stmt_deps.iter() {
                         for &off in ins {
                             inputs.push(fold.canon(off));
                         }
@@ -1912,7 +1969,7 @@ impl ProtoStatement {
                 // retained originals can name a foldable array.  A block
                 // reduced to its cache keeps its arrays expanded — safe,
                 // since the gather reads the same lists.
-                for s in &x.original_stmts {
+                for s in x.original_stmts.iter() {
                     s.collect_big_arrays(fold);
                 }
             }
@@ -1998,7 +2055,7 @@ impl ProtoStatement {
                 // exist (covered by the non-expanded read set), so nothing to
                 // add here.
                 if !x.original_stmts.is_empty() {
-                    for s in &x.original_stmts {
+                    for s in x.original_stmts.iter() {
                         s.gather_dynamic_read_ranges(ranges);
                     }
                 }
@@ -2211,7 +2268,12 @@ impl ProtoStatement {
                         filename,
                         elements,
                         width,
+                        hier,
                     } => {
+                        debug_assert!(
+                            hier.is_none(),
+                            "a hierarchical $readmemh target was never resolved"
+                        );
                         let nb = calc_native_bytes(*width);
                         let resolved: Arc<[_]> = elements
                             .iter()
@@ -3377,32 +3439,41 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     )]
                 }
                 SystemFunctionKind::Readmemh(input, output) => {
-                    let raw = extract_string_value(&input.0).unwrap();
+                    let raw = extract_string_value(&input.0).ok_or_else(|| {
+                        SimulatorError::unsupported_description(&x.comptime.token)
+                    })?;
                     let filename = raw.trim_matches('"').to_string();
-                    let dst = &output.0[0];
-                    let id = dst.id;
-                    let scope = context.scope();
-                    let meta = scope.variable_meta.get(&id).unwrap();
-                    let width = meta.width;
-                    let elements: Vec<ReadmemhElement> = meta
-                        .elements
-                        .iter()
-                        .map(|elem| ReadmemhElement {
-                            current: elem.current,
-                            next_offset: if elem.is_ff() {
-                                Some(elem.next_offset)
-                            } else {
-                                None
-                            },
-                        })
-                        .collect();
-                    vec![ProtoStatement::SystemFunctionCall(
-                        ProtoSystemFunctionCall::Readmemh {
-                            filename,
-                            elements,
-                            width,
-                        },
-                    )]
+                    let call = match output {
+                        // Left for `resolve_hier_refs` (see the `hier` field).
+                        air::SystemFunctionOutput::Hier(hier) => {
+                            ProtoSystemFunctionCall::Readmemh {
+                                filename,
+                                elements: Vec::new(),
+                                width: 0,
+                                hier: Some(Box::new(ProtoReadmemhHier {
+                                    inst_path: hier.inst_path.clone(),
+                                    var_path: hier.var_path.clone(),
+                                    token: hier.comptime.token,
+                                })),
+                            }
+                        }
+                        air::SystemFunctionOutput::Local(dst) => {
+                            let dst = dst.first().ok_or_else(|| {
+                                SimulatorError::unsupported_description(&x.comptime.token)
+                            })?;
+                            let scope = context.scope();
+                            let meta = scope.variable_meta.get(&dst.id).ok_or_else(|| {
+                                SimulatorError::unsupported_description(&dst.token)
+                            })?;
+                            ProtoSystemFunctionCall::Readmemh {
+                                filename,
+                                elements: readmemh_elements(meta),
+                                width: meta.width,
+                                hier: None,
+                            }
+                        }
+                    };
+                    vec![ProtoStatement::SystemFunctionCall(call)]
                 }
                 SystemFunctionKind::Assert { kind, cond, args } => {
                     let condition: ProtoExpression = Conv::conv(context, &cond.0)?;
@@ -4015,8 +4086,7 @@ fn emit_ff_log(
         }
         return;
     }
-    // Wide: contiguous byte buffer per side, split into wide entries
-    // of at most WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES.
+    // Wide: one contiguous byte buffer per side.
     let n_words = nb / 8;
     let payload_digits: Vec<u64> = match value {
         Value::U64(v) => vec![v.payload],
@@ -4031,17 +4101,12 @@ fn emit_ff_log(
         Some((blo, blen)) if blo + blen <= payload_bytes.len() => (blo, blen),
         _ => (0, nb),
     };
-    let mut written: usize = 0;
-    while written < span_len {
-        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, span_len - written);
-        unsafe {
-            event_write_log_push_wide(
-                base_offset + (skip + written) as u32,
-                payload_bytes.as_ptr().add(skip + written),
-                chunk,
-            );
-        }
-        written += chunk;
+    unsafe {
+        event_write_log_push_wide_range(
+            base_offset + skip as u32,
+            payload_bytes.as_ptr().add(skip),
+            span_len,
+        );
     }
     if use_4state {
         let mask_digits: Vec<u64> = match value {
@@ -4058,17 +4123,12 @@ fn emit_ff_log(
         } else {
             (0, nb)
         };
-        let mut written: usize = 0;
-        while written < mlen {
-            let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, mlen - written);
-            unsafe {
-                event_write_log_push_wide(
-                    base_offset + nb_u32 + (mskip + written) as u32,
-                    mask_bytes.as_ptr().add(mskip + written),
-                    chunk,
-                );
-            }
-            written += chunk;
+        unsafe {
+            event_write_log_push_wide_range(
+                base_offset + nb_u32 + mskip as u32,
+                mask_bytes.as_ptr().add(mskip),
+                mlen,
+            );
         }
     }
 }

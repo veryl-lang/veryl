@@ -30,6 +30,8 @@ mod comb_loop_positional_tests;
 
 mod comb_loop_sparse_tests;
 
+mod statement_after_if_reset_tests;
+
 #[track_caller]
 fn analyze(code: &str) -> Vec<AnalyzerError> {
     symbol_table::clear();

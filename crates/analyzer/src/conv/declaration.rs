@@ -14,6 +14,7 @@ use crate::conv::checker::import::check_import;
 use crate::conv::checker::inst::check_inst;
 use crate::conv::checker::modport::{check_modport, check_modport_default, check_modport_in_port};
 use crate::conv::checker::port::{check_direction, check_port_default_value, check_port_direction};
+use crate::conv::checker::portability::check_statement_after_if_reset;
 use crate::conv::context::{FunctionOutputBinding, RuntimeFunctionEffect};
 use crate::conv::utils::{
     TypePosition, assign_rhs_context_type, check_assign_before_definition,
@@ -458,7 +459,10 @@ impl Conv<&WithParameterItem> for () {
             };
 
             // Get overridden parameter if it exists
-            let mut expr = context.get_override(&path).cloned().unwrap_or(expr);
+            let mut expr = context
+                .get_override(&symbol.found.namespace, &path)
+                .cloned()
+                .unwrap_or(expr);
 
             let dst = ir::AssignDestination {
                 id: VarId::default(),
@@ -658,6 +662,7 @@ impl Conv<&AlwaysFfDeclaration> for ir::Declaration {
                 &reset.comptime,
                 &value.always_ff.always_ff_token.token,
             );
+            check_statement_after_if_reset(context, value, reset);
         }
 
         context.current_clock = Some(clock.comptime.clone());
@@ -1632,7 +1637,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 sig.add_parameter(x.name, value.0.value.clone());
             }
         }
-        context.push_override(overridden_params);
+        context.push_override(symbol.inner_namespace(), overridden_params);
         let modport_signatures = context.collect_modport_signatures(value);
 
         // The interfaces connected to this instance's modport ports are part of

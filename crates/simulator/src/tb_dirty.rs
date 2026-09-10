@@ -30,6 +30,11 @@ use crate::testbench::TestbenchStatement;
 pub(crate) struct SettleInfo {
     /// Span table template; re-target per `Ir` with `SpanTable::rebased`.
     pub(crate) table: SpanTable,
+    /// The same over the whole comb, for the testbench filter: a testbench
+    /// write to a derived-clock closure input must still settle, since
+    /// nothing else refreshes the closure before the next step's pre-commit
+    /// phase.  Shares `table` when the two read sets coincide.
+    pub(crate) tb_table: SpanTable,
     pub(crate) clock_toggle_dirties: bool,
     pub(crate) dirty_events: HashSet<Event>,
     pub(crate) event_comb_watch: crate::HashMap<Event, (u32, u32)>,
@@ -65,6 +70,9 @@ fn enabled() -> bool {
 #[derive(Default)]
 pub(crate) struct TbDirtyFilter {
     clean: HashSet<*const Statement>,
+    /// Statements that may store into FF storage: those also drop the event
+    /// gates' idle verdicts, which only see writes an event made.
+    ff_writers: HashSet<*const Statement>,
 }
 
 impl TbDirtyFilter {
@@ -73,9 +81,21 @@ impl TbDirtyFilter {
         !self.clean.is_empty() && self.clean.contains(&(stmt as *const Statement))
     }
 
-    /// Classify `stmts` against `ir`'s comb reach.  `stmts` must be the exact
-    /// slice later executed; the filter keys on statement addresses.
+    #[inline]
+    pub(crate) fn writes_ff(&self, stmt: &Statement) -> bool {
+        self.ff_writers.contains(&(stmt as *const Statement))
+    }
+
+    /// Classify one block; see `build_blocks`.
+    #[cfg(test)]
     pub(crate) fn build(ir: &Ir, stmts: &[TestbenchStatement]) -> Self {
+        Self::build_blocks(ir, &[stmts])
+    }
+
+    /// Classify the `initial` blocks (one slice each) against `ir`'s comb
+    /// reach.  They must be the exact slices later executed; the filter keys
+    /// on statement addresses.
+    pub(crate) fn build_blocks(ir: &Ir, blocks: &[&[TestbenchStatement]]) -> Self {
         let mut filter = TbDirtyFilter::default();
         if !enabled() {
             return filter;
@@ -83,12 +103,16 @@ impl TbDirtyFilter {
         // Reuse the settle filter's cached table when it armed (the usual
         // case); a fresh build only on its opt-out path.
         let spans = match ir.settle_info.get() {
-            Some(info) => info.table.rebased(ir),
-            None => SpanTable::build(ir),
+            Some(info) => info.tb_table.rebased(ir),
+            None => SpanTable::build(ir, &ir.comb_touched_offsets),
         };
         let mut clean = HashSet::default();
-        collect_clean(stmts, &spans, &mut clean);
+        let mut ff_writers = HashSet::default();
+        for stmts in blocks {
+            collect_clean(stmts, &spans, &mut clean, &mut ff_writers);
+        }
         filter.clean = clean;
+        filter.ff_writers = ff_writers;
         filter
     }
 
@@ -104,7 +128,7 @@ impl TbDirtyFilter {
     /// but scales with total memory depth.
     #[cfg(test)]
     pub(crate) fn span_counts(ir: &Ir) -> (usize, usize) {
-        let spans = SpanTable::build(ir);
+        let spans = SpanTable::build(ir, &ir.comb_touched_offsets);
         (spans.ff.len(), spans.comb.len())
     }
 }
@@ -118,6 +142,7 @@ impl TbDirtyFilter {
 /// Besides classifying testbench statements, the table backs the simulator's
 /// settle filter, which asks the same question of committed FF writes by
 /// byte offset (`ff_change_may_reach_comb`).
+#[derive(Clone)]
 pub(crate) struct SpanTable {
     ff: std::sync::Arc<[Span]>,
     comb: std::sync::Arc<[Span]>,
@@ -145,7 +170,10 @@ impl SpanTable {
         }
     }
 
-    pub(crate) fn build(ir: &Ir) -> Self {
+    /// `touched`: the offsets the comb in question reads or writes
+    /// (`Ir::settle_touched_offsets` for the settle filter, the whole
+    /// `Ir::comb_touched_offsets` for the testbench filter).
+    pub(crate) fn build(ir: &Ir, touched: &HashSet<VarOffset>) -> Self {
         let ff_base = ir.ff_values.as_ptr() as usize;
         let ff_end = ff_base + ir.ff_values.len();
         let comb_base = ir.comb_values.as_ptr() as usize;
@@ -165,7 +193,7 @@ impl SpanTable {
         // from a range query over the sorted set rather than a probe per
         // element.
         let (mut touched_ff, mut touched_comb) = (Vec::new(), Vec::new());
-        for o in ir.comb_touched_offsets.iter() {
+        for o in touched.iter() {
             match o {
                 VarOffset::Ff(x) if *x >= 0 => touched_ff.push(*x as usize),
                 VarOffset::Comb(x) if *x >= 0 => touched_comb.push(*x as usize),
@@ -259,6 +287,10 @@ impl SpanTable {
             comb_len: ir.comb_values.len(),
             ff_untouched_cover,
         }
+    }
+
+    pub(crate) fn is_ff_storage(&self, ptr: *mut u8) -> bool {
+        (self.ff_base..self.ff_base + self.ff_len).contains(&(ptr as usize))
     }
 
     /// `true` when a write of `len` bytes at `ptr` may reach a comb read.
@@ -364,6 +396,7 @@ fn collect_clean(
     stmts: &[TestbenchStatement],
     spans: &SpanTable,
     clean: &mut HashSet<*const Statement>,
+    ff_writers: &mut HashSet<*const Statement>,
 ) {
     for tb in stmts {
         match tb {
@@ -371,21 +404,48 @@ fn collect_clean(
                 if is_clean_stmt(s, spans) {
                     clean.insert(s as *const Statement);
                 }
+                if writes_ff_stmt(s, spans) {
+                    ff_writers.insert(s as *const Statement);
+                }
             }
             TestbenchStatement::If {
                 then_block,
                 else_block,
                 ..
             } => {
-                collect_clean(then_block, spans, clean);
-                collect_clean(else_block, spans, clean);
+                collect_clean(then_block, spans, clean, ff_writers);
+                collect_clean(else_block, spans, clean, ff_writers);
             }
-            TestbenchStatement::For { body, .. } => collect_clean(body, spans, clean),
+            TestbenchStatement::For { body, .. } => collect_clean(body, spans, clean, ff_writers),
             // Clock/reset drive design nets; the rest either write through
             // paths this filter does not model or advance time.  All keep the
             // unconditional dirty mark at their own call sites.
             _ => {}
         }
+    }
+}
+
+/// A precompiled block cannot store into FF storage: it is built over
+/// testbench-private storage only.
+fn writes_ff_stmt(stmt: &Statement, spans: &SpanTable) -> bool {
+    match stmt {
+        Statement::Assign(a) => spans.is_ff_storage(a.dst),
+        Statement::AssignDynamic(a) => spans.is_ff_storage(a.dst_base_ptr),
+        Statement::If(x) => x
+            .true_side
+            .iter()
+            .chain(x.false_side.iter())
+            .any(|s| writes_ff_stmt(s, spans)),
+        Statement::Case(x) => x
+            .arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(x.default.iter())
+            .any(|s| writes_ff_stmt(s, spans)),
+        Statement::For(x) => x.body.iter().any(|s| writes_ff_stmt(s, spans)),
+        Statement::SequentialBlock(b) => b.iter().any(|s| writes_ff_stmt(s, spans)),
+        Statement::SystemFunctionCall(crate::ir::SystemFunctionCall::Readmemh { .. }) => true,
+        _ => false,
     }
 }
 

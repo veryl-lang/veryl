@@ -210,6 +210,9 @@ struct CachedStatements {
     post_comb_fns: Vec<ProtoStatement>,
     child_modules: Vec<ModuleVariableMeta>,
     derived_clock_candidates: Vec<crate::ir::EdgeCandidate>,
+    /// `Context::comb_reloc` entries the reference conv recorded inside its
+    /// region; a copy needs them relocated too or its temps stay unowned.
+    comb_reloc: Vec<(isize, isize, usize)>,
 }
 
 /// Single-flight cache slot: one thread `Computing` a component blocks others
@@ -235,6 +238,7 @@ pub struct ReusedStatements {
     pub derived_clock_candidates: Vec<crate::ir::EdgeCandidate>,
     pub ff_size: usize,
     pub comb_size: usize,
+    pub comb_reloc: Vec<(isize, isize, usize)>,
 }
 
 fn adjust_offsets_vec(offs: &[VarOffset], ff_delta: isize, comb_delta: isize) -> Vec<VarOffset> {
@@ -260,17 +264,18 @@ fn reloc_stmt(s: &ProtoStatement, ff_delta: isize, comb_delta: isize) -> ProtoSt
                     .iter()
                     .map(|o| o + ff_delta)
                     .collect(),
-                stmt_deps: cb
-                    .stmt_deps
-                    .iter()
-                    .map(|(ins, outs)| {
-                        (
-                            adjust_offsets_vec(ins, ff_delta, comb_delta),
-                            adjust_offsets_vec(outs, ff_delta, comb_delta),
-                        )
-                    })
-                    .collect(),
-                original_stmts: reloc_stmts(&cb.original_stmts, ff_delta, comb_delta),
+                stmt_deps: Arc::new(
+                    cb.stmt_deps
+                        .iter()
+                        .map(|(ins, outs)| {
+                            (
+                                adjust_offsets_vec(ins, ff_delta, comb_delta),
+                                adjust_offsets_vec(outs, ff_delta, comb_delta),
+                            )
+                        })
+                        .collect(),
+                ),
+                original_stmts: Arc::new(reloc_stmts(&cb.original_stmts, ff_delta, comb_delta)),
             })
         }
         other => {
@@ -338,10 +343,21 @@ fn relocate_entry(
 ) -> ReusedStatements {
     let ff_delta = ff_start - entry.ref_ff_start;
     let comb_delta = comb_start - entry.ref_comb_start;
+    // Testbenches lay out identically up to the DUT, so a reused subtree
+    // usually lands where the reference conv put it and its baked offsets
+    // need no rewrite.
+    let zero = ff_delta == 0 && comb_delta == 0;
+    let reloc = |stmts: &[ProtoStatement]| -> Vec<ProtoStatement> {
+        if zero {
+            stmts.to_vec()
+        } else {
+            reloc_stmts(stmts, ff_delta, comb_delta)
+        }
+    };
     let event_statements = entry
         .event_statements
         .iter()
-        .map(|(ev, stmts)| (ev.clone(), reloc_stmts(stmts, ff_delta, comb_delta)))
+        .map(|(ev, stmts)| (ev.clone(), reloc(stmts)))
         .collect();
     let child_modules = entry
         .child_modules
@@ -353,14 +369,20 @@ fn relocate_entry(
         .iter()
         .map(|(id, off, nb, pol, neg)| (*id, off.adjust(ff_delta, comb_delta), *nb, *pol, *neg))
         .collect();
+    let comb_reloc = entry
+        .comb_reloc
+        .iter()
+        .map(|&(from, to, vs)| (from + comb_delta, to + comb_delta, vs))
+        .collect();
     ReusedStatements {
         event_statements,
-        comb_statements: reloc_stmts(&entry.comb_statements, ff_delta, comb_delta),
-        post_comb_fns: reloc_stmts(&entry.post_comb_fns, ff_delta, comb_delta),
+        comb_statements: reloc(&entry.comb_statements),
+        post_comb_fns: reloc(&entry.post_comb_fns),
         child_modules,
         derived_clock_candidates,
         ff_size: entry.ff_size,
         comb_size: entry.comb_size,
+        comb_reloc,
     }
 }
 
@@ -397,6 +419,7 @@ impl ClaimGuard {
         post_comb_fns: &[ProtoStatement],
         child_modules: &[ModuleVariableMeta],
         derived_clock_candidates: &[crate::ir::EdgeCandidate],
+        comb_reloc: &[(isize, isize, usize)],
     ) {
         let entry = Arc::new(CachedStatements {
             ref_ff_start: ff_start,
@@ -408,6 +431,7 @@ impl ClaimGuard {
             post_comb_fns: post_comb_fns.to_vec(),
             child_modules: child_modules.to_vec(),
             derived_clock_candidates: derived_clock_candidates.to_vec(),
+            comb_reloc: comb_reloc.to_vec(),
         });
         let mut cache = GLOBAL_STMT_CACHE.lock().unwrap();
         cache.insert(self.key, Slot::Done(entry));
@@ -514,6 +538,12 @@ pub fn try_compile_inst_chunks(
     if !context.config.use_jit {
         return;
     }
+    // With the comb layout pass on, the parent expands every inst chunk back
+    // to its statements (`comb_layout::expand_compiled_blocks`) and the
+    // pipeline compiles those; an artifact built here would never run.
+    if crate::ir::comb_layout::enabled(context.config.use_4state) {
+        return;
+    }
     let ff_start_bytes = ff_start;
     let comb_start_bytes = comb_start;
     let component_key: *const air::Component = Arc::as_ptr(&src.component);
@@ -559,8 +589,8 @@ pub fn try_compile_inst_chunks(
                     input_offsets: adjust(&cached.input_offsets),
                     output_offsets: adjust(&cached.output_offsets),
                     ff_canonical_offsets: adjusted_canonical,
-                    stmt_deps: vec![],
-                    original_stmts: adjust_stmts(&cached.original_stmts),
+                    stmt_deps: Arc::new(vec![]),
+                    original_stmts: Arc::new(adjust_stmts(&cached.original_stmts)),
                 })];
             }
         }
@@ -578,8 +608,8 @@ pub fn try_compile_inst_chunks(
                 input_offsets: adjust(&cached.input_offsets),
                 output_offsets: adjust(&cached.output_offsets),
                 ff_canonical_offsets: vec![],
-                stmt_deps: adjusted_deps,
-                original_stmts: adjust_stmts(&cached.original_stmts),
+                stmt_deps: Arc::new(adjusted_deps),
+                original_stmts: Arc::new(adjust_stmts(&cached.original_stmts)),
             })];
         }
     } else {
@@ -610,7 +640,7 @@ pub fn try_compile_inst_chunks(
                 let (input_offsets, output_offsets) = (all_inputs, all_outputs);
                 let ff_canonical = gather_ff_canonical(stmts);
 
-                let event_original = stmts.clone();
+                let event_original = Arc::new(stmts.clone());
                 event_funcs.insert(
                     event.clone(),
                     CachedChunk {
@@ -618,8 +648,8 @@ pub fn try_compile_inst_chunks(
                         input_offsets: input_offsets.clone(),
                         output_offsets: output_offsets.clone(),
                         ff_canonical_offsets: ff_canonical.clone(),
-                        stmt_deps: vec![],
-                        original_stmts: event_original.clone(),
+                        stmt_deps: Arc::new(vec![]),
+                        original_stmts: Arc::clone(&event_original),
                     },
                 );
 
@@ -630,7 +660,7 @@ pub fn try_compile_inst_chunks(
                     input_offsets,
                     output_offsets,
                     ff_canonical_offsets: ff_canonical,
-                    stmt_deps: vec![],
+                    stmt_deps: Arc::new(vec![]),
                     original_stmts: event_original,
                 })];
             }
@@ -660,17 +690,19 @@ pub fn try_compile_inst_chunks(
                 let (input_offsets, output_offsets) =
                     gather_external_offsets(&sorted_comb_for_func);
 
-                let stmt_deps: Vec<_> = sorted_comb_for_func
-                    .iter()
-                    .map(|s| {
-                        let mut ins = vec![];
-                        let mut outs = vec![];
-                        s.gather_variable_offsets(&mut ins, &mut outs);
-                        (ins, outs)
-                    })
-                    .collect();
+                let stmt_deps: Arc<Vec<_>> = Arc::new(
+                    sorted_comb_for_func
+                        .iter()
+                        .map(|s| {
+                            let mut ins = vec![];
+                            let mut outs = vec![];
+                            s.gather_variable_offsets(&mut ins, &mut outs);
+                            (ins, outs)
+                        })
+                        .collect(),
+                );
 
-                let original_stmts = sorted_comb_for_func.clone();
+                let original_stmts = Arc::new(sorted_comb_for_func.clone());
                 *all_comb_statements =
                     vec![ProtoStatement::CompiledBlock(CompiledBlockStatement {
                         artifact: Arc::clone(&artifact),
@@ -679,7 +711,7 @@ pub fn try_compile_inst_chunks(
                         input_offsets: input_offsets.clone(),
                         output_offsets: output_offsets.clone(),
                         ff_canonical_offsets: vec![],
-                        stmt_deps: stmt_deps.clone(),
+                        stmt_deps: Arc::clone(&stmt_deps),
                         original_stmts,
                     })];
 
@@ -689,7 +721,7 @@ pub fn try_compile_inst_chunks(
                     output_offsets,
                     ff_canonical_offsets: vec![],
                     stmt_deps,
-                    original_stmts: sorted_comb_for_func,
+                    original_stmts: Arc::new(sorted_comb_for_func),
                 })
             } else {
                 None

@@ -92,7 +92,17 @@ fn main() {
     let clk = sim.get_clock("clk").unwrap();
     let rst = sim.get_reset("rst").unwrap();
 
-    sim.step(&Event::Initial);
+    let mut initials: Vec<Event> = sim
+        .ir
+        .event_statements
+        .keys()
+        .filter(|e| e.is_initial())
+        .cloned()
+        .collect();
+    initials.sort_by_key(|e| e.initial_index());
+    for event in &initials {
+        sim.step(event);
+    }
     sim.step_reset(&clk, &rst);
 
     for _ in 0..cycle {
