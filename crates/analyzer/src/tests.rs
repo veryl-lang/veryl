@@ -21260,3 +21260,56 @@ fn nested_generic_interface_effect_trace_uses_parent_specialization() {
     assert_eq!(call_stack.len(), 2, "{errors:?}");
     assert_eq!(external_writes.len(), 1, "{errors:?}");
 }
+
+#[test]
+fn cast_by_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 8,
+        param Q: u32 = 16,
+    ) (
+        i_x: input  logic<16>,
+        o_a: output logic<32>,
+        o_b: output logic<32>,
+    ) {
+        assign o_a = i_x as (W + 1);
+        assign o_b = (i_x - 2) as (Q + 1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn cast_by_type_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA (
+        i_x: input  logic<16>,
+        o_y: output logic<32>,
+    ) {
+        assign o_y = i_x as (u32);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSizeType { .. }));
+}
+
+#[test]
+fn cast_by_non_constant_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA (
+        i_x: input  logic<16>,
+        o_y: output logic<32>,
+    ) {
+        assign o_y = i_x as (i_x);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+}

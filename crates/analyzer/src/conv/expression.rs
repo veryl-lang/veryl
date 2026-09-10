@@ -460,6 +460,11 @@ impl Conv<&CastingType> for ir::Factor {
 
                     return Ok(ir::Factor::Value(comptime));
                 }
+                CastingType::LParenExpressionRParen(x) => {
+                    let (comptime, _) = eval_size(context, x.expression.as_ref(), false)?;
+
+                    return Ok(ir::Factor::Value(comptime));
+                }
                 CastingType::UserDefinedType(_) => unreachable!(),
             };
             {
