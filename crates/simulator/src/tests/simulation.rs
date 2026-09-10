@@ -29035,3 +29035,53 @@ fn out_of_range_unpacked_element_index_reads_default_and_drops_write() {
         );
     }
 }
+
+#[test]
+fn const_struct_array_member_folds_per_element() {
+    // A member read of a const ARRAY of structs (`ENC[i].m`) folded to x.
+    // Only a scalar struct const carried its value through the struct-member
+    // symbol route; the array literal's per-element values were dropped, so
+    // every field read came back unknown -- silently at the parameter level,
+    // and as a bogus `invalid_select` where the value reached a bit select.
+    let code = r#"
+    package Pkg {
+        struct enc_t {
+            e: u32,
+            m: u32,
+        }
+        const ENC: enc_t [2] = '{enc_t'{e: 8, m: 23}, enc_t'{e: 11, m: 52}};
+        function man_bits (
+            f: input u32,
+        ) -> u32 {
+            return ENC[f].m;
+        }
+    }
+    module Top (
+        o_m0: output logic<32>,
+        o_e1: output logic<32>,
+        o_fn: output logic<32>,
+    ) {
+        const M0: u32 = Pkg::ENC[0].m;
+        const E1: u32 = Pkg::ENC[1].e;
+        const FN: u32 = Pkg::man_bits(1);
+        assign o_m0 = M0;
+        assign o_e1 = E1;
+        assign o_fn = FN;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // The second-declared member takes the low bits, so reading `.m` as
+        // the whole struct would give 23 for element 0 too: `o_e1` is what
+        // separates a correct field offset from a truncation.
+        assert_eq!(sim.get("o_m0").unwrap(), Value::new(23, 32, false));
+        assert_eq!(sim.get("o_e1").unwrap(), Value::new(11, 32, false));
+        assert_eq!(sim.get("o_fn").unwrap(), Value::new(52, 32, false));
+    }
+}

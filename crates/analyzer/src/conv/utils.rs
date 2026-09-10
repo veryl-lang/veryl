@@ -1178,8 +1178,16 @@ pub fn eval_struct_member(
                         x
                     } else {
                         let expr = x.value.as_ref().ok_or_else(|| ir_error!(token))?;
-                        let (_, mut expr) = eval_expr(context, Some(r#type.clone()), expr, false)?;
-                        expr.eval_comptime(context, None).clone()
+                        let (comptime, mut expr) =
+                            eval_expr(context, Some(r#type.clone()), expr, false)?;
+                        // An array literal's per-element values are carried by
+                        // the comptime `eval_expr` builds; `eval_comptime`
+                        // alone leaves an array literal unevaluated.
+                        if matches!(comptime.value, ValueVariant::NumericArray(_)) {
+                            comptime
+                        } else {
+                            expr.eval_comptime(context, None).clone()
+                        }
                     };
 
                     member_path.add_prelude(&path.0);
@@ -1191,17 +1199,27 @@ pub fn eval_struct_member(
                             // part_select encodes the bit position of the field: the sum of
                             // all pos values gives the LSB (end), and the last entry's type
                             // width gives the field width (beg = end + width - 1).
-                            if let ValueVariant::Numeric(ref full_value) = comptime.value.clone() {
-                                let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
-                                if let Some(width) =
-                                    x.part_select.last().and_then(|ps| ps.r#type.total_width())
-                                {
-                                    let beg = end + width - 1;
-                                    comptime.value =
-                                        ValueVariant::Numeric(full_value.select(beg, end));
-                                }
+                            let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
+                            if let Some(width) =
+                                x.part_select.last().and_then(|ps| ps.r#type.total_width())
+                            {
+                                let beg = end + width - 1;
+                                comptime.value = match &comptime.value {
+                                    ValueVariant::Numeric(v) => {
+                                        ValueVariant::Numeric(v.select(beg, end))
+                                    }
+                                    // Every element holds a whole struct, so the
+                                    // field is taken element by element and the
+                                    // array dimension stays on the type.
+                                    ValueVariant::NumericArray(v) => ValueVariant::NumericArray(
+                                        v.iter().map(|v| v.select(beg, end)).collect(),
+                                    ),
+                                    v => v.clone(),
+                                };
                             }
-                            comptime.r#type = get_member_type(context, member_symbol)?;
+                            let mut member_type = get_member_type(context, member_symbol)?;
+                            member_type.array = r#type.array.clone();
+                            comptime.r#type = member_type;
                             return Ok(ir::Factor::Value(comptime));
                         }
                     }
