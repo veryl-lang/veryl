@@ -116,7 +116,9 @@ impl BackendRegistry {
         let mut r = Self::default();
         #[cfg(not(target_family = "wasm"))]
         {
-            if _config.aot_c {
+            // AOT-C dlopens the object it compiles, so a statically linked
+            // build would pay every `cc` invocation and throw the result away.
+            if _config.aot_c && crate::component::loader::native_loading_supported() {
                 r.register(Box::new(super::AotCBackend::new(
                     _config.aot_c_async,
                     _config.aot_c_event,
@@ -148,10 +150,11 @@ impl BackendRegistry {
         ctx: &CompileCtx,
         event: &Event,
         stmts: &[ProtoStatement],
+        gates: &[crate::ir::opt::event_gate::EventGate],
     ) -> Option<Arc<dyn CompiledWhole>> {
         self.backends
             .iter_mut()
-            .find_map(|b| b.compile_whole_event(ctx, event, stmts))
+            .find_map(|b| b.compile_whole_event(ctx, event, stmts, gates))
     }
 
     pub fn try_compile_chunk(

@@ -272,6 +272,9 @@ pub(crate) mod wide_fn_addrs {
     pub fn copy() -> usize {
         fn_addr!(wide_ops::wide_copy)
     }
+    pub fn window_store() -> usize {
+        fn_addr!(wide_ops::wide_window_store)
+    }
     pub fn eq() -> usize {
         fn_addr!(wide_ops::wide_eq)
     }
@@ -746,6 +749,49 @@ pub(crate) fn emit_wide_shift_right_mask(
     );
     emit_wide_apply_mask(context, builder, dst, nb, width);
     dst
+}
+
+/// `dst[amount +: width] = src`: one helper call that touches only the words
+/// the window covers, so a window write into a large value costs the window,
+/// not the value.  `log` is the relocated write-log offset of `dst`'s current
+/// slot; `in_place` also writes `dst` (an unpacked FF's next slot or a comb
+/// value), otherwise the merged words reach the log alone.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_wide_window_store(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    dst_ptr: CraneliftValue,
+    src_ptr: CraneliftValue,
+    amount: CraneliftValue,
+    width: usize,
+    dst_width: usize,
+    log: Option<CraneliftValue>,
+    in_place: bool,
+) {
+    let flags = (u64::from(in_place) << 32) as i64;
+    let (log_buf, log_and_flags) = match log {
+        Some(off) => {
+            let off = builder.ins().uextend(I64, off);
+            let flags = builder.ins().iconst(I64, flags);
+            (context.log_buf, builder.ins().bor(off, flags))
+        }
+        None => (
+            builder.ins().iconst(I64, 0),
+            builder.ins().iconst(I64, flags),
+        ),
+    };
+    let packed = builder
+        .ins()
+        .iconst(I64, (width as i64) | ((dst_width as i64) << 32));
+    let sig = super::runtime::get_or_create_sig(context, builder, HelperSig::WideWindowStore);
+    let addr = builder
+        .ins()
+        .iconst(I64, wide_fn_addrs::window_store() as i64);
+    builder.ins().call_indirect(
+        sig,
+        addr,
+        &[log_buf, dst_ptr, src_ptr, amount, packed, log_and_flags],
+    );
 }
 
 /// `VERYL_WIDE_RMW_INPLACE=0` routes a static-window wide RMW back through

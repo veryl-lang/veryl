@@ -74,6 +74,8 @@ pub struct Ir {
     pub abstract_reset_active_high: bool,
     pub module_variables: ModuleVariables,
     pub event_statements: HashMap<Event, Vec<Statement>>,
+    /// See `Module::event_gates`.
+    pub event_gates: HashMap<Event, opt::event_gate::RtEventGates>,
     /// Unified comb statements: all port connections, child comb, and internal
     /// comb combined into a single dependency-sorted list.
     pub comb_statements: Vec<Statement>,
@@ -155,12 +157,18 @@ pub struct Ir {
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
     /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
     pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
+    /// See `Module::settle_touched_offsets`.
+    pub settle_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
+    /// See `Module::closure_out_watch`.
+    pub closure_out_watch: Vec<(u32, u32)>,
     /// See `Module::event_comb_writes`.  Consumed by the simulator's
     /// settle filter: a fire of an event whose writes can reach a comb
     /// read dirties the comb.
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// See `Module::cone_state_base`.
     pub cone_state_base: u32,
+    /// See `Module::event_gate_flags`.
+    pub event_gate_flags: Vec<u32>,
     /// See `Module::settle_info`.
     pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
     /// Cone-gate segments over `comb_statements`; empty when ungated.
@@ -184,6 +192,9 @@ pub struct Ir {
     pub(crate) whole_derived_clock_dispatch: [AtomicU64; 2],
     pub(crate) whole_derived_clock_master_dispatch: [AtomicU64; 2],
     pub(crate) whole_event_dispatch: [AtomicU64; 2],
+    /// Event gate skips on the per-statement path.  `Ir` is not `Sync` and
+    /// the gates run on the simulator's own thread, so this needs no atomic.
+    pub(crate) event_gate_skips: std::cell::Cell<u64>,
     /// Whether the whole-comb backend's run-once constant-cone entry has
     /// executed for THIS instance.  Per-instance (not per-artifact): a
     /// shared `.so` serves many simulators, each with fresh comb buffers.
@@ -247,6 +258,7 @@ impl Ir {
             abstract_reset_active_high: config.abstract_reset_active_high,
             module_variables: module.module_variables,
             event_statements: module.event_statements,
+            event_gates: module.event_gates,
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
             write_log_buffer: {
@@ -277,8 +289,11 @@ impl Ir {
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
             comb_touched_offsets: module.comb_touched_offsets,
+            settle_touched_offsets: module.settle_touched_offsets,
+            closure_out_watch: module.closure_out_watch,
             event_comb_writes: module.event_comb_writes,
             cone_state_base: module.cone_state_base,
+            event_gate_flags: module.event_gate_flags,
             settle_info: module.settle_info,
             cone_segments: module.cone_segments,
             cone_gate_state: std::cell::RefCell::new(None),
@@ -290,6 +305,7 @@ impl Ir {
             whole_derived_clock_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_derived_clock_master_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_event_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
+            event_gate_skips: std::cell::Cell::new(0),
             const_cone_done: Default::default(),
         };
         // Bake the WriteLogBuffer's heap-stable address into every

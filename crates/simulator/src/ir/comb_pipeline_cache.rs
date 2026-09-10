@@ -82,6 +82,10 @@ pub struct CombPipeline {
     /// Cone-gate groups over `cone_segments`, compare ranges FINAL; the
     /// per-instance state offsets are zero here.
     pub cone_groups: Arc<Vec<crate::ir::opt::cone_gate::ConeGroup>>,
+    /// The instance tree and storage owners the cone plan was built over,
+    /// in the FINAL storage space; the event gates attribute `always_ff`
+    /// statements to subtrees with it.
+    pub cone_inputs: Option<Arc<crate::ir::opt::cone_gate::ConeGateInputs>>,
 }
 
 enum Slot {

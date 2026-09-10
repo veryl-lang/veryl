@@ -48,5 +48,7 @@ fn main() {
     gather_test("error", "error_test.rs");
     gather_test("filelist/a/src", "filelist_test.rs");
     gather_test("native_test/src", "native_test_test.rs");
-    gather_test("sample/src", "sample_test.rs");
+    gather_test("sample_projects/sample_a/src", "sample_a_test.rs");
+    gather_test("sample_projects/sample_b/src", "sample_b_test.rs");
+    gather_test("sample_projects/sample_c/src", "sample_c_test.rs");
 }

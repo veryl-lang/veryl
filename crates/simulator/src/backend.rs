@@ -76,6 +76,7 @@ pub trait Backend: Send {
         _ctx: &CompileCtx,
         _event: &Event,
         _stmts: &[ProtoStatement],
+        _gates: &[crate::ir::opt::event_gate::EventGate],
     ) -> Option<Arc<dyn CompiledWhole>> {
         None
     }

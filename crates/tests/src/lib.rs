@@ -169,7 +169,9 @@ mod formatter {
             "../../testcases/error",
             "../../testcases/filelist/a/src",
             "../../testcases/native_test/src",
-            "../../testcases/sample/src",
+            "../../testcases/sample_projects/sample_a/src",
+            "../../testcases/sample_projects/sample_b/src",
+            "../../testcases/sample_projects/sample_c/src",
         ];
         for dir in dirs {
             for entry in fs::read_dir(dir).unwrap() {
@@ -214,11 +216,34 @@ mod formatter {
         include!(concat!(env!("OUT_DIR"), "/native_test_test.rs"));
     }
 
-    mod sample {
+    mod sample_a {
         fn test(name: &str) {
-            super::run(&format!("../../testcases/sample/src/{}.veryl", name));
+            super::run(&format!(
+                "../../testcases/sample_projects/sample_a/src/{}.veryl",
+                name
+            ));
         }
-        include!(concat!(env!("OUT_DIR"), "/sample_test.rs"));
+        include!(concat!(env!("OUT_DIR"), "/sample_a_test.rs"));
+    }
+
+    mod sample_b {
+        fn test(name: &str) {
+            super::run(&format!(
+                "../../testcases/sample_projects/sample_b/src/{}.veryl",
+                name
+            ));
+        }
+        include!(concat!(env!("OUT_DIR"), "/sample_b_test.rs"));
+    }
+
+    mod sample_c {
+        fn test(name: &str) {
+            super::run(&format!(
+                "../../testcases/sample_projects/sample_c/src/{}.veryl",
+                name
+            ));
+        }
+        include!(concat!(env!("OUT_DIR"), "/sample_c_test.rs"));
     }
 }
 

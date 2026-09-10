@@ -238,6 +238,44 @@ fn concat_element_for_acc(
     }
 }
 
+/// `{bit repeat n}` as one value: `0 - bit` fills every bit, masked to the
+/// run.  `bit` is already widened to the accumulator type.
+fn concat_bit_run(
+    builder: &mut FunctionBuilder,
+    bit: CraneliftValue,
+    n: usize,
+    wide: bool,
+) -> CraneliftValue {
+    let fill = builder.ins().ineg(bit);
+    band_const(builder, fill, gen_mask_128(n), wide)
+}
+
+/// A repeated 1-bit element as one run, where the loop pays a shift and an OR
+/// per bit.
+fn push_concat_bit_run(
+    builder: &mut FunctionBuilder,
+    acc_payload: &mut CraneliftValue,
+    acc_mask_xz: &mut Option<CraneliftValue>,
+    elem_payload: CraneliftValue,
+    elem_mask_xz: Option<CraneliftValue>,
+    n: usize,
+    wide: bool,
+) {
+    let run = concat_bit_run(builder, elem_payload, n, wide);
+    let shifted = builder.ins().ishl_imm_u(*acc_payload, n as i64);
+    *acc_payload = builder.ins().bor(shifted, run);
+    if let Some(acc_xz) = *acc_mask_xz {
+        let shifted = builder.ins().ishl_imm_u(acc_xz, n as i64);
+        *acc_mask_xz = Some(match elem_mask_xz {
+            Some(elem_xz) => {
+                let xz_run = concat_bit_run(builder, elem_xz, n, wide);
+                builder.ins().bor(shifted, xz_run)
+            }
+            None => shifted,
+        });
+    }
+}
+
 /// OR one concat element into the words it occupies, `pos` being its low bit in
 /// the result.  Elements arrive masked to their own width, which is what lets
 /// the shifted copies be OR-ed together.
@@ -2094,6 +2132,20 @@ impl ProtoExpression {
                         let elem_mask_xz =
                             elem_mask_xz.map(|v| concat_element_for_acc(builder, v, wide));
                         let ew = *elem_width;
+                        if ew == 1 && *repeat > 1 {
+                            let n = *repeat;
+                            push_concat_bit_run(
+                                builder,
+                                &mut acc_payload,
+                                &mut acc_mask_xz,
+                                elem_payload,
+                                elem_mask_xz,
+                                n,
+                                wide,
+                            );
+                            lower_width += n;
+                            continue;
+                        }
                         for _ in 0..*repeat {
                             acc_payload = builder.ins().ishl_imm_u(acc_payload, ew as i64);
                             acc_payload = builder.ins().bor(acc_payload, elem_payload);
@@ -2132,27 +2184,16 @@ impl ProtoExpression {
                             elem_mask_xz.map(|v| concat_element_for_acc(builder, v, wide));
                         let ew = *elem_width;
 
-                        // A repeated single bit is `0 - bit` masked to the run,
-                        // wherever the run sits; the loop below pays a shift
-                        // and an OR per bit.  The leading-run case above stays:
-                        // it needs no mask.
-                        if ew == 1 && *repeat > 1 && *repeat <= 64 && !wide {
-                            let n = *repeat;
-                            let run_mask = if n == 64 { !0u64 } else { (1u64 << n) - 1 };
-                            let fill = builder.ins().ineg(elem_payload);
-                            let run = builder.ins().band_imm_s(fill, run_mask as i64);
-                            acc_payload = builder.ins().ishl_imm_u(acc_payload, n as i64);
-                            acc_payload = builder.ins().bor(acc_payload, run);
-                            if let Some(acc_xz) = acc_mask_xz {
-                                let shifted = builder.ins().ishl_imm_u(acc_xz, n as i64);
-                                acc_mask_xz = if let Some(elem_xz) = elem_mask_xz {
-                                    let xz_fill = builder.ins().ineg(elem_xz);
-                                    let xz_run = builder.ins().band_imm_s(xz_fill, run_mask as i64);
-                                    Some(builder.ins().bor(shifted, xz_run))
-                                } else {
-                                    Some(shifted)
-                                };
-                            }
+                        if ew == 1 && *repeat > 1 {
+                            push_concat_bit_run(
+                                builder,
+                                &mut acc_payload,
+                                &mut acc_mask_xz,
+                                elem_payload,
+                                elem_mask_xz,
+                                *repeat,
+                                wide,
+                            );
                             continue;
                         }
 
@@ -3328,6 +3369,32 @@ impl ProtoExpression {
             let (elem_payload, elem_mask_xz) = expr.build_binary(context, builder)?;
             let elem_payload = concat_element_word(builder, elem_payload);
             let elem_mask_xz = elem_mask_xz.map(|m| concat_element_word(builder, m));
+            // A repeated bit is placed as `0 - bit` runs of up to a word each,
+            // not one shift-and-OR per bit.
+            if ew == 1 && repeat > 1 {
+                let fill = builder.ins().ineg(elem_payload);
+                let fill_xz = elem_mask_xz.map(|m| builder.ins().ineg(m));
+                let mut remaining = repeat;
+                while remaining > 0 {
+                    let piece = remaining.min(64);
+                    pos -= piece;
+                    let run = |builder: &mut FunctionBuilder, v: CraneliftValue| {
+                        if piece == 64 {
+                            v
+                        } else {
+                            builder.ins().band_imm_s(v, ((1u64 << piece) - 1) as i64)
+                        }
+                    };
+                    let v = run(builder, fill);
+                    place_concat_element(builder, &mut words, v, pos, piece);
+                    if let Some(fx) = fill_xz {
+                        let m = run(builder, fx);
+                        place_concat_element(builder, &mut words_xz, m, pos, piece);
+                    }
+                    remaining -= piece;
+                }
+                continue;
+            }
             for _ in 0..repeat {
                 pos -= ew;
                 place_concat_element(builder, &mut words, elem_payload, pos, ew);
