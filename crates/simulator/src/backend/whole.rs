@@ -21,15 +21,15 @@ pub struct WholeCombShape<'a> {
     pub cone_groups: &'a [crate::ir::opt::cone_gate::ConeGroup],
 }
 
-pub fn compile_whole_comb(
+pub(crate) fn compile_whole_comb(
     backends: &mut super::BackendRegistry,
     config: &Config,
     key: u128,
-    dut_reuse: bool,
+    cache: &crate::ir::comb_pipeline_cache::CombPipelineCache,
     stmts: &[ProtoStatement],
     #[cfg_attr(target_family = "wasm", allow(unused_variables))] shape: WholeCombShape<'_>,
 ) -> Option<Arc<dyn CompiledWhole>> {
-    crate::ir::comb_pipeline_cache::whole_comb_get_or_compute(key, dut_reuse, || {
+    cache.whole_comb_get_or_compute(key, config.dut_reuse, || {
         let ctx = super::CompileCtx {
             config,
             use_4state: config.use_4state,

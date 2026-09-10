@@ -2,6 +2,29 @@ use super::*;
 use crate::output_buffer;
 
 #[test]
+fn dut_reuse_survives_alternating_analysis_irs() {
+    // Releasing each IR lets the allocator reuse a Core address for Sub.
+    // A process-wide statement cache served Core's one statement in place
+    // of Sub's three, reproducing (800, 5) instead of (800, 7).
+    for _ in 0..100 {
+        a_sliced_boundary_copy_is_cut_per_source_write();
+        dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance();
+    }
+}
+
+#[test]
+fn dut_reuse_survives_parallel_analysis_irs() {
+    // Each worker analyzes and builds its own design. The recurring set of
+    // one session must never change the other's alias decisions.
+    for _ in 0..100 {
+        std::thread::scope(|scope| {
+            scope.spawn(a_sliced_boundary_copy_is_cut_per_source_write);
+            scope.spawn(dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance);
+        });
+    }
+}
+
+#[test]
 fn simple_comb() {
     let code = r#"
     module Top (
@@ -26815,9 +26838,10 @@ fn a_sliced_boundary_copy_is_cut_per_source_write() {
         dut_reuse: true,
         ..Default::default()
     };
-    crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
+    let session =
+        crate::ir::BuildSession::new(&air_ir, &config, &["ShallowTop".into(), "DeepTop".into()]);
 
-    let ir = build_ir(&air_ir, "DeepTop".into(), &config).unwrap();
+    let ir = session.build_ir("DeepTop".into()).unwrap();
     assert_eq!(
         ir.required_comb_passes, 1,
         "a sliced boundary copy carries bits, not bundles"
@@ -26964,13 +26988,14 @@ fn dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance() {
     let deep_off = build_ir(&air_ir, "DeepTop".into(), &off).unwrap();
     let shallow_off = build_ir(&air_ir, "ShallowTop".into(), &off).unwrap();
 
-    crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
+    let session =
+        crate::ir::BuildSession::new(&air_ir, &on, &["ShallowTop".into(), "DeepTop".into()]);
 
     // `unwrap` is half the assertion: de-aliasing wires `w` across the
     // boundary as a whole-variable copy, and until that copy was cut per range
     // the scheduler read a ring through it (`r` -> `hw.x` -> `w` -> `w.y` ->
     // `r`) that no bit takes.
-    let deep_on = build_ir(&air_ir, "DeepTop".into(), &on).unwrap();
+    let deep_on = session.build_ir("DeepTop".into()).unwrap();
     // `w` is already `Wrap`'s own storage, so nothing moves into a fresh slot
     // and only the copies show.  Exact, because a copy split also adds
     // statements; with the ports left aliased this stayed at `deep_off`.
@@ -26986,7 +27011,7 @@ fn dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance() {
     // The shallow case must keep working, or the check above could pass with
     // reuse broken in a way that happens to add statements.  This one does move
     // storage: `Sub` drives `ShallowTop`'s own ports.
-    let shallow_on = build_ir(&air_ir, "ShallowTop".into(), &on).unwrap();
+    let shallow_on = session.build_ir("ShallowTop".into()).unwrap();
     assert!(
         shallow_on.comb_values.len() > shallow_off.comb_values.len(),
         "the shared DUT directly under the top must still de-alias \
