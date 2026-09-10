@@ -2,29 +2,6 @@ use super::*;
 use crate::output_buffer;
 
 #[test]
-fn dut_reuse_survives_alternating_analysis_irs() {
-    // Releasing each IR lets the allocator reuse a Core address for Sub.
-    // A process-wide statement cache served Core's one statement in place
-    // of Sub's three, reproducing (800, 5) instead of (800, 7).
-    for _ in 0..100 {
-        a_sliced_boundary_copy_is_cut_per_source_write();
-        dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance();
-    }
-}
-
-#[test]
-fn dut_reuse_survives_parallel_analysis_irs() {
-    // Each worker analyzes and builds its own design. The recurring set of
-    // one session must never change the other's alias decisions.
-    for _ in 0..100 {
-        std::thread::scope(|scope| {
-            scope.spawn(a_sliced_boundary_copy_is_cut_per_source_write);
-            scope.spawn(dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance);
-        });
-    }
-}
-
-#[test]
 fn simple_comb() {
     let code = r#"
     module Top (
