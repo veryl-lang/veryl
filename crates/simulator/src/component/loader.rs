@@ -301,7 +301,7 @@ fn exports_hint(available: &[String]) -> String {
 /// unknown-type diagnostic. Best-effort: a hand-written library without a
 /// manifest yields an empty list.
 pub(crate) fn library_export_names(path: &Path) -> Vec<String> {
-    let Some(json) = library_manifest(path) else {
+    let Ok(Some(json)) = library_manifest(path) else {
         return vec![];
     };
     let mut ret: Vec<String> = veryl_metadata::parse_library_manifest(&json)
@@ -338,13 +338,21 @@ pub fn static_manifest(type_name: &str) -> Option<String> {
     STATIC_MANIFESTS.lock().unwrap().get(type_name).cloned()
 }
 
+/// A statically linked unix binary carries no dynamic loader: `dlopen` is a
+/// stub that fails for every path, so nothing built on it (components, the
+/// AOT-C backend) can work.
+pub const fn native_loading_supported() -> bool {
+    !cfg!(target_family = "wasm") && !cfg!(all(unix, target_feature = "crt-static"))
+}
+
 /// Aggregated manifest JSON (`{"types":{...}}`) of a component library:
 /// the manifest symbol of a dynamic library, or the `veryl.manifest`
 /// custom section of a wasm binary (read without a wasm runtime, so it
-/// works regardless of the transport feature). `None` when the library
-/// carries no manifest or cannot be loaded (the load error surfaces via
-/// `lookup_component`).
-pub fn library_manifest(path: &Path) -> Option<String> {
+/// works regardless of the transport feature). `Ok(None)` is a library that
+/// loaded but declares no manifest, which a hand-written component is
+/// entitled to; a library that cannot be loaded at all is an error, so
+/// callers report the load failure instead of blaming the manifest.
+pub fn library_manifest(path: &Path) -> Result<Option<String>, ComponentError> {
     if is_wasm_library(path) {
         return wasm_library_manifest(path);
     }
@@ -352,23 +360,32 @@ pub fn library_manifest(path: &Path) -> Option<String> {
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn native_library_manifest(path: &Path) -> Option<String> {
-    let library = get_library(path).ok()?;
+fn native_library_manifest(path: &Path) -> Result<Option<String>, ComponentError> {
+    let library = get_library(path)?;
     let manifest: libloading::Symbol<sys::VrlManifestFn> =
-        unsafe { library.get(sys::VRL_MANIFEST_SYMBOL.as_bytes()) }.ok()?;
+        match unsafe { library.get(sys::VRL_MANIFEST_SYMBOL.as_bytes()) } {
+            Ok(manifest) => manifest,
+            Err(_) => return Ok(None),
+        };
     let s = unsafe { manifest() };
-    Some(unsafe { s.as_str() }.to_string())
+    Ok(Some(unsafe { s.as_str() }.to_string()))
 }
 
 #[cfg(target_family = "wasm")]
-fn native_library_manifest(_path: &Path) -> Option<String> {
-    None
+fn native_library_manifest(_path: &Path) -> Result<Option<String>, ComponentError> {
+    Err(ComponentError::Unsupported)
 }
 
-fn wasm_library_manifest(path: &Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    let payload = veryl_metadata::wasm_custom_section(&bytes, sys::VRL_WASM_MANIFEST_SECTION)?;
-    String::from_utf8(payload.to_vec()).ok()
+fn wasm_library_manifest(path: &Path) -> Result<Option<String>, ComponentError> {
+    let bytes = std::fs::read(path).map_err(|e| ComponentError::LibraryLoad {
+        path: path.to_path_buf(),
+        reason: e.to_string(),
+    })?;
+    let Some(payload) = veryl_metadata::wasm_custom_section(&bytes, sys::VRL_WASM_MANIFEST_SECTION)
+    else {
+        return Ok(None);
+    };
+    Ok(String::from_utf8(payload.to_vec()).ok())
 }
 
 /// Extracts one type's manifest from a library-level aggregated JSON

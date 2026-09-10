@@ -674,6 +674,7 @@ CastingType: U8
            | UserDefinedType
            | Based
            | BaseLess
+           | LParen Expression RParen
            ;
 
 // ----------------------------------------------------------------------------

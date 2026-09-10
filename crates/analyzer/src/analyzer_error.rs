@@ -128,7 +128,7 @@ pub enum AnalyzerError {
         code(combinational_loop),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
-    #[error("combinational loop detected")]
+    #[error("combinational loop detected: {cycle}")]
     CombinationalLoop {
         identifier: String,
         cycle: String,
@@ -1556,6 +1556,21 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Warning),
+        code(statement_after_if_reset),
+        help("move the statement into an else branch of if_reset, or into a separate always_ff without reset"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("statement after if_reset may not be synthesizable with asynchronous reset")]
+    StatementAfterIfReset {
+        #[source_code]
+        input: MultiSources,
+        #[label("Outside the if_reset/else chain")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
         severity(Error),
         code(sv_keyword_usage),
         help("Change the identifier to a non-SystemVerilog keyword"),
@@ -2347,6 +2362,7 @@ impl AnalyzerError {
             AnalyzerError::PrivateNamespace { input, .. } => input,
             AnalyzerError::ReferringBeforeDefinition { input, .. } => input,
             AnalyzerError::ReservedIdentifier { input, .. } => input,
+            AnalyzerError::StatementAfterIfReset { input, .. } => input,
             AnalyzerError::SvKeywordUsage { input, .. } => input,
             AnalyzerError::SvWithImplicitReset { input, .. } => input,
             AnalyzerError::TooLargeEnumVariant { input, .. } => input,
@@ -2475,6 +2491,7 @@ impl AnalyzerError {
             AnalyzerError::PrivateNamespace { token_source, .. } => *token_source,
             AnalyzerError::ReferringBeforeDefinition { token_source, .. } => *token_source,
             AnalyzerError::ReservedIdentifier { token_source, .. } => *token_source,
+            AnalyzerError::StatementAfterIfReset { token_source, .. } => *token_source,
             AnalyzerError::SvKeywordUsage { token_source, .. } => *token_source,
             AnalyzerError::SvWithImplicitReset { token_source, .. } => *token_source,
             AnalyzerError::TooLargeEnumVariant { token_source, .. } => *token_source,
@@ -3398,6 +3415,13 @@ impl AnalyzerError {
     pub fn reserved_identifier(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::ReservedIdentifier {
             identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn statement_after_if_reset(token: &TokenRange) -> Self {
+        AnalyzerError::StatementAfterIfReset {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

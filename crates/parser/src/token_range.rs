@@ -800,36 +800,45 @@ impl From<&ArrayType> for TokenRange {
 }
 impl_token_ext!(ArrayType);
 
-impl_token_range_enum!(
-    CastingType,
-    p8,
-    p16,
-    p32,
-    p64,
-    u8,
-    u16,
-    u32,
-    u64,
-    i8,
-    i16,
-    i32,
-    i64,
-    f32,
-    f64,
-    b_bool,
-    l_bool,
-    clock,
-    clock_posedge,
-    clock_negedge,
-    reset,
-    reset_async_high,
-    reset_async_low,
-    reset_sync_high,
-    reset_sync_low,
-    user_defined_type,
-    based,
-    base_less
-);
+impl From<&CastingType> for TokenRange {
+    fn from(value: &CastingType) -> Self {
+        match value {
+            CastingType::P8(x) => x.p8.as_ref().into(),
+            CastingType::P16(x) => x.p16.as_ref().into(),
+            CastingType::P32(x) => x.p32.as_ref().into(),
+            CastingType::P64(x) => x.p64.as_ref().into(),
+            CastingType::U8(x) => x.u8.as_ref().into(),
+            CastingType::U16(x) => x.u16.as_ref().into(),
+            CastingType::U32(x) => x.u32.as_ref().into(),
+            CastingType::U64(x) => x.u64.as_ref().into(),
+            CastingType::I8(x) => x.i8.as_ref().into(),
+            CastingType::I16(x) => x.i16.as_ref().into(),
+            CastingType::I32(x) => x.i32.as_ref().into(),
+            CastingType::I64(x) => x.i64.as_ref().into(),
+            CastingType::F32(x) => x.f32.as_ref().into(),
+            CastingType::F64(x) => x.f64.as_ref().into(),
+            CastingType::BBool(x) => x.b_bool.as_ref().into(),
+            CastingType::LBool(x) => x.l_bool.as_ref().into(),
+            CastingType::Clock(x) => x.clock.as_ref().into(),
+            CastingType::ClockPosedge(x) => x.clock_posedge.as_ref().into(),
+            CastingType::ClockNegedge(x) => x.clock_negedge.as_ref().into(),
+            CastingType::Reset(x) => x.reset.as_ref().into(),
+            CastingType::ResetAsyncHigh(x) => x.reset_async_high.as_ref().into(),
+            CastingType::ResetAsyncLow(x) => x.reset_async_low.as_ref().into(),
+            CastingType::ResetSyncHigh(x) => x.reset_sync_high.as_ref().into(),
+            CastingType::ResetSyncLow(x) => x.reset_sync_low.as_ref().into(),
+            CastingType::UserDefinedType(x) => x.user_defined_type.as_ref().into(),
+            CastingType::Based(x) => x.based.as_ref().into(),
+            CastingType::BaseLess(x) => x.base_less.as_ref().into(),
+            CastingType::LParenExpressionRParen(x) => {
+                let beg = x.l_paren.l_paren_token.token;
+                let end = x.r_paren.r_paren_token.token;
+                TokenRange { beg, end }
+            }
+        }
+    }
+}
+impl_token_ext!(CastingType);
 
 // ----------------------------------------------------------------------------
 // ClockDomain

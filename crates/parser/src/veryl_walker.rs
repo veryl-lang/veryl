@@ -1721,6 +1721,11 @@ pub trait VerylWalker {
             CastingType::UserDefinedType(x) => self.user_defined_type(&x.user_defined_type),
             CastingType::Based(x) => self.based(&x.based),
             CastingType::BaseLess(x) => self.base_less(&x.base_less),
+            CastingType::LParenExpressionRParen(x) => {
+                self.l_paren(&x.l_paren);
+                self.expression(&x.expression);
+                self.r_paren(&x.r_paren);
+            }
         }
         after!(self, casting_type, arg);
     }

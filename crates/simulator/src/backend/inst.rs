@@ -538,6 +538,12 @@ pub fn try_compile_inst_chunks(
     if !context.config.use_jit {
         return;
     }
+    // With the comb layout pass on, the parent expands every inst chunk back
+    // to its statements (`comb_layout::expand_compiled_blocks`) and the
+    // pipeline compiles those; an artifact built here would never run.
+    if crate::ir::comb_layout::enabled(context.config.use_4state) {
+        return;
+    }
     let ff_start_bytes = ff_start;
     let comb_start_bytes = comb_start;
     let component_key: *const air::Component = Arc::as_ptr(&src.component);

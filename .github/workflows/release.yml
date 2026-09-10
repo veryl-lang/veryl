@@ -37,28 +37,38 @@ jobs:
       uses: actions/checkout@v6
       with:
         submodules: 'true'
-    - name: Setup MUSL
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        rustup target add x86_64-unknown-linux-musl
-        sudo apt-get -qq install musl-tools
-    - name: Setup MUSL for aarch64
-      if: matrix.os == 'ubuntu-24.04-arm'
-      run: |
-        rustup target add aarch64-unknown-linux-musl
-        sudo apt-get -qq install musl-tools
     - name: Setup aarch64 mac
       if: matrix.os == 'macOS-latest'
       run: |
         rustup target add aarch64-apple-darwin
         rustup target add x86_64-apple-darwin
+    # The manylinux container pins the published binaries to a glibc 2.17
+    # baseline; the runner's own glibc is far newer.
     - name: Build for linux
       if: matrix.os == 'ubuntu-latest'
       run: |
+        mkdir -p .ci-home
+        docker run --rm -v "${PWD}:/work" -w /work \
+          -u "$(id -u):$(id -g)" -e HOME=/work/.ci-home -e CHANNEL \
+          quay.io/pypa/manylinux2014_x86_64 \
+          bash -euo pipefail -c '
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            . "$HOME/.cargo/env"
+            make build_lnx
+          '
         make release_lnx
     - name: Build for linux aarch64
       if: matrix.os == 'ubuntu-24.04-arm'
       run: |
+        mkdir -p .ci-home
+        docker run --rm -v "${PWD}:/work" -w /work \
+          -u "$(id -u):$(id -g)" -e HOME=/work/.ci-home -e CHANNEL \
+          quay.io/pypa/manylinux2014_aarch64 \
+          bash -euo pipefail -c '
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            . "$HOME/.cargo/env"
+            make build_lnx_aarch64
+          '
         make release_lnx_aarch64
     - name: Build for macOS
       if: matrix.os == 'macOS-latest'
@@ -75,7 +85,6 @@ jobs:
         name: release-${{ matrix.os }}
         path: |
           *.zip
-          *.rpm
         if-no-files-found: error
 
   release:
@@ -93,7 +102,6 @@ jobs:
         generate_release_notes: true
         files: |
           artifacts/*.zip
-          artifacts/*.rpm
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

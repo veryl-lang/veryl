@@ -604,7 +604,21 @@ impl ReferenceTable {
 
             path.apply_map(generic_maps);
             path.unalias(None);
-            path.append_namespace_path(namespace, &target.namespace);
+            // The subordinate path is written inside `target`, so it must be
+            // qualified from `target`'s inner namespace: the caller's namespace
+            // neither sees `target`'s imports nor tells whether the referred
+            // symbol lives in another project.
+            // A global function is emitted into the namespace that refers to
+            // it, not the one that declares it.
+            let refers_global_function =
+                symbol_table::resolve((&path.generic_path(), target_namespace))
+                    .is_ok_and(|x| x.found.is_global_function());
+            let ref_namespace = if is_global_func || refers_global_function {
+                namespace
+            } else {
+                target_namespace
+            };
+            path.append_namespace_path(ref_namespace, &target.namespace);
 
             if let Ok(path_symbol) = symbol_table::resolve((&path.generic_path(), target_namespace))
             {

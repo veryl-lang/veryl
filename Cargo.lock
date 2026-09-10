@@ -6350,6 +6350,7 @@ dependencies = [
  "clap",
  "codspeed-criterion-compat",
  "cranelift",
+ "cranelift-native",
  "daggy",
  "fst-writer",
  "fxhash",
