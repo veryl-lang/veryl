@@ -3862,6 +3862,176 @@ fn inlined_function_per_callsite_scratch_in_continuous_assign() {
 }
 
 #[test]
+fn dump_vcd_value_line_shapes() {
+    // The value lines are written straight from the storage bytes, so pin the
+    // shapes that path has to get right: a scalar, a vector wider than a
+    // machine word, and an x within one.
+    let code = r#"
+    module Top (
+        a: input  logic,
+        b: input  logic<96>,
+        c: output logic<96>,
+    ) {
+        assign c = b;
+    }
+    "#;
+
+    const WIDE: &str = "000000000000000100000000000000000000000000000000000000000000000000000000000000000001001000110100";
+    const WIDE_X: &str = "00000000000000010000000000000000000000000000000000000000000000000000000000000000000100100011x100";
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+
+        use crate::wave_dumper::WaveDumper;
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(crate::wave_dumper::SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        let wide = (1u128 << 80) | 0x1234;
+        sim.set("a", Value::new(1, 1, false));
+        sim.set("b", Value::from_u128(wide, 0, 96, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        sim.time += 1;
+
+        sim.set("a", Value::from_u128(0, 1, 1, false));
+        sim.set("b", Value::from_u128(wide, 1 << 3, 96, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        sim.time += 1;
+
+        drop(sim);
+        let dump = String::from_utf8(
+            std::sync::Arc::try_unwrap(dump_buf)
+                .unwrap()
+                .into_inner()
+                .unwrap(),
+        )
+        .unwrap();
+        let body = dump.split("$enddefinitions $end\n").nth(1).unwrap();
+        let has = |line: &str| body.lines().any(|l| l == line);
+
+        assert!(has("1!"), "scalar, {config:?}\n{body}");
+        assert!(has(&format!("b{WIDE} \"")), "wide, {config:?}\n{body}");
+        // x/z reach the waveform only where the storage carries the mask.
+        if config.use_4state {
+            assert!(has("x!"), "scalar x, {config:?}\n{body}");
+            assert!(has(&format!("b{WIDE_X} \"")), "wide x, {config:?}\n{body}");
+        } else {
+            assert!(has("0!"), "scalar, {config:?}\n{body}");
+        }
+    }
+}
+
+#[test]
+fn dump_vcd_writes_only_what_moved() {
+    // VCD carries a value until the next one for that signal, so a step
+    // rewriting every variable is pure volume.  `hold` keeps its value while
+    // `a` moves, and must appear once.
+    let code = r#"
+    module Top (
+        a:    input  logic<8>,
+        hold: input  logic<8>,
+        c:    output logic<8>,
+    ) {
+        assign c = a;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+
+        use crate::wave_dumper::WaveDumper;
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(crate::wave_dumper::SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        sim.set("hold", Value::new(7, 8, false));
+        for a in [1u64, 2, 2, 3] {
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            sim.time += 1;
+        }
+
+        drop(sim);
+        let dump = String::from_utf8(
+            std::sync::Arc::try_unwrap(dump_buf)
+                .unwrap()
+                .into_inner()
+                .unwrap(),
+        )
+        .unwrap();
+        let body = dump.split("$enddefinitions $end\n").nth(1).unwrap();
+        let count = |id: &str| body.lines().filter(|l| l.ends_with(id)).count();
+        // `hold` never moves after the opening dump; `a` and `c` repeat one
+        // value, so they move twice over four steps.
+        assert_eq!(count(" \""), 1, "hold, {config:?}\n{body}");
+        assert_eq!(count(" !"), 3, "a, {config:?}\n{body}");
+        assert_eq!(count(" #"), 3, "c, {config:?}\n{body}");
+        assert_eq!(body.lines().filter(|l| l.starts_with('#')).count(), 4);
+    }
+}
+
+#[test]
+fn dump_vcd_gate_keeps_flop_changes() {
+    // A step decides the FF storage from the write log rather than by reading
+    // it, so a flop that holds must not reach the waveform and one that moves
+    // must not be lost.
+    let code = r#"
+    module Top (
+        clk: input clock,
+        en:  input logic,
+        cnt: output logic<8>,
+    ) {
+        always_ff {
+            if en {
+                cnt = cnt + 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+
+        use crate::wave_dumper::WaveDumper;
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(crate::wave_dumper::SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("cnt", Value::new(0, 8, false));
+        for en in [1u64, 0, 0, 1, 0, 1] {
+            sim.set("en", Value::new(en, 1, false));
+            sim.step(&clk);
+            sim.time += 1;
+        }
+
+        drop(sim);
+        let dump = String::from_utf8(
+            std::sync::Arc::try_unwrap(dump_buf)
+                .unwrap()
+                .into_inner()
+                .unwrap(),
+        )
+        .unwrap();
+        let id = dump
+            .lines()
+            .find_map(|l| l.strip_prefix("$var wire 8 "))
+            .and_then(|l| l.split_whitespace().next())
+            .expect("cnt not declared");
+        let seen: Vec<&str> = dump
+            .split("$enddefinitions $end\n")
+            .nth(1)
+            .unwrap()
+            .lines()
+            .filter_map(|l| l.strip_suffix(id))
+            .map(|l| l.trim_end().trim_start_matches('b').trim_start_matches('0'))
+            .collect();
+        // Only the three enabled cycles move the flop.
+        assert_eq!(seen, ["1", "10", "11"], "{config:?}\n{dump}");
+    }
+}
+
+#[test]
 fn dump_vcd_generic_function() {
     let code = r#"
     module Top (
@@ -5559,6 +5729,73 @@ fn readmemh_basic() {
         assert!(dump.contains("mem[1] = 8'h14"));
         assert!(dump.contains("mem[2] = 8'h1e"));
         assert!(dump.contains("mem[3] = 8'h28"));
+    }
+
+    let _ = std::fs::remove_file(&hex_path);
+}
+
+#[test]
+fn dump_vcd_sees_a_memory_image_loaded_mid_run() {
+    // `$readmemh` writes the storage directly, with no write-log entry, so
+    // a waveform that decides an FF region from the log alone would carry
+    // the memory's pre-load values for the rest of the run.
+    let dir = std::env::temp_dir();
+    let hex_path = dir.join("veryl_test_wave_readmemh.hex");
+    std::fs::write(&hex_path, "0A 14 1E 28\n").unwrap();
+    let hex_path_str = hex_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+        i_we:  input logic,
+    ) {{
+        #[allow(initial_assign)]
+        var mem: logic<8> [4];
+        always_ff {{
+            if i_we {{
+                mem[0] = 8'hff;
+            }}
+        }}
+        initial {{
+            $readmemh("{}", mem);
+        }}
+    }}
+    "#,
+        hex_path_str
+    );
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+
+        use crate::wave_dumper::WaveDumper;
+        let dump_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dumper = WaveDumper::new_vcd(Box::new(crate::wave_dumper::SharedVec(dump_buf.clone())));
+        let mut sim = Simulator::new(ir, Some(dumper));
+
+        let clk = sim.get_clock("i_clk").unwrap();
+        sim.set("i_we", Value::new(0, 1, false));
+        // The opening dump lands here, before the image is loaded.
+        sim.step(&clk);
+        sim.time += 1;
+        sim.step(&Event::Initial);
+        sim.time += 1;
+        sim.step(&clk);
+
+        drop(sim);
+        let dump = String::from_utf8(
+            std::sync::Arc::try_unwrap(dump_buf)
+                .unwrap()
+                .into_inner()
+                .unwrap(),
+        )
+        .unwrap();
+        for byte in ["00001010", "00010100", "00011110", "00101000"] {
+            assert!(
+                dump.contains(&format!("b{byte} ")),
+                "{byte} missing, {config:?}\n{dump}"
+            );
+        }
     }
 
     let _ = std::fs::remove_file(&hex_path);
