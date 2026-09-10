@@ -1448,6 +1448,26 @@ impl Conv<&InstDeclaration> for ir::Declaration {
     fn conv(context: &mut Context, value: &InstDeclaration) -> IrResult<Self> {
         let define_context: DefineContext = (&value.inst.inst_token).into();
         if !define_context.is_active(&context.config.defines) {
+            // An inactive `ifdef` branch is still emitted, so a `$tb`/`$comp`
+            // component in a non-test module has to be rejected here as well.
+            // The emitter has no case for one and would hit `unreachable!()`.
+            if !context.in_test_module {
+                let path: SymbolPathNamespace = value
+                    .component_instantiation
+                    .scoped_identifier
+                    .as_ref()
+                    .into();
+                if let Ok(symbol) = symbol_table::resolve(&path)
+                    && matches!(symbol.found.kind, SymbolKind::TbComponent(_))
+                {
+                    let token: TokenRange = value
+                        .component_instantiation
+                        .scoped_identifier
+                        .as_ref()
+                        .into();
+                    context.insert_error(AnalyzerError::invalid_tb_usage(&token));
+                }
+            }
             return Ok(ir::Declaration::Null);
         }
 
