@@ -9,15 +9,12 @@ module SignedConstant (
 
 #[test(test_signed_constant)]
 module test_signed_constant {
-    inst clk: $tb::clock_gen;
-
     var a: logic<64>;
     var o: logic<64>;
     inst dut: SignedConstant ( a, o );
 
     initial {
         a = 64'hffff_ffff_ffff_ffff;
-        clk.next();
         $display("a=%h o=%h", a, o);
         $assert(o == 64'hffff_ffff_ffff_ffff);
         $finish();
@@ -26,8 +23,6 @@ module test_signed_constant {
 
 #[test(test_constant_type_contexts)]
 module test_constant_type_contexts {
-    inst clk: $tb::clock_gen;
-
     // Truncate the initializer before extending each reference to its context.
     const UNSIGNED: logic       <8> = 64'd511;
     const NEGATIVE: signed logic<8> = 64'd384;
@@ -41,7 +36,6 @@ module test_constant_type_contexts {
     let mask          : logic<64>  = {ONE repeat 64};
 
     initial {
-        clk.next();
         $assert(unsigned_value == 64'hff);
         $assert(negative_value == 128'hffff_ffff_ffff_ffff_ffff_ffff_ffff_ff80);
         $assert(positive_value == 64'h7f);
