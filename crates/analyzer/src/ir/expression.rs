@@ -1050,6 +1050,9 @@ impl Factor {
             Factor::FunctionCall(x) => {
                 x.gather_ff(context, table, decl, assign_target, from_ff);
             }
+            Factor::SystemFunctionCall(x) => {
+                x.gather_ff(context, table, decl, from_ff);
+            }
             _ => (),
         }
     }
