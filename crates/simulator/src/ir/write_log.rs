@@ -261,7 +261,12 @@ impl WriteLogBuffer {
     /// Append a wide entry, growing the pool when full.
     ///
     /// Safety: `payload` must be valid for reads of `native_bytes` (≤ 56) bytes.
-    unsafe fn push_wide(&mut self, offset: u32, payload: *const u8, native_bytes: usize) {
+    pub(crate) unsafe fn push_wide(
+        &mut self,
+        offset: u32,
+        payload: *const u8,
+        native_bytes: usize,
+    ) {
         if self.wide_count >= self.wide_capacity {
             self.grow_wide_to(self.wide_capacity as usize + 1);
         }
@@ -283,6 +288,21 @@ impl WriteLogBuffer {
             *self.wide_entries_ptr.add(idx) = entry;
         }
         self.wide_count += 1;
+    }
+
+    /// `push_wide` over a byte range, one entry per payload-sized chunk.
+    pub(crate) unsafe fn push_wide_range(
+        &mut self,
+        offset: u32,
+        payload: *const u8,
+        nbytes: usize,
+    ) {
+        let mut done = 0usize;
+        while done < nbytes {
+            let chunk = (nbytes - done).min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES);
+            unsafe { self.push_wide(offset + done as u32, payload.add(done), chunk) };
+            done += chunk;
+        }
     }
 
     pub fn narrow_capacity(&self) -> usize {
@@ -566,24 +586,19 @@ pub(crate) unsafe extern "C" fn event_write_log_push_static(
 /// Safety: caller must ensure `payload` is valid for reads of
 /// `native_bytes` bytes; the helper is only invoked while the TLS is
 /// installed.
-pub(crate) unsafe fn event_write_log_push_wide(
+/// Chunked by the entry payload size, with the log resolved once rather than
+/// per chunk.
+pub(crate) unsafe fn event_write_log_push_wide_range(
     offset: u32,
     payload: *const u8,
-    native_bytes: usize,
+    nbytes: usize,
 ) {
-    debug_assert!(
-        native_bytes <= WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES,
-        "wide payload {} exceeds entry capacity",
-        native_bytes
-    );
     EVENT_WRITE_LOG.with(|cell| {
         let Some(ptr) = cell.get() else {
             return;
         };
         let buf = unsafe { &mut *ptr.as_ptr() };
-        unsafe {
-            buf.push_wide(offset, payload, native_bytes);
-        }
+        unsafe { buf.push_wide_range(offset, payload, nbytes) };
     });
 }
 
@@ -701,7 +716,7 @@ mod tests {
         let payload = [0xaau8; 32];
         unsafe {
             set_event_write_log(&mut buf);
-            event_write_log_push_wide(0x2000, payload.as_ptr(), 32);
+            event_write_log_push_wide_range(0x2000, payload.as_ptr(), 32);
             clear_event_write_log();
         }
         assert_eq!(buf.wide_count, 1);
@@ -801,7 +816,7 @@ mod tests {
             set_event_write_log(&mut buf);
             for i in 0..70u32 {
                 let payload = [i as u8; 16];
-                event_write_log_push_wide(i * 16, payload.as_ptr(), 16);
+                event_write_log_push_wide_range(i * 16, payload.as_ptr(), 16);
             }
             clear_event_write_log();
         }

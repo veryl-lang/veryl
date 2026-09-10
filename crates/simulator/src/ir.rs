@@ -74,6 +74,8 @@ pub struct Ir {
     pub abstract_reset_active_high: bool,
     pub module_variables: ModuleVariables,
     pub event_statements: HashMap<Event, Vec<Statement>>,
+    /// See `Module::event_gates`.
+    pub event_gates: HashMap<Event, opt::event_gate::RtEventGates>,
     /// Unified comb statements: all port connections, child comb, and internal
     /// comb combined into a single dependency-sorted list.
     pub comb_statements: Vec<Statement>,
@@ -190,6 +192,9 @@ pub struct Ir {
     pub(crate) whole_derived_clock_dispatch: [AtomicU64; 2],
     pub(crate) whole_derived_clock_master_dispatch: [AtomicU64; 2],
     pub(crate) whole_event_dispatch: [AtomicU64; 2],
+    /// Event gate skips on the per-statement path.  `Ir` is not `Sync` and
+    /// the gates run on the simulator's own thread, so this needs no atomic.
+    pub(crate) event_gate_skips: std::cell::Cell<u64>,
     /// Whether the whole-comb backend's run-once constant-cone entry has
     /// executed for THIS instance.  Per-instance (not per-artifact): a
     /// shared `.so` serves many simulators, each with fresh comb buffers.
@@ -253,6 +258,7 @@ impl Ir {
             abstract_reset_active_high: config.abstract_reset_active_high,
             module_variables: module.module_variables,
             event_statements: module.event_statements,
+            event_gates: module.event_gates,
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
             write_log_buffer: {
@@ -299,6 +305,7 @@ impl Ir {
             whole_derived_clock_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_derived_clock_master_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_event_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
+            event_gate_skips: std::cell::Cell::new(0),
             const_cone_done: Default::default(),
         };
         // Bake the WriteLogBuffer's heap-stable address into every

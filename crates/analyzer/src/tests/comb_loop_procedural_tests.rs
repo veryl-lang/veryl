@@ -2180,3 +2180,334 @@ fn comb_loop_false_negative_runtime_short_circuit_write_kills_disabled_feedback(
         true,
     );
 }
+
+// ---- Does a whole-struct literal lose field granularity? ----
+// A bus struct carries a FORWARD request and a BACKWARD ready in ONE type, and
+// a buffer stage writes the whole struct in a single literal. Per field there
+// is no ring; per whole variable there is.
+
+#[test]
+fn zz_q1_struct_literal_whole_write_two_directions() {
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Producer (
+        src_valid_i: input  logic,
+        back_i     : input  logic,
+        h_o        : output Pk::H,
+    ) {
+        assign h_o = Pk::H'{
+            a_valid: src_valid_i,
+            d_ready: back_i     ,
+        };
+    }
+    module Dev (
+        h_i    : input  Pk::H,
+        ready_o: output logic,
+    ) {
+        assign ready_o = h_i.a_valid;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : Pk::H;
+        var rdy: logic;
+        inst p: Producer (src_valid_i: v  , back_i: rdy, h_o    : h  );
+        inst d: Dev      (h_i        : h  , ready_o    : rdy         );
+        assign z = rdy;
+    }
+    "#;
+    // Per field: rdy <- h.a_valid <- v. h.d_ready <- rdy. NO ring.
+    assert_comb_loop("Q1 whole-struct literal, two directions", code, false);
+}
+
+#[test]
+fn zz_q2_same_but_field_wise_writes() {
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Producer (
+        src_valid_i: input  logic,
+        back_i     : input  logic,
+        h_o        : output Pk::H,
+    ) {
+        assign h_o.a_valid = src_valid_i;
+        assign h_o.d_ready = back_i;
+    }
+    module Dev (
+        h_i    : input  Pk::H,
+        ready_o: output logic,
+    ) {
+        assign ready_o = h_i.a_valid;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : Pk::H;
+        var rdy: logic;
+        inst p: Producer (src_valid_i: v  , back_i: rdy, h_o    : h  );
+        inst d: Dev      (h_i        : h  , ready_o    : rdy         );
+        assign z = rdy;
+    }
+    "#;
+    assert_comb_loop("Q2 field-wise writes, two directions", code, false);
+}
+
+#[test]
+fn zz_q3_flatten_cast_of_the_bidirectional_struct() {
+    // An arbiter takes `arb_data_i[i] = fifo_o[i] as W` with `W` the struct's
+    // own bit count -- the WHOLE bus, forward and backward fields together,
+    // cast to a plain vector.
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Dev (
+        v_i    : input  logic<2>,
+        ready_o: output logic   ,
+    ) {
+        assign ready_o = v_i[1];   // reads only the a_valid bit
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        const W: u32 = 2;
+        var h  : Pk::H   ;
+        var hv : logic<2>;
+        var rdy: logic   ;
+        assign h.a_valid = v;
+        assign h.d_ready = rdy;
+        assign hv        = h as W;
+        inst d: Dev (v_i: hv, ready_o: rdy);
+        assign z = rdy;
+    }
+    "#;
+    assert_comb_loop("Q3 flatten cast of a bidirectional struct", code, false);
+}
+
+#[test]
+fn zz_q4_arbiter_mux_shape() {
+    // prim_arbiter_ppc: gnt_o = ready_i ? winner : '0, winner <- req_i,
+    // and data_o muxed by winner. Upstream a_ready therefore depends on the
+    // requests -- legitimate -- and must not be read back as a request.
+    let code = r#"
+    module Arb #(
+        param N: u32 = 2,
+    ) (
+        req_i  : input  logic<N>   ,
+        data_i : input  logic<2>[N],
+        gnt_o  : output logic<N>   ,
+        data_o : output logic<2>   ,
+        ready_i: input  logic      ,
+    ) {
+        var winner: logic<N>;
+        assign winner = req_i;
+        assign gnt_o  = if ready_i ? winner : '0;
+        always_comb {
+            data_o = '0;
+            for i in 0..N {
+                if winner[i] {
+                    data_o = data_i[i];
+                }
+            }
+        }
+    }
+    module ModuleA (
+        v0: input  logic,
+        v1: input  logic,
+        rd: input  logic,
+        z : output logic,
+    ) {
+        var req  : logic<2>   ;
+        var dat  : logic<2>[2];
+        var gnt  : logic<2>   ;
+        var dout : logic<2>   ;
+        inst a: Arb (req_i: req, data_i: dat, gnt_o: gnt, data_o: dout, ready_i: rd);
+        assign req    = {v1, v0};
+        assign dat[0] = {v0, gnt[0]};   // the h2d bundle: a_valid + d_ready(=grant)
+        assign dat[1] = {v1, gnt[1]};
+        assign z      = dout[0];
+    }
+    "#;
+    assert_comb_loop(
+        "Q4 arbiter mux with grant folded into the data bundle",
+        code,
+        false,
+    );
+}
+
+#[test]
+fn zz_q5_flatten_through_instance_then_part_select_back() {
+    // The real chain: tl_h2d_t --cast--> logic<W> --through prim_fifo_sync
+    // (pass-through) --> logic<W> --part-select--> fields again.
+    // Forward field (bit 1) and backward field (bit 0) never meet, so there is
+    // no ring; the question is whether the packed coordinate survives the
+    // instance boundary.
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Fifo (
+        wdata_i: input  logic<2>,
+        rdata_o: output logic<2>,
+    ) {
+        assign rdata_o = wdata_i;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        const W: u32 = 2;
+        var h  : Pk::H   ;
+        var hv : logic<2>;
+        var dv : logic<2>;
+        var rdy: logic   ;
+        assign h.a_valid = v;
+        assign h.d_ready = rdy;
+        assign hv        = h as W;
+        inst f: Fifo (wdata_i: hv, rdata_o: dv);
+        assign rdy = dv[1+:1];      // recover a_valid by part-select
+        assign z   = dv[0+:1];
+    }
+    "#;
+    assert_comb_loop("Q5 flatten -> instance -> part-select", code, false);
+}
+
+#[test]
+fn zz_q6_no_cast_whole_variable_copy() {
+    // Discriminator: is the CAST special, or is it any WHOLE-VARIABLE
+    // destination? Same shape as Q5 with a plain copy and no cast.
+    let code = r#"
+    module Fifo (
+        wdata_i: input  logic<2>,
+        rdata_o: output logic<2>,
+    ) {
+        assign rdata_o = wdata_i;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : logic<2>;
+        var hv : logic<2>;
+        var dv : logic<2>;
+        var rdy: logic   ;
+        assign h[0] = rdy;
+        assign h[1] = v;
+        assign hv   = h;            // whole-variable destination, no select
+        inst f: Fifo (wdata_i: hv, rdata_o: dv);
+        assign rdy  = dv[1+:1];
+        assign z    = dv[0+:1];
+    }
+    "#;
+    assert_comb_loop("Q6 plain whole-variable copy", code, false);
+}
+
+#[test]
+fn zz_q7_explicit_const_range_on_the_destination() {
+    // Positive control for the MECHANISM: the same graph with an explicit
+    // const range on the destination must be accepted, or the machinery this
+    // fix relies on does not work at all.
+    let code = r#"
+    module Fifo (
+        wdata_i: input  logic<2>,
+        rdata_o: output logic<2>,
+    ) {
+        assign rdata_o = wdata_i;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : logic<2>;
+        var hv : logic<2>;
+        var dv : logic<2>;
+        var rdy: logic   ;
+        assign h[0]     = rdy;
+        assign h[1]     = v;
+        assign hv[1:0]  = h[1:0];   // explicit const range on both sides
+        inst f: Fifo (wdata_i: hv, rdata_o: dv);
+        assign rdy      = dv[1+:1];
+        assign z        = dv[0+:1];
+    }
+    "#;
+    assert_comb_loop("Q7 explicit const range (mechanism control)", code, false);
+}
+
+#[test]
+fn zz_q8_struct_cast_part_select_no_instance() {
+    // Q5 minus the instance: is the module boundary needed?
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        const W: u32 = 2;
+        var h  : Pk::H   ;
+        var hv : logic<2>;
+        var rdy: logic   ;
+        assign h.a_valid = v;
+        assign h.d_ready = rdy;
+        assign hv        = h as W;
+        assign rdy       = hv[1+:1];
+        assign z         = hv[0+:1];
+    }
+    "#;
+    assert_comb_loop("Q8 struct cast + part-select, no instance", code, false);
+}
+
+#[test]
+fn zz_q9_struct_to_struct_through_instance() {
+    // Q5 with no cast at all: struct in, struct out, field reads.
+    let code = r#"
+    package Pk {
+        struct H {
+            a_valid: logic,
+            d_ready: logic,
+        }
+    }
+    module Fifo (
+        w_i: input  Pk::H,
+        r_o: output Pk::H,
+    ) {
+        assign r_o = w_i;
+    }
+    module ModuleA (
+        v: input  logic,
+        z: output logic,
+    ) {
+        var h  : Pk::H;
+        var d  : Pk::H;
+        var rdy: logic;
+        assign h.a_valid = v;
+        assign h.d_ready = rdy;
+        inst f: Fifo (w_i: h, r_o: d);
+        assign rdy       = d.a_valid;
+        assign z         = d.d_ready;
+    }
+    "#;
+    assert_comb_loop("Q9 struct through instance, no cast", code, false);
+}

@@ -4706,6 +4706,72 @@ fn concatenation_repeat() {
 }
 
 #[test]
+fn concatenation_bit_runs() {
+    // A repeated 1-bit element lowers to one negate-and-mask, both below a
+    // leading sign run and as a >64-bit run; the two must still line up
+    // with the element-by-element form.
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        b: input  logic,
+        c: output logic<16>,
+        d: output logic<80>,
+        e: output logic<80>,
+        f: output logic<200>,
+    ) {
+        assign c = {a[7] repeat 3, b repeat 5, a};
+        assign d = {b repeat 72, a};
+        assign e = {a, b repeat 70, a[1:0]};
+        assign f = {a[7] repeat 100, b repeat 92, a};
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for (a, b, c, d, e, f) in [
+            (
+                "8'h85",
+                "1'b1",
+                "16'hff85",
+                "80'hffffffffffffffffff85",
+                "80'h85fffffffffffffffffd",
+                "200'hffffffffffffffffffffffffffffffffffffffffffffffff85",
+            ),
+            (
+                "8'h85",
+                "1'b0",
+                "16'he085",
+                "80'h00000000000000000085",
+                "80'h85000000000000000001",
+                "200'hfffffffffffffffffffffffff0000000000000000000000085",
+            ),
+            (
+                "8'h06",
+                "1'b1",
+                "16'h1f06",
+                "80'hffffffffffffffffff06",
+                "80'h06fffffffffffffffffe",
+                "200'h0000000000000000000000000fffffffffffffffffffffff06",
+            ),
+        ] {
+            sim.set("a", Value::from_str(a).unwrap());
+            sim.set("b", Value::from_str(b).unwrap());
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (name, exp) in [("c", c), ("d", d), ("e", e), ("f", f)] {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::from_str(exp).unwrap(),
+                    "{name} for a={a} b={b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn concat_element_widening_cast() {
     // A widening `as` cast lowers to its operand, so the element contributed
     // the OPERAND's bits: `{8'hA5, a as 24, 8'h5A}` collapsed to 28, shifting
@@ -17418,6 +17484,200 @@ fn wide_dynamic_part_select_write() {
 }
 
 #[test]
+fn a_runtime_bounded_loop_writing_windows_keeps_every_window() {
+    // The shape that loses writes on a single slot: a runtime-bounded `for`,
+    // which is not unrolled, whose windows share a 64-bit word.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        n  : input  u32,
+        o0 : output logic<64>,
+        o1 : output logic<64>,
+        b0 : output logic<64>,
+    ) {
+        var p: logic<736>;
+        var b: logic<64>;
+        always_ff {
+            for i in 0..n {
+                p[i * 2 +: 2] = 2'b11;
+            }
+            for i in 0..n {
+                b[i] = 1;
+            }
+        }
+        assign o0 = p[63:0];
+        assign o1 = p[127:64];
+        assign b0 = b;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+
+        sim.set("n", Value::new(64, 32, false));
+        sim.step(&clk);
+        let got = [
+            sim.get("o0").unwrap().payload_u64(),
+            sim.get("o1").unwrap().payload_u64(),
+            sim.get("b0").unwrap().payload_u64(),
+        ];
+        assert_eq!(got, [u64::MAX; 3], "after the first edge, {config:?}");
+
+        // The windows hold once the loop stops covering them.
+        sim.set("n", Value::new(0, 32, false));
+        sim.step(&clk);
+        let held = [
+            sim.get("o0").unwrap().payload_u64(),
+            sim.get("o1").unwrap().payload_u64(),
+            sim.get("b0").unwrap().payload_u64(),
+        ];
+        assert_eq!(held, [u64::MAX; 3], "after an idle edge, {config:?}");
+    }
+}
+
+#[test]
+fn wide_window_store_shift_register() {
+    // A packed multi-dimensional delay line written window by window in
+    // `for` loops: the writes are dynamic windows into a 736-bit FF, which
+    // the JIT merges and logs per window rather than per value.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        din: input  logic<46, 2>,
+        q  : output logic<46, 2>,
+    ) {
+        var sr: logic<8, 46, 2>;
+        always_ff (clk, rst) {
+            if_reset {
+                for j in 0..8 {
+                    sr[j] = '0;
+                }
+            } else {
+                for j in 0..7 {
+                    sr[j + 1] = sr[j];
+                }
+                for i in 0..46 {
+                    sr[0][i] = din[i];
+                }
+            }
+        }
+        assign q = sr[7];
+    }
+    "#;
+    let dins: Vec<u128> = (1..=20u128)
+        .map(|k| {
+            (k << 80) | (0x0123_4567_89ab_cdefu128 ^ (k * 0x1111_1111_1111)) & ((1u128 << 92) - 1)
+        })
+        .collect();
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for (k, &d) in dins.iter().enumerate() {
+            sim.set("din", Value::from_u128(d, 0, 92, false));
+            sim.step(&clk);
+            sim.ensure_comb_updated();
+            // After step k (0-based), stage 7 holds the input of step k - 7.
+            let expect = if k >= 7 { dins[k - 7] } else { 0 };
+            assert_eq!(
+                sim.get("q").unwrap().payload_u128(),
+                expect,
+                "step {k} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_window_store_indexed_windows() {
+    // Runtime-indexed windows into large FFs: one written once per cycle
+    // (`p`) and one written twice with adjacent, word-crossing windows
+    // (`u`).  Windows may overhang the top of the value; the excess bits are
+    // dropped.
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        i  : input  logic<10>,
+        j  : input  logic<10>,
+        v  : input  logic<70>,
+        w  : input  logic<70>,
+        p  : output logic<800>,
+        u  : output logic<800>,
+    ) {
+        always_ff (clk, rst) {
+            if_reset {
+                p = 0;
+            } else {
+                p[i+:70] = v;
+            }
+        }
+        always_ff (clk, rst) {
+            if_reset {
+                u = 0;
+            } else {
+                u[i+:70] = v;
+                u[j+:70] = w;
+            }
+        }
+    }
+    "#;
+    let full = (BigUint::from(1u8) << 800u32) - 1u8;
+    let window =
+        |bits: u32, at: u64| -> BigUint { (((BigUint::from(1u8) << bits) - 1u8) << at) & &full };
+    let put = |acc: &BigUint, at: u64, val: u128| -> BigUint {
+        let m = window(70, at);
+        (acc & (&full ^ &m)) | ((BigUint::from(val) << at) & &m)
+    };
+    let v: u128 = (1u128 << 69) | (0xfedc_ba98_7654_3210u128 << 5) | 0x15;
+    let w: u128 = (1u128 << 69) | 0x0f0f_0f0f_0f0f_0f0f_0f0fu128;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        sim.set("v", Value::from_u128(v, 0, 70, false));
+        sim.set("w", Value::from_u128(w, 0, 70, false));
+        let mut p = BigUint::from(0u8);
+        let mut u = BigUint::from(0u8);
+        for (i, j) in [
+            (0u64, 70u64),
+            (60, 130),
+            (130, 60),
+            (700, 790),
+            (790, 3),
+            (250, 250),
+        ] {
+            sim.set("i", Value::new(i, 10, false));
+            sim.set("j", Value::new(j, 10, false));
+            sim.step(&clk);
+            sim.ensure_comb_updated();
+            p = put(&p, i, v);
+            u = put(&put(&u, i, v), j, w);
+            assert_eq!(
+                sim.get("p").unwrap(),
+                Value::new_biguint(p.clone(), 800, false),
+                "p i={i} {config:?}"
+            );
+            assert_eq!(
+                sim.get("u").unwrap(),
+                Value::new_biguint(u.clone(), 800, false),
+                "u i={i} j={j} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn comb_block_cycle_war_preserves_blocking_order() {
     // WAR: the forward read of `ext` in `o = a + ext` must not drag `o` past the
     // later `a = in1`, so o captures a's earlier value 0, not in1.
@@ -23740,10 +24000,12 @@ fn event_gate_skips_an_idle_subtree_and_follows_its_inputs() {
                 busy = busy.wrapping_add(1);
                 check(&mut sim, &r, busy, &format!("phase {phase} cycle {cycle}"));
             }
-            // Only a compiled event runs the gates; the other configs, and
-            // a host where the artifact does not load, only plan them.
-            let gates_run = !sim.ir.event_gate_flags.is_empty()
-                && sim.ir.whole_event_dispatch[0].load(std::sync::atomic::Ordering::Relaxed) > 0;
+            // A compiled event runs the gates, and so does the 2-state
+            // per-statement path; 4-state only plans them.
+            let whole_ran =
+                sim.ir.whole_event_dispatch[0].load(std::sync::atomic::Ordering::Relaxed) > 0;
+            let gates_run =
+                !sim.ir.event_gate_flags.is_empty() && (whole_ran || !config.use_4state);
             if gates_run && !en {
                 let idle = sim
                     .ir
@@ -23751,6 +24013,10 @@ fn event_gate_skips_an_idle_subtree_and_follows_its_inputs() {
                     .iter()
                     .any(|&off| sim.ir.comb_values[off as usize] == 1);
                 assert!(idle, "phase {phase} left no gate idle, {config:?}");
+                if !whole_ran && cycles > 2 {
+                    let skips = sim.ir.event_gate_skips.get();
+                    assert!(skips > 0, "phase {phase} skipped nothing, {config:?}");
+                }
             }
         }
         // A reset fire reaches an idle gate too.
@@ -26087,6 +26353,159 @@ fn a_dead_ternary_arm_of_another_type_is_not_a_dependency() {
         sim.set("en", Value::new(1, 1, false));
         sim.set("idx", Value::new(0, 1, false));
         sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "JIT={} 4st={}",
+            config.use_jit,
+            config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_sliced_boundary_copy_is_cut_per_source_write() {
+    // Array-of-instances geometry: each `Core` drives element `bank` of the
+    // request array, so the de-aliased boundary copy is a SLICE of its
+    // destination.  Left whole, every bit of the bundle reads as depending on
+    // every other and the pair closes a ring -- `go` reaches `ack`, `ack`
+    // reaches `done`, `go` reads `done` -- that no bit takes: `done` comes
+    // from `arm`, and `arm` comes from a port.
+    //
+    // `pad` keeps `Core` over the DUT size floor (VERYL_DUT_REUSE_MIN_BYTES),
+    // and `ShallowTop` shares it so the boundary de-aliases at all.
+    let code = r#"
+    package slice_pkg {
+        struct Req {
+            go : logic      ,
+            arm: logic      ,
+            pad: logic<2048>,
+        }
+    }
+
+    module Core (
+        rsp_i: input  logic<2>      ,
+        en   : input  logic         ,
+        req_o: output slice_pkg::Req,
+    ) {
+        assign req_o = slice_pkg::Req'{
+            go : ~rsp_i[0],
+            arm: en       ,
+            pad: 2048'd0  ,
+        };
+    }
+
+    module Macro (
+        req_i: input  slice_pkg::Req<2>,
+        rsp_o: output logic<2>      [2],
+    ) {
+        always_comb {
+            for i in 0..2 {
+                rsp_o[i][1] = req_i[i].go;
+                rsp_o[i][0] = req_i[i].arm;
+            }
+        }
+    }
+
+    module DeepTop (
+        en: input  logic,
+        q : output logic,
+    ) {
+        var req: slice_pkg::Req<2>;
+        var rsp: logic<2>      [2];
+
+        for bank in 0..2 :g_bank {
+            inst u: Core (
+                rsp_i: rsp[bank],
+                en              ,
+                req_o: req[bank],
+            );
+        }
+        inst m: Macro (
+            req_i: req,
+            rsp_o: rsp,
+        );
+
+        assign q = rsp[0][1] ^ rsp[1][0];
+    }
+
+    module ShallowTop (
+        rsp_i: input  logic<2>      ,
+        en   : input  logic         ,
+        req_o: output slice_pkg::Req,
+    ) {
+        inst u: Core (
+            rsp_i,
+            en   ,
+            req_o,
+        );
+    }
+    "#;
+
+    let air_ir = analyze_air(code);
+    let config = Config {
+        dut_reuse: true,
+        ..Default::default()
+    };
+    crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
+
+    let ir = build_ir(&air_ir, "DeepTop".into(), &config).unwrap();
+    assert_eq!(
+        ir.required_comb_passes, 1,
+        "a sliced boundary copy carries bits, not bundles"
+    );
+}
+
+#[test]
+fn a_bundle_mux_is_cut_per_source_write() {
+    // `o = s ? a : b` carries bit k of the arms to bit k of the result and
+    // nothing else, so the select does not make one field depend on another.
+    // Read as a single node it does: `a.down` reads `o.up`, and the pair then
+    // looks like a ring the design does not have -- `o.down` comes from
+    // `a.down`, `o.up` from `a.up`, and `a.up` from a port.
+    let code = r#"
+    module Top (
+        s : input  logic,
+        en: input  logic,
+        q : output logic,
+    ) {
+        struct Bus {
+            up  : logic    ,
+            mid : logic<32>,
+            down: logic    ,
+        }
+
+        var a: Bus;
+        var b: Bus;
+        var o: Bus;
+
+        assign o = if s ? a : b;
+
+        assign a.up   = en;
+        assign a.mid  = 32'd0;
+        assign a.down = o.up;
+        assign b.up   = 1'b0;
+        assign b.mid  = 32'd0;
+        assign b.down = 1'b0;
+        assign q      = o.down;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        assert_eq!(
+            ir.required_comb_passes, 1,
+            "a bundle mux carries bits, not bundles (JIT={} 4st={})",
+            config.use_jit, config.use_4state,
+        );
+
+        let mut sim = Simulator::new(ir, None);
+        sim.set("s", Value::new(1, 1, false));
+        sim.set("en", Value::new(1, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // s picks `a`: o.up = a.up = en = 1, a.down = o.up = 1, o.down = 1.
         assert_eq!(
             sim.get("q").unwrap(),
             Value::new(1, 1, false),

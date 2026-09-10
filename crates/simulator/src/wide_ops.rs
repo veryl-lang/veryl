@@ -79,9 +79,10 @@ enum ProfOp {
     PopcntParity,
     ApplyMask,
     FillOnes,
+    WindowStore,
 }
 
-const N_WIDE_OPS: usize = 25;
+const N_WIDE_OPS: usize = 26;
 pub const WIDE_OP_NAMES: [&str; N_WIDE_OPS] = [
     "resize",
     "band",
@@ -108,6 +109,7 @@ pub const WIDE_OP_NAMES: [&str; N_WIDE_OPS] = [
     "popcnt_parity",
     "apply_mask",
     "fill_ones",
+    "window_store",
 ];
 
 #[allow(clippy::declare_interior_mutable_const)]
@@ -312,6 +314,80 @@ pub unsafe extern "C" fn wide_copy(dst: *mut u8, src: *const u8, nb: u32) {
     unsafe {
         for i in 0..nw(nb) {
             wr(dst, i, rd(src, i));
+        }
+    }
+}
+
+/// `dst[amount +: width] = src[0 +: width]` over the words the window
+/// covers, dropping bits at or above `dst_width`.  `packed_width` carries
+/// `width | dst_width << 32`; `log_and_flags` carries the write-log offset
+/// of `dst`'s current slot in its low 32 bits and bit 32 = write `dst` in
+/// place.  A null `log_buf` skips the log; without in place the merged
+/// words reach the log alone (a packed FF's next value).
+pub unsafe extern "C" fn wide_window_store(
+    log_buf: *mut crate::ir::write_log::WriteLogBuffer,
+    dst: *mut u8,
+    src: *const u8,
+    amount: u64,
+    packed_width: u64,
+    log_and_flags: u64,
+) {
+    record(ProfOp::WindowStore);
+    let width = (packed_width & 0xffff_ffff) as usize;
+    let dst_width = (packed_width >> 32) as usize;
+    let in_place = (log_and_flags >> 32) & 1 == 1;
+    let log_offset = (log_and_flags & 0xffff_ffff) as u32;
+    let amount = amount as usize;
+    if width == 0 || amount >= dst_width {
+        return;
+    }
+    let width = width.min(dst_width - amount);
+    let src_words = width.div_ceil(64);
+    let w0 = amount / 64;
+    let w1 = (amount + width - 1) / 64;
+    let n = w1 - w0 + 1;
+    // Runs per executed statement, and a window is a handful of words: only a
+    // very wide one reaches the heap.
+    let mut merged: smallvec::SmallVec<[u64; 16]> = smallvec::SmallVec::from_elem(0, n);
+    unsafe {
+        for (k, out) in merged.iter_mut().enumerate() {
+            let word = w0 + k;
+            let lo = (word * 64).max(amount);
+            let hi = ((word + 1) * 64).min(amount + width);
+            let shift = lo - word * 64;
+            let cnt = hi - lo;
+            let mask = if cnt >= 64 {
+                u64::MAX
+            } else {
+                ((1u64 << cnt) - 1) << shift
+            };
+            let sbit = lo - amount;
+            let (sw, sb) = (sbit / 64, sbit % 64);
+            let s_lo = if sw < src_words { rd(src, sw) } else { 0 };
+            let s_hi = if sw + 1 < src_words {
+                rd(src, sw + 1)
+            } else {
+                0
+            };
+            let sv = if sb == 0 {
+                s_lo
+            } else {
+                (s_lo >> sb) | (s_hi << (64 - sb))
+            };
+            let old = rd(dst as *const u8, word);
+            *out = (old & !mask) | ((sv << shift) & mask);
+        }
+        if in_place {
+            for (k, &v) in merged.iter().enumerate() {
+                wr(dst, w0 + k, v);
+            }
+        }
+        if !log_buf.is_null() {
+            (*log_buf).push_wide_range(
+                log_offset + (w0 * 8) as u32,
+                merged.as_ptr() as *const u8,
+                n * 8,
+            );
         }
     }
 }

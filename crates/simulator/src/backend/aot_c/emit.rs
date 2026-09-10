@@ -9,7 +9,10 @@
 
 use crate::FuncPtr;
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain, same_var_read};
-use crate::ir::opt::event_gate::EventGate;
+use crate::ir::opt::event_gate::{
+    EVENT_GATE_AUTO_OFF_STREAK, EVENT_GATE_REARM_CAP, EVENT_GATE_REARM_FIRES, EventGate,
+    GATE_COUNT, GATE_IDLE, GATE_OFF, GATE_PERIOD,
+};
 use crate::ir::write_log::static_field_byte_span;
 use crate::ir::{
     ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
@@ -4838,13 +4841,6 @@ pub fn prepare_event(
     Some(compile_or_spawn(src, async_mode))
 }
 
-/// Consecutive dirty checks after which an event gate stops checking.
-const EVENT_GATE_AUTO_OFF_STREAK: u32 = 64;
-/// Fires an auto-offed gate stays off before it checks again; doubled on
-/// each further turn-off up to the cap, reset by a skip.
-const EVENT_GATE_REARM_FIRES: u32 = 1024;
-const EVENT_GATE_REARM_CAP: u32 = 1 << 16;
-
 /// The idle-subtree gates of `emit_event_function`, applied innermost first:
 /// each replaces its statement range with one unit that checks the gate and
 /// calls part functions holding the range, so an enclosing gate then sees it
@@ -4995,25 +4991,29 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
         // skip resets that.
         units[g.lo] = format!(
             "    {{ uint8_t *eg = comb_values + {st:#x};\n\
-             \x20     if (eg[2]) {{ uint32_t eg_n, eg_b; __builtin_memcpy(&eg_n, eg + 4, 4); __builtin_memcpy(&eg_b, eg + 8, 4);\n\
-             \x20       if (++eg_n >= eg_b) {{ eg[2] = 0; eg[0] = 0; eg_n = 0; }} __builtin_memcpy(eg + 4, &eg_n, 4);\n\
+             \x20     if (eg[{off}]) {{ uint32_t eg_n, eg_b; __builtin_memcpy(&eg_n, eg + {cnt}, 4); __builtin_memcpy(&eg_b, eg + {per}, 4);\n\
+             \x20       if (++eg_n >= eg_b) {{ eg[{off}] = 0; eg[{idle}] = 0; eg_n = 0; }} __builtin_memcpy(eg + {cnt}, &eg_n, 4);\n\
              {calls}      }} else {{ int eg_run = 1, eg_chk = 0;\n\
-             \x20     if (eg[0]) {{ eg_run = 0; eg_chk = 1;\n{cmp}      }}\n{check}\
+             \x20     if (eg[{idle}]) {{ eg_run = 0; eg_chk = 1;\n{cmp}      }}\n{check}\
              \x20     if (eg_run) {{\n\
-             \x20       uint32_t eg_stk; __builtin_memcpy(&eg_stk, eg + 4, 4);\n\
-             \x20       if (++eg_stk >= {streak}u) {{ uint32_t eg_b; __builtin_memcpy(&eg_b, eg + 8, 4);\n\
-             \x20         eg_b = eg_b ? (eg_b < {cap}u ? eg_b * 2 : {cap}u) : {rearm}u; __builtin_memcpy(eg + 8, &eg_b, 4); eg[2] = 1; eg_stk = 0; }}\n\
-             \x20       __builtin_memcpy(eg + 4, &eg_stk, 4);\n\
+             \x20       uint32_t eg_stk; __builtin_memcpy(&eg_stk, eg + {cnt}, 4);\n\
+             \x20       if (++eg_stk >= {streak}u) {{ uint32_t eg_b; __builtin_memcpy(&eg_b, eg + {per}, 4);\n\
+             \x20         eg_b = eg_b ? (eg_b < {cap}u ? eg_b * 2 : {cap}u) : {rearm}u; __builtin_memcpy(eg + {per}, &eg_b, 4); eg[{off}] = 1; eg_stk = 0; }}\n\
+             \x20       __builtin_memcpy(eg + {cnt}, &eg_stk, 4);\n\
              \x20       unsigned char *eg_lb = (unsigned char*)write_log;\n\
              \x20       unsigned int eg_n0 = *(unsigned int*)(eg_lb + {ncnt}), eg_w0 = *(unsigned int*)(eg_lb + {wcnt});\n\
              {osnap}{calls}\
              \x20       int eg_idle = (veryl_evg_unchanged(ff_values, write_log, eg_n0, eg_w0){ocmp});\n\
              \x20       if (eg_idle && !eg_chk) {{\n{snap}        }}\n\
-             \x20       eg[0] = (uint8_t)eg_idle;\n\
-             \x20     }} else {{ uint32_t eg_z = 0; __builtin_memcpy(eg + 4, &eg_z, 4); __builtin_memcpy(eg + 8, &eg_z, 4); }} }} }}\n",
+             \x20       eg[{idle}] = (uint8_t)eg_idle;\n\
+             \x20     }} else {{ uint32_t eg_z = 0; __builtin_memcpy(eg + {cnt}, &eg_z, 4); __builtin_memcpy(eg + {per}, &eg_z, 4); }} }} }}\n",
             rearm = EVENT_GATE_REARM_FIRES,
             cap = EVENT_GATE_REARM_CAP,
             st = g.state_off as usize,
+            idle = GATE_IDLE,
+            off = GATE_OFF,
+            cnt = GATE_COUNT,
+            per = GATE_PERIOD,
             streak = EVENT_GATE_AUTO_OFF_STREAK,
             ncnt = WRITE_LOG_NARROW_OFFSET_COUNT,
             wcnt = WRITE_LOG_WIDE_OFFSET_COUNT,

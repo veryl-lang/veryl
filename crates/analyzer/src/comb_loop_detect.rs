@@ -392,6 +392,41 @@ fn split_array_spans(
     ranges
 }
 
+/// Field boundaries of a struct-literal write, as spans on the destination.
+///
+/// The destination of `x = T'{a: p, b: q}` is one whole variable, so without
+/// these the bit partition gives it a single node and `p` and `q` become
+/// interchangeable. The read side (`eval_expr_requested`) already answers per
+/// field, and `write_assignment_destination` already slices per destination
+/// key, so supplying the boundaries is all that is needed for both to line up.
+fn collect_struct_field_bounds(
+    expr: &Expression,
+    dst: PackedSpan,
+    id: VarId,
+    index: ArraySpan,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+) {
+    let Expression::StructConstructor(r#type, fields, _) = expr else {
+        return;
+    };
+    let mut low = dst.start;
+    // `fields` is in declaration order whatever order the literal named them
+    // in, and the first declared member is the most significant.
+    for (name, _) in fields.iter().rev() {
+        let Some(width) = r#type.get_member_type(*name).and_then(|m| m.total_width()) else {
+            return;
+        };
+        let Some(span) = PackedSpan::new(low, width) else {
+            return;
+        };
+        out.entry((id, index)).or_default().push(span);
+        let Some(next) = low.checked_add(width) else {
+            return;
+        };
+        low = next;
+    }
+}
+
 fn collect_expr_spans(
     expr: &Expression,
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
@@ -487,6 +522,13 @@ fn collect_statement_spans(
                 for destination in &assign.dst {
                     for (index, packed) in dst_writes(destination, ctx) {
                         out.entry((destination.id, index)).or_default().push(packed);
+                        collect_struct_field_bounds(
+                            &assign.expr,
+                            packed,
+                            destination.id,
+                            index,
+                            out,
+                        );
                     }
                 }
             }

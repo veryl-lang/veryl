@@ -615,9 +615,81 @@ impl ProtoAssignDynamicStatement {
         let n_words = nb / 8;
         let flags = MemFlagsData::trusted();
 
+        let (payload, _mask_xz) = self.expr.build_binary(context, builder)?;
+
+        let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
+        let max_idx = builder
+            .ins()
+            .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
+        let in_bounds = builder
+            .ins()
+            .icmp(IntCC::UnsignedLessThan, idx_payload, max_idx);
+        let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
+        let stride_val = builder.ins().iconst(I64, self.dst_stride as i64);
+        let byte_offset = builder.ins().imul(clamped, stride_val);
+
+        // Packed: skip the in-place store; the wide log push below delivers it
+        // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
+        // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
+        let ff_is_packed = self.dst_base.raw() == self.dst_ff_current_base_offset;
+
+        // The window path below and the read-merge fallback share this, so it
+        // is lowered once; a copy per path would leave the earlier one dead.
+        // After the element index, so the two index expressions evaluate in
+        // `AssignDynamicStatement::eval_step`'s order.
+        let dyn_window = match self.dynamic_select.as_ref() {
+            Some(dyn_sel) => Some((
+                build_dynamic_select_shift(dyn_sel, context, builder)?,
+                dyn_sel.window,
+            )),
+            None => None,
+        };
+
+        // A narrow source is held in a 16-byte slot rather than an
+        // element-sized one (see the same case in `build_binary_wide`).
+        if nb > WIDE_INLINE_NB
+            && let Some((amount, width)) = dyn_window.or_else(|| {
+                self.select
+                    .map(|(beg, end)| (builder.ins().iconst(I64, end as i64), beg - end + 1))
+            })
+        {
+            let need = width.div_ceil(64) * 8;
+            let src = if returns_wide_pointer(&self.expr) {
+                (calc_native_bytes(self.expr.width()) >= need).then_some(payload)
+            } else if need <= 16 {
+                let slot = alloc_wide_zero(builder, 16);
+                builder.ins().store(flags, payload, slot, 0);
+                Some(slot)
+            } else {
+                None
+            };
+            if let Some(src_ptr) = src {
+                let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
+                let old_ptr = builder.ins().iadd(context.ff_values, base);
+                let old_ptr = builder.ins().iadd(old_ptr, byte_offset);
+                let cur_base = builder
+                    .ins()
+                    .iconst(I64, self.dst_ff_current_base_offset as i64);
+                let log_base = builder.ins().iadd(cur_base, byte_offset);
+                let log_base = builder.ins().ireduce(I32, log_base);
+                let log = builder.ins().iadd(log_base, context.ff_delta);
+                emit_wide_window_store(
+                    context,
+                    builder,
+                    old_ptr,
+                    src_ptr,
+                    amount,
+                    width,
+                    self.dst_width,
+                    Some(log),
+                    !ff_is_packed,
+                );
+                return Some(());
+            }
+        }
+
         // Materialize the RHS into an nb-sized slot, zero-extending a narrower
         // wide source.
-        let (payload, _mask_xz) = self.expr.build_binary(context, builder)?;
         let src_ptr = if returns_wide_pointer(&self.expr) {
             let src_nb = calc_native_bytes(self.expr.width());
             if src_nb == nb {
@@ -640,51 +712,23 @@ impl ProtoAssignDynamicStatement {
         // Mask the source to dst_width (the source may alias a flat read).
         emit_wide_apply_mask(context, builder, src_ptr, nb, self.dst_width);
 
-        let (idx_payload, _) = self.dst_index_expr.build_binary(context, builder)?;
-        let max_idx = builder
-            .ins()
-            .iconst(I64, (self.dst_num_elements as i64).saturating_sub(1));
-        let in_bounds = builder
-            .ins()
-            .icmp(IntCC::UnsignedLessThan, idx_payload, max_idx);
-        let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
-        let stride_val = builder.ins().iconst(I64, self.dst_stride as i64);
-        let byte_offset = builder.ins().imul(clamped, stride_val);
-
-        // Packed: skip the in-place store; the wide log push below delivers it
-        // read-OLD (NBA). Not "idempotent with the log" — it landed mid-event, so a
-        // same-event reader saw read-NEW. Unpacked keeps it for multi-RMW forwarding.
-        let ff_is_packed = self.dst_base.raw() == self.dst_ff_current_base_offset;
-
         // `arr[idx][hi:lo] <= v`: read the element back and merge the window
         // in, so the store/log below still deliver a whole element.  The read
         // source and the dynamic-over-static precedence follow
         // `AssignDynamicStatement::eval_step`.
-        let src_ptr = if self.dynamic_select.is_some() || self.select.is_some() {
+        let src_ptr = if dyn_window.is_some() || self.select.is_some() {
             use super::helpers::{emit_wide_select_rmw, emit_wide_select_rmw_at};
             let base = builder.ins().iconst(I64, self.dst_base.raw() as i64);
             let old_ptr = builder.ins().iadd(context.ff_values, base);
             let old_ptr = builder.ins().iadd(old_ptr, byte_offset);
-            let merged = match self.dynamic_select.as_ref() {
-                Some(dyn_sel) => {
-                    // Built here, after the element index, so the two index
-                    // expressions are evaluated in the same order as
-                    // `AssignDynamicStatement::eval_step`.
-                    let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
-                    emit_wide_select_rmw_at(
-                        context,
-                        builder,
-                        old_ptr,
-                        src_ptr,
-                        shift,
-                        dyn_sel.window,
-                        nb,
-                    )
+            let merged = match (dyn_window, self.select) {
+                (Some((shift, window)), _) => {
+                    emit_wide_select_rmw_at(context, builder, old_ptr, src_ptr, shift, window, nb)
                 }
-                None => {
-                    let (beg, end) = self.select?;
+                (None, Some((beg, end))) => {
                     emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
                 }
+                (None, None) => src_ptr,
             };
             // `Value::assign` confines the result to the declared width: a
             // dynamic window on the last element can overhang, and the padding
@@ -1790,6 +1834,67 @@ impl ProtoAssignStatement {
             0
         };
 
+        // Both window paths below and the read-merge fallback share this, so
+        // it is lowered once; a copy per path would leave the earlier ones
+        // dead.
+        let dyn_window = match self.dynamic_select.as_ref() {
+            Some(dyn_sel) => Some((
+                build_dynamic_select_shift(dyn_sel, context, builder)?,
+                dyn_sel.window,
+            )),
+            None => None,
+        };
+        let window = match (dyn_window, self.select) {
+            (Some(w), _) => Some(w),
+            (None, Some((beg, end))) => {
+                Some((builder.ins().iconst(I64, end as i64), beg - end + 1))
+            }
+            (None, None) => None,
+        };
+
+        // The whole-value forms below walk every word per write, which turns a
+        // `for` over the windows of a packed array into a quadratic cost.  A
+        // narrow source is held in a 16-byte slot rather than a value-sized
+        // one; a static window on an unpacked FF keeps its in-place merge.
+        if nb > WIDE_INLINE_NB
+            && mask_xz.is_none()
+            && self.rhs_select.is_none()
+            && (self.dynamic_select.is_some() || ff_packed)
+            && let Some((amount, width)) = window
+        {
+            let need = width.div_ceil(64) * 8;
+            let src = if returns_wide_pointer(&self.expr) {
+                (calc_native_bytes(expr_width) >= need).then_some(payload)
+            } else if need <= 16 {
+                let slot = alloc_wide_zero(builder, 16);
+                builder
+                    .ins()
+                    .store(MemFlagsData::trusted(), payload, slot, 0);
+                Some(slot)
+            } else {
+                None
+            };
+            if let Some(src_ptr) = src {
+                let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+                let log = is_ff.then(|| {
+                    let base = builder.ins().iconst(I32, log_current_offset as i64);
+                    builder.ins().iadd(base, context.ff_delta)
+                });
+                emit_wide_window_store(
+                    context,
+                    builder,
+                    old_ptr,
+                    src_ptr,
+                    amount,
+                    width,
+                    self.dst_width,
+                    log,
+                    !ff_packed,
+                );
+                return Some(());
+            }
+        }
+
         // Source representation: build_binary returns a POINTER iff
         // `builds_wide_pointer()` (the keystone predicate), NOT simply when
         // width > 128.  A wide-WIDTH expression that build_binary still
@@ -1798,6 +1903,15 @@ impl ProtoAssignStatement {
         // must be promoted into a slot, else `payload` (a scalar) is
         // dereferenced as a pointer (SIGSEGV).  `is_wide_ptr(expr_width)`
         // alone gets this wrong and crashed the v4 OoO core's wide datapath.
+        //
+        // A register is at most 16 bytes.  The in-place merge of a static
+        // window reads only the source words it needs, so it takes the
+        // register's own size; the whole-value paths get a value-sized slot.
+        let reg_slot_nb = if self.select.is_some() && self.dynamic_select.is_none() && !ff_packed {
+            16
+        } else {
+            nb
+        };
         let src_ptr = if returns_wide_pointer(&self.expr) {
             payload
         } else {
@@ -1807,7 +1921,7 @@ impl ProtoAssignStatement {
             // guard is fooled by an inflated `width` field (> 128 while the
             // build is actually a scalar) and would pass the register straight
             // through unstored, to be dereferenced as a pointer (SIGSEGV).
-            let slot = alloc_wide_zero(builder, nb);
+            let slot = alloc_wide_zero(builder, reg_slot_nb);
             builder
                 .ins()
                 .store(MemFlagsData::trusted(), payload, slot, 0);
@@ -1821,7 +1935,7 @@ impl ProtoAssignStatement {
         let src_wide_nb = if returns_wide_pointer(&self.expr) {
             calc_native_bytes(expr_width)
         } else {
-            nb // force-stored above into an nb-sized zeroed slot
+            reg_slot_nb // force-stored above into a zeroed slot of that size
         };
         // Static window merged straight into the destination.  Excludes a
         // packed FF, whose direct store is skipped so in-event readers still
@@ -1893,25 +2007,44 @@ impl ProtoAssignStatement {
         // live value, packed FF = last-cycle current slot, unpacked multi-RMW
         // FF = next slot with prior in-event writes forwarded.  Dynamic index
         // wins over static `select` as in `AssignStatement::eval_step`.
-        let src_ptr = if let Some(dyn_sel) = self.dynamic_select.as_ref() {
-            use super::helpers::emit_wide_select_rmw_at;
-            let shift = build_dynamic_select_shift(dyn_sel, context, builder)?;
+        // The windows the early path declined (a fused `rhs_select`, a source
+        // narrower than the window, an unpacked static window) reach the same
+        // helper here, from the widened source.
+        if nb > WIDE_INLINE_NB
+            && mask_xz.is_none()
+            && let Some((amount, width)) = window
+        {
             let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
-            emit_wide_select_rmw_at(
+            let log = is_ff.then(|| {
+                let base = builder.ins().iconst(I32, log_current_offset as i64);
+                builder.ins().iadd(base, context.ff_delta)
+            });
+            emit_wide_window_store(
                 context,
                 builder,
                 old_ptr,
                 src_ptr,
-                shift,
-                dyn_sel.window,
-                nb,
-            )
-        } else if let Some((beg, end)) = self.select {
-            use super::helpers::emit_wide_select_rmw;
-            let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
-            emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
-        } else {
-            src_ptr
+                amount,
+                width,
+                self.dst_width,
+                log,
+                !ff_packed,
+            );
+            return Some(());
+        }
+
+        let src_ptr = match (dyn_window, self.select) {
+            (Some((shift, dst_window)), _) => {
+                use super::helpers::emit_wide_select_rmw_at;
+                let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+                emit_wide_select_rmw_at(context, builder, old_ptr, src_ptr, shift, dst_window, nb)
+            }
+            (None, Some((beg, end))) => {
+                use super::helpers::emit_wide_select_rmw;
+                let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
+                emit_wide_select_rmw(context, builder, old_ptr, src_ptr, end, beg - end + 1, nb)
+            }
+            (None, None) => src_ptr,
         };
 
         // Apply width mask to the source to truncate extra bits
@@ -1941,7 +2074,7 @@ impl ProtoAssignStatement {
             } else {
                 // Force-store (see the payload src_ptr note above): the
                 // width-field guard in ensure_wide_ptr_val is unreliable here.
-                let slot = alloc_wide_zero(builder, nb);
+                let slot = alloc_wide_zero(builder, reg_slot_nb);
                 builder
                     .ins()
                     .store(MemFlagsData::trusted(), mask_xz, slot, 0);
