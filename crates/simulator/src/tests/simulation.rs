@@ -4129,7 +4129,7 @@ fn unary_test(op: &str, x: &str, dst_width: usize, dst: &str, only_4state: bool)
 }
 
 #[test]
-fn unary_corner_case() {
+fn unary_corner_case_add() {
     unary_test("+ ", "8'h11 ", 16, "16'b0000000000010001", false);
     unary_test("+ ", "8'hf2 ", 16, "16'b0000000011110010", false);
     unary_test("+ ", "8'hx3 ", 16, "16'b00000000xxxx0011", true);
@@ -4138,7 +4138,10 @@ fn unary_corner_case() {
     unary_test("+ ", "8'shf6", 16, "16'b1111111111110110", false);
     unary_test("+ ", "8'shx7", 16, "16'bxxxxxxxxxxxx0111", true);
     unary_test("+ ", "8'shz8", 16, "16'bzzzzzzzzzzzz1000", true);
+}
 
+#[test]
+fn unary_corner_case_sub() {
     unary_test("- ", "8'h11 ", 16, "16'b1111111111101111", false);
     unary_test("- ", "8'hf2 ", 16, "16'b1111111100001110", false);
     unary_test("- ", "8'hx3 ", 16, "16'bxxxxxxxxxxxxxxxx", true);
@@ -4147,7 +4150,10 @@ fn unary_corner_case() {
     unary_test("- ", "8'shf6", 16, "16'b0000000000001010", false);
     unary_test("- ", "8'shx7", 16, "16'bxxxxxxxxxxxxxxxx", true);
     unary_test("- ", "8'shz8", 16, "16'bxxxxxxxxxxxxxxxx", true);
+}
 
+#[test]
+fn unary_corner_case_not() {
     unary_test("~ ", "8'h11 ", 16, "16'b1111111111101110", false);
     unary_test("~ ", "8'hf2 ", 16, "16'b1111111100001101", false);
     unary_test("~ ", "8'hx3 ", 16, "16'b11111111xxxx1100", true);
@@ -4156,7 +4162,10 @@ fn unary_corner_case() {
     unary_test("~ ", "8'shf6", 16, "16'b0000000000001001", false);
     unary_test("~ ", "8'shx7", 16, "16'bxxxxxxxxxxxx1000", true);
     unary_test("~ ", "8'shz8", 16, "16'bxxxxxxxxxxxx0111", true);
+}
 
+#[test]
+fn unary_corner_case_and() {
     unary_test("& ", "8'h11 ", 16, "16'b0000000000000000", false);
     unary_test("& ", "8'hff ", 16, "16'b0000000000000001", false);
     unary_test("& ", "8'hxx ", 16, "16'b000000000000000x", true);
@@ -4165,7 +4174,10 @@ fn unary_corner_case() {
     unary_test("& ", "8'h1z ", 16, "16'b0000000000000000", true);
     unary_test("& ", "8'hfx ", 16, "16'b000000000000000x", true);
     unary_test("& ", "8'hxz ", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn unary_corner_case_nand() {
     unary_test("~&", "8'h11 ", 16, "16'b0000000000000001", false);
     unary_test("~&", "8'hff ", 16, "16'b0000000000000000", false);
     unary_test("~&", "8'hxx ", 16, "16'b000000000000000x", true);
@@ -4174,7 +4186,10 @@ fn unary_corner_case() {
     unary_test("~&", "8'h1z ", 16, "16'b0000000000000001", true);
     unary_test("~&", "8'hfx ", 16, "16'b000000000000000x", true);
     unary_test("~&", "8'hxz ", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn unary_corner_case_or() {
     unary_test("| ", "8'h00 ", 16, "16'b0000000000000000", false);
     unary_test("| ", "8'h11 ", 16, "16'b0000000000000001", false);
     unary_test("| ", "8'hxx ", 16, "16'b000000000000000x", true);
@@ -4183,7 +4198,10 @@ fn unary_corner_case() {
     unary_test("| ", "8'h0z ", 16, "16'b000000000000000x", true);
     unary_test("| ", "8'h1x ", 16, "16'b0000000000000001", true);
     unary_test("| ", "8'h1z ", 16, "16'b0000000000000001", true);
+}
 
+#[test]
+fn unary_corner_case_nor() {
     unary_test("~|", "8'h00 ", 16, "16'b0000000000000001", false);
     unary_test("~|", "8'h11 ", 16, "16'b0000000000000000", false);
     unary_test("~|", "8'hxx ", 16, "16'b000000000000000x", true);
@@ -4192,7 +4210,10 @@ fn unary_corner_case() {
     unary_test("~|", "8'h0z ", 16, "16'b000000000000000x", true);
     unary_test("~|", "8'h1x ", 16, "16'b0000000000000000", true);
     unary_test("~|", "8'h1z ", 16, "16'b0000000000000000", true);
+}
 
+#[test]
+fn unary_corner_case_xor() {
     unary_test("^ ", "8'h00 ", 16, "16'b0000000000000000", false);
     unary_test("^ ", "8'h01 ", 16, "16'b0000000000000001", false);
     unary_test("^ ", "8'hxx ", 16, "16'b000000000000000x", true);
@@ -4201,7 +4222,10 @@ fn unary_corner_case() {
     unary_test("^ ", "8'h0z ", 16, "16'b000000000000000x", true);
     unary_test("^ ", "8'h1x ", 16, "16'b000000000000000x", true);
     unary_test("^ ", "8'h1z ", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn unary_corner_case_xnor() {
     unary_test("~^", "8'h00 ", 16, "16'b0000000000000001", false);
     unary_test("~^", "8'h01 ", 16, "16'b0000000000000000", false);
     unary_test("~^", "8'hxx ", 16, "16'b000000000000000x", true);
@@ -4210,7 +4234,10 @@ fn unary_corner_case() {
     unary_test("~^", "8'h0z ", 16, "16'b000000000000000x", true);
     unary_test("~^", "8'h1x ", 16, "16'b000000000000000x", true);
     unary_test("~^", "8'h1z ", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn unary_corner_case_logical_not() {
     unary_test("! ", "8'h00 ", 16, "16'b0000000000000001", false);
     unary_test("! ", "8'h01 ", 16, "16'b0000000000000000", false);
     unary_test("! ", "8'hxx ", 16, "16'b000000000000000x", true);
@@ -4275,7 +4302,7 @@ fn binary_test(x: &str, op: &str, y: &str, dst_width: usize, dst: &str, only_4st
 }
 
 #[test]
-fn binary_corner_case() {
+fn binary_corner_case_add() {
     binary_test("8'h01 ", "+  ", "8'h01 ", 16, "16'b0000000000000010", false);
     binary_test("8'hf2 ", "+  ", "8'hf2 ", 16, "16'b0000000111100100", false);
     binary_test("8'hx3 ", "+  ", "8'hx3 ", 16, "16'bxxxxxxxxxxxxxxxx", true);
@@ -4284,7 +4311,10 @@ fn binary_corner_case() {
     binary_test("8'shf2", "+  ", "8'shf2", 16, "16'b1111111111100100", false);
     binary_test("8'shx3", "+  ", "8'shx3", 16, "16'bxxxxxxxxxxxxxxxx", true);
     binary_test("8'shz4", "+  ", "8'shz4", 16, "16'bxxxxxxxxxxxxxxxx", true);
+}
 
+#[test]
+fn binary_corner_case_sub() {
     binary_test("8'h01 ", "-  ", "8'hf2 ", 16, "16'b1111111100001111", false);
     binary_test("8'hf2 ", "-  ", "8'h03 ", 16, "16'b0000000011101111", false);
     binary_test("8'hx3 ", "-  ", "8'hx4 ", 16, "16'bxxxxxxxxxxxxxxxx", true);
@@ -4293,7 +4323,10 @@ fn binary_corner_case() {
     binary_test("8'shf2", "-  ", "8'sh03", 16, "16'b1111111111101111", false);
     binary_test("8'shx3", "-  ", "8'shx4", 16, "16'bxxxxxxxxxxxxxxxx", true);
     binary_test("8'shz4", "-  ", "8'shz5", 16, "16'bxxxxxxxxxxxxxxxx", true);
+}
 
+#[test]
+fn binary_corner_case_mul() {
     binary_test("8'h01 ", "*  ", "8'h01 ", 16, "16'b0000000000000001", false);
     binary_test("8'hf2 ", "*  ", "8'hf2 ", 16, "16'b1110010011000100", false);
     binary_test("8'hx3 ", "*  ", "8'hx3 ", 16, "16'bxxxxxxxxxxxxxxxx", true);
@@ -4302,7 +4335,10 @@ fn binary_corner_case() {
     binary_test("8'shf2", "*  ", "8'shf2", 16, "16'b0000000011000100", false);
     binary_test("8'shf3", "*  ", "8'sh03", 16, "16'b1111111111011001", false);
     binary_test("8'shz4", "*  ", "8'shz4", 16, "16'bxxxxxxxxxxxxxxxx", true);
+}
 
+#[test]
+fn binary_corner_case_div() {
     binary_test("8'h02 ", "/  ", "8'h01 ", 16, "16'b0000000000000010", false);
     binary_test("8'hf0 ", "/  ", "8'h02 ", 16, "16'b0000000001111000", false);
     binary_test("8'hx3 ", "/  ", "8'hx3 ", 16, "16'bxxxxxxxxxxxxxxxx", true);
@@ -4311,7 +4347,10 @@ fn binary_corner_case() {
     binary_test("8'shf0", "/  ", "8'sh02", 16, "16'b1111111111111000", false);
     binary_test("8'shf3", "/  ", "8'shf3", 16, "16'b0000000000000001", false);
     binary_test("8'sh01", "/  ", "8'sh00", 16, "16'bxxxxxxxxxxxxxxxx", true);
+}
 
+#[test]
+fn binary_corner_case_rem() {
     binary_test("8'h03 ", "%  ", "8'h01 ", 16, "16'b0000000000000000", false);
     binary_test("8'hf1 ", "%  ", "8'h02 ", 16, "16'b0000000000000001", false);
     binary_test("8'hx3 ", "%  ", "8'hx3 ", 16, "16'bxxxxxxxxxxxxxxxx", true);
@@ -4320,7 +4359,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", "%  ", "8'sh02", 16, "16'b1111111111111111", false);
     binary_test("8'shf1", "%  ", "8'shfc", 16, "16'b1111111111111101", false);
     binary_test("8'sh03", "%  ", "8'shfc", 16, "16'b0000000000000011", false);
+}
 
+#[test]
+fn binary_corner_case_and() {
     binary_test("8'hf3 ", "&  ", "8'hc1 ", 16, "16'b0000000011000001", false);
     binary_test("8'hf1 ", "&  ", "8'he2 ", 16, "16'b0000000011100000", false);
     binary_test("8'hx1 ", "&  ", "8'hx2 ", 16, "16'b00000000xxxx0000", true);
@@ -4329,7 +4371,10 @@ fn binary_corner_case() {
     binary_test("8'h11 ", "&  ", "8'hz2 ", 16, "16'b00000000000x0000", true);
     binary_test("8'hx1 ", "&  ", "8'hzd ", 16, "16'b00000000xxxx0001", true);
     binary_test("8'h1z ", "&  ", "8'hfx ", 16, "16'b000000000001xxxx", true);
+}
 
+#[test]
+fn binary_corner_case_or() {
     binary_test("8'hf3 ", "|  ", "8'hc1 ", 16, "16'b0000000011110011", false);
     binary_test("8'hf1 ", "|  ", "8'he2 ", 16, "16'b0000000011110011", false);
     binary_test("8'hx1 ", "|  ", "8'hx2 ", 16, "16'b00000000xxxx0011", true);
@@ -4338,7 +4383,10 @@ fn binary_corner_case() {
     binary_test("8'h11 ", "|  ", "8'hz2 ", 16, "16'b00000000xxx10011", true);
     binary_test("8'hx1 ", "|  ", "8'hzd ", 16, "16'b00000000xxxx1101", true);
     binary_test("8'h1z ", "|  ", "8'hfx ", 16, "16'b000000001111xxxx", true);
+}
 
+#[test]
+fn binary_corner_case_xor() {
     binary_test("8'hf3 ", "^  ", "8'hc1 ", 16, "16'b0000000000110010", false);
     binary_test("8'hf1 ", "^  ", "8'he2 ", 16, "16'b0000000000010011", false);
     binary_test("8'hx1 ", "^  ", "8'hx2 ", 16, "16'b00000000xxxx0011", true);
@@ -4347,7 +4395,10 @@ fn binary_corner_case() {
     binary_test("8'h11 ", "^  ", "8'hz2 ", 16, "16'b00000000xxxx0011", true);
     binary_test("8'hx1 ", "^  ", "8'hzd ", 16, "16'b00000000xxxx1100", true);
     binary_test("8'h1z ", "^  ", "8'hfx ", 16, "16'b000000001110xxxx", true);
+}
 
+#[test]
+fn binary_corner_case_xnor() {
     binary_test("8'hf3 ", "~^ ", "8'hc1 ", 16, "16'b1111111111001101", false);
     binary_test("8'hf1 ", "~^ ", "8'he2 ", 16, "16'b1111111111101100", false);
     binary_test("8'hx1 ", "~^ ", "8'hx2 ", 16, "16'b11111111xxxx1100", true);
@@ -4356,7 +4407,10 @@ fn binary_corner_case() {
     binary_test("8'h11 ", "~^ ", "8'hz2 ", 16, "16'b11111111xxxx1100", true);
     binary_test("8'hx1 ", "~^ ", "8'hzd ", 16, "16'b11111111xxxx0011", true);
     binary_test("8'h1z ", "~^ ", "8'hfx ", 16, "16'b111111110001xxxx", true);
+}
 
+#[test]
+fn binary_corner_case_eq() {
     binary_test("8'h00 ", "== ", "8'h00 ", 16, "16'b0000000000000001", false);
     binary_test("8'hf1 ", "== ", "8'he2 ", 16, "16'b0000000000000000", false);
     binary_test("8'hx0 ", "== ", "8'hx0 ", 16, "16'b000000000000000x", true);
@@ -4365,7 +4419,10 @@ fn binary_corner_case() {
     binary_test("8'hz1 ", "== ", "8'hz2 ", 16, "16'b0000000000000000", true);
     binary_test("8'hxz ", "== ", "8'hxz ", 16, "16'b000000000000000x", true);
     binary_test("8'hzx ", "== ", "8'hxz ", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn binary_corner_case_ne() {
     binary_test("8'h00 ", "!= ", "8'h00 ", 16, "16'b0000000000000000", false);
     binary_test("8'hf1 ", "!= ", "8'he2 ", 16, "16'b0000000000000001", false);
     binary_test("8'hx0 ", "!= ", "8'hx0 ", 16, "16'b000000000000000x", true);
@@ -4374,7 +4431,10 @@ fn binary_corner_case() {
     binary_test("8'hz1 ", "!= ", "8'hz2 ", 16, "16'b0000000000000001", true);
     binary_test("8'hxz ", "!= ", "8'hxz ", 16, "16'b000000000000000x", true);
     binary_test("8'hzx ", "!= ", "8'hxz ", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn binary_corner_case_eq_wildcard() {
     binary_test("8'h00 ", "==?", "8'h00 ", 16, "16'b0000000000000001", false);
     binary_test("8'hf1 ", "==?", "8'he2 ", 16, "16'b0000000000000000", false);
     binary_test("8'hx0 ", "==?", "8'h30 ", 16, "16'b000000000000000x", true);
@@ -4383,7 +4443,10 @@ fn binary_corner_case() {
     binary_test("8'h11 ", "==?", "8'h1z ", 16, "16'b0000000000000001", true);
     binary_test("8'hxz ", "==?", "8'hxz ", 16, "16'b0000000000000001", true);
     binary_test("8'hzx ", "==?", "8'hxz ", 16, "16'b0000000000000001", true);
+}
 
+#[test]
+fn binary_corner_case_ne_wildcard() {
     binary_test("8'h00 ", "!=?", "8'h00 ", 16, "16'b0000000000000000", false);
     binary_test("8'hf1 ", "!=?", "8'he2 ", 16, "16'b0000000000000001", false);
     binary_test("8'hx0 ", "!=?", "8'h30 ", 16, "16'b000000000000000x", true);
@@ -4392,7 +4455,10 @@ fn binary_corner_case() {
     binary_test("8'h11 ", "!=?", "8'h1z ", 16, "16'b0000000000000000", true);
     binary_test("8'hxz ", "!=?", "8'hxz ", 16, "16'b0000000000000000", true);
     binary_test("8'hzx ", "!=?", "8'hxz ", 16, "16'b0000000000000000", true);
+}
 
+#[test]
+fn binary_corner_case_gt() {
     binary_test("8'h03 ", ">: ", "8'h01 ", 16, "16'b0000000000000001", false);
     binary_test("8'hf1 ", ">: ", "8'h02 ", 16, "16'b0000000000000001", false);
     binary_test("8'hx3 ", ">: ", "8'hx3 ", 16, "16'b000000000000000x", true);
@@ -4401,7 +4467,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", ">: ", "8'sh02", 16, "16'b0000000000000000", false);
     binary_test("8'shx3", ">: ", "8'shx3", 16, "16'b000000000000000x", true);
     binary_test("8'shz4", ">: ", "8'shz4", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn binary_corner_case_ge() {
     binary_test("8'h03 ", ">= ", "8'h01 ", 16, "16'b0000000000000001", false);
     binary_test("8'hf1 ", ">= ", "8'h02 ", 16, "16'b0000000000000001", false);
     binary_test("8'hx3 ", ">= ", "8'hx3 ", 16, "16'b000000000000000x", true);
@@ -4410,7 +4479,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", ">= ", "8'sh02", 16, "16'b0000000000000000", false);
     binary_test("8'shx3", ">= ", "8'shx3", 16, "16'b000000000000000x", true);
     binary_test("8'shz4", ">= ", "8'shz4", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn binary_corner_case_lt() {
     binary_test("8'h03 ", "<: ", "8'h01 ", 16, "16'b0000000000000000", false);
     binary_test("8'hf1 ", "<: ", "8'h02 ", 16, "16'b0000000000000000", false);
     binary_test("8'hx3 ", "<: ", "8'hx3 ", 16, "16'b000000000000000x", true);
@@ -4419,7 +4491,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", "<: ", "8'sh02", 16, "16'b0000000000000001", false);
     binary_test("8'shx3", "<: ", "8'shx3", 16, "16'b000000000000000x", true);
     binary_test("8'shz4", "<: ", "8'shz4", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn binary_corner_case_le() {
     binary_test("8'h03 ", "<= ", "8'h01 ", 16, "16'b0000000000000000", false);
     binary_test("8'hf1 ", "<= ", "8'h02 ", 16, "16'b0000000000000000", false);
     binary_test("8'hx3 ", "<= ", "8'hx3 ", 16, "16'b000000000000000x", true);
@@ -4428,7 +4503,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", "<= ", "8'sh02", 16, "16'b0000000000000001", false);
     binary_test("8'shx3", "<= ", "8'shx3", 16, "16'b000000000000000x", true);
     binary_test("8'shz4", "<= ", "8'shz4", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn binary_corner_case_logical_and() {
     binary_test("8'h03 ", "&& ", "8'h01 ", 16, "16'b0000000000000001", false);
     binary_test("8'hf1 ", "&& ", "8'h00 ", 16, "16'b0000000000000000", false);
     binary_test("8'hx3 ", "&& ", "8'hx3 ", 16, "16'b0000000000000001", true);
@@ -4437,7 +4515,10 @@ fn binary_corner_case() {
     binary_test("8'hf1 ", "&& ", "8'h0z ", 16, "16'b000000000000000x", true);
     binary_test("8'hxx ", "&& ", "8'hx3 ", 16, "16'b000000000000000x", true);
     binary_test("8'hz4 ", "&& ", "8'hzz ", 16, "16'b000000000000000x", true);
+}
 
+#[test]
+fn binary_corner_case_logical_or() {
     binary_test("8'h03 ", "|| ", "8'h01 ", 16, "16'b0000000000000001", false);
     binary_test("8'h00 ", "|| ", "8'h00 ", 16, "16'b0000000000000000", false);
     binary_test("8'hx0 ", "|| ", "8'hx0 ", 16, "16'b000000000000000x", true);
@@ -4446,7 +4527,10 @@ fn binary_corner_case() {
     binary_test("8'hf1 ", "|| ", "8'h0z ", 16, "16'b0000000000000001", true);
     binary_test("8'hxx ", "|| ", "8'hx3 ", 16, "16'b0000000000000001", true);
     binary_test("8'hz4 ", "|| ", "8'hzz ", 16, "16'b0000000000000001", true);
+}
 
+#[test]
+fn binary_corner_case_shr() {
     binary_test("8'h03 ", ">> ", "3'd2  ", 16, "16'b0000000000000000", false);
     binary_test("8'hf1 ", ">> ", "3'd2  ", 16, "16'b0000000000111100", false);
     binary_test("8'hx3 ", ">> ", "3'd2  ", 16, "16'b0000000000xxxx00", true);
@@ -4455,7 +4539,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", ">> ", "3'd2  ", 16, "16'b0011111111111100", false);
     binary_test("8'shx3", ">> ", "3'd2  ", 16, "16'b00xxxxxxxxxxxx00", true);
     binary_test("8'shz4", ">> ", "3'd2  ", 16, "16'b00zzzzzzzzzzzz01", true);
+}
 
+#[test]
+fn binary_corner_case_shl() {
     binary_test("8'h03 ", "<< ", "3'd2  ", 16, "16'b0000000000001100", false);
     binary_test("8'hf1 ", "<< ", "3'd2  ", 16, "16'b0000001111000100", false);
     binary_test("8'hx3 ", "<< ", "3'd2  ", 16, "16'b000000xxxx001100", true);
@@ -4464,7 +4551,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", "<< ", "3'd2  ", 16, "16'b1111111111000100", false);
     binary_test("8'shx3", "<< ", "3'd2  ", 16, "16'bxxxxxxxxxx001100", true);
     binary_test("8'shz4", "<< ", "3'd2  ", 16, "16'bzzzzzzzzzz010000", true);
+}
 
+#[test]
+fn binary_corner_case_ashr() {
     binary_test("8'h03 ", ">>>", "3'd2  ", 16, "16'b0000000000000000", false);
     binary_test("8'hf1 ", ">>>", "3'd2  ", 16, "16'b0000000000111100", false);
     binary_test("8'hx3 ", ">>>", "3'd2  ", 16, "16'b0000000000xxxx00", true);
@@ -4473,7 +4563,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", ">>>", "3'd2  ", 16, "16'b1111111111111100", false);
     binary_test("8'shx3", ">>>", "3'd2  ", 16, "16'bxxxxxxxxxxxxxx00", true);
     binary_test("8'shz4", ">>>", "3'd2  ", 16, "16'bzzzzzzzzzzzzzz01", true);
+}
 
+#[test]
+fn binary_corner_case_ashl() {
     binary_test("8'h03 ", "<<<", "3'd2  ", 16, "16'b0000000000001100", false);
     binary_test("8'hf1 ", "<<<", "3'd2  ", 16, "16'b0000001111000100", false);
     binary_test("8'hx3 ", "<<<", "3'd2  ", 16, "16'b000000xxxx001100", true);
@@ -4482,7 +4575,10 @@ fn binary_corner_case() {
     binary_test("8'shf1", "<<<", "3'd2  ", 16, "16'b1111111111000100", false);
     binary_test("8'shx3", "<<<", "3'd2  ", 16, "16'bxxxxxxxxxx001100", true);
     binary_test("8'shz4", "<<<", "3'd2  ", 16, "16'bzzzzzzzzzz010000", true);
+}
 
+#[test]
+fn binary_corner_case_pow() {
     binary_test("8'h03 ", "** ", "3'd2  ", 16, "16'b0000000000001001", false);
     binary_test("8'hf1 ", "** ", "3'd2  ", 16, "16'b1110001011100001", false);
     binary_test("8'hx3 ", "** ", "3'd2  ", 16, "16'bxxxxxxxxxxxxxxxx", true);
@@ -18776,6 +18872,14 @@ fn write_log_reserve_on_const_loop_narrow() {
     }
     "#;
     for config in Config::all() {
+        // `disable_ff_opt` gives each of the 6000 unrolled elements its own
+        // FF, so a Cranelift build compiles 6000 separate pushes: more work
+        // than all the other configs together, for growth the runtime-bound
+        // sibling already covers.  `cc`, whose reserve this test is about,
+        // keeps both arms.
+        if config.disable_ff_opt && config.use_jit && !config.aot_c {
+            continue;
+        }
         dbg!(&config);
         let ir = analyze(code, &config);
         let mut sim = Simulator::new(ir, None);
@@ -24145,8 +24249,11 @@ fn cone_gate_group_skips_both_cones_and_reruns_them_on_a_change() {
     // Two flat cones fed by the same input sit under one group at the top:
     // its boundary is that input, cheaper than the two compares it replaces.
     // Holding the input lets the group go clean and both cones skip; a change
-    // must reach all four outputs on the very next settle.
-    const T: usize = 400;
+    // must reach all four outputs on the very next settle.  Inlining leaves two
+    // statements per element, so T clears the 300-statement cone floor with
+    // margin; keep it no larger, because the cost of building this design grows
+    // quadratically in T and the test spends all its time in the build.
+    const T: usize = 200;
     let cone = |name: &str, salt: u64| -> String {
         let decls: String = (0..T)
             .map(|i| format!("        var t{i}: logic<16>;\n        var s{i}: logic<16>;\n        var x{i}: logic<16>;\n"))
