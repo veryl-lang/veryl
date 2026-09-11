@@ -11284,6 +11284,64 @@ fn ff_comb_let_basic() {
     }
 }
 
+#[test]
+fn a_hoisted_comb_let_read_in_a_reset_for_bound_keeps_its_value() {
+    // A sole reader in one always_ff makes `w` a comb-to-FF hoist candidate,
+    // and its read is a `for` bound on the reset path: a hoist that lands only
+    // on the clock-only path leaves the reset loop with a stale bound.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        n  : input  logic<3>,
+        q  : output logic<8>,
+        r  : output logic<8>,
+    ) {
+        let w  : u32        = n as u32;
+        var arr: logic<8> [8];
+
+        always_ff {
+            if_reset {
+                for i in 0..8 {
+                    arr[i] = 0;
+                }
+                for j in 0..w {
+                    arr[j] = 8'hff;
+                }
+            } else {
+                arr[0] = arr[0] + 1;
+            }
+        }
+        assign q = arr[0];
+        assign r = arr[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.set("n", Value::new(2, 3, false));
+        sim.step_reset(&clk, &rst);
+
+        // w = 2: arr[0] and arr[1] are filled, arr[2] is not.
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0xff, 8, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0, 8, false),
+            "config={config:?}"
+        );
+    }
+}
+
 /// Read-only cache with tag/index address decomposition (an I-cache).
 /// Tests that fill_count-driven o_mem_addr propagates through comb to update
 /// i_mem_rdata each fill cycle, so data[0] != data[1].
