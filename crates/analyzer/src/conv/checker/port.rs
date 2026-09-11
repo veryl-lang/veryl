@@ -1,4 +1,4 @@
-use crate::analyzer_error::{AnalyzerError, InvalidPortDefaultValueKind};
+use crate::analyzer_error::{AnalyzerError, InvalidModifierKind, InvalidPortDefaultValueKind};
 use crate::conv::{Affiliation, Context};
 use crate::ir::{self, Comptime, IrResult, VarKind};
 use veryl_parser::token_range::TokenRange;
@@ -63,17 +63,27 @@ pub fn check_port_direction(context: &mut Context, value: &PortDeclarationItem) 
         let direction = x.direction.as_ref();
         check_direction(context, direction);
 
-        if let Direction::Inout(_) = direction {
-            let r#type = &x.array_type;
-            let is_tri = r#type
-                .scalar_type
-                .scalar_type_list
-                .iter()
-                .any(|x| matches!(x.type_modifier.as_ref(), TypeModifier::Tri(_)));
-
-            if !is_tri {
-                context.insert_error(AnalyzerError::missing_tri(&r#type.as_ref().into()));
+        let r#type = &x.array_type;
+        let tri = r#type.scalar_type.scalar_type_list.iter().find_map(|x| {
+            match x.type_modifier.as_ref() {
+                TypeModifier::Tri(x) => Some(x.tri.tri_token.token),
+                _ => None,
             }
+        });
+
+        // A module's inout port is a net and needs `tri`, but a function's
+        // argument is a variable passed in and copied back out. SystemVerilog
+        // forbids a net type there, so `tri` is neither required nor legal.
+        if context.is_affiliated(Affiliation::Function) {
+            if let Some(tri) = tri {
+                context.insert_error(AnalyzerError::invalid_modifier(
+                    "tri",
+                    InvalidModifierKind::NetInFunction,
+                    &tri.into(),
+                ));
+            }
+        } else if matches!(direction, Direction::Inout(_)) && tri.is_none() {
+            context.insert_error(AnalyzerError::missing_tri(&r#type.as_ref().into()));
         }
     }
 }
