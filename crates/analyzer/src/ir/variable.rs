@@ -1058,6 +1058,16 @@ impl Variable {
         let Some(index) = self.r#type.array.calc_index(index) else {
             return false;
         };
+        // A `string` carries its own width -- the declared one is the nominal
+        // 1 bit, which is also the range an empty select computes -- so both
+        // the fit and the partial write would keep one bit of the text.
+        if self.r#type.is_string() {
+            let Some(x) = self.value.get_mut(index) else {
+                return false;
+            };
+            *x = value;
+            return true;
+        }
         if let Some(total_width) = self.total_width() {
             let value_width = value.width();
             let value = if value_width >= total_width {

@@ -29085,3 +29085,48 @@ fn const_struct_array_member_folds_per_element() {
         assert_eq!(sim.get("o_fn").unwrap(), Value::new(52, 32, false));
     }
 }
+
+#[test]
+fn string_array_const_element_keeps_its_text() {
+    // A `string`'s declared width is the nominal 1 bit that every widthless
+    // kind reports, so every place that fitted an element to it kept one bit
+    // of the text: the array literal's own elements, a package const read
+    // through the symbol route, and a function's return variable. The
+    // comparisons below are against the text itself, so a truncated element
+    // fails them.
+    let code = r#"
+    package Pkg {
+        const NAMES: string [3] = '{"a.hex", "b.hex", "c.hex"};
+        function pick (
+            i: input u32,
+        ) -> string {
+            return NAMES[i];
+        }
+    }
+    module Top (
+        i_clk : input  clock,
+        o_pkg0: output logic,
+        o_pkg2: output logic,
+        o_fn  : output logic,
+        o_local: output logic,
+    ) {
+        const LOCAL: string [2] = '{"one", "two"};
+        assign o_pkg0  = Pkg::NAMES[0] == "a.hex";
+        assign o_pkg2  = Pkg::NAMES[2] == "c.hex";
+        assign o_fn    = Pkg::pick(1) == "b.hex";
+        assign o_local = LOCAL[1] == "two";
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_pkg0").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_pkg2").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_fn").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_local").unwrap(), Value::new(1, 1, false));
+    }
+}

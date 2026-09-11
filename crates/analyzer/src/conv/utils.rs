@@ -902,8 +902,13 @@ fn eval_array_literal_expressions(
         part_type.width_mut().drain(0..expr.select.len());
 
         if let Some(mut part_value) = expr.expr.eval_value(context) {
-            let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
-            part_value.trunc(part_width);
+            // A `string` has no declared width -- `total_width()` answers 1 for
+            // it -- so the element carries its own, and truncating to the
+            // declared type would leave one bit of the text.
+            if !part_type.is_string() {
+                let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
+                part_value.trunc(part_width);
+            }
 
             value = if let Some(x) = value {
                 Some(x.concat(&part_value))
@@ -971,8 +976,12 @@ fn insert_const_variable(
 /// source variable (inherited/sliced array params) keep the source width, so a
 /// narrower signed source must be sign-extended -- the array-literal path can't
 /// hit this because it evaluates each element in the destination type context.
-/// A `None` width (e.g. `string`) is left untouched.
+/// A width that isn't a real one is left untouched: `None`, and `string`, whose
+/// `total_width()` answers 1 while the text lives in the element itself.
 fn fit_array_elements(mut values: Vec<Value>, r#type: &ir::Type) -> Vec<Value> {
+    if r#type.is_string() {
+        return values;
+    }
     if let Some(total_width) = r#type.total_width() {
         for value in &mut values {
             if value.width() > total_width {
@@ -2510,6 +2519,7 @@ fn eval_factor_path_inner(
             Err(ir_error!(token))
         } else {
             let index = array_select.to_index();
+            let array = comptime.r#type.array.clone();
             comptime.r#type.array.drain(0..index.dimension());
 
             comptime.is_const &= index.is_const() && width_select.is_const();
@@ -2517,13 +2527,33 @@ fn eval_factor_path_inner(
             // The whole-array value doesn't describe a selected part of it; drop
             // it so consumers resolve the selection from the variable table.
             if (index.dimension() > 0 || !width_select.is_empty())
-                && matches!(comptime.value, ValueVariant::NumericArray(_))
+                && let ValueVariant::NumericArray(values) = &comptime.value
             {
-                comptime.value = ValueVariant::Unknown;
+                // Except for a `string`: it has no width to lay out, so the
+                // variable table holds nothing to resolve against and the
+                // element has to be folded here.
+                let element = if comptime.r#type.is_string() && width_select.is_empty() {
+                    index
+                        .eval_value(context)
+                        .and_then(|x| array.calc_index(&x))
+                        .and_then(|x| values.get(x))
+                        .cloned()
+                } else {
+                    None
+                };
+                comptime.value = match element {
+                    Some(x) => ValueVariant::Numeric(x),
+                    None => ValueVariant::Unknown,
+                };
             }
 
             comptime.token = token;
-            if comptime.r#type.is_type() {
+            // A `string` read is only ever its value: there is no variable
+            // behind it for a later stage to look up.
+            let is_folded_string = comptime.r#type.is_string()
+                && width_select.is_empty()
+                && matches!(comptime.value, ValueVariant::Numeric(_));
+            if comptime.r#type.is_type() || is_folded_string {
                 Ok(ir::Factor::Value(comptime))
             } else {
                 // Params arrive with evaluated=true (set by eval_expr), which
@@ -2788,8 +2818,15 @@ fn fold_symbol_select(
     }
 
     let flat = array.calc_index(&indices)?;
-    let (beg, end) = select.eval_value(context, &element, false)?;
-    comptime.value = ValueVariant::Numeric(values.get(flat)?.select(beg, end));
+    let value = values.get(flat)?;
+    comptime.value = if comptime.r#type.is_string() && select.is_empty() {
+        // An empty select reads the declared width, which for a `string` is the
+        // nominal 1 bit rather than the text the element holds.
+        ValueVariant::Numeric(value.clone())
+    } else {
+        let (beg, end) = select.eval_value(context, &element, false)?;
+        ValueVariant::Numeric(value.select(beg, end))
+    };
     Some(comptime)
 }
 
