@@ -6481,18 +6481,27 @@ impl Conv<&air::Module> for ProtoModule {
         if let Some(ci) = cached.cone_inputs.as_deref()
             && crate::ir::opt::event_gate::enabled()
         {
+            // The comb walk dwarfs planning one event, so share it.
+            let mut comb_context = None;
             for (event, stmts) in all_event_statements.iter() {
                 if !matches!(event, Event::Clock(_)) {
                     continue;
                 }
-                let mut gates = crate::ir::opt::event_gate::plan(
-                    stmts,
-                    ci,
-                    &pre_jit_stmts[..],
-                    &closure_touched,
-                    &comb_touched_offsets,
-                    &format!("{event:?}"),
-                );
+                let comb_context = comb_context.get_or_insert_with(|| {
+                    crate::ir::opt::event_gate::CombContext::new(
+                        ci,
+                        &pre_jit_stmts[..],
+                        &closure_touched,
+                        &comb_touched_offsets,
+                    )
+                });
+                // Only the diagnostics read it, and this runs per clock.
+                let label = if crate::ir::opt::event_gate::diag() {
+                    format!("{event:?}")
+                } else {
+                    String::new()
+                };
+                let mut gates = crate::ir::opt::event_gate::plan(stmts, comb_context, &label);
                 for g in &mut gates {
                     let shadow = g.shadow_bytes();
                     let len = (crate::ir::opt::event_gate::GATE_STATE_HEADER_BYTES + shadow)
