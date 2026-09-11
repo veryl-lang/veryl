@@ -1324,6 +1324,7 @@ pub fn eval_type(
                 // append internal width/array
                 width.append(x.width_mut());
                 array.append(&mut x.array);
+                signed = x.signed;
 
                 x.kind
             }
@@ -1533,6 +1534,7 @@ pub fn eval_type(
                         if let ValueVariant::Type(mut x) = comptime.value {
                             width.append(x.width_mut());
                             array.append(&mut x.array);
+                            signed = x.signed;
                             x.kind
                         } else {
                             ir::TypeKind::Unknown

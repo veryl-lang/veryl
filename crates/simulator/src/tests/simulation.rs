@@ -18015,6 +18015,170 @@ fn runtime_numeric_width_cast_preserves_operand_signedness() {
     }
 }
 
+// `4'(s)` keeps the operand's signedness in the emitted SV, and a comparison or
+// a division takes its signedness from its operands, not from its own context.
+#[test]
+fn runtime_narrowing_cast_is_a_signed_comparison_operand() {
+    let code = r#"
+    module Top (
+        s  : input  i8             ,
+        lt : output logic          ,
+        ge : output logic          ,
+        ult: output logic          ,
+        div: output signed logic<16>,
+        rem: output signed logic<16>,
+    ) {
+        var z : signed logic<4>;
+        var t2: signed logic<4>;
+        var u : logic<4>       ;
+        always_comb {
+            z   = 0;
+            t2  = 2;
+            u   = 0;
+            lt  = (s as 4) <: z;
+            ge  = (s as 4) >= z;
+            ult = (s as 4) <: u;
+            div = (s as 4) / t2;
+            rem = (s as 4) % t2;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // s = 8 truncates to 4'b1000, which is -8 signed and 8 unsigned.
+        sim.set("s", Value::new(0x08, 8, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("lt").unwrap().payload_u128(),
+            1,
+            "(s as 4) <: z must compare as -8, {config:?}",
+        );
+        assert_eq!(
+            sim.get("ge").unwrap().payload_u128(),
+            0,
+            "(s as 4) >= z must compare as -8, {config:?}",
+        );
+        assert_eq!(
+            sim.get("ult").unwrap().payload_u128(),
+            0,
+            "an unsigned operand keeps the comparison unsigned, {config:?}",
+        );
+        assert_eq!(
+            sim.get("div").unwrap().payload_u128(),
+            0xfffc,
+            "(s as 4) / 2 must divide as -8, {config:?}",
+        );
+        assert_eq!(
+            sim.get("rem").unwrap().payload_u128(),
+            0,
+            "(s as 4) % 2 must take the remainder of -8, {config:?}",
+        );
+    }
+}
+
+// A same-width cast changes nothing but signedness: `ST'(u)` on an unsigned
+// operand is a signed 4-bit value in the emitted SV.
+#[test]
+fn runtime_same_width_cast_reinterprets_signedness() {
+    let code = r#"
+    module Top (
+        u   : input  logic<4>       ,
+        cast: output signed logic<16>,
+        lt  : output logic          ,
+        ge  : output logic          ,
+    ) {
+        const ST: type = signed logic<4>;
+
+        var z: signed logic<4>;
+
+        always_comb {
+            z    = 0;
+            cast = u as ST;
+            lt   = (u as ST) <: z;
+            ge   = (u as ST) >= z;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("u", Value::new(0b1000, 4, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("cast").unwrap().payload_u128(),
+            0xfff8,
+            "u as ST must sign-extend the reinterpreted value, {config:?}",
+        );
+        assert_eq!(
+            sim.get("lt").unwrap().payload_u128(),
+            1,
+            "(u as ST) <: z must compare as -8, {config:?}",
+        );
+        assert_eq!(
+            sim.get("ge").unwrap().payload_u128(),
+            0,
+            "(u as ST) >= z must compare as -8, {config:?}",
+        );
+    }
+}
+
+// A type alias keeps the modifiers written on it. A `type` constant and a
+// generic type parameter reach the resolution by different paths.
+#[test]
+fn runtime_signed_type_alias_keeps_its_modifier() {
+    let code = r#"
+    module Top #(
+        param GT: type = signed logic<4>,
+    ) (
+        s      : input  i8            ,
+        via    : output signed logic<16>,
+        cast   : output signed logic<16>,
+        generic: output signed logic<16>,
+    ) {
+        const ST: type = signed logic<4>;
+
+        var v: ST;
+        var g: GT;
+
+        always_comb {
+            v       = s as 4;
+            g       = s as 4;
+            via     = v;
+            cast    = s as ST;
+            generic = g;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("s", Value::new(0x08, 8, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("via").unwrap().payload_u128(),
+            0xfff8,
+            "a variable of the alias type sign-extends, {config:?}",
+        );
+        assert_eq!(
+            sim.get("cast").unwrap().payload_u128(),
+            0xfff8,
+            "a cast to the alias type sign-extends, {config:?}",
+        );
+        assert_eq!(
+            sim.get("generic").unwrap().payload_u128(),
+            0xfff8,
+            "a generic type parameter sign-extends, {config:?}",
+        );
+    }
+}
+
 #[test]
 fn comptime_widening_cast_sign_extends() {
     // A widening `as` cast of a signed value sign-extends like SV's `N'(expr)`:
@@ -18034,6 +18198,29 @@ fn comptime_widening_cast_sign_extends() {
         let mut sim = Simulator::new(ir, None);
         sim.step(&Event::Clock(VarId::SYNTHETIC));
         assert_eq!(sim.get("o").unwrap().payload_u128(), 0xffff, "{config:?}");
+    }
+}
+
+#[test]
+fn comptime_same_width_cast_reinterprets_signedness() {
+    // `SB'(U)` on an unsigned 8-bit 0x80 is a signed -128: it sign-extends to
+    // 0xff80, not 0x0080.
+    let code = r#"
+    module Top (
+        o: output signed logic<16>,
+    ) {
+        const U : logic<8>        = 8'h80;
+        const SB: type            = signed logic<8>;
+        const B : signed logic<16> = U as SB;
+        assign o = B;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap().payload_u128(), 0xff80, "{config:?}");
     }
 }
 

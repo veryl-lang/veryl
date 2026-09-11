@@ -405,9 +405,11 @@ impl Expression {
 
                     let cast_width = comptime.r#type.total_width()?;
                     let val_width = val.width();
+                    let cast_signed = comptime.r#type.signed;
                     if val_width > cast_width {
                         let mut val = val.clone();
                         val.trunc(cast_width);
+                        val.set_signed(cast_signed);
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     } else if val_width < cast_width {
                         // SV's `N'(expr)` sign-extends a signed operand; widen by
@@ -415,9 +417,12 @@ impl Expression {
                         // emitted SV (the value flag can carry the init
                         // literal's signedness, e.g. `logic<8> = 200`).
                         let src_signed = x.comptime().r#type.signed;
-                        let val = val.expand(cast_width, src_signed).into_owned();
+                        let mut val = val.expand(cast_width, src_signed).into_owned();
+                        val.set_signed(cast_signed);
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     } else {
+                        let mut val = val.clone();
+                        val.set_signed(cast_signed);
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     }
                 }
