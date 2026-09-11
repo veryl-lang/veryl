@@ -22,6 +22,25 @@ impl Conv<&Expression> for ir::Expression {
     }
 }
 
+/// `dim` numbers the unpacked dimensions first, then the packed ones, to match
+/// the `$size` numbering the emitter relies on. An aggregate has no per-dimension
+/// packed shape, so a select landing on it takes its whole width.
+fn msb_dimension_width(r#type: &Type, dim: usize) -> Option<usize> {
+    let array_dims = r#type.array.dims();
+    if dim < array_dims {
+        r#type.array.as_slice().get(dim).copied().flatten()
+    } else if r#type.is_struct_union() || r#type.is_enum() || r#type.is_unknown() {
+        r#type.total_width()
+    } else {
+        r#type
+            .width()
+            .as_slice()
+            .get(dim - array_dims)
+            .copied()
+            .flatten()
+    }
+}
+
 fn is_if_expression(value: &Expression) -> bool {
     !value.if_expression.if_expression_list.is_empty()
 }
@@ -694,26 +713,11 @@ impl Conv<&Factor> for ir::Expression {
                                 return Err(ir_error!(token));
                             }
 
-                            let dim = context.get_select_dim().unwrap();
-                            let array_dims = comptime.r#type.array.dims();
+                            let Some(dim) = context.get_select_dim() else {
+                                return Err(ir_error!(token));
+                            };
 
-                            let width =
-                                if comptime.r#type.is_struct() || comptime.r#type.is_unknown() {
-                                    comptime.r#type.total_width()
-                                } else if dim < array_dims {
-                                    comptime.r#type.array.as_slice().get(dim).copied().flatten()
-                                } else {
-                                    // packed dim: `dim` also counts the unpacked dims, so
-                                    // skip them before indexing the packed-width Shape.
-                                    let packed_dim = dim - array_dims;
-                                    comptime
-                                        .r#type
-                                        .width()
-                                        .as_slice()
-                                        .get(packed_dim)
-                                        .copied()
-                                        .flatten()
-                                };
+                            let width = msb_dimension_width(&comptime.r#type, dim);
                             let comptime = if let Some(width) = width {
                                 let msb = width.saturating_sub(1);
                                 Comptime::create_value(Value::new(msb as u64, 32, false), token)
@@ -729,25 +733,15 @@ impl Conv<&Factor> for ir::Expression {
                             && !x.is_proto
                         {
                             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
-                            let dim = context.get_select_dim().unwrap();
+                            let Some(dim) = context.get_select_dim() else {
+                                return Err(ir_error!(token));
+                            };
 
                             msb_table::insert(msb.msb.msb_token.token.id, dim + 1);
 
-                            let array_dims = r#type.array.dims();
-                            let width = if r#type.is_struct() {
-                                r#type.total_width()
-                            } else if dim < array_dims {
-                                r#type.array.as_slice().get(dim).copied().flatten()
-                            } else {
-                                // packed dimension: skip the unpacked array dims.
-                                let packed_dim = dim - array_dims;
-                                r#type.width().as_slice().get(packed_dim).copied().flatten()
-                            };
-                            let msb = if let Some(width) = width {
-                                width - 1
-                            } else {
-                                0
-                            };
+                            let msb = msb_dimension_width(&r#type, dim)
+                                .map(|x| x.saturating_sub(1))
+                                .unwrap_or(0);
                             Ok(ir::Expression::create_value(
                                 Value::new(msb as u64, 32, false),
                                 token,

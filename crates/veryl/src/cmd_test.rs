@@ -11,7 +11,9 @@ use veryl_metadata::{ComponentBackendKind, FilelistType, Metadata, SimType, Wave
 use veryl_parser::resource_table::{self, PathId};
 use veryl_parser::text_table;
 use veryl_simulator::component::loader::native_loading_supported;
-use veryl_simulator::ir::{ComponentLibrary, Config, Ir, ProtoModuleCache, build_ir_cached};
+use veryl_simulator::ir::{
+    BuildSession, ComponentLibrary, Config, Ir, ProtoModuleCache, build_ir_cached,
+};
 use veryl_simulator::output_buffer;
 use veryl_simulator::simulator::Simulator;
 use veryl_simulator::simulator_error::SimulatorError;
@@ -372,8 +374,6 @@ impl CmdTest {
                  falling back to the Cranelift JIT backend"
             );
         }
-        let mut proto_cache = ProtoModuleCache::default();
-
         check_format_version(self.opt.format, self.opt.format_version)?;
         let json = matches!(self.opt.format, Format::Json);
         let backend_name = match self.opt.backend {
@@ -441,18 +441,21 @@ impl CmdTest {
                     (Some(x), Some(y)) => y.partial_cmp(&x).unwrap_or(std::cmp::Ordering::Equal),
                 }
             });
-            if config.dut_reuse {
-                let tops: Vec<_> = pending_native.iter().filter_map(|p| p.top).collect();
-                veryl_simulator::backend::inst::compute_recurring_set(&ir, &tops);
-            }
+            let tops: Vec<_> = pending_native
+                .iter()
+                .filter_map(|p| {
+                    p.top
+                        .or_else(|| resource_table::get_str_id(p.test_name.clone()))
+                })
+                .collect();
+            let session = BuildSession::new(&ir, &config, &tops);
             let pending_queue = std::sync::Mutex::new(pending_native.into_iter());
             let resource_snapshot = resource_table::export_tables();
             // `SimulatorError` snapshots source text from `text_table` eagerly
             // at construction time; without this, worker errors carry no source.
             let text_snapshot = text_table::export_tables();
 
-            let ir_ref = &ir;
-            let config_ref = &config;
+            let session_ref = &session;
             let opt_ref = &self.opt;
             let metadata_ref: &Metadata = metadata;
             // Workers print each finished test's block under this lock, so results
@@ -476,7 +479,7 @@ impl CmdTest {
                                 text_table::import_tables(text_snap);
                                 // Per-thread cache avoids locking; cross-test
                                 // reuse is rare since each top name is unique.
-                                let mut thread_cache = ProtoModuleCache::default();
+                                let mut thread_cache = ProtoModuleCache::new(session_ref);
                                 let (mut tally_pass, mut tally_fail) = (0, 0);
                                 let mut tally_waves: Vec<PathBuf> = Vec::new();
                                 let mut tally_timings: Vec<(String, f64)> = Vec::new();
@@ -496,13 +499,11 @@ impl CmdTest {
                                     let t_build = std::time::Instant::now();
                                     let t0 = std::time::Instant::now();
                                     let build_result = prepare_native_test(
-                                        ir_ref,
                                         &pending.test_name,
                                         &pending.top,
                                         opt_ref,
                                         pending.test_path,
                                         metadata_ref,
-                                        config_ref,
                                         &mut thread_cache,
                                     );
                                     #[cfg(feature = "profile")]
@@ -693,20 +694,21 @@ impl CmdTest {
             }
         }
 
+        let doc_tops: Vec<_> = doc_tests.iter().map(|dt| dt.module_name).collect();
+        let doc_session = BuildSession::new(&ir, &config, &doc_tops);
+        let mut proto_cache = ProtoModuleCache::new(&doc_session);
         for dt in &doc_tests {
             let module_name = dt.module_name.to_string();
             info!("Executing doc test ({module_name})");
 
             let t0 = std::time::Instant::now();
             let result = run_doc_test(
-                &ir,
                 &module_name,
                 &dt.wavedrom_json,
                 &dt.ports,
                 self.opt.wave,
                 dt.path,
                 metadata,
-                &config,
                 &mut proto_cache,
             );
             let runtime_s = t0.elapsed().as_secs_f64();
@@ -1251,16 +1253,13 @@ fn paths_refer_to_same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
         }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn prepare_native_test(
-    ir: &veryl_analyzer::ir::Ir,
     test_name: &str,
     top: &Option<resource_table::StrId>,
     opt: &OptTest,
     test_path: PathId,
     metadata: &Metadata,
-    config: &Config,
-    cache: &mut ProtoModuleCache,
+    cache: &mut ProtoModuleCache<'_>,
 ) -> std::result::Result<NativeTestJob, SimulatorError> {
     let top_name = if let Some(top_str) = top {
         top_str.to_string()
@@ -1273,7 +1272,7 @@ fn prepare_native_test(
             module_name: top_name.clone(),
         }
     })?;
-    let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
+    let sim_ir = build_ir_cached(top_str_id, cache)?;
 
     let module_name = sim_ir.name.to_string();
 
@@ -1290,17 +1289,14 @@ fn prepare_native_test(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_doc_test(
-    ir: &veryl_analyzer::ir::Ir,
     module_name: &str,
     wavedrom_json: &str,
     ports: &[(String, String)],
     wave: bool,
     source_path: PathId,
     metadata: &Metadata,
-    config: &Config,
-    cache: &mut ProtoModuleCache,
+    cache: &mut ProtoModuleCache<'_>,
 ) -> std::result::Result<Option<PathBuf>, SimulatorError> {
     let mut scenario = parse_wavedrom(wavedrom_json).map_err(|e| SimulatorError::TestFailed {
         message: format!("WaveDrom parse error in {module_name}: {e}"),
@@ -1312,7 +1308,7 @@ fn run_doc_test(
             module_name: module_name.to_string(),
         }
     })?;
-    let sim_ir = build_ir_cached(ir, top_str_id, config, cache)?;
+    let sim_ir = build_ir_cached(top_str_id, cache)?;
 
     let dump = if wave {
         let doc_name = format!("{}_doc", module_name);

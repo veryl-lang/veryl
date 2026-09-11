@@ -595,6 +595,10 @@ impl Type {
         matches!(&self.kind, TypeKind::Struct(_) | TypeKind::Union(_))
     }
 
+    pub fn is_enum(&self) -> bool {
+        matches!(&self.kind, TypeKind::Enum(_))
+    }
+
     pub fn is_interface(&self) -> bool {
         match &self.kind {
             TypeKind::Instance(_, kind) => *kind == InstanceKind::Interface,

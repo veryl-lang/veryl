@@ -26984,9 +26984,10 @@ fn a_sliced_boundary_copy_is_cut_per_source_write() {
         dut_reuse: true,
         ..Default::default()
     };
-    crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
+    let session =
+        crate::ir::BuildSession::new(&air_ir, &config, &["ShallowTop".into(), "DeepTop".into()]);
 
-    let ir = build_ir(&air_ir, "DeepTop".into(), &config).unwrap();
+    let ir = session.build_ir("DeepTop".into()).unwrap();
     assert_eq!(
         ir.required_comb_passes, 1,
         "a sliced boundary copy carries bits, not bundles"
@@ -27133,13 +27134,14 @@ fn dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance() {
     let deep_off = build_ir(&air_ir, "DeepTop".into(), &off).unwrap();
     let shallow_off = build_ir(&air_ir, "ShallowTop".into(), &off).unwrap();
 
-    crate::backend::inst::compute_recurring_set(&air_ir, &["ShallowTop".into(), "DeepTop".into()]);
+    let session =
+        crate::ir::BuildSession::new(&air_ir, &on, &["ShallowTop".into(), "DeepTop".into()]);
 
     // `unwrap` is half the assertion: de-aliasing wires `w` across the
     // boundary as a whole-variable copy, and until that copy was cut per range
     // the scheduler read a ring through it (`r` -> `hw.x` -> `w` -> `w.y` ->
     // `r`) that no bit takes.
-    let deep_on = build_ir(&air_ir, "DeepTop".into(), &on).unwrap();
+    let deep_on = session.build_ir("DeepTop".into()).unwrap();
     // `w` is already `Wrap`'s own storage, so nothing moves into a fresh slot
     // and only the copies show.  Exact, because a copy split also adds
     // statements; with the ports left aliased this stayed at `deep_off`.
@@ -27155,7 +27157,7 @@ fn dut_reuse_dealiases_a_shared_dut_under_an_unshared_instance() {
     // The shallow case must keep working, or the check above could pass with
     // reuse broken in a way that happens to add statements.  This one does move
     // storage: `Sub` drives `ShallowTop`'s own ports.
-    let shallow_on = build_ir(&air_ir, "ShallowTop".into(), &on).unwrap();
+    let shallow_on = session.build_ir("ShallowTop".into()).unwrap();
     assert!(
         shallow_on.comb_values.len() > shallow_off.comb_values.len(),
         "the shared DUT directly under the top must still de-alias \
@@ -27419,5 +27421,46 @@ fn narrowing_cast_of_a_signed_quotient_still_truncates() {
     );
     for (r, g) in reference.iter().zip(got.iter()) {
         assert_eq!(g, r, "a={} b={}", r.0, r.1);
+    }
+}
+
+#[test]
+fn msb_after_member_access_of_array_element() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic   ,
+        p: output logic   ,
+    ) {
+        struct StructA {
+            v: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].v = a;
+            b[1].v = 8'h01;
+            o      = b[0].v[msb];
+            p      = b[1].v[msb];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("8'h80").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:b}", sim.get("o").unwrap()),
+            "1'b1",
+            "config={config:?}"
+        );
+        assert_eq!(
+            format!("{:b}", sim.get("p").unwrap()),
+            "1'b0",
+            "config={config:?}"
+        );
     }
 }

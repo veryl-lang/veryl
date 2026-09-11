@@ -21313,3 +21313,90 @@ fn cast_by_non_constant_expression() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
 }
+
+#[test]
+fn msb_dimension_after_member_access() {
+    // msb is the member's own msb (7), so +1 is out of range.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].a = 0;
+            b[1].a = 0;
+        }
+        let _c: logic = b[0].a[msb + 1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn msb_dimension_after_member_access_multi_dim() {
+    // msb is m's first packed dimension (4), not a dimension of b.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            m: logic<4, 6>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].m = 0;
+            b[1].m = 0;
+        }
+        let _c: logic = b[0].m[msb][0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn msb_on_element_of_struct_array() {
+    // msb is the element count (2), not the struct width.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].a = 0;
+            b[1].a = 0;
+        }
+        let _c: logic<8> = b[msb].a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn msb_in_assign_destination_is_rejected_without_panic() {
+    // pass2 walks the destination even though pass1 rejected the msb.
+    let code = r#"
+    module ModuleA {
+        var c: logic<8>;
+        assign c[msb] = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidMsb { .. })),
+        "{errors:?}"
+    );
+}

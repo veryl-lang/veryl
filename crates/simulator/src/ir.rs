@@ -1,4 +1,5 @@
 pub(crate) mod big_array;
+mod build_session;
 pub(crate) mod comb_layout;
 pub(crate) mod comb_pipeline_cache;
 pub(crate) mod context;
@@ -19,6 +20,7 @@ pub(crate) mod variable;
 pub(crate) mod write_log;
 
 pub use big_array::BigArrayFold;
+pub use build_session::{BuildSession, ProtoModuleCache};
 pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
 pub use derived_clock::{DerivedClock, DerivedClockSchedule, DerivedReset, EdgeCandidate};
@@ -48,7 +50,7 @@ pub use variable::{
 pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
 pub use veryl_analyzer::value::Value;
 
-use crate::backend::{self, BackendRegistry, CompiledWhole, DispatchOutcome};
+use crate::backend::{self, CompiledWhole, DispatchOutcome};
 use crate::residency;
 use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
@@ -1116,78 +1118,15 @@ fn settle_converge_check() -> bool {
     *ON.get_or_init(|| env::var("VERYL_SETTLE_CONVERGE_CHECK").as_deref() == Ok("1"))
 }
 
+/// Build a single top in an isolated session. Use `BuildSession` to share DUT
+/// conversion across multiple tops from the same analysis IR.
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
-    for x in &ir.components {
-        if let air::Component::Module(x) = x
-            && top == x.name
-        {
-            let token = x.token;
-            let mut context = context::Context {
-                config: config.clone(),
-                backends: BackendRegistry::for_config(config),
-                ..Default::default()
-            };
-            let proto: ProtoModule = Conv::conv(&mut context, x)?;
-            let module = proto.instantiate();
-            return Ok(Ir::from_module(module, config, token));
-        }
-    }
-    Err(SimulatorError::TopModuleNotFound {
-        module_name: top.to_string(),
-    })
+    BuildSession::new(ir, config, &[top]).build_ir(top)
 }
 
-struct CacheEntry {
-    proto: ProtoModule,
-    token: TokenRange,
-}
-
-/// Cache for `ProtoModule` keyed by top module name.  JIT binaries are
-/// kept alive via shared `Arc<ChunkArtifact>` handles embedded in the
-/// cached `ProtoModule`'s `CompiledBlock` statements, so the cache no
-/// longer needs a separate keepalive vector.
-#[derive(Default)]
-pub struct ProtoModuleCache {
-    entries: HashMap<StrId, CacheEntry>,
-}
-
-pub fn build_ir_cached(
-    ir: &air::Ir,
-    top: StrId,
-    config: &Config,
-    cache: &mut ProtoModuleCache,
-) -> Result<Ir, SimulatorError> {
-    // Cache hit: reuse ProtoModule, just instantiate with fresh buffers
-    if let Some(entry) = cache.entries.get(&top) {
-        let module = entry.proto.instantiate();
-        return Ok(Ir::from_module(module, config, entry.token));
-    }
-
-    // Cache miss: run Conv::conv
-    for x in &ir.components {
-        if let air::Component::Module(x) = x
-            && top == x.name
-        {
-            let token = x.token;
-            let mut context = context::Context {
-                config: config.clone(),
-                backends: BackendRegistry::for_config(config),
-                ..Default::default()
-            };
-
-            let proto: ProtoModule = Conv::conv(&mut context, x)?;
-            let module = proto.instantiate();
-
-            let result = Ir::from_module(module, config, token);
-
-            cache.entries.insert(top, CacheEntry { proto, token });
-
-            return Ok(result);
-        }
-    }
-    Err(SimulatorError::TopModuleNotFound {
-        module_name: top.to_string(),
-    })
+/// Build using a cache already bound to its session's IR and configuration.
+pub fn build_ir_cached(top: StrId, cache: &mut ProtoModuleCache<'_>) -> Result<Ir, SimulatorError> {
+    cache.build_ir(top)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1228,11 +1167,9 @@ pub struct Config {
     /// now that the compile pool caps concurrency; set `VERYL_AOT_C_MIN_STMTS=N`
     /// to restore a floor.
     pub aot_c_min_stmts: usize,
-    /// Cross-test DUT reuse: cache a converted DUT and relocate it into later
-    /// tests.  The caches are keyed by `Arc<Component>` pointer (unique only
-    /// within one `air::Ir`), so it's safe only for the CLI (one analysis per
-    /// process), not the parallel unit-test harness — hence default off, enabled
-    /// only by `apply_env`.
+    /// Cache a converted DUT and relocate it into later builds in the same
+    /// `BuildSession`. Different sessions never share these caches. Default
+    /// off; `apply_env` enables it for the CLI unless explicitly disabled.
     pub dut_reuse: bool,
     /// Base seed for user-defined component instances (from `[test] seed`
     /// or `--seed`).
