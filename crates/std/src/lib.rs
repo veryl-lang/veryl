@@ -16,12 +16,21 @@ fn std_dir() -> PathBuf {
 
 pub fn expand() -> Result<(), PathError> {
     let std_dir = std_dir();
+    // The marker, not the directory, is what says the tree is complete: the
+    // directory appears as soon as one process starts writing into it, so a
+    // second process keying off its existence would read a half-written tree.
+    // A crashed expansion leaves the marker absent and is redone.
+    let expanded = std_dir.join("expanded");
 
-    if !std_dir.exists() {
-        ignore_already_exists(fs::create_dir_all(&std_dir))?;
+    if expanded.exists() {
+        return Ok(());
+    }
 
-        let lock = veryl_path::lock_dir(&std_dir)?;
+    ignore_already_exists(fs::create_dir_all(&std_dir))?;
 
+    let lock = veryl_path::lock_dir(&std_dir)?;
+
+    if !expanded.exists() {
         for file in Asset::iter() {
             let content = Asset::get(file.as_ref()).unwrap();
             let path = std_dir.join(file.as_ref());
@@ -34,8 +43,10 @@ pub fn expand() -> Result<(), PathError> {
             fs::write(&path, content.data.as_ref())?;
         }
 
-        veryl_path::unlock_dir(lock)?;
+        veryl_path::atomic_write(&expanded, &[])?;
     }
+
+    veryl_path::unlock_dir(lock)?;
 
     Ok(())
 }
