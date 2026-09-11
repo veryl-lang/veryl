@@ -1,0 +1,12 @@
+# `ci` is the profile regression.yml runs with; `default` stays untouched for
+# local runs.
+[profile.ci]
+# One platform stopping at its first failure hides the rest of that platform's
+# result, which is the whole point of running the matrix.
+fail-fast = false
+failure-output = "immediate-final"
+# Wall time is dominated by a handful of tests, so name the slow ones in the
+# log instead of letting a new one quietly become the critical path.
+slow-timeout = { period = "30s" }
+final-status-level = "slow"
+status-level = "fail"

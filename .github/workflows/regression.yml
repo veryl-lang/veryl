@@ -60,14 +60,24 @@ jobs:
           # stats stay in the job log via the explicit step below; keep them off
           # the run-summary annotations
           disable_annotations: true
+      - uses: taiki-e/install-action@nextest
       - uses: actions/cache/restore@v4
         continue-on-error: true
         with:
           path: ${{ github.workspace }}/.sccache
           key: sccache-${{ matrix.target }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.target }}-
+      # nextest runs the whole workspace under one scheduler instead of one
+      # test binary at a time, so a long test no longer leaves the other cores
+      # idle.  It also gives every test its own process, which is what the
+      # in-process mutexes around the analyzer's global tables exist to emulate.
       - name: Run tests
-        run: cargo test --locked --target ${{ matrix.target }}
+        run: cargo nextest run --locked --profile ci --target ${{ matrix.target }}
+      # nextest cannot run doctests.  They are a handful of examples with no
+      # platform dependence, so one platform covers them.
+      - name: Run doctests
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --locked --doc --target ${{ matrix.target }}
       - name: sccache stats
         if: always()
         run: sccache --show-stats
