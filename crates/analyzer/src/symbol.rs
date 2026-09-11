@@ -949,6 +949,8 @@ impl Symbol {
         matches!(
             type_kind,
             TypeKind::Type
+                | TypeKind::Bit
+                | TypeKind::Logic
                 | TypeKind::U8
                 | TypeKind::U16
                 | TypeKind::U32

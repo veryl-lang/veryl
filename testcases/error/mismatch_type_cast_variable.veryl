@@ -1,0 +1,9 @@
+module mismatch_type_cast_variable (
+    i_a: input logic,
+) {
+    var b: logic<2>;
+
+    let _c: logic<2> = i_a as b;
+
+    assign b = 0;
+}

@@ -13,8 +13,7 @@ use crate::ir::variable::{
     VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
 };
 use crate::ir::write_log::{
-    WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, event_write_log_push_static, event_write_log_push_wide,
-    static_field_byte_span,
+    event_write_log_push_static, event_write_log_push_wide_range, static_field_byte_span,
 };
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
@@ -144,32 +143,45 @@ impl ProtoStatements {
         comb_len: usize,
         use_4state: bool,
     ) -> Vec<Statement> {
-        let mut result = Vec::new();
-        for block in &self.0 {
-            match block {
-                ProtoStatementBlock::Interpreted(proto) => {
-                    for s in proto {
-                        result.push(unsafe {
-                            s.apply_values_ptr(ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
-                        });
-                    }
-                }
-                ProtoStatementBlock::Compiled(artifact) => {
-                    // log_buf populated by `Ir::install_write_log_ptr` after
-                    // WriteLogBuffer allocation; null until then.
-                    result.push(Statement::Compiled(CompiledStmt {
-                        artifact: Arc::clone(artifact),
-                        ff: ff_ptr as *const u8,
-                        comb: comb_ptr as *const u8,
-                        log_buf: std::ptr::null_mut(),
-                        ff_delta: 0,
-                        outputs: None,
-                    }));
+        blocks_to_statements(&self.0, ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
+    }
+}
+
+/// Lower a run of blocks, so a caller that cuts an event at gate boundaries
+/// can lower the pieces apart.
+pub(crate) fn blocks_to_statements(
+    blocks: &[ProtoStatementBlock],
+    ff_ptr: *mut u8,
+    ff_len: usize,
+    comb_ptr: *mut u8,
+    comb_len: usize,
+    use_4state: bool,
+) -> Vec<Statement> {
+    let mut result = Vec::new();
+    for block in blocks {
+        match block {
+            ProtoStatementBlock::Interpreted(proto) => {
+                for s in proto {
+                    result.push(unsafe {
+                        s.apply_values_ptr(ff_ptr, ff_len, comb_ptr, comb_len, use_4state)
+                    });
                 }
             }
+            ProtoStatementBlock::Compiled(artifact) => {
+                // log_buf populated by `Ir::install_write_log_ptr` after
+                // WriteLogBuffer allocation; null until then.
+                result.push(Statement::Compiled(CompiledStmt {
+                    artifact: Arc::clone(artifact),
+                    ff: ff_ptr as *const u8,
+                    comb: comb_ptr as *const u8,
+                    log_buf: std::ptr::null_mut(),
+                    ff_delta: 0,
+                    outputs: None,
+                }));
+            }
         }
-        result
     }
+    result
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -855,6 +867,8 @@ impl SystemFunctionCall {
                     i += 1;
                     true
                 });
+                // A waveform's gate hears about writes only through the log.
+                crate::wave_dumper::note_direct_write();
             }
             SystemFunctionCall::Assert {
                 kind,
@@ -4072,8 +4086,7 @@ fn emit_ff_log(
         }
         return;
     }
-    // Wide: contiguous byte buffer per side, split into wide entries
-    // of at most WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES.
+    // Wide: one contiguous byte buffer per side.
     let n_words = nb / 8;
     let payload_digits: Vec<u64> = match value {
         Value::U64(v) => vec![v.payload],
@@ -4088,17 +4101,12 @@ fn emit_ff_log(
         Some((blo, blen)) if blo + blen <= payload_bytes.len() => (blo, blen),
         _ => (0, nb),
     };
-    let mut written: usize = 0;
-    while written < span_len {
-        let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, span_len - written);
-        unsafe {
-            event_write_log_push_wide(
-                base_offset + (skip + written) as u32,
-                payload_bytes.as_ptr().add(skip + written),
-                chunk,
-            );
-        }
-        written += chunk;
+    unsafe {
+        event_write_log_push_wide_range(
+            base_offset + skip as u32,
+            payload_bytes.as_ptr().add(skip),
+            span_len,
+        );
     }
     if use_4state {
         let mask_digits: Vec<u64> = match value {
@@ -4115,17 +4123,12 @@ fn emit_ff_log(
         } else {
             (0, nb)
         };
-        let mut written: usize = 0;
-        while written < mlen {
-            let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, mlen - written);
-            unsafe {
-                event_write_log_push_wide(
-                    base_offset + nb_u32 + (mskip + written) as u32,
-                    mask_bytes.as_ptr().add(mskip + written),
-                    chunk,
-                );
-            }
-            written += chunk;
+        unsafe {
+            event_write_log_push_wide_range(
+                base_offset + nb_u32 + mskip as u32,
+                mask_bytes.as_ptr().add(mskip),
+                mlen,
+            );
         }
     }
 }

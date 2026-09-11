@@ -1,0 +1,8 @@
+pub module sample_c_module::<WIDTH: u32> (
+    i_d: input  logic<WIDTH>,
+    o_d: output logic<WIDTH>,
+) {
+    always_comb {
+        o_d = i_d;
+    }
+}

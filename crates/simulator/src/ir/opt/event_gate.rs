@@ -23,7 +23,9 @@ use super::cone_gate::{ConeGateInputs, has_side_effects};
 use crate::ir::ProtoExpression;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::{VarOffset, native_bytes};
+use crate::ir::write_log::WriteLogBuffer;
 use crate::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// One gated range `[lo, hi)` of an event's top-level statements.
 #[derive(Clone, Debug)]
@@ -43,12 +45,19 @@ pub struct EventGate {
     pub cone: String,
 }
 
-/// Bytes ahead of a gate's shadows: `[0]` idle (the last fire's entries all
-/// repeated the current values and it changed no direct comb write), `[2]`
-/// off, `[4..8)` the dirty
-/// streak while on and the fires since turning off while off, `[8..12)` the
-/// off period, doubled each time the gate turns off again.
+/// Bytes ahead of a gate's shadows, named by both the Rust runtime
+/// (`RtEventGate`) and the C the AOT-C emitter writes: the two take turns on
+/// one gate's state, so they must read one layout.
 pub const GATE_STATE_HEADER_BYTES: usize = 16;
+/// The last fire's entries all repeated the current values and it changed no
+/// direct comb write.
+pub(crate) const GATE_IDLE: usize = 0;
+/// The gate is off: its range runs unchecked until the period below passes.
+pub(crate) const GATE_OFF: usize = 2;
+/// The dirty streak while on, the fires since turning off while off.
+pub(crate) const GATE_COUNT: usize = 4;
+/// The off period, doubled each time the gate turns off again.
+pub(crate) const GATE_PERIOD: usize = 8;
 /// Rough check cost, in nanoseconds: each span is a compare call and a
 /// branch, each byte a slice of memory bandwidth.
 const SPAN_NS: usize = 16;
@@ -127,7 +136,8 @@ pub(crate) fn enabled() -> bool {
 /// and reports the first run that wrote something (a wrong skip).  Emit-time,
 /// so it changes the generated C.
 pub(crate) fn check() -> bool {
-    std::env::var("VERYL_EVENT_GATE_CHECK").as_deref() == Ok("1")
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_EVENT_GATE_CHECK").as_deref() == Ok("1"))
 }
 
 /// `(is_ff, start, end)`: a byte range in one value buffer.
@@ -686,6 +696,325 @@ pub fn plan(
     gates
 }
 
+/// Consecutive dirty checks after which an event gate stops checking.
+pub(crate) const EVENT_GATE_AUTO_OFF_STREAK: u32 = 64;
+/// Fires an auto-offed gate stays off before it checks again; doubled on
+/// each further turn-off up to the cap, reset by a skip.
+pub(crate) const EVENT_GATE_REARM_FIRES: u32 = 1024;
+pub(crate) const EVENT_GATE_REARM_CAP: u32 = 1 << 16;
+
+/// A planned gate with the range of chunk blocks its statements went into.
+#[derive(Debug)]
+pub struct ChunkedGate {
+    pub gate: EventGate,
+    pub blocks: (usize, usize),
+}
+
+/// A gate over the per-statement event path: `[lo, hi)` of the event's
+/// runtime statements, kept by the rules of the AOT-C emitter's gate on the
+/// same state bytes, so the two paths can take turns on one gate.
+#[derive(Debug)]
+pub struct RtEventGate {
+    pub lo: usize,
+    pub hi: usize,
+    state_off: usize,
+    /// `compare_spans()` of the planned gate, in shadow order.
+    spans: Vec<Span>,
+    out_comb: Vec<(u32, u32)>,
+    /// Where the direct comb writes' shadows start, after the spans'.
+    out_comb_off: usize,
+    cone: String,
+    /// The gates nested in this one, in range order.
+    pub children: Vec<usize>,
+    /// Check mode: this gate's wrong skip has been reported.
+    said: AtomicBool,
+}
+
+/// One event's gates; `roots` are the ones nested in no other.
+#[derive(Debug)]
+pub struct RtEventGates {
+    pub gates: Vec<RtEventGate>,
+    pub roots: Vec<usize>,
+}
+
+/// What a fire does with a gate's range.
+pub enum GateEntry {
+    /// Turned off: the range runs unjudged.
+    Plain,
+    /// Idle since the last fire and every read held.
+    Skip,
+    /// The range runs and is judged from the log counts at entry; `checked`
+    /// when the reads were compared (and their shadows refreshed) on the way.
+    Run { n0: u32, w0: u32, checked: bool },
+}
+
+impl RtEventGates {
+    /// Partial overlaps never reach here (the planner drops them), so the
+    /// ranges nest.
+    pub fn new<'a>(gates: impl Iterator<Item = (&'a EventGate, (usize, usize))>) -> Self {
+        let mut items: Vec<(&EventGate, (usize, usize))> =
+            gates.filter(|(_, (lo, hi))| lo < hi).collect();
+        // Outer gates first: by start, the longer range ahead on a tie.
+        items.sort_by_key(|&(_, (lo, hi))| (lo, std::cmp::Reverse(hi)));
+        let mut out: Vec<RtEventGate> = Vec::with_capacity(items.len());
+        let mut roots = Vec::new();
+        let mut open: Vec<usize> = Vec::new();
+        for (g, (lo, hi)) in items {
+            while open.last().is_some_and(|&p| lo >= out[p].hi) {
+                open.pop();
+            }
+            let idx = out.len();
+            match open.last() {
+                Some(&p) => out[p].children.push(idx),
+                None => roots.push(idx),
+            }
+            let spans = g.compare_spans();
+            out.push(RtEventGate {
+                lo,
+                hi,
+                state_off: g.state_off as usize,
+                out_comb_off: spans.iter().map(|&(_, a, b)| (b - a) as usize).sum(),
+                spans,
+                out_comb: g.out_comb.clone(),
+                cone: g.cone.clone(),
+                children: Vec::new(),
+                said: AtomicBool::new(false),
+            });
+            open.push(idx);
+        }
+        Self { gates: out, roots }
+    }
+}
+
+unsafe fn read_u32(p: *const u8) -> u32 {
+    unsafe { p.cast::<u32>().read_unaligned() }
+}
+
+unsafe fn write_u32(p: *mut u8, v: u32) {
+    unsafe { p.cast::<u32>().write_unaligned(v) }
+}
+
+/// A span is usually one variable's 1-8 bytes, which a typed load settles
+/// without the libcall a slice compare would take.
+///
+/// # Safety
+/// Both pointers must be valid for `len` bytes.
+unsafe fn bytes_eq(a: *const u8, b: *const u8, len: usize) -> bool {
+    unsafe {
+        match len {
+            1 => *a == *b,
+            2 => a.cast::<u16>().read_unaligned() == b.cast::<u16>().read_unaligned(),
+            4 => a.cast::<u32>().read_unaligned() == b.cast::<u32>().read_unaligned(),
+            8 => a.cast::<u64>().read_unaligned() == b.cast::<u64>().read_unaligned(),
+            _ => std::slice::from_raw_parts(a, len) == std::slice::from_raw_parts(b, len),
+        }
+    }
+}
+
+/// Did every entry pushed since counts `n0` / `w0` repeat the value it
+/// would commit?
+///
+/// # Safety
+/// `ff` must be valid for every entry's bytes.
+pub unsafe fn log_unchanged(ff: *const u8, log: &WriteLogBuffer, n0: u32, w0: u32) -> bool {
+    let narrow = &log.narrow_entries_slice()[n0 as usize..log.narrow_count as usize];
+    for e in narrow {
+        let cur = unsafe { ff.add(e.offset as usize) };
+        let held = unsafe {
+            match e.width_class {
+                1 => *cur == e.payload as u8,
+                2 => cur.cast::<u16>().read_unaligned() == e.payload as u16,
+                4 => cur.cast::<u32>().read_unaligned() == e.payload as u32,
+                _ => cur.cast::<u64>().read_unaligned() == e.payload,
+            }
+        };
+        if !held {
+            return false;
+        }
+    }
+    let wide = &log.wide_entries_slice()[w0 as usize..log.wide_count as usize];
+    for e in wide {
+        let n = e.native_bytes as usize;
+        let cur = unsafe { std::slice::from_raw_parts(ff.add(e.offset as usize), n) };
+        if cur != &e.payload[..n] {
+            return false;
+        }
+    }
+    true
+}
+
+impl RtEventGate {
+    /// The gate's state bytes and, after the header, its shadows.
+    ///
+    /// # Safety
+    /// `comb` must be valid for the gate's state.
+    unsafe fn state(&self, comb: *mut u8) -> (*mut u8, *mut u8) {
+        let eg = unsafe { comb.add(self.state_off) };
+        (eg, unsafe { eg.add(GATE_STATE_HEADER_BYTES) })
+    }
+
+    /// Off: the range runs plain until the re-arm period passes; the first
+    /// fire after re-arming runs and takes a fresh snapshot.  On: a checked
+    /// fire whose reads all matched skips, resetting the dirty streak;
+    /// otherwise the range runs, a dirty streak turning the gate off for
+    /// twice as long each time.
+    ///
+    /// # Safety
+    /// `ff` and `comb` must be valid for the gate's spans and state.
+    pub unsafe fn enter(&self, ff: *const u8, comb: *mut u8, log: &WriteLogBuffer) -> GateEntry {
+        let (eg, shadow) = unsafe { self.state(comb) };
+        let mut run = true;
+        let mut checked = false;
+        unsafe {
+            if *eg.add(GATE_OFF) != 0 {
+                let mut n = read_u32(eg.add(GATE_COUNT)) + 1;
+                if n >= read_u32(eg.add(GATE_PERIOD)) {
+                    *eg.add(GATE_OFF) = 0;
+                    *eg.add(GATE_IDLE) = 0;
+                    n = 0;
+                }
+                write_u32(eg.add(GATE_COUNT), n);
+                return GateEntry::Plain;
+            }
+            if *eg.add(GATE_IDLE) != 0 {
+                run = false;
+                checked = true;
+                let mut sh = shadow;
+                for &(is_ff, a, b) in &self.spans {
+                    let len = (b - a) as usize;
+                    let src = if is_ff {
+                        ff.add(a as usize)
+                    } else {
+                        comb.add(a as usize)
+                    };
+                    // A mismatching span refreshes its shadow on the spot: the
+                    // run that follows leaves the compared values as they are.
+                    if !bytes_eq(sh, src, len) {
+                        std::ptr::copy_nonoverlapping(src, sh, len);
+                        run = true;
+                    }
+                    sh = sh.add(len);
+                }
+            }
+            if !run {
+                write_u32(eg.add(GATE_COUNT), 0);
+                write_u32(eg.add(GATE_PERIOD), 0);
+                return GateEntry::Skip;
+            }
+            let mut streak = read_u32(eg.add(GATE_COUNT)) + 1;
+            if streak >= EVENT_GATE_AUTO_OFF_STREAK {
+                let off = read_u32(eg.add(GATE_PERIOD));
+                let off = if off == 0 {
+                    EVENT_GATE_REARM_FIRES
+                } else {
+                    (off * 2).min(EVENT_GATE_REARM_CAP)
+                };
+                write_u32(eg.add(GATE_PERIOD), off);
+                *eg.add(GATE_OFF) = 1;
+                streak = 0;
+            }
+            write_u32(eg.add(GATE_COUNT), streak);
+            self.snapshot_out_comb(comb);
+        }
+        GateEntry::Run {
+            n0: log.narrow_count,
+            w0: log.wide_count,
+            checked,
+        }
+    }
+
+    /// After a `Run`: idle when the run's entries all repeated their values
+    /// and no direct comb write changed; an idle run whose reads were not
+    /// compared on entry snapshots them now.
+    ///
+    /// # Safety
+    /// As `enter`, and `ff` valid for the log's entries.
+    pub unsafe fn exit(
+        &self,
+        ff: *const u8,
+        comb: *mut u8,
+        log: &WriteLogBuffer,
+        n0: u32,
+        w0: u32,
+        checked: bool,
+    ) {
+        let (eg, shadow) = unsafe { self.state(comb) };
+        let idle = unsafe { log_unchanged(ff, log, n0, w0) && self.out_comb_held(comb) };
+        if idle && !checked {
+            let mut sh = shadow;
+            for &(is_ff, a, b) in &self.spans {
+                let len = (b - a) as usize;
+                unsafe {
+                    let src = if is_ff {
+                        ff.add(a as usize)
+                    } else {
+                        comb.add(a as usize)
+                    };
+                    std::ptr::copy_nonoverlapping(src, sh, len);
+                    sh = sh.add(len);
+                }
+            }
+        }
+        unsafe { *eg.add(GATE_IDLE) = u8::from(idle) };
+    }
+
+    /// Check mode: a `Skip` ran its range anyway from the log counts `n0` /
+    /// `w0`; report the first such run that wrote something.
+    ///
+    /// # Safety
+    /// As `exit`.
+    pub unsafe fn check_skip(
+        &self,
+        ff: *const u8,
+        comb: *mut u8,
+        log: &WriteLogBuffer,
+        n0: u32,
+        w0: u32,
+    ) {
+        let wrote = unsafe { !(log_unchanged(ff, log, n0, w0) && self.out_comb_held(comb)) };
+        if wrote && !self.said.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "[event_gate] WRONG SKIP gate {} (per-statement path)",
+                self.cone
+            );
+        }
+    }
+
+    /// The shadow of the direct comb writes, after the spans' shadows.
+    unsafe fn out_comb_shadow(&self, comb: *mut u8) -> *mut u8 {
+        let (_, shadow) = unsafe { self.state(comb) };
+        unsafe { shadow.add(self.out_comb_off) }
+    }
+
+    /// Shadow the direct comb writes before a run.
+    ///
+    /// # Safety
+    /// `comb` must be valid for the gate's state and `out_comb`.
+    pub unsafe fn snapshot_out_comb(&self, comb: *mut u8) {
+        let mut sh = unsafe { self.out_comb_shadow(comb) };
+        for &(a, b) in &self.out_comb {
+            let len = (b - a) as usize;
+            unsafe {
+                std::ptr::copy_nonoverlapping(comb.add(a as usize), sh, len);
+                sh = sh.add(len);
+            }
+        }
+    }
+
+    unsafe fn out_comb_held(&self, comb: *mut u8) -> bool {
+        let mut sh = unsafe { self.out_comb_shadow(comb) };
+        for &(a, b) in &self.out_comb {
+            let len = (b - a) as usize;
+            unsafe {
+                if !bytes_eq(sh, comb.add(a as usize), len) {
+                    return false;
+                }
+                sh = sh.add(len);
+            }
+        }
+        true
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
