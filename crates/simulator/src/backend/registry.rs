@@ -403,13 +403,18 @@ pub enum ChunkPlan {
     Compile(Vec<ProtoStatement>),
 }
 
-/// `compile_plans` on helper threads, for the unified-comb JIT: it runs behind
-/// the comb-pipeline single-flight while every other test worker waits on it,
-/// so the helpers take cores that would otherwise idle.  Each helper gets its
-/// own registry; the backends keep no state of their own (the executable arena
-/// and the artifact cache are shared behind locks), so artifacts from any
-/// thread are interchangeable.  Results stay in plan order.
-pub fn compile_plans_parallel(
+/// `compile_plans` on helper threads, for the unified-comb JIT.  Only a
+/// caller holding a comb-pipeline claim may use it: the peers blocked on that
+/// claim leave their cores idle, which is what the helpers take.  Elsewhere it
+/// costs far more than it saves, and not in the compiling: every worker spawns
+/// a set at once, and each helper's stack mmap and munmap holds `mmap_lock`
+/// against every other thread's page faults.  Note the claim is per key, so
+/// workers converting tops with different comb lists are not blocked by it.
+///
+/// Each helper gets its own registry; the backends keep no state of their own
+/// (the executable arena and the artifact cache are shared behind locks), so
+/// artifacts from any thread are interchangeable.  Results stay in plan order.
+pub(crate) fn compile_plans_parallel(
     registry: &mut BackendRegistry,
     ctx: &CompileCtx,
     plans: Vec<ChunkPlan>,

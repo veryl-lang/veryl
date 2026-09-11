@@ -722,7 +722,8 @@ fn try_jit_gated(
     bounds.sort_unstable();
     bounds.dedup();
     let stmt_count = proto.len();
-    let (stmts, pieces) = try_jit_with_boundaries(context, proto, &bounds, false);
+    let (stmts, pieces) =
+        try_jit_with_boundaries(context, proto, &bounds, false, /* helpers= */ false);
     // A piece is named by the statement it starts at; the list's end closes
     // the last gate's range.
     let mut block_at: HashMap<usize, usize> = HashMap::default();
@@ -975,20 +976,26 @@ fn precompile_tb_bodies(
 
 /// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
 /// between loads, so load_cache CSE is disabled in the emitted chunks.
-fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    let mut pieces = jit_pieces_in_parallel(context, vec![proto], true);
+/// `helpers` as in `jit_pieces`.
+fn try_jit_no_cache(
+    context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    helpers: bool,
+) -> ProtoStatements {
+    let mut pieces = jit_pieces(context, vec![proto], true, helpers);
     ProtoStatements(pieces.pop().unwrap_or_default())
 }
 
-/// Chunks every piece of one unified comb list and compiles the lot on helper
-/// threads.  Planning is per piece, so a cone segment still maps to whole
-/// blocks; the compiles pool across pieces.  Only this path parallelises: it
-/// runs once per component behind the comb-pipeline single-flight, while the
-/// per-test chunk paths run on workers that are already busy.
-fn jit_pieces_in_parallel(
+/// Chunks every piece of one unified comb list and compiles the lot.
+/// Planning is per piece, so a cone segment still maps to whole blocks; the
+/// compiles pool across pieces.
+/// `helpers` asks for `compile_plans_parallel`, which only a caller holding a
+/// comb-pipeline claim may do; see it for why.
+fn jit_pieces(
     context: &mut Context,
     pieces: Vec<Vec<ProtoStatement>>,
     contains_compiled_block: bool,
+    helpers: bool,
 ) -> Vec<Vec<ProtoStatementBlock>> {
     if context.backends.is_empty() {
         return pieces
@@ -1017,7 +1024,11 @@ fn jit_pieces_in_parallel(
             use_4state: context.config.use_4state,
             contains_compiled_block,
         };
-        compile_plans_parallel(&mut context.backends, &ctx, plans)
+        if helpers {
+            compile_plans_parallel(&mut context.backends, &ctx, plans)
+        } else {
+            context.backends.compile_plans(&ctx, plans)
+        }
     };
     let mut outputs = outputs.into_iter();
     counts
@@ -1040,12 +1051,13 @@ fn jit_pieces_in_parallel(
 /// number of blocks.  Returns, per boundary-delimited piece, its `[lo, hi)`
 /// block range in the produced `ProtoStatements`.  `contains_compiled_block`
 /// as in `CompileCtx`: the unified comb embeds inst chunks and so disables
-/// load-cache CSE, an event list does not.
+/// load-cache CSE, an event list does not.  `helpers` as in `jit_pieces`.
 fn try_jit_with_boundaries(
     context: &mut Context,
     mut proto: Vec<ProtoStatement>,
     boundaries: &[usize],
     contains_compiled_block: bool,
+    helpers: bool,
 ) -> (
     ProtoStatements,
     Vec<(usize, usize, usize)>, // (piece_start_stmt, block_lo, block_hi)
@@ -1066,10 +1078,11 @@ fn try_jit_with_boundaries(
     }
     tails.reverse();
     let (starts, bodies): (Vec<usize>, Vec<Vec<ProtoStatement>>) = tails.into_iter().unzip();
-    for (start, piece_blocks) in starts.into_iter().zip(jit_pieces_in_parallel(
+    for (start, piece_blocks) in starts.into_iter().zip(jit_pieces(
         context,
         bodies,
         contains_compiled_block,
+        helpers,
     )) {
         let lo = blocks.len();
         blocks.extend(piece_blocks);
@@ -1492,6 +1505,7 @@ fn run_comb_pipeline(
     fusion_extra: Option<&[VarOffset]>,
     cone_inputs: Option<&cone_gate::ConeGateInputs>,
     module_name: StrId,
+    helpers: bool,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
     let mut stage = StageTimer::new(module_name);
     dump_stmt_order("conv", module_name, &unified);
@@ -1788,7 +1802,8 @@ fn run_comb_pipeline(
                 .collect();
             bounds.sort_unstable();
             bounds.dedup();
-            let (ps, pieces) = try_jit_with_boundaries(context, unified_sorted, &bounds, true);
+            let (ps, pieces) =
+                try_jit_with_boundaries(context, unified_sorted, &bounds, true, helpers);
             // Bring ranges into the FINAL storage space piecewise: a merged
             // span can straddle relayout units that land apart.
             let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
@@ -1920,7 +1935,7 @@ fn run_comb_pipeline(
             (ps, segs, groups)
         }
         None => {
-            let a = try_jit_no_cache(context, unified_sorted);
+            let a = try_jit_no_cache(context, unified_sorted, helpers);
             (a, Vec::new(), Vec::new())
         }
     };
@@ -5838,6 +5853,9 @@ impl Conv<&air::Module> for ProtoModule {
                         )
                     });
 
+                // Compute holds the claim its peers are blocked on, so their
+                // cores are free; Disabled blocks nobody.
+                let helpers = matches!(other, comb_pipeline_cache::Outcome::Compute(_));
                 let mut result = run_comb_pipeline(
                     context,
                     unified,
@@ -5847,6 +5865,7 @@ impl Conv<&air::Module> for ProtoModule {
                     aux_extra_offsets.as_deref(),
                     cone_inputs.as_ref(),
                     src.name,
+                    helpers,
                 )?;
                 result.unfuse_comb_bytes = unfuse_comb_bytes;
                 result.unfuse_comb_reloc = unfuse_comb_reloc;
