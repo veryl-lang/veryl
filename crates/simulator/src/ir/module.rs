@@ -1446,13 +1446,15 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
 /// the only way to find the expensive one was to timestamp the log from outside
 /// and match lines up by eye.
 struct StageTimer {
-    on: bool,
-    last: std::time::Instant,
+    last: Option<std::time::Instant>,
     scope: String,
 }
 
 /// Whether `VERYL_STAGE_TIME` asked for stage timings.  Read once: the sort
 /// consults it per call, and there are thousands of calls on a large design.
+///
+/// `Instant::now` panics on wasm, where the playground elaborates the same IR,
+/// so the clock must stay behind this gate.
 pub(crate) fn stage_time_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("VERYL_STAGE_TIME").is_ok())
@@ -1461,20 +1463,19 @@ pub(crate) fn stage_time_enabled() -> bool {
 impl StageTimer {
     fn new(scope: impl std::fmt::Display) -> Self {
         Self {
-            on: stage_time_enabled(),
-            last: std::time::Instant::now(),
+            last: stage_time_enabled().then(std::time::Instant::now),
             scope: scope.to_string(),
         }
     }
 
     fn mark(&mut self, stage: &str) {
-        if self.on {
+        if let Some(last) = &mut self.last {
             log::info!(
                 "stage_time ({}): {stage} {:.3}s",
                 self.scope,
-                self.last.elapsed().as_secs_f64()
+                last.elapsed().as_secs_f64()
             );
-            self.last = std::time::Instant::now();
+            *last = std::time::Instant::now();
         }
     }
 }

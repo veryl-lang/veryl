@@ -268,9 +268,9 @@ fn stable_topo_sort_impl(
     // WRITES per variable, so a design that splits finely can move the cost
     // from one to another without changing the statement count much.
     let time_stages = crate::ir::module::stage_time_enabled();
-    let mut t = std::time::Instant::now();
-    let mark = move |what: &str, t: &mut std::time::Instant| {
-        if time_stages {
+    let mut t = time_stages.then(std::time::Instant::now);
+    let mark = move |what: &str, t: &mut Option<std::time::Instant>| {
+        if let Some(t) = t {
             log::info!(
                 "stage_time (sort n={n}): {what} {:.3}s",
                 t.elapsed().as_secs_f64()
