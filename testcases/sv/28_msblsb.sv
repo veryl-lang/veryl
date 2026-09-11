@@ -37,4 +37,20 @@ module veryl_testcase_ModuleB;
     logic _y; always_comb _y = veryl_testcase_Package28C::C[($size(veryl_testcase_Package28C::C, 1) - 1)];
     logic _z; always_comb _z = veryl_testcase_Package28C::C[0][($size(veryl_testcase_Package28C::C, 2) - 1)];
 endmodule
+
+module veryl_testcase_ModuleC;
+    typedef struct packed {
+        logic [8-1:0] a;
+    } StructB;
+
+    StructB b [2];
+
+    always_comb begin
+        b[0].a = 0;
+        b[1].a = 0;
+    end
+
+    logic _x; always_comb _x = b[0].a[($size(b[0].a, 1) - 1)];
+    logic _y; always_comb _y = b[1].a[($size(b[0].a, 1) - 1) - 1];
+endmodule
 //# sourceMappingURL=../map/28_msblsb.sv.map
