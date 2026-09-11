@@ -226,10 +226,14 @@ fn extract_top_level_assign(
 }
 
 fn inject_into_ff_body(stmts: &mut Vec<Statement>, hoisted: Vec<Statement>) {
-    // If the first statement is an IfReset, prepend into its false_side
-    // (clock-only path) so the hoisted comb assignment runs only on the
-    // active clock edge, not during reset.
+    // The reset path reads what this writes too: a `for` range bound there is
+    // evaluated on the reset edge. Injecting inside the IfReset instead of
+    // ahead of it keeps that statement first for everything downstream.
     if let Some(Statement::IfReset(ifr)) = stmts.first_mut() {
+        let mut new_true = hoisted.clone();
+        new_true.append(&mut ifr.true_side);
+        ifr.true_side = new_true;
+
         let mut new_false = hoisted;
         new_false.append(&mut ifr.false_side);
         ifr.false_side = new_false;

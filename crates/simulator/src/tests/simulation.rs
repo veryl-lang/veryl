@@ -11284,6 +11284,64 @@ fn ff_comb_let_basic() {
     }
 }
 
+#[test]
+fn a_hoisted_comb_let_read_in_a_reset_for_bound_keeps_its_value() {
+    // A sole reader in one always_ff makes `w` a comb-to-FF hoist candidate,
+    // and its read is a `for` bound on the reset path: a hoist that lands only
+    // on the clock-only path leaves the reset loop with a stale bound.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        n  : input  logic<3>,
+        q  : output logic<8>,
+        r  : output logic<8>,
+    ) {
+        let w  : u32        = n as u32;
+        var arr: logic<8> [8];
+
+        always_ff {
+            if_reset {
+                for i in 0..8 {
+                    arr[i] = 0;
+                }
+                for j in 0..w {
+                    arr[j] = 8'hff;
+                }
+            } else {
+                arr[0] = arr[0] + 1;
+            }
+        }
+        assign q = arr[0];
+        assign r = arr[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.set("n", Value::new(2, 3, false));
+        sim.step_reset(&clk, &rst);
+
+        // w = 2: arr[0] and arr[1] are filled, arr[2] is not.
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0xff, 8, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("r").unwrap(),
+            Value::new(0, 8, false),
+            "config={config:?}"
+        );
+    }
+}
+
 /// Read-only cache with tag/index address decomposition (an I-cache).
 /// Tests that fill_count-driven o_mem_addr propagates through comb to update
 /// i_mem_rdata each fill cycle, so data[0] != data[1].
@@ -24809,6 +24867,67 @@ fn a_register_read_only_as_a_write_index_keeps_its_pre_edge_value() {
             "JIT={} 4st={}",
             config.use_jit,
             config.use_4state,
+        );
+    }
+}
+
+#[test]
+fn a_register_read_only_as_a_for_range_bound_keeps_its_pre_edge_value() {
+    // Until the bound was gathered, `n` looked unread and lost its register,
+    // so the loop ran against the post-edge count.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        sum: output logic<8>,
+    ) {
+        var n: logic<3>;
+        always_ff {
+            if_reset {
+                n = 2;
+            } else {
+                n = n + 1;
+            }
+        }
+        always_ff {
+            if_reset {
+                sum = 0;
+            } else {
+                var acc: logic<8>;
+                acc = 0;
+                for i in 0..n {
+                    acc = acc + i;
+                }
+                sum = acc;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+
+        // Pre-edge n = 2: the loop sums 0 + 1.
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(1, 8, false),
+            "config={config:?}"
+        );
+
+        // Pre-edge n = 3: 0 + 1 + 2.
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(3, 8, false),
+            "config={config:?}"
         );
     }
 }
