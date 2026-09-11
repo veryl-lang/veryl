@@ -2862,8 +2862,11 @@ pub fn eval_factor_symbol(
 ) -> IrResult<ir::Factor> {
     match &symbol.found.kind {
         SymbolKind::Parameter(x) if !x.is_proto => {
-            // Parameter should be found through context.find_path from the defined namespace
-            if let Some(namespace) = context.current_namespace()
+            // Parameter should be found through context.find_path from the
+            // defined namespace. Not while sizing a declared width, where a
+            // component instantiating itself would name its own scope.
+            if !context.sizing_component_width()
+                && let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
                 context.insert_error(AnalyzerError::referring_before_definition(
@@ -2880,7 +2883,6 @@ pub fn eval_factor_symbol(
                 &VarPath::new(symbol.found.token.text),
             ) {
                 let mut comptime = comptime.clone();
-
                 // A value whose representation is narrower than its type
                 // reaches the back end as a store the variable's width does
                 // not match.
@@ -3696,7 +3698,9 @@ fn size_in_component_scope(
 ) -> IrResult<ir::Type> {
     let mut external = Context::default();
     external.inherit(context);
+    external.enter_component_sizing();
     let ret = external.block(|c| r#type.to_ir_type(c, TypePosition::Variable));
+    external.leave_component_sizing();
     context.inherit(&mut external);
     ret
 }
@@ -3755,16 +3759,12 @@ pub fn get_overridden_params(
                 continue;
             };
 
-            let target_type = if let Some(x) = target.kind.get_type() {
-                let x = size_in_component_scope(context, x);
-                if let Ok(x) = x {
-                    Some(x)
-                } else {
-                    continue;
-                }
-            } else {
-                None
-            };
+            // A type that will not size is no reason to drop the binding; a
+            // parameter declaring no type takes this same route.
+            let target_type = target
+                .kind
+                .get_type()
+                .and_then(|x| size_in_component_scope(context, x).ok());
 
             let mut expr = if let Some(x) = &param.inst_parameter_item_opt {
                 eval_expr(context, target_type.clone(), &x.expression, false)?

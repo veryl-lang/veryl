@@ -122,6 +122,8 @@ pub struct Context {
     pub namespaces: Vec<Namespace>,
     pub in_generic: bool,
     pub allow_component_as_factor: bool,
+    /// Depth of `size_in_component_scope`.
+    component_sizing: usize,
     pub in_test_module: bool,
     pub in_dependency: bool,
     pub in_global_func: Option<Token>,
@@ -285,6 +287,7 @@ impl Context {
         self.disalbe_const_opt = tgt.disalbe_const_opt;
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
+        self.component_sizing = tgt.component_sizing;
         self.config = tgt.config.clone();
         self.profiler = tgt.profiler.clone();
         self.project_name = tgt.project_name.clone();
@@ -959,6 +962,20 @@ impl Context {
 
     pub fn pop_namespace(&mut self) {
         self.namespaces.pop();
+    }
+
+    pub fn enter_component_sizing(&mut self) {
+        self.component_sizing += 1;
+    }
+
+    pub fn leave_component_sizing(&mut self) {
+        self.component_sizing -= 1;
+    }
+
+    /// Whether the component's own variables are out of reach on purpose, so
+    /// that resolving through the symbol route says nothing about order.
+    pub fn sizing_component_width(&self) -> bool {
+        self.component_sizing > 0
     }
 
     pub fn current_namespace(&self) -> Option<Namespace> {

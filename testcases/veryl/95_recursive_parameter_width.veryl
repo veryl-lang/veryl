@@ -1,0 +1,24 @@
+module Module95 #(
+    param STAGE: u32          = 2    ,
+    param WIDTH: u32          = 2    ,
+    param FORKS: logic<STAGE> = 2'b01,
+    param MASK : logic<WIDTH> = 2'b10,
+) (
+    o_fork: output logic,
+) {
+    assign o_fork = FORKS[0] & MASK[0];
+
+    // A component instantiating itself names its own scope, so a parameter a
+    // declared width names must not read as a use before its declaration.
+    // STAGE, which sizes FORKS, is bound here; WIDTH, which sizes the equally
+    // bound MASK, is not.
+    if STAGE >= 2 :deeper {
+        inst u: Module95 #(
+            STAGE: STAGE - 1,
+            FORKS: 1'b1     ,
+            MASK : 2'b01    ,
+        ) (
+            o_fork: _,
+        );
+    }
+}
