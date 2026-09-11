@@ -4,7 +4,7 @@ use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{
-    BitRange, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
+    BitRange, ReadOffsets, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
 };
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
@@ -285,21 +285,32 @@ fn stable_topo_sort_impl(
     let mut stmt_reads: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
     let mut writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
     {
+        // A runtime-indexed write is reported as its first and last element
+        // only; the elements between them have to be materialized here or
+        // their readers bind to no writer at all. See `ReadOffsets`.
+        let read_offsets = ReadOffsets::collect(&statements);
         let mut ins = vec![];
         let mut bit_outs = vec![];
+        let mut interior = vec![];
         for (i, s) in statements.iter().enumerate() {
             ins.clear();
             let mut outs = vec![];
             s.gather_variable_offsets(&mut ins, &mut outs);
-            stmt_outputs.push(outs);
             let mut reads = vec![];
             s.gather_reads_with_ranges(&mut reads);
             stmt_reads.push(reads);
             bit_outs.clear();
             gather_bit_aware_outputs(s, &mut bit_outs);
+            interior.clear();
+            read_offsets.interior_writes(s, &mut interior);
+            // An interior element carries no bit range of its own: the write
+            // covers the whole element.
+            outs.extend_from_slice(&interior);
+            bit_outs.extend(interior.iter().map(|off| (*off, None)));
             for &(off, br) in &bit_outs {
                 writer_ranges.entry(off).or_default().push((i, br));
             }
+            stmt_outputs.push(outs);
         }
     }
 

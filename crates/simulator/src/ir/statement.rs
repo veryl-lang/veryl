@@ -1780,6 +1780,53 @@ impl ProtoStatement {
         }
     }
 
+    /// The element spans this statement writes through a runtime index, as
+    /// `(base, stride, num_elements)`.
+    ///
+    /// `gather_variable_offsets` reports such a write as its FIRST and LAST
+    /// element only, to keep `analyze_dependency` off an O(N²) expansion. The
+    /// elements between them are written just as surely, so an ordering pass
+    /// that binds readers to writers by exact offset needs the span as well:
+    /// without it a read of a middle element sees no writer and is free to
+    /// run before the loop that fills it.
+    pub fn gather_dynamic_write_spans(&self, out: &mut Vec<(VarOffset, isize, usize)>) {
+        match self {
+            ProtoStatement::AssignDynamic(x) if x.dst_num_elements > 2 => {
+                out.push((x.dst_base, x.dst_stride, x.dst_num_elements));
+            }
+            ProtoStatement::AssignDynamic(_)
+            | ProtoStatement::Assign(_)
+            | ProtoStatement::SystemFunctionCall(_)
+            | ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::Break => {}
+            ProtoStatement::If(x) => {
+                for s in x.true_side.iter().chain(&x.false_side) {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::Case(x) => {
+                for s in x.arms.iter().flat_map(|a| &a.body).chain(&x.default) {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::For(x) => {
+                for s in &x.body {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::CompiledBlock(x) => {
+                for s in x.original_stmts.iter() {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+        }
+    }
+
     /// Same as `gather_variable_offsets` but fully expands dynamic reads
     /// and writes to every element offset. Used by dead-store elimination
     /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it

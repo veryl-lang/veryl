@@ -2010,6 +2010,10 @@ pub(crate) fn analyze_dependency(
             // boundaries, so the dependency survives as an edge between
             // distinct atoms.
             let atoms = self_referenced_bit_atoms(table);
+            // A runtime-indexed write names its first and last element only,
+            // so nothing here would order a reader of a MIDDLE element after
+            // the loop that fills it. See `ReadOffsets`.
+            let read_offsets = ReadOffsets::collect(table.values());
 
             let mut dag = Dag::<Node, ()>::new();
             let mut dag_nodes: HashMap<Node, _> = HashMap::default();
@@ -2030,6 +2034,8 @@ pub(crate) fn analyze_dependency(
                 let mut inputs = vec![];
                 let mut outputs = vec![];
                 x.gather_variable_offsets(&mut inputs, &mut outputs);
+                let interior_from = outputs.len();
+                read_offsets.interior_writes(x, &mut outputs);
                 let stmt_node = Node::Statement(*id);
                 let stmt = dag.add_node(stmt_node);
                 dag_nodes.insert(stmt_node, stmt);
@@ -2044,6 +2050,9 @@ pub(crate) fn analyze_dependency(
                 if split_here {
                     x.gather_reads_with_ranges(&mut bit_reads);
                     gather_bit_aware_outputs(x, &mut bit_writes);
+                    // An interior element is written whole; `gather_bit_aware_outputs`
+                    // keeps the base+last encoding and would leave it out.
+                    bit_writes.extend(outputs[interior_from..].iter().map(|off| (*off, None)));
                 }
 
                 edges.clear();
@@ -3823,6 +3832,79 @@ pub(crate) fn ranges_overlap(a: BitRange, b: BitRange) -> bool {
     }
 }
 
+/// The offsets some statement in a scope reads, indexed for span lookup.
+///
+/// A runtime-indexed write reports only its FIRST and LAST element
+/// (`gather_variable_offsets`), so an ordering pass that binds readers to
+/// writers by exact offset never binds a reader of a middle element. That
+/// reader is then free to run BEFORE the loop that fills it, which reads as
+/// "the array kept only its endpoints".
+///
+/// Materializing every element would be the O(N²) expansion the base+last
+/// encoding exists to avoid, so only offsets something actually READS are
+/// materialized: a memory written by a loop and read by another runtime
+/// index costs nothing here.
+pub(crate) struct ReadOffsets {
+    comb: Vec<isize>,
+    ff: Vec<isize>,
+}
+
+impl ReadOffsets {
+    pub(crate) fn collect<'a>(statements: impl IntoIterator<Item = &'a ProtoStatement>) -> Self {
+        let mut comb = Vec::new();
+        let mut ff = Vec::new();
+        let mut ins = Vec::new();
+        let mut outs = Vec::new();
+        let mut reads = Vec::new();
+        for s in statements {
+            ins.clear();
+            outs.clear();
+            s.gather_variable_offsets(&mut ins, &mut outs);
+            reads.clear();
+            s.gather_reads_with_ranges(&mut reads);
+            for off in ins.iter().copied().chain(reads.iter().map(|(o, _)| *o)) {
+                if off.is_ff() { &mut ff } else { &mut comb }.push(off.raw());
+            }
+        }
+        for v in [&mut comb, &mut ff] {
+            v.sort_unstable();
+            v.dedup();
+        }
+        Self { comb, ff }
+    }
+
+    /// Every interior element `stmt` writes through a runtime index that
+    /// something reads. Appends; the caller clears.
+    pub(crate) fn interior_writes(&self, stmt: &ProtoStatement, out: &mut Vec<VarOffset>) {
+        let mut spans = Vec::new();
+        stmt.gather_dynamic_write_spans(&mut spans);
+        for (base, stride, num) in spans {
+            self.interior_of(base, stride, num, out);
+        }
+    }
+
+    /// The elements of `(base, stride, num)` BETWEEN its endpoints that
+    /// something reads. The endpoints themselves are already reported by
+    /// `gather_variable_offsets`.
+    fn interior_of(&self, base: VarOffset, stride: isize, num: usize, out: &mut Vec<VarOffset>) {
+        if num <= 2 || stride == 0 {
+            return;
+        }
+        let sorted = if base.is_ff() { &self.ff } else { &self.comb };
+        let last = base.raw() + stride * (num as isize - 1);
+        let (lo, hi) = (base.raw().min(last), base.raw().max(last));
+        let from = sorted.partition_point(|o| *o < lo);
+        for &o in sorted[from..].iter().take_while(|o| **o <= hi) {
+            // Strided, so an offset inside the range is not necessarily an
+            // element of it.
+            if o == base.raw() || o == last || (o - base.raw()) % stride != 0 {
+                continue;
+            }
+            out.push(VarOffset::new(base.is_ff(), o));
+        }
+    }
+}
+
 /// Collect (offset, bit_range) outputs for bit-aware SCC analysis.
 /// Only captures writes that are precisely bit-ranged (via Assign.select);
 /// everything else falls back to full-width (None).
@@ -5060,6 +5142,11 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     let mut var_last_use: HashMap<VarOffset, usize> = HashMap::default();
     let mut levels: Vec<usize> = Vec::with_capacity(sorted.len());
 
+    // The sort this pass reorders binds a runtime-indexed write to readers of
+    // its interior elements; leveling has to see the same writes or it hoists
+    // those readers straight back above the write. See `ReadOffsets`.
+    let read_offsets = ReadOffsets::collect(&sorted);
+
     for stmt in &sorted {
         let mut inputs = vec![];
         let mut outputs = vec![];
@@ -5079,6 +5166,7 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
                 stmt.gather_variable_offsets(&mut inputs, &mut outputs);
             }
         }
+        read_offsets.interior_writes(stmt, &mut outputs);
 
         let raw_level = inputs
             .iter()

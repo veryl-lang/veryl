@@ -28825,3 +28825,96 @@ fn display_string_argument_renders_text() {
         assert_eq!(output, "[inline][here][world][A]");
     }
 }
+
+#[test]
+fn a_runtime_indexed_write_reports_the_read_elements_between_its_endpoints() {
+    use crate::ir::module::ReadOffsets;
+    use crate::ir::{
+        ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
+        ProtoStatement, VarOffset,
+    };
+
+    // `gather_variable_offsets` reports a runtime-indexed write as its FIRST
+    // and LAST element only, so that a big array does not cost the dependency
+    // analysis an O(N²) expansion. The elements between them are written just
+    // as surely: an ordering pass that binds readers to writers by exact
+    // offset must still see them, or a reader of a middle element is free to
+    // run BEFORE the loop that fills it and the array keeps only its
+    // endpoints.
+    //
+    // The end-to-end shape needs the
+    // per-element copies a DE-ALIASED input port emits, which this harness
+    // cannot build (cross-test DUT reuse needs two test tops running in one
+    // process). This pins the mechanism instead, and it is the mechanism the
+    // three call sites share.
+    let value = |v: u64| ProtoExpression::Value {
+        value: Value::new(v, 8, false),
+        width: 8,
+        expr_context: ExpressionContext {
+            width: 8,
+            signed: false,
+        },
+    };
+    let scalar_read = |off: isize| ProtoExpression::Variable {
+        var_offset: VarOffset::Comb(off),
+        select: None,
+        dynamic_select: None,
+        width: 8,
+        var_full_width: 8,
+        expr_context: ExpressionContext {
+            width: 8,
+            signed: false,
+        },
+    };
+    let reader = |src: isize, dst: isize| {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: 8,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: scalar_read(src),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: Default::default(),
+        })
+    };
+    // `a[k] = v` over 24 elements of 4 bytes each, based at 100.
+    let writer = ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+        dst_base: VarOffset::Comb(100),
+        dst_stride: 4,
+        dst_num_elements: 24,
+        dst_index_expr: value(0),
+        dst_width: 8,
+        select: None,
+        dynamic_select: None,
+        rhs_select: None,
+        expr: value(7),
+        dst_ff_current_base_offset: 0,
+        comb_direct: false,
+    });
+
+    // Readers of element 0 (the base), element 5, element 23 (the last) and
+    // of an offset that is INSIDE the span but not on its stride.
+    let stmts = vec![
+        writer,
+        reader(100, 900),
+        reader(120, 904),
+        reader(122, 908),
+        reader(192, 912),
+    ];
+    let reads = ReadOffsets::collect(&stmts);
+    let mut interior = vec![];
+    reads.interior_writes(&stmts[0], &mut interior);
+
+    // Element 5 only: the endpoints are already reported by
+    // `gather_variable_offsets`, 122 is not an element, and nothing reads the
+    // other twenty.
+    assert_eq!(interior, vec![VarOffset::Comb(120)]);
+
+    // And the base+last encoding it complements is unchanged.
+    let mut ins = vec![];
+    let mut outs = vec![];
+    stmts[0].gather_variable_offsets(&mut ins, &mut outs);
+    assert_eq!(outs, vec![VarOffset::Comb(100), VarOffset::Comb(192)]);
+}
