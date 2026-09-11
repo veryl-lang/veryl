@@ -29203,3 +29203,68 @@ fn nested_self_call_is_composition_not_recursion() {
         assert_eq!(sim.get("o_sib").unwrap(), Value::new(0xe5, 8, false));
     }
 }
+
+#[test]
+fn const_from_a_function_call_with_an_unpacked_array_argument() {
+    // The argument binding in `FunctionCall::eval_value` evaluated each actual
+    // to ONE value, and an unpacked array has none: `get_value(&[])` wants an
+    // index per dimension, so the `?` bailed and the whole const came out
+    // `unresolved_expression`. The simulator's own inliner already copied such
+    // an argument element by element; the analyzer's const evaluation did not.
+    //
+    // The actual arrives in two shapes depending on the context -- a variable
+    // reference and an already-folded `NumericArray` -- and only fixing both
+    // resolves every call site.
+    let code = r#"
+    package Pkg {
+        const N    : u32     = 3;
+        const SIZES: u32 [N] = '{10, 1, 2};
+
+        function max_of (
+            v: input u32 [N],
+        ) -> u32 {
+            var m: u32;
+            m = 0;
+            for i in 0..N {
+                if v[i] >: m {
+                    m = v[i];
+                }
+            }
+            return m;
+        }
+        const MAX: u32 = max_of(SIZES);
+
+        // The scalar control: this always resolved, so a failure here would
+        // mean something other than the array argument broke.
+        function plus_one (
+            v: input u32,
+        ) -> u32 {
+            return v + 1;
+        }
+        const ONE_MORE: u32 = plus_one(9);
+    }
+    module Top (
+        i_clk : input  clock,
+        o_max : output logic<32>,
+        o_ctrl: output logic<32>,
+        o_elem: output logic<32>,
+    ) {
+        assign o_max  = Pkg::MAX;
+        assign o_ctrl = Pkg::ONE_MORE;
+        // Reading an element of the same const directly: the control that
+        // says the const itself was never the problem.
+        assign o_elem = Pkg::SIZES[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_max").unwrap(), Value::new(10, 32, false));
+        assert_eq!(sim.get("o_ctrl").unwrap(), Value::new(10, 32, false));
+        assert_eq!(sim.get("o_elem").unwrap(), Value::new(10, 32, false));
+    }
+}
