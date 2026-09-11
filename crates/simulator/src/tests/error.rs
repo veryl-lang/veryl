@@ -370,3 +370,63 @@ fn dynamic_index_leaving_a_sub_array() {
         );
     }
 }
+
+/// A port connection whose unpacked dimensions disagree with the port's is
+/// illegal SystemVerilog (IEEE 1800-2023 7.6) and the analyzer reports it at
+/// Warning severity, so `build` and `test` still reach the simulator. The two
+/// directions fail differently, so they are checked apart: one is caught by
+/// the assertion, the other only by the value it never computes.
+#[track_caller]
+fn port_dimension_mismatch(child_port: &str, child_drive: &str, parent_var: &str) {
+    let code = format!(
+        r#"
+    package pk {{
+        enum e3_t: logic<3> {{
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }}
+    }}
+    module Child (
+        o: output {child_port},
+    ) {{
+        always_comb {{
+            {child_drive}
+        }}
+    }}
+    module Top (
+        y: output logic<3>,
+    ) {{
+        var r: {parent_var};
+        inst u: Child (
+            o: r,
+        );
+        assign y = r[0];
+    }}
+    "#
+    );
+
+    let result = analyze_top_allowing_mismatch_assignment(&code, &Config::default(), "Top");
+    assert!(
+        matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
+        "{child_port} <- {parent_var}"
+    );
+}
+
+#[test]
+fn parent_array_longer_than_the_port_it_is_wired_to() {
+    // Used to index off the end of the child's elements and abort.
+    port_dimension_mismatch("pk::e3_t<4>", "o = 12'b011_100_100_011;", "pk::e3_t [4]");
+}
+
+#[test]
+fn parent_array_shorter_than_the_port_it_is_wired_to() {
+    // Used to wire the leading elements and drop the rest in silence.
+    // The elements are driven one by one: a whole-array assignment is
+    // declined earlier, which would make this test pass without the fix.
+    port_dimension_mismatch(
+        "pk::e3_t [4]",
+        "o[0] = pk::e3_t::HIGH; o[1] = pk::e3_t::LOW; \
+         o[2] = pk::e3_t::HIGH; o[3] = pk::e3_t::LOW;",
+        "pk::e3_t [2]",
+    );
+}

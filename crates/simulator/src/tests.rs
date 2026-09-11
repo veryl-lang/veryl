@@ -19,9 +19,18 @@ fn analyze(code: &str, config: &Config) -> Ir {
     analyze_top(code, config, "Top").unwrap()
 }
 
+/// The analyzer diagnostic a test deliberately provokes. Anything else it
+/// reports fails the test, so a design cannot be waved through by accident.
+#[derive(Clone, Copy, PartialEq)]
+enum Allowed {
+    Nothing,
+    CombLoop,
+    MismatchAssignment,
+}
+
 #[track_caller]
 fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, false)
+    analyze_top_inner(code, config, top, Allowed::Nothing)
 }
 
 /// The analyzer IR itself, for the tests that build more than one top out of
@@ -56,7 +65,18 @@ fn analyze_top_allowing_comb_loop(
     config: &Config,
     top: &str,
 ) -> Result<Ir, SimulatorError> {
-    analyze_top_inner(code, config, top, true)
+    analyze_top_inner(code, config, top, Allowed::CombLoop)
+}
+
+/// For the tests targeting a port connection the analyzer already reports, at
+/// Warning severity, so `build` and `test` still reach the simulator with it.
+#[track_caller]
+fn analyze_top_allowing_mismatch_assignment(
+    code: &str,
+    config: &Config,
+    top: &str,
+) -> Result<Ir, SimulatorError> {
+    analyze_top_inner(code, config, top, Allowed::MismatchAssignment)
 }
 
 #[track_caller]
@@ -64,7 +84,7 @@ fn analyze_top_inner(
     code: &str,
     config: &Config,
     top: &str,
-    allow_comb_loop: bool,
+    allow: Allowed,
 ) -> Result<Ir, SimulatorError> {
     symbol_table::clear();
 
@@ -88,7 +108,13 @@ fn analyze_top_inner(
                 x,
                 AnalyzerError::InvalidLogicalOperand { .. }
                     | AnalyzerError::UnsignedArithShift { .. }
-            ) && !(allow_comb_loop && matches!(x, AnalyzerError::CombinationalLoop { .. }))
+            ) && !match allow {
+                Allowed::Nothing => false,
+                Allowed::CombLoop => matches!(x, AnalyzerError::CombinationalLoop { .. }),
+                Allowed::MismatchAssignment => {
+                    matches!(x, AnalyzerError::MismatchAssignment { .. })
+                }
+            }
         })
         .collect();
     assert!(errors.is_empty());
