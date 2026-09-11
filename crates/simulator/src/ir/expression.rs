@@ -2502,8 +2502,38 @@ impl Conv<&air::Expression> for ProtoExpression {
                         ctx.signed = signed;
                         Ok(inner)
                     }
+                    // `$bits`/`$size`/`$clog2`/`$onehot` are elaboration-time
+                    // values. The analyzer folds one that sits in a `const`
+                    // initialiser, because it evaluates the whole RHS -- but
+                    // one in an ordinary expression, or in a function body
+                    // where the argument only becomes constant at the call
+                    // site, arrives here as a call, on a line `veryl check`,
+                    // `veryl build` and Verilator all accept. Evaluate it,
+                    // and report an unsupported description rather than
+                    // panicking when it will not evaluate.
                     _ => {
-                        unreachable!("system function calls are resolved by the analyzer")
+                        let scope = context.scope();
+                        let value = call.eval_value(&mut scope.analyzer_context);
+                        let Some(value) = value else {
+                            return Err(SimulatorError::unsupported_description(
+                                &call.comptime.token,
+                            ));
+                        };
+                        // Sized by the VALUE, not by `comptime`: these calls
+                        // are built on an unknown comptime (`is_const` is all
+                        // it carries), so its type has no width and its
+                        // context has width zero. A literal's own width is
+                        // what the surrounding context then extends.
+                        let width = value.width();
+                        let expr_context = ExpressionContext {
+                            width,
+                            signed: false,
+                        };
+                        Ok(ProtoExpression::Value {
+                            value,
+                            width,
+                            expr_context,
+                        })
                     }
                 },
                 air::Factor::Anonymous(comptime) | air::Factor::Unknown(comptime) => {

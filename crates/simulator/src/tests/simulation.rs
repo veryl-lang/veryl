@@ -28297,3 +28297,56 @@ fn interface_array_element_struct_field_keeps_the_instance_array() {
         assert_eq!(sim.get("o_whole1").unwrap(), Value::new(0x1a5, 9, false));
     }
 }
+
+#[test]
+fn an_elaboration_time_system_function_in_a_runtime_expression_is_a_value() {
+    // `$clog2`/`$bits`/`$onehot` in an ordinary expression -- not a `const`
+    // initialiser, which is where the analyzer already folds them -- used to
+    // PANIC the simulator at elaboration (`unreachable!("system function
+    // calls are resolved by the analyzer")`), on lines `veryl check`,
+    // `veryl build` and the reference simulators all accept, of the shape
+    // `assign addr = haddr_i >> $clog2(AHB_DATA_WIDTH / 8);`
+    //
+    // The function arm matters on its own: there the argument is constant
+    // only at the CALL site, so no analyzer-side fold could reach it.
+    let code = r#"
+    package pk {
+        struct st {
+            a: logic<12>,
+            b: logic<4> ,
+        }
+    }
+    module Top #(
+        param DW: u32 = 64,
+    ) (
+        a : input  logic<32>,
+        y0: output logic<32>,
+        y1: output logic<32>,
+        y2: output logic   ,
+        y3: output logic<32>,
+        y4: output logic<32>,
+    ) {
+        function sh (n: input u32, v: input logic<32>) -> logic<32> {
+            return v >> $clog2(n);
+        }
+        assign y0 = a >> $clog2(DW / 8);
+        assign y1 = a + $bits(pk::st);
+        assign y2 = $onehot(4'b0100);
+        assign y3 = sh(DW / 8, a);
+        assign y4 = a >> $clog2($bits(pk::st));
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x1238, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("y0").unwrap(), Value::new(0x247, 32, false));
+        assert_eq!(sim.get("y1").unwrap(), Value::new(0x1248, 32, false));
+        assert_eq!(sim.get("y2").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("y3").unwrap(), Value::new(0x247, 32, false));
+        assert_eq!(sim.get("y4").unwrap(), Value::new(0x123, 32, false));
+    }
+}
