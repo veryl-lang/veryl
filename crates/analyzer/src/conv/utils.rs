@@ -786,10 +786,8 @@ pub fn eval_array_range_assign(
     let Some((_, mut comptime)) = context.find_path(&lhs.0) else {
         return Ok(None);
     };
-    if let Some(part_select) = &comptime.part_select {
-        comptime.r#type = part_select.base.clone();
-    }
-    let (array_select, _) = select.split(comptime.r#type.array.dims());
+    let array_dims = comptime.rebase_part_select();
+    let (array_select, _) = select.split(array_dims);
     if !array_select.is_range() {
         return Ok(None);
     }
@@ -2451,11 +2449,9 @@ fn eval_factor_path_inner(
     };
 
     if let Some((var_id, mut comptime)) = found {
-        if let Some(part_select) = &comptime.part_select {
-            comptime.r#type = part_select.base.clone();
-        }
+        let array_dims = comptime.rebase_part_select();
 
-        let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+        let (array_select, width_select) = select.split(array_dims);
 
         // Array select type check
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);

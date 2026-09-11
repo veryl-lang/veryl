@@ -54,9 +54,7 @@ impl VarPathSelect {
         check_initial_assign(context, &path, &token);
 
         if let Some((id, mut comptime)) = context.find_path(&path) {
-            if let Some(part_select) = &comptime.part_select {
-                comptime.r#type = part_select.base.clone();
-            }
+            let array_dims = comptime.rebase_part_select();
 
             // A write index/select from another domain is the same mux CDC
             // as the data-dependent read (Factor::Variable::gather_context);
@@ -72,7 +70,7 @@ impl VarPathSelect {
                 }
             }
 
-            let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+            let (array_select, width_select) = select.split(array_dims);
             // Validate LHS array selects: a wrong-order/out-of-range slice
             // can't lower to valid SV, and an out-of-range index wraps modulo
             // the shape in VarIndex::from_index, emitting out-of-bounds SV and
@@ -160,11 +158,9 @@ impl VarPathSelect {
                 .into_iter()
                 .collect();
         };
-        if let Some(part_select) = &base_comptime.part_select {
-            base_comptime.r#type = part_select.base.clone();
-        }
+        let array_dims = base_comptime.rebase_part_select();
 
-        let (array_select, _) = select.clone().split(base_comptime.r#type.array.dims());
+        let (array_select, _) = select.clone().split(array_dims);
         if !array_select.is_range() {
             return self
                 .to_assign_destination(context, ignore_error)
@@ -295,10 +291,8 @@ impl VarPathSelect {
         let Some((_, mut comptime)) = context.find_path(&path) else {
             return false;
         };
-        if let Some(part_select) = &comptime.part_select {
-            comptime.r#type = part_select.base.clone();
-        }
-        select.split(comptime.r#type.array.dims()).0.is_range()
+        let array_dims = comptime.rebase_part_select();
+        select.split(array_dims).0.is_range()
     }
 
     pub fn to_expression(self, context: &mut Context) -> Option<Expression> {
@@ -309,10 +303,8 @@ impl VarPathSelect {
             // part_select offset; rebase the type and remap the member-relative select
             // into base coords (like eval_factor_path_inner), else the read hits the
             // base's low bits, not the member.
-            if let Some(part_select) = &comptime.part_select {
-                comptime.r#type = part_select.base.clone();
-            }
-            let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+            let array_dims = comptime.rebase_part_select();
+            let (array_select, width_select) = select.split(array_dims);
             let width_select = if let Some(part_select) = &comptime.part_select {
                 part_select.to_base_select(context, &width_select)?
             } else {

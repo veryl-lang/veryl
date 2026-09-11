@@ -28231,3 +28231,69 @@ fn two_always_ff_blocks_on_one_word_keep_nba_semantics() {
         );
     }
 }
+
+#[test]
+fn interface_array_element_struct_field_keeps_the_instance_array() {
+    // Importing an interface instance array prepends the instance's array
+    // dimensions to each member's type, but not to `part_select.base` -- the
+    // whole-variable type a struct member carries, and the one the select
+    // split reads its array dimensions from. So `arr[k].member.field` put the
+    // `[k]` in the WIDTH select: `veryl check` bounds-checked it against the
+    // FIELD's width (`invalid_select`, "[1] > 1" for a 1-bit field), the
+    // simulator refused to read it (`unsupported_description`), and where it
+    // did run it touched the field's lowest sub-element instead of element k.
+    let code = r#"
+    package Pkg {
+        struct req_t {
+            rw  : logic,
+            addr: logic<8>,
+        }
+    }
+    interface BusIf {
+        var req_valid: logic;
+        var req_data : Pkg::req_t;
+    }
+    module Top (
+        i_clk   : input  clock,
+        o_rw0   : output logic,
+        o_rw1   : output logic,
+        o_addr0 : output logic<8>,
+        o_addr1 : output logic<8>,
+        o_whole1: output logic<9>,
+    ) {
+        inst arr: BusIf [2];
+
+        assign arr[0].req_valid     = 1'b0;
+        assign arr[1].req_valid     = 1'b0;
+        // Per-field writes through the array index: the shape that broke.
+        assign arr[0].req_data.rw   = 1'b0;
+        assign arr[1].req_data.rw   = 1'b1;
+        assign arr[0].req_data.addr = 8'h5a;
+        assign arr[1].req_data.addr = 8'ha5;
+
+        assign o_rw0    = arr[0].req_data.rw;
+        assign o_rw1    = arr[1].req_data.rw;
+        assign o_addr0  = arr[0].req_data.addr;
+        assign o_addr1  = arr[1].req_data.addr;
+        // The whole-struct read is the control: it worked throughout, and it
+        // is what the ports used as the workaround.
+        assign o_whole1 = arr[1].req_data as 9;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // The two elements must stay distinct, and a 1-bit field must accept
+        // index 1 exactly as an 8-bit one does.
+        assert_eq!(sim.get("o_rw0").unwrap(), Value::new(0, 1, false));
+        assert_eq!(sim.get("o_rw1").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_addr0").unwrap(), Value::new(0x5a, 8, false));
+        assert_eq!(sim.get("o_addr1").unwrap(), Value::new(0xa5, 8, false));
+        // `rw` is the first-declared member, so it takes the HIGH bit.
+        assert_eq!(sim.get("o_whole1").unwrap(), Value::new(0x1a5, 9, false));
+    }
+}

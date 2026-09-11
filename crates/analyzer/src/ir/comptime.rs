@@ -317,6 +317,27 @@ pub struct Comptime {
 }
 
 impl Comptime {
+    /// Rebase a struct/union member onto the whole variable's type, and report
+    /// the array dimensions a select has to be split on.
+    ///
+    /// `part_select.base` is the type as DECLARED, so it misses an array the
+    /// member picked up afterwards: importing an interface instance array
+    /// prepends the instance's dimensions to each member's own type, not to
+    /// the base it was declared with. Taking the larger of the two keeps both
+    /// -- an array of structs (`s[2].f`, on the base) and a member of an
+    /// interface array (`arr[2].s.f`, on the member).
+    pub fn rebase_part_select(&mut self) -> usize {
+        if let Some(part_select) = &self.part_select {
+            let own = self.r#type.array.clone();
+            let mut base = part_select.base.clone();
+            if own.dims() > base.array.dims() {
+                base.array = own;
+            }
+            self.r#type = base;
+        }
+        self.r#type.array.dims()
+    }
+
     pub fn create_unknown(token: TokenRange) -> Self {
         Self {
             value: ValueVariant::Unknown,
