@@ -18,6 +18,7 @@ use crate::ir::write_log::{
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
 use crate::simulator_error::SimulatorError;
+use num_bigint::BigUint;
 use std::sync::Arc;
 use veryl_analyzer::conv::utils::eval_array_literal;
 use veryl_analyzer::ir as air;
@@ -4983,10 +4984,15 @@ pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
 }
 
 /// `sink` returns false to stop early.  A token carrying a character outside
-/// `[0-9a-fA-F_]`, or a value past 64 bits, is dropped.
+/// `[0-9a-fA-F_]` is dropped, and so is one whose value does not fit the
+/// accumulator: 64 bits, or the element's own width where that is wider.
 fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -> bool) {
     let len = bytes.len();
     let mut i = 0usize;
+    // An element wider than a `u64` needs a wider accumulator, and only then:
+    // a hex image is read word by word, so the narrow path carries every
+    // ordinary load.
+    let cap_bits = width.max(64);
 
     while i < len {
         let c = bytes[i];
@@ -5019,6 +5025,7 @@ fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -
             i += 1;
         }
         let mut acc = 0u64;
+        let mut wide: Option<BigUint> = None;
         let mut digits = 0usize;
         let mut ok = true;
         while i < len {
@@ -5039,14 +5046,27 @@ fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -
                     continue;
                 }
             };
-            ok &= acc >> 60 == 0;
-            acc = (acc << 4) | d as u64;
+            // The word has outgrown the fast accumulator and the element can
+            // hold more: carry what is read so far into the wide one, which
+            // then applies the same "room for one more digit" rule.
+            if wide.is_none() && acc >> 60 != 0 && cap_bits > 64 && !is_address {
+                wide = Some(BigUint::from(acc));
+            }
+            if let Some(w) = &mut wide {
+                ok &= w.bits() as usize + 4 <= cap_bits;
+                *w = (std::mem::take(w) << 4u32) | BigUint::from(d);
+            } else {
+                ok &= acc >> 60 == 0;
+                acc = (acc << 4) | d as u64;
+            }
             digits += 1;
             i += 1;
         }
         if ok && digits > 0 {
             let item = if is_address {
                 HexItem::Address(acc)
+            } else if let Some(w) = wide {
+                HexItem::Word(AnalyzerValue::new_biguint(w, width, false))
             } else {
                 HexItem::Word(AnalyzerValue::new(acc, width, false))
             };

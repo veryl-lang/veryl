@@ -5862,6 +5862,53 @@ fn parse_hex_content_drops_a_word_wider_than_the_payload() {
 }
 
 #[test]
+fn parse_hex_content_reads_a_word_wider_than_64_bits() {
+    // Digits accumulated into a `u64`, so a word past 60 bits was dropped and
+    // an image of anything wider than a machine word loaded NOTHING, in
+    // silence. Verilator reads the same file correctly.
+    let content = "0123456789abcdef0123456789abcdef fedcba9876543210fedcba9876543210";
+    let values = parse_hex_content(content, 128);
+    assert_eq!(values.len(), 2);
+    assert_eq!(
+        values[0].payload_u128(),
+        0x0123456789abcdef0123456789abcdefu128
+    );
+    assert_eq!(
+        values[1].payload_u128(),
+        0xfedcba9876543210fedcba9876543210u128
+    );
+}
+
+#[test]
+fn parse_hex_content_drops_a_word_wider_than_a_wide_payload() {
+    // The narrow path's rule, at the wide accumulator's own capacity: a word
+    // the element cannot hold is dropped and the load carries on with the
+    // next one. `..._drops_a_word_wider_than_the_payload` is the 64-bit twin.
+    let content = "11 1000000000000000000000000000000000 22";
+    let values = parse_hex_content(content, 128);
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].payload_u128(), 0x11);
+    assert_eq!(values[1].payload_u128(), 0x22);
+}
+
+#[test]
+fn parse_hex_content_fills_a_width_that_is_not_a_whole_word() {
+    // The wide accumulator's capacity is the ELEMENT's width, not the next
+    // multiple of 64: a 100-bit element takes 25 digits and drops 26. The
+    // boundary matters because the switch from the `u64` accumulator happens
+    // mid-token, and a rule written against the switch point instead of the
+    // width would refuse the last few digits of an odd width.
+    let full = "f".repeat(25);
+    let over = "f".repeat(26);
+    let content = format!("1 {full} {over} 2");
+    let values = parse_hex_content(&content, 100);
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0].payload_u128(), 0x1);
+    assert_eq!(values[1].payload_u128(), (1u128 << 100) - 1);
+    assert_eq!(values[2].payload_u128(), 0x2);
+}
+
+#[test]
 fn parse_hex_content_drops_a_word_with_a_stray_character() {
     let content = "11 2g2 __ 33";
     let values = parse_hex_content(content, 16);
@@ -5918,6 +5965,61 @@ fn readmemh_basic() {
     }
 
     let _ = std::fs::remove_file(&hex_path);
+}
+
+#[test]
+fn readmemh_loads_an_element_wider_than_64_bits() {
+    // End to end over the whole `$readmemh` path, not just the parser: the
+    // 64-bit array beside it is the control that says the image and the
+    // load position are fine, so only the width is on trial.
+    let dir = std::env::temp_dir();
+    let hex128 = dir.join("veryl_test_readmemh_w128.hex");
+    let hex64 = dir.join("veryl_test_readmemh_w64.hex");
+    std::fs::write(
+        &hex128,
+        "00112233445566778899aabbccddeeff\nffeeddccbbaa99887766554433221100\n",
+    )
+    .unwrap();
+    std::fs::write(&hex64, "1122334455667788\naabbccddeeff0011\n").unwrap();
+    let p128 = hex128.to_str().unwrap().replace('\\', "\\\\");
+    let p64 = hex64.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        #[allow(initial_assign)]
+        var m128: logic<128> [2];
+        #[allow(initial_assign)]
+        var m64: logic<64> [2];
+        initial {{
+            $readmemh("{p128}", m128);
+            $readmemh("{p64}", m64);
+        }}
+    }}
+    "#
+    );
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+
+        let dump = sim.ir.dump_variables();
+        assert!(
+            dump.contains("m128[1] = 128'hffeeddccbbaa99887766554433221100"),
+            "{dump}"
+        );
+        assert!(
+            dump.contains("m128[0] = 128'h00112233445566778899aabbccddeeff"),
+            "{dump}"
+        );
+        assert!(dump.contains("m64[1] = 64'haabbccddeeff0011"), "{dump}");
+    }
+
+    let _ = std::fs::remove_file(&hex128);
+    let _ = std::fs::remove_file(&hex64);
 }
 
 #[test]
