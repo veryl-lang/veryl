@@ -2596,8 +2596,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let unmasked = proto.unmasked_bits(UNMASKED_BITS_DEPTH);
                     let carries_above = |cw: usize| unmasked.is_none_or(|w| w > cw);
                     let needs_reinterpret = |cw: usize| {
-                        outer.width > cw
-                            && operand_width <= cw
+                        operand_width <= cw
                             && proto.width() == cw
                             && proto.expr_context().signed != comptime.r#type.signed
                     };
@@ -2618,15 +2617,23 @@ impl Conv<&air::Expression> for ProtoExpression {
                             width: node_width,
                             signed: false,
                         };
+                        // A comparison, Div/Rem and a store take signedness
+                        // from their operands, not from their own context, so
+                        // the cast node has to carry it.
+                        let result_ctx = ExpressionContext {
+                            width: node_width,
+                            signed: comptime.r#type.signed,
+                        };
+                        let sign_extends = comptime.r#type.signed && outer.width > cw;
                         let mask = (BigUint::one() << cw) - BigUint::one();
                         let mut ret = ProtoExpression::Binary {
                             x: Box::new(proto),
                             op: Op::BitAnd,
                             y: Box::new(value_node(mask)),
                             width: node_width,
-                            expr_context: ctx,
+                            expr_context: if sign_extends { ctx } else { result_ctx },
                         };
-                        if comptime.r#type.signed && outer.width > cw {
+                        if sign_extends {
                             // Sign-extend the truncated value to the outer
                             // width: ((v ^ s) - s) mod 2^node_width.
                             let sign = BigUint::one() << (cw - 1);
@@ -2641,7 +2648,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                                 op: Op::Sub,
                                 y: Box::new(value_node(sign)),
                                 width: node_width,
-                                expr_context: ctx,
+                                expr_context: result_ctx,
                             };
                         }
                         return Ok(ret);

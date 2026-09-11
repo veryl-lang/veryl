@@ -786,7 +786,29 @@ impl Conv<&Factor> for ir::Expression {
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(ret))))
             }
             Factor::FactorTypeFactor(x) => {
-                let ret = Conv::conv(context, x.factor_type_factor.factor_type.as_ref())?;
+                let factor = x.factor_type_factor.as_ref();
+                let mut ret = Conv::conv(context, factor.factor_type.as_ref())?;
+                // `signed` applies only to `bit`/`logic`, the rule the
+                // declaration path enforces; a fixed type keeps its own.
+                let signed = factor
+                    .factor_type_factor_list
+                    .iter()
+                    .any(|x| matches!(*x.type_modifier, TypeModifier::Signed(_)))
+                    && matches!(
+                        factor.factor_type.factor_type_group.as_ref(),
+                        FactorTypeGroup::VariableTypeFactorTypeOpt(x)
+                            if matches!(
+                                *x.variable_type,
+                                VariableType::Logic(_) | VariableType::Bit(_)
+                            )
+                    );
+                if signed
+                    && let ir::Factor::Value(comptime) = &mut ret
+                    && let ValueVariant::Type(value) = &mut comptime.value
+                {
+                    value.signed = true;
+                    comptime.r#type.signed = true;
+                }
                 Ok(ir::Expression::Term(Box::new(ret)))
             }
         }
