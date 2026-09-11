@@ -853,10 +853,16 @@ impl Type {
                 self.kind = x.r#type.kind.clone();
                 self.signed = x.r#type.signed;
                 let mut array = x.r#type.array.clone();
-                let mut width = x.r#type.width.clone();
                 array.append(&mut self.array);
-                width.append(&mut self.width);
                 self.array = array;
+                // The DECLARED packed dimensions are the outer ones and the
+                // enum's own width the innermost: `e3_t<8>` emits
+                // `p_e3_t [8-1:0]`, eight elements of three bits. Composing
+                // them the other way round bounded an index by the element's
+                // width, so `i[3]` on an eight-element array was rejected as
+                // "out of range [3] > 3" while `i[2]` was accepted.
+                let mut width = self.width.clone();
+                width.append(&mut x.r#type.width.clone());
                 self.set_concrete_width(width);
             }
             _ => (),

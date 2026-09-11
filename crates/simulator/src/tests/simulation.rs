@@ -28350,3 +28350,51 @@ fn an_elaboration_time_system_function_in_a_runtime_expression_is_a_value() {
         assert_eq!(sim.get("y4").unwrap(), Value::new(0x123, 32, false));
     }
 }
+
+#[test]
+fn a_packed_array_of_an_enum_indexes_by_the_array_not_the_element() {
+    // `flatten_struct_union_enum` composed the shape of a packed array of a
+    // user enum with the ENUM's own width outermost and the declared packed
+    // dimensions inside it, so `e3_t<8>` measured as [3, 8] rather than
+    // [8, 3]. The select bound then came from the element: `i[3]` on an
+    // eight-element array was rejected as "out of range [3] > 3" while
+    // `i[2]` was accepted, and an ordinary packed array of a user enum is
+    // written that way.
+    //
+    // The VALUES are what this asserts, not just that it elaborates: getting
+    // the order right has to select the element the emitted SystemVerilog
+    // does.
+    let code = r#"
+    package pk {
+        enum e3_t: logic<3> {
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }
+    }
+    module Top (
+        i : input  pk::e3_t<8>,
+        o0: output logic      ,
+        o3: output logic      ,
+        o7: output logic      ,
+    ) {
+        assign o0 = i[0] == pk::e3_t::HIGH;
+        assign o3 = i[3] == pk::e3_t::HIGH;
+        assign o7 = i[7] == pk::e3_t::HIGH;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // element 7..0, MSB first: LOW LOW LOW LOW HIGH LOW LOW HIGH
+        sim.set(
+            "i",
+            Value::new(0b100_100_100_100_011_100_100_011, 24, false),
+        );
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o0").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o3").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o7").unwrap(), Value::new(0, 1, false));
+    }
+}
