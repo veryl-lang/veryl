@@ -1933,6 +1933,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     parent_need_dynamic,
                     parent_width_shape,
                     parent_kind_width,
+                    parent_index_is_absolute_bits,
                 ) = {
                     let parent_scope = context.scope();
                     let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
@@ -1956,6 +1957,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let width = parent_meta.width;
                     let width_shape = parent_meta.r#type.width().clone();
                     let kind_width = parent_meta.r#type.kind.width().unwrap_or(1);
+                    let index_is_absolute_bits = !parent_meta.r#type.kind.is_enum();
                     (
                         parent_index,
                         select,
@@ -1963,6 +1965,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         need_dynamic,
                         width_shape,
                         kind_width,
+                        index_is_absolute_bits,
                     )
                 };
 
@@ -1972,6 +1975,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         &parent_width_shape,
                         &parent_dst.select,
                         parent_kind_width,
+                        parent_index_is_absolute_bits,
                     )?)
                 } else {
                     None

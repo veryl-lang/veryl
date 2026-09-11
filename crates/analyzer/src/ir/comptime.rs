@@ -1072,6 +1072,14 @@ impl TypeKind {
         }
     }
 
+    /// True for a user `enum`, whose element width lives in the kind while
+    /// its packed dimensions stay in the shape. The dynamic-select lowering
+    /// asks, because that is the one kind whose select index is an element
+    /// number rather than an absolute bit position.
+    pub fn is_enum(&self) -> bool {
+        matches!(self, TypeKind::Enum(_))
+    }
+
     pub fn width(&self) -> Option<usize> {
         match self {
             TypeKind::Clock

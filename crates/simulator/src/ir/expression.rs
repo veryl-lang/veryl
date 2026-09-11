@@ -2032,6 +2032,7 @@ pub fn build_dynamic_bit_select(
     width_shape: &veryl_analyzer::ir::ShapeRef,
     select: &air::VarSelect,
     kind_width: usize,
+    index_is_absolute_bits: bool,
 ) -> Result<ProtoDynamicBitSelect, SimulatorError> {
     // The analyzer already folds the element stride and any struct field offset
     // into the select index as an absolute *bit* position. For a non-trivial
@@ -2039,8 +2040,18 @@ pub fn build_dynamic_bit_select(
     // would re-apply the stride, double-scaling the index/window/clamp. Collapse
     // to a flat single-bit view so the folded index passes through unscaled;
     // plain logic (kind_width == 1) is already flat.
+    //
+    // That holds only where the stride really was folded in. A packed array of
+    // an ENUM (`e3_t<8>`: shape [8],
+    // kind_width 3) keeps its element stride in the SHAPE, and the index
+    // arrives as an element number. Flattening that left the index unscaled
+    // AND the window one bit wide, so a runtime-indexed write landed a single
+    // bit at the index instead of the element -- silently, with the right
+    // total width. `index_is_absolute_bits` is the caller's answer, because
+    // only it knows the kind.
     let flat_storage: [Option<usize>; 1];
     let (width_shape, kind_width) = if kind_width > 1
+        && index_is_absolute_bits
         && let Some(total) = width_shape.total()
     {
         flat_storage = [Some(total * kind_width)];
@@ -2356,7 +2367,14 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
                     // Try constant index first
-                    let (select_val, const_index, need_dynamic_select, width_shape, kind_width) = {
+                    let (
+                        select_val,
+                        const_index,
+                        need_dynamic_select,
+                        width_shape,
+                        kind_width,
+                        index_is_absolute_bits,
+                    ) = {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(id).unwrap();
                         let select_val = if !select.is_empty() {
@@ -2376,12 +2394,14 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let select_val = if need_dynamic { None } else { select_val };
                         let width_shape = meta.r#type.width().clone();
                         let kind_width = meta.r#type.kind.width().unwrap_or(1);
+                        let index_is_absolute_bits = !meta.r#type.kind.is_enum();
                         (
                             select_val,
                             const_index,
                             need_dynamic,
                             width_shape,
                             kind_width,
+                            index_is_absolute_bits,
                         )
                     };
                     let dynamic_select = if need_dynamic_select {
@@ -2390,6 +2410,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                             &width_shape,
                             select,
                             kind_width,
+                            index_is_absolute_bits,
                         )?)
                     } else {
                         None

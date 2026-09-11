@@ -241,6 +241,7 @@ pub(crate) fn resolve_expr(
                     &width_shape,
                     &hier.select,
                     kind_width,
+                    !meta.r#type.kind.is_enum(),
                 )?;
                 // The index may itself reach into the hierarchy (`dut.a[dut.i]`).
                 resolve_expr(&mut sel.index_expr, context, children)?;

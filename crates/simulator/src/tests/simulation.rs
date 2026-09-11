@@ -28398,3 +28398,63 @@ fn a_packed_array_of_an_enum_indexes_by_the_array_not_the_element() {
         assert_eq!(sim.get("o7").unwrap(), Value::new(0, 1, false));
     }
 }
+
+#[test]
+fn a_runtime_index_into_a_packed_enum_array_writes_the_whole_element() {
+    // `build_dynamic_bit_select` collapses (width_shape, kind_width) to a flat
+    // single-bit view whenever `kind_width > 1`, because for a struct the
+    // analyzer has already folded the element stride and any field offset into
+    // the index as an absolute BIT position. A packed array of an ENUM does
+    // not work that way: its element stride stays in the SHAPE and the index
+    // arrives as an element number. Flattening it left the index unscaled AND
+    // the window one bit wide, so `r[idx] = HIGH` set a single bit at bit
+    // `idx` -- silently, with the right total width and no diagnostic.
+    //
+    // The plain-logic twin is the control: same bits, same stride, and it was
+    // always correct, so a mismatch between the two is the defect and nothing
+    // else.
+    let code = r#"
+    package pk {
+        const N: u32 = 8;
+        enum e3_t: logic<3> {
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }
+    }
+    module Top (
+        idx: input  logic<3> ,
+        oe : output logic<24>,
+        ol : output logic<24>,
+    ) {
+        var re: pk::e3_t<pk::N>;
+        always_comb {
+            for i in 0..pk::N {
+                re[i] = pk::e3_t::LOW;
+            }
+            re[idx] = pk::e3_t::HIGH;
+        }
+        var rl: logic<pk::N, 3>;
+        always_comb {
+            for i in 0..pk::N {
+                rl[i] = 3'b100;
+            }
+            rl[idx] = 3'b011;
+        }
+        assign oe = re;
+        assign ol = rl;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for idx in 0..8u64 {
+            sim.set("idx", Value::new(idx, 3, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let e = sim.get("oe").unwrap();
+            let l = sim.get("ol").unwrap();
+            assert_eq!(e, l, "idx={idx}: the enum array must match the logic twin");
+        }
+    }
+}
