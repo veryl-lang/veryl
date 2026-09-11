@@ -6181,6 +6181,12 @@ fn split_entry_function(
 /// directly; FF-target writes push WriteLogEntries like the event path.
 pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     reset_wide_tmp();
+    // A comb list can carry FF-target assigns (the comb-to-ff hoist), and each
+    // emits an UNCHECKED write-log push: the push code is unchecked because an
+    // entry prologue is supposed to have reserved the room.  Count them the way
+    // the event path does, so the prologue below can.
+    EVENT_NARROW_PUSHES.with(|c| c.set(0));
+    EVENT_WIDE_PUSHES.with(|c| c.set(0));
     // Splitting the monolithic body into ~chunk_size-stmt static functions
     // gives gcc -O3 smaller register-allocation and stack-frame scopes per
     // chunk and bounds spill locality (the unsplit body regresses L1d
@@ -6573,12 +6579,24 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         );
     }
 
+    // Every entry this module exports reserves the whole body's worst case:
+    // each is a way in to code whose pushes are unchecked, and a run-once
+    // entry only ever over-reserves.  `> u32::MAX` pushes cannot be reserved
+    // in one call, so bail to Cranelift (which checks per push) rather than
+    // under-reserve -- the event path makes the same choice.
+    let reserve_prologue = {
+        let narrow = u32::try_from(EVENT_NARROW_PUSHES.with(|c| c.get())).ok()?;
+        let wide = u32::try_from(EVENT_WIDE_PUSHES.with(|c| c.get())).ok()?;
+        emit_reserve_prologue(narrow, wide)
+    };
+
     if chunks.len() == 1 && const_chunks == 0 && cone_segments.is_empty() {
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
              \x20   (void)write_log;\n",
         );
+        body.push_str(&reserve_prologue);
         body.push_str(&chunk_bodies[0]);
         body.push_str("}\n");
     } else {
@@ -6604,6 +6622,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 "__attribute__((visibility(\"default\")))\n\
                  void veryl_aot_eval_const(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
             );
+            body.push_str(&reserve_prologue);
             for i in 0..const_chunks {
                 body.push_str(&format!(
                     "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
@@ -7022,7 +7041,10 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             .map(|&(_, _, s)| s.state_off)
             .chain(egroups.iter().map(|eg| eg.state_off))
             .collect();
-        let entry_preamble = cone_gate_rearm_preamble(&state_offs, rearm_mask);
+        let entry_preamble = format!(
+            "{reserve_prologue}{}",
+            cone_gate_rearm_preamble(&state_offs, rearm_mask)
+        );
         body.push_str(&split_entry_function(
             &entry_prologue,
             &entry_preamble,
@@ -11143,6 +11165,48 @@ mod tests {
         let src = emit_event_function(&[ProtoStatement::Assign(a)], false, &[])
             .expect("a full-width select must emit");
         assert!(src.contains("0xffffffffffffffffULL"), "{src}");
+    }
+
+    #[test]
+    fn comb_entry_reserves_the_room_its_own_pushes_need() {
+        // A comb list can carry an FF-target assign, and that emits a write-log
+        // push. The push is UNCHECKED: it assumes an entry prologue already
+        // reserved the room. The comb entry emitted no prologue at all, so the
+        // pushes ran past the pool and corrupted the heap.
+        let ff = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 64),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(ff)]).expect("an FF store must emit");
+        assert!(
+            src.contains(")(_lb, 1u, 0u)"),
+            "the comb entry must reserve for the one narrow push its body makes: {src}"
+        );
+
+        // The control: a comb-only body pushes nothing, so it must carry NO
+        // reserve. Without this the assertion above would also pass on a
+        // prologue emitted unconditionally, which would hide a miscount.
+        let comb = ProtoAssignStatement {
+            dst: VarOffset::Comb(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 64),
+            dst_ff_current_offset: 0,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(comb)]).expect("a comb store must emit");
+        assert!(
+            !src.contains(")(_lb, "),
+            "a body with no push must not reserve: {src}"
+        );
     }
 
     #[test]
