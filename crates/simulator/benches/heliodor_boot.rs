@@ -13,7 +13,7 @@ use veryl_analyzer::{Analyzer, AnalyzerError, Context};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 use veryl_parser::resource_table;
-use veryl_simulator::ir::{Config, ProtoModuleCache, build_ir_cached};
+use veryl_simulator::ir::{BuildSession, Config, ProtoModuleCache, build_ir_cached};
 use veryl_simulator::testbench::{TestResult, run_native_testbench_capped};
 
 const TOP: &str = "test_soc_linux_boot";
@@ -106,7 +106,8 @@ fn criterion_benchmark(c: &mut Criterion) {
     // Cache the ProtoModule (incl. the aot_c compiled artifact) so the ~9s
     // C-compile happens once, not per iteration; setup is then a cheap
     // fresh-state instantiate, like `veryl test` running many tests.
-    let mut cache = ProtoModuleCache::default();
+    let session = BuildSession::new(&air_ir, &config, &[top]);
+    let mut cache = ProtoModuleCache::new(&session);
 
     let mut group = c.benchmark_group("heliodor");
     // The CodSpeed walltime runner uses the criterion sampling pipeline, so these
@@ -116,7 +117,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(25));
     group.bench_function("linux_boot_1core", |b| {
         b.iter_batched(
-            || build_ir_cached(&air_ir, top, &config, &mut cache).expect("build_ir failed"),
+            || build_ir_cached(top, &mut cache).expect("build_ir failed"),
             |sim_ir| {
                 let result =
                     run_native_testbench_capped(sim_ir, None, TOP.to_string(), Some(boot_cycles()))

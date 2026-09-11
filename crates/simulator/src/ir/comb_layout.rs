@@ -19,7 +19,7 @@
 //!   shifted by their uniform `comb_delta_bytes`, so every comb byte a block
 //!   touches merges into one rigid unit (`cb_comb_span`).  Blocks cloned
 //!   across instances by a single delta (`try_compile_inst_chunks`,
-//!   `GLOBAL_STMT_CACHE`) stay sound for the same reason.
+//!   `DutReuseCache`) stay sound for the same reason.
 //! - Offsets that appear in statements but in no variable's meta (function
 //!   per-call-site body copies allocate straight from `comb_total_bytes`) are
 //!   promoted to units extending to the next known boundary, so no live byte

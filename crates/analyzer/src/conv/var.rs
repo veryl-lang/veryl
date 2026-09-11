@@ -210,17 +210,99 @@ fn fold_generate_block_index(
 
 impl Conv<&ExpressionIdentifier> for VarPathSelect {
     fn conv(context: &mut Context, value: &ExpressionIdentifier) -> IrResult<Self> {
-        check_separator(context, value);
+        // Unwound here because the walk returns early on an invalid select.
+        let select_paths = context.select_paths.len();
+        let select_dims = context.select_dims.len();
+        let ret = conv_expression_identifier(context, value);
+        context.select_paths.truncate(select_paths);
+        context.select_dims.truncate(select_dims);
+        ret
+    }
+}
 
-        let mut path: VarPath = Conv::conv(context, value.scoped_identifier.as_ref())?;
-        let mut generic_path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
-        let mut select = VarSelect::default();
-        let token: TokenRange = value.into();
-        let mut end: Option<(VarSelectOp, ir::Expression)> = None;
+fn conv_expression_identifier(
+    context: &mut Context,
+    value: &ExpressionIdentifier,
+) -> IrResult<VarPathSelect> {
+    check_separator(context, value);
 
-        context.select_dims.push(0);
+    let mut path: VarPath = Conv::conv(context, value.scoped_identifier.as_ref())?;
+    let mut generic_path: GenericSymbolPath = value.scoped_identifier.as_ref().into();
+    let mut select = VarSelect::default();
+    let token: TokenRange = value.into();
+    let mut end: Option<(VarSelectOp, ir::Expression)> = None;
 
-        for x in &value.expression_identifier_list {
+    context.select_dims.push(0);
+
+    for x in &value.expression_identifier_list {
+        if end.is_some() {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::SelectAfterRange,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+        context
+            .select_paths
+            .push((path.clone(), generic_path.clone()));
+        let base_value = x.select.expression.as_ref();
+        let mut base = Conv::conv(context, base_value)?;
+        check_select_type(context, &mut base, base_value);
+        if let Some(x) = &x.select.select_opt {
+            let op = Conv::conv(context, x.select_operator.as_ref())?;
+            let mut bound = Conv::conv(context, x.expression.as_ref())?;
+            check_select_type(context, &mut bound, &x.expression);
+            check_part_select_width(context, &op, (&base, base_value), (&bound, &x.expression));
+            end = Some((op, bound));
+        }
+        select.push(base);
+        context.select_paths.pop();
+        context.inc_select_dim();
+    }
+
+    let mut current_scope: Option<Namespace> = None;
+    for x in &value.expression_identifier_list0 {
+        let base_token = x.identifier.identifier_token.token;
+        path.push(base_token.text);
+        generic_path.paths.push(GenericSymbol {
+            base: base_token,
+            arguments: vec![],
+        });
+
+        // Cross-instance hops only appear in test modules; gating the lookups
+        // there keeps them off the hot path for ordinary RTL member accesses.
+        let hop = if context.in_test_module {
+            resolve_hop_symbol(&generic_path, current_scope.as_ref(), &base_token)
+        } else {
+            None
+        };
+
+        // Generate-block hop: absorb `[0]` into the segment, then descend so a
+        // nested generate hop resolves in the block's scope.
+        if let Some(symbol) = &hop
+            && !x.expression_identifier_list0_list.is_empty()
+            && let Some(folded) = fold_generate_block_index(
+                context,
+                symbol,
+                &base_token,
+                &x.expression_identifier_list0_list,
+            )
+        {
+            *path.0.last_mut().unwrap() = folded;
+            current_scope = Some(symbol.inner_namespace());
+            continue;
+        }
+
+        // Plain-instance hop: descend into the instantiated module so a
+        // following generate hop resolves there; any other node ends the chain.
+        current_scope = hop.as_ref().and_then(instance_module_scope);
+
+        context
+            .select_paths
+            .push((path.clone(), generic_path.clone()));
+        context.reset_select_dim();
+        for x in &x.expression_identifier_list0_list {
             if end.is_some() {
                 context.insert_error(AnalyzerError::invalid_select(
                     &InvalidSelectKind::SelectAfterRange,
@@ -229,9 +311,6 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                 ));
                 return Err(ir_error!(token));
             }
-            context
-                .select_paths
-                .push((path.clone(), generic_path.clone()));
             let base_value = x.select.expression.as_ref();
             let mut base = Conv::conv(context, base_value)?;
             check_select_type(context, &mut base, base_value);
@@ -243,97 +322,80 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
                 end = Some((op, bound));
             }
             select.push(base);
-            context.select_paths.pop();
             context.inc_select_dim();
         }
-
-        let mut current_scope: Option<Namespace> = None;
-        for x in &value.expression_identifier_list0 {
-            let base_token = x.identifier.identifier_token.token;
-            path.push(base_token.text);
-            generic_path.paths.push(GenericSymbol {
-                base: base_token,
-                arguments: vec![],
-            });
-
-            // Cross-instance hops only appear in test modules; gating the lookups
-            // there keeps them off the hot path for ordinary RTL member accesses.
-            let hop = if context.in_test_module {
-                resolve_hop_symbol(&generic_path, current_scope.as_ref(), &base_token)
-            } else {
-                None
-            };
-
-            // Generate-block hop: absorb `[0]` into the segment, then descend so a
-            // nested generate hop resolves in the block's scope.
-            if let Some(symbol) = &hop
-                && !x.expression_identifier_list0_list.is_empty()
-                && let Some(folded) = fold_generate_block_index(
-                    context,
-                    symbol,
-                    &base_token,
-                    &x.expression_identifier_list0_list,
-                )
-            {
-                *path.0.last_mut().unwrap() = folded;
-                current_scope = Some(symbol.inner_namespace());
-                continue;
-            }
-
-            // Plain-instance hop: descend into the instantiated module so a
-            // following generate hop resolves there; any other node ends the chain.
-            current_scope = hop.as_ref().and_then(instance_module_scope);
-
-            context
-                .select_paths
-                .push((path.clone(), generic_path.clone()));
-            for x in &x.expression_identifier_list0_list {
-                if end.is_some() {
-                    context.insert_error(AnalyzerError::invalid_select(
-                        &InvalidSelectKind::SelectAfterRange,
-                        &token,
-                        &[],
-                    ));
-                    return Err(ir_error!(token));
-                }
-                let base_value = x.select.expression.as_ref();
-                let mut base = Conv::conv(context, base_value)?;
-                check_select_type(context, &mut base, base_value);
-                if let Some(x) = &x.select.select_opt {
-                    let op = Conv::conv(context, x.select_operator.as_ref())?;
-                    let mut bound = Conv::conv(context, x.expression.as_ref())?;
-                    check_select_type(context, &mut bound, &x.expression);
-                    check_part_select_width(
-                        context,
-                        &op,
-                        (&base, base_value),
-                        (&bound, &x.expression),
-                    );
-                    end = Some((op, bound));
-                }
-                select.push(base);
-                context.inc_select_dim();
-            }
-            context.select_paths.pop();
-        }
-
-        context.select_dims.pop();
-
-        select.1 = end;
-
-        Ok(VarPathSelect(path, select, token))
+        context.select_paths.pop();
     }
+
+    context.select_dims.pop();
+
+    select.1 = end;
+
+    Ok(VarPathSelect(path, select, token))
 }
 
 impl Conv<&HierarchicalIdentifier> for VarPathSelect {
     fn conv(context: &mut Context, value: &HierarchicalIdentifier) -> IrResult<Self> {
-        let mut path: VarPath = Conv::conv(context, value.identifier.as_ref())?;
-        let mut generic_path: GenericSymbolPath = value.identifier.as_ref().into();
-        let mut select = VarSelect::default();
-        let token: TokenRange = value.into();
-        let mut end: Option<(VarSelectOp, ir::Expression)> = None;
+        // Unwound here because the walk returns early on an invalid select.
+        let select_paths = context.select_paths.len();
+        let select_dims = context.select_dims.len();
+        let ret = conv_hierarchical_identifier(context, value);
+        context.select_paths.truncate(select_paths);
+        context.select_dims.truncate(select_dims);
+        ret
+    }
+}
 
-        for x in &value.hierarchical_identifier_list {
+fn conv_hierarchical_identifier(
+    context: &mut Context,
+    value: &HierarchicalIdentifier,
+) -> IrResult<VarPathSelect> {
+    let mut path: VarPath = Conv::conv(context, value.identifier.as_ref())?;
+    let mut generic_path: GenericSymbolPath = value.identifier.as_ref().into();
+    let mut select = VarSelect::default();
+    let token: TokenRange = value.into();
+    let mut end: Option<(VarSelectOp, ir::Expression)> = None;
+
+    context.select_dims.push(0);
+
+    for x in &value.hierarchical_identifier_list {
+        if end.is_some() {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::SelectAfterRange,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+        context
+            .select_paths
+            .push((path.clone(), generic_path.clone()));
+        let base_value = x.select.expression.as_ref();
+        let mut base = Conv::conv(context, base_value)?;
+        check_select_type(context, &mut base, base_value);
+        if let Some(x) = &x.select.select_opt {
+            let op = Conv::conv(context, x.select_operator.as_ref())?;
+            let mut bound = Conv::conv(context, x.expression.as_ref())?;
+            check_select_type(context, &mut bound, &x.expression);
+            check_part_select_width(context, &op, (&base, base_value), (&bound, &x.expression));
+            end = Some((op, bound));
+        }
+        select.push(base);
+        context.select_paths.pop();
+        context.inc_select_dim();
+    }
+
+    for x in &value.hierarchical_identifier_list0 {
+        path.push(x.identifier.identifier_token.token.text);
+        generic_path.paths.push(GenericSymbol {
+            base: x.identifier.identifier_token.token,
+            arguments: vec![],
+        });
+        context
+            .select_paths
+            .push((path.clone(), generic_path.clone()));
+        context.reset_select_dim();
+        for x in &x.hierarchical_identifier_list0_list {
             if end.is_some() {
                 context.insert_error(AnalyzerError::invalid_select(
                     &InvalidSelectKind::SelectAfterRange,
@@ -342,9 +404,6 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
                 ));
                 return Err(ir_error!(token));
             }
-            context
-                .select_paths
-                .push((path.clone(), generic_path.clone()));
             let base_value = x.select.expression.as_ref();
             let mut base = Conv::conv(context, base_value)?;
             check_select_type(context, &mut base, base_value);
@@ -356,51 +415,16 @@ impl Conv<&HierarchicalIdentifier> for VarPathSelect {
                 end = Some((op, bound));
             }
             select.push(base);
-            context.select_paths.pop();
+            context.inc_select_dim();
         }
-
-        for x in &value.hierarchical_identifier_list0 {
-            path.push(x.identifier.identifier_token.token.text);
-            generic_path.paths.push(GenericSymbol {
-                base: x.identifier.identifier_token.token,
-                arguments: vec![],
-            });
-            context
-                .select_paths
-                .push((path.clone(), generic_path.clone()));
-            for x in &x.hierarchical_identifier_list0_list {
-                if end.is_some() {
-                    context.insert_error(AnalyzerError::invalid_select(
-                        &InvalidSelectKind::SelectAfterRange,
-                        &token,
-                        &[],
-                    ));
-                    return Err(ir_error!(token));
-                }
-                let base_value = x.select.expression.as_ref();
-                let mut base = Conv::conv(context, base_value)?;
-                check_select_type(context, &mut base, base_value);
-                if let Some(x) = &x.select.select_opt {
-                    let op = Conv::conv(context, x.select_operator.as_ref())?;
-                    let mut bound = Conv::conv(context, x.expression.as_ref())?;
-                    check_select_type(context, &mut bound, &x.expression);
-                    check_part_select_width(
-                        context,
-                        &op,
-                        (&base, base_value),
-                        (&bound, &x.expression),
-                    );
-                    end = Some((op, bound));
-                }
-                select.push(base);
-            }
-            context.select_paths.pop();
-        }
-
-        select.1 = end;
-
-        Ok(VarPathSelect(path, select, token))
+        context.select_paths.pop();
     }
+
+    context.select_dims.pop();
+
+    select.1 = end;
+
+    Ok(VarPathSelect(path, select, token))
 }
 
 impl Conv<&Expression> for Vec<VarPathSelect> {

@@ -643,6 +643,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
         Ok(())
     }
 
+    fn dot(&mut self, _arg: &Dot) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point
+            && self.is_in_expression_identifier()
+        {
+            *self.select_dimension.last_mut().unwrap() = 0;
+        }
+        Ok(())
+    }
+
     fn identifier(&mut self, arg: &Identifier) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.insert_namespace(&arg.identifier_token.token);

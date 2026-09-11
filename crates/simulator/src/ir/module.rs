@@ -1,4 +1,3 @@
-use crate::backend::inst::next_test_top_id;
 use crate::backend::{
     ChunkOutput, ChunkPlan, CompileCtx, CompiledWhole, compile_plans_parallel, whole,
 };
@@ -1447,13 +1446,15 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
 /// the only way to find the expensive one was to timestamp the log from outside
 /// and match lines up by eye.
 struct StageTimer {
-    on: bool,
-    last: std::time::Instant,
+    last: Option<std::time::Instant>,
     scope: String,
 }
 
 /// Whether `VERYL_STAGE_TIME` asked for stage timings.  Read once: the sort
 /// consults it per call, and there are thousands of calls on a large design.
+///
+/// `Instant::now` panics on wasm, where the playground elaborates the same IR,
+/// so the clock must stay behind this gate.
 pub(crate) fn stage_time_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("VERYL_STAGE_TIME").is_ok())
@@ -1462,20 +1463,19 @@ pub(crate) fn stage_time_enabled() -> bool {
 impl StageTimer {
     fn new(scope: impl std::fmt::Display) -> Self {
         Self {
-            on: stage_time_enabled(),
-            last: std::time::Instant::now(),
+            last: stage_time_enabled().then(std::time::Instant::now),
             scope: scope.to_string(),
         }
     }
 
     fn mark(&mut self, stage: &str) {
-        if self.on {
+        if let Some(last) = &mut self.last {
             log::info!(
                 "stage_time ({}): {stage} {:.3}s",
                 self.scope,
-                self.last.elapsed().as_secs_f64()
+                last.elapsed().as_secs_f64()
             );
-            self.last = std::time::Instant::now();
+            *last = std::time::Instant::now();
         }
     }
 }
@@ -5344,10 +5344,6 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
 
 impl Conv<&air::Module> for ProtoModule {
     fn conv(context: &mut Context, src: &air::Module) -> Result<Self, SimulatorError> {
-        // This conv is one test top (testbench).  Tag it so cross-test DUT
-        // recurrence can be told apart from within-top replication (SMP harts).
-        context.test_top_id = next_test_top_id();
-
         let mut analyzer_context = veryl_analyzer::conv::Context::default();
         analyzer_context.variables = src.variables.clone();
         analyzer_context.functions = src.functions.clone();
@@ -5758,7 +5754,9 @@ impl Conv<&air::Module> for ProtoModule {
                 base
             }
         };
-        let claimed = comb_pipeline_cache::try_get_or_claim(key, context.config.dut_reuse);
+        let claimed = context
+            .comb_cache
+            .try_get_or_claim(key, context.config.dut_reuse);
         let cached: Arc<comb_pipeline_cache::CombPipeline> = match claimed {
             comb_pipeline_cache::Outcome::Hit(cached) => {
                 // The pipeline (incl. the in-place event DCE) did not run for
@@ -6452,7 +6450,7 @@ impl Conv<&air::Module> for ProtoModule {
                     &mut context.backends,
                     &context.config,
                     key,
-                    context.config.dut_reuse,
+                    &context.comb_cache,
                     protos,
                     whole::WholeCombShape::default(),
                 )
@@ -6600,7 +6598,6 @@ impl Conv<&air::Module> for ProtoModule {
         // try compile_whole_comb; backends that decline (4-state,
         // unsupported construct) return None and Ir::settle_comb stays
         // on the per-chunk Cranelift loop.
-        let dut_reuse = context.config.dut_reuse;
         let whole_comb: Option<Arc<dyn CompiledWhole>> = if !size_ok {
             None
         } else {
@@ -6612,7 +6609,7 @@ impl Conv<&air::Module> for ProtoModule {
                 &mut context.backends,
                 &context.config,
                 key,
-                dut_reuse,
+                &context.comb_cache,
                 &pre_jit_stmts,
                 whole::WholeCombShape {
                     localize: localize_info.as_ref(),
