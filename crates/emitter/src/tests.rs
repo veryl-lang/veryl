@@ -4197,6 +4197,33 @@ fn regression_sv_attribute_backslash_unescape() {
 }
 
 #[test]
+fn msb_on_struct_array_uses_the_unpacked_dimension() {
+    // Pins the emitted dimension against the constant the analyzer folds.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module M (
+    o: output logic<8>,
+) {
+    struct S {
+        a: logic<8>,
+    }
+    var b: S [2];
+    always_comb {
+        b[0].a = 0;
+        b[1].a = 0;
+        o      = b[msb].a;
+    }
+}
+"#;
+
+    let ret = emit(&metadata, code);
+    assert!(
+        ret.contains("b[($size(b, 1) - 1)].a"),
+        "msb on a struct array must use the unpacked dimension:\n{ret}"
+    );
+}
+
+#[test]
 fn msb_after_unpacked_array_select_dimension() {
     // Regression: SV $size numbers unpacked dims first, then packed. msb after
     // an unpacked-array select must reference the packed dimension of the

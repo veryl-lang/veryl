@@ -706,6 +706,14 @@ impl Context {
         }
     }
 
+    /// A select dimension is relative to its path segment, so a member access
+    /// starts the count again.
+    pub fn reset_select_dim(&mut self) {
+        if let Some(x) = self.select_dims.last_mut() {
+            *x = 0;
+        }
+    }
+
     pub fn get_select_dim(&self) -> Option<usize> {
         self.select_dims.last().copied()
     }
