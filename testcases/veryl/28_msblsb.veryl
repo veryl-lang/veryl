@@ -40,7 +40,8 @@ module ModuleB {
 
 module ModuleC {
     struct StructB {
-        a: logic<8>,
+        a: logic<8>   ,
+        m: logic<4, 6>,
     }
 
     var b: StructB [2];
@@ -48,8 +49,12 @@ module ModuleC {
     always_comb {
         b[0].a = 0;
         b[1].a = 0;
+        b[0].m = 0;
+        b[1].m = 0;
     }
 
-    let _x: logic = b[0].a[msb];
-    let _y: logic = b[1].a[msb - 1];
+    let _x: logic    = b[0].a[msb];
+    let _y: logic    = b[1].a[msb - 1];
+    let _z: logic<6> = b[1].m[msb];
+    let _v: logic<8> = b[msb].a;
 }

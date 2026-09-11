@@ -21316,8 +21316,7 @@ fn cast_by_non_constant_expression() {
 
 #[test]
 fn msb_dimension_after_member_access() {
-    // The dimensions consumed before a member access belong to the outer path
-    // segment, so msb on the member counts from the member's own type again.
+    // msb is the member's own msb (7), so +1 is out of range.
     let code = r#"
     module ModuleA {
         struct StructA {
@@ -21339,9 +21338,11 @@ fn msb_dimension_after_member_access() {
             .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. })),
         "{errors:?}"
     );
+}
 
-    // A multi-dimension packed member keeps its own dimension order after an
-    // array select of the enclosing variable.
+#[test]
+fn msb_dimension_after_member_access_multi_dim() {
+    // msb is m's first packed dimension (4), not a dimension of b.
     let code = r#"
     module ModuleA {
         struct StructA {
@@ -21358,4 +21359,44 @@ fn msb_dimension_after_member_access() {
 
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn msb_on_element_of_struct_array() {
+    // msb is the element count (2), not the struct width.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].a = 0;
+            b[1].a = 0;
+        }
+        let _c: logic<8> = b[msb].a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn msb_in_assign_destination_is_rejected_without_panic() {
+    // pass2 walks the destination even though pass1 rejected the msb.
+    let code = r#"
+    module ModuleA {
+        var c: logic<8>;
+        assign c[msb] = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidMsb { .. })),
+        "{errors:?}"
+    );
 }
