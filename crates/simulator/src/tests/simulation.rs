@@ -6773,6 +6773,49 @@ fn const_array_whole_assign_multi_dim() {
 }
 
 #[test]
+fn unsized_all_bit_const_fills_the_declared_width() {
+    // `'1` and `'0` are unsized sentinels carrying ONE bit; the declared type
+    // is what says how far to replicate it. A packed multi-dimensional const
+    // is where getting that wrong shows: the sentinel's bit was stamped with
+    // the declared width instead of replicated, so `logic<8, 32> = '1` read
+    // as 1 in element 0 and x above it, while the emitted SystemVerilog was
+    // correct.
+    let code = r#"
+    package pk {
+        const ONES_W8  : logic<8>     = '1;
+        const ONES_W65 : logic<65>    = '1;
+        const ONES_2D  : logic<8, 32> = '1;
+        const ZEROS_2D : logic<8, 32> = '0;
+    }
+    module Top (
+        a: output logic<8> ,
+        b: output logic<32>,
+        c: output logic<32>,
+        d: output logic<32>,
+        e: output logic<32>,
+    ) {
+        assign a = pk::ONES_W8;
+        assign b = pk::ONES_W65[64:33];
+        assign c = pk::ONES_2D[0];
+        assign d = pk::ONES_2D[7];
+        assign e = pk::ZEROS_2D[7];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("a").unwrap(), Value::new(0xff, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("d").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("e").unwrap(), Value::new(0, 32, false));
+    }
+}
+
+#[test]
 fn const_array_as_operand() {
     // A single-element array must take the same paths as a wider one.
     let code = r#"
