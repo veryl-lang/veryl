@@ -29130,3 +29130,76 @@ fn string_array_const_element_keeps_its_text() {
         assert_eq!(sim.get("o_local").unwrap(), Value::new(1, 1, false));
     }
 }
+
+#[test]
+fn nested_self_call_is_composition_not_recursion() {
+    // The inliner marked the callee as expanding BEFORE converting its
+    // arguments, so a call to the same function inside an argument tripped the
+    // recursion guard: `f(f(x))` aborted elaboration with `recursive function
+    // "f" cannot be inlined`, and so did a call whose argument expands to one
+    // transitively. An argument is evaluated at the call site, before the call,
+    // so none of it is recursion. `testcases/error/recursive_function.veryl`
+    // is the negative control: genuine self-recursion stays rejected.
+    //
+    // The argument has to be non-constant: with a literal the analyzer folds
+    // the whole call before the inliner sees it and the test passes whether or
+    // not the guard is right.
+    let code = r#"
+    package Pkg {
+        function mul2 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return {x[6:0], 1'b0} ^ (if x[7] ? 8'h1b : 8'h00);
+        }
+        // Directly nested.
+        function mul4 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return mul2(mul2(x));
+        }
+        // Nested through a DIFFERENT function that itself expands to `mul2`:
+        // the guard has to follow the expansion, not the name at the call.
+        function mul8 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return mul2(mul4(x));
+        }
+    }
+    module Top (
+        i_clk: input clock,
+        o_m2 : output logic<8>,
+        o_m4 : output logic<8>,
+        o_m8 : output logic<8>,
+        o_sib: output logic<8>,
+        o_cs : output logic<8>,
+    ) {
+        #[allow(initial_assign)]
+        var seed: logic<8>;
+        initial {
+            seed = 8'h57;
+        }
+        assign o_m2  = Pkg::mul2(seed);
+        assign o_m4  = Pkg::mul4(seed);
+        assign o_m8  = Pkg::mul8(seed);
+        // Two sibling calls in one expression, and the nesting written at the
+        // call site: the same guard rejected both.
+        assign o_sib = Pkg::mul2(seed) ^ Pkg::mul2(~seed);
+        assign o_cs  = Pkg::mul2(Pkg::mul2(seed));
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // FIPS 197 xtime: 0x57 -> 0xae -> 0x47 -> 0x8e.
+        assert_eq!(sim.get("o_m2").unwrap(), Value::new(0xae, 8, false));
+        assert_eq!(sim.get("o_m4").unwrap(), Value::new(0x47, 8, false));
+        assert_eq!(sim.get("o_m8").unwrap(), Value::new(0x8e, 8, false));
+        assert_eq!(sim.get("o_cs").unwrap(), Value::new(0x47, 8, false));
+        // ~0x57 = 0xa8 -> 0x4b; 0xae ^ 0x4b = 0xe5.
+        assert_eq!(sim.get("o_sib").unwrap(), Value::new(0xe5, 8, false));
+    }
+}

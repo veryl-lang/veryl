@@ -4747,21 +4747,6 @@ impl Conv<&air::IfResetStatement> for ProtoIfStatement {
 
 impl Conv<&FunctionCall> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &FunctionCall) -> Result<Self, SimulatorError> {
-        if !context.expanding_functions.insert(src.id) {
-            let name = context
-                .scope()
-                .analyzer_context
-                .functions
-                .get(&src.id)
-                .unwrap()
-                .name
-                .to_string();
-            return Err(SimulatorError::recursive_function(
-                &name,
-                &src.comptime.token,
-            ));
-        }
-
         let mut result = Vec::new();
 
         // Clone to avoid borrow conflict with context
@@ -4941,6 +4926,25 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
         let mut pending = std::mem::take(&mut context.pending_statements);
         pending.append(&mut result);
         result = pending;
+
+        // Only the BODY can recurse. An argument is evaluated at the call site
+        // before the call happens, so `f(f(x))` is composition, not recursion --
+        // guarding the argument conversion too rejected it, and rejected a
+        // sibling call in an argument with it.
+        if !context.expanding_functions.insert(src.id) {
+            let name = context
+                .scope()
+                .analyzer_context
+                .functions
+                .get(&src.id)
+                .unwrap()
+                .name
+                .to_string();
+            return Err(SimulatorError::recursive_function(
+                &name,
+                &src.comptime.token,
+            ));
+        }
 
         for stmt in &body.statements {
             let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
