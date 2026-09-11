@@ -44,6 +44,8 @@ pub struct Build {
     pub instance_total_limit: usize,
     #[serde(default = "default_function_instance_depth_limit")]
     pub function_instance_depth_limit: usize,
+    #[serde(default = "default_symbol_eval_depth_limit")]
+    pub symbol_eval_depth_limit: usize,
     #[serde(default = "default_evaluate_size_limit")]
     pub evaluate_size_limit: usize,
     #[serde(default = "default_evaluate_array_limit")]
@@ -72,6 +74,14 @@ fn default_instance_depth_limit() -> usize {
 
 fn default_function_instance_depth_limit() -> usize {
     24
+}
+
+/// A cyclic `const` is caught by `cyclic_type_dependency`, so this bound
+/// guards nothing but the native stack: it is sized against where a debug
+/// build actually aborts, and a larger one turns a clean diagnostic into a
+/// SIGABRT.
+fn default_symbol_eval_depth_limit() -> usize {
+    48
 }
 
 fn default_instance_total_limit() -> usize {

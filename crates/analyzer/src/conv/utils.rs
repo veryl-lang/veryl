@@ -2455,7 +2455,7 @@ pub fn eval_factor_path(
     // resolved to a base case here; otherwise it recurses until the native
     // stack overflows.
     context.function_eval_depth += 1;
-    let ret = if context.function_eval_depth > context.config.function_instance_depth_limit {
+    let ret = if context.function_eval_depth > context.config.symbol_eval_depth_limit {
         if context.function_eval_overflow.is_none() {
             context.function_eval_overflow = Some((token, context.function_eval_depth));
         }

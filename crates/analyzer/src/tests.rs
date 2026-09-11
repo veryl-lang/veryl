@@ -61,6 +61,52 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     errors
 }
 
+#[test]
+fn a_long_const_chain_is_not_a_function_instantiation() {
+    // A `const` that refers to another `const` costs one level of
+    // `eval_factor_path` per link, and an external reference re-derives the
+    // whole chain: each component gets a fresh `Context`, `Context::inherit`
+    // does not carry `variables`, so a consumer cannot see the values the
+    // defining package already folded. That recursion used to be charged
+    // against the function-instantiation limit, which a const chain is not,
+    // so a long chain was rejected partway with a diagnostic pointing at its
+    // first link.
+    //
+    // This runs on an explicit stack: libtest gives each test a fraction of
+    // the main thread's, and these frames are large in a debug build, so the
+    // harness aborts well before either bound. The bound is not what protects
+    // the stack; it is only kept below it.
+    fn chain(n: usize) -> String {
+        let mut s = String::from("package pk {\n    const C0: logic<32> = 32'd0;\n");
+        for i in 1..=n {
+            s += &format!("    const C{i}: logic<32> = C{} + 32'd1;\n", i - 1);
+        }
+        s += "}\nmodule Top (\n    y: output logic<32>,\n) {\n";
+        s += &format!("    assign y = pk::C{n};\n}}\n");
+        s
+    }
+
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            assert!(
+                analyze(&chain(37)).is_empty(),
+                "a 37-link const chain is ordinary SystemVerilog and must elaborate"
+            );
+            // And the bound still bites, and REPORTS rather than aborting.
+            let errors = analyze(&chain(48));
+            assert!(
+                errors
+                    .iter()
+                    .any(|x| matches!(x, AnalyzerError::ExceedLimit { .. })),
+                "past the bound it must be reported"
+            );
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
 #[track_caller]
 fn comb_loop_analysis_is_complete(code: &str) -> bool {
     symbol_table::clear();

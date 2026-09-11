@@ -251,6 +251,7 @@ impl Analyzer {
         context.config.instance_depth_limit = self.build_opt.instance_depth_limit;
         context.config.instance_total_limit = self.build_opt.instance_total_limit;
         context.config.function_instance_depth_limit = self.build_opt.function_instance_depth_limit;
+        context.config.symbol_eval_depth_limit = self.build_opt.symbol_eval_depth_limit;
         context.config.evaluate_size_limit = self.build_opt.evaluate_size_limit;
         context.config.evaluate_array_limit = self.build_opt.evaluate_array_limit;
 
