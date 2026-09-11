@@ -21313,3 +21313,49 @@ fn cast_by_non_constant_expression() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
 }
+
+#[test]
+fn msb_dimension_after_member_access() {
+    // The dimensions consumed before a member access belong to the outer path
+    // segment, so msb on the member counts from the member's own type again.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].a = 0;
+            b[1].a = 0;
+        }
+        let _c: logic = b[0].a[msb + 1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. })),
+        "{errors:?}"
+    );
+
+    // A multi-dimension packed member keeps its own dimension order after an
+    // array select of the enclosing variable.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            m: logic<4, 6>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].m = 0;
+            b[1].m = 0;
+        }
+        let _c: logic = b[0].m[msb][0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}

@@ -287,6 +287,7 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
             context
                 .select_paths
                 .push((path.clone(), generic_path.clone()));
+            context.reset_select_dim();
             for x in &x.expression_identifier_list0_list {
                 if end.is_some() {
                     context.insert_error(AnalyzerError::invalid_select(

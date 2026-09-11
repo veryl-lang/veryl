@@ -27254,3 +27254,44 @@ fn narrowing_cast_of_a_signed_quotient_still_truncates() {
         assert_eq!(g, r, "a={} b={}", r.0, r.1);
     }
 }
+
+#[test]
+fn msb_after_member_access_of_array_element() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic   ,
+        p: output logic   ,
+    ) {
+        struct StructA {
+            v: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].v = a;
+            b[1].v = 8'h01;
+            o      = b[0].v[msb];
+            p      = b[1].v[msb];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        sim.set("a", Value::from_str("8'h80").unwrap());
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(
+            format!("{:b}", sim.get("o").unwrap()),
+            "1'b1",
+            "config={config:?}"
+        );
+        assert_eq!(
+            format!("{:b}", sim.get("p").unwrap()),
+            "1'b0",
+            "config={config:?}"
+        );
+    }
+}
