@@ -188,6 +188,68 @@ fn combinational_loop_closed_inside_one_arm_of_a_case() {
 }
 
 #[test]
+fn no_combinational_loop_through_a_parameter_gated_arm() {
+    // A synchronous FIFO gates its pass-through arm with a parameter, and
+    // such cells ring each other.
+    // At `Pass = 0` the cell's outputs come from flops alone, so keeping the
+    // gated-off operand as a read reports a loop the design does not have.
+    //
+    // Both values are checked from one shape: dropping the phantom edge must
+    // not cost the analysis the real edge at `Pass = 1`.
+    let code = |pass: u32| {
+        format!(
+            r#"
+    module Cell #(
+        param Pass: bit = 1,
+    ) (
+        clk_i   : input  clock   ,
+        wvalid_i: input  logic   ,
+        wdata_i : input  logic<8>,
+        rvalid_o: output logic   ,
+        rdata_o : output logic<8>,
+    ) {{
+        var storage: logic<8>;
+        var full_q : logic   ;
+        always_ff (clk_i) {{
+            storage = wdata_i;
+            full_q  = 1'b1;
+        }}
+        assign rvalid_o = full_q || (Pass && wvalid_i);
+        assign rdata_o  = if (full_q || Pass == 1'b0) ? storage : wdata_i;
+    }}
+
+    module Top (
+        clk_i: input  clock   ,
+        seed : input  logic<8>,
+        o    : output logic<8>,
+    ) {{
+        var a: logic<8>;
+        var b: logic<8>;
+        var v: logic   ;
+        inst u: Cell #(
+            Pass: {pass},
+        ) (
+            clk_i             ,
+            wvalid_i: 1'b1    ,
+            wdata_i : a       ,
+            rvalid_o: v       ,
+            rdata_o : b       ,
+        );
+        assign a = b + seed;
+        assign o = if v ? b : 8'd0;
+    }}
+    "#
+        )
+    };
+
+    assert!(analyze_top(&code(0), &Config::default(), "Top").is_ok());
+    assert!(matches!(
+        analyze_top_allowing_comb_loop(&code(1), &Config::default(), "Top"),
+        Err(SimulatorError::CombinationalLoop { .. })
+    ));
+}
+
+#[test]
 fn undetermined_width() {
     // An unevaluatable width used to panic during IR construction.
     let code = r#"
