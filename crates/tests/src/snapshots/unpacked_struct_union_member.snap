@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+unpacked_struct_union_member (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#unpacked_struct_union_member)
+
+  × "digest" has an unpacked array type, which a struct/union member can't have
+   ╭─[../../testcases/error/unpacked_struct_union_member.veryl:8:17]
+ 7 │     struct wrapper_t {
+ 8 │         digest: member_array_t,
+   ·                 ───────┬──────
+   ·                        ╰── Error location
+ 9 │     }
+   ╰────
+  help: declare "digest" with a packed array type, or move the array outside the struct/union

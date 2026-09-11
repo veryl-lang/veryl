@@ -1458,6 +1458,22 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(unpacked_struct_union_member),
+        help("declare \"{identifier}\" with a packed array type, or move the array outside the struct/union"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" has an unpacked array type, which a struct/union member can't have")]
+    UnpackedStructUnionMember {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(multiple_assignment),
         help("add `#[allow(multiple_assign)]` to the declaration of \"{identifier}\" if it is intentional"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2391,6 +2407,7 @@ impl AnalyzerError {
             AnalyzerError::UnresolvableGenericExpression { input, .. } => input,
             AnalyzerError::UnsignedArithShift { input, .. } => input,
             AnalyzerError::UnusedReturn { input, .. } => input,
+            AnalyzerError::UnpackedStructUnionMember { input, .. } => input,
             AnalyzerError::UnusedVariable { input, .. } => input,
             AnalyzerError::WrongSeparator { input, .. } => input,
             AnalyzerError::ZeroWidthNumber { input, .. } => input,
@@ -2516,6 +2533,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownUnsafe { token_source, .. } => *token_source,
             AnalyzerError::UnresolvableGenericExpression { token_source, .. } => *token_source,
             AnalyzerError::UnusedReturn { token_source, .. } => *token_source,
+            AnalyzerError::UnpackedStructUnionMember { token_source, .. } => *token_source,
             AnalyzerError::UnusedVariable { token_source, .. } => *token_source,
             AnalyzerError::WrongSeparator { token_source, .. } => *token_source,
             AnalyzerError::InvalidWavedrom { token_source, .. } => *token_source,
@@ -3358,6 +3376,14 @@ impl AnalyzerError {
     }
     pub fn mixed_struct_union_member(token: &TokenRange) -> Self {
         AnalyzerError::MixedStructUnionMember {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn unpacked_struct_union_member(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnpackedStructUnionMember {
+            identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
