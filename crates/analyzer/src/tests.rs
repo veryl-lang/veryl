@@ -7488,6 +7488,26 @@ fn referring_before_definition() {
         AnalyzerError::ReferringBeforeDefinition { .. }
     ));
 
+    // An instantiation binding the forward-referenced parameter must not
+    // suppress the check for the component's own conversion.
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleB #(B: 4) ();
+    }
+    module ModuleB #(
+        param A: u32 = B,
+        param B: u32 = 3,
+    ) {
+        const C: u32 = A + B;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
     let code = r#"
     module ModuleA {
         always_comb {
