@@ -85,6 +85,7 @@ pub struct Context {
     pub converting_funcs: Vec<SymbolId>,
     pub variables: HashMap<VarId, Variable>,
     pub functions: HashMap<VarId, Function>,
+    pub(crate) function_value_cache: crate::ir::FunctionValueCache,
     pub port_types: HashMap<VarPath, (Type, ClockDomain)>,
     pub modports: HashMap<StrId, Vec<(StrId, Direction)>>,
     pub declarations: Vec<Declaration>,
