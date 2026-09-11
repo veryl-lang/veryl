@@ -1036,9 +1036,21 @@ impl Factor {
                         }
                     }
                 }
+                for expression in &index.0 {
+                    expression.gather_ff(context, table, decl, assign_target, from_ff);
+                }
+                for expression in &select.0 {
+                    expression.gather_ff(context, table, decl, assign_target, from_ff);
+                }
+                if let Some((_, expression)) = &select.1 {
+                    expression.gather_ff(context, table, decl, assign_target, from_ff);
+                }
             }
             Factor::FunctionCall(x) => {
                 x.gather_ff(context, table, decl, assign_target, from_ff);
+            }
+            Factor::SystemFunctionCall(x) => {
+                x.gather_ff(context, table, decl, from_ff);
             }
             _ => (),
         }
