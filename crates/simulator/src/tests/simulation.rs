@@ -24872,6 +24872,67 @@ fn a_register_read_only_as_a_write_index_keeps_its_pre_edge_value() {
 }
 
 #[test]
+fn a_register_read_only_as_a_for_range_bound_keeps_its_pre_edge_value() {
+    // Until the bound was gathered, `n` looked unread and lost its register,
+    // so the loop ran against the post-edge count.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        sum: output logic<8>,
+    ) {
+        var n: logic<3>;
+        always_ff {
+            if_reset {
+                n = 2;
+            } else {
+                n = n + 1;
+            }
+        }
+        always_ff {
+            if_reset {
+                sum = 0;
+            } else {
+                var acc: logic<8>;
+                acc = 0;
+                for i in 0..n {
+                    acc = acc + i;
+                }
+                sum = acc;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+
+        // Pre-edge n = 2: the loop sums 0 + 1.
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(1, 8, false),
+            "config={config:?}"
+        );
+
+        // Pre-edge n = 3: 0 + 1 + 2.
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("sum").unwrap(),
+            Value::new(3, 8, false),
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn an_early_return_in_a_package_function_wins() {
     // `return` lowers to an assignment to the function's return variable, and
     // the constant evaluator used to walk every statement of the body — so the
