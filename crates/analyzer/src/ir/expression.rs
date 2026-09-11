@@ -209,12 +209,11 @@ impl Expression {
                 comptime.is_global = xc.is_global & yc.is_global;
 
                 let mut ctx = op.eval_context_binary(xc, yc);
-                // An `as`-cast inherits its target's signedness only for an
-                // explicit signed TYPE; a numeric width cast (`x as N`) is an
-                // unsigned `logic<N>` like the emitted SystemVerilog. Otherwise
-                // it is spuriously signed at runtime, sign-extending in shifts.
+                // A numeric width cast (`x as N`, emitted as `N'(x)`) keeps
+                // the operand's signedness. The width literal's signedness
+                // determines neither sign extension nor arithmetic shifting.
                 if *op == Op::As && !as_target_is_type {
-                    ctx.signed = false;
+                    ctx.signed = xc.signed;
                 }
                 ctx
             }
@@ -497,9 +496,9 @@ impl Expression {
                         1
                     };
 
-                    for _ in 0..rep {
-                        ret = ret.concat(&exp);
-                    }
+                    let width = exp.width().checked_mul(rep)?.checked_add(ret.width())?;
+                    context.check_size(width, self.token_range())?;
+                    ret = ret.concat(&exp.repeat(rep));
                 }
                 Some(ret)
             }

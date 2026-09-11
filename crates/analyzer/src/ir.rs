@@ -5,6 +5,9 @@ mod declaration;
 mod expression;
 mod ff_table;
 mod function;
+pub(crate) use function::FunctionValueCache;
+#[cfg(test)]
+pub(crate) use function::VALUE_EVALUATIONS;
 mod interface;
 #[allow(clippy::module_inception)]
 mod ir;

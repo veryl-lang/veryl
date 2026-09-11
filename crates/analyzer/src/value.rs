@@ -1042,8 +1042,28 @@ impl Value {
         }
     }
 
+    /// Replicate a packed value with linear total bit-copying work. The
+    /// geometrically growing blocks avoid copying every preceding repetition
+    /// again. Concatenation also supplies the required unsigned result.
+    pub fn repeat(&self, mut count: usize) -> Value {
+        let mut result = Value::new(0, 0, false);
+        let mut block = self.clone();
+        while count != 0 {
+            if count & 1 != 0 {
+                result = result.concat(&block);
+            }
+            count >>= 1;
+            if count != 0 {
+                block = block.concat(&block);
+            }
+        }
+        result
+    }
+
     pub fn concat(&self, x: &Value) -> Value {
         let width = self.width() + x.width();
+        #[cfg(test)]
+        CONCATENATED_BITS.set(CONCATENATED_BITS.get().saturating_add(width));
 
         if width > 64 {
             let (mut payload, mut mask_xz) = match self {
@@ -1963,6 +1983,11 @@ impl MaskCache {
 }
 
 #[cfg(test)]
+thread_local! {
+    static CONCATENATED_BITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::ir::{Op, TypeKind};
@@ -2020,6 +2045,54 @@ mod tests {
         assert_eq!(&format!("{:x}", x10), "16'hf0f0");
         assert_eq!(&format!("{:x}", x11), "32'h0000f0f0");
         assert_eq!(&format!("{:x}", x12), "72'hd00000e0e00000f0f0");
+    }
+
+    #[test]
+    fn repeat_matches_bit_strings_and_preserves_xz() {
+        for literal in [
+            "1'b1",
+            "8'b10xz0101",
+            "37'h12xz89abc",
+            "65'h123456789abcdefxz",
+        ] {
+            let mut value = from_based_str(literal);
+            for signed in [false, true] {
+                value.set_signed(signed);
+                let pattern = format!("{:b}", value);
+                let pattern = pattern.split_once('b').unwrap().1;
+                for count in [0, 1, 2, 3, 7, 8, 9, 17] {
+                    let repeated = value.repeat(count);
+                    assert_eq!(repeated.width(), value.width() * count);
+                    assert!(!repeated.signed());
+                    if count != 0 {
+                        assert_eq!(
+                            format!("{:b}", repeated),
+                            format!("{}'b{}", repeated.width(), pattern.repeat(count))
+                        );
+                    } else {
+                        assert_eq!(repeated.to_u64(), Some(0));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn repeat_bit_copying_work_is_linear_in_result_width() {
+        let value = from_based_str("8'b10xz0101");
+        for count in [1, 31, 32, 33, 1024, 1_000_003] {
+            CONCATENATED_BITS.set(0);
+            let repeated = value.repeat(count);
+            let work = CONCATENATED_BITS.get();
+            assert!(work <= 4 * repeated.width(), "count={count}, work={work}");
+            for index in [0, count / 2, count - 1] {
+                assert_eq!(repeated.select(index * 8 + 7, index * 8), value);
+            }
+            eprintln!(
+                "constant repeat count={count} width={} copied_bits={work}",
+                repeated.width()
+            );
+        }
     }
 
     #[test]
