@@ -629,6 +629,7 @@ fn ff_read_as_system_function_arg_from_other_block() {
         addr: output logic<2>,
         q0  : output logic<8>,
         q1  : output logic<8>,
+        q2  : output logic<2>,
     ) {
         var mem : logic<8> [4];
         assign mem[0] = 8'h10;
@@ -647,6 +648,7 @@ fn ff_read_as_system_function_arg_from_other_block() {
             if en {
                 q0 = mem[$unsigned(addr)];
                 q1 = $unsigned(mem[addr]);
+                q2 = $unsigned(addr);
             }
         }
     }
@@ -681,6 +683,12 @@ fn ff_read_as_system_function_arg_from_other_block() {
             Value::new(0x10, 8, false),
             "config={config:?}"
         );
+        // Reaches the table through the system function arm alone.
+        assert_eq!(
+            sim.get("q2").unwrap(),
+            Value::new(0, 2, false),
+            "config={config:?}"
+        );
 
         sim.step(&clk);
         assert_eq!(
@@ -696,6 +704,11 @@ fn ff_read_as_system_function_arg_from_other_block() {
         assert_eq!(
             sim.get("q1").unwrap(),
             Value::new(0x11, 8, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("q2").unwrap(),
+            Value::new(1, 2, false),
             "config={config:?}"
         );
     }

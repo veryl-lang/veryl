@@ -760,11 +760,8 @@ impl AssignDestination {
         }
     }
 
-    /// A dynamic index or select on the left-hand side READS the variables in
-    /// it. Those reads live outside `expr`, so without registering them here a
-    /// register used *only* as an index looks unread, and the optimizer is
-    /// free to give it storage where the write is visible immediately — the
-    /// indexed write then lands in the post-edge slot.
+    /// The index and select on the left-hand side are read, not written, and
+    /// are not part of `expr`: see [`VarIndex::gather_ff`].
     pub fn gather_ff_selectors(
         &self,
         context: &mut Context,
@@ -773,15 +770,10 @@ impl AssignDestination {
         assign_target: Option<&AssignTarget>,
         from_ff: bool,
     ) {
-        for expression in &self.index.0 {
-            expression.gather_ff(context, table, decl, assign_target, from_ff);
-        }
-        for expression in &self.select.0 {
-            expression.gather_ff(context, table, decl, assign_target, from_ff);
-        }
-        if let Some((_, expression)) = &self.select.1 {
-            expression.gather_ff(context, table, decl, assign_target, from_ff);
-        }
+        self.index
+            .gather_ff(context, table, decl, assign_target, from_ff);
+        self.select
+            .gather_ff(context, table, decl, assign_target, from_ff);
     }
 
     pub fn set_index(&mut self, index: &VarIndex) {
