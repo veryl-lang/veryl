@@ -1,4 +1,3 @@
-use crate::backend::inst::next_test_top_id;
 use crate::backend::{
     ChunkOutput, ChunkPlan, CompileCtx, CompiledWhole, compile_plans_parallel, whole,
 };
@@ -5344,10 +5343,6 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
 
 impl Conv<&air::Module> for ProtoModule {
     fn conv(context: &mut Context, src: &air::Module) -> Result<Self, SimulatorError> {
-        // This conv is one test top (testbench).  Tag it so cross-test DUT
-        // recurrence can be told apart from within-top replication (SMP harts).
-        context.test_top_id = next_test_top_id();
-
         let mut analyzer_context = veryl_analyzer::conv::Context::default();
         analyzer_context.variables = src.variables.clone();
         analyzer_context.functions = src.functions.clone();
@@ -5758,7 +5753,9 @@ impl Conv<&air::Module> for ProtoModule {
                 base
             }
         };
-        let claimed = comb_pipeline_cache::try_get_or_claim(key, context.config.dut_reuse);
+        let claimed = context
+            .comb_cache
+            .try_get_or_claim(key, context.config.dut_reuse);
         let cached: Arc<comb_pipeline_cache::CombPipeline> = match claimed {
             comb_pipeline_cache::Outcome::Hit(cached) => {
                 // The pipeline (incl. the in-place event DCE) did not run for
@@ -6452,7 +6449,7 @@ impl Conv<&air::Module> for ProtoModule {
                     &mut context.backends,
                     &context.config,
                     key,
-                    context.config.dut_reuse,
+                    &context.comb_cache,
                     protos,
                     whole::WholeCombShape::default(),
                 )
@@ -6600,7 +6597,6 @@ impl Conv<&air::Module> for ProtoModule {
         // try compile_whole_comb; backends that decline (4-state,
         // unsupported construct) return None and Ir::settle_comb stays
         // on the per-chunk Cranelift loop.
-        let dut_reuse = context.config.dut_reuse;
         let whole_comb: Option<Arc<dyn CompiledWhole>> = if !size_ok {
             None
         } else {
@@ -6612,7 +6608,7 @@ impl Conv<&air::Module> for ProtoModule {
                 &mut context.backends,
                 &context.config,
                 key,
-                dut_reuse,
+                &context.comb_cache,
                 &pre_jit_stmts,
                 whole::WholeCombShape {
                     localize: localize_info.as_ref(),

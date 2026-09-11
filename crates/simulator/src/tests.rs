@@ -493,6 +493,7 @@ where
 mod component;
 mod component_sim;
 mod derived_clock;
+mod dut_reuse;
 mod error;
 mod hier_ref;
 mod simulation;
