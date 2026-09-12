@@ -1,6 +1,7 @@
 use crate::analyzer_error::{
     AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForRangeKind,
-    InvalidForStepKind, MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
+    InvalidForStepKind, InvalidSelectKind, MismatchTypeKind, MultipleDefaultKind,
+    UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -4365,6 +4366,33 @@ pub fn function_call(
 
     let ret = context.block(|c| {
         let func = get_function(c, &path, token)?;
+        if let Some(function) = c.functions.get(&func.id) {
+            let shape = &function.array;
+            let omitted_singleton = shape.dims() == 1
+                && shape.get(0) == Some(&Some(1))
+                && receiver_index.0.is_empty();
+            let invalid = if !omitted_singleton && receiver_index.dimension() != shape.dims() {
+                Some(InvalidSelectKind::OutOfDimension {
+                    dim: receiver_index.dimension(),
+                    size: shape.dims(),
+                })
+            } else {
+                receiver_index.0.iter().zip(shape.iter()).find_map(|(expr, size)| {
+                    let size = (*size)?;
+                    let index = expr.comptime().is_const
+                        .then(|| expr.comptime().get_value().ok()?.to_usize())??;
+                    (index >= size).then_some(InvalidSelectKind::OutOfRange {
+                        beg: index,
+                        end: index,
+                        size,
+                    })
+                })
+            };
+            if let Some(invalid) = invalid {
+                c.insert_error(AnalyzerError::invalid_select(&invalid, &token, &[]));
+                return Err(ir_error!(token));
+            }
+        }
         let (mut inputs, outputs) = args.to_function_args(c, &func, token)?;
 
         let symbol = symbol_table::get(sig.symbol);

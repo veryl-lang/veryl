@@ -4619,7 +4619,9 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             .clone();
         let (receiver, mut receiver_statements) =
             sample_function_receiver(context, &src.receiver_index)?;
-        let body = func.get_function_for_index(&receiver).unwrap();
+        let body = func
+            .get_function_for_index(&receiver)
+            .ok_or_else(|| SimulatorError::unresolved_expression(&src.comptime.token))?;
 
         for (var_path, expr) in &src.inputs {
             let arg_var_id = body.arg_map.get(var_path).unwrap();

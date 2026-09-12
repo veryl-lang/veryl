@@ -417,6 +417,7 @@ struct FunctionSummaryKey {
 #[derive(Clone)]
 struct FunctionSummary {
     arg_map: HashMap<VarPath, VarId>,
+    receiver_formals: HashMap<VarId, usize>,
     graph: Rc<DependencyDag<SsaKey>>,
     result: FunctionResultSummary,
     writes: Vec<(NodeKey, Option<usize>)>,
@@ -518,6 +519,7 @@ pub(super) struct FunctionSummaries<'a> {
     contexts: Vec<ProcedureContext>,
     module_scope_ids: Rc<HashSet<VarId>>,
     work: usize,
+    next_receiver_id: VarId,
 }
 
 /// Reusable module-local evaluation context for independent procedural
@@ -910,6 +912,14 @@ impl<'a> FunctionSummaries<'a> {
             // baseline scratch context lazily so ordinary declarations keep
             // just the reusable top-level procedure context.
             contexts: Vec::new(),
+            next_receiver_id: module
+                .variables
+                .keys()
+                .chain(module.interface_members.keys())
+                .chain(module.functions.keys())
+                .copied()
+                .max()
+                .unwrap_or_default(),
             module_scope_ids: Rc::new(module_scope_ids(module)),
             #[cfg(test)]
             work: FUNCTION_LIMIT.get(),
@@ -938,7 +948,56 @@ impl<'a> FunctionSummaries<'a> {
             .contexts
             .pop()
             .unwrap_or_else(|| ProcedureContext::new_summary(Rc::clone(&self.module_scope_ids)));
-        context.prepare_summary(self.module, call.id, &call.receiver_index);
+        // Bind receiver coordinates as hidden copy-in formals. Substituting
+        // the caller's expression into every access would re-evaluate it
+        // after argument or body side effects and could select another cell.
+        let mut receiver_formals = HashMap::default();
+        let mut receiver_variables = Vec::new();
+        let receiver_index = VarIndex(
+            call.receiver_index
+                .0
+                .iter()
+                .enumerate()
+                .map(|(axis, expr)| {
+                    if expr.comptime().is_const {
+                        return Expression::Term(Box::new(Factor::Value(expr.comptime().clone())));
+                    }
+                    self.next_receiver_id.inc();
+                    let id = self.next_receiver_id;
+                    receiver_formals.insert(id, axis);
+                    let mut comptime = expr.comptime().clone();
+                    comptime.value = crate::ir::ValueVariant::Unknown;
+                    comptime.part_select = None;
+                    comptime.member_select_domain = None;
+                    receiver_variables.push(crate::ir::Variable {
+                        id,
+                        path: VarPath::default(),
+                        kind: crate::ir::VarKind::Let,
+                        r#type: comptime.r#type.clone(),
+                        array_path_offsets: Vec::new(),
+                        value: Vec::new(),
+                        assigned: Vec::new(),
+                        affiliation: crate::symbol::Affiliation::Function,
+                        token: comptime.token,
+                    });
+                    Expression::Term(Box::new(Factor::Variable(
+                        id,
+                        VarIndex::default(),
+                        VarSelect::default(),
+                        comptime,
+                    )))
+                })
+                .collect(),
+        );
+        context.prepare_summary(self.module, call.id, &receiver_index);
+        for variable in receiver_variables {
+            context
+                .ctx
+                .as_mut()
+                .unwrap()
+                .variables
+                .insert(variable.id, variable);
+        }
         // Function IR is immutable during dependency analysis. Move the one
         // module-wide map down the suspended call chain instead of cloning it
         // into every recursive scratch context, then restore it before the
@@ -948,7 +1007,8 @@ impl<'a> FunctionSummaries<'a> {
             self.module,
             self.bit_part,
             call.id,
-            &call.receiver_index,
+            &receiver_index,
+            receiver_formals,
             &mut context,
             self,
         )
@@ -971,7 +1031,8 @@ impl<'a> FunctionSummaries<'a> {
             if call.index.is_some() || call.receiver_index.0.is_empty() {
                 self.summaries.insert(key, Some(summary.clone()));
             } else {
-                // A dynamic receiver embeds this call site's selector sources.
+                // Mixed constant/dynamic coordinates and their types belong
+                // to this call site, rather than the common `index: None` key.
                 self.summaries.remove(&key);
             }
             FunctionSummaryLookup::Ready(summary)
@@ -1301,6 +1362,7 @@ struct ProcedureAnalysis<'a, 's> {
     active_assignment: Option<TokenRange>,
     repeatable: bool,
     shared_call_branches: HashMap<SummaryInvocationKey, Rc<HashMap<BranchId, BranchId>>>,
+    receiver_formals: HashMap<VarId, usize>,
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
@@ -1342,6 +1404,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             active_assignment: None,
             repeatable: true,
             shared_call_branches: HashMap::default(),
+            receiver_formals: HashMap::default(),
         }
     }
 
@@ -1410,15 +1473,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         bit_part: &'a BitPartition,
         id: VarId,
         receiver_index: &VarIndex,
+        receiver_formals: HashMap<VarId, usize>,
         context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
     ) -> Option<FunctionSummary> {
         let function = module.functions.get(&id)?;
         let body = function.get_function_for_index(receiver_index)?;
-        let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
+        let formal_ids = body
+            .arg_map
+            .values()
+            .copied()
+            .chain(receiver_formals.keys().copied())
+            .collect::<HashSet<_>>();
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
         let mut this = Self::from_context(bit_part, module, ctx, module_scope_ids);
+        this.receiver_formals = receiver_formals;
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
         this.call_caches.push(None);
@@ -1523,6 +1593,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
         let summary = FunctionSummary {
             arg_map: body.arg_map,
+            receiver_formals: this.receiver_formals.clone(),
             graph,
             result,
             repeatable: this.repeatable
@@ -1985,6 +2056,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         select: &VarSelect,
         member_select_domain: Option<MemberSelectDomain>,
     ) -> Vec<NodeKey> {
+        if self.receiver_formals.contains_key(&id) {
+            return self.keys_for_id(id);
+        }
         if !self.ctx.variables.contains_key(&id) && index.0.is_empty() && select.is_empty() {
             return self.keys_for_id(id);
         }
@@ -3051,6 +3125,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::Variable(id, index, select, comptime) => {
+                    if self.receiver_formals.contains_key(id) {
+                        return ExpressionSources::whole(self.read_variable(
+                            *id,
+                            index,
+                            select,
+                            comptime.member_select_domain,
+                        ));
+                    }
                     let sampled = self.sample_variable(factor);
                     let mut selector_sources = if let Some(sampled) = &sampled {
                         sampled.selectors.clone()
@@ -4190,13 +4272,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         #[cfg(test)]
         FUNCTION_EVALUATIONS.set(FUNCTION_EVALUATIONS.get() + 1);
 
+        // The receiver is sampled once, before ordinary argument copy-in.
+        // Keep these versions separate from captures read after those calls.
+        let receiver_sources = call
+            .receiver_index
+            .0
+            .iter()
+            .map(|expr| self.eval_expr(expr))
+            .collect::<Vec<_>>();
+
         let summary = self
             .summaries
             .as_deref_mut()
             .map(|summaries| summaries.get(call, &mut self.ctx));
         match summary {
             Some(FunctionSummaryLookup::Ready(summary)) => {
-                return self.apply_function_summary(call, controls, summary.as_ref());
+                return self.apply_function_summary(
+                    call,
+                    controls,
+                    summary.as_ref(),
+                    &receiver_sources,
+                );
             }
             Some(FunctionSummaryLookup::Recursive) => {
                 self.repeatable = false;
@@ -4321,6 +4417,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         call: &FunctionCall,
         controls: &[VersionId],
         summary: &FunctionSummary,
+        receiver_sources: &[Vec<VersionId>],
     ) -> CallResult {
         self.status = self.status.max(summary.status);
         self.repeatable &= summary.repeatable;
@@ -4355,7 +4452,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             if !bindings.contains_key(key) {
                 bindings.insert(
                     *key,
-                    self.map_summary_node_source(call, summary, key.node)
+                    self.map_summary_node_source(call, summary, key.node, receiver_sources)
                         .sources,
                 );
             }
@@ -4427,7 +4524,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .opaque_sources
             .iter()
             .flat_map(|source| {
-                self.map_summary_node_source(call, summary, *source)
+                self.map_summary_node_source(call, summary, *source, receiver_sources)
                     .sources
                     .into_iter()
                     .map(|(version, _)| version)
@@ -4445,7 +4542,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         call: &FunctionCall,
         summary: &FunctionSummary,
         source: NodeKey,
+        receiver_sources: &[Vec<VersionId>],
     ) -> ExpressionSources {
+        if let Some(axis) = summary.receiver_formals.get(&source.0) {
+            return ExpressionSources::whole(receiver_sources[*axis].clone());
+        }
         if self.is_module_scope_key(source) {
             return ExpressionSources {
                 sources: vec![(self.read_key(source), PositionRelation::default())],
@@ -4532,6 +4633,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn keys_for_id(&self, id: VarId) -> Vec<NodeKey> {
+        if self.receiver_formals.contains_key(&id) {
+            // A sampled selector is one whole-value dependency, with no
+            // circuit storage or packed partition of its own.
+            return vec![(
+                id,
+                ArraySpan {
+                    start: 0,
+                    length: 1,
+                },
+                0,
+            )];
+        }
         let mut keys = self
             .bit_part
             .array_spans(id)

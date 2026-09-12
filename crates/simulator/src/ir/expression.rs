@@ -2252,7 +2252,9 @@ pub(crate) fn inline_function_call(
         .get(&call.id)
         .unwrap()
         .clone();
-    let body = func.get_function_for_index(&call.receiver_index).unwrap();
+    let body = func
+        .get_function_for_index(&call.receiver_index)
+        .ok_or_else(|| SimulatorError::unresolved_expression(&call.comptime.token))?;
     let ret_id = body.ret.unwrap();
 
     let mut ret_offsets: Vec<VarOffset> = {

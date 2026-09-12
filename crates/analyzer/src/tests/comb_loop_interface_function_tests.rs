@@ -1448,3 +1448,193 @@ fn comb_loop_interface_function_in_selector_keeps_return_bits_independent() {
             .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. }))
     );
 }
+
+#[test]
+fn interface_function_rejects_invalid_receiver_coordinates() {
+    for (shape, receiver) in [
+        ("[2]", "bus"),
+        ("[2]", "bus[2]"),
+        ("[2]", "bus[1][0]"),
+        ("[2, 1]", "bus[1]"),
+        ("", "bus[0]"),
+    ] {
+        let code = format!(
+            r#"
+            interface Bus {{ function get () -> logic {{ return 0; }} }}
+            module Top (o: output logic) {{
+                inst bus: Bus{shape};
+                assign o = {receiver}.get();
+            }}
+        "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidSelect { .. })),
+            "{receiver}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn comb_loop_receiver_is_sampled_before_argument_side_effects() {
+    for (initial, replacement, expected) in [("o", "0", true), ("i", "o", false)] {
+        let code = format!(
+            r#"
+            interface Bus {{
+                var value: logic;
+                function get (unused: input logic) -> logic {{ return value; }}
+            }}
+            module Top (i: input logic, o: output logic) {{
+                var index: logic;
+                inst bus: Bus[2];
+                assign bus[0].value = 0;
+                assign bus[1].value = 1;
+                function change_index () -> logic {{ index = {replacement}; return 0; }}
+                always_comb {{
+                    index = {initial};
+                    o = bus[index].get(change_index());
+                }}
+            }}
+        "#
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+        assert_interface_function_comb_loop(&code, expected);
+    }
+}
+
+#[test]
+fn comb_loop_receiver_is_sampled_before_body_side_effects() {
+    for (initial, replacement, expected) in [("o", "0", true), ("i", "o", false)] {
+        let code = format!(
+            r#"
+            interface Bus {{
+                var index: logic;
+                var value: logic;
+                function get (replacement: input logic) -> logic {{
+                    index = replacement;
+                    return value;
+                }}
+            }}
+            module Top (i: input logic, o: output logic) {{
+                inst bus: Bus[2];
+                assign bus[0].value = 0;
+                assign bus[1].value = 1;
+                always_comb {{
+                    bus[0].index = {initial};
+                    bus[1].index = 0;
+                    o = bus[bus[0].index].get({replacement});
+                }}
+            }}
+        "#
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+        assert_interface_function_comb_loop(&code, expected);
+    }
+}
+
+#[test]
+fn comb_loop_receiver_expression_runs_once_even_when_body_does_not_read_it() {
+    for body in ["return 0;", "return value ^ value;"] {
+        let code = format!(
+            r#"
+            interface Bus {{
+                var value: logic;
+                function get () -> logic {{ {body} }}
+            }}
+            module Top (o: output logic) {{
+                var index: logic;
+                inst bus: Bus[2];
+                assign bus[0].value = 0;
+                assign bus[1].value = 1;
+                function take_index () -> logic {{
+                    let previous: logic = index;
+                    index = 0;
+                    return previous;
+                }}
+                always_comb {{
+                    index = o;
+                    let unused: logic = bus[take_index()].get();
+                    o = index;
+                }}
+            }}
+        "#
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+        assert_interface_function_comb_loop(&code, false);
+    }
+}
+
+#[test]
+fn receiver_discovery_deduplicates_before_retaining_nested_calls() {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            for depth in [16, 64] {
+                let mut code = String::from(
+                    r#"
+            interface Bus {
+                var value: logic;
+                function get (x: input logic) -> logic { return value ^ x; }
+            }
+            module Top (index: input logic, i: input logic, o: output logic<32>) {
+                inst bus: Bus[2];
+                assign bus[0].value = 0;
+                assign bus[1].value = 1;
+                function identity (x: input logic) -> logic { return x; }
+        "#,
+                );
+                for bit in 0..32 {
+                    code.push_str(&format!(
+                        "assign o[{bit}] = bus[index].get({}i{});",
+                        "identity(".repeat(depth),
+                        ")".repeat(depth)
+                    ));
+                }
+                code.push('}');
+                crate::comb_loop_detect::reset_span_call_queue_counts();
+                let errors = analyze(&code);
+                assert!(errors.is_empty(), "{errors:?}");
+                // Every dynamic call discovers the same receiver regions, regardless
+                // of its source location or the depth of its ordinary arguments.
+                assert_eq!(crate::comb_loop_detect::span_call_queue_counts(), (1, 1));
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn comb_loop_receiver_side_effect_is_not_repeated_for_each_member_read() {
+    let code = r#"
+        interface Bus {
+            var value: logic;
+            function get () -> logic { return value ^ value; }
+        }
+        module Top (o: output logic) {
+            var index: logic;
+            var saved: logic;
+            inst bus: Bus[2];
+            assign bus[0].value = 0;
+            assign bus[1].value = 1;
+            function take_index () -> logic {
+                let previous: logic = index;
+                index = saved;
+                saved = 0;
+                return previous;
+            }
+            always_comb {
+                index = 0;
+                saved = o;
+                let unused: logic = bus[take_index()].get();
+                o = index;
+            }
+        }
+    "#;
+    // One receiver evaluation leaves index dependent on o; a second would
+    // overwrite that dependency with the cleared saved value.
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_interface_function_comb_loop(code, true);
+}

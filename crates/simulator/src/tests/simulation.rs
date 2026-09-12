@@ -27873,3 +27873,64 @@ fn msb_after_member_access_of_array_element() {
         );
     }
 }
+
+#[test]
+fn interface_array_function_invalid_receiver_is_an_error() {
+    for statement_call in [false, true] {
+        let statement = if statement_call {
+            "always_comb { bus[0].put(i); o = bus[0].value; }"
+        } else {
+            "assign bus[0].value = i; assign o = bus[0].get();"
+        };
+        let code = format!(
+            r#"
+            interface Bus {{
+                var value: logic;
+                function get () -> logic {{ return value; }}
+                function put (x: input logic) {{ value = x; }}
+            }}
+            module Top (i: input logic, o: output logic) {{
+                inst bus: Bus[2];
+                assign bus[1].value = i;
+                {statement}
+            }}
+        "#
+        );
+        let mut ir = analyze_air(&code);
+        let mut changed = false;
+        for component in &mut ir.components {
+            let air::Component::Module(module) = component else {
+                continue;
+            };
+            for declaration in &mut module.declarations {
+                let air::Declaration::Comb(comb) = declaration else {
+                    continue;
+                };
+                for statement in &mut comb.statements {
+                    let call = match statement {
+                        air::Statement::FunctionCall(call) => Some(call.as_mut()),
+                        air::Statement::Assign(assign) => match &mut assign.expr {
+                            air::Expression::Term(factor) => match factor.as_mut() {
+                                air::Factor::FunctionCall(call) => Some(call),
+                                _ => None,
+                            },
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    if let Some(call) = call {
+                        // Malformed AIR can reach lowering independently of
+                        // the source analyzer's receiver validation.
+                        call.receiver_index.0.push(call.receiver_index.0[0].clone());
+                        changed = true;
+                    }
+                }
+            }
+        }
+        assert!(changed);
+        assert!(matches!(
+            build_ir(&ir, "Top".into(), &Config::default()),
+            Err(SimulatorError::UnresolvedExpression { .. })
+        ));
+    }
+}

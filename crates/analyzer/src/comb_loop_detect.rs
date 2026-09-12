@@ -133,7 +133,7 @@ fn build_bit_partition(
     ctx: &mut Context,
 ) -> Option<BitPartition> {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
-    let mut calls = Vec::new();
+    let mut calls = SpanCalls::default();
 
     for declaration in &module.declarations {
         if let Declaration::Comb(comb) = declaration {
@@ -229,27 +229,11 @@ fn build_bit_partition(
     // Hydrate only receivers that are actually called. A queue avoids growing
     // the Rust stack with the function-call graph; each specialization is
     // visited once even when it is called repeatedly.
-    let mut visited = HashSet::default();
-    while let Some(call) = calls.pop() {
-        let receiver = call
-            .receiver_index
-            .0
-            .iter()
-            .map(|x| {
-                x.comptime()
-                    .is_const
-                    .then(|| x.comptime().get_value().ok().and_then(|v| v.to_usize()))
-                    .flatten()
-                    .ok_or_else(|| x.token_range())
-            })
-            .collect::<Vec<_>>();
-        if !visited.insert((call.id, receiver)) {
-            continue;
-        }
+    while let Some((id, receiver)) = calls.pending.pop() {
         if let Some(body) = module
             .functions
-            .get(&call.id)
-            .and_then(|f| f.get_function_for_index(&call.receiver_index))
+            .get(&id)
+            .and_then(|f| f.get_function_for_index(&receiver))
         {
             collect_statement_spans(&body.statements, &mut accesses, &mut calls, ctx);
         }
@@ -457,7 +441,7 @@ fn collect_struct_field_bounds(
 fn collect_expr_spans(
     expr: &Expression,
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
-    calls: &mut Vec<FunctionCall>,
+    calls: &mut SpanCalls,
     ctx: &mut Context,
 ) {
     match expr {
@@ -503,10 +487,83 @@ fn collect_expr_spans(
     }
 }
 
+#[derive(Default)]
+struct SpanCalls {
+    pending: Vec<(VarId, crate::ir::VarIndex)>,
+    visited: HashSet<(VarId, Vec<Option<usize>>)>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static SPAN_QUEUED_COORDINATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SPAN_PENDING_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_span_call_queue_counts() {
+    SPAN_QUEUED_COORDINATES.set(0);
+    SPAN_PENDING_PEAK.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn span_call_queue_counts() -> (usize, usize) {
+    (SPAN_QUEUED_COORDINATES.get(), SPAN_PENDING_PEAK.get())
+}
+
+impl SpanCalls {
+    fn insert(&mut self, call: &FunctionCall, ctx: &Context) {
+        // Scalar bodies are already visited directly. Discovery needs only
+        // receiver coordinates, never copies of the caller's argument trees.
+        if ctx
+            .functions
+            .get(&call.id)
+            .is_none_or(|f| f.array.is_empty())
+        {
+            return;
+        }
+        let coordinates = call
+            .receiver_index
+            .0
+            .iter()
+            .map(|expr| {
+                expr.comptime()
+                    .is_const
+                    .then(|| expr.comptime().get_value().ok()?.to_usize())
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        if !self.visited.insert((call.id, coordinates.clone())) {
+            return;
+        }
+        // Dynamic coordinates all discover the same storage regions. Their
+        // executable expressions were visited before enqueueing this call.
+        let receiver = crate::ir::VarIndex(
+            call.receiver_index
+                .0
+                .iter()
+                .zip(coordinates)
+                .map(|(expr, coordinate)| {
+                    let comptime = if coordinate.is_some() {
+                        expr.comptime().clone()
+                    } else {
+                        crate::ir::Comptime::create_unknown(expr.token_range())
+                    };
+                    Expression::Term(Box::new(Factor::Value(comptime)))
+                })
+                .collect(),
+        );
+        #[cfg(test)]
+        SPAN_QUEUED_COORDINATES.set(SPAN_QUEUED_COORDINATES.get() + receiver.0.len());
+        self.pending.push((call.id, receiver));
+        #[cfg(test)]
+        SPAN_PENDING_PEAK.set(SPAN_PENDING_PEAK.get().max(self.pending.len()));
+    }
+}
+
 fn collect_call_spans(
     call: &FunctionCall,
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
-    calls: &mut Vec<FunctionCall>,
+    calls: &mut SpanCalls,
     ctx: &mut Context,
 ) {
     for expression in call.receiver_index.0.iter().chain(call.inputs.values()) {
@@ -528,13 +585,13 @@ fn collect_call_spans(
             }
         }
     }
-    calls.push(call.clone());
+    calls.insert(call, ctx);
 }
 
 fn collect_factor_spans(
     factor: &Factor,
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
-    calls: &mut Vec<FunctionCall>,
+    calls: &mut SpanCalls,
     ctx: &mut Context,
 ) {
     match factor {
@@ -566,7 +623,7 @@ fn collect_factor_spans(
 fn collect_statement_spans(
     statements: &[Statement],
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
-    calls: &mut Vec<FunctionCall>,
+    calls: &mut SpanCalls,
     ctx: &mut Context,
 ) {
     for statement in statements {
