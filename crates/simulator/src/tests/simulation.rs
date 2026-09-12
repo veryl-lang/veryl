@@ -27796,3 +27796,36 @@ fn msb_after_member_access_of_array_element() {
         );
     }
 }
+
+#[test]
+fn explicit_modport_connection_transfers_input_and_output() {
+    let code = r#"
+        interface Bus {
+            var request: logic<8>;
+            var response: logic<8>;
+            modport mp { request: input, response: output, }
+        }
+        module Target (bus: modport Bus::mp) {
+            assign bus.response = bus.request + 1;
+        }
+        module Top (i: input logic<8>, o: output logic<8>) {
+            inst bus: Bus;
+            inst target: Target(bus: bus.mp);
+            assign bus.request = i;
+            assign o = bus.response;
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for input in [0, 42, 254] {
+            sim.set("i", Value::new(input, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(input + 1, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
