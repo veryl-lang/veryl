@@ -62,7 +62,9 @@ pub(crate) use summary::{
 };
 
 #[cfg(test)]
-pub(crate) use procedure::{with_procedure_guard_limit, with_procedure_import_limit};
+pub(crate) use procedure::{
+    with_function_traversal_limit, with_procedure_guard_limit, with_procedure_import_limit,
+};
 
 use crate::AnalyzerError;
 use crate::HashMap;

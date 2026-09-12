@@ -314,11 +314,14 @@ struct FunctionValueKey {
 /// Reuse pure constant-function results within one evaluation tree. The
 /// cache never survives an outer call, so changing conversion contexts and
 /// captured runtime state cannot make a later evaluation reuse stale data.
+/// Also bounds aggregate evaluation work, including calls that cannot be cached.
 #[derive(Default)]
 pub(crate) struct FunctionValueCache {
     depth: usize,
     bits: usize,
     values: HashMap<FunctionValueKey, Value>,
+    work: usize,
+    exhausted: bool,
 }
 
 impl FunctionCall {
@@ -330,11 +333,25 @@ impl FunctionCall {
         #[cfg(test)]
         VALUE_EVALUATIONS.set(VALUE_EVALUATIONS.get() + 1);
         context.function_value_cache.depth += 1;
-        let result = self.eval_value_inner(context);
+        context.function_value_cache.work = context.function_value_cache.work.saturating_add(1);
+        if context.function_value_cache.work > context.config.evaluate_size_limit {
+            context.function_value_cache.exhausted = true;
+        }
+        let result = if context.function_value_cache.exhausted {
+            None
+        } else {
+            self.eval_value_inner(context)
+        };
+        // A skipped nested call must not yield a stale or partial return value.
+        let result = (!context.function_value_cache.exhausted)
+            .then_some(result)
+            .flatten();
         context.function_value_cache.depth -= 1;
         if context.function_value_cache.depth == 0 {
             context.function_value_cache.values.clear();
             context.function_value_cache.bits = 0;
+            context.function_value_cache.work = 0;
+            context.function_value_cache.exhausted = false;
         }
         result
     }
@@ -399,7 +416,7 @@ impl FunctionCall {
 
         // A skipped over-limit for loop leaves the return value at its
         // pre-loop state; treat the call as unevaluable instead.
-        if overflowed {
+        if overflowed || context.function_value_cache.exhausted {
             return None;
         }
 

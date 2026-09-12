@@ -150,12 +150,20 @@ fn constant_function_memoization_matches_uncached_evaluation() {
                     Value::new(value, 32, false),
                     None,
                 );
+                crate::ir::VALUE_EVALUATIONS.set(0);
                 let actual = expression.eval_value(&mut context).unwrap().to_u64();
+                let evaluations = crate::ir::VALUE_EVALUATIONS.get();
                 assert_eq!(
                     actual,
                     Some(expected(value)),
                     "cached={cached}, input={value}\n{code}"
                 );
+                // An exhausted nested call must not reuse the return value
+                // from above. The next outer evaluation gets a fresh budget.
+                let limit = context.config.evaluate_size_limit;
+                context.config.evaluate_size_limit = evaluations - 1;
+                assert!(expression.eval_value(&mut context).is_none());
+                context.config.evaluate_size_limit = limit;
             }
         }
     }

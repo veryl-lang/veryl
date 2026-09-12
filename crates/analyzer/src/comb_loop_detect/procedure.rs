@@ -443,6 +443,7 @@ enum FunctionSummaryLookup {
     Ready(Rc<FunctionSummary>),
     Recursive,
     Missing,
+    Exhausted,
 }
 
 type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
@@ -450,6 +451,10 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 // Distinct invocation guards can require genuinely different subgraphs.
 // Bound their materialization before cycle search gets a chance to run.
 const FUNCTION_SUMMARY_WORK: usize = 100_000;
+
+// Per-summary limits do not bound repeated uncached calls. Share this budget
+// across the module's entire summary traversal, including nested calls.
+const FUNCTION_TRAVERSAL_WORK: usize = 100_000;
 
 // Ordinary procedures can import many individually bounded summaries. Limit
 // their combined expansion, including repeated copies of runtime-loop
@@ -466,6 +471,19 @@ const PROCEDURE_GUARD_WORK: usize = 100_000;
 thread_local! {
     static GUARD_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(PROCEDURE_GUARD_WORK) };
     static IMPORT_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(PROCEDURE_IMPORT_WORK) };
+    static FUNCTION_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(FUNCTION_TRAVERSAL_WORK) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_function_traversal_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
+    struct Reset(usize);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FUNCTION_LIMIT.set(self.0);
+        }
+    }
+    let _reset = Reset(FUNCTION_LIMIT.replace(limit));
+    f()
 }
 
 #[cfg(test)]
@@ -499,6 +517,7 @@ pub(super) struct FunctionSummaries<'a> {
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
     contexts: Vec<ProcedureContext>,
     module_scope_ids: Rc<HashSet<VarId>>,
+    work: usize,
 }
 
 /// Reusable module-local evaluation context for independent procedural
@@ -892,6 +911,10 @@ impl<'a> FunctionSummaries<'a> {
             // just the reusable top-level procedure context.
             contexts: Vec::new(),
             module_scope_ids: Rc::new(module_scope_ids(module)),
+            #[cfg(test)]
+            work: FUNCTION_LIMIT.get(),
+            #[cfg(not(test))]
+            work: FUNCTION_TRAVERSAL_WORK,
         }
     }
 
@@ -906,6 +929,10 @@ impl<'a> FunctionSummaries<'a> {
                 FunctionSummaryLookup::Ready,
             );
         }
+        let Some(work) = self.work.checked_sub(1) else {
+            return FunctionSummaryLookup::Exhausted;
+        };
+        self.work = work;
         self.summaries.insert(key.clone(), None);
         let mut context = self
             .contexts
@@ -930,6 +957,17 @@ impl<'a> FunctionSummaries<'a> {
         context.clear_summary();
         self.contexts.push(context);
         if let Some(summary) = summary {
+            let cost = summary
+                .graph
+                .nodes
+                .len()
+                .saturating_add(summary.graph.edges.len());
+            let Some(work) = self.work.checked_sub(cost) else {
+                self.work = 0;
+                self.summaries.remove(&key);
+                return FunctionSummaryLookup::Exhausted;
+            };
+            self.work = work;
             if call.index.is_some() || call.receiver_index.0.is_empty() {
                 self.summaries.insert(key, Some(summary.clone()));
             } else {
@@ -1650,6 +1688,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         visited: &mut HashSet<FunctionSummaryKey>,
     ) {
         for statement in statements {
+            if self.guard_work.is_none() {
+                return;
+            }
             #[cfg(test)]
             WRITE_FOOTPRINT_STATEMENT_VISITS
                 .set(WRITE_FOOTPRINT_STATEMENT_VISITS.get().saturating_add(1));
@@ -1815,6 +1856,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys: &mut HashSet<NodeKey>,
         visited: &mut HashSet<FunctionSummaryKey>,
     ) {
+        if !self.reserve_guard_work(1) {
+            return;
+        }
         for expression in &call.receiver_index.0 {
             self.collect_expression_write_footprint(expression, keys, visited);
         }
@@ -4164,6 +4208,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 return CallResult {
                     region_groups: Vec::new(),
                     opaque_sources: sources,
+                };
+            }
+            Some(FunctionSummaryLookup::Exhausted) => {
+                self.exhaust_work();
+                return CallResult {
+                    region_groups: Vec::new(),
+                    opaque_sources: Vec::new(),
                 };
             }
             Some(FunctionSummaryLookup::Missing) | None => self.repeatable = false,

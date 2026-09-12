@@ -1,5 +1,54 @@
 use super::*;
 
+#[test]
+fn dynamic_receiver_fanout_stops_at_shared_work_limits() {
+    for depth in [2, 10] {
+        let mut code = String::from(
+            "interface Bus { var value: logic; function f0 () -> logic { return value; }",
+        );
+        for n in 1..=depth {
+            let previous = n - 1;
+            code.push_str(&format!(
+                "function f{n} () -> logic {{ return f{previous}() ^ f{previous}(); }}"
+            ));
+        }
+        code.push_str(&format!(
+            "}} module Top (idx: input u32, inp: input logic, o: output logic,
+                            independent: output logic) {{
+                inst bus: Bus[2];
+                assign bus[0].value = inp;
+                assign bus[1].value = 0;
+                assign o = bus[idx].f{depth}();
+                assign independent = independent;
+             }}"
+        ));
+        for (summary_limit, guard_limit) in [(128, 100_000), (100_000, 128)] {
+            crate::comb_loop_detect::with_function_traversal_limit(summary_limit, || {
+                crate::comb_loop_detect::with_procedure_guard_limit(guard_limit, || {
+                    assert_eq!(comb_loop_analysis_is_complete(&code), depth == 2);
+                    crate::comb_loop_detect::reset_function_evaluation_count();
+                    let errors = analyze(&code);
+                    let loops = errors
+                        .iter()
+                        .filter_map(|error| match error {
+                            AnalyzerError::CombinationalLoop { identifier, .. } => {
+                                Some(identifier.as_str())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(loops, ["independent"], "{errors:?}");
+                    if summary_limit == 128 {
+                        assert!(crate::comb_loop_detect::function_evaluation_count() < 256);
+                    } else {
+                        assert!(crate::comb_loop_detect::write_footprint_statement_visits() < 256);
+                    }
+                });
+            });
+        }
+    }
+}
+
 fn assert_interface_function_comb_loop(code: &str, expected: bool) {
     let errors = analyze(code);
     let detected = errors
