@@ -673,6 +673,25 @@ impl Type {
         Some(self.kind.width()? * self.width.total()?)
     }
 
+    /// Every bit the type holds, unpacked dimensions included. This is what
+    /// `$bits` answers; `total_width` stops at one element.
+    pub fn total_bits(&self) -> Option<usize> {
+        Some(self.total_width()? * self.array.total()?)
+    }
+
+    /// Elements in the leftmost dimension, which is what `$size` answers:
+    /// the outermost unpacked dimension, else the outermost packed one, else
+    /// the kind's own width (a struct or enum is one packed vector).
+    pub fn leading_dimension(&self) -> Option<usize> {
+        if let Some(x) = self.array.first() {
+            *x
+        } else if let Some(x) = self.width.first() {
+            *x
+        } else {
+            self.kind.width()
+        }
+    }
+
     /// An unevaluated width (generics) counts as single-bit to avoid
     /// false positives.
     pub fn is_single_bit_plain(&self) -> bool {

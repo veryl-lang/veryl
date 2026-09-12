@@ -28458,3 +28458,103 @@ fn a_runtime_index_into_a_packed_enum_array_writes_the_whole_element() {
         }
     }
 }
+
+/// The six argument forms of `$bits`/`$size`, with the numbers every
+/// reference simulator agrees on.
+/// The two defects fail differently, so they are checked apart: one panics
+/// before the other's rows are ever read.
+#[track_caller]
+fn bits_and_size(decls: &str, exprs: &[&str], expected: &[u64]) {
+    let body: String = exprs
+        .iter()
+        .enumerate()
+        .map(|(i, e)| format!("        assign o{i} = trig + {e};\n"))
+        .collect();
+    let ports: String = (0..exprs.len())
+        .map(|i| format!("        o{i}: output logic<32>,\n"))
+        .collect();
+    let code = format!(
+        r#"
+    package pk {{
+        struct st {{
+            a: logic<12>,
+            b: logic<4> ,
+        }}
+        enum e3_t: logic<3> {{
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }}
+    }}
+    module Top (
+        trig: input logic<32>,
+{ports}    ) {{
+{decls}
+{body}    }}
+    "#
+    );
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("trig", Value::new(0, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (i, want) in expected.iter().enumerate() {
+            assert_eq!(
+                sim.get(&format!("o{i}")).unwrap(),
+                Value::new(*want, 32, false),
+                "o{i}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bits_and_size_of_an_unpacked_array_variable_elaborate() {
+    // Both took their answer only when the operand's comptime value was
+    // Numeric or a Type. An unpacked-array variable is neither, so the
+    // expression form reported `unsupported description` and the `const`
+    // form -- the hoist that carries every other system function -- PANICKED
+    // in `Factor::Variable` instead. `$bits` also has to multiply by the
+    // unpacked dimensions, which `Type::total_width` leaves out.
+    //
+    // `o0` goes through a `const`, which is the form that panicked.
+    bits_and_size(
+        "        var arr: logic<8> [7];\n\
+         \x20       let u2 : logic<8> [5, 3] = '{default: '{default: 8'd0}};\n\
+         \x20       const SZ: u32 = $bits(arr);\n\
+         \x20       assign arr = '{default: 8'd0};",
+        &["SZ", "$size(arr)", "$bits(u2)", "$size(u2)"],
+        &[56, 7, 120, 5],
+    );
+}
+
+#[test]
+fn size_answers_the_leading_dimension_not_the_total_bits() {
+    // `$size` shared `Bits`'s body, so it answered total bits. That is the
+    // same number for a struct and for a 1-D vector, which is why it went
+    // unnoticed; for anything with more than one dimension it is not, and
+    // the emitted SystemVerilog carries `$size` verbatim, so the native
+    // column disagreed with every other simulator while both ran.
+    //
+    // The struct and the scalar are the controls: they were already right.
+    bits_and_size(
+        "        var a : logic<32>;\n\
+         \x20       var p2: logic<8, 4>;\n\
+         \x20       var ea: pk::e3_t<8>;\n\
+         \x20       assign a  = 0;\n\
+         \x20       assign p2 = 0;\n\
+         \x20       assign ea = 0;",
+        &[
+            "$bits(pk::st)",
+            "$size(pk::st)",
+            "$bits(a)",
+            "$size(a)",
+            "$bits(p2)",
+            "$size(p2)",
+            "$bits(ea)",
+            "$size(ea)",
+        ],
+        &[16, 16, 32, 32, 32, 8, 24, 8],
+    );
+}
