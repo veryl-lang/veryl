@@ -709,6 +709,10 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
 
         let mut false_side = vec![];
         let mut else_if_break = false;
+        // The trailing `else` is gated by the conditions above it. Only the
+        // last live one is carried here, so a crossing in an earlier `else if`
+        // of the same chain still goes unreported.
+        let mut last_cond_comptime: Option<ir::Comptime> = None;
 
         for x in &value.if_reset_statement_list {
             let (comptime, cond) = eval_expr(context, None, &x.expression, false)?;
@@ -725,8 +729,15 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
                 continue;
             }
 
-            let true_side: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
-            let true_side = true_side.0;
+            // An `else if` of the reset chain gates its body exactly as a plain
+            // `if` does, so its clock domain has to reach the writes inside it.
+            // Without this a foreign-domain condition here goes unreported.
+            let true_side: ir::IrResult<ir::StatementBlock> = context
+                .with_condition_domain(comptime.clone(), |c| {
+                    Conv::conv(c, x.statement_block.as_ref())
+                });
+            let true_side = true_side?.0;
+            last_cond_comptime = Some(comptime);
 
             // The uncovered-branch check that motivates this in `if` is comb-only;
             // here it just keeps a dead always-true node out of the IR.
@@ -748,7 +759,16 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
         if let Some(x) = &value.if_reset_statement_opt
             && !else_if_break
         {
-            let block: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
+            let block: ir::StatementBlock = match last_cond_comptime {
+                Some(cond) => {
+                    let block: ir::IrResult<ir::StatementBlock> = context
+                        .with_condition_domain(cond, |c| Conv::conv(c, x.statement_block.as_ref()));
+                    block?
+                }
+                // `if_reset { .. } else { .. }`: the reset is the only gate and
+                // it is same-domain by construction.
+                None => Conv::conv(context, x.statement_block.as_ref())?,
+            };
 
             append_leaf_false(&mut false_side, block.0);
         }

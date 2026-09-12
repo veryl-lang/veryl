@@ -13667,6 +13667,98 @@ fn clock_domain_function_call() {
 }
 
 #[test]
+fn clock_domain_if_reset_else_if_condition() {
+    // An `else if` of the `if_reset` chain gates its body exactly as a plain
+    // `if` does, so a foreign-domain condition there is a crossing, and it went
+    // unreported: `Conv<&IfResetStatement>` did not push the condition's domain
+    // the way `Conv<&IfStatement>` does.
+    for cond in ["cond_i", "!cond_i"] {
+        let code = format!(
+            r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'b logic,
+        o_a   : output 'a logic,
+    ) {{
+        always_ff (i_clk, i_rst) {{
+            if_reset {{
+                o_a = 1'b0;
+            }} else if {cond} {{
+                o_a = 1'b1;
+            }}
+        }}
+    }}
+    "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+            "cond={cond}: {errors:?}"
+        );
+    }
+
+    // The trailing `else` is gated by the same condition and is reported too.
+    let code = r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'b logic,
+        o_a   : output 'a logic,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_a = 1'b0;
+            } else if cond_i {
+                o_a = 1'b1;
+            } else {
+                o_a = 1'b0;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. }))
+            .count(),
+        2,
+        "{errors:?}"
+    );
+
+    // A same-domain condition stays accepted, and so does an `if_reset` with
+    // no `else if` at all -- the reset is the only gate there.
+    let code = r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'a logic,
+        o_a   : output 'a logic,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_a = 1'b0;
+            } else if cond_i {
+                o_a = 1'b1;
+            } else {
+                o_a = 1'b0;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn clock_domain_system_function() {
     // Regression: $signed/$unsigned laundered the operand's clock domain to
     // None, so a crossing through them passed CDC silently.
