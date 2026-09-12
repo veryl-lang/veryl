@@ -734,6 +734,61 @@ fn comb_loop_interface_array_receiver_detects_feedback_in_a_later_element() {
 }
 
 #[test]
+fn interface_array_function_assignments_cover_all_receiver_elements() {
+    let code = r#"
+        interface Bus {
+            var data: logic<8>[1];
+            function get () -> logic<8> {
+                data[0] = 7;
+                return data[0];
+            }
+        }
+        module Top (first: output logic<8>, second: output logic<8>) {
+            inst bus: Bus[2];
+            assign first = bus[0].get();
+            assign second = bus[1].get();
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn interface_array_function_assignments_preserve_unwritten_member_elements() {
+    let code = r#"
+        interface Bus {
+            var data: logic<8>[2];
+            function get () -> logic<8> {
+                data[0] = 7;
+                return data[1];
+            }
+        }
+        module Top (first: output logic<8>, second: output logic<8>) {
+            inst bus: Bus[2];
+            assign first = bus[0].get();
+            assign second = bus[1].get();
+        }
+    "#;
+    let errors = analyze(code);
+    let mut unassigned = errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::UnassignVariable { identifier, .. } => Some(identifier.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    unassigned.sort_unstable();
+    assert_eq!(
+        unassigned,
+        [
+            "bus.data[32'h00000000][32'h00000001]",
+            "bus.data[32'h00000001][32'h00000001]",
+        ],
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn comb_loop_large_interface_function_array_specializes_only_the_called_receiver() {
     let code = format!(
         r#"

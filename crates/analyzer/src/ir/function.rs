@@ -155,8 +155,42 @@ impl Function {
     }
 
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
-        for x in &self.functions {
-            x.eval_assign(context, assign_table);
+        if self.array.is_empty() {
+            for body in &self.functions {
+                body.eval_assign(context, assign_table);
+            }
+            return;
+        }
+
+        // Check every receiver coordinate represented in AssignTable. Storage
+        // beyond its array limit is skipped there, so axes owned only by that
+        // storage need one representative; scalar locals still get checked.
+        let checked_dims = self
+            .receiver_prefixes
+            .iter()
+            .filter(|(id, _)| {
+                context.variables.get(id).is_some_and(|variable| {
+                    variable
+                        .r#type
+                        .total_array()
+                        .is_some_and(|total| total > 0 && total <= assign_table.array_limit)
+                })
+            })
+            .map(|(_, dims)| *dims)
+            .max()
+            .unwrap_or(0);
+        let mut checked_shape = self.array.clone();
+        for dimension in checked_shape.iter_mut().skip(checked_dims) {
+            *dimension = Some(1);
+        }
+        for flat in 0..checked_shape.total().unwrap_or(1) {
+            let index = VarIndex::from_index(flat, &checked_shape);
+            for body in &self.functions {
+                let mut body = body.clone();
+                receiver::Receiver::Bind(&index, &self.receiver_prefixes)
+                    .statements(&mut body.statements);
+                body.eval_assign(context, assign_table);
+            }
         }
     }
 
