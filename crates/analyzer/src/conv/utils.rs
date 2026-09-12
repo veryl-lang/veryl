@@ -4194,7 +4194,8 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             let mut local_context = Context::default();
             local_context.var_id = context.var_id;
             local_context.inherit(context);
-            local_context.extract_var_paths(context, &path.path, &array);
+            let relative_variables =
+                local_context.extract_var_paths_with_receiver(context, &path.path, &array);
 
             for path in &generic_arg_paths {
                 // Copy var path referenced as resolved generic arg from the given context
@@ -4216,7 +4217,14 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
                 }
             }
 
-            context.extract_function(&mut local_context, &path.path, &array);
+            let root_function = local_context.func_paths.get(path).copied();
+            context.extract_function_with_receiver(
+                &mut local_context,
+                &path.path,
+                &array,
+                &relative_variables,
+                root_function,
+            );
             context.inherit(&mut local_context);
             context.var_id = local_context.var_id;
 
@@ -4256,8 +4264,11 @@ pub fn function_call(
 
     let path: VarPathSelect = Conv::conv(context, path)?;
     let (mut base_path, select, _) = path.into();
-    let index = select.to_index();
-    let index = index.eval_value(context);
+    let receiver_index = select.to_index();
+    let index = receiver_index
+        .is_const()
+        .then(|| receiver_index.eval_value(context))
+        .flatten();
 
     // remove function name
     base_path.pop();
@@ -4376,6 +4387,8 @@ pub fn function_call(
 
         Ok(ir::FunctionCall {
             id: func.id,
+            receiver_index,
+            receiver_prefix_dims: 0,
             index,
             comptime,
             inputs,

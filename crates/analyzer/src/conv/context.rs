@@ -622,6 +622,15 @@ impl Context {
     }
 
     pub fn extract_var_paths(&mut self, context: &Context, base: &VarPath, array: &ShapeRef) {
+        self.extract_var_paths_with_receiver(context, base, array);
+    }
+    pub(crate) fn extract_var_paths_with_receiver(
+        &mut self,
+        context: &Context,
+        base: &VarPath,
+        array: &ShapeRef,
+    ) -> HashSet<VarId> {
+        let mut relative_variables = HashSet::default();
         for (path, (id, comptime)) in &context.var_paths {
             if path.starts_with(&base.0) {
                 let mut path = path.clone();
@@ -632,8 +641,81 @@ impl Context {
                         comptime.r#type.array.remove(0);
                     }
                     self.var_paths.insert(path, (*id, comptime));
+                    relative_variables.insert(*id);
                 }
             }
+        }
+        relative_variables
+    }
+    pub(crate) fn extract_function_with_receiver(
+        &mut self,
+        context: &mut Context,
+        base: &VarPath,
+        array: &ShapeRef,
+        relative_variables: &HashSet<VarId>,
+        root_function: Option<VarId>,
+    ) {
+        // Receiver-relative storage is identified when paths are imported from
+        // the receiver namespace. Affiliation cannot distinguish a modport
+        // formal member from an ordinary scalar function formal.
+        let receiver_variables = relative_variables.clone();
+        // Only the requested receiver method and nested receiver methods whose
+        // storage is below that receiver acquire this receiver axis. A global
+        // receiver or a modport-array formal may be converted in the same
+        // local context, but its storage ids do not belong to `base`.
+        let mut receiver_functions = context
+            .functions
+            .values()
+            .filter(|function| {
+                function.receiver_relative
+                    && function
+                        .receiver_variables
+                        .iter()
+                        .any(|id| relative_variables.contains(id))
+            })
+            .map(|function| function.id)
+            .collect::<HashSet<_>>();
+        if let Some(root_function) = root_function {
+            receiver_functions.insert(root_function);
+        }
+        for (id, mut variable) in context.variables.drain() {
+            let path_offset = variable.path.0.len();
+            variable.path.add_prelude(&base.0);
+            if receiver_variables.contains(&id) {
+                variable.prepend_array_at_path_with_limit(
+                    array,
+                    path_offset,
+                    self.config.evaluate_array_limit,
+                );
+            }
+            self.variables.insert(id, variable);
+        }
+
+        for (mut path, id) in context.func_paths.drain() {
+            if !path.path.starts_with(&base.0) {
+                path.path.add_prelude(&base.0);
+            }
+            self.func_paths.insert(path, id);
+        }
+
+        for (id, mut function) in context.functions.drain() {
+            if receiver_functions.contains(&id) {
+                let function_receiver_variables = if Some(id) == root_function {
+                    receiver_variables.clone()
+                } else {
+                    function
+                        .receiver_variables
+                        .intersection(relative_variables)
+                        .copied()
+                        .collect()
+                };
+                function.prepend_receiver(array, &function_receiver_variables, &receiver_functions);
+            }
+
+            if !function.path.path.starts_with(&base.0) {
+                function.path.path.add_prelude(&base.0);
+            }
+            self.functions.insert(id, function);
         }
     }
 
@@ -671,7 +753,11 @@ impl Context {
             }
 
             let path_offset = variable.path.0.len();
-            variable.prepend_array_at_path(array, path_offset);
+            variable.prepend_array_at_path_with_limit(
+                array,
+                path_offset,
+                self.config.evaluate_array_limit,
+            );
 
             // override token, affiliation to interface instance
             variable.token = token;

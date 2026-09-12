@@ -25,7 +25,7 @@ impl VarId {
         self.0 += 1;
     }
 
-    /// Used by the simulator's `alloc_internal_event_id` to mint
+    /// Used by the simulator's `alloc_internal_id` to mint
     /// globally-unique event ids; see its doc for why per-module-scope
     /// ids are not enough there.
     pub const fn from_raw(raw: u32) -> Self {
@@ -1117,20 +1117,65 @@ impl Variable {
     }
 
     pub fn prepend_array_at_path(&mut self, array: &ShapeRef, path_offset: usize) {
-        if !array.is_empty()
-            && let Some(total_array) = array.total()
-        {
-            let value = self.value.clone();
-            let assigned = self.assigned.clone();
-            for _ in 0..total_array.saturating_sub(1) {
-                self.value.append(&mut value.clone());
-                self.assigned.append(&mut assigned.clone());
-            }
-            let mut offsets = vec![path_offset; array.dims()];
-            offsets.append(&mut self.array_path_offsets);
-            self.array_path_offsets = offsets;
-            self.r#type.prepend_array(array);
+        self.prepend_array_at_path_with_limit(array, path_offset, usize::MAX);
+    }
+
+    pub(crate) fn prepend_array_at_path_with_limit(
+        &mut self,
+        array: &ShapeRef,
+        path_offset: usize,
+        array_limit: usize,
+    ) {
+        if array.is_empty() {
+            return;
         }
+
+        if let (Some(prepend_total), Some(member_total)) =
+            (array.total(), self.r#type.array.total())
+        {
+            let combined_total = prepend_total.checked_mul(member_total);
+            if combined_total.is_some_and(|total| total <= array_limit) {
+                // Keep the historical AIR contract for ordinary arrays: every
+                // non-uniform logical element is present in `value`. A
+                // single-value uniform template remains a single value.
+                if self.value.len() > 1 {
+                    let member_values = self.value.clone();
+                    self.value = Vec::with_capacity(combined_total.unwrap_or(0));
+                    for _ in 0..prepend_total {
+                        self.value.extend(member_values.iter().cloned());
+                    }
+                }
+            } else if self.value.len() > 1 {
+                // The legacy AIR represents only a full value vector or one
+                // uniform template. A non-uniform array that is too large to
+                // materialize is therefore not compile-time representable.
+                self.value.clear();
+                if matches!(self.kind, VarKind::Const | VarKind::Param) {
+                    self.value.push(Value::new_x(
+                        self.r#type.total_width().unwrap_or(1),
+                        self.r#type.signed,
+                    ));
+                }
+            }
+
+            if combined_total.is_none_or(|total| total > array_limit) {
+                self.assigned.clear();
+            } else {
+                let assigned = self.assigned.clone();
+                for _ in 0..prepend_total.saturating_sub(1) {
+                    self.assigned.extend(assigned.iter().cloned());
+                }
+            }
+        } else {
+            // Unknown shapes cannot translate flat mutation coordinates.
+            // Their compile-time value is already indeterminate; retain only
+            // the reusable base pattern and discard coordinate-specific state.
+            self.assigned.clear();
+        }
+        let mut offsets = vec![path_offset; array.dims()];
+        offsets.append(&mut self.array_path_offsets);
+        self.array_path_offsets = offsets;
+        self.r#type.prepend_array(array);
     }
 
     pub fn set_leading_array_path_offset(&mut self, dimensions: usize, path_offset: usize) {

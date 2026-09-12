@@ -70,8 +70,8 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, Component, Declaration, Expression, Factor, InstDeclaration, Ir, Module, Op,
-    Signature, Statement, SystemFunctionKind, VarSelect, Variable,
+    AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
+    Ir, Module, Op, Signature, Statement, SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
@@ -158,10 +158,11 @@ fn build_bit_partition(
     ctx: &mut Context,
 ) -> BitPartition {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+    let mut calls = Vec::new();
 
     for declaration in &module.declarations {
         if let Declaration::Comb(comb) = declaration {
-            collect_statement_spans(&comb.statements, &mut accesses, ctx);
+            collect_statement_spans(&comb.statements, &mut accesses, &mut calls, ctx);
         }
     }
 
@@ -169,11 +170,20 @@ fn build_bit_partition(
     for inst in walk_insts(module) {
         for inp in &inst.inputs {
             for expr in &inp.exprs {
-                collect_expr_spans(expr, &mut accesses, ctx);
+                collect_expr_spans(expr, &mut accesses, &mut calls, ctx);
             }
         }
         for out in &inst.outputs {
             for dst in &out.dst {
+                for expression in dst
+                    .index
+                    .0
+                    .iter()
+                    .chain(dst.select.0.iter())
+                    .chain(dst.select.1.iter().map(|(_, x)| x))
+                {
+                    collect_expr_spans(expression, &mut accesses, &mut calls, ctx);
+                }
                 if let Some((idx, packed)) = eval_dst_span(dst, &module.variables, ctx) {
                     accesses
                         .entry((
@@ -223,7 +233,38 @@ fn build_bit_partition(
                     .unwrap_or(&function.r#type.r#type);
                 add_whole_type_access(&mut accesses, id, r#type);
             }
-            collect_statement_spans(&body.statements, &mut accesses, ctx);
+            if function.array.is_empty() {
+                collect_statement_spans(&body.statements, &mut accesses, &mut calls, ctx);
+            }
+        }
+    }
+
+    // Hydrate only receivers that are actually called. A queue avoids growing
+    // the Rust stack with the function-call graph; each specialization is
+    // visited once even when it is called repeatedly.
+    let mut visited = HashSet::default();
+    while let Some(call) = calls.pop() {
+        let receiver = call
+            .receiver_index
+            .0
+            .iter()
+            .map(|x| {
+                x.comptime()
+                    .is_const
+                    .then(|| x.comptime().get_value().ok().and_then(|v| v.to_usize()))
+                    .flatten()
+                    .ok_or_else(|| x.token_range())
+            })
+            .collect::<Vec<_>>();
+        if !visited.insert((call.id, receiver)) {
+            continue;
+        }
+        if let Some(body) = module
+            .functions
+            .get(&call.id)
+            .and_then(|f| f.get_function_for_index(&call.receiver_index))
+        {
+            collect_statement_spans(&body.statements, &mut accesses, &mut calls, ctx);
         }
     }
 
@@ -430,44 +471,45 @@ fn collect_struct_field_bounds(
 fn collect_expr_spans(
     expr: &Expression,
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    calls: &mut Vec<FunctionCall>,
     ctx: &mut Context,
 ) {
     match expr {
-        Expression::Term(t) => collect_factor_spans(t, out, ctx),
-        Expression::Unary(_, e, _) => collect_expr_spans(e, out, ctx),
+        Expression::Term(t) => collect_factor_spans(t, out, calls, ctx),
+        Expression::Unary(_, e, _) => collect_expr_spans(e, out, calls, ctx),
         Expression::Binary(a, _, b, _) => {
-            collect_expr_spans(a, out, ctx);
-            collect_expr_spans(b, out, ctx);
+            collect_expr_spans(a, out, calls, ctx);
+            collect_expr_spans(b, out, calls, ctx);
         }
         Expression::Ternary(a, b, c, _) => {
-            collect_expr_spans(a, out, ctx);
-            collect_expr_spans(b, out, ctx);
-            collect_expr_spans(c, out, ctx);
+            collect_expr_spans(a, out, calls, ctx);
+            collect_expr_spans(b, out, calls, ctx);
+            collect_expr_spans(c, out, calls, ctx);
         }
         Expression::Concatenation(parts, _) => {
             for (a, b) in parts {
-                collect_expr_spans(a, out, ctx);
+                collect_expr_spans(a, out, calls, ctx);
                 if let Some(b) = b {
-                    collect_expr_spans(b, out, ctx);
+                    collect_expr_spans(b, out, calls, ctx);
                 }
             }
         }
         Expression::StructConstructor(_, fields, _) => {
             for (_, e) in fields {
-                collect_expr_spans(e, out, ctx);
+                collect_expr_spans(e, out, calls, ctx);
             }
         }
         Expression::ArrayLiteral(items, _) => {
             for item in items {
                 match item {
                     crate::ir::ArrayLiteralItem::Value(value, repeat) => {
-                        collect_expr_spans(value, out, ctx);
+                        collect_expr_spans(value, out, calls, ctx);
                         if let Some(repeat) = repeat {
-                            collect_expr_spans(repeat, out, ctx);
+                            collect_expr_spans(repeat, out, calls, ctx);
                         }
                     }
                     crate::ir::ArrayLiteralItem::Defaul(value) => {
-                        collect_expr_spans(value, out, ctx);
+                        collect_expr_spans(value, out, calls, ctx);
                     }
                 }
             }
@@ -475,9 +517,38 @@ fn collect_expr_spans(
     }
 }
 
+fn collect_call_spans(
+    call: &FunctionCall,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    calls: &mut Vec<FunctionCall>,
+    ctx: &mut Context,
+) {
+    for expression in call.receiver_index.0.iter().chain(call.inputs.values()) {
+        collect_expr_spans(expression, out, calls, ctx);
+    }
+    for destinations in call.outputs.values() {
+        for dst in destinations {
+            for expression in dst
+                .index
+                .0
+                .iter()
+                .chain(dst.select.0.iter())
+                .chain(dst.select.1.iter().map(|(_, x)| x))
+            {
+                collect_expr_spans(expression, out, calls, ctx);
+            }
+            for (index, packed) in dst_writes(dst, ctx) {
+                out.entry((dst.id, index)).or_default().push(packed);
+            }
+        }
+    }
+    calls.push(call.clone());
+}
+
 fn collect_factor_spans(
     factor: &Factor,
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    calls: &mut Vec<FunctionCall>,
     ctx: &mut Context,
 ) {
     match factor {
@@ -486,17 +557,13 @@ fn collect_factor_spans(
                 out.entry((*id, idx)).or_default().push(packed);
             }
         }
-        Factor::FunctionCall(call) => {
-            for input in call.inputs.values() {
-                collect_expr_spans(input, out, ctx);
-            }
-        }
+        Factor::FunctionCall(call) => collect_call_spans(call, out, calls, ctx),
         Factor::SystemFunctionCall(call) => match &call.kind {
             SystemFunctionKind::Onehot(input)
             | SystemFunctionKind::Signed(input)
             | SystemFunctionKind::Unsigned(input)
             | SystemFunctionKind::Readmemh(input, _) => {
-                collect_expr_spans(&input.0, out, ctx);
+                collect_expr_spans(&input.0, out, calls, ctx);
             }
             SystemFunctionKind::Bits(_)
             | SystemFunctionKind::Size(_)
@@ -513,12 +580,13 @@ fn collect_factor_spans(
 fn collect_statement_spans(
     statements: &[Statement],
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    calls: &mut Vec<FunctionCall>,
     ctx: &mut Context,
 ) {
     for statement in statements {
         match statement {
             Statement::Assign(assign) => {
-                collect_expr_spans(&assign.expr, out, ctx);
+                collect_expr_spans(&assign.expr, out, calls, ctx);
                 for destination in &assign.dst {
                     for (index, packed) in dst_writes(destination, ctx) {
                         out.entry((destination.id, index)).or_default().push(packed);
@@ -533,43 +601,32 @@ fn collect_statement_spans(
                 }
             }
             Statement::If(statement) => {
-                collect_expr_spans(&statement.cond, out, ctx);
-                collect_statement_spans(&statement.true_side, out, ctx);
-                collect_statement_spans(&statement.false_side, out, ctx);
+                collect_expr_spans(&statement.cond, out, calls, ctx);
+                collect_statement_spans(&statement.true_side, out, calls, ctx);
+                collect_statement_spans(&statement.false_side, out, calls, ctx);
             }
             Statement::Case(statement) => {
-                collect_expr_spans(&statement.case_target, out, ctx);
+                collect_expr_spans(&statement.case_target, out, calls, ctx);
                 for arm in &statement.arms {
                     for pattern in &arm.patterns {
                         match pattern {
                             crate::ir::CasePattern::Eq(expression) => {
-                                collect_expr_spans(expression, out, ctx);
+                                collect_expr_spans(expression, out, calls, ctx);
                             }
                             crate::ir::CasePattern::Range { lo, hi, .. } => {
-                                collect_expr_spans(lo, out, ctx);
-                                collect_expr_spans(hi, out, ctx);
+                                collect_expr_spans(lo, out, calls, ctx);
+                                collect_expr_spans(hi, out, calls, ctx);
                             }
                         }
                     }
-                    collect_statement_spans(&arm.body, out, ctx);
+                    collect_statement_spans(&arm.body, out, calls, ctx);
                 }
-                collect_statement_spans(&statement.default, out, ctx);
+                collect_statement_spans(&statement.default, out, calls, ctx);
             }
             Statement::For(statement) => {
-                collect_statement_spans(&statement.body, out, ctx);
+                collect_statement_spans(&statement.body, out, calls, ctx);
             }
-            Statement::FunctionCall(call) => {
-                for input in call.inputs.values() {
-                    collect_expr_spans(input, out, ctx);
-                }
-                for outputs in call.outputs.values() {
-                    for destination in outputs {
-                        for (index, packed) in dst_writes(destination, ctx) {
-                            out.entry((destination.id, index)).or_default().push(packed);
-                        }
-                    }
-                }
-            }
+            Statement::FunctionCall(call) => collect_call_spans(call, out, calls, ctx),
             Statement::SystemFunctionCall(_)
             | Statement::IfReset(_)
             | Statement::TbMethodCall(_)

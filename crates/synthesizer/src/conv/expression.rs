@@ -866,16 +866,14 @@ fn synth_function_call(
         .get(&call.id)
         .cloned()
         .ok_or_else(|| SynthesizerError::internal(format!("function {} not found", call.id)))?;
-    let body = match &call.index {
-        Some(idx) => func.get_function(idx),
-        None => func.get_function(&[]),
-    }
-    .ok_or_else(|| {
-        SynthesizerError::internal(format!(
-            "function {} has no body for the requested variant",
-            call.id
-        ))
-    })?;
+    let body = func
+        .get_function_for_index(&call.receiver_index)
+        .ok_or_else(|| {
+            SynthesizerError::internal(format!(
+                "function {} has no body for the requested variant",
+                call.id
+            ))
+        })?;
 
     let mut inner = current.clone();
 

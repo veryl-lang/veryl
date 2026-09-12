@@ -1,3 +1,5 @@
+mod receiver;
+
 use crate::conv::Context;
 use crate::conv::checker::portability::allow_multiple_assign;
 use crate::conv::utils::{
@@ -6,12 +8,12 @@ use crate::conv::utils::{
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, Signature, Statement,
-    ValueVariant, VarId, VarIndex, VarPath, VarPathSelect,
+    AssignDestination, Comptime, Expression, FfTable, IrResult, Shape, ShapeRef, Signature,
+    Statement, ValueVariant, VarId, VarIndex, VarPath, VarPathSelect,
 };
 use crate::symbol::{Direction, Symbol, SymbolId, SymbolKind};
 use crate::value::{Value, ValueBigUint};
-use crate::{AnalyzerError, HashMap, ir_error};
+use crate::{AnalyzerError, HashMap, HashSet, ir_error};
 use indent::indent_all_by;
 use std::fmt;
 use veryl_parser::resource_table::StrId;
@@ -72,12 +74,86 @@ pub struct Function {
     pub array: Shape,
     pub arity: usize,
     pub args: Vec<FuncArg>,
+    pub receiver_relative: bool,
+    pub receiver_variables: HashSet<VarId>,
+    pub receiver_prefixes: HashMap<VarId, usize>,
     pub is_const: bool,
     pub functions: Vec<FunctionBody>,
     pub token: TokenRange,
 }
 
 impl Function {
+    fn contains_receiver_index(&self, index: &[usize]) -> bool {
+        if self.array.is_empty() {
+            return index.is_empty();
+        }
+        if self.array.dims() == 1 && self.array[0] == Some(1) && index.is_empty() {
+            return true;
+        }
+        index.len() == self.array.dims()
+            && index
+                .iter()
+                .zip(self.array.iter())
+                .all(|(index, length)| length.is_some_and(|length| *index < length))
+    }
+    pub(crate) fn prepend_receiver(
+        &mut self,
+        array: &ShapeRef,
+        receiver_variables: &HashSet<VarId>,
+        receiver_functions: &HashSet<VarId>,
+    ) {
+        self.receiver_variables
+            .extend(receiver_variables.iter().copied());
+        if array.is_empty() {
+            return;
+        }
+        let mut combined = array.to_owned();
+        combined.append(&mut self.array);
+        self.array = combined;
+        let added_dims = array.dims();
+        for variable in receiver_variables {
+            self.receiver_prefixes
+                .entry(*variable)
+                .and_modify(|prefix| *prefix += added_dims)
+                .or_insert(added_dims);
+        }
+        for body in &mut self.functions {
+            receiver::Receiver::Prepend(added_dims, receiver_functions)
+                .statements(&mut body.statements);
+        }
+    }
+    pub fn get_function_for_index(&self, index: &VarIndex) -> Option<FunctionBody> {
+        if self.array.is_empty() {
+            if !index.0.is_empty() {
+                return None;
+            }
+            return self.functions.first().cloned();
+        }
+        if index.0.is_empty() {
+            return self.get_function(&[]);
+        }
+        let concrete = index
+            .is_const()
+            .then(|| {
+                index
+                    .0
+                    .iter()
+                    .map(|expression| expression.comptime().get_value().ok()?.to_usize())
+                    .collect::<Option<Vec<_>>>()
+            })
+            .flatten();
+        if concrete
+            .as_deref()
+            .is_some_and(|index| !self.contains_receiver_index(index))
+        {
+            return None;
+        }
+        self.array.calc_index_expr(&index.0)?;
+        let mut body = self.functions.first()?.clone();
+        receiver::Receiver::Bind(index, &self.receiver_prefixes).statements(&mut body.statements);
+        Some(body)
+    }
+
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
         for x in &self.functions {
             x.eval_assign(context, assign_table);
@@ -91,8 +167,18 @@ impl Function {
     }
 
     pub fn get_function(&self, index: &[usize]) -> Option<FunctionBody> {
-        let index = self.array.calc_index(index)?;
-        self.functions.get(index).cloned()
+        if self.array.is_empty() {
+            self.contains_receiver_index(index).then_some(())?;
+            return self.functions.first().cloned();
+        }
+
+        self.contains_receiver_index(index).then_some(())?;
+        let flat = self.array.calc_index(index)?;
+        let mut body = self.functions.first()?.clone();
+        let receiver_index = VarIndex::from_index(flat, &self.array);
+        receiver::Receiver::Bind(&receiver_index, &self.receiver_prefixes)
+            .statements(&mut body.statements);
+        Some(body)
     }
 
     pub fn to_proto(&self) -> FuncProto {
@@ -102,6 +188,7 @@ impl Function {
             r#type: self.r#type.clone(),
             arity: self.arity,
             args: self.args.clone(),
+            receiver_relative: self.receiver_relative,
             token: self.token,
         }
     }
@@ -114,6 +201,7 @@ pub struct FuncProto {
     pub r#type: Comptime,
     pub arity: usize,
     pub args: Vec<FuncArg>,
+    pub receiver_relative: bool,
     pub token: TokenRange,
 }
 
@@ -143,7 +231,9 @@ impl fmt::Display for Function {
         let mut ret = String::new();
 
         for (i, f) in self.functions.iter().enumerate() {
-            if self.functions.len() == 1 {
+            if !self.array.is_empty() {
+                ret.push_str(&format!("func {}[*]({})", self.id, self.path));
+            } else if self.functions.len() == 1 {
                 ret.push_str(&format!("func {}({})", self.id, self.path));
             } else {
                 ret.push_str(&format!("func {}[{}]({})", self.id, i, self.path));
@@ -169,6 +259,10 @@ impl fmt::Display for Function {
 #[derive(Clone, Debug)]
 pub struct FunctionCall {
     pub id: VarId,
+    /// Receiver expressions retained for dynamic interface-array calls.
+    pub receiver_index: VarIndex,
+    /// Coordinates contributed by an enclosing receiver.
+    pub receiver_prefix_dims: usize,
     pub index: Option<Vec<usize>>,
     pub comptime: Comptime,
     pub inputs: CallArgs<Expression>,
@@ -214,11 +308,7 @@ impl FunctionCall {
     fn eval_value_inner(&self, context: &mut Context) -> Option<Value> {
         let func = context.functions.get(&self.id)?;
         let cacheable = func.is_const && self.outputs.is_empty();
-        let func = if let Some(x) = &self.index {
-            func.get_function(x)
-        } else {
-            func.get_function(&[])
-        }?;
+        let func = func.get_function_for_index(&self.receiver_index)?;
 
         let mut inputs = Vec::new();
         let mut input_bits = 0usize;
@@ -328,6 +418,9 @@ impl FunctionCall {
         for expr in self.inputs.values() {
             expr.eval_assign(context, assign_table, assign_context);
         }
+        for expression in &self.receiver_index.0 {
+            expression.eval_assign(context, assign_table, assign_context);
+        }
         for output in self.outputs.values() {
             for dst in output {
                 if let Some(index) = dst.index.eval_value(context) {
@@ -373,6 +466,9 @@ impl FunctionCall {
         for input in self.inputs.values() {
             input.gather_ff(context, table, decl, assign_target, from_ff);
         }
+        for expression in &self.receiver_index.0 {
+            expression.gather_ff(context, table, decl, assign_target, from_ff);
+        }
         for dsts in self.outputs.values() {
             for dst in dsts {
                 dst.gather_ff(context, table, decl);
@@ -405,7 +501,11 @@ impl FunctionCall {
             .get(&self.id)
             .map(|func| func.is_const)
             .unwrap_or(true);
-        for expr in self.inputs.values_mut() {
+        for expr in self
+            .inputs
+            .values_mut()
+            .chain(self.receiver_index.0.iter_mut())
+        {
             is_const &= expr.eval_comptime(context, None).is_const;
         }
 

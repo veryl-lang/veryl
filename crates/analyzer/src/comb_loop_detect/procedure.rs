@@ -557,7 +557,7 @@ impl ProcedureContext {
         self.ctx = Some(ctx);
     }
 
-    fn prepare_summary(&mut self, module: &Module, id: VarId, index: Option<&[usize]>) {
+    fn prepare_summary(&mut self, module: &Module, id: VarId, receiver_index: &VarIndex) {
         debug_assert!(self.summary_scratch);
         let ctx = self.ctx.as_mut().expect("summary context is available");
         debug_assert!(ctx.variables.is_empty());
@@ -566,7 +566,7 @@ impl ProcedureContext {
         let Some(function) = module.functions.get(&id) else {
             return;
         };
-        let Some(body) = function.get_function(index.unwrap_or_default()) else {
+        let Some(body) = function.get_function_for_index(receiver_index) else {
             return;
         };
         let mut ids = body.arg_map.values().copied().collect::<HashSet<_>>();
@@ -787,6 +787,7 @@ fn collect_summary_expression_variables(
 }
 
 fn collect_summary_call_variables(module: &Module, call: &FunctionCall, ids: &mut HashSet<VarId>) {
+    collect_summary_index_variables(module, &call.receiver_index, ids);
     for input in call.inputs.values() {
         collect_summary_expression_variables(module, input, ids);
     }
@@ -798,7 +799,7 @@ fn collect_summary_call_variables(module: &Module, call: &FunctionCall, ids: &mu
     if let Some(body) = module
         .functions
         .get(&call.id)
-        .and_then(|function| function.get_function(call.index.as_deref().unwrap_or_default()))
+        .and_then(|function| function.get_function_for_index(&call.receiver_index))
     {
         ids.extend(body.arg_map.values().copied());
         ids.extend(body.ret);
@@ -910,7 +911,7 @@ impl<'a> FunctionSummaries<'a> {
             .contexts
             .pop()
             .unwrap_or_else(|| ProcedureContext::new_summary(Rc::clone(&self.module_scope_ids)));
-        context.prepare_summary(self.module, call.id, call.index.as_deref());
+        context.prepare_summary(self.module, call.id, &call.receiver_index);
         // Function IR is immutable during dependency analysis. Move the one
         // module-wide map down the suspended call chain instead of cloning it
         // into every recursive scratch context, then restore it before the
@@ -920,7 +921,7 @@ impl<'a> FunctionSummaries<'a> {
             self.module,
             self.bit_part,
             call.id,
-            call.index.as_deref(),
+            &call.receiver_index,
             &mut context,
             self,
         )
@@ -929,7 +930,12 @@ impl<'a> FunctionSummaries<'a> {
         context.clear_summary();
         self.contexts.push(context);
         if let Some(summary) = summary {
-            self.summaries.insert(key, Some(summary.clone()));
+            if call.index.is_some() || call.receiver_index.0.is_empty() {
+                self.summaries.insert(key, Some(summary.clone()));
+            } else {
+                // A dynamic receiver embeds this call site's selector sources.
+                self.summaries.remove(&key);
+            }
             FunctionSummaryLookup::Ready(summary)
         } else {
             self.summaries.remove(&key);
@@ -1243,7 +1249,6 @@ struct ProcedureAnalysis<'a, 's> {
     call_caches: Vec<CallCache>,
     call_frames: Vec<usize>,
     next_call_frame: usize,
-    receiver_indices: Vec<Option<VarIndex>>,
     function_flows: Vec<FunctionFlow>,
     loop_flows: Vec<LoopFlow>,
     path_condition: PathCondition,
@@ -1285,7 +1290,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             call_caches: Vec::new(),
             call_frames: Vec::new(),
             next_call_frame: 0,
-            receiver_indices: Vec::new(),
             function_flows: Vec::new(),
             loop_flows: Vec::new(),
             path_condition: PathCondition::default(),
@@ -1367,12 +1371,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         module: &'a Module,
         bit_part: &'a BitPartition,
         id: VarId,
-        index: Option<&[usize]>,
+        receiver_index: &VarIndex,
         context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
     ) -> Option<FunctionSummary> {
         let function = module.functions.get(&id)?;
-        let body = function.get_function(index.unwrap_or_default())?;
+        let body = function.get_function_for_index(receiver_index)?;
         let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
@@ -1380,13 +1384,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
         this.call_caches.push(None);
-        this.receiver_indices.push(
-            (!function.path.path.0.is_empty())
-                .then(|| index.map(concrete_var_index))
-                .flatten(),
-        );
         this.eval_function_body(&body.statements, body.ret, &[]);
-        this.receiver_indices.pop();
         this.call_caches.pop();
 
         let result_versions: Vec<(ArraySpan, Vec<(PackedSpan, VersionId)>)> = body
@@ -1714,10 +1712,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys: &mut HashSet<NodeKey>,
         visited: &mut HashSet<FunctionSummaryKey>,
     ) {
-        let mut resolved = destination.clone();
-        resolved.index = self.receiver_index(resolved.id, &resolved.index);
-        for (array, packed) in dst_writes(&resolved, &mut self.ctx) {
-            keys.extend(self.bit_part.overlapping_access(resolved.id, array, packed));
+        for (array, packed) in dst_writes(destination, &mut self.ctx) {
+            keys.extend(
+                self.bit_part
+                    .overlapping_access(destination.id, array, packed),
+            );
         }
         for expression in destination
             .index
@@ -1813,6 +1812,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         keys: &mut HashSet<NodeKey>,
         visited: &mut HashSet<FunctionSummaryKey>,
     ) {
+        for expression in &call.receiver_index.0 {
+            self.collect_expression_write_footprint(expression, keys, visited);
+        }
         for actual in call.inputs.values() {
             self.collect_expression_write_footprint(actual, keys, visited);
         }
@@ -1833,7 +1835,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .module
             .functions
             .get(&call.id)
-            .and_then(|function| function.get_function(call.index.as_deref().unwrap_or_default()))
+            .and_then(|function| function.get_function_for_index(&call.receiver_index))
             .map(|body| body.statements)
         else {
             visited.remove(&summary_key);
@@ -1844,6 +1846,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // call-site-specific and are always visited. The selected function
         // body is identical for every later call with the same summary key,
         // so retaining it avoids walking an N-statement body at N call sites.
+        if call.index.is_none() && !call.receiver_index.0.is_empty() {
+            visited.remove(&summary_key);
+        }
     }
 
     fn collect_system_call_write_footprint(
@@ -1934,8 +1939,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return self.keys_for_id(id);
         }
         let mut keys = Vec::new();
-        let index = self.receiver_index(id, index);
-        let accesses = var_reads(id, &index, select, &mut self.ctx);
+        let accesses = var_reads(id, index, select, &mut self.ctx);
         if accesses.is_empty() {
             self.status = self.status.max(AnalysisStatus::Partial);
         }
@@ -1955,9 +1959,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return self.keys_for_id(destination.id);
         }
         let mut keys = Vec::new();
-        let mut destination = destination.clone();
-        destination.index = self.receiver_index(destination.id, &destination.index);
-        let accesses = dst_writes(&destination, &mut self.ctx);
+        let accesses = dst_writes(destination, &mut self.ctx);
         if accesses.is_empty() {
             self.status = AnalysisStatus::Barrier;
         }
@@ -1970,12 +1972,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn destination_is_dynamic(&self, destination: &AssignDestination) -> bool {
-        let index = self.receiver_index(destination.id, &destination.index);
-        !index.is_const() || !destination.select.is_const_with_range()
+        !destination.index.is_const() || !destination.select.is_const_with_range()
     }
 
     fn flattened_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<AffineIndex> {
-        let index = self.receiver_index(id, index);
         let variable = self.ctx.variables.get(&id)?;
         if index.dimension() != variable.r#type.array.dims() {
             return None;
@@ -2019,21 +2019,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.bind_key(key, version);
         }
         self.written.insert(key);
-    }
-
-    fn receiver_index(&self, id: VarId, index: &VarIndex) -> VarIndex {
-        if !self.ctx.variables.get(&id).is_some_and(|variable| {
-            matches!(
-                variable.affiliation,
-                crate::symbol::Affiliation::Module | crate::symbol::Affiliation::Interface
-            )
-        }) {
-            return index.clone();
-        }
-        self.receiver_indices
-            .last()
-            .and_then(Clone::clone)
-            .unwrap_or_else(|| index.clone())
     }
 
     fn read_variable(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<VersionId> {
@@ -2157,9 +2142,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
-        let mut selected_destination = destination.clone();
-        selected_destination.index = self.receiver_index(destination.id, &destination.index);
-        let destination_array = dst_writes(&selected_destination, &mut self.ctx)
+        let selected_destination = destination;
+        let destination_array = dst_writes(selected_destination, &mut self.ctx)
             .into_iter()
             .map(|(array, _)| array)
             .next();
@@ -3027,8 +3011,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     };
                     if let Some((_, low)) = selected {
                         let mut reads = Vec::new();
-                        let receiver = self.receiver_index(*id, index);
-                        let accesses = var_reads(*id, &receiver, select, &mut self.ctx);
+                        let accesses = var_reads(*id, index, select, &mut self.ctx);
                         let dynamic_array_offset = projection
                             .destination_index
                             .as_ref()
@@ -3041,9 +3024,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 }?;
                                 destination.destination_offset_from(&source)
                             });
-                        let position_preserving =
-                            receiver.0.iter().all(|index| index.comptime().is_const)
-                                && accesses.len() == 1;
+                        let position_preserving = index.is_const() && accesses.len() == 1;
                         if let Some(source_span) = requested.translated(0, low) {
                             for (idx, access) in &accesses {
                                 let source_array = if let Some(offset) = dynamic_array_offset {
@@ -4158,18 +4139,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Some(FunctionSummaryLookup::Missing) | None => self.repeatable = false,
         }
 
-        let receiver_index = self.ctx.functions.get(&call.id).and_then(|function| {
-            (!function.path.path.0.is_empty())
-                .then(|| call.index.as_deref().map(concrete_var_index))
-                .flatten()
-        });
-        let body = self.ctx.functions.get(&call.id).and_then(|function| {
-            if let Some(index) = &call.index {
-                function.get_function(index)
-            } else {
-                function.get_function(&[])
-            }
-        });
+        let body = self
+            .ctx
+            .functions
+            .get(&call.id)
+            .and_then(|function| function.get_function_for_index(&call.receiver_index));
         let Some(body) = body else {
             let mut sources = Vec::new();
             for input in call.inputs.values() {
@@ -4220,9 +4194,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
 
         self.call_caches.push(None);
-        self.receiver_indices.push(receiver_index);
         self.eval_function_body(&body.statements, body.ret, controls);
-        self.receiver_indices.pop();
         self.call_caches.pop();
 
         let mut formal_outputs = HashMap::default();
@@ -4429,10 +4401,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let Factor::Variable(id, index, select, _) = factor.as_ref() else {
                 return None;
             };
-            if !index.0.is_empty()
-                || !select.is_empty()
-                || !self.receiver_index(*id, index).0.is_empty()
-            {
+            if !index.0.is_empty() || !select.is_empty() || !index.0.is_empty() {
                 return None;
             }
             actuals.push(SummaryActualIdentity {
@@ -4729,13 +4698,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
-        let mut selected_destination = destination.clone();
-        selected_destination.index = self.receiver_index(destination.id, &destination.index);
+        let selected_destination = destination;
         let destination_array = selected_destination
             .index
             .is_const()
             .then(|| {
-                dst_writes(&selected_destination, &mut self.ctx)
+                dst_writes(selected_destination, &mut self.ctx)
                     .into_iter()
                     .map(|(array, _)| array)
                     .next()
@@ -4884,20 +4852,6 @@ fn statements_have_unknown(statements: &[Statement]) -> bool {
         Statement::For(statement) => statements_have_unknown(&statement.body),
         _ => false,
     })
-}
-
-fn concrete_var_index(index: &[usize]) -> VarIndex {
-    VarIndex(
-        index
-            .iter()
-            .map(|index| {
-                Expression::create_value(
-                    Value::new(*index as u64, 32, false),
-                    veryl_parser::token_range::TokenRange::default(),
-                )
-            })
-            .collect(),
-    )
 }
 
 fn expression_has_unknown(expression: &Expression) -> bool {
