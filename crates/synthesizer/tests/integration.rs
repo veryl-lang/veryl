@@ -1042,6 +1042,53 @@ fn interface_instance_synthesizes() {
     );
 }
 
+#[test]
+fn interface_array_function_samples_receiver_before_writing_it() {
+    let code = r#"
+        interface Bus {
+            var index: logic;
+            var data: logic<8>;
+            function get () -> logic<8> {
+                index = 1;
+                return data;
+            }
+        }
+        module Top (initial_index: input logic, selected: output logic<8>) {
+            inst bus: Bus[2];
+            assign bus[0].data = 7;
+            assign bus[1].data = 19;
+            always_comb {
+                bus[0].index = initial_index;
+                selected = bus[bus[0].index].get();
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let initial_index = gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "initial_index")
+        .unwrap();
+    let selected = gate
+        .ports
+        .iter()
+        .find(|p| p.name.to_string() == "selected")
+        .unwrap();
+    for (index, expected) in [(false, 7), (true, 19)] {
+        let inputs = [(initial_index.nets[0], index)].into_iter().collect();
+        let mut memo = std::collections::HashMap::new();
+        let value = selected
+            .nets
+            .iter()
+            .enumerate()
+            .fold(0, |value, (bit, &net)| {
+                value | (usize::from(eval_net(&gate, net, &inputs, &mut memo)) << bit)
+            });
+        assert_eq!(value, expected);
+    }
+}
+
 /// Tries to synthesize every module found in `testcases/veryl/`. Not a pass/
 /// fail test — it's an exploration that prints a per-category error histogram
 /// to help decide what to support next. Run with:

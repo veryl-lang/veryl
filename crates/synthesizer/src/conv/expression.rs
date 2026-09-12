@@ -5,10 +5,10 @@ use veryl_analyzer::ir::{
 };
 use veryl_parser::resource_table::StrId;
 
-use crate::conv::ConvContext;
 use crate::conv::arith;
 use crate::conv::ram;
 use crate::conv::statement::{dst_slice_width, process_statements, write_to_dst};
+use crate::conv::{ConvContext, VarDriverKind, VarSlot};
 use crate::ir::{CellKind, NET_CONST0, NET_CONST1, NetDriver, NetId, RamReadPort};
 use crate::synthesizer_error::{SynthesizerError, UnsupportedKind};
 
@@ -852,6 +852,49 @@ fn onehot_reduce(ctx: &mut ConvContext, bits: &[NetId]) -> NetId {
     ctx.add_cell(CellKind::And2, vec![any, not_more])
 }
 
+/// Freeze dynamic receiver coordinates before argument and body effects.
+fn sample_function_receiver(
+    ctx: &mut ConvContext,
+    index: &air::VarIndex,
+    current: &mut HashMap<air::VarId, Vec<NetId>>,
+) -> Result<(air::VarIndex, Vec<air::VarId>), SynthesizerError> {
+    let mut receiver = index.clone();
+    let mut temporaries = Vec::new();
+    for expression in &mut receiver.0 {
+        if expression.comptime().is_const {
+            continue;
+        }
+        let comptime = expression.comptime().clone();
+        let width = comptime.r#type.total_width().ok_or_else(|| {
+            SynthesizerError::unknown_width("function receiver index", &comptime.token)
+        })?;
+        let nets = synthesize_expr(ctx, expression, current, width)?;
+        let id = ctx.next_temporary_id;
+        ctx.next_temporary_id.inc();
+        ctx.variables.insert(
+            id,
+            VarSlot {
+                nets,
+                width,
+                scalar_width: width,
+                shape: air::Shape::default(),
+                r#type: comptime.r#type.clone(),
+                name: veryl_parser::resource_table::insert_str("__receiver"),
+                kind: air::VarKind::Let,
+                driver: VarDriverKind::None,
+            },
+        );
+        temporaries.push(id);
+        *expression = Expression::Term(Box::new(Factor::Variable(
+            id,
+            air::VarIndex::default(),
+            air::VarSelect::default(),
+            comptime,
+        )));
+    }
+    Ok((receiver, temporaries))
+}
+
 /// Inlines a user-defined function call. The body runs against a clone of
 /// `current` so the call sees the caller's updates to module-level signals
 /// but doesn't leak its own locals back — only declared outputs and the
@@ -866,14 +909,13 @@ fn synth_function_call(
         .get(&call.id)
         .cloned()
         .ok_or_else(|| SynthesizerError::internal(format!("function {} not found", call.id)))?;
-    let body = func
-        .get_function_for_index(&call.receiver_index)
-        .ok_or_else(|| {
-            SynthesizerError::internal(format!(
-                "function {} has no body for the requested variant",
-                call.id
-            ))
-        })?;
+    let (receiver, temporaries) = sample_function_receiver(ctx, &call.receiver_index, current)?;
+    let body = func.get_function_for_index(&receiver).ok_or_else(|| {
+        SynthesizerError::internal(format!(
+            "function {} has no body for the requested variant",
+            call.id
+        ))
+    })?;
 
     let mut inner = current.clone();
 
@@ -892,6 +934,9 @@ fn synth_function_call(
     }
 
     process_statements(ctx, &body.statements, &mut inner)?;
+    for id in temporaries {
+        ctx.variables.remove(&id);
+    }
 
     for (path, dsts) in &call.outputs {
         let arg_vid = body.arg_map.get(path).ok_or_else(|| {
