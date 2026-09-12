@@ -40,6 +40,49 @@ fn check_ir(code: &str, exp: &str) {
 }
 
 #[test]
+fn constant_type_contexts() {
+    let code = r#"
+module ModuleA {
+    const P: signed logic<8> = 64'd255;
+    const UNSIGNED: logic<8> = 64'd511;
+    const NEGATIVE: signed logic<8> = 64'd384;
+    const POSITIVE: signed logic<8> = 64'd383;
+    const ONE: bit = 64'd3;
+
+    let _value: logic<64> = P;
+    const WIDENED: logic<64> = P;
+    const UNSIGNED_VALUE: logic<64> = UNSIGNED;
+    const NEGATIVE_VALUE: logic<128> = NEGATIVE;
+    const POSITIVE_VALUE: logic<64> = POSITIVE;
+    const MIXED_VALUE: logic<64> = NEGATIVE + 64'd0;
+    const MASK: logic<64> = {ONE repeat 64};
+}
+"#;
+
+    let exp = r#"module ModuleA {
+  const var0(P): signed logic<8> = 8'shff;
+  const var1(UNSIGNED): logic<8> = 8'hff;
+  const var2(NEGATIVE): signed logic<8> = 8'sh80;
+  const var3(POSITIVE): signed logic<8> = 8'sh7f;
+  const var4(ONE): bit = 1'h1;
+  let var5(_value): logic<64> = 64'hxxxxxxxxxxxxxxxx;
+  const var6(WIDENED): logic<64> = 64'hffffffffffffffff;
+  const var7(UNSIGNED_VALUE): logic<64> = 64'h00000000000000ff;
+  const var8(NEGATIVE_VALUE): logic<128> = 128'hffffffffffffffffffffffffffffff80;
+  const var9(POSITIVE_VALUE): logic<64> = 64'h000000000000007f;
+  const var10(MIXED_VALUE): logic<64> = 64'h0000000000000080;
+  const var11(MASK): logic<64> = 64'hffffffffffffffff;
+
+  comb {
+    var5 = 8'shff;
+  }
+}
+"#;
+
+    check_ir(code, exp);
+}
+
+#[test]
 fn basic() {
     let code = r#"
     module ModuleA (
