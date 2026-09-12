@@ -637,7 +637,7 @@ impl AssignDestination {
     ) {
         if let Some(variable) = context.get_variable_info(self.id) {
             let is_index_const = self.index.is_const();
-            let is_select_const = self.select.is_const();
+            let is_select_const = self.select.is_const_with_range();
             let is_const = is_index_const & is_select_const;
 
             let range = if !is_index_const {
@@ -649,33 +649,14 @@ impl AssignDestination {
                 variable.r#type.array.calc_range(&index)
             };
 
-            // A dynamic select can only reach inside the region its const prefix
-            // pins down (`x[const][dyn]`); masking the whole width would merge
-            // writes that provably land on different regions.
-            let mask = if !is_select_const {
-                let const_len = self
-                    .select
-                    .0
-                    .iter()
-                    .take_while(|x| x.comptime().is_const)
-                    .count();
-                let prefix = self.select.clone().split(const_len).0;
-                match prefix.eval_value(context, &variable.r#type, false) {
-                    Some((beg, end)) => ValueBigUint::gen_mask_range(beg, end),
-                    None => {
-                        let Some(width) = variable.total_width() else {
-                            return;
-                        };
-                        ValueBigUint::gen_mask(width)
-                    }
-                }
-            } else {
-                let Some((beg, end)) = self.select.eval_value(context, &variable.r#type, false)
-                else {
-                    return;
-                };
-                ValueBigUint::gen_mask_range(beg, end)
+            let Some((beg, end)) = self.select.conservative_packed_range(
+                context,
+                &variable.r#type,
+                self.comptime.member_select_domain,
+            ) else {
+                return;
             };
+            let mask = ValueBigUint::gen_mask_range(beg, end);
 
             let mut errors = vec![];
             if let Some((beg, end)) = range {
@@ -805,17 +786,11 @@ fn compute_assign_target(
     } else {
         None
     };
-    // A non-const select targets an indeterminate bit range, so fall back to
-    // the full-width mask.
-    let mask = if dst.select.is_const()
-        && let Some((beg, end)) = dst.select.eval_value(context, &var_info.r#type, false)
-    {
-        ValueBigUint::gen_mask_range(beg, end)
-    } else if let Some(width) = var_info.total_width() {
-        ValueBigUint::gen_mask(width)
-    } else {
-        crate::BigUint::default()
-    };
+    let mask = dst
+        .select
+        .conservative_packed_range(context, &var_info.r#type, dst.comptime.member_select_domain)
+        .map(|(beg, end)| ValueBigUint::gen_mask_range(beg, end))
+        .unwrap_or_default();
     Some((dst.id, arr_idx, mask))
 }
 

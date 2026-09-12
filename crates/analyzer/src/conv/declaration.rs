@@ -23,7 +23,7 @@ use crate::conv::utils::{
     eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable, expand_connect,
     expand_connect_const, expand_input_connect, get_component, get_overridden_params,
     get_port_connects, get_return_str, insert_port_connect, try_infer_decl_type,
-    try_infer_var_assign, var_path_to_assign_destination,
+    try_infer_var_assign, var_path_to_assign_destination, var_path_to_contiguous_fragment,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::definition_table::{self, Definition};
@@ -1361,6 +1361,9 @@ fn conv_function(
         array: Shape::default(),
         arity,
         args,
+        receiver_relative: proeprty.affiliation == Affiliation::Interface,
+        receiver_variables: HashSet::default(),
+        receiver_prefixes: HashMap::default(),
         is_const: proeprty.constantable.unwrap_or_default(),
         functions: body,
         token,
@@ -1684,24 +1687,32 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             };
 
                             if let Some(actual) = connects.interface_binding {
-                                for (child, child_variable) in &component.interface_members {
+                                for (child, child_variable) in component
+                                    .interface_members
+                                    .iter()
+                                    .chain(component.variables.iter())
+                                {
                                     if !child_variable.path.starts_with(&path.0) {
                                         continue;
                                     }
                                     let mut parent_path = actual.0.clone();
                                     parent_path.append(&child_variable.path.0[path.0.len()..]);
-                                    let Some((parent, comptime)) = context.find_path(&parent_path)
-                                    else {
-                                        continue;
-                                    };
-                                    let (array_select, width_select) =
-                                        actual.1.clone().split(comptime.r#type.array.dims());
-                                    interface_bindings.push(ir::InstInterfaceBinding {
-                                        child: *child,
-                                        parent,
-                                        index: array_select.to_index(),
-                                        select: width_select,
-                                    });
+                                    let parent_actual =
+                                        VarPathSelect(parent_path, actual.1.clone(), actual.2);
+                                    if let Some(actual) = var_path_to_contiguous_fragment(
+                                        context,
+                                        &parent_actual,
+                                        true,
+                                    ) && child_variable.r#type.array.total()
+                                        == Some(actual.parent_array_length)
+                                        && child_variable.total_width()
+                                            == Some(actual.parent_packed_length)
+                                    {
+                                        interface_bindings.push(ir::InstInterfaceBinding {
+                                            child: *child,
+                                            actual,
+                                        });
+                                    }
                                 }
                             }
 

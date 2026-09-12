@@ -100,8 +100,8 @@ pub struct Context {
     pub(crate) comb_cache: Arc<super::comb_pipeline_cache::CombPipelineCache>,
     /// Populated from `Config`.  Empty → interpreter-only.
     pub backends: BackendRegistry,
-    /// See `alloc_internal_event_id`.
-    pub internal_event_ids_allocated: u32,
+    /// See `alloc_internal_id`.
+    pub internal_ids_allocated: u32,
     /// Per-call-site copies of a function's comb scratch, as
     /// `(old_offset, new_offset, bytes)`.  A copy carries no `VariableMeta`,
     /// so without this record nothing owns it and `cone_gate` pins every
@@ -114,21 +114,21 @@ impl Context {
         self.scope_contexts.last_mut().unwrap()
     }
 
-    /// Mint a globally-unique VarId for an event declared inside a child
-    /// instance.  Ids come from the top of the u32 range (just below
+    /// Mint a globally-unique VarId for an internal event or receiver temporary.
+    /// Ids come from the top of the u32 range (just below
     /// `VarId::SYNTHETIC`), which real per-scope ids never reach, so the
     /// inst-boundary event remap is a guaranteed no-op for them at every
     /// ancestor level.  See the re-key in `InstDeclaration`'s `Conv` impl
     /// (ir/declaration.rs) for the collision this prevents.
-    pub fn alloc_internal_event_id(&mut self) -> VarId {
-        self.internal_event_ids_allocated += 1;
+    pub fn alloc_internal_id(&mut self) -> VarId {
+        self.internal_ids_allocated += 1;
         // SYNTHETIC is u32::MAX; start below it.  Real ids count up from
         // 0, so the ranges meet only after ~2^31 allocations.
         debug_assert!(
-            self.internal_event_ids_allocated < u32::MAX / 2,
-            "internal event id allocator exhausted its half of the u32 range"
+            self.internal_ids_allocated < u32::MAX / 2,
+            "internal id allocator exhausted its half of the u32 range"
         );
-        VarId::from_raw(u32::MAX - self.internal_event_ids_allocated)
+        VarId::from_raw(u32::MAX - self.internal_ids_allocated)
     }
 }
 

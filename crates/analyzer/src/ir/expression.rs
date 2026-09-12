@@ -967,7 +967,7 @@ impl Factor {
         assign_context: AssignContext,
     ) {
         match self {
-            Factor::Variable(id, index, select, _) => {
+            Factor::Variable(id, index, select, comptime) => {
                 // `insert_reference` bails out on arrays over `array_limit`;
                 // short-circuit to avoid cloning the full Variable (value
                 // vec scales with array size).
@@ -981,7 +981,11 @@ impl Factor {
                 }
                 if let Some(index) = index.eval_value(context)
                     && let Some(variable) = context.variables.get(id).cloned()
-                    && let Some((beg, end)) = select.eval_value(context, &variable.r#type, false)
+                    && let Some((beg, end)) = select.conservative_packed_range(
+                        context,
+                        &variable.r#type,
+                        comptime.member_select_domain,
+                    )
                 {
                     let mask = ValueBigUint::gen_mask_range(beg, end);
                     assign_table.insert_reference(&variable, index, mask);
@@ -1006,17 +1010,16 @@ impl Factor {
         from_ff: bool,
     ) {
         match self {
-            Factor::Variable(id, index, select, _) => {
+            Factor::Variable(id, index, select, comptime) => {
                 if let Some(variable) = context.get_variable_info(*id) {
-                    let src_read_mask = if let Some((beg, end)) =
-                        select.eval_value(context, &variable.r#type, false)
-                    {
-                        ValueBigUint::gen_mask_range(beg, end)
-                    } else if let Some(width) = variable.total_width() {
-                        ValueBigUint::gen_mask(width)
-                    } else {
-                        crate::BigUint::default()
-                    };
+                    let src_read_mask = select
+                        .conservative_packed_range(
+                            context,
+                            &variable.r#type,
+                            comptime.member_select_domain,
+                        )
+                        .map(|(beg, end)| ValueBigUint::gen_mask_range(beg, end))
+                        .unwrap_or_default();
                     if let Some(index) = index.eval_value(context) {
                         if let Some(index) = variable.r#type.array.calc_index(&index) {
                             table.insert_refered(

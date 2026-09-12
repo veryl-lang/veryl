@@ -6463,6 +6463,83 @@ fn a_parameter_width_is_not_taken_from_the_instantiating_module() {
 }
 
 #[test]
+fn interface_array_function_receiver_and_member_indices() {
+    let code = r#"
+        interface Bus {
+            var data: logic<8>[2];
+            function get () -> logic<8> { return data[1]; }
+        }
+        module Top (index: input u32, selected: output logic<8>, fixed: output logic<8>) {
+            inst bus: Bus[2];
+            assign bus[0].data = '{3, 7};
+            assign bus[1].data = '{11, 19};
+            assign selected = bus[index].get();
+            assign fixed = bus[1].get();
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (index, expected) in [(0, 7), (1, 19), (0, 7)] {
+            sim.set("index", Value::new(index, 32, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("selected").unwrap(), Value::new(expected, 8, false));
+            assert_eq!(sim.get("fixed").unwrap(), Value::new(19, 8, false));
+        }
+    }
+}
+
+#[test]
+fn interface_array_function_samples_receiver_before_writing_it() {
+    let code = r#"
+        interface Bus {
+            var index: logic;
+            var data: logic<8>;
+            function get () -> logic<8> {
+                index = 1;
+                return data;
+            }
+        }
+        module Top (selected: output logic<8>) {
+            inst bus: Bus[2];
+            assign bus[0].data = 7;
+            assign bus[1].data = 19;
+            always_comb {
+                bus[0].index = 0;
+                selected = bus[bus[0].index].get();
+            }
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("selected").unwrap(), Value::new(7, 8, false));
+    }
+}
+
+#[test]
+fn interface_single_element_array_function_without_index() {
+    let code = r#"
+        interface Bus {
+            var data: logic<8>;
+            function get () -> logic<8> { return data; }
+        }
+        module Top (selected: output logic<8>) {
+            inst bus: Bus[1];
+            assign bus[0].data = 7;
+            assign selected = bus.get();
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("selected").unwrap(), Value::new(7, 8, false));
+    }
+}
+
+#[test]
 fn interface_function() {
     let code = r#"
     interface BusIf {

@@ -1655,21 +1655,13 @@ fn interface_array() {
   var var5[0](u.b): logic = 1'hx;
   var var5[1](u.b): logic = 1'hx;
   var var8(a): logic<4> = 4'hx;
-  var var10[0](u.FuncA.return): logic = 1'hx;
-  var var10[1](u.FuncA.return): logic = 1'hx;
-  var var12[0](if_a.FuncA.return): logic = 1'hx;
-  var var12[1](if_a.FuncA.return): logic = 1'hx;
-  func var9[0](u.FuncA) -> var10 {
-    var10[32'h00000000] = var4[32'h00000000];
+  var var10(u.FuncA.return): logic = 1'hx;
+  var var12(if_a.FuncA.return): logic = 1'hx;
+  func var9[*](u.FuncA) -> var10 {
+    var10 = var4;
   }
-  func var9[1](u.FuncA) -> var10 {
-    var10[32'h00000001] = var4[32'h00000001];
-  }
-  func var11[0](if_a.FuncA) -> var12 {
-    var12[32'h00000000] = var0[32'h00000000];
-  }
-  func var11[1](if_a.FuncA) -> var12 {
-    var12[32'h00000001] = var0[32'h00000001];
+  func var11[*](if_a.FuncA) -> var12 {
+    var12 = var0;
   }
 
   comb {
