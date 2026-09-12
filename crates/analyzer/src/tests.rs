@@ -5667,6 +5667,9 @@ fn invalid_type_declaration() {
 
 #[test]
 fn mismatch_assignment() {
+    // The unpacked dimensions disagree. No SystemVerilog tool accepts that, so
+    // the help says which axis is wrong, but the severity stays the warning the
+    // rest of this test covers: the check is conservative.
     let code = r#"
     module ModuleA {
         let _a: logic[2] = 1;
@@ -5676,7 +5679,10 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::MismatchAssignment {
+            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+            ..
+        }
     ));
 
     let code = r#"
@@ -5689,8 +5695,34 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::MismatchAssignment {
+            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+            ..
+        }
     ));
+
+    // A 2-state destination answers `compatible` from its element kind alone,
+    // so the dimensions were never compared and the whole 2-state half of the
+    // type system reported nothing. Clock and reset arrays answer the same way.
+    let code = r#"
+    module ModuleA {
+        var _a: bit<8>[4];
+        var _b: bit<8>[2];
+        assign _a = _b;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors.iter().any(|x| matches!(
+            x,
+            AnalyzerError::MismatchAssignment {
+                kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
 
     let code = r#"
     module ModuleA {

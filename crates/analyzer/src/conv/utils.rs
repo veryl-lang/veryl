@@ -1,6 +1,7 @@
 use crate::analyzer_error::{
     AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForRangeKind,
-    InvalidForStepKind, MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
+    InvalidForStepKind, MismatchAssignmentKind, MismatchTypeKind, MultipleDefaultKind,
+    UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -4480,12 +4481,22 @@ pub fn check_compatibility(
         check_implicit_clock_conversion(context, dst, src, token);
         return;
     }
-    if !dst.compatible(src, context.in_generic) {
-        let src_type = src.r#type.to_string();
-        let dst_type = dst.to_string();
+    // The unpacked dimensions are asked on their own axis rather than inside
+    // `compatible`, which answers from the element kind for a 2-state, clock or
+    // reset destination and never reaches its array branch for one. The answer
+    // only refines the help: the severity is the same conservative warning.
+    let kind = if dst.array_shape_mismatch(src) {
+        Some(MismatchAssignmentKind::ArrayShape)
+    } else if !dst.compatible(src, context.in_generic) {
+        Some(MismatchAssignmentKind::Normal)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
         context.insert_error(AnalyzerError::mismatch_assignment(
-            &src_type,
-            &dst_type,
+            &src.r#type.to_string(),
+            &dst.to_string(),
+            kind,
             token,
             &[],
         ));

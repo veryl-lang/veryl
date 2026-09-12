@@ -28,6 +28,19 @@ enum Allowed {
     MismatchAssignment,
 }
 
+impl Allowed {
+    fn permits(self, error: &AnalyzerError) -> bool {
+        match self {
+            Allowed::Nothing => false,
+            Allowed::CombLoop => matches!(error, AnalyzerError::CombinationalLoop { .. }),
+            // The unpacked-dimension mismatch is one kind of this warning.
+            Allowed::MismatchAssignment => {
+                matches!(error, AnalyzerError::MismatchAssignment { .. })
+            }
+        }
+    }
+}
+
 #[track_caller]
 fn analyze_top(code: &str, config: &Config, top: &str) -> Result<Ir, SimulatorError> {
     analyze_top_inner(code, config, top, Allowed::Nothing)
@@ -108,13 +121,7 @@ fn analyze_top_inner(
                 x,
                 AnalyzerError::InvalidLogicalOperand { .. }
                     | AnalyzerError::UnsignedArithShift { .. }
-            ) && !match allow {
-                Allowed::Nothing => false,
-                Allowed::CombLoop => matches!(x, AnalyzerError::CombinationalLoop { .. }),
-                Allowed::MismatchAssignment => {
-                    matches!(x, AnalyzerError::MismatchAssignment { .. })
-                }
-            }
+            ) && !allow.permits(x)
         })
         .collect();
     assert!(errors.is_empty());

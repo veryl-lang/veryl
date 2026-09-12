@@ -1076,13 +1076,14 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Warning),
         code(mismatch_assignment),
-        help(""),
+        help("{kind}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{src}\" can't be assigned to \"{dst}\"")]
     MismatchAssignment {
         src: String,
         dst: String,
+        kind: MismatchAssignmentKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -3167,6 +3168,7 @@ impl AnalyzerError {
     pub fn mismatch_assignment(
         src: &str,
         dst: &str,
+        kind: MismatchAssignmentKind,
         token: &TokenRange,
         inst_context: &[TokenRange],
     ) -> Self {
@@ -3174,6 +3176,7 @@ impl AnalyzerError {
         AnalyzerError::MismatchAssignment {
             src: src.to_string(),
             dst: dst.to_string(),
+            kind,
             input,
             error_location: token.into(),
             inst_context,
@@ -4202,6 +4205,27 @@ impl fmt::Display for MultipleDefaultKind {
             MultipleDefaultKind::Clock => "clock".fmt(f),
             MultipleDefaultKind::Reset => "reset".fmt(f),
             MultipleDefaultKind::ArrayLiteral => "value in array literal".fmt(f),
+        }
+    }
+}
+
+/// Refines the `mismatch_assignment` help. The severity stays a warning: the
+/// check is conservative and a false positive must not stop a build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MismatchAssignmentKind {
+    Normal,
+    /// The unpacked dimensions disagree, which no SystemVerilog tool accepts
+    /// and which the simulator reports for itself when it reaches one.
+    ArrayShape,
+}
+
+impl fmt::Display for MismatchAssignmentKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MismatchAssignmentKind::Normal => "".fmt(f),
+            MismatchAssignmentKind::ArrayShape => {
+                "the unpacked dimensions disagree; give both sides the same ones".fmt(f)
+            }
         }
     }
 }
