@@ -515,6 +515,26 @@ impl ProtoExpression {
                 width: out_width,
                 expr_context: ctx(expr_context.signed),
             }),
+            // A select is scalar, so it picks the same arm for every bit: each
+            // window keeps the whole condition and narrows only the arms.  The
+            // condition is then evaluated once per window -- `max_parts` at the
+            // caller is what bounds that, and it is what a bundle mux costs to
+            // stop carrying every bit into every other.
+            ProtoExpression::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                expr_context,
+                ..
+            } if true_expr.width() == width && false_expr.width() == width => {
+                Some(ProtoExpression::Ternary {
+                    cond: cond.clone(),
+                    true_expr: Box::new(true_expr.bit_parallel_window(hi, lo)?),
+                    false_expr: Box::new(false_expr.bit_parallel_window(hi, lo)?),
+                    width: out_width,
+                    expr_context: ctx(expr_context.signed),
+                })
+            }
             _ => None,
         }
     }
@@ -2576,8 +2596,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let unmasked = proto.unmasked_bits(UNMASKED_BITS_DEPTH);
                     let carries_above = |cw: usize| unmasked.is_none_or(|w| w > cw);
                     let needs_reinterpret = |cw: usize| {
-                        outer.width > cw
-                            && operand_width <= cw
+                        operand_width <= cw
                             && proto.width() == cw
                             && proto.expr_context().signed != comptime.r#type.signed
                     };
@@ -2598,15 +2617,23 @@ impl Conv<&air::Expression> for ProtoExpression {
                             width: node_width,
                             signed: false,
                         };
+                        // A comparison, Div/Rem and a store take signedness
+                        // from their operands, not from their own context, so
+                        // the cast node has to carry it.
+                        let result_ctx = ExpressionContext {
+                            width: node_width,
+                            signed: comptime.r#type.signed,
+                        };
+                        let sign_extends = comptime.r#type.signed && outer.width > cw;
                         let mask = (BigUint::one() << cw) - BigUint::one();
                         let mut ret = ProtoExpression::Binary {
                             x: Box::new(proto),
                             op: Op::BitAnd,
                             y: Box::new(value_node(mask)),
                             width: node_width,
-                            expr_context: ctx,
+                            expr_context: if sign_extends { ctx } else { result_ctx },
                         };
-                        if comptime.r#type.signed && outer.width > cw {
+                        if sign_extends {
                             // Sign-extend the truncated value to the outer
                             // width: ((v ^ s) - s) mod 2^node_width.
                             let sign = BigUint::one() << (cw - 1);
@@ -2621,7 +2648,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                                 op: Op::Sub,
                                 y: Box::new(value_node(sign)),
                                 width: node_width,
-                                expr_context: ctx,
+                                expr_context: result_ctx,
                             };
                         }
                         return Ok(ret);

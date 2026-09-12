@@ -3,8 +3,8 @@ use crate::component::loader::ComponentError;
 use crate::component::runtime::{RuntimeComponent, build_components};
 use crate::ir::opt::event_gate::{GateEntry, RtEventGates};
 use crate::ir::write_log::{
-    WriteLogBuffer, clear_event_write_log, ff_commit_from_log, ff_commit_from_log_watched,
-    set_event_write_log,
+    WriteLogBuffer, clear_event_write_log, ff_commit_from_log, ff_commit_from_log_marking,
+    ff_commit_from_log_watched, set_event_write_log,
 };
 use crate::ir::{
     Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, dispatch_stmt_fast,
@@ -1599,7 +1599,11 @@ impl Simulator {
         for c in &mut components {
             c.on_init();
             c.drain_logs();
-            c.apply_outputs(&mut self.ir.module_variables, self.ir.use_4state);
+            if c.apply_outputs(&mut self.ir.module_variables, self.ir.use_4state)
+                && self.dump.is_some()
+            {
+                crate::wave_dumper::note_direct_write();
+            }
         }
         self.comb_dirty = true;
         for c in &components {
@@ -1651,6 +1655,11 @@ impl Simulator {
         self.components = components;
         if wrote {
             self.comb_dirty = true;
+            // A waveform's gate hears about writes only through the log.  The
+            // test is what keeps a run without one off this path entirely.
+            if self.dump.is_some() {
+                crate::wave_dumper::note_direct_write();
+            }
         }
     }
 
@@ -1878,32 +1887,47 @@ impl Simulator {
         }
     }
 
-    /// Apply the accumulated write log to FF storage and reset the buffer.
-    fn commit_event_log(&mut self) {
-        #[cfg(feature = "profile")]
-        let ff_start = Instant::now();
+    /// Commit the log with a waveform attached: every changed byte is reported
+    /// so the dump's gate hears about it, and the settle filter's probe rides
+    /// along on the same compare.  Kept apart from `commit_event_log` so a run
+    /// without a waveform commits exactly as it did before there was one.
+    fn commit_marking(
+        ir: &mut Ir,
+        dump: &mut WaveDumper,
+        probe: Option<&mut dyn FnMut(usize, usize) -> bool>,
+    ) -> bool {
+        let (ff, log) = (&mut ir.ff_values, &ir.write_log_buffer);
+        match probe {
+            Some(probe) => ff_commit_from_log_marking(ff, log, &mut |off, len| {
+                dump.mark_ff(off, len);
+                probe(off, len)
+            }),
+            None => ff_commit_from_log_marking(ff, log, &mut |off, len| {
+                dump.mark_ff(off, len);
+                false
+            }),
+        }
+    }
 
+    /// `commit_event_log` for a run with a waveform; see `commit_marking`.
+    fn commit_event_log_marking(&mut self) {
         match &self.settle_filter {
-            // Value-compare the commit against the comb's reach: when no
-            // byte the comb can read changes, the standing settled state
-            // stays valid and `comb_dirty` stays false.  An already-dirty
-            // comb skips the compare — the verdict cannot improve.
             Some(_) if self.ff_unreachable && !self.comb_dirty => {
-                ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
+                Self::commit_marking(&mut self.ir, self.dump.as_mut().unwrap(), None);
             }
             Some(spans) if self.filter_armed && !self.comb_dirty => {
                 let diag_offsets = &mut self.dirty_commit_offsets;
                 let record = self.settle_diag;
-                if ff_commit_from_log_watched(
-                    &mut self.ir.ff_values,
-                    &self.ir.write_log_buffer,
-                    &mut |off, len| {
+                if Self::commit_marking(
+                    &mut self.ir,
+                    self.dump.as_mut().unwrap(),
+                    Some(&mut |off, len| {
                         let hit = spans.ff_change_may_reach_comb(off, len);
                         if hit && record && diag_offsets.len() < 16 {
                             diag_offsets.push((off, len));
                         }
                         hit
-                    },
+                    }),
                 ) {
                     if self.settle_diag {
                         self.dirty_from_commit += 1;
@@ -1912,12 +1936,58 @@ impl Simulator {
                 }
             }
             _ => {
-                ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
-                // Disarmed, the flag must still reach the next settle
-                // decision (the event fire above covers eval'd paths, but
-                // not commits without one, e.g. the reset batch).
+                Self::commit_marking(&mut self.ir, self.dump.as_mut().unwrap(), None);
                 if self.settle_filter.is_some() && !self.filter_armed {
                     self.comb_dirty = true;
+                }
+            }
+        }
+    }
+
+    /// Apply the accumulated write log to FF storage and reset the buffer.
+    fn commit_event_log(&mut self) {
+        #[cfg(feature = "profile")]
+        let ff_start = Instant::now();
+
+        if self.dump.is_some() {
+            self.commit_event_log_marking();
+        } else {
+            match &self.settle_filter {
+                // Value-compare the commit against the comb's reach: when no
+                // byte the comb can read changes, the standing settled state
+                // stays valid and `comb_dirty` stays false.  An already-dirty
+                // comb skips the compare — the verdict cannot improve.
+                Some(_) if self.ff_unreachable && !self.comb_dirty => {
+                    ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
+                }
+                Some(spans) if self.filter_armed && !self.comb_dirty => {
+                    let diag_offsets = &mut self.dirty_commit_offsets;
+                    let record = self.settle_diag;
+                    if ff_commit_from_log_watched(
+                        &mut self.ir.ff_values,
+                        &self.ir.write_log_buffer,
+                        &mut |off, len| {
+                            let hit = spans.ff_change_may_reach_comb(off, len);
+                            if hit && record && diag_offsets.len() < 16 {
+                                diag_offsets.push((off, len));
+                            }
+                            hit
+                        },
+                    ) {
+                        if self.settle_diag {
+                            self.dirty_from_commit += 1;
+                        }
+                        self.comb_dirty = true;
+                    }
+                }
+                _ => {
+                    ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
+                    // Disarmed, the flag must still reach the next settle
+                    // decision (the event fire above covers eval'd paths, but
+                    // not commits without one, e.g. the reset batch).
+                    if self.settle_filter.is_some() && !self.filter_armed {
+                        self.comb_dirty = true;
+                    }
                 }
             }
         }
@@ -2506,29 +2576,30 @@ impl Simulator {
         let Some(x) = self.ir.module_variables.variables.get_mut(var_id) else {
             return;
         };
+        let (ptr, nb) = (x.current_values[0], x.native_bytes);
         let mut val = val;
         val.trunc(x.width);
         unsafe {
-            write_native_value(
-                x.current_values[0],
-                x.native_bytes,
-                self.ir.use_4state,
-                &val,
-            );
+            write_native_value(ptr, nb, self.ir.use_4state, &val);
         }
         self.comb_dirty = true;
         // An FF store from outside any event; see `invalidate_event_gates`.
         let ff = self.ir.ff_values.as_ptr() as usize;
-        let in_ff = (ff..ff + self.ir.ff_values.len()).contains(&(x.current_values[0] as usize));
+        let in_ff = (ff..ff + self.ir.ff_values.len()).contains(&(ptr as usize));
         if in_ff {
             self.invalidate_event_gates();
+            // Outside the arena a waveform compares the bytes anyway, which
+            // is why this rides on the test above rather than its own.
+            if let Some(dump) = &mut self.dump {
+                dump.mark_written(ptr, if self.ir.use_4state { nb * 2 } else { nb });
+            }
         }
     }
 
     pub fn dump_start(&mut self) {
         if let Some(dump) = &mut self.dump {
             dump.begin_dumpvars();
-            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
+            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state, true);
             Self::dump_trace_vars(dump, &self.trace_dump_vars, &self.components);
             dump.end_dumpvars();
         }
@@ -2542,7 +2613,7 @@ impl Simulator {
             }
             let dump = self.dump.as_mut().unwrap();
             dump.timestamp(self.time);
-            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state);
+            dump.dump_all_vars(&self.dump_vars, self.ir.use_4state, false);
             Self::dump_trace_vars(dump, &self.trace_dump_vars, &self.components);
         }
     }
@@ -2581,6 +2652,7 @@ impl Simulator {
             dumper.upscope();
         }
         dumper.finish_header();
+        dumper.set_gate_arena(&self.ir.ff_values);
         self.dump = Some(dumper);
     }
 

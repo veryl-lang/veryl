@@ -22,11 +22,9 @@ use std::sync::{Arc, LazyLock, Mutex};
 /// `try_jit_no_cache` that otherwise re-JITs the whole shared DUT comb each run.
 ///
 /// Populated on miss only; a rare concurrent double-compile just overwrites an
-/// equivalent artifact. Never cleared — a `veryl test` process is one-shot and
-/// the entries stay hot for its whole run. Gated to `config.dut_reuse` (CLI
-/// only), so the unit-test harness (many transient `air::Ir`s) never touches it.
-static CHUNK_ARTIFACT_CACHE: LazyLock<Mutex<HashMap<u128, Arc<ChunkArtifact>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// equivalent artifact. Shared by the registries and compiler helpers of one
+/// `BuildSession`, so another IR or backend configuration cannot reuse it.
+pub(crate) type ChunkArtifactCache = Arc<Mutex<HashMap<u128, Arc<ChunkArtifact>>>>;
 
 /// Lets the IR's `Hash` impls feed XXH3-128 directly, replacing the old sink
 /// that fed `Debug`-formatted strings (its dominant per-test cost). Keying uses
@@ -107,6 +105,7 @@ pub(crate) fn whole_comb_fingerprint_from(stmts_fp: u128, extra: u128) -> u128 {
 #[derive(Default)]
 pub struct BackendRegistry {
     backends: Vec<Box<dyn Backend>>,
+    pub(crate) chunk_cache: ChunkArtifactCache,
 }
 
 impl BackendRegistry {
@@ -169,7 +168,7 @@ impl BackendRegistry {
                 .find_map(|b| b.compile_chunk(ctx, stmts));
         }
         let key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
-        if let Some(artifact) = CHUNK_ARTIFACT_CACHE.lock().unwrap().get(&key) {
+        if let Some(artifact) = self.chunk_cache.lock().unwrap().get(&key) {
             return Some(Arc::clone(artifact));
         }
         // Compile outside the lock; a concurrent peer may compile the same
@@ -186,7 +185,7 @@ impl BackendRegistry {
             if let Some(a) = Arc::get_mut(artifact) {
                 a.content_fp = Some(key);
             }
-            CHUNK_ARTIFACT_CACHE
+            self.chunk_cache
                 .lock()
                 .unwrap()
                 .insert(key, Arc::clone(artifact));
@@ -404,13 +403,18 @@ pub enum ChunkPlan {
     Compile(Vec<ProtoStatement>),
 }
 
-/// `compile_plans` on helper threads, for the unified-comb JIT: it runs behind
-/// the comb-pipeline single-flight while every other test worker waits on it,
-/// so the helpers take cores that would otherwise idle.  Each helper gets its
-/// own registry; the backends keep no state of their own (the executable arena
-/// and the artifact cache are shared behind locks), so artifacts from any
-/// thread are interchangeable.  Results stay in plan order.
-pub fn compile_plans_parallel(
+/// `compile_plans` on helper threads, for the unified-comb JIT.  Only a
+/// caller holding a comb-pipeline claim may use it: the peers blocked on that
+/// claim leave their cores idle, which is what the helpers take.  Elsewhere it
+/// costs far more than it saves, and not in the compiling: every worker spawns
+/// a set at once, and each helper's stack mmap and munmap holds `mmap_lock`
+/// against every other thread's page faults.  Note the claim is per key, so
+/// workers converting tops with different comb lists are not blocked by it.
+///
+/// Each helper gets its own registry; the backends keep no state of their own
+/// (the executable arena and the artifact cache are shared behind locks), so
+/// artifacts from any thread are interchangeable.  Results stay in plan order.
+pub(crate) fn compile_plans_parallel(
     registry: &mut BackendRegistry,
     ctx: &CompileCtx,
     plans: Vec<ChunkPlan>,
@@ -431,12 +435,14 @@ pub fn compile_plans_parallel(
     // The compile recurses over statement trees like the workers do.
     let parts: Vec<Vec<(usize, Vec<ChunkOutput>)>> = std::thread::scope(|s| {
         let queue = &queue;
+        let chunk_cache = &registry.chunk_cache;
         let handles: Vec<_> = (0..threads)
             .map(|_| {
                 std::thread::Builder::new()
                     .stack_size(crate::IR_WALK_STACK_BYTES)
                     .spawn_scoped(s, move || {
                         let mut local = BackendRegistry::for_config(ctx.config);
+                        local.chunk_cache = Arc::clone(chunk_cache);
                         let mut mine = Vec::new();
                         loop {
                             let Some((i, plan)) = queue.lock().unwrap().next() else {

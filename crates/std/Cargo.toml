@@ -18,3 +18,6 @@ veryl-path  = {version = "0.21.0", path = "../path"}
 
 [build-dependencies]
 merkle_hash = "3.9"
+
+[dev-dependencies]
+tempfile = {workspace = true}

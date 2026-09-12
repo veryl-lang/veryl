@@ -4,8 +4,9 @@ use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::portability::check_initial_assign;
 use crate::conv::utils::eval_width_select;
+use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, Factor, Op, Shape, ShapeRef, Type, TypeKind,
+    AssignDestination, Comptime, Expression, Factor, FfTable, Op, Shape, ShapeRef, Type, TypeKind,
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
@@ -425,6 +426,22 @@ impl VarIndex {
         self.0.push(x)
     }
 
+    /// An index is read outside the value expression it sits on, so a register
+    /// used only as an index looks unread and loses its register: every read of
+    /// it then lands in the post-edge slot.
+    pub fn gather_ff(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        assign_target: Option<&AssignTarget>,
+        from_ff: bool,
+    ) {
+        for expression in &self.0 {
+            expression.gather_ff(context, table, decl, assign_target, from_ff);
+        }
+    }
+
     pub fn dimension(&self) -> usize {
         self.0.len()
     }
@@ -596,6 +613,24 @@ impl VarSelect {
 
     pub fn push(&mut self, x: Expression) {
         self.0.push(x)
+    }
+
+    /// See [`VarIndex::gather_ff`].
+    pub fn gather_ff(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        assign_target: Option<&AssignTarget>,
+        from_ff: bool,
+    ) {
+        for expression in &self.0 {
+            expression.gather_ff(context, table, decl, assign_target, from_ff);
+        }
+
+        if let Some((_, expression)) = &self.1 {
+            expression.gather_ff(context, table, decl, assign_target, from_ff);
+        }
     }
 
     pub fn append(&mut self, mut x: VarSelect) {
