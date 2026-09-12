@@ -28075,3 +28075,58 @@ fn a_parameter_override_reaches_a_module_through_an_alias() {
         assert_eq!(sim.get("walias").unwrap(), Value::new(0xabc, 16, false));
     }
 }
+
+#[test]
+fn two_always_ff_blocks_on_one_word_keep_nba_semantics() {
+    // One packed word carries both bits, so the FF table keys them together and
+    // `assigned` holds only the last block that wrote the word. The exemption
+    // that lets a block read what it wrote itself then cleared the second
+    // block's read of the FIRST block's bit, and the word dropped to comb: the
+    // two stages collapsed into one edge instead of forming a shift register.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        d  : input  logic   ,
+        q  : output logic<2>,
+    ) {
+        var v: logic<2>;
+        always_ff (clk, rst) {
+            if_reset { v[0] = 0; } else { v[0] = d; }
+        }
+        always_ff (clk, rst) {
+            if_reset { v[1] = 0; } else { v[1] = v[0]; }
+        }
+        assign q = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.set("d", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        // One cycle of `d`, then the pulse walks the two stages.
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0b01, 2, false),
+            "stage 1 only, config={config:?}"
+        );
+
+        sim.set("d", Value::new(0, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0b10, 2, false),
+            "stage 2 only, config={config:?}"
+        );
+    }
+}
