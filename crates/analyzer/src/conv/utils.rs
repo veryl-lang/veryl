@@ -3804,6 +3804,27 @@ pub fn get_overridden_params(
                 ));
             }
 
+            // An override is converted to the parameter's DECLARED type
+            // (IEEE 1800-2023 23.10), so a wider value keeps only the low
+            // bits. The variable the parameter becomes is fitted on its own,
+            // which is why the wrapper reads correctly; what is stored here is
+            // what the next level down is handed, and an untruncated value
+            // there reaches a wider child parameter whole.
+            //
+            // `is_bit_sized` is the gate, not the presence of a width:
+            // `TypeKind::width` answers `Some(1)` for `string` as well, and
+            // fitting a `string` parameter to one bit loses the text.
+            if !is_type_param
+                && let Some(r#type) = &target_type
+                && r#type.kind.is_bit_sized()
+                && let Some(width) = r#type
+                    .total_width()
+                    .zip(r#type.total_array())
+                    .map(|(w, n)| w * n)
+            {
+                expr.0.value.trunc_value(width);
+            }
+
             context.insert_override(VarPath::new(name), expr);
         }
 

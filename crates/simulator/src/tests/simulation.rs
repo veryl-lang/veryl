@@ -27923,3 +27923,101 @@ fn msb_after_member_access_of_array_element() {
         );
     }
 }
+
+#[test]
+fn a_parameter_override_is_converted_to_the_declared_type() {
+    // IEEE 1800-2023 23.10: an override is converted to the parameter's
+    // DECLARED type, so a wider value keeps only the low bits. The parameter's
+    // own variable was already fitted, so the wrapper read correctly; what was
+    // stored for the next level down was not, and the child -- which declares
+    // the parameter wide -- got the untruncated value whole.
+    //
+    // Verilator 5.050, VCS X-2025.06 and iverilog 12 all print `def0` for the
+    // emitted SystemVerilog.
+    let code = r#"
+    module Child #(
+        param P: logic<64> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        assign o = P;
+    }
+    module Wrap #(
+        param P: logic<16> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        inst u: Child #( P: P ) ( o: o );
+    }
+    module WideWrap #(
+        param P: logic<64> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        inst u: Child #( P: P ) ( o: o );
+    }
+    module Top (
+        o: output logic<64>,
+        w: output logic<64>,
+    ) {
+        inst u : Wrap     #( P: 64'h123456789abcdef0 ) ( o: o );
+        inst uw: WideWrap #( P: 64'h123456789abcdef0 ) ( o: w );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xdef0, 64, false));
+        // The control: a wrapper wide enough to hold the value must still
+        // pass all of it down, so the fix cannot be "truncate everything".
+        assert_eq!(
+            sim.get("w").unwrap(),
+            Value::new(0x123456789abcdef0, 64, false)
+        );
+    }
+}
+
+#[test]
+fn a_string_parameter_survives_being_passed_down() {
+    // `TypeKind::width` answers `Some(1)` for `string` -- the widthless
+    // bucket -- so a conversion driven by the declared width fits the text to
+    // ONE BIT. MEASURED: gating the override conversion on the presence of a
+    // width instead of on `is_bit_sized` broke every e902 / vortex / caliptra
+    // bench at once, on `param IMEM_HEX0: string` truncated 152 -> 1.
+    let code = r#"
+    module Leaf #(
+        param S: string = "",
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = if S == "nonempty" ? 8'ha5 : 8'h00;
+    }
+    module Wrap #(
+        param S: string = "",
+    ) (
+        o: output logic<8>,
+    ) {
+        inst u: Leaf #( S: S ) ( o: o );
+    }
+    module Top (
+        trig: input  logic<8>,
+        o   : output logic<8>,
+    ) {
+        var inner: logic<8>;
+        inst u: Wrap #( S: "nonempty" ) ( o: inner );
+        assign o = inner | trig;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("trig", Value::new(0, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xa5, 8, false));
+    }
+}
