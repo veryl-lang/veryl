@@ -841,8 +841,20 @@ fn emit_wide_const(
         Value::U64(x) if x.width == 0 => {
             let target = ctx_width.max(proto_width);
             let count = wide_words(native_bytes(target));
+            // Fill to the TARGET WIDTH, not to the whole allocation:
+            // `native_bytes(196)` is 32, and a 256-bit fill makes `a == '1`
+            // false because `a`'s own bits 196..255 are zero.
             let d = if x.payload != 0 {
-                vec![u64::MAX; count]
+                let mut v = vec![u64::MAX; count];
+                let rem = target % 64;
+                let top = target / 64;
+                if rem != 0 {
+                    v[top] = (1u64 << rem) - 1;
+                }
+                for w in v.iter_mut().skip(top + usize::from(rem != 0)) {
+                    *w = 0;
+                }
+                v
             } else {
                 vec![0u64; count]
             };
