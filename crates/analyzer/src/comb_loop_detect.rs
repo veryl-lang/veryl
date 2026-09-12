@@ -71,8 +71,8 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     AssignDestination, Component, Declaration, Expression, Factor, FunctionCall,
-    InstActualFragment, InstDeclaration, InstInterfaceBinding, Ir, Module, Op, Signature,
-    Statement, SystemFunctionKind, VarSelect, Variable,
+    InstActualFragment, InstDeclaration, InstInterfaceBinding, Ir, MemberSelectDomain, Module, Op,
+    Signature, Statement, SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
@@ -387,10 +387,20 @@ fn summary_parent_accesses(
             .map(|access| (access.parent, access.array, access.packed))
             .collect();
     }
-    if let Some((parent, index, select)) = instance_port_region_actual(inst, region.id, direction) {
-        return translated_summary_access(region, variable, parent, index, select, ctx)
-            .map(|(array, packed, _)| vec![(parent, array, packed)])
-            .unwrap_or_default();
+    if let Some((parent, index, select, member_select_domain)) =
+        instance_port_region_actual(inst, region.id, direction)
+    {
+        return translated_summary_access(
+            region,
+            variable,
+            parent,
+            index,
+            select,
+            member_select_domain,
+            ctx,
+        )
+        .map(|(array, packed, _)| vec![(parent, array, packed)])
+        .unwrap_or_default();
     }
     Vec::new()
 }
@@ -581,8 +591,8 @@ fn collect_factor_spans(
     ctx: &mut Context,
 ) {
     match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, packed) in var_reads(*id, index, select, ctx) {
+        Factor::Variable(id, index, select, comptime) => {
+            for (idx, packed) in var_reads(*id, index, select, comptime.member_select_domain, ctx) {
                 out.entry((*id, idx)).or_default().push(packed);
             }
         }
@@ -1584,10 +1594,19 @@ fn instance_region_mapping(
     }
 
     if let Some(variable) = variable
-        && let Some((parent, index, select)) =
+        && let Some((parent, index, select, member_select_domain)) =
             instance_port_region_actual(inst, region.id, direction)
     {
-        return map_summary_region(region, variable, parent, index, select, bit_part, ctx);
+        return map_summary_region(
+            region,
+            variable,
+            parent,
+            index,
+            select,
+            member_select_domain,
+            bit_part,
+            ctx,
+        );
     }
 
     InstanceRegionMapping {
@@ -1607,24 +1626,34 @@ fn instance_port_region_actual(
     inst: &InstDeclaration,
     child: VarId,
     direction: Direction,
-) -> Option<(VarId, &crate::ir::VarIndex, &VarSelect)> {
+) -> Option<(
+    VarId,
+    &crate::ir::VarIndex,
+    &VarSelect,
+    Option<MemberSelectDomain>,
+)> {
     match direction {
         Direction::Input => {
             let input = inst.inputs.iter().find(|input| input.id == child)?;
             let Expression::Term(factor) = input.single()? else {
                 return None;
             };
-            let Factor::Variable(parent, index, select, _) = factor.as_ref() else {
+            let Factor::Variable(parent, index, select, comptime) = factor.as_ref() else {
                 return None;
             };
-            Some((*parent, index, select))
+            Some((*parent, index, select, comptime.member_select_domain))
         }
         Direction::Output => {
             let output = inst.outputs.iter().find(|output| output.id == child)?;
             let [destination] = output.dst.as_slice() else {
                 return None;
             };
-            Some((destination.id, &destination.index, &destination.select))
+            Some((
+                destination.id,
+                &destination.index,
+                &destination.select,
+                destination.comptime.member_select_domain,
+            ))
         }
         Direction::Inout | Direction::Interface | Direction::Modport | Direction::Import => None,
     }
@@ -1661,7 +1690,13 @@ fn actual_fragments(
             if !destination.index.is_const() || !destination.select.is_const_with_range() {
                 return None;
             }
-            let spans = var_reads(destination.id, &destination.index, &destination.select, ctx);
+            let spans = var_reads(
+                destination.id,
+                &destination.index,
+                &destination.select,
+                destination.comptime.member_select_domain,
+                ctx,
+            );
             let [(parent_array, parent_packed)] = spans.as_slice() else {
                 return None;
             };
@@ -1867,17 +1902,24 @@ fn map_summary_region(
     parent: VarId,
     index: &crate::ir::VarIndex,
     select: &VarSelect,
+    member_select_domain: Option<MemberSelectDomain>,
     bit_part: &BitPartition,
     ctx: &mut Context,
 ) -> InstanceRegionMapping {
     let mut keys = Vec::new();
-    let offset = if let Some((array, packed, offset)) =
-        translated_summary_access(region, child, parent, index, select, ctx)
-    {
+    let offset = if let Some((array, packed, offset)) = translated_summary_access(
+        region,
+        child,
+        parent,
+        index,
+        select,
+        member_select_domain,
+        ctx,
+    ) {
         keys.extend(bit_part.overlapping_access(parent, array, packed));
         Some(offset)
     } else {
-        for (array, packed) in var_reads(parent, index, select, ctx) {
+        for (array, packed) in var_reads(parent, index, select, member_select_domain, ctx) {
             keys.extend(bit_part.overlapping_access(parent, array, packed));
         }
         None
@@ -1902,9 +1944,10 @@ fn translated_summary_access(
     parent: VarId,
     index: &crate::ir::VarIndex,
     select: &VarSelect,
+    member_select_domain: Option<MemberSelectDomain>,
     ctx: &mut Context,
 ) -> Option<(ArraySpan, PackedSpan, (isize, isize))> {
-    let accesses = var_reads(parent, index, select, ctx);
+    let accesses = var_reads(parent, index, select, member_select_domain, ctx);
     let [(parent_array, parent_packed)] = accesses.as_slice() else {
         return None;
     };
@@ -2234,8 +2277,8 @@ fn collect_factor_node_keys(
     ctx: &mut Context,
 ) {
     match factor {
-        Factor::Variable(id, index, select, _) => {
-            for (idx, span) in var_reads(*id, index, select, ctx) {
+        Factor::Variable(id, index, select, comptime) => {
+            for (idx, span) in var_reads(*id, index, select, comptime.member_select_domain, ctx) {
                 out.extend(bit_part.overlapping_access(*id, idx, span));
             }
         }

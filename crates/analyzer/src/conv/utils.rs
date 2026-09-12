@@ -2461,7 +2461,11 @@ fn eval_factor_path_inner(
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
 
         let width_select = if let Some(part_select) = &comptime.part_select {
-            part_select.to_base_select(context, &width_select)
+            let (select, domain) = part_select
+                .to_base_select_with_domain(context, &width_select)
+                .ok_or_else(|| ir_error!(token))?;
+            comptime.member_select_domain = domain;
+            Some(select)
         } else {
             eval_width_select(context, &path, &comptime.r#type, width_select)
         };

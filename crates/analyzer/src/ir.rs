@@ -23,8 +23,8 @@ mod width_expr;
 mod write_count;
 pub use assign_table::ReferencedEntry;
 pub use comptime::{
-    Comptime, ExpressionContext, InstanceKind, PartSelectPath, Type, TypeKind, TypeKindEnum,
-    TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
+    Comptime, ExpressionContext, InstanceKind, MemberSelectDomain, PartSelectPath, Type, TypeKind,
+    TypeKindEnum, TypeKindMember, TypeKindStruct, TypeKindUnion, ValueVariant,
 };
 pub use declaration::{
     CombDeclaration, Declaration, DeclarationBlock, ExternalConnect, ExternalDeclaration,

@@ -13,9 +13,9 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
-    Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, Module, Op, Shape,
-    Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex, VarPath,
-    VarSelect, VarSelectOp,
+    Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain,
+    Module, Op, Shape, Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex,
+    VarPath, VarSelect, VarSelectOp,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -1934,12 +1934,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
+    fn read_keys(
+        &mut self,
+        id: VarId,
+        index: &VarIndex,
+        select: &VarSelect,
+        member_select_domain: Option<MemberSelectDomain>,
+    ) -> Vec<NodeKey> {
         if !self.ctx.variables.contains_key(&id) && index.0.is_empty() && select.is_empty() {
             return self.keys_for_id(id);
         }
         let mut keys = Vec::new();
-        let accesses = var_reads(id, index, select, &mut self.ctx);
+        let accesses = var_reads(id, index, select, member_select_domain, &mut self.ctx);
         if accesses.is_empty() {
             self.status = self.status.max(AnalysisStatus::Partial);
         }
@@ -1998,7 +2004,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let index = self.flattened_affine_index(id, index)?;
         let mut versions = Vec::new();
         for &(id, _) in &index.terms {
-            versions.extend(self.read_variable(id, &VarIndex::default(), &VarSelect::default()));
+            versions.extend(self.read_variable(
+                id,
+                &VarIndex::default(),
+                &VarSelect::default(),
+                None,
+            ));
         }
         Some(SampledAffineIndex { index, versions })
     }
@@ -2021,8 +2032,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.written.insert(key);
     }
 
-    fn read_variable(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<VersionId> {
-        self.read_keys(id, index, select)
+    fn read_variable(
+        &mut self,
+        id: VarId,
+        index: &VarIndex,
+        select: &VarSelect,
+        member_select_domain: Option<MemberSelectDomain>,
+    ) -> Vec<VersionId> {
+        self.read_keys(id, index, select, member_select_domain)
             .into_iter()
             .map(|key| self.read_key(key))
             .collect()
@@ -2034,7 +2051,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if let Some(sampled) = cache.get(&cache_key) {
             return Some(Rc::clone(sampled));
         }
-        let Factor::Variable(id, index, select, _) = factor else {
+        let Factor::Variable(id, index, select, comptime) = factor else {
             return None;
         };
         let mut selectors = Vec::new();
@@ -2045,7 +2062,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             selectors.extend(self.eval_expr(expression));
         }
         let values = self
-            .read_keys(*id, index, select)
+            .read_keys(*id, index, select, comptime.member_select_domain)
             .into_iter()
             .map(|key| (key, self.read_key(key)))
             .collect();
@@ -2987,7 +3004,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) -> ExpressionSources {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
-                Factor::Variable(id, index, select, _) => {
+                Factor::Variable(id, index, select, comptime) => {
                     let sampled = self.sample_variable(factor);
                     let mut selector_sources = if let Some(sampled) = &sampled {
                         sampled.selectors.clone()
@@ -3011,7 +3028,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     };
                     if let Some((_, low)) = selected {
                         let mut reads = Vec::new();
-                        let accesses = var_reads(*id, index, select, &mut self.ctx);
+                        let accesses = var_reads(
+                            *id,
+                            index,
+                            select,
+                            comptime.member_select_domain,
+                            &mut self.ctx,
+                        );
                         let dynamic_array_offset = projection
                             .destination_index
                             .as_ref()
@@ -3084,7 +3107,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         if let Some(sampled) = &sampled {
                             selector_sources.extend(sampled.values.values().copied());
                         } else {
-                            selector_sources.extend(self.read_variable(*id, index, select));
+                            selector_sources.extend(self.read_variable(
+                                *id,
+                                index,
+                                select,
+                                comptime.member_select_domain,
+                            ));
                         }
                         ExpressionSources::whole(selector_sources)
                     }
@@ -3998,7 +4026,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn eval_factor(&mut self, factor: &Factor, reads: &mut Vec<VersionId>) {
         match factor {
-            Factor::Variable(id, index, select, _) => {
+            Factor::Variable(id, index, select, comptime) => {
                 if let Some(sampled) = self.sample_variable(factor) {
                     reads.extend(sampled.selectors.iter().copied());
                     reads.extend(sampled.values.values().copied());
@@ -4010,7 +4038,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if let Some((_, expression)) = &select.1 {
                     reads.extend(self.eval_expr(expression));
                 }
-                reads.extend(self.read_variable(*id, index, select));
+                reads.extend(self.read_variable(*id, index, select, comptime.member_select_domain));
             }
             Factor::FunctionCall(call) => reads.extend(self.eval_call(call, &[])),
             Factor::SystemFunctionCall(call) => {
