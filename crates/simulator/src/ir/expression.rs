@@ -18,6 +18,32 @@ use veryl_parser::token_range::TokenRange;
 /// mask that may not have been needed, nothing more.
 const UNMASKED_BITS_DEPTH: usize = 16;
 
+/// Value an out-of-range dynamic index reads.
+///
+/// IEEE 1800-2023 7.4.6 gives it the element type's default, which is `x`
+/// in 4-state storage and zero in 2-state.  The address is still clamped
+/// so the load stays inside the allocation; only the value the caller sees
+/// comes from here.
+pub fn out_of_range_read(width: usize, signed: bool, use_4state: bool) -> Value {
+    if use_4state {
+        Value::new_x(width, signed)
+    } else {
+        Value::new(0, width, signed)
+    }
+}
+
+/// Whether a runtime index can leave an array of `num_elements`.
+///
+/// A 10-bit index into 1024 entries never can, so the guards below and in
+/// the two compiling backends are emitted only where they can fire.  Width
+/// zero is the unsized all-bit sentinel, whose value is filled from its
+/// context rather than its own width, so it is never ruled out here.
+pub fn index_may_exceed(index_width: usize, num_elements: usize) -> bool {
+    index_width == 0
+        || index_width >= usize::BITS as usize
+        || (1usize << index_width) > num_elements
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExpressionContext {
     pub width: usize,
@@ -116,12 +142,10 @@ impl Expression {
                     read_native_value(*value, *native_bytes, *use_4state, read_width, *signed)
                 };
                 if let Some(dyn_sel) = dynamic_select {
-                    let idx = dyn_sel
-                        .index_expr
-                        .eval(mask_cache)
-                        .to_usize()
-                        .unwrap_or(0)
-                        .min(dyn_sel.num_elements.saturating_sub(1));
+                    let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+                    if idx >= dyn_sel.num_elements {
+                        return out_of_range_read(*width, *signed, *use_4state);
+                    }
                     let end = idx * dyn_sel.elem_width;
                     let beg = end + dyn_sel.window - 1;
                     val.select(beg, end)
@@ -197,14 +221,11 @@ impl Expression {
                 width,
                 signed,
             } => {
-                if *num_elements == 0 {
-                    return Value::new(0, *width, *signed);
-                }
                 let idx_val = index_expr.eval(mask_cache);
-                let idx = idx_val
-                    .to_usize()
-                    .unwrap_or(0)
-                    .min(num_elements.saturating_sub(1));
+                let idx = idx_val.to_usize().unwrap_or(0);
+                if idx >= *num_elements {
+                    return out_of_range_read(*width, *signed, *use_4state);
+                }
                 #[cfg(debug_assertions)]
                 debug_assert!(
                     stride.checked_mul(idx as isize).is_some(),
@@ -223,12 +244,10 @@ impl Expression {
                     read_native_value(ptr, *native_bytes, *use_4state, read_width, *signed)
                 };
                 if let Some(dyn_sel) = dynamic_select {
-                    let idx = dyn_sel
-                        .index_expr
-                        .eval(mask_cache)
-                        .to_usize()
-                        .unwrap_or(0)
-                        .min(dyn_sel.num_elements.saturating_sub(1));
+                    let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+                    if idx >= dyn_sel.num_elements {
+                        return out_of_range_read(*width, *signed, *use_4state);
+                    }
                     let end = idx * dyn_sel.elem_width;
                     let beg = end + dyn_sel.window - 1;
                     value.select(beg, end)

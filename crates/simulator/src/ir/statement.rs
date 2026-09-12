@@ -2717,12 +2717,10 @@ impl AssignStatement {
             value
         };
         if let Some(dyn_sel) = &self.dynamic_select {
-            let idx = dyn_sel
-                .index_expr
-                .eval(mask_cache)
-                .to_usize()
-                .unwrap_or(0)
-                .min(dyn_sel.num_elements.saturating_sub(1));
+            let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+            if idx >= dyn_sel.num_elements {
+                return;
+            }
             let end = idx * dyn_sel.elem_width;
             let beg = end + dyn_sel.window - 1;
             let Some((beg, end)) = clip_window_to_width(beg, end, self.dst_width) else {
@@ -2835,14 +2833,14 @@ impl AssignStatement {
 
 impl AssignDynamicStatement {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
-        if self.dst_num_elements == 0 {
+        let idx_val = self.dst_index_expr.eval(mask_cache);
+        let idx = idx_val.to_usize().unwrap_or(0);
+        // IEEE 1800-2023 11.5.1: a write through an out-of-range index has
+        // no effect.  Clamping, which is what this did, overwrites the last
+        // element with a value the design meant for nobody.
+        if idx >= self.dst_num_elements {
             return;
         }
-        let idx_val = self.dst_index_expr.eval(mask_cache);
-        let idx = idx_val
-            .to_usize()
-            .unwrap_or(0)
-            .min(self.dst_num_elements.saturating_sub(1));
         let dst = unsafe { self.dst_base_ptr.offset(self.dst_stride * idx as isize) };
 
         let value = self.expr.eval(mask_cache);
@@ -2874,12 +2872,10 @@ impl AssignDynamicStatement {
             }
         };
         if let Some(dyn_sel) = &self.dynamic_select {
-            let dyn_idx = dyn_sel
-                .index_expr
-                .eval(mask_cache)
-                .to_usize()
-                .unwrap_or(0)
-                .min(dyn_sel.num_elements.saturating_sub(1));
+            let dyn_idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+            if dyn_idx >= dyn_sel.num_elements {
+                return;
+            }
             let end = dyn_idx * dyn_sel.elem_width;
             let beg = end + dyn_sel.window - 1;
             let Some((beg, end)) = clip_window_to_width(beg, end, self.dst_width) else {

@@ -17,7 +17,7 @@ use crate::ir::write_log::static_field_byte_span;
 use crate::ir::{
     ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, ProtoSystemFunctionCall,
-    VarOffset, native_bytes, veryl_aot_sysfn_print,
+    VarOffset, index_may_exceed, native_bytes, veryl_aot_sysfn_print,
 };
 use crate::{HashMap, HashSet};
 use std::cell::RefCell;
@@ -927,11 +927,26 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 let res_nb = native_bytes(dyn_sel.window);
                 let res_nw = wide_words(res_nb);
                 let t = next_wide_tmp();
+                // An out-of-range index reads the element default, so the
+                // scratch is zeroed instead of filled from the clamped one.
+                let (g0, g1) = match oob_cond(
+                    "_di_raw",
+                    dyn_sel.index_expr.width(),
+                    dyn_sel.num_elements,
+                ) {
+                    Some(c) => (
+                        format!("if ({c}) {{ "),
+                        format!(
+                            " }} else {{ for (unsigned _z = 0; _z < {res_nw}u; ++_z) _w{t}[_z] = 0; }}"
+                        ),
+                    ),
+                    None => (String::new(), String::new()),
+                };
                 pre.push_str(&format!(
                     "uint64_t _w{t}[{res_nw}]; \
                      {{ uint64_t _di_raw = (uint64_t)({idx}); \
                         uint64_t _di = _di_raw < {max_idx}ull ? _di_raw : {max_idx}ull; \
-                        vw_lshr_win((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {res_nb}u, {src_nb}u); }} \
+                        {g0}vw_lshr_win((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {res_nb}u, {src_nb}u);{g1} }} \
                      vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask}u); ",
                     ew = dyn_sel.elem_width,
                     mask = wpack(res_nb, dyn_sel.window),
@@ -1042,11 +1057,25 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             // Clamp the index once; the address below references `_wi{t}`,
             // which lives in the same flat `pre` block.
             pre.push_str(&format!(
-                "uint64_t _wi{t} = (uint64_t)({idx}); _wi{t} = _wi{t} < {max} ? _wi{t} : {max}; ",
+                "uint64_t _wr{t} = (uint64_t)({idx}); \
+                 uint64_t _wi{t} = _wr{t} < {max} ? _wr{t} : {max}; ",
                 max = max_idx,
             ));
             let elem =
                 format!("((uint8_t*)({buf} + {off:#x} + (intptr_t){stride} * (intptr_t)_wi{t}))");
+            // Out of range reads the element default, which is a zeroed
+            // scratch of the same size rather than the clamped neighbour.
+            let elem = match oob_cond(&format!("_wr{t}"), index_expr.width(), *num_elements) {
+                Some(c) => {
+                    let z = next_wide_tmp();
+                    pre.push_str(&format!(
+                        "uint64_t _w{z}[{nw}] = {{0}}; ",
+                        nw = wide_words(*element_native_bytes),
+                    ));
+                    format!("(({c}) ? {elem} : (uint8_t*)_w{z})")
+                }
+                None => elem,
+            };
             let Some((lo, nbits)) = sel_window else {
                 return Some(WideRef {
                     addr: elem,
@@ -2626,6 +2655,38 @@ fn width_mask(width: usize) -> u64 {
     }
 }
 
+/// C test that a runtime index is inside its array, or `None` where the
+/// index's own width cannot reach past the last element.
+///
+/// IEEE 1800-2023 gives an out-of-range index the element type's default
+/// on a read (7.4.6) and no effect at all on a write (11.5.1); clamping it
+/// to the last element, which is what the emitted address arithmetic does,
+/// returns a neighbour and overwrites one.  Where the index cannot leave
+/// the array -- a power-of-two memory, say -- nothing is emitted and the
+/// access stays straight-line.
+fn oob_cond(idx_var: &str, index_width: usize, num_elements: usize) -> Option<String> {
+    index_may_exceed(index_width, num_elements).then(|| format!("{idx_var} < {num_elements}ull"))
+}
+
+/// Opening and closing text of the guard a dynamic store runs under.
+fn oob_guard(idx_var: &str, index_width: usize, num_elements: usize) -> (String, String) {
+    match oob_cond(idx_var, index_width, num_elements) {
+        Some(c) => (format!("if ({c}) {{ "), " }".to_string()),
+        None => (String::new(), String::new()),
+    }
+}
+
+/// Wrap the value a dynamic read produces so an out-of-range index yields
+/// the element default, which is zero: this emitter is 2-state only.
+fn oob_read(value: String, conds: &[Option<String>]) -> String {
+    let live: Vec<&str> = conds.iter().flatten().map(String::as_str).collect();
+    if live.is_empty() {
+        value
+    } else {
+        format!("(({}) ? ({value}) : 0)", live.join(" && "))
+    }
+}
+
 /// How a bit-field store may treat the sub-word it writes into, when the
 /// whole sub-word is redefined by a group of disjoint stores (see
 /// `plan_field_groups`).
@@ -4200,8 +4261,9 @@ fn emit_event_ff_assign_wide_dynsel_field(
     let rhs = emit_expr_root(&a.expr)?;
     let d = next_wide_tmp();
     let reg = format!("_w{d}");
+    let (g0, g1) = oob_guard(&format!("_di{d}"), ds.index_expr.width(), ne);
     let mut body = format!(
-        "uint64_t _di{d} = (uint64_t)({idx}); if (_di{d} > {max}ull) _di{d} = {max}ull; \
+        "uint64_t _di{d} = (uint64_t)({idx}); {g0}if (_di{d} > {max}ull) _di{d} = {max}ull; \
          uint64_t _bo{d} = _di{d} * {ew}ull; \
          uint64_t _wi{d} = _bo{d} >> 6, _sh{d} = _bo{d} & 63ull; ",
         max = ne - 1,
@@ -4230,7 +4292,7 @@ fn emit_event_ff_assign_wide_dynsel_field(
     body.push_str(&emit_wide_ff_rmw_tail(
         &reg, nb, packed, dst_raw, cur_off, None,
     ));
-    Some(format!("{{ {body} }}"))
+    Some(format!("{{ {body}{g1} }}"))
 }
 
 /// Event-path wide FF write at a RUNTIME index neither `_dynsel*` sibling can
@@ -4287,11 +4349,12 @@ fn emit_event_ff_assign_wide_dynsel_general(
     // `clip_window_to_width` drops the write outright once the window's LOW
     // bit is past the width, so the guard covers the log push too: an
     // out-of-range index must leave no entry, not re-log the old value.
+    let (g0, g1) = oob_guard("_di_raw", ds.index_expr.width(), ne);
     Some(format!(
         "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
             uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
             uint64_t _sh = _di * {ew}ull; \
-            if (_sh < {dw}ull) {{ {inner} }} }}",
+            {g0}if (_sh < {dw}ull) {{ {inner} }}{g1} }}",
         max_idx = ne - 1,
         dw = a.dst_width,
     ))
@@ -4327,7 +4390,7 @@ fn emit_event_ff_assign_wide_dynsel(
     let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
     let d = next_wide_tmp();
     pre.push_str(&format!(
-        "uint64_t _di{d} = (uint64_t)({idx}); \
+        "uint64_t _di{d} = _dir{d}; \
          if (_di{d} > {max}ull) _di{d} = {max}ull; \
          uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
          vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
@@ -4358,7 +4421,10 @@ fn emit_event_ff_assign_wide_dynsel(
             nb,
         ),
     );
-    Some(format!("{{ {pre}{flag}{store}{push} }}"))
+    let (g0, g1) = oob_guard(&format!("_dir{d}"), ds.index_expr.width(), ne);
+    Some(format!(
+        "{{ uint64_t _dir{d} = (uint64_t)({idx}); {g0}{pre}{flag}{store}{push}{g1} }}"
+    ))
 }
 
 /// Event-path FF write (static dst): pushes a WriteLogEntry at the
@@ -4414,12 +4480,10 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
         let max_idx = ne - 1;
         let idx = emit_expr(&dyn_sel.index_expr)?;
         let body = format!(
-            "uint64_t _di_raw = (uint64_t)({idx}); \
-             uint64_t _di = _di_raw < {max} ? _di_raw : {max}; \
+            "uint64_t _di = _di_raw < {max} ? _di_raw : {max}; \
              uint64_t _sh = _di * {ew}ull; \
              uint64_t _m = ((((uint64_t)*((const {ct}*)(ff_values + {dst})) & ~(0x{vm:x}ULL << _sh)) | \
                  (((uint64_t)({rhs}) & 0x{vm:x}ULL) << _sh)) & 0x{dw:x}ULL);",
-            idx = idx,
             max = max_idx,
             ew = ew,
             ct = cty,
@@ -4438,7 +4502,10 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
             )
         };
         let push = emit_log_push(&log_off, "_m", nb);
-        return Some(format!("{{ {body} {store} {push} }}"));
+        let (g0, g1) = oob_guard("_di_raw", dyn_sel.index_expr.width(), ne);
+        return Some(format!(
+            "{{ uint64_t _di_raw = (uint64_t)({idx}); {g0}{body} {store} {push}{g1} }}"
+        ));
     }
     if let Some((hi, lo)) = a.select {
         let nbits = hi.checked_sub(lo)?.checked_add(1)?;
@@ -4570,13 +4637,14 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
             stride = a.dst_stride,
         )
     };
+    let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-            uint64_t _wval = {pay}; \
+            {g0}uint64_t _wval = {pay}; \
             {store}\
             unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
-            {push} }});",
+            {push}{g1} }});",
         idx = idx,
         max = max_idx,
         pay = payload,
@@ -4682,12 +4750,13 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
         &format!("_c{d}"),
         &emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), "_woff", nb),
     );
+    let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
         "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-            {pre}{flag}{store}\
+            {g0}{pre}{flag}{store}\
             unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
-            {push} }}",
+            {push}{g1} }}",
         idx = idx,
         max = max_idx,
         pre = pre,
@@ -7635,11 +7704,12 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                         } else {
                             (1u64 << win) - 1
                         };
+                        let (g0, g1) = oob_guard("_di_raw", dyn_sel.index_expr.width(), ne);
                         return Some(format!(
                             "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
                                 uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
                                 uint64_t _sh = _di * {ew}ull; \
-                                if (_sh < {dw}ull) {{ \
+                                {g0}if (_sh < {dw}ull) {{ \
                                 uint64_t _wi = _sh >> 6; \
                                 uint64_t _b = _sh & 63; \
                                 __uint128_t _m = ((__uint128_t){wm:#x}ULL) << _b; \
@@ -7651,7 +7721,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                                 veryl_u64_ua* _d = ((veryl_u64_ua*)(comb_values + {store_off:#x})) + _wi; \
                                 _d[0] = (_d[0] & ~_m0) | (((uint64_t)_v) & _m0); \
                                 if (_m1) _d[1] = (_d[1] & ~_m1) | (((uint64_t)(_v >> 64)) & _m1); \
-                                }} }}",
+                                }}{g1} }}",
                             dw = a.dst_width,
                         ));
                     }
@@ -7666,10 +7736,11 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
                     let merge =
                         emit_wide_dynsel_merge(&dst, &r.addr, "_sh", win, a.dst_width, nb, nw);
+                    let (g0, g1) = oob_guard("_di_raw", dyn_sel.index_expr.width(), ne);
                     return Some(format!(
                         "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
                             uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
-                            uint64_t _sh = _di * {ew}ull; {merge} }}"
+                            uint64_t _sh = _di * {ew}ull; {g0}{merge}{g1} }}"
                     ));
                 }
             }
@@ -8042,15 +8113,17 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 // `dst_width`; clip the field mask as `clip_window_to_width`
                 // does.
                 let dwmask = width_mask(a.dst_width);
+                let (g0, g1) =
+                    oob_guard("_idx_raw", dyn_sel.index_expr.width(), dyn_sel.num_elements);
                 return Some(format!(
                     "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
-                        uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                        {g0}uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
                         uint64_t _sh = _idx * {ew}; \
                         uint64_t _m = (0x{vmask:x}ULL << _sh) & 0x{dwmask:x}ULL; \
                         uint64_t _v = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
                         {ct} _o = *(({ct}*)({b} + {o:#x})); \
                         *(({ct}*)({b} + {o:#x})) = \
-                          ({ct})((_o & ({ct})(~_m)) | ({ct})((_v << _sh) & _m)); }}",
+                          ({ct})((_o & ({ct})(~_m)) | ({ct})((_v << _sh) & _m));{g1} }}",
                     idx = idx_str,
                     max = max_idx,
                     ew = dyn_sel.elem_width,
@@ -8358,11 +8431,12 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                         src = r.addr,
                     )
                 };
+                let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
                 return Some(format!(
                     "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
                         uint8_t* _pa = (uint8_t*)(comb_values + {base:#x} + (intptr_t){stride} * (intptr_t)_idx); \
-                        {store} }}",
+                        {g0}{store}{g1} }}",
                     idx = idx_str,
                     max = max_idx,
                     base = base_off,
@@ -8416,10 +8490,11 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     m = dwmask,
                 )
             };
+            let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
             Some(format!(
                 "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                     uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                    {store} }});",
+                    {g0}{store}{g1} }});",
                 idx = idx_str,
                 max = max_idx,
                 store = store,
@@ -8958,21 +9033,28 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 }
                 let idx_str = emit_expr(&dyn_sel.index_expr)?;
                 let max_idx = dyn_sel.num_elements.saturating_sub(1);
+                let oob = oob_cond("_idx_raw", dyn_sel.index_expr.width(), dyn_sel.num_elements);
                 if *var_full_width <= 128 {
                     let load = emit_var_load(var_offset, *var_full_width)?;
                     if dyn_sel.window < 64 {
                         let mask = (1u64 << dyn_sel.window) - 1;
                         // Result is <= 64 bits; cast down so a __uint128_t
                         // load (65..128-bit var) still yields a scalar.
+                        let value = oob_read(
+                            format!(
+                                "(uint64_t)((({load}) >> (_idx * {ew})) & 0x{mask:x}ULL)",
+                                load = load,
+                                ew = dyn_sel.elem_width,
+                                mask = mask,
+                            ),
+                            std::slice::from_ref(&oob),
+                        );
                         return Some(format!(
                             "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                                 uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                                (uint64_t)((({load}) >> (_idx * {ew})) & 0x{mask:x}ULL); }})",
+                                {value}; }})",
                             idx = idx_str,
                             max = max_idx,
-                            load = load,
-                            ew = dyn_sel.elem_width,
-                            mask = mask,
                         ));
                     }
                     // 64..128-bit window (e.g. an 80-bit element of a 160-bit
@@ -8984,15 +9066,21 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         (1u128 << dyn_sel.window) - 1
                     };
                     let (mhi, mlo) = ((m >> 64) as u64, m as u64);
+                    let value = oob_read(
+                        format!(
+                            "(((__uint128_t)({load})) >> (_idx * {ew})) \
+                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)",
+                            load = load,
+                            ew = dyn_sel.elem_width,
+                        ),
+                        std::slice::from_ref(&oob),
+                    );
                     return Some(format!(
                         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                            ((((__uint128_t)({load})) >> (_idx * {ew})) \
-                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)); }})",
+                            ({value}); }})",
                         idx = idx_str,
                         max = max_idx,
-                        load = load,
-                        ew = dyn_sel.elem_width,
                     ));
                 }
                 if dyn_sel.window > 64 {
@@ -9013,6 +9101,13 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         (1u128 << dyn_sel.window) - 1
                     };
                     let (mhi, mlo) = ((m >> 64) as u64, m as u64);
+                    let value = oob_read(
+                        format!(
+                            "(((__uint128_t)_v1 << 64) | (__uint128_t)_v0) \
+                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)"
+                        ),
+                        std::slice::from_ref(&oob),
+                    );
                     return Some(format!(
                         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
@@ -9023,8 +9118,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                             uint64_t _q2 = (_w + 2) < {nw}ull ? _p[_w + 2] : 0; \
                             uint64_t _v0 = _s == 0 ? _q0 : ((_q0 >> _s) | (_q1 << (64 - _s))); \
                             uint64_t _v1 = _s == 0 ? _q1 : ((_q1 >> _s) | (_q2 << (64 - _s))); \
-                            ((((__uint128_t)_v1 << 64) | (__uint128_t)_v0) \
-                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)); }})",
+                            ({value}); }})",
                         idx = idx_str,
                         max = max_idx,
                         ew = dyn_sel.elem_width,
@@ -9046,6 +9140,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     return None;
                 }
                 let nw = wide_words(native_bytes(*var_full_width));
+                let value = oob_read(format!("_vv & 0x{mask:x}ULL"), &[oob]);
                 return Some(format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
@@ -9054,14 +9149,13 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         uint64_t _lo = _w < {nw}ull ? _p[_w] : 0; \
                         uint64_t _hi = (_w + 1) < {nw}ull ? _p[_w + 1] : 0; \
                         uint64_t _vv = _s == 0 ? _lo : ((_lo >> _s) | (_hi << (64 - _s))); \
-                        (_vv & 0x{mask:x}ULL); }})",
+                        ({value}); }})",
                     idx = idx_str,
                     max = max_idx,
                     ew = dyn_sel.elem_width,
                     b = buf,
                     off = off,
                     nw = nw,
-                    mask = mask,
                 ));
             }
             // Wide (>128-bit) underlying variable.  A static narrow (≤64-bit)
@@ -10367,13 +10461,27 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 let max_idx = num_elements.saturating_sub(1);
                 let max_sel = dyn_sel.num_elements.saturating_sub(1);
                 let mask = (1u64 << dyn_sel.window) - 1;
+                let value = oob_read(
+                    format!(
+                        "(_el >> (_bsel * {ew})) & 0x{mask:x}ULL",
+                        ew = dyn_sel.elem_width
+                    ),
+                    &[
+                        oob_cond("_idx_raw", index_expr.width(), *num_elements),
+                        oob_cond(
+                            "_bsel_raw",
+                            dyn_sel.index_expr.width(),
+                            dyn_sel.num_elements,
+                        ),
+                    ],
+                );
                 return Some(format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {maxi} ? _idx_raw : {maxi}; \
                         uint64_t _el = (uint64_t)*((const {ct}*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); \
                         uint64_t _bsel_raw = (uint64_t)({bsel}); \
                         uint64_t _bsel = _bsel_raw < {maxs} ? _bsel_raw : {maxs}; \
-                        ((_el >> (_bsel * {ew})) & 0x{mask:x}ULL); }})",
+                        ({value}); }})",
                     idx = idx_str,
                     maxi = max_idx,
                     ct = cty,
@@ -10382,8 +10490,6 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     stride = stride,
                     bsel = sel_str,
                     maxs = max_sel,
-                    ew = dyn_sel.elem_width,
-                    mask = mask,
                 ));
             }
             // Wide (>16 native-byte) array element: a static narrow (≤64-bit)
@@ -10406,7 +10512,10 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         let addr = format!(
                             "({buf} + {base_off:#x} + (intptr_t){stride} * (intptr_t)_idx)"
                         );
-                        let read = emit_wide_select_read_at(&addr, *lo, nbits);
+                        let read = oob_read(
+                            emit_wide_select_read_at(&addr, *lo, nbits),
+                            &[oob_cond("_idx_raw", index_expr.width(), *num_elements)],
+                        );
                         return Some(format!(
                             "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                                 uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
@@ -10431,15 +10540,21 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 };
                 let idx_str = emit_expr(index_expr)?;
                 let max_idx = num_elements.saturating_sub(1);
+                let value = oob_read(
+                    format!(
+                        "(__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx))",
+                        b = buf,
+                        off = base_off,
+                        stride = stride,
+                    ),
+                    &[oob_cond("_idx_raw", index_expr.width(), *num_elements)],
+                );
                 let load = format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                        (__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); }})",
+                        {value}; }})",
                     idx = idx_str,
                     max = max_idx,
-                    b = buf,
-                    off = base_off,
-                    stride = stride,
                 );
                 if needs_clean && *width < 128 {
                     return Some(mask_u128(&load, *width));
@@ -10465,15 +10580,21 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 };
                 let idx_str = emit_expr(index_expr)?;
                 let max_idx = num_elements.saturating_sub(1);
+                let value = oob_read(
+                    format!(
+                        "(__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx))",
+                        b = buf,
+                        off = base_off,
+                        stride = stride,
+                    ),
+                    &[oob_cond("_idx_raw", index_expr.width(), *num_elements)],
+                );
                 let load = format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                        (__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); }})",
+                        {value}; }})",
                     idx = idx_str,
                     max = max_idx,
-                    b = buf,
-                    off = base_off,
-                    stride = stride,
                 );
                 let shifted = format!("(((__uint128_t)({load})) >> {lo})");
                 if nbits >= 128 {
@@ -10516,16 +10637,22 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // exactly once and `idx` is reusable.  Compatible with
             // gcc/clang; we already require gcc to compile the .so.
             let max_idx = num_elements.saturating_sub(1);
+            let load = oob_read(
+                format!(
+                    "(uint64_t)*((const {ct}*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx))",
+                    ct = cty,
+                    b = buf,
+                    off = base_off,
+                    stride = stride,
+                ),
+                &[oob_cond("_idx_raw", index_expr.width(), *num_elements)],
+            );
             let load_expr = format!(
                 "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                     uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                    (uint64_t)*((const {ct}*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); }})",
+                    {load}; }})",
                 idx = idx_str,
                 max = max_idx,
-                ct = cty,
-                b = buf,
-                off = base_off,
-                stride = stride,
             );
             if let Some((hi, lo)) = select {
                 let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
@@ -12855,7 +12982,9 @@ mod tests {
         for (idx, want80, want96, want64) in [
             (0u32, e0, t[0], g[0]),
             (1, e1, t[1], g[1]),
-            (2, e1, t[2], g[1]), // out-of-range indexes clamp to the last element
+            // Index 2 is in range for the 3-element triple and past the end
+            // of the two 2-element arrays, which read the element default.
+            (2, 0, t[2], 0),
         ] {
             comb[96..100].copy_from_slice(&idx.min(7).to_le_bytes());
             comb[100..104].copy_from_slice(&idx.to_le_bytes());
@@ -12980,8 +13109,8 @@ mod tests {
             comb[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
         }
         let mut log = vec![0u64; 16];
-        // Index 3 is out of range and clamps to the last element.
-        for (idx, elem) in [(0u32, 0usize), (1, 1), (2, 2), (3, 2)] {
+        // Index 3 is out of range, and reads the element default.
+        for (idx, elem) in [(0u32, Some(0usize)), (1, Some(1)), (2, Some(2)), (3, None)] {
             comb[72..76].copy_from_slice(&idx.to_le_bytes());
             unsafe {
                 (module.func)(
@@ -13001,11 +13130,11 @@ mod tests {
                 &slice_bits(&words, 400, 160)[..],
                 "[559:400]"
             );
-            assert_eq!(
-                &comb[128..152],
-                &slice_bits(&words, elem * 192, 192)[..],
-                "element {idx}"
-            );
+            let want_elem = match elem {
+                Some(e) => slice_bits(&words, e * 192, 192),
+                None => vec![0u8; 24],
+            };
+            assert_eq!(&comb[128..152], &want_elem[..], "element {idx}");
             assert_eq!(
                 &comb[152..176],
                 &slice_bits(&words, 449, 192)[..],
@@ -14781,7 +14910,8 @@ mod tests {
             written, 0xcccc,
             "DynamicVariable read should fetch element 2"
         );
-        // Out-of-range idx should clamp to last element (0xdddd, index 3).
+        // An out-of-range idx reads the element default, not the neighbour
+        // the clamped address points at.
         comb[16..20].copy_from_slice(&99u32.to_le_bytes());
         unsafe {
             (module.func)(
@@ -14793,8 +14923,8 @@ mod tests {
         }
         let written = u32::from_le_bytes(comb[20..24].try_into().unwrap());
         assert_eq!(
-            written, 0xdddd,
-            "out-of-range idx should clamp to last element"
+            written, 0,
+            "out-of-range idx should read the element default"
         );
 
         let _ = fs::remove_dir_all(&tmp);

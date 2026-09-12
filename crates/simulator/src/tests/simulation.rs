@@ -22544,8 +22544,8 @@ fn dynamic_index_store_into_a_65_to_128_bit_element() {
 fn wide_dynamic_bit_select_store() {
     // A runtime-indexed bit / part-select WRITE into a >128-bit value.  Both
     // the single-bit form and a part-select that straddles a 64-bit word
-    // boundary must land exactly, and the runtime index must clamp to the last
-    // element rather than run off the value.
+    // boundary must land exactly, and an index past the last element must
+    // leave the value alone (IEEE 1800-2023 11.5.1; iverilog and VCS agree).
     let code = r#"
     module Top (
         i: input  logic<10>,
@@ -22574,8 +22574,12 @@ fn wide_dynamic_bit_select_store() {
     let v = (BigUint::from(0x2a_u32) << 48u32) + BigUint::from(0xfedc_ba98_7654_u64);
     // j=1 puts the 54-bit window at bits 54..107, across the word-0/1 seam;
     // j=15 is the last element, ending exactly at the top bit.
-    // i=999 is past the end and must clamp to bit 575.
-    for (i, j, bit_pos, win_pos) in [(0u32, 0u32, 0u32, 0u32), (7, 1, 7, 54), (999, 15, 575, 810)] {
+    // i=999 is past bit 575 and must write nothing, leaving `a` at 0.
+    for (i, j, bit_pos, win_pos) in [
+        (0u32, 0u32, Some(0u32), 0u32),
+        (7, 1, Some(7), 54),
+        (999, 15, None, 810),
+    ] {
         for config in Config::all() {
             let ir = analyze(code, &config);
             let mut sim = Simulator::new(ir, None);
@@ -22584,9 +22588,13 @@ fn wide_dynamic_bit_select_store() {
             sim.set("b", Value::new(1, 1, false));
             sim.set("v", Value::new_biguint(v.clone(), 54, false));
             sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let want_o = match bit_pos {
+                Some(b) => BigUint::from(1u32) << b,
+                None => BigUint::from(0u32),
+            };
             assert_eq!(
                 sim.get("o").unwrap(),
-                Value::new_biguint(BigUint::from(1u32) << bit_pos, 576, false),
+                Value::new_biguint(want_o, 576, false),
                 "o i={i} config={config:?}"
             );
             assert_eq!(
@@ -23148,11 +23156,14 @@ fn a_comb_driven_bit_of_a_dual_slot_word_reaches_both_slots() {
 
 #[test]
 fn dynamic_part_select_store_out_of_range_is_dropped() {
-    // `x[i +: 4]` clamps `i` to the last ELEMENT, not the last legal window
-    // start, so on the last few positions the window runs off the top of `x`.
-    // SystemVerilog does not write the out-of-range bits; every backend must
-    // agree, and must leave the rest of `x` alone.  The four widths pick four
-    // different store emitters (scalar, __uint128_t, wide RMW, wide RMW again).
+    // `x[i +: 4]` starting near the top runs the window off the end of `x`.
+    // SystemVerilog writes the in-range bits and ignores the rest, and a
+    // base past the last bit writes nothing at all (IEEE 1800-2023 11.5.1 --
+    // measured against the reference simulators, one of which instead wraps
+    // the index modulo the width).  Every backend must
+    // agree, and must leave the rest of `x` alone.  The four widths pick
+    // four different store emitters (scalar, __uint128_t, wide RMW, wide
+    // RMW again).
     let code = r#"
     module Top (
         i : input  logic<10>,
@@ -23191,13 +23202,15 @@ fn dynamic_part_select_store_out_of_range_is_dropped() {
 
     use num_bigint::BigUint;
     // All ones, then the in-range bits of the 4-bit window replaced by `v`.
+    // A base at or past `width` leaves every bit alone.
     let expect = |width: usize, i: u64, v: u64| {
-        let lo = (i as usize).min(width - 1);
         let mut x = (BigUint::from(1u32) << width) - BigUint::from(1u32);
-        for b in 0..4u64 {
-            let bit = lo as u64 + b;
-            if (bit as usize) < width {
-                x.set_bit(bit, (v >> b) & 1 == 1);
+        if (i as usize) < width {
+            for b in 0..4u64 {
+                let bit = i + b;
+                if (bit as usize) < width {
+                    x.set_bit(bit, (v >> b) & 1 == 1);
+                }
             }
         }
         x
@@ -24514,7 +24527,8 @@ fn wide_ff_word_aligned_slice_and_element_writes() {
     // Both writes reduce to a full-width write at a shifted offset, so the
     // risk is a wrong offset silently clobbering a neighbour — hence the
     // read-back of every element once all of them are written.  The index is
-    // one bit wider than the element count to drive the clamp.
+    // one bit wider than the element count, so half the iterations are out
+    // of range: those write nothing and read the element default.
     let code = r#"
     module Top (
         i_clk: input  clock,
@@ -24546,10 +24560,21 @@ fn wide_ff_word_aligned_slice_and_element_writes() {
 
     let elem = |i: u64| -> u128 { 0x1111_2222_3333_4444_5555_6666_7777_0000u128 + i as u128 };
     let lo_val = |i: u64| -> u128 { 0x0102_0304_0506_0708_090A_0B0C_0D0E_0F10u128 + i as u128 };
-    // An out-of-range index clamps to the last element.
+    // An out-of-range index writes nothing, so only the first four land.
     let mut expected = [0u128; 4];
-    for i in 0..8u64 {
-        expected[i.min(3) as usize] = elem(i);
+    for i in 0..4u64 {
+        expected[i as usize] = elem(i);
+    }
+    // An out-of-range READ is the element type's default, which is x where
+    // the storage is 4-state and zero where it is not.
+    fn element_default(in_range: bool, want: u128, width: usize, config: &Config) -> Value {
+        if in_range {
+            Value::from_u128(want, 0, width, false)
+        } else if config.use_4state {
+            Value::new_x(width, false)
+        } else {
+            Value::from_u128(0, 0, width, false)
+        }
     }
 
     for config in wide_ff_event_configs() {
@@ -24567,10 +24592,16 @@ fn wide_ff_word_aligned_slice_and_element_writes() {
             sim.set("i_d", Value::from_u128(elem(i), 0, 128, false));
             sim.set("i_e", Value::from_u128(lo_val(i), 0, 128, false));
             sim.step(&clk);
-            for (name, want) in [("o_hi", elem(i)), ("o_lo", lo_val(i)), ("o_el", elem(i))] {
+            for (name, want) in [
+                ("o_hi", Value::from_u128(elem(i), 0, 128, false)),
+                ("o_lo", Value::from_u128(lo_val(i), 0, 128, false)),
+                // `r[i_idx]` is out of range from i=4 on: nothing is written
+                // and the read-back is the element default.
+                ("o_el", element_default(i < 4, elem(i), 128, &config)),
+            ] {
                 assert_eq!(
                     sim.get(name).unwrap(),
-                    Value::from_u128(want, 0, 128, false),
+                    want,
                     "{name} i={i} config={config:?}"
                 );
             }
@@ -28917,4 +28948,90 @@ fn a_runtime_indexed_write_reports_the_read_elements_between_its_endpoints() {
     let mut outs = vec![];
     stmts[0].gather_variable_offsets(&mut ins, &mut outs);
     assert_eq!(outs, vec![VarOffset::Comb(100), VarOffset::Comb(192)]);
+}
+
+#[test]
+fn out_of_range_unpacked_element_index_reads_default_and_drops_write() {
+    // An index past the last ELEMENT of an unpacked array: IEEE 1800-2023
+    // 7.4.6 reads the element type's default there and 11.5.1 writes
+    // nothing.  Both directions used to clamp to the last element, which
+    // returns a live neighbour on a read and OVERWRITES one on a write.
+    // Measured: the 4-state reference simulators drop the write and read x,
+    // and a 2-state one, like this simulator, reads the element default.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        idx: input  logic<4>,
+        wen: input  logic   ,
+        rd : output logic<8>,
+        e13: output logic<8>,
+        e14: output logic<8>,
+    ) {
+        var mem: logic<8> [15];
+        always_ff {
+            if_reset {
+                for i in 0..15 {
+                    mem[i] = 8'h00;
+                }
+            } else {
+                if wen {
+                    mem[idx] = 8'hff;
+                }
+            }
+        }
+        assign rd  = mem[idx];
+        assign e13 = mem[13];
+        assign e14 = mem[14];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("idx", Value::new(0, 4, false));
+        sim.set("wen", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        // Index 15 of a 15-entry array: the write must leave both the last
+        // element and its neighbour alone.
+        sim.set("idx", Value::new(15, 4, false));
+        sim.set("wen", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("e14").unwrap(),
+            Value::new(0, 8, false),
+            "an out-of-range write must not land on the last element, config={config:?}"
+        );
+        assert_eq!(
+            sim.get("e13").unwrap(),
+            Value::new(0, 8, false),
+            "an out-of-range write must not land anywhere, config={config:?}"
+        );
+
+        // With element 14 written, the out-of-range read must still be the
+        // element default rather than that element.
+        sim.set("idx", Value::new(14, 4, false));
+        sim.step(&clk);
+        sim.set("wen", Value::new(0, 1, false));
+        sim.set("idx", Value::new(15, 4, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("e14").unwrap(),
+            Value::new(0xff, 8, false),
+            "the in-range write must land, config={config:?}"
+        );
+        let want = if config.use_4state {
+            Value::new_x(8, false)
+        } else {
+            Value::new(0, 8, false)
+        };
+        assert_eq!(
+            sim.get("rd").unwrap(),
+            want,
+            "an out-of-range read must be the element default, config={config:?}"
+        );
+    }
 }
