@@ -720,6 +720,10 @@ pub fn eval_assign_statement(
 
             let mut dst = dst.clone();
             dst.index.append(&index);
+            // The emitted RHS initializes the indexed element. Preserve only
+            // dimensions not consumed by this lowering; explicit LHS indices
+            // have already been removed from the destination type.
+            dst.comptime.r#type.array.drain(0..index.dimension());
             dst.select = select;
 
             let statement = ir::Statement::Assign(ir::AssignStatement {
@@ -1168,15 +1172,27 @@ pub fn eval_struct_member(
     if let Ok(symbol) = symbol_table::resolve(&parent_path) {
         match &symbol.found.kind {
             SymbolKind::Parameter(x) if !x.is_proto => {
-                if let Some(expr) = &x.value {
-                    let path = VarPath::new(symbol.found.token.text);
+                let path = VarPath::new(symbol.found.token.text);
+                // A member of an overridden parameter is not the member of the
+                // declaration default.
+                let overridden = context
+                    .get_override(&symbol.found.namespace, &path)
+                    .map(|(c, _)| c.clone());
+
+                if overridden.is_some() || x.value.is_some() {
                     let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
-                    let (_, mut expr) = eval_expr(context, Some(r#type.clone()), expr, false)?;
+                    let whole = if let Some(x) = overridden {
+                        x
+                    } else {
+                        let expr = x.value.as_ref().ok_or_else(|| ir_error!(token))?;
+                        let (_, mut expr) = eval_expr(context, Some(r#type.clone()), expr, false)?;
+                        expr.eval_comptime(context, None).clone()
+                    };
 
                     member_path.add_prelude(&path.0);
                     for x in r#type.expand_struct_union(&path, &[], None) {
                         if x.path == member_path {
-                            let mut comptime = expr.eval_comptime(context, None).clone();
+                            let mut comptime = whole.clone();
                             comptime.token = token;
                             // Extract the field value from the full struct value.
                             // part_select encodes the bit position of the field: the sum of
@@ -1286,6 +1302,24 @@ pub fn eval_type(
         None
     };
 
+    let non_const_cast = matches!(pos, TypePosition::Cast)
+        && path
+            .to_var_path()
+            .is_some_and(|x| context.var_paths.get(&x).is_some_and(|x| !x.1.is_const));
+    if non_const_cast {
+        let resolved = context.resolve_path(path.clone());
+        if let Ok(symbol) = symbol_table::resolve(&resolved) {
+            context.insert_error(AnalyzerError::mismatch_type(
+                MismatchTypeKind::SymbolKind {
+                    name: symbol.found.token.to_string(),
+                    expected: "enum, union, struct, typedef or integer constant".to_string(),
+                    actual: symbol.found.kind.to_kind_name(),
+                },
+                &path.range,
+            ));
+        }
+    }
+
     let kind = if let Some(x) = path.to_var_path()
         && let Some(x) = context.var_paths.get(&x)
     {
@@ -1296,6 +1330,7 @@ pub fn eval_type(
                 // append internal width/array
                 width.append(x.width_mut());
                 array.append(&mut x.array);
+                signed = x.signed;
 
                 x.kind
             }
@@ -1505,6 +1540,7 @@ pub fn eval_type(
                         if let ValueVariant::Type(mut x) = comptime.value {
                             width.append(x.width_mut());
                             array.append(&mut x.array);
+                            signed = x.signed;
                             x.kind
                         } else {
                             ir::TypeKind::Unknown
@@ -2832,14 +2868,36 @@ pub fn eval_factor_symbol(
 ) -> IrResult<ir::Factor> {
     match &symbol.found.kind {
         SymbolKind::Parameter(x) if !x.is_proto => {
-            // Parameter should be found through context.find_path from the defined namespace
-            if let Some(namespace) = context.current_namespace()
+            // Parameter should be found through context.find_path from the
+            // defined namespace. Not while sizing a declared width, where a
+            // component instantiating itself would name its own scope.
+            if !context.sizing_component_width()
+                && let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
                 context.insert_error(AnalyzerError::referring_before_definition(
                     &symbol.found.token.to_string(),
                     &token,
                 ));
+            }
+
+            // Reached while a width names a parameter of a component whose body
+            // has not been converted yet, so the declaration default is not
+            // what that parameter stands for.
+            if let Some((comptime, _)) = context.get_override(
+                &symbol.found.namespace,
+                &VarPath::new(symbol.found.token.text),
+            ) {
+                let mut comptime = comptime.clone();
+                // A value whose representation is narrower than its type
+                // reaches the back end as a store the variable's width does
+                // not match.
+                if let Some(width) = comptime.r#type.total_width() {
+                    comptime.value.expand_value(width);
+                }
+
+                comptime.token = token;
+                return Ok(ir::Factor::Value(comptime));
             }
 
             if let Some(expr) = &x.value {
@@ -3635,18 +3693,34 @@ fn resolve_array_value(
     }
 }
 
+/// The width expression names the component's scope, so the instantiating
+/// module's variables must not be in reach: they resolve first, and a parameter
+/// the two modules happen to give the same name would answer with the caller's
+/// value. With none, resolution goes through the symbol route, where this
+/// instantiation's overrides are what a parameter stands for.
+fn size_in_component_scope(
+    context: &mut Context,
+    r#type: &crate::symbol::Type,
+) -> IrResult<ir::Type> {
+    let mut external = Context::default();
+    external.inherit(context);
+    external.enter_component_sizing();
+    let ret = external.block(|c| r#type.to_ir_type(c, TypePosition::Variable));
+    external.leave_component_sizing();
+    context.inherit(&mut external);
+    ret
+}
+
 pub fn get_overridden_params(
     context: &mut Context,
     arg: &ComponentInstantiation,
 ) -> IrResult<HashMap<VarPath, (Comptime, ir::Expression)>> {
-    let mut ret = HashMap::default();
-
     let token: TokenRange = arg.scoped_identifier.as_ref().into();
     let symbol =
         symbol_table::resolve(arg.scoped_identifier.as_ref()).map_err(|_| ir_error!(token))?;
     let component_namespace = symbol.found.inner_namespace();
 
-    let params = if let Some(ref x) = arg.component_instantiation_opt1 {
+    let params: Vec<_> = if let Some(ref x) = arg.component_instantiation_opt1 {
         if let Some(x) = &x.inst_parameter.inst_parameter_opt {
             x.inst_parameter_list.as_ref().into()
         } else {
@@ -3656,67 +3730,93 @@ pub fn get_overridden_params(
         Vec::new()
     };
 
-    for param in params {
-        let name = param.identifier.text();
+    // A parameter's declared width can name a parameter that precedes it, so
+    // the values are bound in declaration order: by the time one is sized,
+    // everything its width may legally name is already bound. An instantiation
+    // may write them in any order.
+    let order: HashMap<StrId, usize> = symbol
+        .found
+        .kind
+        .get_parameters()
+        .iter()
+        .enumerate()
+        .map(|(i, x)| (x.name, i))
+        .collect();
+    let mut params: Vec<_> = params.into_iter().enumerate().collect();
+    params.sort_by_key(|(i, param)| {
+        (
+            order
+                .get(&param.identifier.text())
+                .copied()
+                .unwrap_or(usize::MAX),
+            *i,
+        )
+    });
 
-        let Ok(target) = symbol_table::resolve((param.identifier.as_ref(), &component_namespace))
-            .map(|x| Rc::clone(&x.found))
-        else {
-            continue;
-        };
+    context.push_override(component_namespace.clone(), HashMap::default());
+    let result = (|| -> IrResult<()> {
+        for (_, param) in params {
+            let name = param.identifier.text();
 
-        let target_type = if let Some(x) = target.kind.get_type() {
-            let x = x.to_ir_type(context, TypePosition::Variable);
-            if let Ok(x) = x {
-                Some(x)
-            } else {
+            let Ok(target) =
+                symbol_table::resolve((param.identifier.as_ref(), &component_namespace))
+                    .map(|x| Rc::clone(&x.found))
+            else {
                 continue;
+            };
+
+            // A type that will not size is no reason to drop the binding; a
+            // parameter declaring no type takes this same route.
+            let target_type = target
+                .kind
+                .get_type()
+                .and_then(|x| size_in_component_scope(context, x).ok());
+
+            let mut expr = if let Some(x) = &param.inst_parameter_item_opt {
+                eval_expr(context, target_type.clone(), &x.expression, false)?
+            } else {
+                let src: Expression = param.identifier.as_ref().into();
+                eval_expr(context, target_type.clone(), &src, false)?
+            };
+
+            // Carry an array override's element values as a NumericArray so the
+            // signature distinguishes them and eval_const_assign can materialize it.
+            if expr.0.value.is_unknown()
+                && let Some(r#type) = &target_type
+                && let Some(values) = resolve_array_value(context, r#type, &expr.1)
+            {
+                expr.0.value = ValueVariant::NumericArray(values);
             }
-        } else {
-            None
-        };
 
-        let mut expr = if let Some(x) = &param.inst_parameter_item_opt {
-            eval_expr(context, target_type.clone(), &x.expression, false)?
-        } else {
-            let src: Expression = param.identifier.as_ref().into();
-            eval_expr(context, target_type.clone(), &src, false)?
-        };
+            // An element of an unpacked-array parameter arrives const but
+            // unfolded, so no instance is specialised and a width derived from it
+            // stays symbolic — which the simulator cannot elaborate.
+            if expr.0.value.is_unknown()
+                && expr.0.is_const
+                && let Some(value) = expr.1.eval_value(context)
+            {
+                expr.0.value = ValueVariant::Numeric(value);
+            }
 
-        // Carry an array override's element values as a NumericArray so the
-        // signature distinguishes them and eval_const_assign can materialize it.
-        if expr.0.value.is_unknown()
-            && let Some(r#type) = &target_type
-            && let Some(values) = resolve_array_value(context, r#type, &expr.1)
-        {
-            expr.0.value = ValueVariant::NumericArray(values);
+            let is_type_param = matches!(
+                &target.kind,
+                SymbolKind::Parameter(x) if !x.is_proto && matches!(x.r#type.kind, TypeKind::Type)
+            );
+            if !is_type_param && !expr.0.is_const {
+                let token: TokenRange = param.identifier.as_ref().into();
+                context.insert_error(AnalyzerError::unevaluable_value(
+                    UnevaluableValueKind::ParameterValue,
+                    &token,
+                ));
+            }
+
+            context.insert_override(VarPath::new(name), expr);
         }
 
-        // An element of an unpacked-array parameter arrives const but
-        // unfolded, so no instance is specialised and a width derived from it
-        // stays symbolic — which the simulator cannot elaborate.
-        if expr.0.value.is_unknown()
-            && expr.0.is_const
-            && let Some(value) = expr.1.eval_value(context)
-        {
-            expr.0.value = ValueVariant::Numeric(value);
-        }
-
-        let is_type_param = matches!(
-            &target.kind,
-            SymbolKind::Parameter(x) if !x.is_proto && matches!(x.r#type.kind, TypeKind::Type)
-        );
-        if !is_type_param && !expr.0.is_const {
-            let token: TokenRange = param.identifier.as_ref().into();
-            context.insert_error(AnalyzerError::unevaluable_value(
-                UnevaluableValueKind::ParameterValue,
-                &token,
-            ));
-        }
-
-        let path = VarPath::new(name);
-        ret.insert(path, expr);
-    }
+        Ok(())
+    })();
+    let ret = context.take_override();
+    result?;
 
     Ok(ret)
 }

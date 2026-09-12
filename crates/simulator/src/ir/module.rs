@@ -1,4 +1,3 @@
-use crate::backend::inst::next_test_top_id;
 use crate::backend::{
     ChunkOutput, ChunkPlan, CompileCtx, CompiledWhole, compile_plans_parallel, whole,
 };
@@ -723,7 +722,8 @@ fn try_jit_gated(
     bounds.sort_unstable();
     bounds.dedup();
     let stmt_count = proto.len();
-    let (stmts, pieces) = try_jit_with_boundaries(context, proto, &bounds, false);
+    let (stmts, pieces) =
+        try_jit_with_boundaries(context, proto, &bounds, false, /* helpers= */ false);
     // A piece is named by the statement it starts at; the list's end closes
     // the last gate's range.
     let mut block_at: HashMap<usize, usize> = HashMap::default();
@@ -976,20 +976,26 @@ fn precompile_tb_bodies(
 
 /// Unified-comb JIT path: nested CompiledBlocks may mutate comb storage
 /// between loads, so load_cache CSE is disabled in the emitted chunks.
-fn try_jit_no_cache(context: &mut Context, proto: Vec<ProtoStatement>) -> ProtoStatements {
-    let mut pieces = jit_pieces_in_parallel(context, vec![proto], true);
+/// `helpers` as in `jit_pieces`.
+fn try_jit_no_cache(
+    context: &mut Context,
+    proto: Vec<ProtoStatement>,
+    helpers: bool,
+) -> ProtoStatements {
+    let mut pieces = jit_pieces(context, vec![proto], true, helpers);
     ProtoStatements(pieces.pop().unwrap_or_default())
 }
 
-/// Chunks every piece of one unified comb list and compiles the lot on helper
-/// threads.  Planning is per piece, so a cone segment still maps to whole
-/// blocks; the compiles pool across pieces.  Only this path parallelises: it
-/// runs once per component behind the comb-pipeline single-flight, while the
-/// per-test chunk paths run on workers that are already busy.
-fn jit_pieces_in_parallel(
+/// Chunks every piece of one unified comb list and compiles the lot.
+/// Planning is per piece, so a cone segment still maps to whole blocks; the
+/// compiles pool across pieces.
+/// `helpers` asks for `compile_plans_parallel`, which only a caller holding a
+/// comb-pipeline claim may do; see it for why.
+fn jit_pieces(
     context: &mut Context,
     pieces: Vec<Vec<ProtoStatement>>,
     contains_compiled_block: bool,
+    helpers: bool,
 ) -> Vec<Vec<ProtoStatementBlock>> {
     if context.backends.is_empty() {
         return pieces
@@ -1018,7 +1024,11 @@ fn jit_pieces_in_parallel(
             use_4state: context.config.use_4state,
             contains_compiled_block,
         };
-        compile_plans_parallel(&mut context.backends, &ctx, plans)
+        if helpers {
+            compile_plans_parallel(&mut context.backends, &ctx, plans)
+        } else {
+            context.backends.compile_plans(&ctx, plans)
+        }
     };
     let mut outputs = outputs.into_iter();
     counts
@@ -1041,12 +1051,13 @@ fn jit_pieces_in_parallel(
 /// number of blocks.  Returns, per boundary-delimited piece, its `[lo, hi)`
 /// block range in the produced `ProtoStatements`.  `contains_compiled_block`
 /// as in `CompileCtx`: the unified comb embeds inst chunks and so disables
-/// load-cache CSE, an event list does not.
+/// load-cache CSE, an event list does not.  `helpers` as in `jit_pieces`.
 fn try_jit_with_boundaries(
     context: &mut Context,
     mut proto: Vec<ProtoStatement>,
     boundaries: &[usize],
     contains_compiled_block: bool,
+    helpers: bool,
 ) -> (
     ProtoStatements,
     Vec<(usize, usize, usize)>, // (piece_start_stmt, block_lo, block_hi)
@@ -1067,10 +1078,11 @@ fn try_jit_with_boundaries(
     }
     tails.reverse();
     let (starts, bodies): (Vec<usize>, Vec<Vec<ProtoStatement>>) = tails.into_iter().unzip();
-    for (start, piece_blocks) in starts.into_iter().zip(jit_pieces_in_parallel(
+    for (start, piece_blocks) in starts.into_iter().zip(jit_pieces(
         context,
         bodies,
         contains_compiled_block,
+        helpers,
     )) {
         let lo = blocks.len();
         blocks.extend(piece_blocks);
@@ -1447,13 +1459,15 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
 /// the only way to find the expensive one was to timestamp the log from outside
 /// and match lines up by eye.
 struct StageTimer {
-    on: bool,
-    last: std::time::Instant,
+    last: Option<std::time::Instant>,
     scope: String,
 }
 
 /// Whether `VERYL_STAGE_TIME` asked for stage timings.  Read once: the sort
 /// consults it per call, and there are thousands of calls on a large design.
+///
+/// `Instant::now` panics on wasm, where the playground elaborates the same IR,
+/// so the clock must stay behind this gate.
 pub(crate) fn stage_time_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("VERYL_STAGE_TIME").is_ok())
@@ -1462,20 +1476,19 @@ pub(crate) fn stage_time_enabled() -> bool {
 impl StageTimer {
     fn new(scope: impl std::fmt::Display) -> Self {
         Self {
-            on: stage_time_enabled(),
-            last: std::time::Instant::now(),
+            last: stage_time_enabled().then(std::time::Instant::now),
             scope: scope.to_string(),
         }
     }
 
     fn mark(&mut self, stage: &str) {
-        if self.on {
+        if let Some(last) = &mut self.last {
             log::info!(
                 "stage_time ({}): {stage} {:.3}s",
                 self.scope,
-                self.last.elapsed().as_secs_f64()
+                last.elapsed().as_secs_f64()
             );
-            self.last = std::time::Instant::now();
+            *last = std::time::Instant::now();
         }
     }
 }
@@ -1492,6 +1505,7 @@ fn run_comb_pipeline(
     fusion_extra: Option<&[VarOffset]>,
     cone_inputs: Option<&cone_gate::ConeGateInputs>,
     module_name: StrId,
+    helpers: bool,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
     let mut stage = StageTimer::new(module_name);
     dump_stmt_order("conv", module_name, &unified);
@@ -1788,7 +1802,8 @@ fn run_comb_pipeline(
                 .collect();
             bounds.sort_unstable();
             bounds.dedup();
-            let (ps, pieces) = try_jit_with_boundaries(context, unified_sorted, &bounds, true);
+            let (ps, pieces) =
+                try_jit_with_boundaries(context, unified_sorted, &bounds, true, helpers);
             // Bring ranges into the FINAL storage space piecewise: a merged
             // span can straddle relayout units that land apart.
             let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
@@ -1920,7 +1935,7 @@ fn run_comb_pipeline(
             (ps, segs, groups)
         }
         None => {
-            let a = try_jit_no_cache(context, unified_sorted);
+            let a = try_jit_no_cache(context, unified_sorted, helpers);
             (a, Vec::new(), Vec::new())
         }
     };
@@ -2814,7 +2829,7 @@ type SortOutcome = Result<(Vec<ProtoStatement>, Option<usize>), (Vec<ProtoStatem
 /// Sort `stmts`, then verify no cycle survives a bit- and branch-aware
 /// reading of the result.
 fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> SortOutcome {
-    let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, blocks);
+    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, blocks);
     // Verify no genuine combinational loop remains.  One `VarOffset` is a
     // whole struct and a conditional's reads are the union over its
     // branches, so key by bits AND by per-branch piece; `sorted` still runs.
@@ -2927,6 +2942,17 @@ fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> Sort
         }
     }
     if cnt == n {
+        // The sort refused to linearize, so `sorted` is the UNSORTED input and
+        // every reader that precedes its writer costs a settle pass.  The pass
+        // count alone does not distinguish that from a design that really has
+        // a loop.
+        if fell_back {
+            log::warn!(
+                "no cycle survives a bit-aware reading of the order, but the sort \
+                 could not linearize it: the statements run in source order and \
+                 settle in several passes"
+            );
+        }
         return Ok((sorted, passes_hint));
     }
     // `deg > 0` includes the cycle's downstream cone; isolate just the
@@ -3018,25 +3044,29 @@ fn split_copies_by_source_writes(
     }
 }
 
-/// Every variable a bit-parallel expression reads.  A leaf must be the WHOLE
-/// variable, or its cuts land in a different coordinate space from the
-/// destination's.
-fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<VarOffset>) -> bool {
+/// Every variable a bit-parallel expression reads, with where bit 0 of the
+/// value sits in that variable: a leaf may be a SLICE, and its cuts then need
+/// translating into the expression's coordinates before they can be used.
+/// Reading the same `base` [`ProtoExpression::bit_parallel_window`] uses keeps
+/// the two in step.
+fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<(VarOffset, usize)>) -> bool {
     let width = expr.width();
     match expr {
         ProtoExpression::Variable {
             var_offset,
-            select: None,
+            select,
             dynamic_select: None,
             width: w,
             var_full_width,
             ..
         } => {
-            let ok = w == var_full_width;
-            if ok {
-                out.push(*var_offset);
-            }
-            ok
+            let base = match select {
+                None if w == var_full_width => 0,
+                Some((shi, slo)) if shi >= slo && *w == shi - slo + 1 => *slo,
+                _ => return false,
+            };
+            out.push((*var_offset, base));
+            true
         }
         ProtoExpression::Unary {
             op: Op::BitNot, x, ..
@@ -3052,13 +3082,31 @@ fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<VarOffset>) -> boo
                 && bit_parallel_sources(x, out)
                 && bit_parallel_sources(y, out)
         }
+        // The condition is scalar: every window reads it whole, so it offers no
+        // cut and imposes none.  Only the arms carry bits across.
+        ProtoExpression::Ternary {
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            true_expr.width() == width
+                && false_expr.width() == width
+                && bit_parallel_sources(true_expr, out)
+                && bit_parallel_sources(false_expr, out)
+        }
         _ => false,
     }
 }
 
-/// One statement, split per source write when it copies a whole variable:
-/// the parts tile the destination and each names the matching window of every
-/// operand, so the value is identical.
+/// One statement, split per source write when it copies bit-parallel data:
+/// the parts tile the destination window and each names the matching window of
+/// every operand, so the value is identical.
+///
+/// The window need not be the whole variable on either side.  An instance in a
+/// generate loop drives one ELEMENT of a bundle array, so its boundary copy is
+/// a slice; refusing those left every bit of one bundle reading as if it
+/// depended on every bit of the other, which closes a ring through a
+/// request/response pair no wire connects.
 fn split_one_copy(
     stmt: ProtoStatement,
     bounds: &HashMap<VarOffset, Option<Vec<usize>>>,
@@ -3069,28 +3117,49 @@ fn split_one_copy(
         out.push(stmt);
         return;
     };
-    if a.select.is_some()
-        || a.dynamic_select.is_some()
-        || a.rhs_select.is_some()
-        || a.expr.width() != a.dst_width
-    {
+    // Where bit 0 of the value sits in the destination, and how wide it is.
+    let (dst_base, width) = match a.select {
+        None => (0, a.dst_width),
+        Some((hi, lo)) if hi >= lo => (lo, hi - lo + 1),
+        Some(_) => {
+            out.push(ProtoStatement::Assign(a));
+            return;
+        }
+    };
+    if a.dynamic_select.is_some() || a.rhs_select.is_some() || a.expr.width() != width {
         out.push(ProtoStatement::Assign(a));
         return;
     }
-    let mut sources: Vec<VarOffset> = Vec::new();
+    let mut sources: Vec<(VarOffset, usize)> = Vec::new();
     if !bit_parallel_sources(&a.expr, &mut sources) {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    // A copy that reads its own destination carries no bits between two
+    // variables, so there is no weld to break.  Splitting one buys nothing and
+    // costs a writer per part: the carry-over a version split leaves behind
+    // covers a whole bundle, and cutting it per field turns one writer of that
+    // variable into dozens.
+    if sources.iter().any(|(src, _)| *src == a.dst) {
         out.push(ProtoStatement::Assign(a));
         return;
     }
     // A source written with unknown bits contributes no cut, but it does not
     // stop the others from cutting: each part still reads it whole, so the
     // dependency it carries is unchanged.
-    let mut cuts: Vec<usize> = vec![0, a.dst_width];
+    let mut cuts: Vec<usize> = vec![0, width];
     let mut any_known = false;
-    for src in &sources {
+    for (src, base) in &sources {
         if let Some(Some(known)) = bounds.get(src) {
             any_known = true;
-            cuts.extend(known.iter().copied().filter(|b| *b <= a.dst_width));
+            // Boundaries are in the source variable's coordinates; a boundary
+            // outside the window read is not a cut of this copy.
+            cuts.extend(
+                known
+                    .iter()
+                    .filter_map(|b| b.checked_sub(*base))
+                    .filter(|b| *b <= width),
+            );
         }
     }
     cuts.sort_unstable();
@@ -3111,7 +3180,7 @@ fn split_one_copy(
         parts.push(ProtoStatement::Assign(ProtoAssignStatement {
             dst: a.dst,
             dst_width: a.dst_width,
-            select: Some((hi, lo)),
+            select: Some((dst_base + hi, dst_base + lo)),
             dynamic_select: None,
             rhs_select: None,
             expr,
@@ -5290,10 +5359,6 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
 
 impl Conv<&air::Module> for ProtoModule {
     fn conv(context: &mut Context, src: &air::Module) -> Result<Self, SimulatorError> {
-        // This conv is one test top (testbench).  Tag it so cross-test DUT
-        // recurrence can be told apart from within-top replication (SMP harts).
-        context.test_top_id = next_test_top_id();
-
         let mut analyzer_context = veryl_analyzer::conv::Context::default();
         analyzer_context.variables = src.variables.clone();
         analyzer_context.functions = src.functions.clone();
@@ -5704,7 +5769,9 @@ impl Conv<&air::Module> for ProtoModule {
                 base
             }
         };
-        let claimed = comb_pipeline_cache::try_get_or_claim(key, context.config.dut_reuse);
+        let claimed = context
+            .comb_cache
+            .try_get_or_claim(key, context.config.dut_reuse);
         let cached: Arc<comb_pipeline_cache::CombPipeline> = match claimed {
             comb_pipeline_cache::Outcome::Hit(cached) => {
                 // The pipeline (incl. the in-place event DCE) did not run for
@@ -5786,6 +5853,9 @@ impl Conv<&air::Module> for ProtoModule {
                         )
                     });
 
+                // Compute holds the claim its peers are blocked on, so their
+                // cores are free; Disabled blocks nobody.
+                let helpers = matches!(other, comb_pipeline_cache::Outcome::Compute(_));
                 let mut result = run_comb_pipeline(
                     context,
                     unified,
@@ -5795,6 +5865,7 @@ impl Conv<&air::Module> for ProtoModule {
                     aux_extra_offsets.as_deref(),
                     cone_inputs.as_ref(),
                     src.name,
+                    helpers,
                 )?;
                 result.unfuse_comb_bytes = unfuse_comb_bytes;
                 result.unfuse_comb_reloc = unfuse_comb_reloc;
@@ -6398,7 +6469,7 @@ impl Conv<&air::Module> for ProtoModule {
                     &mut context.backends,
                     &context.config,
                     key,
-                    context.config.dut_reuse,
+                    &context.comb_cache,
                     protos,
                     whole::WholeCombShape::default(),
                 )
@@ -6429,18 +6500,27 @@ impl Conv<&air::Module> for ProtoModule {
         if let Some(ci) = cached.cone_inputs.as_deref()
             && crate::ir::opt::event_gate::enabled()
         {
+            // The comb walk dwarfs planning one event, so share it.
+            let mut comb_context = None;
             for (event, stmts) in all_event_statements.iter() {
                 if !matches!(event, Event::Clock(_)) {
                     continue;
                 }
-                let mut gates = crate::ir::opt::event_gate::plan(
-                    stmts,
-                    ci,
-                    &pre_jit_stmts[..],
-                    &closure_touched,
-                    &comb_touched_offsets,
-                    &format!("{event:?}"),
-                );
+                let comb_context = comb_context.get_or_insert_with(|| {
+                    crate::ir::opt::event_gate::CombContext::new(
+                        ci,
+                        &pre_jit_stmts[..],
+                        &closure_touched,
+                        &comb_touched_offsets,
+                    )
+                });
+                // Only the diagnostics read it, and this runs per clock.
+                let label = if crate::ir::opt::event_gate::diag() {
+                    format!("{event:?}")
+                } else {
+                    String::new()
+                };
+                let mut gates = crate::ir::opt::event_gate::plan(stmts, comb_context, &label);
                 for g in &mut gates {
                     let shadow = g.shadow_bytes();
                     let len = (crate::ir::opt::event_gate::GATE_STATE_HEADER_BYTES + shadow)
@@ -6546,7 +6626,6 @@ impl Conv<&air::Module> for ProtoModule {
         // try compile_whole_comb; backends that decline (4-state,
         // unsupported construct) return None and Ir::settle_comb stays
         // on the per-chunk Cranelift loop.
-        let dut_reuse = context.config.dut_reuse;
         let whole_comb: Option<Arc<dyn CompiledWhole>> = if !size_ok {
             None
         } else {
@@ -6558,7 +6637,7 @@ impl Conv<&air::Module> for ProtoModule {
                 &mut context.backends,
                 &context.config,
                 key,
-                dut_reuse,
+                &context.comb_cache,
                 &pre_jit_stmts,
                 whole::WholeCombShape {
                     localize: localize_info.as_ref(),

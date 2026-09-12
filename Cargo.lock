@@ -6400,6 +6400,7 @@ dependencies = [
  "merkle_hash",
  "miette",
  "rust-embed",
+ "tempfile",
  "thiserror",
  "veryl-path",
 ]

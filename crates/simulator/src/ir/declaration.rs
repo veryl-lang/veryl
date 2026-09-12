@@ -1,6 +1,4 @@
-use crate::backend::inst::{
-    ReuseOutcome, port_alias_enabled, try_compile_inst_chunks, try_reuse_or_claim,
-};
+use crate::backend::inst::{ReuseOutcome, try_compile_inst_chunks};
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
@@ -270,9 +268,9 @@ fn stable_topo_sort_impl(
     // WRITES per variable, so a design that splits finely can move the cost
     // from one to another without changing the statement count much.
     let time_stages = crate::ir::module::stage_time_enabled();
-    let mut t = std::time::Instant::now();
-    let mark = move |what: &str, t: &mut std::time::Instant| {
-        if time_stages {
+    let mut t = time_stages.then(std::time::Instant::now);
+    let mark = move |what: &str, t: &mut Option<std::time::Instant>| {
+        if let Some(t) = t {
             log::info!(
                 "stage_time (sort n={n}): {what} {:.3}s",
                 t.elapsed().as_secs_f64()
@@ -1434,12 +1432,11 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // to, eliminating the inter-module copy at settle_comb.  De-aliased only
         // for the reuse-target DUT boundary — see `port_alias_enabled`.
         let component_key = Arc::as_ptr(&src.component);
-        let alias_enabled = port_alias_enabled(
+        let alias_enabled = context.dut_reuse.port_alias_enabled(
             component_key,
             child_ff_count,
             child_comb_count,
             context.in_reuse_dut,
-            context.test_top_id,
             context.config.dut_reuse,
         );
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
@@ -1564,7 +1561,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // test/instance), restore its subtree relocated to this instance's
         // offsets, skipping IR assembly AND codegen.  `child_variable_meta` and
         // the port copies / event remap below are still rebuilt fresh.
-        let (reuse_hit, claim_guard) = match try_reuse_or_claim(
+        let (reuse_hit, claim_guard) = match context.dut_reuse.try_reuse_or_claim(
             component_key,
             alias_enabled,
             ff_start,

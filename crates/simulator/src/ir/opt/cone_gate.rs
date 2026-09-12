@@ -68,6 +68,65 @@ impl FfOwner {
     }
 }
 
+/// `a` is an ancestor of `m` exactly when `tin[a] <= tin[m] < tout[a]`, so
+/// the ancestry test the gate planners run per statement costs two
+/// comparisons instead of a walk to the root.
+#[derive(Clone, Default)]
+pub struct Tour {
+    tin: Vec<u32>,
+    tout: Vec<u32>,
+    depth: Vec<u32>,
+}
+
+impl Tour {
+    /// `build_inputs` pushes a node only after its parent, so `parent[m] < m`
+    /// and plain scans suffice, with no tree walk.
+    fn of(parent: &[u32]) -> Tour {
+        let n = parent.len();
+        let (mut tin, mut tout) = (vec![0u32; n], vec![0u32; n]);
+        let mut depth = vec![0u32; n];
+        let mut size = vec![1u32; n];
+        for m in (1..n).rev() {
+            debug_assert!(
+                (parent[m] as usize) < m,
+                "build_inputs numbers an instance node after its parent"
+            );
+            size[parent[m] as usize] += size[m];
+        }
+        // Where the next child of `m` starts.
+        let mut next = vec![0u32; n];
+        for m in 0..n {
+            if m > 0 {
+                let p = parent[m] as usize;
+                depth[m] = depth[p] + 1;
+                tin[m] = next[p];
+                next[p] += size[m];
+            }
+            next[m] = tin[m] + 1;
+            tout[m] = tin[m] + size[m];
+        }
+        Tour { tin, tout, depth }
+    }
+
+    pub fn entry(&self, m: u32) -> u32 {
+        self.tin[m as usize]
+    }
+
+    /// One past the last entry number under `m`.
+    pub fn exit(&self, m: u32) -> u32 {
+        self.tout[m as usize]
+    }
+
+    pub fn is_desc(&self, m: u32, a: u32) -> bool {
+        let (i, lo) = (self.tin[m as usize], self.tin[a as usize]);
+        lo <= i && i < self.tout[a as usize]
+    }
+
+    pub fn depth(&self, m: u32) -> u32 {
+        self.depth[m as usize]
+    }
+}
+
 /// Node tables of the module-instance tree plus storage-ownership intervals,
 /// prepared by the caller (`ProtoModule::conv`) from `ModuleVariableMeta`.
 #[derive(Clone)]
@@ -89,6 +148,10 @@ pub struct ConeGateInputs {
     pub comb_var: Vec<(usize, usize, u32)>,
     /// Merged comb byte ranges any event statement can write.
     pub event_written_comb: Vec<(usize, usize)>,
+    /// Construct it empty: it derives from `node_parent` and nothing else.
+    /// Living here means the re-conversions of one DUT share it, since they
+    /// take these inputs from the pipeline cache.
+    pub(crate) tour: std::sync::OnceLock<Tour>,
 }
 
 /// One gated contiguous statement range of the reordered schedule.
@@ -698,6 +761,26 @@ fn inherit_reloc_owners(
 }
 
 impl ConeGateInputs {
+    pub fn tour(&self) -> &Tour {
+        self.tour.get_or_init(|| Tour::of(&self.node_parent))
+    }
+
+    pub fn parent(&self, m: u32) -> Option<u32> {
+        let p = self.node_parent[m as usize];
+        (p != u32::MAX).then_some(p)
+    }
+
+    pub fn lca(&self, a: u32, b: u32) -> u32 {
+        let tour = self.tour();
+        let mut a = a;
+        while !tour.is_desc(b, a) {
+            a = self
+                .parent(a)
+                .expect("the root is an ancestor of every node");
+        }
+        a
+    }
+
     /// Own comb storage allocated after `build_inputs`, given as
     /// `(from, to, bytes)` entries in the `Context::comb_reloc` shape, as the
     /// owner of `from`.
@@ -901,6 +984,7 @@ pub fn build_inputs(
         ff_node,
         comb_var,
         event_written_comb,
+        tour: std::sync::OnceLock::new(),
     }
 }
 
@@ -1023,34 +1107,8 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
             .map(|i| table[i])
             .filter(|&(s, e, _)| s <= x && x < e)
     };
-    let parent = |x: u32| -> Option<u32> {
-        let p = inputs.node_parent[x as usize];
-        (p != u32::MAX).then_some(p)
-    };
-    let depth = |mut x: u32| -> usize {
-        let mut d = 0;
-        while let Some(p) = parent(x) {
-            x = p;
-            d += 1;
-        }
-        d
-    };
-    let lca = |mut a: u32, mut b: u32| -> u32 {
-        let (mut da, mut db) = (depth(a), depth(b));
-        while da > db {
-            a = parent(a).unwrap();
-            da -= 1;
-        }
-        while db > da {
-            b = parent(b).unwrap();
-            db -= 1;
-        }
-        while a != b {
-            a = parent(a).unwrap();
-            b = parent(b).unwrap();
-        }
-        a
-    };
+    let parent = |x: u32| -> Option<u32> { inputs.parent(x) };
+    let lca = |a: u32, b: u32| -> u32 { inputs.lca(a, b) };
 
     // -- per-statement info + node attribution.
     let root = (0..inputs.node_parent.len() as u32)
@@ -1653,29 +1711,9 @@ fn build_groups(
     for (k, &oi) in order.iter().enumerate() {
         pos[oi as usize] = k;
     }
-    let parent = |m: u32| -> Option<u32> {
-        let p = inputs.node_parent[m as usize];
-        (p != u32::MAX).then_some(p)
-    };
-    let is_desc = |mut m: u32, a: u32| -> bool {
-        loop {
-            if m == a {
-                return true;
-            }
-            match parent(m) {
-                Some(p) => m = p,
-                None => return false,
-            }
-        }
-    };
-    let depth = |mut m: u32| -> usize {
-        let mut d = 0usize;
-        while let Some(p) = parent(m) {
-            d += 1;
-            m = p;
-        }
-        d
-    };
+    let parent = |m: u32| -> Option<u32> { inputs.parent(m) };
+    let is_desc = |m: u32, a: u32| -> bool { inputs.tour().is_desc(m, a) };
+    let depth = |m: u32| -> usize { inputs.tour().depth(m) as usize };
     let mut cands: Vec<u32> = Vec::new();
     for &sn in seg_nodes {
         let mut m = sn;
@@ -1844,6 +1882,7 @@ mod tests {
             comb_var: Vec::new(),
             ff_node: Vec::new(),
             event_written_comb: vec![],
+            tour: Default::default(),
         };
         let info = |node: u32, ins: &[(usize, usize)], outs: &[(usize, usize)]| StmtInfo {
             node,

@@ -104,6 +104,26 @@ pub enum ForRange {
 }
 
 impl ForRange {
+    /// A runtime bound is read outside the loop body, so a register used only
+    /// as a bound looks unread and loses its register: the loop then runs
+    /// against the post-edge count.
+    pub fn gather_ff(
+        &self,
+        context: &mut Context,
+        table: &mut FfTable,
+        decl: usize,
+        from_ff: bool,
+    ) {
+        let (ForRange::Forward { start, end, .. }
+        | ForRange::Reverse { start, end, .. }
+        | ForRange::Stepped { start, end, .. }) = self;
+        for bound in [start, end] {
+            if let ForBound::Expression(expr) = bound {
+                expr.gather_ff(context, table, decl, None, from_ff);
+            }
+        }
+    }
+
     /// True when the range has const-evaluable bounds whose span exceeds
     /// evaluate_size_limit — i.e. eval_iter declines because of the limit,
     /// not because the bounds are runtime values.
@@ -419,6 +439,7 @@ impl Statement {
             Statement::FunctionCall(x) => x.gather_ff(context, table, decl, None, true),
             Statement::SystemFunctionCall(x) => x.gather_ff(context, table, decl, true),
             Statement::For(x) => {
+                x.range.gather_ff(context, table, decl, true);
                 for s in &x.body {
                     s.gather_ff(context, table, decl);
                 }
@@ -458,6 +479,7 @@ impl Statement {
             Statement::FunctionCall(x) => x.gather_ff_comb_assign(context, table, decl),
             Statement::SystemFunctionCall(x) => x.gather_ff(context, table, decl, false),
             Statement::For(x) => {
+                x.range.gather_ff(context, table, decl, false);
                 for s in &x.body {
                     s.gather_ff_comb_assign(context, table, decl);
                 }
@@ -738,11 +760,8 @@ impl AssignDestination {
         }
     }
 
-    /// A dynamic index or select on the left-hand side READS the variables in
-    /// it. Those reads live outside `expr`, so without registering them here a
-    /// register used *only* as an index looks unread, and the optimizer is
-    /// free to give it storage where the write is visible immediately — the
-    /// indexed write then lands in the post-edge slot.
+    /// The index and select on the left-hand side are read, not written, and
+    /// are not part of `expr`: see [`VarIndex::gather_ff`].
     pub fn gather_ff_selectors(
         &self,
         context: &mut Context,
@@ -751,15 +770,10 @@ impl AssignDestination {
         assign_target: Option<&AssignTarget>,
         from_ff: bool,
     ) {
-        for expression in &self.index.0 {
-            expression.gather_ff(context, table, decl, assign_target, from_ff);
-        }
-        for expression in &self.select.0 {
-            expression.gather_ff(context, table, decl, assign_target, from_ff);
-        }
-        if let Some((_, expression)) = &self.select.1 {
-            expression.gather_ff(context, table, decl, assign_target, from_ff);
-        }
+        self.index
+            .gather_ff(context, table, decl, assign_target, from_ff);
+        self.select
+            .gather_ff(context, table, decl, assign_target, from_ff);
     }
 
     pub fn set_index(&mut self, index: &VarIndex) {

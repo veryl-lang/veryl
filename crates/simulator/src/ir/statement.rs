@@ -867,6 +867,8 @@ impl SystemFunctionCall {
                     i += 1;
                     true
                 });
+                // A waveform's gate hears about writes only through the log.
+                crate::wave_dumper::note_direct_write();
             }
             SystemFunctionCall::Assert {
                 kind,

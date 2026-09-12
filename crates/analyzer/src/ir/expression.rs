@@ -209,12 +209,11 @@ impl Expression {
                 comptime.is_global = xc.is_global & yc.is_global;
 
                 let mut ctx = op.eval_context_binary(xc, yc);
-                // An `as`-cast inherits its target's signedness only for an
-                // explicit signed TYPE; a numeric width cast (`x as N`) is an
-                // unsigned `logic<N>` like the emitted SystemVerilog. Otherwise
-                // it is spuriously signed at runtime, sign-extending in shifts.
+                // A numeric width cast (`x as N`, emitted as `N'(x)`) keeps
+                // the operand's signedness. The width literal's signedness
+                // determines neither sign extension nor arithmetic shifting.
                 if *op == Op::As && !as_target_is_type {
-                    ctx.signed = false;
+                    ctx.signed = xc.signed;
                 }
                 ctx
             }
@@ -406,9 +405,11 @@ impl Expression {
 
                     let cast_width = comptime.r#type.total_width()?;
                     let val_width = val.width();
+                    let cast_signed = comptime.r#type.signed;
                     if val_width > cast_width {
                         let mut val = val.clone();
                         val.trunc(cast_width);
+                        val.set_signed(cast_signed);
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     } else if val_width < cast_width {
                         // SV's `N'(expr)` sign-extends a signed operand; widen by
@@ -416,9 +417,12 @@ impl Expression {
                         // emitted SV (the value flag can carry the init
                         // literal's signedness, e.g. `logic<8> = 200`).
                         let src_signed = x.comptime().r#type.signed;
-                        let val = val.expand(cast_width, src_signed).into_owned();
+                        let mut val = val.expand(cast_width, src_signed).into_owned();
+                        val.set_signed(cast_signed);
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     } else {
+                        let mut val = val.clone();
+                        val.set_signed(cast_signed);
                         return Some(convert_cast(val, src_kind, dst_kind, context_width));
                     }
                 }
@@ -497,9 +501,9 @@ impl Expression {
                         1
                     };
 
-                    for _ in 0..rep {
-                        ret = ret.concat(&exp);
-                    }
+                    let width = exp.width().checked_mul(rep)?.checked_add(ret.width())?;
+                    context.check_size(width, self.token_range())?;
+                    ret = ret.concat(&exp.repeat(rep));
                 }
                 Some(ret)
             }
@@ -1037,9 +1041,14 @@ impl Factor {
                         }
                     }
                 }
+                index.gather_ff(context, table, decl, assign_target, from_ff);
+                select.gather_ff(context, table, decl, assign_target, from_ff);
             }
             Factor::FunctionCall(x) => {
                 x.gather_ff(context, table, decl, assign_target, from_ff);
+            }
+            Factor::SystemFunctionCall(x) => {
+                x.gather_ff(context, table, decl, from_ff);
             }
             _ => (),
         }

@@ -1,0 +1,13 @@
+module Module94 #(
+    param W: u32 = 8 ,
+    param Q: u32 = 16,
+) (
+    i_x: input  logic<16>,
+    o_a: output logic<32>,
+    o_b: output logic<32>,
+    o_c: output logic<32>,
+) {
+    assign o_a = i_x as (W + 1);
+    assign o_b = (i_x - 2) as (Q + 1);
+    assign o_c = i_x as (W * 2 - 3);
+}

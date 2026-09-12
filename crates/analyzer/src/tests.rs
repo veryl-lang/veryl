@@ -10,6 +10,8 @@ use veryl_parser::resource_table;
 
 mod comb_loop_diagnostic_tests;
 
+mod comb_loop_adversarial_tests;
+
 mod comb_loop_conservative_tests;
 
 mod comb_loop_incomplete_tests;
@@ -28,7 +30,13 @@ mod comb_loop_module_tests;
 
 mod comb_loop_positional_tests;
 
+mod comb_loop_replication_tests;
+
+mod constant_evaluation_tests;
+
 mod comb_loop_sparse_tests;
+
+mod comb_loop_summary_tests;
 
 mod statement_after_if_reset_tests;
 
@@ -7471,6 +7479,26 @@ fn referring_before_definition() {
     module ModuleA {
         assign a = 1;
         var a: logic;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::ReferringBeforeDefinition { .. }
+    ));
+
+    // An instantiation binding the forward-referenced parameter must not
+    // suppress the check for the component's own conversion.
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleB #(B: 4) ();
+    }
+    module ModuleB #(
+        param A: u32 = B,
+        param B: u32 = 3,
+    ) {
+        const C: u32 = A + B;
     }
     "#;
 
@@ -21259,4 +21287,144 @@ fn nested_generic_interface_effect_trace_uses_parent_specialization() {
     };
     assert_eq!(call_stack.len(), 2, "{errors:?}");
     assert_eq!(external_writes.len(), 1, "{errors:?}");
+}
+
+#[test]
+fn cast_by_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 8,
+        param Q: u32 = 16,
+    ) (
+        i_x: input  logic<16>,
+        o_a: output logic<32>,
+        o_b: output logic<32>,
+    ) {
+        assign o_a = i_x as (W + 1);
+        assign o_b = (i_x - 2) as (Q + 1);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn cast_by_type_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA (
+        i_x: input  logic<16>,
+        o_y: output logic<32>,
+    ) {
+        assign o_y = i_x as (u32);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidSizeType { .. }));
+}
+
+#[test]
+fn cast_by_non_constant_expression() {
+    // https://github.com/veryl-lang/veryl/issues/3091
+    let code = r#"
+    module ModuleA (
+        i_x: input  logic<16>,
+        o_y: output logic<32>,
+    ) {
+        assign o_y = i_x as (i_x);
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::InvalidOperand { .. }));
+}
+
+#[test]
+fn msb_dimension_after_member_access() {
+    // msb is the member's own msb (7), so +1 is out of range.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].a = 0;
+            b[1].a = 0;
+        }
+        let _c: logic = b[0].a[msb + 1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidSelect { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn msb_dimension_after_member_access_multi_dim() {
+    // msb is m's first packed dimension (4), not a dimension of b.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            m: logic<4, 6>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].m = 0;
+            b[1].m = 0;
+        }
+        let _c: logic = b[0].m[msb][0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn msb_on_element_of_struct_array() {
+    // msb is the element count (2), not the struct width.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            a: logic<8>,
+        }
+        var b: StructA [2];
+        always_comb {
+            b[0].a = 0;
+            b[1].a = 0;
+        }
+        let _c: logic<8> = b[msb].a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn msb_in_assign_destination_is_rejected_without_panic() {
+    // pass2 walks the destination even though pass1 rejected the msb.
+    let code = r#"
+    module ModuleA {
+        var c: logic<8>;
+        assign c[msb] = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidMsb { .. })),
+        "{errors:?}"
+    );
 }
