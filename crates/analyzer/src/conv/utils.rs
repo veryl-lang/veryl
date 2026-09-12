@@ -3744,7 +3744,16 @@ pub fn get_port_connects(
         let (dst_path, dst_select) = if let Some(x) = &port.inst_port_item_opt {
             let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
             let dst = dst.first().ok_or_else(|| ir_error!(token))?;
-            (dst.0.clone(), dst.1.clone())
+            let mut path = dst.0.clone();
+            // An explicit modport selects a view of the interface; its members
+            // still live under the interface instance, not under that view.
+            if let Some(identifier) = x.expression.unwrap_identifier()
+                && let Ok(symbol) = symbol_table::resolve(identifier)
+                && matches!(symbol.found.kind, SymbolKind::Modport(_))
+            {
+                path.0.pop();
+            }
+            (path, dst.1.clone())
         } else {
             (port_path.clone(), VarSelect::default())
         };

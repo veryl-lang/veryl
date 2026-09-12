@@ -30,6 +30,7 @@ mod comb_loop_positional_tests;
 
 mod comb_loop_sparse_tests;
 
+mod modport_connection_tests;
 mod statement_after_if_reset_tests;
 
 #[track_caller]
