@@ -28558,3 +28558,82 @@ fn size_answers_the_leading_dimension_not_the_total_bits() {
         &[16, 16, 32, 32, 32, 8, 24, 8],
     );
 }
+
+#[test]
+fn whole_unpacked_array_unsized_fill() {
+    // `arr = '0;` on an UNPACKED array.  The fill carries no width of its
+    // own, so SystemVerilog replicates it into every element; the simulator
+    // used to decline the design (`unsupported_description`) because the
+    // single-statement conversion had one destination shape to size it
+    // against and an array is not one.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        d:   input  logic<8>,
+        c0:  output logic<8>,
+        c1:  output logic<8>,
+        c3:  output logic<8>,
+        f0:  output logic<8>,
+        f2:  output logic<8>,
+    ) {
+        var cmb: logic<8> [4];
+        var ff:  logic<8> [3];
+        always_comb {
+            cmb    = '0;
+            cmb[1] = d;
+        }
+        always_ff {
+            if_reset {
+                ff = '1;
+            } else {
+                ff[0] = d;
+            }
+        }
+        assign c0 = cmb[0];
+        assign c1 = cmb[1];
+        assign c3 = cmb[3];
+        assign f0 = ff[0];
+        assign f2 = ff[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        // The analyzer reports the fill against the array type as a
+        // `mismatch_assignment` warning, which `build` and `test` carry on
+        // through; that it does so at all is its own question.
+        let ir = analyze_top_allowing_mismatch_assignment(code, &config, "Top").unwrap();
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("d", Value::new(0xa5, 8, false));
+        sim.step_reset(&clk, &rst);
+
+        // The reset fill reached every element, not just the first.
+        assert_eq!(
+            sim.get("f2").unwrap(),
+            Value::new(0xff, 8, false),
+            "'1 fill must reach the last element, config={config:?}"
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("f0").unwrap(),
+            Value::new(0xa5, 8, false),
+            "the element write still lands, config={config:?}"
+        );
+
+        // The comb fill is overwritten at index 1 and holds elsewhere.
+        assert_eq!(
+            sim.get("c1").unwrap(),
+            Value::new(0xa5, 8, false),
+            "config={config:?}"
+        );
+        for name in ["c0", "c3"] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(0, 8, false),
+                "{name} must be the fill, config={config:?}"
+            );
+        }
+    }
+}
