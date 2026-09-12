@@ -1113,9 +1113,24 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
         match src {
             air::Declaration::Comb(x) => {
                 let mut comb_statements = vec![];
+                let prev_in_comb = context.in_comb;
+                context.in_comb = true;
+                let mut conv_err = None;
                 for stmt in &x.statements {
-                    let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
-                    comb_statements.extend(stmts);
+                    match Conv::conv(context, stmt) {
+                        Ok(stmts) => {
+                            let stmts: Vec<ProtoStatement> = stmts;
+                            comb_statements.extend(stmts);
+                        }
+                        Err(e) => {
+                            conv_err = Some(e);
+                            break;
+                        }
+                    }
+                }
+                context.in_comb = prev_in_comb;
+                if let Some(e) = conv_err {
+                    return Err(e);
                 }
                 #[allow(unused_mut)]
                 let mut comb_statements = if comb_statements.len() > 1 {
@@ -1726,6 +1741,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select: None,
                         expr: proto_expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -1744,6 +1760,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -1767,6 +1784,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -1825,6 +1843,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     rhs_select: None,
                                     expr: parent_expr,
                                     dst_ff_current_offset: 0, // not FF
+                                    comb_direct: false,
                                     token: TokenRange::default(),
                                 },
                             ));
@@ -1846,6 +1865,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 rhs_select: None,
                 expr: proto_expr.clone(),
                 dst_ff_current_offset: 0, // not FF
+                comb_direct: false,
                 token: TokenRange::default(),
             }));
         }
@@ -2042,6 +2062,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select,
                         expr: child_expr,
                         dst_ff_current_offset: parent_element.current_offset(),
+                        comb_direct: false,
                         token: TokenRange::default(),
                     });
 

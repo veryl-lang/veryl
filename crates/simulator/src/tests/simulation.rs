@@ -2113,6 +2113,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         rhs_select: None,
         expr: val(92),
         dst_ff_current_offset: 0x800,
+        comb_direct: false,
         token: TokenRange::default(),
     });
 
@@ -2129,6 +2130,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         rhs_select: None,
         expr: val(8),
         dst_ff_current_base_offset: 0x1800,
+        comb_direct: false,
     });
 
     // 3. Runtime-indexed 92-bit element of a 64 x 92 packed array: the stride
@@ -2146,6 +2148,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         rhs_select: None,
         expr: val(92),
         dst_ff_current_offset: 0x2800,
+        comb_direct: false,
         token: TokenRange::default(),
     });
 
@@ -2165,6 +2168,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         rhs_select: None,
         expr: val(32),
         dst_ff_current_offset: 0x4800,
+        comb_direct: false,
         token: TokenRange::default(),
     });
 
@@ -22343,6 +22347,7 @@ fn wide_bit_select_store_stays_compiled() {
             },
         },
         dst_ff_current_offset: -1,
+        comb_direct: false,
         token: TokenRange::default(),
     };
 
@@ -22920,6 +22925,126 @@ fn dynamic_part_select_into_an_array_element_clips_rhs_to_the_window() {
 }
 
 #[test]
+fn comb_driven_bit_of_an_ff_word_arrives_without_a_clock_edge() {
+    // One packed word carries ONE drive kind, so a word whose other bits an
+    // `always_ff` writes is FF-classified even where a continuous assign
+    // drives bit 0.  That put the comb write into ff_values, where
+    // `emit_log = dst.is_ff()` turned it into a write-log push and the log
+    // commits at the edge -- so the flop reading bit 0 saw the previous
+    // cycle and the two-deep pipeline took three edges instead of two.
+    // Every reference simulator takes two.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        d:   input  logic   ,
+        q:   output logic   ,
+        all: output logic<3>,
+    ) {
+        var v: logic<3>;
+        assign v[0] = d;
+        always_ff {
+            if_reset {
+                v[1] = 1'b0;
+            } else {
+                v[1] = v[0];
+            }
+        }
+        always_ff {
+            if_reset {
+                v[2] = 1'b0;
+            } else {
+                v[2] = v[1];
+            }
+        }
+        assign q   = v[2];
+        assign all = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("d", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        // A held input reaches the output on the SECOND edge, and the comb
+        // bit itself is there without any edge at all.
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("d", Value::new(0, 1, false));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0, 1, false),
+            "not through after one edge, config={config:?}"
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "through after two edges, config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn a_comb_driven_bit_of_a_dual_slot_word_reaches_both_slots() {
+    // The same pipeline written as a generate-`for`: every iteration is its
+    // own `always_ff`, so the word is written more than once per edge and its
+    // element carries a `next` slot beside its current one.  A dual-slot
+    // element's read-modify-write reads that `next` slot and logs the WHOLE
+    // word, so a combinational bit written only into `current` is carried back
+    // over by the commit and the pipeline stalls a stage.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        d:   input  logic,
+        q:   output logic,
+    ) {
+        var v: logic<3>;
+        assign v[0] = d;
+        for i in 0..2 :gen_pipe {
+            always_ff {
+                if_reset {
+                    v[i + 1] = 1'b0;
+                } else {
+                    v[i + 1] = v[i];
+                }
+            }
+        }
+        assign q = v[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("d", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("d", Value::new(0, 1, false));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0, 1, false),
+            "not through after one edge, config={config:?}"
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "through after two edges, config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn dynamic_part_select_store_out_of_range_is_dropped() {
     // `x[i +: 4]` clamps `i` to the last ELEMENT, not the last legal window
     // start, so on the last few positions the window runs off the top of `x`.
@@ -23034,6 +23159,7 @@ fn wide_dynamic_bit_select_store_gate() {
             },
         },
         dst_ff_current_offset: -1,
+        comb_direct: false,
         token: TokenRange::default(),
     };
 
@@ -23079,6 +23205,7 @@ fn dynamic_index_store_stays_compiled_above_64_bits() {
             },
         },
         dst_ff_current_base_offset: -1,
+        comb_direct: false,
     };
 
     for width in [65, 96, 128, 200] {

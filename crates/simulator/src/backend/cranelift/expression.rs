@@ -3762,6 +3762,7 @@ mod tests {
             rhs_select: None,
             expr: concat,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: TokenRange::default(),
         });
 
@@ -3792,6 +3793,7 @@ mod tests {
                             expr_context: ctx(256),
                         },
                         dst_ff_current_offset: 0,
+                        comb_direct: false,
                         token: TokenRange::default(),
                     })
                 })
@@ -3829,6 +3831,7 @@ mod tests {
                 rhs_select: rhs,
                 expr: cvar((dst_width / 8) as isize, dst_width),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: TokenRange::default(),
             });
             assert!(
@@ -3907,6 +3910,7 @@ mod tests {
                 rhs_select: rhs,
                 expr: cvar(src_off as isize, src_width),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: TokenRange::default(),
             });
             let (func, _mmap) = build_binary_no_cache(&Config::default(), vec![stmt])

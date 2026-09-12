@@ -147,6 +147,11 @@ impl ProtoAssignDynamicStatement {
         if !self.expr.can_build_binary() || !self.dst_index_expr.can_build_binary() {
             return false;
         }
+        // See the same gate on `ProtoAssignStatement`: only the narrow path
+        // below honours `comb_direct`.
+        if self.comb_direct && self.dst_width > 64 {
+            return false;
+        }
         // Sign-extension of a bare narrow signed RHS at the store is
         // handled only by the interpreter for dynamic-index destinations.
         if self.rhs_select.is_none() && self.expr.store_sign_extend_from(self.dst_width).is_some() {
@@ -259,7 +264,9 @@ impl ProtoAssignDynamicStatement {
         // the current slot (packed layout) or the next slot (dual-slot
         // multi-RMW).  The canonical `dst_ff_current_base_offset` always
         // reflects the current slot origin.
-        let emit_log = self.dst_base.is_ff() && self.dst_width <= 64;
+        // `comb_direct` lands in ff_values without being a flop write, so it
+        // stores directly and logs nothing (see the IR-side field).
+        let emit_log = self.dst_base.is_ff() && !self.comb_direct && self.dst_width <= 64;
         let is_packed_ff_dyn = emit_log && (self.dst_base.raw() == self.dst_ff_current_base_offset);
         let log_offset_i32 = if emit_log {
             let log_base = builder
@@ -1096,6 +1103,12 @@ impl ProtoAssignStatement {
         if !self.expr.can_build_binary() {
             return false;
         }
+        // A combinational write into FF storage must not be logged, and the
+        // wide (>128-bit) emitter threads its log pushes through too many
+        // paths to gate one by one.  Rare enough to leave to the interpreter.
+        if self.comb_direct && self.dst_width > 128 {
+            return false;
+        }
         // The wide (>128-bit) flat-buffer store path can't sign-extend a
         // narrow signed RHS; run on the interpreter instead.  A field no wider
         // than the RHS needs no extension (`visible_store_sign_extend`); one
@@ -1314,7 +1327,9 @@ impl ProtoAssignStatement {
         // Wide FFs (65-128 bit, nb=16) emit a pair of 8-byte log entries
         // for the payload (and another pair for the 4-state mask).  See
         // the log push block below.
-        let emit_log = self.dst.is_ff();
+        // `comb_direct` lands in ff_values without being a flop write, so it
+        // stores directly and logs nothing (see the IR-side field).
+        let emit_log = self.dst.is_ff() && !self.comb_direct;
         let is_packed_ff = emit_log && (self.dst.raw() == self.dst_ff_current_offset);
         let log_current_offset = self.dst_ff_current_offset as i32;
 

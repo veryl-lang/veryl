@@ -1075,6 +1075,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: off,
+            comb_direct: false,
             token: TokenRange::default(),
         };
         ProtoStatement::SequentialBlock(vec![ProtoStatement::Assign(assign); n])
@@ -1102,6 +1103,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: -1,
+            comb_direct: false,
             token: TokenRange::default(),
         };
         ProtoStatement::Assign(assign)

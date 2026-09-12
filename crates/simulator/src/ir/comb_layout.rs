@@ -776,6 +776,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: Default::default(),
         })
     }
@@ -831,6 +832,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: Default::default(),
         });
         let unified = vec![

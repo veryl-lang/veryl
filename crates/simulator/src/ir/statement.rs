@@ -986,6 +986,10 @@ pub struct ProtoAssignDynamicStatement {
     pub expr: ProtoExpression,
     /// Canonical (current) base byte offset for FF variables.
     pub dst_ff_current_base_offset: isize,
+    /// See `ProtoAssignStatement::comb_direct`.  Reached here through
+    /// `force_ff`, which puts every element of a runtime-indexed array in FF
+    /// storage so the stride is uniform, comb-driven elements included.
+    pub comb_direct: bool,
 }
 
 /// Reused compiled block from a cached module instance.  Byte deltas
@@ -2178,14 +2182,17 @@ impl ProtoStatement {
                     // splits wide elements into wide entries.  (Was gated
                     // `<= 64` when the push was hand-rolled narrow-only and
                     // silently dropped wider writes.)
-                    let ff_log_base_current_offset = if x.dst_base.is_ff() {
+                    let ff_log_base_current_offset = if x.dst_base.is_ff() && !x.comb_direct {
                         Some(x.dst_ff_current_base_offset as u32)
                     } else {
                         None
                     };
-                    // is_ff() so a comb-target dynamic write keeps its in-place store.
-                    let ff_is_packed =
-                        x.dst_base.is_ff() && (x.dst_base.raw() == x.dst_ff_current_base_offset);
+                    // is_ff() so a comb-target dynamic write keeps its in-place
+                    // store, and `comb_direct` so does one that happens to land
+                    // in ff_values (see `ProtoAssignStatement::comb_direct`).
+                    let ff_is_packed = x.dst_base.is_ff()
+                        && !x.comb_direct
+                        && (x.dst_base.raw() == x.dst_ff_current_base_offset);
                     let dst_index_expr = x.dst_index_expr.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -2901,6 +2908,16 @@ pub struct ProtoAssignStatement {
     /// Used by append_ff_next_copies to compute the next offset and
     /// by gather_ff_canonical_offsets for dependency analysis.
     pub dst_ff_current_offset: isize,
+    /// A COMBINATIONAL write that lands in FF storage: store it directly
+    /// into the current slot and push no write-log entry.
+    ///
+    /// `dst.is_ff()` says where a write lands, not that it is a flop write,
+    /// and the two part company when a packed word is half comb-driven and
+    /// half `always_ff`-driven (one word carries one drive kind), or when a
+    /// runtime-indexed array forces every element FF for a uniform stride.
+    /// Without this the write would be logged and committed at the next
+    /// clock edge, arriving one edge late.
+    pub comb_direct: bool,
     /// Source location from the original assign statement.
     pub token: TokenRange,
 }
@@ -2923,6 +2940,7 @@ impl std::fmt::Debug for ProtoAssignStatement {
             rhs_select,
             expr,
             dst_ff_current_offset,
+            comb_direct,
             token: _,
         } = self;
         f.debug_struct("ProtoAssignStatement")
@@ -2933,6 +2951,7 @@ impl std::fmt::Debug for ProtoAssignStatement {
             .field("rhs_select", rhs_select)
             .field("expr", expr)
             .field("dst_ff_current_offset", dst_ff_current_offset)
+            .field("comb_direct", comb_direct)
             .finish()
     }
 }
@@ -2947,8 +2966,10 @@ impl std::hash::Hash for ProtoAssignStatement {
             rhs_select,
             expr,
             dst_ff_current_offset,
+            comb_direct,
             token: _,
         } = self;
+        comb_direct.hash(state);
         dst.hash(state);
         dst_width.hash(state);
         select.hash(state);
@@ -3046,7 +3067,10 @@ impl ProtoAssignStatement {
             // Wide FFs (>64 bits) emit one log entry per 8-byte word; the
             // ff_log_offset records the canonical base and eval_step / JIT
             // codegen splits per word.
-            let emit_log = self.dst.is_ff();
+            // `comb_direct` separates "lands in ff_values" from "is a flop
+            // write": a combinational write into an FF word stores directly
+            // and logs nothing, or the log would deliver it one edge late.
+            let emit_log = self.dst.is_ff() && !self.comb_direct;
             let ff_log_offset = if emit_log {
                 Some(self.dst_ff_current_offset as u32)
             } else {
@@ -3729,7 +3753,19 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
 
 impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
+        let mut result = conv_assign_statements(context, src)?;
+        result.append(&mut context.comb_ff_mirror);
+        Ok(result)
+    }
+}
+
+fn conv_assign_statements(
+    context: &mut Context,
+    src: &air::AssignStatement,
+) -> Result<Vec<ProtoStatement>, SimulatorError> {
+    {
         let in_initial = context.in_initial;
+        let in_comb = context.in_comb;
 
         // Array-shaped assignment (`assign out = arr;`, `s[0] = arr;`), which
         // the single-stmt conv path below can't address.
@@ -3846,8 +3882,9 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                         elements[base..base + total].iter().zip(ret_offsets)
                     {
                         let current_offset = element.current_offset();
+                        let comb_direct = element.is_ff() && in_comb && !in_initial;
                         let dst = if element.is_ff() {
-                            if in_initial {
+                            if in_initial || comb_direct {
                                 VarOffset::Ff(current_offset)
                             } else {
                                 VarOffset::Ff(element.next_offset)
@@ -3870,6 +3907,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                                 expr_context,
                             },
                             dst_ff_current_offset: current_offset,
+                            comb_direct,
                             token: src.token,
                         }));
                     }
@@ -3991,9 +4029,11 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                 let element = &meta.elements[index];
                 let is_ff = element.is_ff();
                 let dst_width = meta.width;
-                // FF assignment writes to next, but in initial block writes to current
+                // FF assignment writes to next; an initial block and a
+                // combinational one write to current.  See `comb_direct`.
+                let comb_direct = is_ff && in_comb && !in_initial;
                 let dst_var = if is_ff {
-                    if in_initial {
+                    if in_initial || comb_direct {
                         VarOffset::Ff(element.current_offset())
                     } else {
                         VarOffset::Ff(element.next_offset)
@@ -4010,6 +4050,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     rhs_select,
                     expr: expr.clone(),
                     dst_ff_current_offset: element.current_offset(),
+                    comb_direct,
                     token: src.token,
                 }));
             } else {
@@ -4019,9 +4060,11 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
                 let num_elements = meta.elements.len();
                 let (base_current, base_next, stride, is_ff) = dyn_info;
-                // FF assignment writes to next, but in initial block writes to current
+                // FF assignment writes to next; an initial block and a
+                // combinational one write to current.  See `comb_direct`.
+                let comb_direct = is_ff && in_comb && !in_initial;
                 let dst_base = if is_ff {
-                    if in_initial {
+                    if in_initial || comb_direct {
                         VarOffset::Ff(base_current)
                     } else {
                         VarOffset::Ff(base_next)
@@ -4044,6 +4087,7 @@ impl Conv<&air::AssignStatement> for Vec<ProtoStatement> {
                     rhs_select,
                     expr: expr.clone(),
                     dst_ff_current_base_offset: base_current,
+                    comb_direct,
                 }));
             }
         }
@@ -4250,6 +4294,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         let dst = &src.dst[0];
         let id = dst.id;
         let in_initial = context.in_initial;
+        let in_comb = context.in_comb;
 
         let (select, dst_width, const_index, need_dynamic_select, width_shape, kind_width) = {
             let scope = context.scope();
@@ -4302,12 +4347,15 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             let element = &meta.elements[index];
             let is_ff = element.is_ff();
             let current_offset = element.current_offset();
-            // FF assignment writes to next, but in initial block writes to current
+            let next_offset = element.next_offset;
+            // FF assignment writes to next; an initial block and a
+            // combinational one write to current.  See `comb_direct`.
+            let comb_direct = is_ff && in_comb && !in_initial;
             let dst = if is_ff {
-                if in_initial {
+                if in_initial || comb_direct {
                     VarOffset::Ff(current_offset)
                 } else {
-                    VarOffset::Ff(element.next_offset)
+                    VarOffset::Ff(next_offset)
                 }
             } else {
                 VarOffset::Comb(current_offset)
@@ -4321,6 +4369,27 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 dst_width,
             );
 
+            // A dual-slot element's `always_ff` read-modify-write reads the
+            // NEXT slot and logs the WHOLE word, so without the same bits
+            // there the commit carries a stale copy of them back over the
+            // current slot.  The mirror is `comb_direct` too: it stores and
+            // logs nothing.
+            if comb_direct && next_offset != current_offset {
+                context
+                    .comb_ff_mirror
+                    .push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: VarOffset::Ff(next_offset),
+                        dst_width,
+                        select,
+                        dynamic_select: dynamic_select.clone(),
+                        rhs_select: None,
+                        expr: expr.clone(),
+                        dst_ff_current_offset: current_offset,
+                        comb_direct: true,
+                        token: src.token,
+                    }));
+            }
+
             Ok(ProtoStatement::Assign(ProtoAssignStatement {
                 dst,
                 dst_width,
@@ -4329,6 +4398,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 rhs_select: None,
                 expr,
                 dst_ff_current_offset: current_offset,
+                comb_direct,
                 token: src.token,
             }))
         } else {
@@ -4341,9 +4411,11 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 .ok_or_else(|| SimulatorError::unsupported_description(&src.token))?;
             let num_elements = meta.elements.len();
             let (base_current, base_next, stride, is_ff) = dyn_info;
-            // FF assignment writes to next, but in initial block writes to current
+            // FF assignment writes to next; an initial block and a
+            // combinational one write to current.  See `comb_direct`.
+            let comb_direct = is_ff && in_comb && !in_initial;
             let dst_base = if is_ff {
-                if in_initial {
+                if in_initial || comb_direct {
                     VarOffset::Ff(base_current)
                 } else {
                     VarOffset::Ff(base_next)
@@ -4372,6 +4444,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 rhs_select: None,
                 expr,
                 dst_ff_current_base_offset: base_current,
+                comb_direct,
             }))
         }
     }
@@ -4380,6 +4453,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
 impl Conv<&air::AssignStatement> for ProtoAssignStatement {
     fn conv(context: &mut Context, src: &air::AssignStatement) -> Result<Self, SimulatorError> {
         let in_initial = context.in_initial;
+        let in_comb = context.in_comb;
 
         // TODO multiple dst
         let dst = &src.dst[0];
@@ -4442,9 +4516,11 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             None
         };
 
-        // FF assignment writes to next, but in initial block writes to current
+        // FF assignment writes to next; an initial block and a combinational
+        // one write to current.  See `comb_direct`.
+        let comb_direct = is_ff && in_comb && !in_initial;
         let dst_var = if is_ff {
-            if in_initial {
+            if in_initial || comb_direct {
                 VarOffset::Ff(current_offset)
             } else {
                 VarOffset::Ff(next_offset)
@@ -4469,6 +4545,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             rhs_select: None,
             expr,
             dst_ff_current_offset: current_offset,
+            comb_direct,
             token: src.token,
         })
     }
@@ -4620,6 +4697,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                         rhs_select: None,
                         expr: proto_expr,
                         dst_ff_current_offset: 0,
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -4639,6 +4717,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -4695,6 +4774,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                                 rhs_select: None,
                                 expr: parent_expr,
                                 dst_ff_current_offset: 0, // not FF
+                                comb_direct: false,
                                 token: TokenRange::default(),
                             }));
                         }
@@ -4717,6 +4797,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 rhs_select: None,
                 expr: proto_expr,
                 dst_ff_current_offset: 0, // not FF
+                comb_direct: false,
                 token: TokenRange::default(),
             }));
         }
@@ -4775,6 +4856,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                     rhs_select: None,
                     expr: arg_expr.clone(),
                     dst_ff_current_offset: dst_element.current_offset(),
+                    comb_direct: false,
                     token: TokenRange::default(),
                 }));
             }

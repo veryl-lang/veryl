@@ -602,6 +602,7 @@ fn split_block(
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: 0,
+                        comb_direct: false,
                         token: evs[0].token,
                     },
                     writes: evs.len(),
@@ -899,6 +900,7 @@ impl IMap {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token,
         });
         let ver = self.next_ver;
@@ -1410,6 +1412,7 @@ fn try_lut_compress(
             rhs_select: None,
             expr: sel.clone(),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token,
         });
         off
@@ -1884,6 +1887,7 @@ mod tests {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: TokenRange::default(),
         })
     }
@@ -1903,6 +1907,7 @@ mod tests {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: TokenRange::default(),
         })
     }

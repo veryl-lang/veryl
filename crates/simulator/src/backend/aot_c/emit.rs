@@ -7558,7 +7558,10 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // refinement can land an FF write here (e.g. function output args).
             // emit_event_ff_assign returns None on uncovered patterns, safely
             // bailing the module to Cranelift.
-            if a.dst.is_ff() {
+            // `comb_direct` is a combinational write that merely lands in
+            // ff_values: it must NOT be logged, so it takes the plain store
+            // path below with `ff_values` as its buffer.
+            if a.dst.is_ff() && !a.comb_direct {
                 return emit_event_ff_assign(a, se_from);
             }
             // A runtime-indexed bit-slice store. A ≤64-bit dst is the scalar
@@ -7647,15 +7650,22 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // rhs_select (field extract + store); the rhs_select + dst-select
             // combination stays on Cranelift.
             if a.dst_width > 128 || (a.dst_width > 64 && eff_expr.builds_wide_pointer()) {
-                let VarOffset::Comb(store_off) = a.dst else {
-                    return None;
+                // Same destination rule as the scalar store below: a
+                // `comb_direct` write is combinational but lands in
+                // ff_values, and must not be logged.  Without the FF arm a
+                // wide write of that kind declines here and takes the whole
+                // comb list to Cranelift with it.
+                let (dst_buf, store_off) = match a.dst {
+                    VarOffset::Comb(o) => ("comb_values", o),
+                    VarOffset::Ff(o) if a.comb_direct => ("ff_values", o),
+                    VarOffset::Ff(_) => return None,
                 };
                 if store_off < 0 {
                     return None;
                 }
                 let nb = native_bytes(a.dst_width);
                 let nw = wide_words(nb);
-                let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
+                let dst = format!("(uint8_t*)({dst_buf} + {store_off:#x})");
                 let dmask = wpack(nb, a.dst_width);
                 // Non-foldable rhs_select (rhs isn't a plain variable):
                 // extract `value.select(rhs_hi, rhs_lo)` from the wide RHS,
@@ -7716,7 +7726,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                             None,
                             |k| {
                                 format!(
-                                    "(veryl_u64_ua*)(comb_values + {:#x})",
+                                    "(veryl_u64_ua*)({dst_buf} + {:#x})",
                                     store_off + (k as isize) * 8
                                 )
                             },
@@ -7961,12 +7971,13 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     }
                 }
             };
-            // FF targets returned via emit_event_ff_assign above, so the
-            // destination here is always comb.
-            let VarOffset::Comb(store_off) = a.dst else {
-                return None;
+            // FF targets returned via emit_event_ff_assign above unless they
+            // are `comb_direct`, which stores straight into ff_values.
+            let (buf, store_off) = match a.dst {
+                VarOffset::Comb(o) => ("comb_values", o),
+                VarOffset::Ff(o) if a.comb_direct => ("ff_values", o),
+                VarOffset::Ff(_) => return None,
             };
-            let buf = "comb_values";
             // Clean-store elision (see expr_emits_clean): the stores below
             // re-mask to dst_width only to canonicalize a dirty RHS.  Only
             // the bare form qualifies — a sign-extending store dirties
@@ -8198,8 +8209,10 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 return None;
             }
             // Event-path dynamic FF write (e.g. register file by rd index):
-            // direct element store + WriteLogEntry push.
-            if event_mode() && a.dst_base.is_ff() {
+            // direct element store + WriteLogEntry push. A combinational write
+            // that happens to land in FF storage takes neither: it stores
+            // directly and pushes nothing, so it falls back below.
+            if event_mode() && a.dst_base.is_ff() && !a.comb_direct {
                 return emit_event_ff_assign_dynamic(a);
             }
             // Mirror ProtoAssignDynamicStatement::eval_step (comb target).
@@ -10852,6 +10865,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 4),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10919,6 +10933,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xdeadbeef, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10944,6 +10959,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 64),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10963,6 +10979,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11000,6 +11017,7 @@ mod tests {
             rhs_select: None,
             expr: signed_var_expr(VarOffset::Comb(0x8), 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11023,6 +11041,7 @@ mod tests {
             rhs_select: None,
             expr: signed_var_expr(VarOffset::Comb(0x8), 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11046,6 +11065,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 4),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11069,6 +11089,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xf, 4),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11160,6 +11181,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x0123_4567_89ab_cdef, 64),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_event_function(&[ProtoStatement::Assign(a)], false, &[])
@@ -11181,6 +11203,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 64),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(ff)]).expect("an FF store must emit");
@@ -11200,6 +11223,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 64),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(comb)]).expect("a comb store must emit");
@@ -11225,6 +11249,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a.clone())).expect("wide field store must emit");
@@ -11286,6 +11311,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11328,6 +11354,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xff, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11359,6 +11386,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(0x1234_5678_9abc_def0, 64),
                     dst_ff_current_offset: i * 8,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -11407,6 +11435,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xff, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11431,6 +11460,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let if_stmt = ProtoIfStatement {
@@ -11461,6 +11491,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xabc, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let if_stmt = ProtoIfStatement {
@@ -11486,6 +11517,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(i as u64, 32),
                     dst_ff_current_offset: 0,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -11573,6 +11605,7 @@ mod tests {
             rhs_select: None,
             expr: src,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         assert!(
@@ -11634,6 +11667,7 @@ mod tests {
             rhs_select: None,
             expr: var_expr_signed(VarOffset::Comb(0), 100),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         // -6 in 100-bit two's complement.
@@ -11667,6 +11701,7 @@ mod tests {
             rhs_select: None,
             expr: var_expr_signed(VarOffset::Comb(0), 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let Some(dst) = run_wide_field_store(assign, "wsx_single", 0xfb) else {
@@ -11718,6 +11753,7 @@ mod tests {
             rhs_select: None,
             expr: e,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("a zero-repeat element must stay AOT-covered");
@@ -11824,6 +11860,7 @@ mod tests {
             rhs_select: None,
             expr: add,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
@@ -11879,6 +11916,7 @@ mod tests {
             rhs_select: None,
             expr: add,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
@@ -11934,6 +11972,7 @@ mod tests {
             rhs_select: None,
             expr: mul,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("66-bit product must stay AOT-covered");
@@ -11977,6 +12016,7 @@ mod tests {
             rhs_select: None,
             expr: mul,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit product must stay AOT-covered");
@@ -12026,6 +12066,7 @@ mod tests {
             rhs_select: None,
             expr: concat,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12204,6 +12245,7 @@ mod tests {
                 rhs_select: rsel,
                 expr: slice(),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12282,6 +12324,7 @@ mod tests {
             rhs_select: Some((159, 32)),
             expr: or192,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12381,6 +12424,7 @@ mod tests {
                 expr_context: ctx(192, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src_txt = emit_function(&[stmt]).expect("must stay AOT-covered");
@@ -12443,6 +12487,7 @@ mod tests {
                 rhs_select: Some((150, 125)),
                 expr: or192(),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12527,6 +12572,7 @@ mod tests {
             rhs_select: None,
             expr: and192,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12597,6 +12643,7 @@ mod tests {
                 rhs_select: None,
                 expr: e,
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12729,6 +12776,7 @@ mod tests {
                 rhs_select: None,
                 expr: e,
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -13220,6 +13268,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xab, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         emit_stmt(&ProtoStatement::Assign(a)).unwrap()
@@ -13256,6 +13305,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13277,6 +13327,7 @@ mod tests {
                 expr_context: ctx(hi - lo + 1, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13335,6 +13386,7 @@ mod tests {
                 expr_context: ctx(32, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13540,6 +13592,7 @@ mod tests {
                 expr_context: ctx(1, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let mut stmts = vec![bit_store(0x40, 8), self_read];
@@ -13566,6 +13619,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(((b % 2) == 0) as u64, 1),
                     dst_ff_current_offset: 0,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -13691,6 +13745,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xdeadbeef, 32),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         };
         let s = emit_stmt(&ProtoStatement::AssignDynamic(a)).unwrap();
         assert!(s.contains("_idx_raw"));
@@ -13715,6 +13770,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0, 32),
             dst_ff_current_base_offset: 0x40,
+            comb_direct: false,
         };
         assert!(emit_stmt(&ProtoStatement::AssignDynamic(a)).is_none());
     }
@@ -13734,6 +13790,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1111, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let inner_b = ProtoStatement::Assign(ProtoAssignStatement {
@@ -13744,6 +13801,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x2222, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let cb = CompiledBlockStatement {
@@ -13778,6 +13836,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xabc, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let cb = CompiledBlockStatement {
@@ -14090,6 +14149,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let for_stmt = ProtoForStatement {
@@ -14278,6 +14338,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(7, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).unwrap();
@@ -14528,6 +14589,7 @@ mod tests {
             rhs_select: None,
             expr: dyn_read,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(assign)]).unwrap();
@@ -14946,6 +15008,7 @@ mod tests {
             rhs_select: None,
             expr: rhs,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -15284,6 +15347,7 @@ mod tests {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -15300,6 +15364,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0, 32),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         })
     }
 
@@ -15466,6 +15531,7 @@ mod tests {
                 rhs_select: None,
                 expr: var_expr(VarOffset::Ff(0), 16),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             }),
             cassign(0x20, 32, var_expr(VarOffset::Ff(8), 32)),
@@ -15477,6 +15543,7 @@ mod tests {
                 rhs_select: None,
                 expr: var_expr(VarOffset::Ff(2), 16),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             }),
         ];
@@ -15751,6 +15818,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let narrow = || ProtoAssignStatement {
@@ -15761,6 +15829,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 32),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let emit = |a: ProtoAssignStatement, clock: bool| {
@@ -15789,6 +15858,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_event_function(&[ProtoStatement::Assign(a)], true, &[]).expect("must emit");
@@ -15823,6 +15893,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let gate = EventGate {
@@ -15898,6 +15969,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 32),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let gate = EventGate {
