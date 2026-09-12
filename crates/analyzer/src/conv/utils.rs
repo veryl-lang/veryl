@@ -3971,9 +3971,16 @@ pub fn insert_port_connect(
 ) {
     match variable.kind {
         VarKind::Input => {
+            let range_src = match dst.as_slice() {
+                [actual] if actual.is_array_range(context) => {
+                    var_path_to_contiguous_fragment(context, actual, true)
+                }
+                _ => None,
+            };
             inputs.push(ir::InstInput {
                 id: variable.id,
                 exprs,
+                range_src,
             });
         }
         VarKind::Output => {
@@ -3982,10 +3989,17 @@ pub fn insert_port_connect(
             if !expr.is_assignable() {
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
             }
+            let range_dst = match dst.as_slice() {
+                [actual] if actual.is_array_range(context) => {
+                    var_path_to_contiguous_fragment(context, actual, false)
+                }
+                _ => None,
+            };
             let dst = var_path_to_assign_destination(context, dst, false);
             outputs.push(ir::InstOutput {
                 id: variable.id,
                 dst,
+                range_dst,
             });
         }
         _ => (),
@@ -4127,6 +4141,68 @@ pub fn expand_connect_const(
     }
 
     Ok(ret)
+}
+
+fn inclusive_storage_span(left: usize, right: usize, total: usize) -> Option<(usize, usize)> {
+    let start = left.min(right);
+    let end = left.max(right);
+    (end < total).then_some((start, end.checked_sub(start)?.checked_add(1)?))
+}
+
+/// Resolve a constant variable selection to one contiguous storage fragment.
+/// Unlike `to_assign_destinations`, this never enumerates an unpacked range.
+pub(crate) fn var_path_to_contiguous_fragment(
+    context: &mut Context,
+    actual: &VarPathSelect,
+    ignore_error: bool,
+) -> Option<ir::InstActualFragment> {
+    let (parent_path, select, token) = actual.clone().into();
+    let (parent, mut comptime) = context.find_path(&parent_path)?;
+    let part_select = comptime.part_select.clone();
+    if let Some(part_select) = &part_select {
+        comptime.r#type = part_select.base.clone();
+    }
+
+    let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+    if !array_select.is_const_with_range() || !width_select.is_const_with_range() {
+        return None;
+    }
+    array_select.eval_comptime(context, &comptime.r#type, true)?;
+
+    let (array_left, array_right) =
+        array_select.eval_value_unbounded(context, &comptime.r#type, true)?;
+    let (parent_array_start, parent_array_length) =
+        inclusive_storage_span(array_left, array_right, comptime.r#type.total_array()?)?;
+
+    let width_select = if let Some(part_select) = &part_select {
+        part_select.to_base_select(context, &width_select)?
+    } else {
+        width_select.eval_comptime(context, &comptime.r#type, false)?;
+        width_select
+    };
+    let (packed_left, packed_right) =
+        width_select.eval_value_unbounded(context, &comptime.r#type, false)?;
+    let (parent_packed_start, parent_packed_length) =
+        inclusive_storage_span(packed_left, packed_right, comptime.r#type.total_width()?)?;
+
+    if let Some(variable) = context.variables.get(&parent)
+        && !variable.is_assignable()
+        && !ignore_error
+    {
+        context.insert_error(AnalyzerError::invalid_assignment(
+            &parent_path.to_string(),
+            &variable.kind.description(),
+            &token,
+        ));
+    }
+
+    Some(ir::InstActualFragment {
+        parent,
+        parent_array_start,
+        parent_array_length,
+        parent_packed_start,
+        parent_packed_length,
+    })
 }
 
 pub fn var_path_to_assign_destination(

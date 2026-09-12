@@ -70,8 +70,9 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
-    Ir, Module, Op, Signature, Statement, SystemFunctionKind, VarSelect, Variable,
+    AssignDestination, Component, Declaration, Expression, Factor, FunctionCall,
+    InstActualFragment, InstDeclaration, InstInterfaceBinding, Ir, Module, Op, Signature,
+    Statement, SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
@@ -327,8 +328,8 @@ fn collect_instance_summary_spans(
                 SummaryNodeKind::Output => Direction::Output,
                 SummaryNodeKind::Internal => continue,
             };
-            if let Some((parent, array, packed)) =
-                summary_parent_access(inst, child, node.region, direction, ctx)
+            for (parent, array, packed) in
+                summary_parent_accesses(inst, child, node.region, direction, ctx)
             {
                 accesses.entry((parent, array)).or_default().push(packed);
             }
@@ -336,34 +337,62 @@ fn collect_instance_summary_spans(
     }
 }
 
-fn summary_parent_access(
+fn summary_parent_accesses(
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
     direction: Direction,
     ctx: &mut Context,
-) -> Option<(VarId, ArraySpan, PackedSpan)> {
-    let variable = child
+) -> Vec<(VarId, ArraySpan, PackedSpan)> {
+    let Some(variable) = child
         .variables
         .get(&region.id)
-        .or_else(|| child.interface_members.get(&region.id))?;
-    if let Some((parent, index, select)) = instance_port_region_actual(inst, region.id, direction) {
-        return translated_summary_access(region, variable, parent, index, select, ctx)
-            .map(|(array, packed, _)| (parent, array, packed));
-    }
-    let binding = inst
+        .or_else(|| child.interface_members.get(&region.id))
+    else {
+        return Vec::new();
+    };
+    if let Some(binding) = inst
         .interface_bindings
         .iter()
-        .find(|binding| binding.child == region.id)?;
-    translated_summary_access(
-        region,
-        variable,
-        binding.parent,
-        &binding.index,
-        &binding.select,
-        ctx,
-    )
-    .map(|(array, packed, _)| (binding.parent, array, packed))
+        .find(|binding| binding.child == region.id)
+        && let Some(accesses) = translated_interface_binding_accesses(region, variable, binding)
+    {
+        return accesses
+            .into_iter()
+            .map(|access| (access.parent, access.array, access.packed))
+            .collect();
+    }
+    if direction == Direction::Output
+        && let Some(output) = inst.outputs.iter().find(|output| output.id == region.id)
+    {
+        let accesses = if let Some(actual) = &output.range_dst {
+            translated_contiguous_actual_accesses(region, variable, actual)
+        } else {
+            translated_fragment_accesses(region, variable, &output.dst, ctx)
+        };
+        if let Some(accesses) = accesses {
+            return accesses
+                .into_iter()
+                .map(|access| (access.parent, access.array, access.packed))
+                .collect();
+        }
+    }
+    if direction == Direction::Input
+        && let Some(input) = inst.inputs.iter().find(|input| input.id == region.id)
+        && let Some(actual) = &input.range_src
+        && let Some(accesses) = translated_contiguous_actual_accesses(region, variable, actual)
+    {
+        return accesses
+            .into_iter()
+            .map(|access| (access.parent, access.array, access.packed))
+            .collect();
+    }
+    if let Some((parent, index, select)) = instance_port_region_actual(inst, region.id, direction) {
+        return translated_summary_access(region, variable, parent, index, select, ctx)
+            .map(|(array, packed, _)| vec![(parent, array, packed)])
+            .unwrap_or_default();
+    }
+    Vec::new()
 }
 
 fn split_array_spans(
@@ -1515,28 +1544,50 @@ fn instance_region_mapping(
         .variables
         .get(&region.id)
         .or_else(|| child.interface_members.get(&region.id));
-    if let Some(variable) = variable
-        && let Some((parent, index, select)) =
-            instance_port_region_actual(inst, region.id, direction)
-    {
-        return map_summary_region(region, variable, parent, index, select, bit_part, ctx);
-    }
-
     if let (Some(variable), Some(binding)) = (
         variable,
         inst.interface_bindings
             .iter()
             .find(|binding| binding.child == region.id),
-    ) {
-        return map_summary_region(
-            region,
+    ) && let Some(mapping) =
+        map_summary_region_to_interface_binding(region, variable, binding, bit_part)
+    {
+        return mapping;
+    }
+
+    if direction == Direction::Output
+        && let (Some(variable), Some(output)) = (
             variable,
-            binding.parent,
-            &binding.index,
-            &binding.select,
-            bit_part,
-            ctx,
-        );
+            inst.outputs.iter().find(|output| output.id == region.id),
+        )
+    {
+        let mapping = if let Some(actual) = &output.range_dst {
+            map_summary_region_to_contiguous_actual(region, variable, actual, bit_part)
+        } else {
+            map_summary_region_to_fragments(region, variable, &output.dst, bit_part, ctx)
+        };
+        if let Some(mapping) = mapping {
+            return mapping;
+        }
+    }
+
+    if direction == Direction::Input
+        && let (Some(variable), Some(input)) = (
+            variable,
+            inst.inputs.iter().find(|input| input.id == region.id),
+        )
+        && let Some(actual) = &input.range_src
+        && let Some(mapping) =
+            map_summary_region_to_contiguous_actual(region, variable, actual, bit_part)
+    {
+        return mapping;
+    }
+
+    if let Some(variable) = variable
+        && let Some((parent, index, select)) =
+            instance_port_region_actual(inst, region.id, direction)
+    {
+        return map_summary_region(region, variable, parent, index, select, bit_part, ctx);
     }
 
     InstanceRegionMapping {
@@ -1577,6 +1628,236 @@ fn instance_port_region_actual(
         }
         Direction::Inout | Direction::Interface | Direction::Modport | Direction::Import => None,
     }
+}
+
+#[derive(Clone, Copy)]
+struct ActualFragment {
+    parent: VarId,
+    child_array: ArraySpan,
+    child_packed: PackedSpan,
+    parent_array: ArraySpan,
+    parent_packed: PackedSpan,
+}
+
+#[derive(Clone, Copy)]
+struct TranslatedFragmentAccess {
+    parent: VarId,
+    array: ArraySpan,
+    packed: PackedSpan,
+    offset: (isize, isize),
+}
+
+fn actual_fragments(
+    child: &Variable,
+    actual: &[AssignDestination],
+    ctx: &mut Context,
+) -> Option<Vec<ActualFragment>> {
+    let child_array_length = child.r#type.array.total()?;
+    let child_packed_width = child.total_width()?;
+    let child_packed = PackedSpan::whole(child_packed_width)?;
+    let accesses = actual
+        .iter()
+        .map(|destination| {
+            if !destination.index.is_const() || !destination.select.is_const_with_range() {
+                return None;
+            }
+            let spans = var_reads(destination.id, &destination.index, &destination.select, ctx);
+            let [(parent_array, parent_packed)] = spans.as_slice() else {
+                return None;
+            };
+            Some((destination.id, *parent_array, *parent_packed))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let array_length = accesses.iter().try_fold(0usize, |total, (_, array, _)| {
+        total.checked_add(array.length)
+    })?;
+    if array_length == child_array_length
+        && accesses
+            .iter()
+            .all(|(_, _, packed)| packed.length == child_packed_width)
+    {
+        let mut child_start = 0usize;
+        return accesses
+            .into_iter()
+            .map(|(parent, parent_array, parent_packed)| {
+                let child_array = ArraySpan {
+                    start: child_start,
+                    length: parent_array.length,
+                };
+                child_start = child_start.checked_add(parent_array.length)?;
+                Some(ActualFragment {
+                    parent,
+                    child_array,
+                    child_packed,
+                    parent_array,
+                    parent_packed,
+                })
+            })
+            .collect();
+    }
+
+    let packed_width = accesses.iter().try_fold(0usize, |total, (_, _, packed)| {
+        total.checked_add(packed.length)
+    })?;
+    if child_array_length != 1
+        || packed_width != child_packed_width
+        || accesses.iter().any(|(_, array, _)| array.length != 1)
+    {
+        return None;
+    }
+
+    let mut child_start = child_packed_width;
+    accesses
+        .into_iter()
+        .map(|(parent, parent_array, parent_packed)| {
+            child_start = child_start.checked_sub(parent_packed.length)?;
+            Some(ActualFragment {
+                parent,
+                child_array: ArraySpan {
+                    start: 0,
+                    length: 1,
+                },
+                child_packed: PackedSpan::new(child_start, parent_packed.length)?,
+                parent_array,
+                parent_packed,
+            })
+        })
+        .collect()
+}
+
+fn contiguous_actual_fragment(
+    child: &Variable,
+    actual: &InstActualFragment,
+) -> Option<ActualFragment> {
+    let child_array_length = child.r#type.array.total()?;
+    let child_packed_width = child.total_width()?;
+    if child_array_length != actual.parent_array_length
+        || child_packed_width != actual.parent_packed_length
+    {
+        return None;
+    }
+    Some(ActualFragment {
+        parent: actual.parent,
+        child_array: ArraySpan {
+            start: 0,
+            length: child_array_length,
+        },
+        child_packed: PackedSpan::whole(child_packed_width)?,
+        parent_array: ArraySpan {
+            start: actual.parent_array_start,
+            length: actual.parent_array_length,
+        },
+        parent_packed: PackedSpan::new(actual.parent_packed_start, actual.parent_packed_length)?,
+    })
+}
+
+fn translate_actual_fragments(
+    region: SummaryRegion,
+    fragments: impl IntoIterator<Item = ActualFragment>,
+) -> Option<Vec<TranslatedFragmentAccess>> {
+    fragments
+        .into_iter()
+        .filter_map(|fragment| {
+            let array = region.array.intersection(fragment.child_array)?;
+            let packed = region.packed.intersection(fragment.child_packed)?;
+            Some((fragment, array, packed))
+        })
+        .map(|(fragment, child_array, child_packed)| {
+            let array =
+                child_array.translated(fragment.child_array.start, fragment.parent_array.start)?;
+            let packed = child_packed
+                .translated(fragment.child_packed.start, fragment.parent_packed.start)?;
+            Some(TranslatedFragmentAccess {
+                parent: fragment.parent,
+                array,
+                packed,
+                offset: (
+                    signed_difference(fragment.parent_array.start, fragment.child_array.start)?,
+                    signed_difference(fragment.parent_packed.start, fragment.child_packed.start)?,
+                ),
+            })
+        })
+        .collect()
+}
+
+fn translated_fragment_accesses(
+    region: SummaryRegion,
+    child: &Variable,
+    actual: &[AssignDestination],
+    ctx: &mut Context,
+) -> Option<Vec<TranslatedFragmentAccess>> {
+    let fragments = actual_fragments(child, actual, ctx)?;
+    translate_actual_fragments(region, fragments)
+}
+
+fn translated_interface_binding_accesses(
+    region: SummaryRegion,
+    child: &Variable,
+    binding: &InstInterfaceBinding,
+) -> Option<Vec<TranslatedFragmentAccess>> {
+    translate_actual_fragments(
+        region,
+        [contiguous_actual_fragment(child, &binding.actual)?],
+    )
+}
+
+fn translated_contiguous_actual_accesses(
+    region: SummaryRegion,
+    child: &Variable,
+    actual: &InstActualFragment,
+) -> Option<Vec<TranslatedFragmentAccess>> {
+    translate_actual_fragments(region, [contiguous_actual_fragment(child, actual)?])
+}
+
+fn map_translated_fragment_accesses(
+    accesses: Vec<TranslatedFragmentAccess>,
+    bit_part: &BitPartition,
+) -> InstanceRegionMapping {
+    let mut nodes = Vec::new();
+    for access in accesses {
+        nodes.extend(
+            bit_part
+                .overlapping_access(access.parent, access.array, access.packed)
+                .into_iter()
+                .map(|key| MappedNode {
+                    key,
+                    offset: Some(access.offset),
+                    condition: PathCondition::default(),
+                }),
+        );
+    }
+    InstanceRegionMapping { nodes }
+}
+
+fn map_summary_region_to_fragments(
+    region: SummaryRegion,
+    child: &Variable,
+    actual: &[AssignDestination],
+    bit_part: &BitPartition,
+    ctx: &mut Context,
+) -> Option<InstanceRegionMapping> {
+    let accesses = translated_fragment_accesses(region, child, actual, ctx)?;
+    Some(map_translated_fragment_accesses(accesses, bit_part))
+}
+
+fn map_summary_region_to_interface_binding(
+    region: SummaryRegion,
+    child: &Variable,
+    binding: &InstInterfaceBinding,
+    bit_part: &BitPartition,
+) -> Option<InstanceRegionMapping> {
+    let accesses = translated_interface_binding_accesses(region, child, binding)?;
+    Some(map_translated_fragment_accesses(accesses, bit_part))
+}
+
+fn map_summary_region_to_contiguous_actual(
+    region: SummaryRegion,
+    child: &Variable,
+    actual: &InstActualFragment,
+    bit_part: &BitPartition,
+) -> Option<InstanceRegionMapping> {
+    let accesses = translated_contiguous_actual_accesses(region, child, actual)?;
+    Some(map_translated_fragment_accesses(accesses, bit_part))
 }
 
 #[allow(clippy::too_many_arguments)]

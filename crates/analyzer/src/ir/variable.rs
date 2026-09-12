@@ -839,6 +839,26 @@ impl VarSelect {
         r#type: &Type,
         is_array: bool,
     ) -> Option<(usize, usize)> {
+        self.eval_value_inner(context, r#type, is_array, true)
+    }
+
+    /// Compute symbolic storage coordinates without limiting the span length.
+    pub(crate) fn eval_value_unbounded(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        is_array: bool,
+    ) -> Option<(usize, usize)> {
+        self.eval_value_inner(context, r#type, is_array, false)
+    }
+
+    fn eval_value_inner(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        is_array: bool,
+        check_size: bool,
+    ) -> Option<(usize, usize)> {
         if self.0.is_empty() {
             let total_width: usize = if is_array {
                 r#type.total_array()?
@@ -908,9 +928,11 @@ impl VarSelect {
             }
         }
 
-        let token = self.token_range();
-        let beg = context.check_size(beg, token)?;
-        let end = context.check_size(end, token)?;
+        if check_size {
+            let token = self.token_range();
+            context.check_size(beg, token)?;
+            context.check_size(end, token)?;
+        }
 
         Some((beg, end))
     }
