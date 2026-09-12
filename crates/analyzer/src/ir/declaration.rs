@@ -346,7 +346,7 @@ impl fmt::Display for InstInput {
 pub struct InstOutput {
     pub id: VarId,
     pub dst: Vec<AssignDestination>,
-    /// A single contiguous unpacked-array range is also retained as one
+    /// A whole unpacked array or a single contiguous range is retained as one
     /// symbolic storage fragment. `dst` remains populated for existing IR
     /// consumers; the comb-loop analysis gives this metadata precedence.
     pub range_dst: Option<InstActualFragment>,

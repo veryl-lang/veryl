@@ -15,6 +15,7 @@ mod diagnostics;
 mod graph;
 mod hierarchy;
 mod model;
+mod partition;
 mod procedure;
 mod region;
 mod ssa;
@@ -45,6 +46,9 @@ use graph::{
 pub(crate) use graph::{cycle_search_work, reset_cycle_search_work, with_cycle_search_limit};
 use hierarchy::{module_postorder, walk_insts};
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
+use partition::split_array_spans;
+#[cfg(test)]
+pub(crate) use partition::with_partition_work_limit;
 use region::{
     ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
@@ -123,43 +127,11 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     (errors, complete)
 }
 
-/// Split only at observed access endpoints. Runtime and storage depend on the
-/// number of accesses, never on the highest referenced bit position.
-fn atomic_ranges(spans: &[PackedSpan], endpoints: Option<&HashSet<usize>>) -> Vec<PackedSpan> {
-    let mut events = Vec::with_capacity(spans.len() * 2 + endpoints.map_or(0, HashSet::len));
-    for span in spans {
-        events.push((span.start, 1isize));
-        events.push((span.end(), -1isize));
-    }
-    if let Some(endpoints) = endpoints {
-        events.extend(endpoints.iter().map(|endpoint| (*endpoint, 0)));
-    }
-    events.sort_unstable_by_key(|event| event.0);
-
-    let mut atoms = Vec::new();
-    let mut active = 0isize;
-    let mut index = 0;
-    while index < events.len() {
-        let position = events[index].0;
-        while index < events.len() && events[index].0 == position {
-            active += events[index].1;
-            index += 1;
-        }
-        if active > 0
-            && let Some(next) = events.get(index).map(|event| event.0)
-            && let Some(atom) = PackedSpan::new(position, next - position)
-        {
-            atoms.push(atom);
-        }
-    }
-    atoms
-}
-
 fn build_bit_partition(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     ctx: &mut Context,
-) -> BitPartition {
+) -> Option<BitPartition> {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
     let mut calls = Vec::new();
 
@@ -172,11 +144,23 @@ fn build_bit_partition(
     // Inst input expressions are not represented by procedure statements.
     for inst in walk_insts(module) {
         for inp in &inst.inputs {
+            if let Some((id, array, packed)) =
+                inp.range_src.as_ref().and_then(instance_actual_access)
+            {
+                accesses.entry((id, array)).or_default().push(packed);
+                continue;
+            }
             for expr in &inp.exprs {
                 collect_expr_spans(expr, &mut accesses, &mut calls, ctx);
             }
         }
         for out in &inst.outputs {
+            if let Some((id, array, packed)) =
+                out.range_dst.as_ref().and_then(instance_actual_access)
+            {
+                accesses.entry((id, array)).or_default().push(packed);
+                continue;
+            }
             for dst in &out.dst {
                 for expression in dst
                     .index
@@ -277,9 +261,37 @@ fn build_bit_partition(
     // subset sums of independent shifts and silently devolve into bit-level
     // expansion.
     let endpoints = HashMap::default();
-    let ranges = split_array_spans(accesses, &endpoints);
+    let ranges = split_array_spans(accesses, &endpoints)?;
 
-    BitPartition::new(ranges)
+    Some(BitPartition::new(ranges))
+}
+
+// This metadata represents constant storage selectors, with no executable
+// expressions. Keep it symbolic in discovery and graph construction alike;
+// the compatibility IR vectors may contain one entry per declared element.
+fn instance_actual_access(actual: &InstActualFragment) -> Option<(VarId, ArraySpan, PackedSpan)> {
+    let array = ArraySpan {
+        start: actual.parent_array_start,
+        length: actual.parent_array_length,
+    };
+    array.end()?;
+    let packed = PackedSpan::new(actual.parent_packed_start, actual.parent_packed_length)?;
+    Some((actual.parent, array, packed))
+}
+
+fn instance_actual_sources(
+    bit_part: &BitPartition,
+    access: (VarId, ArraySpan, PackedSpan),
+) -> Vec<procedure::RegionSource> {
+    bit_part
+        .overlapping_access(access.0, access.1, access.2)
+        .into_iter()
+        .map(|key| procedure::RegionSource {
+            key,
+            offset: None,
+            condition: PathCondition::default(),
+        })
+        .collect()
 }
 
 fn add_whole_type_access(
@@ -405,73 +417,6 @@ fn summary_parent_accesses(
         .unwrap_or_default();
     }
     Vec::new()
-}
-
-fn split_array_spans(
-    accesses_by_index: HashMap<IdxKey, Vec<PackedSpan>>,
-    endpoints: &HashMap<VarId, HashSet<usize>>,
-) -> HashMap<IdxKey, Vec<PackedSpan>> {
-    let mut accesses: HashMap<VarId, Vec<(ArraySpan, PackedSpan)>> = HashMap::default();
-    for ((id, span), packed_spans) in accesses_by_index {
-        for packed in packed_spans {
-            accesses.entry(id).or_default().push((span, packed));
-        }
-    }
-
-    let mut ranges = HashMap::default();
-    for (id, accesses) in accesses {
-        let mut events = Vec::with_capacity(accesses.len() * 2);
-        for (span, packed) in accesses {
-            if span.length == 0 {
-                continue;
-            }
-            let Some(end) = span.end() else {
-                continue;
-            };
-            events.push((span.start, true, packed));
-            events.push((end, false, packed));
-        }
-        events.sort_unstable_by_key(|(position, starts, packed)| {
-            (*position, *starts, packed.start, packed.length)
-        });
-
-        let mut active: HashMap<PackedSpan, usize> = HashMap::default();
-        let mut previous = events.first().map(|event| event.0);
-        let mut cursor = 0;
-        while cursor < events.len() {
-            let position = events[cursor].0;
-            if let Some(previous) = previous
-                && previous < position
-                && !active.is_empty()
-            {
-                let split = ArraySpan {
-                    start: previous,
-                    length: position - previous,
-                };
-                let split_spans = active.keys().copied().collect::<Vec<_>>();
-                let parts = atomic_ranges(&split_spans, endpoints.get(&id));
-                if !parts.is_empty() {
-                    ranges.insert((id, split), parts);
-                }
-            }
-            while cursor < events.len() && events[cursor].0 == position {
-                let (_, starts, packed) = events[cursor];
-                if starts {
-                    *active.entry(packed).or_default() += 1;
-                } else if let std::collections::hash_map::Entry::Occupied(mut entry) =
-                    active.entry(packed)
-                {
-                    *entry.get_mut() -= 1;
-                    if *entry.get() == 0 {
-                        entry.remove();
-                    }
-                }
-                cursor += 1;
-            }
-            previous = Some(position);
-        }
-    }
-    ranges
 }
 
 /// Field boundaries of a struct-literal write, as spans on the destination.
@@ -712,7 +657,6 @@ fn build_module_graph_with_trace(
     ctx.variables = module.variables.clone();
     ctx.variables.extend(module.interface_members.clone());
     ctx.functions = module.functions.clone();
-    let bit_part = build_bit_partition(module, summaries, &mut ctx);
     let limit = isize::MAX as usize;
     let oversized = module
         .variables
@@ -726,14 +670,23 @@ fn build_module_graph_with_trace(
                 || variable.total_width().is_some_and(|width| width > limit)
         })
         .map(|variable| variable.token);
-    if let Some(token) = oversized.or_else(|| {
-        bit_part.position_overflow().map(|id| {
-            module
-                .variables
-                .get(&id)
-                .or_else(|| module.interface_members.get(&id))
-                .map_or(module.token, |variable| variable.token)
-        })
+    if let Some(token) = oversized {
+        return Err(Box::new(
+            AnalyzerError::combinational_loop_position_overflow(&token),
+        ));
+    }
+    let Some(bit_part) = build_bit_partition(module, summaries, &mut ctx) else {
+        // Partial partitions are not safe: a missing write boundary could
+        // retain an overwritten dependency and invent a cycle. Skip this
+        // module and propagate incompleteness to its parents instead.
+        return Ok((DependencyGraph::new(), BitPartition::default(), false));
+    };
+    if let Some(token) = bit_part.position_overflow().map(|id| {
+        module
+            .variables
+            .get(&id)
+            .or_else(|| module.interface_members.get(&id))
+            .map_or(module.token, |variable| variable.token)
     }) {
         return Err(Box::new(
             AnalyzerError::combinational_loop_position_overflow(&token),
@@ -858,6 +811,10 @@ impl<'a> ModuleGraphBuilder<'a> {
             if !is_pure_input_or_output(inp.id, &child.variables, Direction::Input) {
                 continue;
             }
+            if let Some(access) = inp.range_src.as_ref().and_then(instance_actual_access) {
+                input_reads.insert(inp.id, instance_actual_sources(bit_part, access));
+                continue;
+            }
             let mut reads = Vec::new();
             for expression in &inp.exprs {
                 let (sources, dependencies, actual_complete) = analyze_instance_actual(
@@ -889,6 +846,10 @@ impl<'a> ModuleGraphBuilder<'a> {
         let mut output_dsts: HashMap<VarId, Vec<procedure::RegionSource>> = HashMap::default();
         for out in &inst.outputs {
             if !is_pure_input_or_output(out.id, &child.variables, Direction::Output) {
+                continue;
+            }
+            if let Some(access) = out.range_dst.as_ref().and_then(instance_actual_access) {
+                output_dsts.insert(out.id, instance_actual_sources(bit_part, access));
                 continue;
             }
             let mut keys = Vec::new();
@@ -2321,109 +2282,4 @@ fn is_inout(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
     variables
         .get(&id)
         .is_some_and(|variable| matches!(variable.kind, crate::ir::VarKind::Inout))
-}
-
-#[cfg(test)]
-mod partition_tests {
-    use super::*;
-
-    #[test]
-    fn packed_partition_storage_depends_on_endpoints_not_declared_width() {
-        let distant = 1_000_000_000;
-        let spans = [
-            PackedSpan {
-                start: 0,
-                length: 1,
-            },
-            PackedSpan {
-                start: distant,
-                length: 1,
-            },
-        ];
-
-        assert_eq!(atomic_ranges(&spans, None), spans);
-    }
-    #[test]
-    fn array_partition_sweep_keeps_an_access_active_until_its_own_end() {
-        let id = VarId::from_raw(0);
-        let packed = PackedSpan {
-            start: 0,
-            length: 1,
-        };
-        let mut accesses = HashMap::default();
-        accesses.insert(
-            (
-                id,
-                ArraySpan {
-                    start: 0,
-                    length: 2,
-                },
-            ),
-            vec![packed],
-        );
-        accesses.insert(
-            (
-                id,
-                ArraySpan {
-                    start: 1,
-                    length: 2,
-                },
-            ),
-            vec![packed],
-        );
-
-        let ranges = split_array_spans(accesses, &HashMap::default());
-        for start in 0..3 {
-            assert_eq!(
-                ranges
-                    .get(&(id, ArraySpan { start, length: 1 }))
-                    .map(Vec::as_slice),
-                Some([packed].as_slice())
-            );
-        }
-    }
-    #[test]
-    fn disjoint_array_point_queries_do_not_scan_every_partition() {
-        const COUNT: usize = 16_384;
-
-        let id = VarId::from_raw(0);
-        let packed = PackedSpan {
-            start: 0,
-            length: 32,
-        };
-        let mut accesses = HashMap::default();
-        for start in 0..COUNT {
-            accesses.insert((id, ArraySpan { start, length: 1 }), vec![packed]);
-        }
-
-        let ranges = split_array_spans(accesses, &HashMap::default());
-        let partition = BitPartition::new(ranges);
-        assert_eq!(partition.array_spans(id).len(), COUNT);
-        for start in 0..COUNT {
-            assert_eq!(
-                partition.overlapping_access(id, ArraySpan { start, length: 1 }, packed),
-                vec![(id, ArraySpan { start, length: 1 }, 0)]
-            );
-        }
-    }
-    #[test]
-    fn partition_rejects_positions_that_do_not_fit_the_relation_type() {
-        let id = VarId::from_raw(0);
-        let mut ranges = HashMap::default();
-        ranges.insert(
-            (
-                id,
-                ArraySpan {
-                    start: isize::MAX as usize + 1,
-                    length: 1,
-                },
-            ),
-            vec![PackedSpan {
-                start: 0,
-                length: 1,
-            }],
-        );
-
-        assert_eq!(BitPartition::new(ranges).position_overflow(), Some(id));
-    }
 }

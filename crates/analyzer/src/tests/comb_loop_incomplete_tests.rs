@@ -2,6 +2,62 @@
 use super::*;
 
 #[test]
+fn contiguous_instance_array_input_fits_a_small_partition_budget() {
+    for count in [16, 16_384] {
+        let last = count - 1;
+        let code = format!(
+            "module Pass (i: input logic[{count}], o: output logic) {{ assign o = i[{last}]; }}
+             module Top (i: input logic[{count}], o: output logic) {{
+                inst child: Pass (i: i[0:{last}], o: o);
+             }}"
+        );
+        crate::comb_loop_detect::with_partition_work_limit(512, || {
+            assert!(comb_loop_analysis_is_complete(&code));
+            assert!(analyze(&code).is_empty());
+        });
+    }
+}
+
+#[test]
+fn partition_expansion_limit_propagates_and_keeps_parent_cycles() {
+    for count in [8, 64] {
+        let assignments = (0..count)
+            .map(|index| {
+                format!("assign o[{index}] = mem[{index}][{index}] ^ mem[index][{index}];")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let code = format!(
+            "module Fragmented (index: input u32, mem: input logic<{count}>[{count}],
+                                o: output logic<{count}>) {{
+                {assignments}
+             }}
+             module Top (index: input u32, mem: input logic<{count}>[{count}],
+                         o: output logic<{count}>, independent: output logic) {{
+                inst child: Fragmented (index: index, mem: mem, o: o);
+                assign independent = independent;
+             }}"
+        );
+        crate::comb_loop_detect::with_partition_work_limit(4096, || {
+            assert_eq!(comb_loop_analysis_is_complete(&code), count == 8);
+            let errors = analyze(&code);
+            assert!(
+                errors.iter().all(|error| match error {
+                    AnalyzerError::CombinationalLoop { identifier, .. }
+                    | AnalyzerError::UnassignVariable { identifier, .. } =>
+                        identifier == "independent",
+                    _ => false,
+                }),
+                "{errors:?}"
+            );
+            assert!(errors.iter().any(|error| matches!(error,
+                AnalyzerError::CombinationalLoop { identifier, .. } if identifier == "independent"
+            )), "{errors:?}");
+        });
+    }
+}
+
+#[test]
 fn instance_source_guard_limit_preserves_independent_cycles() {
     for selector in [false, true] {
         for stages in [4, 64] {

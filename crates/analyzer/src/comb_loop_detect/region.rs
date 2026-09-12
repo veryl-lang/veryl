@@ -2,6 +2,11 @@ use crate::HashMap;
 use crate::conv::Context;
 use crate::ir::{AssignDestination, MemberSelectDomain, Type, VarId, VarIndex, VarSelect};
 
+#[cfg(test)]
+thread_local! {
+    static PACKED_QUERY_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(super) fn signed_difference(destination: usize, source: usize) -> Option<isize> {
     isize::try_from(destination)
         .ok()?
@@ -110,6 +115,11 @@ pub(super) struct BitPartition {
 
 impl BitPartition {
     pub(super) fn new(ranges: HashMap<IdxKey, Vec<PackedSpan>>) -> Self {
+        debug_assert!(
+            ranges
+                .values()
+                .all(|spans| { spans.windows(2).all(|pair| pair[0].end() <= pair[1].start) })
+        );
         let mut array_spans: HashMap<VarId, Vec<ArraySpan>> = HashMap::default();
         for &(id, span) in ranges.keys() {
             array_spans.entry(id).or_default().push(span);
@@ -149,16 +159,22 @@ impl BitPartition {
         self.ranges.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    pub(super) fn overlapping(
-        &self,
-        key: IdxKey,
-        span: PackedSpan,
-    ) -> impl Iterator<Item = usize> + '_ {
-        self.ranges_of(key)
-            .iter()
-            .enumerate()
-            .filter(move |(_, range)| range.overlaps(span))
-            .map(|(i, _)| i)
+    pub(super) fn overlapping(&self, key: IdxKey, span: PackedSpan) -> std::ops::Range<usize> {
+        // Atomic ranges are sorted and disjoint. Locate both boundaries in
+        // logarithmic time so repeated point accesses cannot scan every bit
+        // partition. Preserve the original indices used by NodeKey.
+        let ranges = self.ranges_of(key);
+        let first = ranges.partition_point(|range| {
+            #[cfg(test)]
+            PACKED_QUERY_PROBES.set(PACKED_QUERY_PROBES.get() + 1);
+            range.end() <= span.start
+        });
+        let count = ranges[first..].partition_point(|range| {
+            #[cfg(test)]
+            PACKED_QUERY_PROBES.set(PACKED_QUERY_PROBES.get() + 1);
+            range.start < span.end()
+        });
+        first..first + count
     }
 
     pub(super) fn overlapping_access(
@@ -172,22 +188,15 @@ impl BitPartition {
         };
         let spans = self.array_spans(id);
         let first = spans.partition_point(|span| span.end().is_some_and(|end| end <= access.start));
-        let mut keys = spans[first..]
+        spans[first..]
             .iter()
             .take_while(|split| split.start < access_end)
             .filter(|split| split.overlaps(access))
             .flat_map(|split| {
-                let ranges = self.ranges_of((id, *split));
-                ranges
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, range)| range.overlaps(span))
-                    .map(|(range, _)| (id, *split, range))
+                self.overlapping((id, *split), span)
+                    .map(|range| (id, *split, range))
             })
-            .collect::<Vec<_>>();
-        keys.sort_unstable();
-        keys.dedup();
-        keys
+            .collect()
     }
 }
 
@@ -251,4 +260,122 @@ fn array_access_span(index: &VarIndex, r#type: &Type, ctx: &mut Context) -> Opti
         start,
         length: inclusive_end.checked_sub(start)?.checked_add(1)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_point_queries_take_logarithmic_work() {
+        const COUNT: usize = 16_384;
+        let id = VarId::from_raw(0);
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        let ranges = (0..COUNT)
+            .map(|index| PackedSpan {
+                start: index * 2,
+                length: 1,
+            })
+            .collect();
+        let partition = BitPartition::new(HashMap::from_iter([((id, array), ranges)]));
+        PACKED_QUERY_PROBES.set(0);
+        for index in 0..COUNT {
+            assert_eq!(
+                partition.overlapping_access(
+                    id,
+                    array,
+                    PackedSpan {
+                        start: index * 2,
+                        length: 1
+                    }
+                ),
+                vec![(id, array, index)]
+            );
+        }
+        assert!(PACKED_QUERY_PROBES.get() <= COUNT * 32);
+    }
+
+    #[test]
+    fn packed_queries_preserve_gaps_boundaries_and_original_indices() {
+        let id = VarId::from_raw(0);
+        let array = ArraySpan {
+            start: 1,
+            length: 2,
+        };
+        let ranges = vec![
+            PackedSpan {
+                start: 2,
+                length: 2,
+            },
+            PackedSpan {
+                start: 4,
+                length: 1,
+            },
+            PackedSpan {
+                start: 8,
+                length: 2,
+            },
+        ];
+        let partition = BitPartition::new(HashMap::from_iter([((id, array), ranges.clone())]));
+        for start in 0..12 {
+            for length in 1..12 {
+                let query = PackedSpan { start, length };
+                let expected = ranges
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, range)| range.overlaps(query))
+                    .map(|(index, _)| index)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    partition
+                        .overlapping((id, array), query)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(
+                    partition.overlapping_access(
+                        id,
+                        ArraySpan {
+                            start: 0,
+                            length: 4
+                        },
+                        query
+                    ),
+                    expected
+                        .into_iter()
+                        .map(|index| (id, array, index))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        assert!(
+            partition
+                .overlapping_access(
+                    id,
+                    ArraySpan {
+                        start: 0,
+                        length: 1
+                    },
+                    ranges[0]
+                )
+                .is_empty()
+        );
+        assert!(
+            partition
+                .overlapping(
+                    (
+                        id,
+                        ArraySpan {
+                            start: 0,
+                            length: 1
+                        }
+                    ),
+                    ranges[0]
+                )
+                .is_empty()
+        );
+    }
 }

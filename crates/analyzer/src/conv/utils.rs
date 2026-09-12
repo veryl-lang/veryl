@@ -3994,7 +3994,7 @@ pub fn insert_port_connect(
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
             }
             let range_dst = match dst.as_slice() {
-                [actual] if actual.is_array_range(context) => {
+                [actual] if actual.is_array_range(context) || !variable.r#type.array.is_empty() => {
                     var_path_to_contiguous_fragment(context, actual, false)
                 }
                 _ => None,
