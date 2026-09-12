@@ -4184,6 +4184,7 @@ impl fmt::Display for MultipleDefaultKind {
 pub enum DuplicatedIdentifierKind {
     Normal,
     RawIdentifier { raw: String },
+    ClockDomain { name: String },
 }
 
 impl fmt::Display for DuplicatedIdentifierKind {
@@ -4194,6 +4195,12 @@ impl fmt::Display for DuplicatedIdentifierKind {
                 write!(
                     f,
                     "r#-prefixed identifier \"{raw}\" is treated as the same identifier without the prefix"
+                )
+            }
+            DuplicatedIdentifierKind::ClockDomain { name } => {
+                write!(
+                    f,
+                    "a clock domain label shares one identifier namespace with ordinary declarations, so '{name} and {name} collide in the same scope"
                 )
             }
         }

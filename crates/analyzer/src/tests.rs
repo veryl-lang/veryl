@@ -1270,6 +1270,81 @@ fn cyclic_file_dependency() {
 }
 
 #[test]
+fn duplicated_identifier_clock_domain_label() {
+    use crate::analyzer_error::DuplicatedIdentifierKind;
+
+    // A clock-domain label occupies the scope's ordinary namespace, so `'i`
+    // and `i` collide. Reported both ways round: the label used to reuse
+    // whatever symbol resolved under its name, variable included, so only the
+    // label-first order errored.
+    let label_first = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_i: input  'i clock,
+        y    : output 'a logic,
+    ) {
+        var i: 'a logic;
+        var j: 'i logic;
+        always_ff (clk_a) { i = 1; }
+        always_ff (clk_i) { j = 1; }
+        assign y = i;
+    }
+    "#;
+    let var_first = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_b: input  'b clock,
+        y    : output 'a logic,
+    ) {
+        var i: 'a logic;
+        var j: 'i logic;
+        always_ff (clk_a) { i = 1; }
+        always_ff (clk_b) { j = 1; }
+        assign y = i;
+    }
+    "#;
+    for (name, code) in [("label first", label_first), ("var first", var_first)] {
+        let errors = analyze(code);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                AnalyzerError::DuplicatedIdentifier {
+                    // The help names the colliding identifier: a reader sees
+                    // `"i" is duplicated` and has to be told which label.
+                    kind: DuplicatedIdentifierKind::ClockDomain { name },
+                    ..
+                } if name == "i"
+            )),
+            "{name}: {errors:?}"
+        );
+    }
+
+    // A label that does not collide stays silent, and so does a second use of
+    // the same label -- that is what the symbol reuse is for.
+    let code = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_i: input  'i clock,
+        y    : output 'a logic,
+    ) {
+        var n: 'a logic;
+        var j: 'i logic;
+        var k: 'i logic;
+        always_ff (clk_a) { n = 1; }
+        always_ff (clk_i) { j = 1; k = j; }
+        assign y = n;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicatedIdentifier { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn duplicated_identifier() {
     let code = r#"
     module ModuleA {
