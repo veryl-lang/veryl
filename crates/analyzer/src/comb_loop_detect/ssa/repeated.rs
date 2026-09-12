@@ -281,11 +281,11 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
     for (key, entry, _, root, domains) in outputs {
         let mut output = mapped[root.index()];
         if may_skip {
-            let entry = project(ssa, entry, &domains);
-            output = ssa.related_definition(vec![
-                (output, PositionRelation::default()),
-                (entry, PositionRelation::default()),
-            ]);
+            // Skipping the loop retains the entry value without reading it.
+            // A phi keeps bare retained state out of dependency DAG roots,
+            // while preserving definitions established before the loop.
+            output = ssa.phi(vec![output, entry]);
+            output = project(ssa, output, &domains);
         }
         ssa.bind(key, output);
     }

@@ -1384,6 +1384,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
         this.call_caches.push(None);
+        if statements_have_unsupported(&body.statements) {
+            this.causal_write_keys = this.process_write_footprint(&body.statements);
+        }
         this.eval_function_body(&body.statements, body.ret, &[]);
         this.call_caches.pop();
 
@@ -1893,13 +1896,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.ssa.definition(Vec::new())
     }
 
-    #[allow(dead_code)]
     fn opaque_kill_keys(&mut self, keys: Vec<NodeKey>, weak: bool) {
         self.status = self.status.max(AnalysisStatus::Partial);
         self.bind_opaque_keys(keys, weak);
     }
 
-    #[allow(dead_code)]
     fn bind_opaque_keys(&mut self, keys: Vec<NodeKey>, weak: bool) {
         for key in keys {
             let opaque = self.ssa.definition(Vec::new());
@@ -1907,7 +1908,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    #[allow(dead_code)]
     fn opaque_causal_boundary(&mut self) {
         self.opaque_kill_keys(self.causal_write_keys.clone(), false);
     }
@@ -2487,7 +2487,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
             Statement::Null => FlowResult::new(ProcedureFlow::Continue),
             Statement::Unsupported(_) => {
-                self.status = AnalysisStatus::Barrier;
+                // Discard definitions that this process may have changed, then
+                // retain exact dependencies established after the rejected statement.
+                self.opaque_causal_boundary();
                 FlowResult::new(ProcedureFlow::Continue)
             }
         }
@@ -4859,6 +4861,29 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
     }
+}
+
+fn statements_have_unsupported(statements: &[Statement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        Statement::Unsupported(_) => true,
+        Statement::If(statement) => {
+            statements_have_unsupported(&statement.true_side)
+                || statements_have_unsupported(&statement.false_side)
+        }
+        Statement::IfReset(statement) => {
+            statements_have_unsupported(&statement.true_side)
+                || statements_have_unsupported(&statement.false_side)
+        }
+        Statement::Case(statement) => {
+            statement
+                .arms
+                .iter()
+                .any(|arm| statements_have_unsupported(&arm.body))
+                || statements_have_unsupported(&statement.default)
+        }
+        Statement::For(statement) => statements_have_unsupported(&statement.body),
+        _ => false,
+    })
 }
 
 fn statements_have_unknown(statements: &[Statement]) -> bool {
