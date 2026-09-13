@@ -78,7 +78,7 @@ use crate::ir::VarId;
 use crate::ir::{
     AssignDestination, Component, Declaration, Expression, Factor, FunctionCall,
     InstActualFragment, InstDeclaration, InstInterfaceBinding, Ir, MemberSelectDomain, Module, Op,
-    Signature, Statement, SystemFunctionKind, VarSelect, Variable,
+    Signature, Statement, SystemFunctionKind, VarIndex, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
@@ -162,15 +162,7 @@ fn build_bit_partition(
                 continue;
             }
             for dst in &out.dst {
-                for expression in dst
-                    .index
-                    .0
-                    .iter()
-                    .chain(dst.select.0.iter())
-                    .chain(dst.select.1.iter().map(|(_, x)| x))
-                {
-                    collect_expr_spans(expression, &mut accesses, &mut calls, ctx);
-                }
+                collect_selector_spans(&dst.index, &dst.select, &mut accesses, &mut calls, ctx);
                 if let Some((idx, packed)) = eval_dst_span(dst, &module.variables, ctx) {
                     accesses
                         .entry((
@@ -560,6 +552,25 @@ impl SpanCalls {
     }
 }
 
+fn collect_selector_spans(
+    index: &VarIndex,
+    select: &VarSelect,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    calls: &mut SpanCalls,
+    ctx: &mut Context,
+) {
+    // Selectors can call receiver methods too. Discover their local storage
+    // before dependency analysis, just as for calls in ordinary expressions.
+    for expression in index
+        .0
+        .iter()
+        .chain(&select.0)
+        .chain(select.1.iter().map(|(_, x)| x))
+    {
+        collect_expr_spans(expression, out, calls, ctx);
+    }
+}
+
 fn collect_call_spans(
     call: &FunctionCall,
     out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
@@ -571,15 +582,7 @@ fn collect_call_spans(
     }
     for destinations in call.outputs.values() {
         for dst in destinations {
-            for expression in dst
-                .index
-                .0
-                .iter()
-                .chain(dst.select.0.iter())
-                .chain(dst.select.1.iter().map(|(_, x)| x))
-            {
-                collect_expr_spans(expression, out, calls, ctx);
-            }
+            collect_selector_spans(&dst.index, &dst.select, out, calls, ctx);
             for (index, packed) in dst_writes(dst, ctx) {
                 out.entry((dst.id, index)).or_default().push(packed);
             }
@@ -596,27 +599,52 @@ fn collect_factor_spans(
 ) {
     match factor {
         Factor::Variable(id, index, select, comptime) => {
+            collect_selector_spans(index, select, out, calls, ctx);
             for (idx, packed) in var_reads(*id, index, select, comptime.member_select_domain, ctx) {
                 out.entry((*id, idx)).or_default().push(packed);
             }
         }
         Factor::FunctionCall(call) => collect_call_spans(call, out, calls, ctx),
-        Factor::SystemFunctionCall(call) => match &call.kind {
-            SystemFunctionKind::Onehot(input)
-            | SystemFunctionKind::Signed(input)
-            | SystemFunctionKind::Unsigned(input)
-            | SystemFunctionKind::Readmemh(input, _) => {
+        Factor::SystemFunctionCall(call) => collect_system_call_spans(call, out, calls, ctx),
+        _ => {}
+    }
+}
+
+fn collect_system_call_spans(
+    call: &crate::ir::SystemFunctionCall,
+    out: &mut HashMap<IdxKey, Vec<PackedSpan>>,
+    calls: &mut SpanCalls,
+    ctx: &mut Context,
+) {
+    match &call.kind {
+        SystemFunctionKind::Onehot(input)
+        | SystemFunctionKind::Signed(input)
+        | SystemFunctionKind::Unsigned(input) => collect_expr_spans(&input.0, out, calls, ctx),
+        SystemFunctionKind::Readmemh(input, output) => {
+            collect_expr_spans(&input.0, out, calls, ctx);
+            for destination in output.local() {
+                collect_selector_spans(&destination.index, &destination.select, out, calls, ctx);
+                for (index, packed) in dst_writes(destination, ctx) {
+                    out.entry((destination.id, index)).or_default().push(packed);
+                }
+            }
+        }
+        SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
+            for input in inputs {
                 collect_expr_spans(&input.0, out, calls, ctx);
             }
-            SystemFunctionKind::Bits(_)
-            | SystemFunctionKind::Size(_)
-            | SystemFunctionKind::Clog2(_)
-            | SystemFunctionKind::Display(_)
-            | SystemFunctionKind::Write(_)
-            | SystemFunctionKind::Assert { .. }
-            | SystemFunctionKind::Finish => {}
-        },
-        _ => {}
+        }
+        SystemFunctionKind::Assert { cond, args, .. } => {
+            collect_expr_spans(&cond.0, out, calls, ctx);
+            for input in args {
+                collect_expr_spans(&input.0, out, calls, ctx);
+            }
+        }
+        // These queries inspect compile-time metadata without executing calls.
+        SystemFunctionKind::Bits(_)
+        | SystemFunctionKind::Size(_)
+        | SystemFunctionKind::Clog2(_)
+        | SystemFunctionKind::Finish => {}
     }
 }
 
@@ -631,6 +659,13 @@ fn collect_statement_spans(
             Statement::Assign(assign) => {
                 collect_expr_spans(&assign.expr, out, calls, ctx);
                 for destination in &assign.dst {
+                    collect_selector_spans(
+                        &destination.index,
+                        &destination.select,
+                        out,
+                        calls,
+                        ctx,
+                    );
                     for (index, packed) in dst_writes(destination, ctx) {
                         out.entry((destination.id, index)).or_default().push(packed);
                         collect_struct_field_bounds(
@@ -667,11 +702,21 @@ fn collect_statement_spans(
                 collect_statement_spans(&statement.default, out, calls, ctx);
             }
             Statement::For(statement) => {
+                let (start, end) = match &statement.range {
+                    crate::ir::ForRange::Forward { start, end, .. }
+                    | crate::ir::ForRange::Reverse { start, end, .. }
+                    | crate::ir::ForRange::Stepped { start, end, .. } => (start, end),
+                };
+                for bound in [start, end] {
+                    if let crate::ir::ForBound::Expression(expression) = bound {
+                        collect_expr_spans(expression, out, calls, ctx);
+                    }
+                }
                 collect_statement_spans(&statement.body, out, calls, ctx);
             }
             Statement::FunctionCall(call) => collect_call_spans(call, out, calls, ctx),
-            Statement::SystemFunctionCall(_)
-            | Statement::IfReset(_)
+            Statement::SystemFunctionCall(call) => collect_system_call_spans(call, out, calls, ctx),
+            Statement::IfReset(_)
             | Statement::TbMethodCall(_)
             | Statement::Break
             | Statement::Unsupported(_)

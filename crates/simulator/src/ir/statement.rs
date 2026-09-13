@@ -4592,21 +4592,6 @@ fn sample_function_receiver(
 
 impl Conv<&FunctionCall> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &FunctionCall) -> Result<Self, SimulatorError> {
-        if !context.expanding_functions.insert(src.id) {
-            let name = context
-                .scope()
-                .analyzer_context
-                .functions
-                .get(&src.id)
-                .unwrap()
-                .name
-                .to_string();
-            return Err(SimulatorError::recursive_function(
-                &name,
-                &src.comptime.token,
-            ));
-        }
-
         let mut result = Vec::new();
 
         // Clone to avoid borrow conflict with context
@@ -4784,10 +4769,24 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
         receiver_statements.append(&mut result);
         result = receiver_statements;
 
-        for stmt in &body.statements {
-            let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
-            result.extend(stmts);
+        // Receiver and argument expressions belong to the caller. Reusing
+        // this function there is finite nesting, not recursive body expansion.
+        if !context.expanding_functions.insert(src.id) {
+            return Err(SimulatorError::recursive_function(
+                &func.name.to_string(),
+                &src.comptime.token,
+            ));
         }
+        let body_result =
+            body.statements
+                .iter()
+                .try_for_each(|stmt| -> Result<(), SimulatorError> {
+                    let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
+                    result.extend(stmts);
+                    Ok(())
+                });
+        context.expanding_functions.remove(&src.id);
+        body_result?;
 
         for (var_path, destinations) in &src.outputs {
             let arg_var_id = body.arg_map.get(var_path).unwrap();
@@ -4838,7 +4837,6 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             }
         }
 
-        context.expanding_functions.remove(&src.id);
         Ok(result)
     }
 }

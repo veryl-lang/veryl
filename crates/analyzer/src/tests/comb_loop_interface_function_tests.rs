@@ -1638,3 +1638,129 @@ fn comb_loop_receiver_side_effect_is_not_repeated_for_each_member_read() {
     assert!(comb_loop_analysis_is_complete(code));
     assert_interface_function_comb_loop(code, true);
 }
+
+#[test]
+fn comb_loop_receiver_method_locals_are_discovered_in_read_selectors() {
+    for (ty, init, expression) in [
+        ("logic<2>", "2'b10", "a[bus[0].get()]"),
+        ("logic[2]", "'{0, 1}", "a[bus[0].get()]"),
+        ("logic<2>", "2'b10", "a[bus[0].get() +: 1]"),
+        ("logic<2>", "2'b10", "a[selectors[bus[0].get()]]"),
+    ] {
+        for (source, expected) in [("o", true), ("i", false)] {
+            let code = format!(
+                r#"
+                interface Bus {{
+                    var value: logic;
+                    function get () -> logic {{
+                        let tmp: logic = value;
+                        return tmp;
+                    }}
+                }}
+                module Top (i: input logic, o: output logic) {{
+                    var a: {ty};
+                    var selectors: logic<2>;
+                    inst bus: Bus[2];
+                    assign bus[0].value = {source};
+                    assign bus[1].value = 0;
+                    assign a = {init};
+                    assign selectors = 2'b10;
+                    assign o = {expression};
+                }}
+            "#
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+            assert_interface_function_comb_loop(&code, expected);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_receiver_method_locals_are_discovered_in_write_selectors() {
+    for (ty, init) in [("logic<2>", "0"), ("logic[2]", "'{0, 0}")] {
+        for (source, expected) in [("o", true), ("i", false)] {
+            let code = format!(
+                r#"
+                interface Bus {{
+                    var value: logic;
+                    function get () -> logic {{
+                        let tmp: logic = value;
+                        return tmp;
+                    }}
+                }}
+                module Top (i: input logic, o: output logic) {{
+                    var a: {ty};
+                    inst bus: Bus[2];
+                    assign bus[0].value = {source};
+                    assign bus[1].value = 0;
+                    always_comb {{
+                        a = {init};
+                        a[bus[0].get()] = 1;
+                        o = a[1];
+                    }}
+                }}
+            "#
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+            assert_interface_function_comb_loop(&code, expected);
+        }
+    }
+}
+
+#[test]
+fn comb_loop_receiver_method_locals_are_discovered_in_loop_bounds() {
+    for (source, expected) in [("o", true), ("i", false)] {
+        let code = format!(
+            r#"
+            interface Bus {{
+                var value: logic;
+                function get () -> logic {{
+                    let tmp: logic = value;
+                    return tmp;
+                }}
+            }}
+            module Top (i: input logic, o: output logic) {{
+                inst bus: Bus[2];
+                assign bus[0].value = {source};
+                assign bus[1].value = 0;
+                always_comb {{
+                    o = 0;
+                    for k in 0..bus[0].get() {{ o = 1; }}
+                }}
+            }}
+        "#
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+        assert_interface_function_comb_loop(&code, expected);
+    }
+}
+
+#[test]
+fn comb_loop_receiver_method_locals_are_discovered_in_system_call_arguments() {
+    for (source, expected) in [("o", true), ("i", false)] {
+        let code = format!(
+            r#"
+            interface Bus {{
+                var value: logic;
+                var result: logic;
+                function copy () -> logic {{
+                    let tmp: logic = value;
+                    result = tmp;
+                    return 0;
+                }}
+            }}
+            module Top (i: input logic, o: output logic) {{
+                inst bus: Bus[2];
+                assign bus[0].value = {source};
+                assign bus[1].value = 0;
+                always_comb {{
+                    $display("%b", bus[0].copy());
+                    o = bus[0].result;
+                }}
+            }}
+        "#
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
+        assert_interface_function_comb_loop(&code, expected);
+    }
+}
