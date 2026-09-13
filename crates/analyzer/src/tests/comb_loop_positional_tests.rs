@@ -1178,3 +1178,134 @@ fn comb_loop_periodic_output_maps_concatenated_actual() {
         true,
     );
 }
+
+#[test]
+fn comb_loop_module_output_array_range_keeps_fragments_independent() {
+    let code = r#"
+        module Forward (
+            i: input  logic [2],
+            o: output logic [2],
+        ) {
+            assign o[0] = i[0];
+            assign o[1] = 0;
+        }
+        module Top (out: output logic) {
+            var source  : logic [2];
+            var returned: logic [2];
+            inst forward: Forward (
+                i: source,
+                o: returned[0:1],
+            );
+            assign source[0] = returned[1];
+            assign source[1] = 0;
+            assign out = returned[0];
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_comb_loop(
+        "an unpacked output range preserves child element identity",
+        code,
+        false,
+    );
+}
+
+#[test]
+fn module_output_array_range_rejects_an_input_destination() {
+    let errors = analyze(
+        r#"
+        module Fill (o: output logic [2]) {
+            assign o[0] = 0;
+            assign o[1] = 0;
+        }
+        module Top (received: input logic [2]) {
+            inst fill: Fill (o: received[0:1]);
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::InvalidAssignment { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn module_output_array_range_marks_the_whole_destination_assigned() {
+    let errors = analyze(
+        r#"
+        module Fill (o: output logic [2]) {
+            assign o[0] = 0;
+            assign o[1] = 0;
+        }
+        module Top (received: output logic [2]) {
+            inst fill: Fill (o: received[0:1]);
+        }
+        "#,
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn module_output_array_range_participates_in_driver_ownership() {
+    let errors = analyze(
+        r#"
+        module Fill (o: output logic [2]) {
+            assign o[0] = 0;
+            assign o[1] = 0;
+        }
+        module Top (received: output logic [2]) {
+            inst fill: Fill (o: received[0:1]);
+            assign received[1] = 0;
+        }
+        "#,
+    );
+    let Some(AnalyzerError::MultipleAssignment {
+        error_locations, ..
+    }) = errors
+        .iter()
+        .find(|error| matches!(error, AnalyzerError::MultipleAssignment { .. }))
+    else {
+        panic!("{errors:?}");
+    };
+    // The legacy `dst` contains two selected elements plus the conflicting
+    // continuous assignment. `range_dst` is side metadata and must not
+    // register either element in AssignTable a second time.
+    assert_eq!(error_locations.len(), 3, "{errors:?}");
+}
+
+#[test]
+fn comb_loop_module_output_concatenation_keeps_fragments_independent() {
+    let code = r#"
+        module Forward (
+            i: input  logic<2>,
+            o: output logic<2>,
+        ) {
+            assign o[0] = i[0];
+            assign o[1] = 0;
+        }
+        module Top (out: output logic) {
+            var source: logic<2>;
+            var high  : logic;
+            var low   : logic;
+            inst forward: Forward (
+                i: source,
+                o: {high, low},
+            );
+            assign source[0] = high;
+            assign source[1] = 0;
+            assign out = low;
+        }
+    "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    assert_comb_loop(
+        "a packed output concatenation preserves child bit positions",
+        code,
+        false,
+    );
+}

@@ -1368,3 +1368,213 @@ fn comb_loop_many_exclusive_opposing_shifts_remain_acyclic_and_complete() {
     );
     assert!(comb_loop_analysis_is_complete(&code));
 }
+
+#[test]
+fn dynamic_packed_select_stays_within_its_struct_member() {
+    assert_comb_loop(
+        "a dynamic packed select cannot alias a disjoint struct member",
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var left : Pair;
+            var right: Pair;
+            assign left = Pair'{
+                selected: 0,
+                result  : right.result[0],
+            };
+            assign right = Pair'{
+                selected: 0,
+                result  : left.selected[index],
+            };
+            assign o = right.result[0];
+        }
+        "#,
+        false,
+    );
+    assert_comb_loop(
+        "feedback within the selected member remains visible",
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var left : Pair;
+            var right: Pair;
+            assign left = Pair'{
+                selected: 0,
+                result  : right.result[0],
+            };
+            assign right = Pair'{
+                selected: 0,
+                result  : left.result[index],
+            };
+            assign o = right.result[0];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn dynamic_packed_select_stays_within_a_struct_member_nested_in_a_union() {
+    assert_comb_loop(
+        "a dynamic packed select cannot escape a nested member through a union overlay",
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            union Overlay {
+                pair: Pair,
+                raw : bit<8>,
+            }
+            var left : Overlay;
+            var right: Overlay;
+            assign left.pair = Pair'{
+                selected: 0,
+                result  : right.pair.result[0],
+            };
+            assign right.pair = Pair'{
+                selected: 0,
+                result  : left.pair.selected[index],
+            };
+            assign o = right.pair.result[0];
+        }
+        "#,
+        false,
+    );
+    assert_comb_loop(
+        "feedback within the selected member remains visible",
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            union Overlay {
+                pair: Pair,
+                raw : bit<8>,
+            }
+            var left : Overlay;
+            var right: Overlay;
+            assign left.pair = Pair'{
+                selected: 0,
+                result  : right.pair.result[0],
+            };
+            assign right.pair = Pair'{
+                selected: 0,
+                result  : left.pair.result[index],
+            };
+            assign o = right.pair.result[0];
+        }
+        "#,
+        true,
+    );
+}
+
+#[test]
+fn dynamic_select_write_does_not_escape_its_struct_member() {
+    let errors = analyze(
+        r#"
+        module Top (
+            index: input bit<2>,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var pair: Pair;
+            always_comb {
+                pair.selected[index] = 0;
+            }
+            always_comb {
+                pair.result = 0;
+            }
+        }
+        "#,
+    );
+
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::MultipleAssignment { .. })),
+        "disjoint member writes must remain separate LSPs: {errors:?}"
+    );
+}
+
+#[test]
+fn dynamic_select_read_is_confined_to_its_struct_member() {
+    let errors = analyze(
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var pair: Pair;
+            always_comb {
+                pair.selected = 0;
+                o = pair.selected[index];
+                pair.result = 0;
+            }
+        }
+        "#,
+    );
+
+    assert!(
+        !errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { .. })),
+        "a read from one member must not precede a write to another: {errors:?}"
+    );
+}
+
+#[test]
+fn dynamic_select_read_is_recorded_within_its_struct_member() {
+    let errors = analyze(
+        r#"
+        module Top (
+            index: input  bit<2>,
+            o    : output bit,
+        ) {
+            struct Pair {
+                selected: bit<4>,
+                result  : bit<4>,
+            }
+            var pair: Pair;
+            always_comb {
+                pair.result = 0;
+                o = pair.selected[index];
+                pair.selected = 0;
+            }
+        }
+        "#,
+    );
+
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UnassignVariable { .. })),
+        "a dynamic read before a same-member write must be recorded: {errors:?}"
+    );
+}

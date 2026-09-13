@@ -6,7 +6,8 @@ use crate::conv::checker::portability::check_initial_assign;
 use crate::conv::utils::eval_width_select;
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, Factor, FfTable, Op, Shape, ShapeRef, Type, TypeKind,
+    AssignDestination, Comptime, Expression, Factor, FfTable, MemberSelectDomain, Op, Shape,
+    ShapeRef, Type, TypeKind,
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
@@ -25,7 +26,7 @@ impl VarId {
         self.0 += 1;
     }
 
-    /// Used by the simulator's `alloc_internal_event_id` to mint
+    /// Used by the simulator's `alloc_internal_id` to mint
     /// globally-unique event ids; see its doc for why per-module-scope
     /// ids are not enough there.
     pub const fn from_raw(raw: u32) -> Self {
@@ -98,7 +99,10 @@ impl VarPathSelect {
             }
 
             let width_select = if let Some(part_select) = &comptime.part_select {
-                part_select.to_base_select(context, &width_select)?
+                let (select, domain) =
+                    part_select.to_base_select_with_domain(context, &width_select)?;
+                comptime.member_select_domain = domain;
+                select
             } else {
                 eval_width_select(context, &path, &comptime.r#type, width_select)?
             };
@@ -314,7 +318,10 @@ impl VarPathSelect {
             }
             let (array_select, width_select) = select.split(comptime.r#type.array.dims());
             let width_select = if let Some(part_select) = &comptime.part_select {
-                part_select.to_base_select(context, &width_select)?
+                let (select, domain) =
+                    part_select.to_base_select_with_domain(context, &width_select)?;
+                comptime.member_select_domain = domain;
+                select
             } else {
                 width_select
             };
@@ -675,6 +682,48 @@ impl VarSelect {
         self.is_const() && self.1.as_ref().is_none_or(|(_, e)| e.comptime().is_const)
     }
 
+    /// Return the packed base-variable range which this access may touch.
+    ///
+    /// Constant accesses retain their exact range. A dynamic coordinate keeps
+    /// only the constant outer-coordinate prefix, and a rebased member access
+    /// is additionally confined to the domain retained by `PartSelectPath`.
+    pub(crate) fn conservative_packed_range(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        member_domain: Option<MemberSelectDomain>,
+    ) -> Option<(usize, usize)> {
+        let coordinate_range = if self.is_const_with_range() {
+            self.eval_value(context, r#type, false)
+        } else {
+            // The final expression of a range is its starting position, not
+            // an outer packed coordinate. It cannot narrow a dynamic range.
+            let coordinate_len = self.0.len().saturating_sub(usize::from(self.1.is_some()));
+            let coordinates = &self.0[..coordinate_len];
+            let prefix_len = coordinates
+                .iter()
+                .take_while(|expression| expression.comptime().is_const)
+                .count();
+            let prefix = VarSelect(coordinates[..prefix_len].to_vec(), None);
+            prefix.eval_value(context, r#type, false).or_else(|| {
+                r#type
+                    .total_width()
+                    .and_then(|width| width.checked_sub(1).map(|high| (high, 0)))
+            })
+        };
+        let member_range = member_domain.map(|domain| (domain.high, domain.low));
+
+        match (coordinate_range, member_range) {
+            (Some((coordinate_high, coordinate_low)), Some((member_high, member_low))) => {
+                let high = coordinate_high.min(member_high);
+                let low = coordinate_low.max(member_low);
+                (high >= low).then_some((high, low))
+            }
+            (Some(range), None) | (None, Some(range)) => Some(range),
+            (None, None) => None,
+        }
+    }
+
     pub fn to_index(self) -> VarIndex {
         VarIndex(self.0)
     }
@@ -839,6 +888,26 @@ impl VarSelect {
         r#type: &Type,
         is_array: bool,
     ) -> Option<(usize, usize)> {
+        self.eval_value_inner(context, r#type, is_array, true)
+    }
+
+    /// Compute symbolic storage coordinates without limiting the span length.
+    pub(crate) fn eval_value_unbounded(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        is_array: bool,
+    ) -> Option<(usize, usize)> {
+        self.eval_value_inner(context, r#type, is_array, false)
+    }
+
+    fn eval_value_inner(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        is_array: bool,
+        check_size: bool,
+    ) -> Option<(usize, usize)> {
         if self.0.is_empty() {
             let total_width: usize = if is_array {
                 r#type.total_array()?
@@ -908,9 +977,11 @@ impl VarSelect {
             }
         }
 
-        let token = self.token_range();
-        let beg = context.check_size(beg, token)?;
-        let end = context.check_size(end, token)?;
+        if check_size {
+            let token = self.token_range();
+            context.check_size(beg, token)?;
+            context.check_size(end, token)?;
+        }
 
         Some((beg, end))
     }
@@ -1117,20 +1188,65 @@ impl Variable {
     }
 
     pub fn prepend_array_at_path(&mut self, array: &ShapeRef, path_offset: usize) {
-        if !array.is_empty()
-            && let Some(total_array) = array.total()
-        {
-            let value = self.value.clone();
-            let assigned = self.assigned.clone();
-            for _ in 0..total_array.saturating_sub(1) {
-                self.value.append(&mut value.clone());
-                self.assigned.append(&mut assigned.clone());
-            }
-            let mut offsets = vec![path_offset; array.dims()];
-            offsets.append(&mut self.array_path_offsets);
-            self.array_path_offsets = offsets;
-            self.r#type.prepend_array(array);
+        self.prepend_array_at_path_with_limit(array, path_offset, usize::MAX);
+    }
+
+    pub(crate) fn prepend_array_at_path_with_limit(
+        &mut self,
+        array: &ShapeRef,
+        path_offset: usize,
+        array_limit: usize,
+    ) {
+        if array.is_empty() {
+            return;
         }
+
+        if let (Some(prepend_total), Some(member_total)) =
+            (array.total(), self.r#type.array.total())
+        {
+            let combined_total = prepend_total.checked_mul(member_total);
+            if combined_total.is_some_and(|total| total <= array_limit) {
+                // Keep the historical AIR contract for ordinary arrays: every
+                // non-uniform logical element is present in `value`. A
+                // single-value uniform template remains a single value.
+                if self.value.len() > 1 {
+                    let member_values = self.value.clone();
+                    self.value = Vec::with_capacity(combined_total.unwrap_or(0));
+                    for _ in 0..prepend_total {
+                        self.value.extend(member_values.iter().cloned());
+                    }
+                }
+            } else if self.value.len() > 1 {
+                // The legacy AIR represents only a full value vector or one
+                // uniform template. A non-uniform array that is too large to
+                // materialize is therefore not compile-time representable.
+                self.value.clear();
+                if matches!(self.kind, VarKind::Const | VarKind::Param) {
+                    self.value.push(Value::new_x(
+                        self.r#type.total_width().unwrap_or(1),
+                        self.r#type.signed,
+                    ));
+                }
+            }
+
+            if combined_total.is_none_or(|total| total > array_limit) {
+                self.assigned.clear();
+            } else {
+                let assigned = self.assigned.clone();
+                for _ in 0..prepend_total.saturating_sub(1) {
+                    self.assigned.extend(assigned.iter().cloned());
+                }
+            }
+        } else {
+            // Unknown shapes cannot translate flat mutation coordinates.
+            // Their compile-time value is already indeterminate; retain only
+            // the reusable base pattern and discard coordinate-specific state.
+            self.assigned.clear();
+        }
+        let mut offsets = vec![path_offset; array.dims()];
+        offsets.append(&mut self.array_path_offsets);
+        self.array_path_offsets = offsets;
+        self.r#type.prepend_array(array);
     }
 
     pub fn set_leading_array_path_offset(&mut self, dimensions: usize, path_offset: usize) {
@@ -1234,6 +1350,36 @@ mod tests {
         }
 
         ret
+    }
+
+    fn unknown_expression() -> Expression {
+        Expression::Term(Box::new(Factor::Unknown(Comptime::create_unknown(
+            TokenRange::default(),
+        ))))
+    }
+
+    #[test]
+    fn conservative_packed_range_intersects_dynamic_prefix_with_member_domain() {
+        let mut context = Context::default();
+        let mut r#type = Type::new(TypeKind::Logic);
+        r#type.set_concrete_width(Shape::new(vec![Some(2), Some(4)]));
+
+        let select = VarSelect(
+            vec![
+                Expression::create_value(Value::new(1, 32, false), TokenRange::default()),
+                unknown_expression(),
+            ],
+            None,
+        );
+
+        assert_eq!(
+            select.conservative_packed_range(
+                &mut context,
+                &r#type,
+                Some(MemberSelectDomain { high: 6, low: 5 }),
+            ),
+            Some((6, 5))
+        );
     }
 
     #[test]

@@ -4533,23 +4533,65 @@ impl Conv<&air::IfResetStatement> for ProtoIfStatement {
     }
 }
 
+/// Evaluate each dynamic receiver coordinate before arguments and body writes.
+fn sample_function_receiver(
+    context: &mut Context,
+    index: &air::VarIndex,
+) -> Result<(air::VarIndex, Vec<ProtoStatement>), SimulatorError> {
+    let mut receiver = index.clone();
+    let mut statements = Vec::new();
+    for expression in &mut receiver.0 {
+        if expression.comptime().is_const {
+            continue;
+        }
+        let value: ProtoExpression = Conv::conv(context, &*expression)?;
+        statements.append(&mut context.pending_statements);
+        let comptime = expression.comptime().clone();
+        let width = comptime.r#type.total_width().unwrap();
+        let bytes = calc_native_bytes(width);
+        let offset = VarOffset::Comb(context.comb_total_bytes as isize);
+        context.comb_total_bytes +=
+            crate::ir::variable::value_size(bytes, context.config.use_4state);
+        let id = context.alloc_internal_id();
+        let name = veryl_parser::resource_table::insert_str(&format!("__receiver_{id}"));
+        context.scope().variable_meta.insert(
+            id,
+            crate::ir::VariableMeta {
+                path: air::VarPath::new(name),
+                r#type: comptime.r#type.clone(),
+                width,
+                native_bytes: bytes,
+                elements: vec![crate::ir::variable::VariableElement {
+                    native_bytes: bytes,
+                    current: offset,
+                    next_offset: offset.raw(),
+                }],
+                initial_values: vec![Value::new(0, width, comptime.r#type.signed)],
+                uniform_buffer: true,
+            },
+        );
+        statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+            dst: offset,
+            dst_width: width,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: value,
+            dst_ff_current_offset: 0,
+            token: expression.token_range(),
+        }));
+        *expression = air::Expression::Term(Box::new(air::Factor::Variable(
+            id,
+            air::VarIndex::default(),
+            air::VarSelect::default(),
+            comptime,
+        )));
+    }
+    Ok((receiver, statements))
+}
+
 impl Conv<&FunctionCall> for Vec<ProtoStatement> {
     fn conv(context: &mut Context, src: &FunctionCall) -> Result<Self, SimulatorError> {
-        if !context.expanding_functions.insert(src.id) {
-            let name = context
-                .scope()
-                .analyzer_context
-                .functions
-                .get(&src.id)
-                .unwrap()
-                .name
-                .to_string();
-            return Err(SimulatorError::recursive_function(
-                &name,
-                &src.comptime.token,
-            ));
-        }
-
         let mut result = Vec::new();
 
         // Clone to avoid borrow conflict with context
@@ -4560,11 +4602,11 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             .get(&src.id)
             .unwrap()
             .clone();
-        let body = if let Some(ref idx) = src.index {
-            func.get_function(idx).unwrap()
-        } else {
-            func.get_function(&[]).unwrap()
-        };
+        let (receiver, mut receiver_statements) =
+            sample_function_receiver(context, &src.receiver_index)?;
+        let body = func
+            .get_function_for_index(&receiver)
+            .ok_or_else(|| SimulatorError::unresolved_expression(&src.comptime.token))?;
 
         for (var_path, expr) in &src.inputs {
             let arg_var_id = body.arg_map.get(var_path).unwrap();
@@ -4721,15 +4763,30 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             }));
         }
 
-        // Drain pending statements from nested function calls in input expressions
+        // Receiver coordinates precede argument effects and body execution.
         let mut pending = std::mem::take(&mut context.pending_statements);
-        pending.append(&mut result);
-        result = pending;
+        receiver_statements.append(&mut pending);
+        receiver_statements.append(&mut result);
+        result = receiver_statements;
 
-        for stmt in &body.statements {
-            let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
-            result.extend(stmts);
+        // Receiver and argument expressions belong to the caller. Reusing
+        // this function there is finite nesting, not recursive body expansion.
+        if !context.expanding_functions.insert(src.id) {
+            return Err(SimulatorError::recursive_function(
+                &func.name.to_string(),
+                &src.comptime.token,
+            ));
         }
+        let body_result =
+            body.statements
+                .iter()
+                .try_for_each(|stmt| -> Result<(), SimulatorError> {
+                    let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
+                    result.extend(stmts);
+                    Ok(())
+                });
+        context.expanding_functions.remove(&src.id);
+        body_result?;
 
         for (var_path, destinations) in &src.outputs {
             let arg_var_id = body.arg_map.get(var_path).unwrap();
@@ -4780,7 +4837,6 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             }
         }
 
-        context.expanding_functions.remove(&src.id);
         Ok(result)
     }
 }

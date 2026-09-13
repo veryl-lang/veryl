@@ -1580,9 +1580,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             let mut id_map: HashMap<air::VarId, air::VarId> = HashMap::default();
             let mut intern = |vid: air::VarId, ctx: &mut Context| {
                 if vid > threshold {
-                    id_map
-                        .entry(vid)
-                        .or_insert_with(|| ctx.alloc_internal_event_id());
+                    id_map.entry(vid).or_insert_with(|| ctx.alloc_internal_id());
                 }
             };
             for ev in reuse.event_statements.keys() {
@@ -2115,7 +2113,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             if is_reset {
                 if let Some(stmts) = remapped_events.remove(&Event::Reset(*vid)) {
-                    let unique_id = context.alloc_internal_event_id();
+                    let unique_id = context.alloc_internal_id();
                     remapped_events.insert(Event::Reset(unique_id), stmts);
                     let inst_kinds = child_inst_reset_kinds.get_or_insert_with(|| {
                         crate::ir::module::collect_inst_reset_kinds(&child_module.declarations)
@@ -2143,7 +2141,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             if let Some(meta) = child_variable_meta.get(vid)
                 && let Some(elem) = meta.elements.first()
             {
-                let unique_id = context.alloc_internal_event_id();
+                let unique_id = context.alloc_internal_id();
                 if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid)) {
                     remapped_events.insert(Event::Clock(unique_id), stmts);
                 }

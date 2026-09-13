@@ -6463,6 +6463,83 @@ fn a_parameter_width_is_not_taken_from_the_instantiating_module() {
 }
 
 #[test]
+fn interface_array_function_receiver_and_member_indices() {
+    let code = r#"
+        interface Bus {
+            var data: logic<8>[2];
+            function get () -> logic<8> { return data[1]; }
+        }
+        module Top (index: input u32, selected: output logic<8>, fixed: output logic<8>) {
+            inst bus: Bus[2];
+            assign bus[0].data = '{3, 7};
+            assign bus[1].data = '{11, 19};
+            assign selected = bus[index].get();
+            assign fixed = bus[1].get();
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (index, expected) in [(0, 7), (1, 19), (0, 7)] {
+            sim.set("index", Value::new(index, 32, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("selected").unwrap(), Value::new(expected, 8, false));
+            assert_eq!(sim.get("fixed").unwrap(), Value::new(19, 8, false));
+        }
+    }
+}
+
+#[test]
+fn interface_array_function_samples_receiver_before_writing_it() {
+    let code = r#"
+        interface Bus {
+            var index: logic;
+            var data: logic<8>;
+            function get () -> logic<8> {
+                index = 1;
+                return data;
+            }
+        }
+        module Top (selected: output logic<8>) {
+            inst bus: Bus[2];
+            assign bus[0].data = 7;
+            assign bus[1].data = 19;
+            always_comb {
+                bus[0].index = 0;
+                selected = bus[bus[0].index].get();
+            }
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("selected").unwrap(), Value::new(7, 8, false));
+    }
+}
+
+#[test]
+fn interface_single_element_array_function_without_index() {
+    let code = r#"
+        interface Bus {
+            var data: logic<8>;
+            function get () -> logic<8> { return data; }
+        }
+        module Top (selected: output logic<8>) {
+            inst bus: Bus[1];
+            assign bus[0].data = 7;
+            assign selected = bus.get();
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("selected").unwrap(), Value::new(7, 8, false));
+    }
+}
+
+#[test]
 fn interface_function() {
     let code = r#"
     interface BusIf {
@@ -27795,4 +27872,163 @@ fn msb_after_member_access_of_array_element() {
             "config={config:?}"
         );
     }
+}
+
+#[test]
+fn interface_array_function_invalid_receiver_is_an_error() {
+    for statement_call in [false, true] {
+        let statement = if statement_call {
+            "always_comb { bus[0].put(i); o = bus[0].value; }"
+        } else {
+            "assign bus[0].value = i; assign o = bus[0].get();"
+        };
+        let code = format!(
+            r#"
+            interface Bus {{
+                var value: logic;
+                function get () -> logic {{ return value; }}
+                function put (x: input logic) {{ value = x; }}
+            }}
+            module Top (i: input logic, o: output logic) {{
+                inst bus: Bus[2];
+                assign bus[1].value = i;
+                {statement}
+            }}
+        "#
+        );
+        let mut ir = analyze_air(&code);
+        let mut changed = false;
+        for component in &mut ir.components {
+            let air::Component::Module(module) = component else {
+                continue;
+            };
+            for declaration in &mut module.declarations {
+                let air::Declaration::Comb(comb) = declaration else {
+                    continue;
+                };
+                for statement in &mut comb.statements {
+                    let call = match statement {
+                        air::Statement::FunctionCall(call) => Some(call.as_mut()),
+                        air::Statement::Assign(assign) => match &mut assign.expr {
+                            air::Expression::Term(factor) => match factor.as_mut() {
+                                air::Factor::FunctionCall(call) => Some(call),
+                                _ => None,
+                            },
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    if let Some(call) = call {
+                        // Malformed AIR can reach lowering independently of
+                        // the source analyzer's receiver validation.
+                        call.receiver_index.0.push(call.receiver_index.0[0].clone());
+                        changed = true;
+                    }
+                }
+            }
+        }
+        assert!(changed);
+        assert!(matches!(
+            build_ir(&ir, "Top".into(), &Config::default()),
+            Err(SimulatorError::UnresolvedExpression { .. })
+        ));
+    }
+}
+
+#[test]
+fn interface_array_function_can_call_itself_in_receiver_expression() {
+    let code = r#"
+        interface Bus {
+            var value: logic;
+            function get () -> logic { return value; }
+        }
+        module Top (i: input logic, o: output logic) {
+            inst bus: Bus[2];
+            assign bus[0].value = i;
+            assign bus[1].value = 1;
+            assign o = bus[bus[0].get()].get();
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for input in [0, 1, 0] {
+            sim.set("i", Value::new(input, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("o").unwrap(), Value::new(input, 1, false));
+        }
+    }
+}
+
+#[test]
+fn function_can_call_itself_in_argument_expression() {
+    let code = r#"
+        module Top (i: input logic<8>, o: output logic<8>) {
+            function increment (x: input logic<8>) -> logic<8> { return x + 1; }
+            assign o = increment(increment(i));
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for input in [0, 3, 253] {
+            sim.set("i", Value::new(input, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("o").unwrap(), Value::new(input + 2, 8, false));
+        }
+    }
+}
+
+#[test]
+fn interface_array_function_recursive_body_is_still_rejected() {
+    let code = r#"
+        interface Bus {
+            var value: logic;
+            function get () -> logic { return value; }
+        }
+        module Top (i: input logic, o: output logic) {
+            inst bus: Bus[2];
+            assign bus[0].value = i;
+            assign bus[1].value = 1;
+            assign o = bus[0].get();
+        }
+    "#;
+    let mut ir = analyze_air(code);
+    let mut changed = false;
+    for component in &mut ir.components {
+        let air::Component::Module(module) = component else {
+            continue;
+        };
+        let call = module.declarations.iter().find_map(|declaration| {
+            let air::Declaration::Comb(comb) = declaration else {
+                return None;
+            };
+            comb.statements.iter().find_map(|statement| {
+                let air::Statement::Assign(assign) = statement else {
+                    return None;
+                };
+                let air::Expression::Term(factor) = &assign.expr else {
+                    return None;
+                };
+                let air::Factor::FunctionCall(call) = factor.as_ref() else {
+                    return None;
+                };
+                Some(call.clone())
+            })
+        });
+        if let Some(call) = call {
+            // Source recursion is rejected by the analyzer. Exercise the
+            // simulator's guard independently with a recursive AIR body.
+            let function = module.functions.get_mut(&call.id).unwrap();
+            function.functions[0]
+                .statements
+                .insert(0, air::Statement::FunctionCall(Box::new(call)));
+            changed = true;
+        }
+    }
+    assert!(changed);
+    assert!(matches!(
+        build_ir(&ir, "Top".into(), &Config::default()),
+        Err(SimulatorError::RecursiveFunction { .. })
+    ));
 }

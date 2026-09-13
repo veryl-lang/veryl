@@ -218,6 +218,8 @@ pub(crate) struct ConvContext {
     pub ffs: Vec<FfCell>,
     pub nets: Vec<NetInfo>,
     pub variables: HashMap<air::VarId, VarSlot>,
+    /// Starts after the module's variables; shared by nested call expansions.
+    pub next_temporary_id: air::VarId,
     pub ff_allocation: HashMap<air::VarId, PreFf>,
     /// User functions, for inline expansion at call sites. Cloned (not borrowed)
     /// because the module borrow wouldn't survive recursive child conversion.
@@ -273,6 +275,7 @@ impl ConvContext {
             ffs: Vec::new(),
             nets,
             variables: HashMap::new(),
+            next_temporary_id: air::VarId::default(),
             ff_allocation: HashMap::new(),
             functions,
             eval_ctx: veryl_analyzer::Context::default(),
@@ -348,6 +351,10 @@ impl ConvContext {
         // Deterministic net numbering simplifies diffing dump output.
         let mut vars: Vec<&air::Variable> = module.variables.values().collect();
         vars.sort_by_key(|v| v.id);
+        if let Some(last) = vars.last() {
+            self.next_temporary_id = last.id;
+            self.next_temporary_id.inc();
+        }
         // Seed scalar params/consts so a param-indexed select (`count[FIFO_W]`)
         // folds. Only genuine constants — a signal's undriven `x` init would
         // otherwise be read as one. Arrays skipped: a select index is scalar.
