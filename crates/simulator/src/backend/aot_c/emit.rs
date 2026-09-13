@@ -7573,9 +7573,13 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     return None;
                 }
                 if a.dst_width > 64 {
-                    // A static bit-select / rhs_select / sign-extend combined
-                    // with the dynamic index isn't modelled here — bail those.
-                    if a.select.is_some() || eff_rhs_select.is_some() || se_from.is_some() {
+                    // `a.select` is DEAD on this shape: `eval_step` takes the
+                    // dynamic_select arm and never reads it (the two are
+                    // `if`/`else if`), so the window alone places the field.
+                    // Declining on it took the whole comb list to Cranelift.
+                    // `rhs_select` does shape the value and is applied below;
+                    // a sign-extending store still declines.
+                    if se_from.is_some() {
                         return None;
                     }
                     let ew = dyn_sel.elem_width;
@@ -7601,7 +7605,19 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     // emit_wide_narrow_field_store, byte-identical to it.
                     if win <= 64 {
                         let mut pre = String::new();
-                        let sv = wide_shift_amount(eff_expr, &mut pre)?;
+                        // `rhs_select` picks the field the reference takes with
+                        // `value.select(beg, end)` before the window write.
+                        let sv = match eff_rhs_select {
+                            Some((rhs_hi, rhs_lo)) => {
+                                let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
+                                if nbits > 64 {
+                                    return None;
+                                }
+                                let f = emit_wide_rhs_field(eff_expr, rhs_hi, rhs_lo, &mut pre)?;
+                                format!("((const veryl_u64_ua*)({}))[0]", f.addr)
+                            }
+                            None => wide_shift_amount(eff_expr, &mut pre)?,
+                        };
                         let wm: u64 = if win == 64 {
                             u64::MAX
                         } else {
@@ -7626,6 +7642,12 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                                 }} }}",
                             dw = a.dst_width,
                         ));
+                    }
+                    // A window wider than 64 bits with an rhs_select would need
+                    // the field materialized at nb bytes, not just its low
+                    // word; leave that shape to Cranelift until a design asks.
+                    if eff_rhs_select.is_some() {
+                        return None;
                     }
                     let mut pre = String::new();
                     // rhs value (masked to `win` below) as an nb-byte buffer.
@@ -8064,9 +8086,32 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                         lo = lo,
                     ));
                 }
-                // A full-width [63:0] select on a 64-bit dst is a plain store;
-                // the single-u64 mask math below would overflow (`1u64 << 64`).
-                if nbits == 64 && lo == 0 {
+                // A select that covers the whole destination is a plain store:
+                // `Value::assign` intersects the field with `gen_mask(width)`,
+                // so a `beg` past the top writes every bit and nothing else,
+                // which a real design does carry.  It also keeps a 64-bit
+                // field away from the masked-store math below, which works in
+                // a single u64 and would overflow on one (`1u64 << 64`).
+                if lo == 0 && nbits >= a.dst_width {
+                    // The store writes the whole native word, so the bits above
+                    // the declared width come from the rhs. Every other store
+                    // path masks them off, and the loads rely on it: a full load
+                    // is reported clean because storage is canonical.
+                    //
+                    // One u64 holds the mask: a destination wider than 64 bits
+                    // has returned above, so `dst_width` is 63 or less here.
+                    let native_bits = nb * 8;
+                    if a.dst_width > 0 && a.dst_width < native_bits && !rhs_clean {
+                        let mask = (1u64 << a.dst_width) - 1;
+                        return Some(format!(
+                            "*(({ct}*)({b} + {o:#x})) = ({ct})(((uint64_t)({rhs})) & 0x{m:x}ULL);",
+                            ct = cty,
+                            b = buf,
+                            o = store_off,
+                            rhs = rhs_str,
+                            m = mask,
+                        ));
+                    }
                     return Some(format!(
                         "*(({ct}*)({b} + {o:#x})) = ({ct})({rhs});",
                         ct = cty,
@@ -10153,7 +10198,26 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     ));
                 }
             }
-            for (sub, repeat, elem_width) in elements {
+            // Bits each element sits above: `Value::concat` appends every
+            // element in full and the consumer truncates to `width`, so an
+            // element reaching past the top keeps only its low part.  Walking
+            // right-to-left gives the count below each one, which clips the
+            // slot so the shift stays representable, which a concatenation of
+            // a variable far wider than its result needs.
+            let mut below_of: Vec<usize> = vec![0; elements.len()];
+            {
+                let mut below = 0usize;
+                for (i, (sub, repeat, elem_width)) in elements.iter().enumerate().rev() {
+                    below_of[i] = below;
+                    let w = if sub.width() == 0 {
+                        *elem_width
+                    } else {
+                        sub.width()
+                    };
+                    below = below.saturating_add(w.saturating_mul(*repeat));
+                }
+            }
+            for (i, (sub, repeat, elem_width)) in elements.iter().enumerate() {
                 if concat_elem_is_empty(sub, *repeat) {
                     continue;
                 }
@@ -10164,6 +10228,18 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 } else {
                     sub.width()
                 };
+                let below = below_of[i];
+                if below >= *width {
+                    // Entirely above the result: contributes nothing.
+                    continue;
+                }
+                let room = *width - below;
+                if room < sub_width && *repeat > 1 {
+                    // Each repeat would clip at a different offset; that is not
+                    // what the loop below emits.  Leave it to Cranelift.
+                    return None;
+                }
+                let sub_width = sub_width.min(room);
                 if sub_width == 0 || sub_width > 128 {
                     return None;
                 }
@@ -11187,6 +11263,72 @@ mod tests {
         let src = emit_event_function(&[ProtoStatement::Assign(a)], false, &[])
             .expect("a full-width select must emit");
         assert!(src.contains("0xffffffffffffffffULL"), "{src}");
+    }
+
+    #[test]
+    fn a_select_that_covers_the_whole_destination_masks_a_dirty_rhs() {
+        // `Value::assign` intersects the field with the destination's width, so
+        // a select whose top is past it writes every bit and nothing else: a
+        // plain store, not the read-modify-write below it.  The bits above the
+        // declared width still have to go, or a later full-width load -- which
+        // is reported clean because storage is canonical -- reads the rhs's own.
+        let assign = |expr: ProtoExpression| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0x40),
+                dst_width: 12,
+                select: Some((15, 0)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr,
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            })
+        };
+        // A 16-bit read carries four bits the destination does not.
+        let dirty = emit_stmt(&assign(var_expr(VarOffset::Comb(0), 16))).expect("must emit");
+        assert!(dirty.contains("0xfffULL"), "{dirty}");
+        assert!(
+            !dirty.contains("_o"),
+            "a covering select is not an RMW: {dirty}"
+        );
+        // A value already inside the width needs no mask.
+        let clean = emit_stmt(&assign(const_expr(0xa, 12))).expect("must emit");
+        assert!(!clean.contains("0xfffULL"), "{clean}");
+    }
+
+    #[test]
+    fn a_concat_element_wider_than_the_result_keeps_its_low_part() {
+        // `Value::concat` appends every element in full and the consumer
+        // truncates, so an element reaching past the top contributes only the
+        // bits under it.  Sizing its slot at the declared width instead put a
+        // shift of more than 128 in front of the emitter, which declined and
+        // took the whole comb list to Cranelift.  An unsized fill is where a
+        // slot outruns the result: it carries no width of its own, so the
+        // declared one is all there is.
+        let e = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(const_expr(1, 0)), 1, 192),
+                (Box::new(var_expr(VarOffset::Comb(0x40), 8)), 1, 8),
+            ],
+            width: 64,
+            expr_context: ctx(64, false),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0x80),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: e,
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        });
+        assert!(
+            emit_function(&[assign]).is_some(),
+            "a slot wider than the result must stay AOT-covered"
+        );
     }
 
     #[test]
