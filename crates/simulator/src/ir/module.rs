@@ -2803,6 +2803,7 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
                 rhs_select: None,
                 expr: (**expr).clone(),
                 dst_ff_current_offset: a.dst_ff_current_offset,
+                comb_direct: a.comb_direct,
                 token: a.token,
             }));
             hi = lo;
@@ -3185,6 +3186,7 @@ fn split_one_copy(
             rhs_select: None,
             expr,
             dst_ff_current_offset: a.dst_ff_current_offset,
+            comb_direct: a.comb_direct,
             token: a.token,
         }));
     }
@@ -5292,6 +5294,7 @@ fn cond_hoist_transform(stmts: &mut Vec<ProtoStatement>, context: &mut Context) 
                     rhs_select: None,
                     expr: cond_expr,
                     dst_ff_current_offset: 0,
+                    comb_direct: false,
                     token: TokenRange::default(),
                 });
                 let new_cond = PE::Variable {
@@ -7294,6 +7297,7 @@ fn rename_versions(
                     },
                 },
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: stmts[p.after].token().unwrap_or_default(),
             }));
     }
@@ -7519,6 +7523,7 @@ mod event_written_comb_tests {
             rhs_select: None,
             expr: lit(0, w),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: TokenRange::default(),
         })
     }
@@ -7535,6 +7540,7 @@ mod event_written_comb_tests {
             rhs_select: None,
             expr: lit(0, 32),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         })
     }
 

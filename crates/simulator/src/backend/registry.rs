@@ -514,6 +514,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: -1,
+            comb_direct: false,
             token: TokenRange::default(),
         })
     }

@@ -6181,6 +6181,12 @@ fn split_entry_function(
 /// directly; FF-target writes push WriteLogEntries like the event path.
 pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     reset_wide_tmp();
+    // A comb list can carry FF-target assigns (the comb-to-ff hoist), and each
+    // emits an UNCHECKED write-log push: the push code is unchecked because an
+    // entry prologue is supposed to have reserved the room.  Count them the way
+    // the event path does, so the prologue below can.
+    EVENT_NARROW_PUSHES.with(|c| c.set(0));
+    EVENT_WIDE_PUSHES.with(|c| c.set(0));
     // Splitting the monolithic body into ~chunk_size-stmt static functions
     // gives gcc -O3 smaller register-allocation and stack-frame scopes per
     // chunk and bounds spill locality (the unsplit body regresses L1d
@@ -6573,12 +6579,24 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         );
     }
 
+    // Every entry this module exports reserves the whole body's worst case:
+    // each is a way in to code whose pushes are unchecked, and a run-once
+    // entry only ever over-reserves.  `> u32::MAX` pushes cannot be reserved
+    // in one call, so bail to Cranelift (which checks per push) rather than
+    // under-reserve -- the event path makes the same choice.
+    let reserve_prologue = {
+        let narrow = u32::try_from(EVENT_NARROW_PUSHES.with(|c| c.get())).ok()?;
+        let wide = u32::try_from(EVENT_WIDE_PUSHES.with(|c| c.get())).ok()?;
+        emit_reserve_prologue(narrow, wide)
+    };
+
     if chunks.len() == 1 && const_chunks == 0 && cone_segments.is_empty() {
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
              \x20   (void)write_log;\n",
         );
+        body.push_str(&reserve_prologue);
         body.push_str(&chunk_bodies[0]);
         body.push_str("}\n");
     } else {
@@ -6604,6 +6622,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 "__attribute__((visibility(\"default\")))\n\
                  void veryl_aot_eval_const(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
             );
+            body.push_str(&reserve_prologue);
             for i in 0..const_chunks {
                 body.push_str(&format!(
                     "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
@@ -7022,7 +7041,10 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             .map(|&(_, _, s)| s.state_off)
             .chain(egroups.iter().map(|eg| eg.state_off))
             .collect();
-        let entry_preamble = cone_gate_rearm_preamble(&state_offs, rearm_mask);
+        let entry_preamble = format!(
+            "{reserve_prologue}{}",
+            cone_gate_rearm_preamble(&state_offs, rearm_mask)
+        );
         body.push_str(&split_entry_function(
             &entry_prologue,
             &entry_preamble,
@@ -7536,7 +7558,10 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // refinement can land an FF write here (e.g. function output args).
             // emit_event_ff_assign returns None on uncovered patterns, safely
             // bailing the module to Cranelift.
-            if a.dst.is_ff() {
+            // `comb_direct` is a combinational write that merely lands in
+            // ff_values: it must NOT be logged, so it takes the plain store
+            // path below with `ff_values` as its buffer.
+            if a.dst.is_ff() && !a.comb_direct {
                 return emit_event_ff_assign(a, se_from);
             }
             // A runtime-indexed bit-slice store. A ≤64-bit dst is the scalar
@@ -7548,9 +7573,13 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     return None;
                 }
                 if a.dst_width > 64 {
-                    // A static bit-select / rhs_select / sign-extend combined
-                    // with the dynamic index isn't modelled here — bail those.
-                    if a.select.is_some() || eff_rhs_select.is_some() || se_from.is_some() {
+                    // `a.select` is DEAD on this shape: `eval_step` takes the
+                    // dynamic_select arm and never reads it (the two are
+                    // `if`/`else if`), so the window alone places the field.
+                    // Declining on it took the whole comb list to Cranelift.
+                    // `rhs_select` does shape the value and is applied below;
+                    // a sign-extending store still declines.
+                    if se_from.is_some() {
                         return None;
                     }
                     let ew = dyn_sel.elem_width;
@@ -7576,7 +7605,19 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     // emit_wide_narrow_field_store, byte-identical to it.
                     if win <= 64 {
                         let mut pre = String::new();
-                        let sv = wide_shift_amount(eff_expr, &mut pre)?;
+                        // `rhs_select` picks the field the reference takes with
+                        // `value.select(beg, end)` before the window write.
+                        let sv = match eff_rhs_select {
+                            Some((rhs_hi, rhs_lo)) => {
+                                let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
+                                if nbits > 64 {
+                                    return None;
+                                }
+                                let f = emit_wide_rhs_field(eff_expr, rhs_hi, rhs_lo, &mut pre)?;
+                                format!("((const veryl_u64_ua*)({}))[0]", f.addr)
+                            }
+                            None => wide_shift_amount(eff_expr, &mut pre)?,
+                        };
                         let wm: u64 = if win == 64 {
                             u64::MAX
                         } else {
@@ -7602,6 +7643,12 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                             dw = a.dst_width,
                         ));
                     }
+                    // A window wider than 64 bits with an rhs_select would need
+                    // the field materialized at nb bytes, not just its low
+                    // word; leave that shape to Cranelift until a design asks.
+                    if eff_rhs_select.is_some() {
+                        return None;
+                    }
                     let mut pre = String::new();
                     // rhs value (masked to `win` below) as an nb-byte buffer.
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
@@ -7625,15 +7672,22 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // rhs_select (field extract + store); the rhs_select + dst-select
             // combination stays on Cranelift.
             if a.dst_width > 128 || (a.dst_width > 64 && eff_expr.builds_wide_pointer()) {
-                let VarOffset::Comb(store_off) = a.dst else {
-                    return None;
+                // Same destination rule as the scalar store below: a
+                // `comb_direct` write is combinational but lands in
+                // ff_values, and must not be logged.  Without the FF arm a
+                // wide write of that kind declines here and takes the whole
+                // comb list to Cranelift with it.
+                let (dst_buf, store_off) = match a.dst {
+                    VarOffset::Comb(o) => ("comb_values", o),
+                    VarOffset::Ff(o) if a.comb_direct => ("ff_values", o),
+                    VarOffset::Ff(_) => return None,
                 };
                 if store_off < 0 {
                     return None;
                 }
                 let nb = native_bytes(a.dst_width);
                 let nw = wide_words(nb);
-                let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
+                let dst = format!("(uint8_t*)({dst_buf} + {store_off:#x})");
                 let dmask = wpack(nb, a.dst_width);
                 // Non-foldable rhs_select (rhs isn't a plain variable):
                 // extract `value.select(rhs_hi, rhs_lo)` from the wide RHS,
@@ -7694,7 +7748,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                             None,
                             |k| {
                                 format!(
-                                    "(veryl_u64_ua*)(comb_values + {:#x})",
+                                    "(veryl_u64_ua*)({dst_buf} + {:#x})",
                                     store_off + (k as isize) * 8
                                 )
                             },
@@ -7939,12 +7993,13 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     }
                 }
             };
-            // FF targets returned via emit_event_ff_assign above, so the
-            // destination here is always comb.
-            let VarOffset::Comb(store_off) = a.dst else {
-                return None;
+            // FF targets returned via emit_event_ff_assign above unless they
+            // are `comb_direct`, which stores straight into ff_values.
+            let (buf, store_off) = match a.dst {
+                VarOffset::Comb(o) => ("comb_values", o),
+                VarOffset::Ff(o) if a.comb_direct => ("ff_values", o),
+                VarOffset::Ff(_) => return None,
             };
-            let buf = "comb_values";
             // Clean-store elision (see expr_emits_clean): the stores below
             // re-mask to dst_width only to canonicalize a dirty RHS.  Only
             // the bare form qualifies — a sign-extending store dirties
@@ -8031,9 +8086,32 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                         lo = lo,
                     ));
                 }
-                // A full-width [63:0] select on a 64-bit dst is a plain store;
-                // the single-u64 mask math below would overflow (`1u64 << 64`).
-                if nbits == 64 && lo == 0 {
+                // A select that covers the whole destination is a plain store:
+                // `Value::assign` intersects the field with `gen_mask(width)`,
+                // so a `beg` past the top writes every bit and nothing else,
+                // which a real design does carry.  It also keeps a 64-bit
+                // field away from the masked-store math below, which works in
+                // a single u64 and would overflow on one (`1u64 << 64`).
+                if lo == 0 && nbits >= a.dst_width {
+                    // The store writes the whole native word, so the bits above
+                    // the declared width come from the rhs. Every other store
+                    // path masks them off, and the loads rely on it: a full load
+                    // is reported clean because storage is canonical.
+                    //
+                    // One u64 holds the mask: a destination wider than 64 bits
+                    // has returned above, so `dst_width` is 63 or less here.
+                    let native_bits = nb * 8;
+                    if a.dst_width > 0 && a.dst_width < native_bits && !rhs_clean {
+                        let mask = (1u64 << a.dst_width) - 1;
+                        return Some(format!(
+                            "*(({ct}*)({b} + {o:#x})) = ({ct})(((uint64_t)({rhs})) & 0x{m:x}ULL);",
+                            ct = cty,
+                            b = buf,
+                            o = store_off,
+                            rhs = rhs_str,
+                            m = mask,
+                        ));
+                    }
                     return Some(format!(
                         "*(({ct}*)({b} + {o:#x})) = ({ct})({rhs});",
                         ct = cty,
@@ -8176,8 +8254,10 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 return None;
             }
             // Event-path dynamic FF write (e.g. register file by rd index):
-            // direct element store + WriteLogEntry push.
-            if event_mode() && a.dst_base.is_ff() {
+            // direct element store + WriteLogEntry push. A combinational write
+            // that happens to land in FF storage takes neither: it stores
+            // directly and pushes nothing, so it falls back below.
+            if event_mode() && a.dst_base.is_ff() && !a.comb_direct {
                 return emit_event_ff_assign_dynamic(a);
             }
             // Mirror ProtoAssignDynamicStatement::eval_step (comb target).
@@ -10118,7 +10198,26 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     ));
                 }
             }
-            for (sub, repeat, elem_width) in elements {
+            // Bits each element sits above: `Value::concat` appends every
+            // element in full and the consumer truncates to `width`, so an
+            // element reaching past the top keeps only its low part.  Walking
+            // right-to-left gives the count below each one, which clips the
+            // slot so the shift stays representable, which a concatenation of
+            // a variable far wider than its result needs.
+            let mut below_of: Vec<usize> = vec![0; elements.len()];
+            {
+                let mut below = 0usize;
+                for (i, (sub, repeat, elem_width)) in elements.iter().enumerate().rev() {
+                    below_of[i] = below;
+                    let w = if sub.width() == 0 {
+                        *elem_width
+                    } else {
+                        sub.width()
+                    };
+                    below = below.saturating_add(w.saturating_mul(*repeat));
+                }
+            }
+            for (i, (sub, repeat, elem_width)) in elements.iter().enumerate() {
                 if concat_elem_is_empty(sub, *repeat) {
                     continue;
                 }
@@ -10129,6 +10228,18 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 } else {
                     sub.width()
                 };
+                let below = below_of[i];
+                if below >= *width {
+                    // Entirely above the result: contributes nothing.
+                    continue;
+                }
+                let room = *width - below;
+                if room < sub_width && *repeat > 1 {
+                    // Each repeat would clip at a different offset; that is not
+                    // what the loop below emits.  Leave it to Cranelift.
+                    return None;
+                }
+                let sub_width = sub_width.min(room);
                 if sub_width == 0 || sub_width > 128 {
                     return None;
                 }
@@ -10830,6 +10941,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 4),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10897,6 +11009,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xdeadbeef, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10922,6 +11035,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 64),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10941,6 +11055,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10978,6 +11093,7 @@ mod tests {
             rhs_select: None,
             expr: signed_var_expr(VarOffset::Comb(0x8), 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11001,6 +11117,7 @@ mod tests {
             rhs_select: None,
             expr: signed_var_expr(VarOffset::Comb(0x8), 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11024,6 +11141,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 4),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11047,6 +11165,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xf, 4),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11138,11 +11257,122 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x0123_4567_89ab_cdef, 64),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_event_function(&[ProtoStatement::Assign(a)], false, &[])
             .expect("a full-width select must emit");
         assert!(src.contains("0xffffffffffffffffULL"), "{src}");
+    }
+
+    #[test]
+    fn a_select_that_covers_the_whole_destination_masks_a_dirty_rhs() {
+        // `Value::assign` intersects the field with the destination's width, so
+        // a select whose top is past it writes every bit and nothing else: a
+        // plain store, not the read-modify-write below it.  The bits above the
+        // declared width still have to go, or a later full-width load -- which
+        // is reported clean because storage is canonical -- reads the rhs's own.
+        let assign = |expr: ProtoExpression| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0x40),
+                dst_width: 12,
+                select: Some((15, 0)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr,
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            })
+        };
+        // A 16-bit read carries four bits the destination does not.
+        let dirty = emit_stmt(&assign(var_expr(VarOffset::Comb(0), 16))).expect("must emit");
+        assert!(dirty.contains("0xfffULL"), "{dirty}");
+        assert!(
+            !dirty.contains("_o"),
+            "a covering select is not an RMW: {dirty}"
+        );
+        // A value already inside the width needs no mask.
+        let clean = emit_stmt(&assign(const_expr(0xa, 12))).expect("must emit");
+        assert!(!clean.contains("0xfffULL"), "{clean}");
+    }
+
+    #[test]
+    fn a_concat_element_wider_than_the_result_keeps_its_low_part() {
+        // `Value::concat` appends every element in full and the consumer
+        // truncates, so an element reaching past the top contributes only the
+        // bits under it.  Sizing its slot at the declared width instead put a
+        // shift of more than 128 in front of the emitter, which declined and
+        // took the whole comb list to Cranelift.  An unsized fill is where a
+        // slot outruns the result: it carries no width of its own, so the
+        // declared one is all there is.
+        let e = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(const_expr(1, 0)), 1, 192),
+                (Box::new(var_expr(VarOffset::Comb(0x40), 8)), 1, 8),
+            ],
+            width: 64,
+            expr_context: ctx(64, false),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0x80),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: e,
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        });
+        assert!(
+            emit_function(&[assign]).is_some(),
+            "a slot wider than the result must stay AOT-covered"
+        );
+    }
+
+    #[test]
+    fn comb_entry_reserves_the_room_its_own_pushes_need() {
+        // A comb list can carry an FF-target assign, and that emits a write-log
+        // push. The push is UNCHECKED: it assumes an entry prologue already
+        // reserved the room. The comb entry emitted no prologue at all, so the
+        // pushes ran past the pool and corrupted the heap.
+        let ff = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 64),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(ff)]).expect("an FF store must emit");
+        assert!(
+            src.contains(")(_lb, 1u, 0u)"),
+            "the comb entry must reserve for the one narrow push its body makes: {src}"
+        );
+
+        // The control: a comb-only body pushes nothing, so it must carry NO
+        // reserve. Without this the assertion above would also pass on a
+        // prologue emitted unconditionally, which would hide a miscount.
+        let comb = ProtoAssignStatement {
+            dst: VarOffset::Comb(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 64),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(comb)]).expect("a comb store must emit");
+        assert!(
+            !src.contains(")(_lb, "),
+            "a body with no push must not reserve: {src}"
+        );
     }
 
     #[test]
@@ -11161,6 +11391,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a.clone())).expect("wide field store must emit");
@@ -11222,6 +11453,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11264,6 +11496,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xff, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11295,6 +11528,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(0x1234_5678_9abc_def0, 64),
                     dst_ff_current_offset: i * 8,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -11343,6 +11577,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xff, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11367,6 +11602,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let if_stmt = ProtoIfStatement {
@@ -11397,6 +11633,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xabc, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let if_stmt = ProtoIfStatement {
@@ -11422,6 +11659,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(i as u64, 32),
                     dst_ff_current_offset: 0,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -11509,6 +11747,7 @@ mod tests {
             rhs_select: None,
             expr: src,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         assert!(
@@ -11570,6 +11809,7 @@ mod tests {
             rhs_select: None,
             expr: var_expr_signed(VarOffset::Comb(0), 100),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         // -6 in 100-bit two's complement.
@@ -11603,6 +11843,7 @@ mod tests {
             rhs_select: None,
             expr: var_expr_signed(VarOffset::Comb(0), 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let Some(dst) = run_wide_field_store(assign, "wsx_single", 0xfb) else {
@@ -11654,6 +11895,7 @@ mod tests {
             rhs_select: None,
             expr: e,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("a zero-repeat element must stay AOT-covered");
@@ -11760,6 +12002,7 @@ mod tests {
             rhs_select: None,
             expr: add,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
@@ -11815,6 +12058,7 @@ mod tests {
             rhs_select: None,
             expr: add,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
@@ -11870,6 +12114,7 @@ mod tests {
             rhs_select: None,
             expr: mul,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("66-bit product must stay AOT-covered");
@@ -11913,6 +12158,7 @@ mod tests {
             rhs_select: None,
             expr: mul,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit product must stay AOT-covered");
@@ -11962,6 +12208,7 @@ mod tests {
             rhs_select: None,
             expr: concat,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12140,6 +12387,7 @@ mod tests {
                 rhs_select: rsel,
                 expr: slice(),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12218,6 +12466,7 @@ mod tests {
             rhs_select: Some((159, 32)),
             expr: or192,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12317,6 +12566,7 @@ mod tests {
                 expr_context: ctx(192, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src_txt = emit_function(&[stmt]).expect("must stay AOT-covered");
@@ -12379,6 +12629,7 @@ mod tests {
                 rhs_select: Some((150, 125)),
                 expr: or192(),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12463,6 +12714,7 @@ mod tests {
             rhs_select: None,
             expr: and192,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12533,6 +12785,7 @@ mod tests {
                 rhs_select: None,
                 expr: e,
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12665,6 +12918,7 @@ mod tests {
                 rhs_select: None,
                 expr: e,
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -13156,6 +13410,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xab, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         emit_stmt(&ProtoStatement::Assign(a)).unwrap()
@@ -13192,6 +13447,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13213,6 +13469,7 @@ mod tests {
                 expr_context: ctx(hi - lo + 1, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13271,6 +13528,7 @@ mod tests {
                 expr_context: ctx(32, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13476,6 +13734,7 @@ mod tests {
                 expr_context: ctx(1, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let mut stmts = vec![bit_store(0x40, 8), self_read];
@@ -13502,6 +13761,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(((b % 2) == 0) as u64, 1),
                     dst_ff_current_offset: 0,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -13627,6 +13887,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xdeadbeef, 32),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         };
         let s = emit_stmt(&ProtoStatement::AssignDynamic(a)).unwrap();
         assert!(s.contains("_idx_raw"));
@@ -13651,6 +13912,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0, 32),
             dst_ff_current_base_offset: 0x40,
+            comb_direct: false,
         };
         assert!(emit_stmt(&ProtoStatement::AssignDynamic(a)).is_none());
     }
@@ -13670,6 +13932,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1111, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let inner_b = ProtoStatement::Assign(ProtoAssignStatement {
@@ -13680,6 +13943,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x2222, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let cb = CompiledBlockStatement {
@@ -13714,6 +13978,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xabc, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let cb = CompiledBlockStatement {
@@ -14026,6 +14291,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let for_stmt = ProtoForStatement {
@@ -14214,6 +14480,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(7, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).unwrap();
@@ -14464,6 +14731,7 @@ mod tests {
             rhs_select: None,
             expr: dyn_read,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(assign)]).unwrap();
@@ -14882,6 +15150,7 @@ mod tests {
             rhs_select: None,
             expr: rhs,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -15220,6 +15489,7 @@ mod tests {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -15236,6 +15506,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0, 32),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         })
     }
 
@@ -15402,6 +15673,7 @@ mod tests {
                 rhs_select: None,
                 expr: var_expr(VarOffset::Ff(0), 16),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             }),
             cassign(0x20, 32, var_expr(VarOffset::Ff(8), 32)),
@@ -15413,6 +15685,7 @@ mod tests {
                 rhs_select: None,
                 expr: var_expr(VarOffset::Ff(2), 16),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             }),
         ];
@@ -15687,6 +15960,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let narrow = || ProtoAssignStatement {
@@ -15697,6 +15971,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 32),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let emit = |a: ProtoAssignStatement, clock: bool| {
@@ -15725,6 +16000,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_event_function(&[ProtoStatement::Assign(a)], true, &[]).expect("must emit");
@@ -15759,6 +16035,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let gate = EventGate {
@@ -15834,6 +16111,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 32),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let gate = EventGate {
