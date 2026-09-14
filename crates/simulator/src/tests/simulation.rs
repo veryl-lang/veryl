@@ -27923,3 +27923,155 @@ fn msb_after_member_access_of_array_element() {
         );
     }
 }
+
+#[test]
+fn a_parameter_override_is_converted_to_the_declared_type() {
+    // IEEE 1800-2023 23.10: an override is converted to the parameter's
+    // DECLARED type, so a wider value keeps only the low bits. The parameter's
+    // own variable was already fitted, so the wrapper read correctly; what was
+    // stored for the next level down was not, and the child -- which declares
+    // the parameter wide -- got the untruncated value whole.
+    //
+    // The emitted SystemVerilog prints `def0` under every reference simulator
+    // this port is checked against.
+    let code = r#"
+    module Child #(
+        param P: logic<64> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        assign o = P;
+    }
+    module Wrap #(
+        param P: logic<16> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        inst u: Child #( P: P ) ( o: o );
+    }
+    module WideWrap #(
+        param P: logic<64> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        inst u: Child #( P: P ) ( o: o );
+    }
+    module Top (
+        o: output logic<64>,
+        w: output logic<64>,
+    ) {
+        inst u : Wrap     #( P: 64'h123456789abcdef0 ) ( o: o );
+        inst uw: WideWrap #( P: 64'h123456789abcdef0 ) ( o: w );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xdef0, 64, false));
+        // The control: a wrapper wide enough to hold the value must still
+        // pass all of it down, so the fix cannot be "truncate everything".
+        assert_eq!(
+            sim.get("w").unwrap(),
+            Value::new(0x123456789abcdef0, 64, false)
+        );
+    }
+}
+
+#[test]
+fn a_string_parameter_survives_being_passed_down() {
+    // `TypeKind::width` answers `Some(1)` for `string`, which is in the
+    // widthless bucket, so a conversion driven by the presence of a width
+    // rather than by `is_bit_sized` fits the text to one bit and loses it.
+    let code = r#"
+    module Leaf #(
+        param S: string = "",
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = if S == "nonempty" ? 8'ha5 : 8'h00;
+    }
+    module Wrap #(
+        param S: string = "",
+    ) (
+        o: output logic<8>,
+    ) {
+        inst u: Leaf #( S: S ) ( o: o );
+    }
+    module Top (
+        trig: input  logic<8>,
+        o   : output logic<8>,
+    ) {
+        var inner: logic<8>;
+        inst u: Wrap #( S: "nonempty" ) ( o: inner );
+        assign o = inner | trig;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("trig", Value::new(0, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xa5, 8, false));
+    }
+}
+
+#[test]
+fn a_parameter_override_reaches_a_module_through_an_alias() {
+    // `get_overridden_params` resolved each parameter name in the namespace of
+    // the symbol the instantiation names -- for an `alias module` that is the
+    // ALIAS's namespace, where the parameters do not live. The loop skips a
+    // name it cannot resolve, so every override through an alias was dropped
+    // in SILENCE: no diagnostic, and the child ran at its default.
+    //
+    // The direct instantiation is the control; both must read 31.
+    let code = r#"
+    module Leaf #(
+        param V: u32 = 0,
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = V as 8;
+    }
+    alias module LeafAlias = Leaf;
+    // A second parameter whose WIDTH names the first, overridden in the
+    // opposite order to the declaration: binding order comes from the
+    // component's parameter list, which is empty for an alias, so this is
+    // where the alias's own `get_parameters` shows.
+    module Wide #(
+        param W: u32       = 8,
+        param M: logic<W>  = 0,
+    ) (
+        o: output logic<16>,
+    ) {
+        assign o = M as 16;
+    }
+    alias module WideAlias = Wide;
+    module Top (
+        direct: output logic<8> ,
+        viaal : output logic<8> ,
+        wdir  : output logic<16>,
+        walias: output logic<16>,
+    ) {
+        inst ud: Leaf      #( V: 31 ) ( o: direct );
+        inst ua: LeafAlias #( V: 31 ) ( o: viaal  );
+        inst uw: Wide      #( M: 16'habc, W: 16 ) ( o: wdir   );
+        inst uv: WideAlias #( M: 16'habc, W: 16 ) ( o: walias );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("direct").unwrap(), Value::new(31, 8, false));
+        assert_eq!(sim.get("viaal").unwrap(), Value::new(31, 8, false));
+        assert_eq!(sim.get("wdir").unwrap(), Value::new(0xabc, 16, false));
+        assert_eq!(sim.get("walias").unwrap(), Value::new(0xabc, 16, false));
+    }
+}

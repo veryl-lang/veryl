@@ -379,6 +379,17 @@ impl ValueVariant {
         }
     }
 
+    /// Drop the bits above `width`. Narrower values are left alone: a
+    /// parameter's use site sizes them, and widening here would change what
+    /// every existing override means.
+    pub fn trunc_value(&mut self, width: usize) {
+        if let ValueVariant::Numeric(x) = self
+            && x.width() > width
+        {
+            x.trunc(width);
+        }
+    }
+
     pub fn is_unknown(&self) -> bool {
         matches!(self, ValueVariant::Unknown)
     }
@@ -1001,6 +1012,39 @@ pub enum TypeKind {
 }
 
 impl TypeKind {
+    /// Whether `width()` is a real BIT width. It answers `Some(1)` for a
+    /// whole bucket of kinds that have no bit width at all -- `String`,
+    /// `F32`/`F64`, `Type`, a module or interface handle -- so anything that
+    /// resizes a value by it has to ask this first.
+    pub fn is_bit_sized(&self) -> bool {
+        match self {
+            TypeKind::Clock
+            | TypeKind::ClockPosedge
+            | TypeKind::ClockNegedge
+            | TypeKind::Reset
+            | TypeKind::ResetAsyncHigh
+            | TypeKind::ResetAsyncLow
+            | TypeKind::ResetSyncHigh
+            | TypeKind::ResetSyncLow
+            | TypeKind::Bit
+            | TypeKind::Logic => true,
+            TypeKind::Union(_) | TypeKind::Struct(_) | TypeKind::Enum(_) => true,
+            TypeKind::F32
+            | TypeKind::F64
+            | TypeKind::Type
+            | TypeKind::String
+            | TypeKind::Unknown
+            | TypeKind::SystemVerilog
+            | TypeKind::Module(_)
+            | TypeKind::Interface(_)
+            | TypeKind::Modport(_, _)
+            | TypeKind::Package(_)
+            | TypeKind::Instance(_, _)
+            | TypeKind::AbstractInterface(_)
+            | TypeKind::Void => false,
+        }
+    }
+
     pub fn width(&self) -> Option<usize> {
         match self {
             TypeKind::Clock

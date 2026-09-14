@@ -3705,6 +3705,30 @@ fn size_in_component_scope(
     ret
 }
 
+/// Follow `alias module` / `alias interface` to the symbol that declares the
+/// parameters. The chain is bounded the way the instantiation checker bounds
+/// it: a revisited symbol ends the walk rather than looping.
+fn resolve_alias_target(symbol: &Rc<Symbol>) -> Rc<Symbol> {
+    let mut current = Rc::clone(symbol);
+    let mut visited = vec![current.id];
+    loop {
+        let target = match &current.kind {
+            SymbolKind::AliasModule(x) => &x.target,
+            SymbolKind::AliasInterface(x) => &x.target,
+            _ => return current,
+        };
+        let path: SymbolPathNamespace = (&target.generic_path(), &current.namespace).into();
+        let Ok(resolved) = symbol_table::resolve(&path) else {
+            return current;
+        };
+        if visited.contains(&resolved.found.id) {
+            return current;
+        }
+        visited.push(resolved.found.id);
+        current = Rc::clone(&resolved.found);
+    }
+}
+
 pub fn get_overridden_params(
     context: &mut Context,
     arg: &ComponentInstantiation,
@@ -3712,7 +3736,13 @@ pub fn get_overridden_params(
     let token: TokenRange = arg.scoped_identifier.as_ref().into();
     let symbol =
         symbol_table::resolve(arg.scoped_identifier.as_ref()).map_err(|_| ir_error!(token))?;
-    let component_namespace = symbol.found.inner_namespace();
+    // An `alias module` has its own namespace, and the parameters live in the
+    // TARGET's. Resolving them in the alias's finds nothing, and the loop
+    // below skips what it cannot resolve -- so every override through an
+    // alias was dropped in silence. `get_parameters` is empty for an alias
+    // too, which would leave the declaration order below unknown.
+    let component = resolve_alias_target(&symbol.found);
+    let component_namespace = component.inner_namespace();
 
     let params: Vec<_> = if let Some(ref x) = arg.component_instantiation_opt1 {
         if let Some(x) = &x.inst_parameter.inst_parameter_opt {
@@ -3728,8 +3758,7 @@ pub fn get_overridden_params(
     // the values are bound in declaration order: by the time one is sized,
     // everything its width may legally name is already bound. An instantiation
     // may write them in any order.
-    let order: HashMap<StrId, usize> = symbol
-        .found
+    let order: HashMap<StrId, usize> = component
         .kind
         .get_parameters()
         .iter()
@@ -3802,6 +3831,27 @@ pub fn get_overridden_params(
                     UnevaluableValueKind::ParameterValue,
                     &token,
                 ));
+            }
+
+            // An override is converted to the parameter's DECLARED type
+            // (IEEE 1800-2023 23.10), so a wider value keeps only the low
+            // bits. The variable the parameter becomes is fitted on its own,
+            // which is why the wrapper reads correctly; what is stored here is
+            // what the next level down is handed, and an untruncated value
+            // there reaches a wider child parameter whole.
+            //
+            // `is_bit_sized` is the gate, not the presence of a width:
+            // `TypeKind::width` answers `Some(1)` for `string` as well, and
+            // fitting a `string` parameter to one bit loses the text.
+            if !is_type_param
+                && let Some(r#type) = &target_type
+                && r#type.kind.is_bit_sized()
+                && let Some(width) = r#type
+                    .total_width()
+                    .zip(r#type.total_array())
+                    .map(|(w, n)| w * n)
+            {
+                expr.0.value.trunc_value(width);
             }
 
             context.insert_override(VarPath::new(name), expr);
