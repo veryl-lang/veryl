@@ -27796,3 +27796,44 @@ fn msb_after_member_access_of_array_element() {
         );
     }
 }
+
+#[test]
+fn testbench_attribute_child_owns_tb_clock() {
+    // https://github.com/veryl-lang/veryl/issues/3272
+    // A #[testbench] child module may own a $tb::clock_gen; the test
+    // instantiates it and observes the counter it drives.
+    let code = r#"
+    #[testbench]
+    module m1 (
+        o_cnt: output logic<8>,
+    ) {
+        inst clk: $tb::clock_gen;
+        var cnt: logic<8>;
+        always_ff (clk) {
+            cnt = cnt + 1;
+        }
+        assign o_cnt = cnt;
+        initial {
+            clk.next(5);
+        }
+    }
+    #[test(t)]
+    module t {
+        var c: logic<8>;
+        inst dut: m1 (o_cnt: c);
+        initial {
+            $finish();
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "t")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        assert_eq!(
+            run_native_testbench(ir, None, module_name).unwrap(),
+            TestResult::Pass,
+            "config: {config:?}"
+        );
+    }
+}
