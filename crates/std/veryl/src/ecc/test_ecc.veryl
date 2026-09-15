@@ -79,10 +79,10 @@ module test_ecc_8 {
         }
 
         for i in 0..(CODE_WIDTH / 2) {
-            data[0]               = data_gen.get();
-            error                 = '0;
-            error[i]              = '1;
-            error[CODE_WIDTH - i] = '1;
+            data[0]                   = data_gen.get();
+            error                     = '0;
+            error[i]                  = '1;
+            error[CODE_WIDTH - 1 - i] = '1;
 
             u_clock.next();
             $assert(!corrected);
@@ -140,10 +140,10 @@ module test_ecc_16 {
         }
 
         for i in 0..(CODE_WIDTH / 2) {
-            data[0]               = data_gen.get();
-            error                 = '0;
-            error[i]              = '1;
-            error[CODE_WIDTH - i] = '1;
+            data[0]                   = data_gen.get();
+            error                     = '0;
+            error[i]                  = '1;
+            error[CODE_WIDTH - 1 - i] = '1;
 
             u_clock.next();
             $assert(!corrected);
@@ -201,10 +201,10 @@ module test_ecc_32 {
         }
 
         for i in 0..(CODE_WIDTH / 2) {
-            data[0]               = data_gen.get();
-            error                 = '0;
-            error[i]              = '1;
-            error[CODE_WIDTH - i] = '1;
+            data[0]                   = data_gen.get();
+            error                     = '0;
+            error[i]                  = '1;
+            error[CODE_WIDTH - 1 - i] = '1;
 
             u_clock.next();
             $assert(!corrected);
@@ -262,10 +262,10 @@ module test_ecc_64 {
         }
 
         for i in 0..(CODE_WIDTH / 2) {
-            data[0]               = data_gen.get();
-            error                 = '0;
-            error[i]              = '1;
-            error[CODE_WIDTH - i] = '1;
+            data[0]                   = data_gen.get();
+            error                     = '0;
+            error[i]                  = '1;
+            error[CODE_WIDTH - 1 - i] = '1;
 
             u_clock.next();
             $assert(!corrected);
@@ -323,10 +323,10 @@ module test_ecc_128 {
         }
 
         for i in 0..(CODE_WIDTH / 2) {
-            data[0]               = {data_gen.get(), data_gen.get()};
-            error                 = '0;
-            error[i]              = '1;
-            error[CODE_WIDTH - i] = '1;
+            data[0]                   = {data_gen.get(), data_gen.get()};
+            error                     = '0;
+            error[i]                  = '1;
+            error[CODE_WIDTH - 1 - i] = '1;
 
             u_clock.next();
             $assert(!corrected);
