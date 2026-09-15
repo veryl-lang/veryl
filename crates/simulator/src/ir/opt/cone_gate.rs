@@ -1010,6 +1010,9 @@ pub(crate) fn has_side_effects(s: &ProtoStatement) -> bool {
         ProtoStatement::SystemFunctionCall(_)
         | ProtoStatement::CompiledBlock(_)
         | ProtoStatement::TbMethodCall { .. } => true,
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 

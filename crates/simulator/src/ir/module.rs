@@ -394,13 +394,24 @@ impl ProtoModule {
                         event_gates.insert(event.clone(), gates);
                         s
                     }
-                    _ => batch_compiled_statements(stmts.to_statements(
-                        ff_ptr,
-                        ff_len,
-                        comb_ptr,
-                        comb_len,
-                        self.use_4state,
-                    )),
+                    _ => {
+                        let mut s = stmts.to_statements(
+                            ff_ptr,
+                            ff_len,
+                            comb_ptr,
+                            comb_len,
+                            self.use_4state,
+                        );
+                        // Testbench blocks store into FF slots directly; see
+                        // `make_ff_stores_direct`.  Gates are planned for clock
+                        // events only, so an initial/final block always lands
+                        // here.  `is_initial` covers every `initial` block, not
+                        // just the first.
+                        if event.is_initial() || *event == Event::Final {
+                            crate::ir::statement::make_ff_stores_direct(&mut s);
+                        }
+                        batch_compiled_statements(s)
+                    }
                 };
                 (event.clone(), s)
             })
@@ -447,6 +458,9 @@ impl ProtoModule {
                     ProtoStatement::TbMethodCall { .. } => "TbMethod".to_string(),
                     ProtoStatement::Break => "Break".to_string(),
                     ProtoStatement::CompiledBlock(_) => "NestedCB".to_string(),
+                    &ProtoStatement::HierAssign(_) => {
+                        unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+                    }
                 };
                 *hist.entry(kind).or_insert(0) += 1;
             }
@@ -1200,6 +1214,9 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
             ProtoStatement::CompiledBlock(_) => "CB",
             ProtoStatement::SequentialBlock(_) => "SeqBlock",
             ProtoStatement::TbMethodCall { .. } => "TbMethod",
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         };
         eprintln!("[stmtord] {module_name} {tag} {path} {kind} tok={tok} out={outs:?} in={ins:?}");
         match s {
@@ -1343,6 +1360,9 @@ fn collect_event_written_comb(
             ),
             // No comb writes.
             ProtoStatement::Break => true,
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
     let mut out = HashSet::default();
@@ -1439,6 +1459,9 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
                 }
             }
             ProtoStatement::Break => true,
+            ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
     let mut out = Vec::new();
@@ -4330,6 +4353,9 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
                     ProtoStatement::CompiledBlock(_) => "CompiledBlock",
                     ProtoStatement::SequentialBlock(_) => "SequentialBlock",
                     ProtoStatement::TbMethodCall { .. } => "TbMethodCall",
+                    &ProtoStatement::HierAssign(_) => {
+                        unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+                    }
                 };
                 *kind_hist.entry(kind).or_insert(0) += 1;
                 for &off in &stmt_outputs[idx] {
@@ -6695,12 +6721,24 @@ impl Conv<&air::Module> for ProtoModule {
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
             .map(|(event, stmts)| {
+                // A testbench FF store writes its slot directly, which only
+                // the interpreter does (`make_ff_stores_direct`); a compiled
+                // chunk would push into the cycle write log instead, and
+                // nothing applies one outside an event.  `precompile_tb_bodies`
+                // is safe regardless: its own predicate declines any statement
+                // that writes an FF.
+                let tb_ff_store = (event.is_initial() || event == Event::Final)
+                    && stmts.iter().any(ProtoStatement::writes_ff);
                 #[cfg(not(target_family = "wasm"))]
                 let stmts = if event.is_initial() {
                     precompile_tb_bodies(context, stmts, &tb_private)
                 } else {
                     stmts
                 };
+                if tb_ff_store {
+                    let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
+                    return (event, stmts);
+                }
                 let stmts = match event_gates.remove(&event) {
                     Some(gates) if !context.config.use_4state => {
                         let (stmts, chunked) = try_jit_gated(context, stmts, gates);

@@ -79,9 +79,14 @@ fn hier_testbench(body: &str) -> String {
 
 #[track_caller]
 fn run_hier_test(code: &str) -> Vec<(Config, TestResult, Simulator)> {
+    run_hier_test_named(code, "hier_test")
+}
+
+#[track_caller]
+fn run_hier_test_named(code: &str, top: &str) -> Vec<(Config, TestResult, Simulator)> {
     let mut ret = vec![];
     for config in Config::all() {
-        let ir = analyze_top(code, &config, "hier_test")
+        let ir = analyze_top(code, &config, top)
             .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
         let mut sim = Simulator::new(ir, None);
 
@@ -827,5 +832,318 @@ fn hier_ref_struct_member_in_interface() {
             TestResult::Pass,
             "config: {config:?}"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hierarchical assignment (`dut.u_mem.mem[i] = ...`): the write-side twin of
+// the references above.  A testbench preloads a memory inside the design and
+// the design reads it back through its own port, so the value has to survive
+// the clock edges that follow the preload.
+
+const MEM_DUT: &str = r#"
+    module Ram (
+        clk : input  clock,
+        we  : input  logic,
+        addr: input  logic<2>,
+        din : input  logic<32>,
+        dout: output logic<32>,
+    ) {
+        var mem: logic<32> [4];
+        always_ff {
+            if we {
+                mem[addr] = din;
+            }
+            dout = mem[addr];
+        }
+    }
+
+    module MemTop (
+        clk : input  clock,
+        we  : input  logic,
+        addr: input  logic<2>,
+        din : input  logic<32>,
+        dout: output logic<32>,
+    ) {
+        inst u_ram: Ram (clk, we, addr, din, dout);
+    }
+"#;
+
+/// Preload with `body`, then read every element back through the design's own
+/// port and compare against `expect(k)`.
+fn mem_testbench(body: &str) -> String {
+    format!(
+        r#"
+    {MEM_DUT}
+
+    #[test(mem_test)]
+    module mem_test {{
+        inst clk: $tb::clock_gen;
+
+        var we  : logic;
+        var addr: logic<2>;
+        var din : logic<32>;
+        var dout: logic<32>;
+
+        inst dut: MemTop (clk, we, addr, din, dout);
+
+        initial {{
+            we   = 0;
+            din  = 0;
+            addr = 0;
+            {body}
+            for k in 0..4 {{
+                addr = k;
+                clk.next();
+                $assert(dout == 32'hbeef_0000 + k, "preloaded element read back");
+            }}
+            $finish();
+        }}
+    }}
+    "#
+    )
+}
+
+#[test]
+fn hier_assign_const_index_survives_clock_edges() {
+    let code = mem_testbench(
+        r#"
+            dut.u_ram.mem[0] = 32'hbeef_0000;
+            dut.u_ram.mem[1] = 32'hbeef_0001;
+            dut.u_ram.mem[2] = 32'hbeef_0002;
+            dut.u_ram.mem[3] = 32'hbeef_0003;
+        "#,
+    );
+    for (config, result, _) in run_hier_test_named(&code, "mem_test") {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hier_assign_runtime_index() {
+    // The shape every program-loading testbench uses: a loop whose induction
+    // variable indexes the target memory.
+    let code = mem_testbench(
+        r#"
+            for i in 0..4 {
+                dut.u_ram.mem[i] = 32'hbeef_0000 + i;
+            }
+        "#,
+    );
+    for (config, result, _) in run_hier_test_named(&code, "mem_test") {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hier_assign_runtime_index_byte_lanes() {
+    // Byte-lane writes under a runtime index: the destination is a constant
+    // bit-select of a dynamically indexed element.
+    let code = mem_testbench(
+        r#"
+            for i in 0..4 {
+                dut.u_ram.mem[i][7:0]   = 8'h00 + i;
+                dut.u_ram.mem[i][15:8]  = 8'h00;
+                dut.u_ram.mem[i][31:16] = 16'hbeef;
+            }
+        "#,
+    );
+    for (config, result, _) in run_hier_test_named(&code, "mem_test") {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hier_assign_runtime_index_and_runtime_select() {
+    // Both the element index and the bit-select vary at runtime.
+    let code = mem_testbench(
+        r#"
+            for i in 0..4 {
+                for b in 0..4 {
+                    var lane: logic<8>;
+                    lane = case b {
+                        0      : 8'h00 + i,
+                        1      : 8'h00,
+                        2      : 8'hef,
+                        default: 8'hbe,
+                    };
+                    dut.u_ram.mem[i][b * 8 +: 8] = lane;
+                }
+            }
+        "#,
+    );
+    for (config, result, _) in run_hier_test_named(&code, "mem_test") {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hier_assign_rhs_reads_through_the_hierarchy() {
+    // The RHS of a hierarchical write is itself behind the walk that would
+    // have descended into it, so its own hierarchical reads must resolve.
+    let code = format!(
+        r#"
+    {MEM_DUT}
+
+    module Src (
+        clk: input clock,
+    ) {{
+        #[allow(unused_variable)]
+        var word: logic<32>;
+        always_ff {{
+            word = 32'hbeef_0002;
+        }}
+    }}
+
+    #[test(mem_test)]
+    module mem_test {{
+        inst clk: $tb::clock_gen;
+
+        var we  : logic;
+        var addr: logic<2>;
+        var din : logic<32>;
+        var dout: logic<32>;
+
+        inst dut: MemTop (clk, we, addr, din, dout);
+        inst src: Src    (clk);
+
+        initial {{
+            we   = 0;
+            din  = 0;
+            addr = 0;
+            clk.next();
+            dut.u_ram.mem[0] = src.word;
+            addr = 0;
+            clk.next();
+            $assert(dout == 32'hbeef_0002, "rhs read through the hierarchy");
+            $finish();
+        }}
+    }}
+    "#
+    );
+    for (config, result, _) in run_hier_test_named(&code, "mem_test") {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+    }
+}
+
+#[test]
+fn hier_assign_of_an_array_literal_is_reported() {
+    // A hierarchical destination resolves to no local variable, so the
+    // statement's destination list is empty. The array-literal branch indexed
+    // into it without the guard its neighbours carry, so preloading a child
+    // memory in one statement panicked instead of reporting.
+    let code = format!(
+        r#"
+    {MEM_DUT}
+
+    #[test(mem_test)]
+    module mem_test {{
+        inst clk: $tb::clock_gen;
+
+        var we  : logic;
+        var addr: logic<2>;
+        var din : logic<32>;
+        var dout: logic<32>;
+
+        inst dut: MemTop (clk, we, addr, din, dout);
+
+        initial {{
+            we   = 0;
+            din  = 0;
+            addr = 0;
+            dut.u_ram.mem = '{{32'd1, 32'd2, 32'd3, 32'd4}};
+            $finish();
+        }}
+    }}
+    "#
+    );
+    for config in Config::all() {
+        let result = analyze_top(&code, &config, "mem_test");
+        assert!(
+            result.is_err(),
+            "{config:?}: an array-literal hierarchical write must be reported"
+        );
+    }
+}
+
+const RMW_MEM_DUT: &str = r#"
+    module RmwRam (
+        clk : input  clock    ,
+        we  : input  logic    ,
+        addr: input  logic<2> ,
+        dout: output logic<32>,
+    ) {
+        var mem: logic<32> [4];
+        always_ff {
+            if we {
+                mem[addr] = mem[addr] + 1;
+                mem[addr] = mem[addr] + 1;
+            }
+            dout = mem[addr];
+        }
+    }
+
+    module RmwMemTop (
+        clk : input  clock    ,
+        we  : input  logic    ,
+        addr: input  logic<2> ,
+        dout: output logic<32>,
+    ) {
+        inst u_ram: RmwRam (clk, we, addr, dout);
+    }
+"#;
+
+#[test]
+fn hier_assign_reaches_both_slots_of_a_dual_slot_ff() {
+    // An element written twice in one event keeps its array unpacked, so every
+    // element carries a `next` slot alongside its current one. A hierarchical
+    // write has to reach both: the edge commit copies `next` over `current`, so
+    // a preload that filled only `current` is erased by the first edge and the
+    // design counts up from zero instead of from the preloaded value.
+    //
+    // This is the only shape that exercises the two-statement expansion; a
+    // packed FF takes the single-statement path the other tests here cover.
+    let code = format!(
+        r#"
+    {RMW_MEM_DUT}
+
+    #[test(rmw_test)]
+    module rmw_test {{
+        inst clk: $tb::clock_gen;
+
+        var we  : logic;
+        var addr: logic<2>;
+        var dout: logic<32>;
+
+        inst dut: RmwMemTop (clk, we, addr, dout);
+
+        initial {{
+            we   = 0;
+            addr = 0;
+            dut.u_ram.mem[0] = 32'd10;
+            dut.u_ram.mem[1] = 32'd20;
+
+            // `dout` is written in the same always_ff, so it shows the value as
+            // of before each edge. The two writes are non-blocking and both
+            // read the pre-edge value, so one edge adds one.
+            we = 1;
+            clk.next();
+            $assert(dout == 32'd10, "element 0 kept its preloaded value");
+            clk.next();
+            $assert(dout == 32'd11, "and the design counted up from it");
+            clk.next();
+            $assert(dout == 32'd12, "and again");
+
+            addr = 1;
+            clk.next();
+            clk.next();
+            $assert(dout == 32'd21, "element 1 counted up from its own preload");
+            $finish();
+        }}
+    }}
+    "#
+    );
+    for (config, result, _) in run_hier_test_named(&code, "rmw_test") {
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
     }
 }
