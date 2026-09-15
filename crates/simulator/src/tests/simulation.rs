@@ -28233,6 +28233,8 @@ fn explicit_modport_connection_transfers_input_and_output() {
         }
     }
 }
+
+#[test]
 fn a_parameter_override_is_converted_to_the_declared_type() {
     // IEEE 1800-2023 23.10: an override is converted to the parameter's
     // DECLARED type, so a wider value keeps only the low bits. The parameter's
