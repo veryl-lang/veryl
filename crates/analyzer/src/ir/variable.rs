@@ -54,9 +54,7 @@ impl VarPathSelect {
         check_initial_assign(context, &path, &token);
 
         if let Some((id, mut comptime)) = context.find_path(&path) {
-            if let Some(part_select) = &comptime.part_select {
-                comptime.r#type = part_select.base.clone();
-            }
+            let array_dims = comptime.rebase_part_select();
 
             // A write index/select from another domain is the same mux CDC
             // as the data-dependent read (Factor::Variable::gather_context);
@@ -72,7 +70,7 @@ impl VarPathSelect {
                 }
             }
 
-            let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+            let (array_select, width_select) = select.split(array_dims);
             // Validate LHS array selects: a wrong-order/out-of-range slice
             // can't lower to valid SV, and an out-of-range index wraps modulo
             // the shape in VarIndex::from_index, emitting out-of-bounds SV and
@@ -160,11 +158,9 @@ impl VarPathSelect {
                 .into_iter()
                 .collect();
         };
-        if let Some(part_select) = &base_comptime.part_select {
-            base_comptime.r#type = part_select.base.clone();
-        }
+        let array_dims = base_comptime.rebase_part_select();
 
-        let (array_select, _) = select.clone().split(base_comptime.r#type.array.dims());
+        let (array_select, _) = select.clone().split(array_dims);
         if !array_select.is_range() {
             return self
                 .to_assign_destination(context, ignore_error)
@@ -295,10 +291,8 @@ impl VarPathSelect {
         let Some((_, mut comptime)) = context.find_path(&path) else {
             return false;
         };
-        if let Some(part_select) = &comptime.part_select {
-            comptime.r#type = part_select.base.clone();
-        }
-        select.split(comptime.r#type.array.dims()).0.is_range()
+        let array_dims = comptime.rebase_part_select();
+        select.split(array_dims).0.is_range()
     }
 
     pub fn to_expression(self, context: &mut Context) -> Option<Expression> {
@@ -309,10 +303,8 @@ impl VarPathSelect {
             // part_select offset; rebase the type and remap the member-relative select
             // into base coords (like eval_factor_path_inner), else the read hits the
             // base's low bits, not the member.
-            if let Some(part_select) = &comptime.part_select {
-                comptime.r#type = part_select.base.clone();
-            }
-            let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+            let array_dims = comptime.rebase_part_select();
+            let (array_select, width_select) = select.split(array_dims);
             let width_select = if let Some(part_select) = &comptime.part_select {
                 part_select.to_base_select(context, &width_select)?
             } else {
@@ -848,6 +840,19 @@ impl VarSelect {
             return Some((total_width.saturating_sub(1), 0));
         }
 
+        // A width select addresses BITS, so the innermost stride is the scalar
+        // element's own width, which lives in `kind` and not in the width
+        // shape: `logic<N, W>` has shape [N, W] and element width 1, while
+        // `some_enum<N>` has shape [N] and element width $bits(enum).
+        // An array select addresses ELEMENTS, so its stride is 1; and a
+        // struct/union select arrives already remapped to bits by
+        // `eval_width_select`, so scaling it again would count twice.
+        let elem_width = if is_array || r#type.is_struct_union() {
+            1
+        } else {
+            r#type.kind.width()?
+        };
+
         let r#type = if is_array {
             &r#type.array
         } else {
@@ -856,7 +861,7 @@ impl VarSelect {
 
         let mut beg = 0;
         let mut end = 0;
-        let mut base = 1;
+        let mut base = elem_width;
 
         let dim = self.dimension();
         if r#type.dims() < dim {
@@ -1053,6 +1058,16 @@ impl Variable {
         let Some(index) = self.r#type.array.calc_index(index) else {
             return false;
         };
+        // A `string` carries its own width -- the declared one is the nominal
+        // 1 bit, which is also the range an empty select computes -- so both
+        // the fit and the partial write would keep one bit of the text.
+        if self.r#type.is_string() {
+            let Some(x) = self.value.get_mut(index) else {
+                return false;
+            };
+            *x = value;
+            return true;
+        }
         if let Some(total_width) = self.total_width() {
             let value_width = value.width();
             let value = if value_width >= total_width {

@@ -2113,6 +2113,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         rhs_select: None,
         expr: val(92),
         dst_ff_current_offset: 0x800,
+        comb_direct: false,
         token: TokenRange::default(),
     });
 
@@ -2129,6 +2130,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         rhs_select: None,
         expr: val(8),
         dst_ff_current_base_offset: 0x1800,
+        comb_direct: false,
     });
 
     // 3. Runtime-indexed 92-bit element of a 64 x 92 packed array: the stride
@@ -2146,6 +2148,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         rhs_select: None,
         expr: val(92),
         dst_ff_current_offset: 0x2800,
+        comb_direct: false,
         token: TokenRange::default(),
     });
 
@@ -2165,6 +2168,7 @@ fn wide_ff_select_covered_by_aot_c_event_emitter() {
         rhs_select: None,
         expr: val(32),
         dst_ff_current_offset: 0x4800,
+        comb_direct: false,
         token: TokenRange::default(),
     });
 
@@ -5858,6 +5862,53 @@ fn parse_hex_content_drops_a_word_wider_than_the_payload() {
 }
 
 #[test]
+fn parse_hex_content_reads_a_word_wider_than_64_bits() {
+    // Digits accumulated into a `u64`, so a word past 60 bits was dropped and
+    // an image of anything wider than a machine word loaded NOTHING, in
+    // silence. Verilator reads the same file correctly.
+    let content = "0123456789abcdef0123456789abcdef fedcba9876543210fedcba9876543210";
+    let values = parse_hex_content(content, 128);
+    assert_eq!(values.len(), 2);
+    assert_eq!(
+        values[0].payload_u128(),
+        0x0123456789abcdef0123456789abcdefu128
+    );
+    assert_eq!(
+        values[1].payload_u128(),
+        0xfedcba9876543210fedcba9876543210u128
+    );
+}
+
+#[test]
+fn parse_hex_content_drops_a_word_wider_than_a_wide_payload() {
+    // The narrow path's rule, at the wide accumulator's own capacity: a word
+    // the element cannot hold is dropped and the load carries on with the
+    // next one. `..._drops_a_word_wider_than_the_payload` is the 64-bit twin.
+    let content = "11 1000000000000000000000000000000000 22";
+    let values = parse_hex_content(content, 128);
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].payload_u128(), 0x11);
+    assert_eq!(values[1].payload_u128(), 0x22);
+}
+
+#[test]
+fn parse_hex_content_fills_a_width_that_is_not_a_whole_word() {
+    // The wide accumulator's capacity is the ELEMENT's width, not the next
+    // multiple of 64: a 100-bit element takes 25 digits and drops 26. The
+    // boundary matters because the switch from the `u64` accumulator happens
+    // mid-token, and a rule written against the switch point instead of the
+    // width would refuse the last few digits of an odd width.
+    let full = "f".repeat(25);
+    let over = "f".repeat(26);
+    let content = format!("1 {full} {over} 2");
+    let values = parse_hex_content(&content, 100);
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0].payload_u128(), 0x1);
+    assert_eq!(values[1].payload_u128(), (1u128 << 100) - 1);
+    assert_eq!(values[2].payload_u128(), 0x2);
+}
+
+#[test]
 fn parse_hex_content_drops_a_word_with_a_stray_character() {
     let content = "11 2g2 __ 33";
     let values = parse_hex_content(content, 16);
@@ -5914,6 +5965,61 @@ fn readmemh_basic() {
     }
 
     let _ = std::fs::remove_file(&hex_path);
+}
+
+#[test]
+fn readmemh_loads_an_element_wider_than_64_bits() {
+    // End to end over the whole `$readmemh` path, not just the parser: the
+    // 64-bit array beside it is the control that says the image and the
+    // load position are fine, so only the width is on trial.
+    let dir = std::env::temp_dir();
+    let hex128 = dir.join("veryl_test_readmemh_w128.hex");
+    let hex64 = dir.join("veryl_test_readmemh_w64.hex");
+    std::fs::write(
+        &hex128,
+        "00112233445566778899aabbccddeeff\nffeeddccbbaa99887766554433221100\n",
+    )
+    .unwrap();
+    std::fs::write(&hex64, "1122334455667788\naabbccddeeff0011\n").unwrap();
+    let p128 = hex128.to_str().unwrap().replace('\\', "\\\\");
+    let p64 = hex64.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input clock,
+    ) {{
+        #[allow(initial_assign)]
+        var m128: logic<128> [2];
+        #[allow(initial_assign)]
+        var m64: logic<64> [2];
+        initial {{
+            $readmemh("{p128}", m128);
+            $readmemh("{p64}", m64);
+        }}
+    }}
+    "#
+    );
+
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+
+        let dump = sim.ir.dump_variables();
+        assert!(
+            dump.contains("m128[1] = 128'hffeeddccbbaa99887766554433221100"),
+            "{dump}"
+        );
+        assert!(
+            dump.contains("m128[0] = 128'h00112233445566778899aabbccddeeff"),
+            "{dump}"
+        );
+        assert!(dump.contains("m64[1] = 64'haabbccddeeff0011"), "{dump}");
+    }
+
+    let _ = std::fs::remove_file(&hex128);
+    let _ = std::fs::remove_file(&hex64);
 }
 
 #[test]
@@ -6663,6 +6769,49 @@ fn const_array_whole_assign_multi_dim() {
         assert_eq!(sim.get("o01").unwrap(), Value::new(2, 8, false));
         assert_eq!(sim.get("o10").unwrap(), Value::new(4, 8, false));
         assert_eq!(sim.get("o12").unwrap(), Value::new(6, 8, false));
+    }
+}
+
+#[test]
+fn unsized_all_bit_const_fills_the_declared_width() {
+    // `'1` and `'0` are unsized sentinels carrying ONE bit; the declared type
+    // is what says how far to replicate it. A packed multi-dimensional const
+    // is where getting that wrong shows: the sentinel's bit was stamped with
+    // the declared width instead of replicated, so `logic<8, 32> = '1` read
+    // as 1 in element 0 and x above it, while the emitted SystemVerilog was
+    // correct.
+    let code = r#"
+    package pk {
+        const ONES_W8  : logic<8>     = '1;
+        const ONES_W65 : logic<65>    = '1;
+        const ONES_2D  : logic<8, 32> = '1;
+        const ZEROS_2D : logic<8, 32> = '0;
+    }
+    module Top (
+        a: output logic<8> ,
+        b: output logic<32>,
+        c: output logic<32>,
+        d: output logic<32>,
+        e: output logic<32>,
+    ) {
+        assign a = pk::ONES_W8;
+        assign b = pk::ONES_W65[64:33];
+        assign c = pk::ONES_2D[0];
+        assign d = pk::ONES_2D[7];
+        assign e = pk::ZEROS_2D[7];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("a").unwrap(), Value::new(0xff, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("d").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("e").unwrap(), Value::new(0, 32, false));
     }
 }
 
@@ -22343,6 +22492,7 @@ fn wide_bit_select_store_stays_compiled() {
             },
         },
         dst_ff_current_offset: -1,
+        comb_direct: false,
         token: TokenRange::default(),
     };
 
@@ -22437,8 +22587,8 @@ fn dynamic_index_store_into_a_65_to_128_bit_element() {
 fn wide_dynamic_bit_select_store() {
     // A runtime-indexed bit / part-select WRITE into a >128-bit value.  Both
     // the single-bit form and a part-select that straddles a 64-bit word
-    // boundary must land exactly, and the runtime index must clamp to the last
-    // element rather than run off the value.
+    // boundary must land exactly, and an index past the last element must
+    // leave the value alone (IEEE 1800-2023 11.5.1; iverilog and VCS agree).
     let code = r#"
     module Top (
         i: input  logic<10>,
@@ -22467,8 +22617,12 @@ fn wide_dynamic_bit_select_store() {
     let v = (BigUint::from(0x2a_u32) << 48u32) + BigUint::from(0xfedc_ba98_7654_u64);
     // j=1 puts the 54-bit window at bits 54..107, across the word-0/1 seam;
     // j=15 is the last element, ending exactly at the top bit.
-    // i=999 is past the end and must clamp to bit 575.
-    for (i, j, bit_pos, win_pos) in [(0u32, 0u32, 0u32, 0u32), (7, 1, 7, 54), (999, 15, 575, 810)] {
+    // i=999 is past bit 575 and must write nothing, leaving `a` at 0.
+    for (i, j, bit_pos, win_pos) in [
+        (0u32, 0u32, Some(0u32), 0u32),
+        (7, 1, Some(7), 54),
+        (999, 15, None, 810),
+    ] {
         for config in Config::all() {
             let ir = analyze(code, &config);
             let mut sim = Simulator::new(ir, None);
@@ -22477,9 +22631,13 @@ fn wide_dynamic_bit_select_store() {
             sim.set("b", Value::new(1, 1, false));
             sim.set("v", Value::new_biguint(v.clone(), 54, false));
             sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let want_o = match bit_pos {
+                Some(b) => BigUint::from(1u32) << b,
+                None => BigUint::from(0u32),
+            };
             assert_eq!(
                 sim.get("o").unwrap(),
-                Value::new_biguint(BigUint::from(1u32) << bit_pos, 576, false),
+                Value::new_biguint(want_o, 576, false),
                 "o i={i} config={config:?}"
             );
             assert_eq!(
@@ -22920,12 +23078,135 @@ fn dynamic_part_select_into_an_array_element_clips_rhs_to_the_window() {
 }
 
 #[test]
+fn comb_driven_bit_of_an_ff_word_arrives_without_a_clock_edge() {
+    // One packed word carries ONE drive kind, so a word whose other bits an
+    // `always_ff` writes is FF-classified even where a continuous assign
+    // drives bit 0.  That put the comb write into ff_values, where
+    // `emit_log = dst.is_ff()` turned it into a write-log push and the log
+    // commits at the edge -- so the flop reading bit 0 saw the previous
+    // cycle and the two-deep pipeline took three edges instead of two.
+    // Every reference simulator takes two.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        d:   input  logic   ,
+        q:   output logic   ,
+        all: output logic<3>,
+    ) {
+        var v: logic<3>;
+        assign v[0] = d;
+        always_ff {
+            if_reset {
+                v[1] = 1'b0;
+            } else {
+                v[1] = v[0];
+            }
+        }
+        always_ff {
+            if_reset {
+                v[2] = 1'b0;
+            } else {
+                v[2] = v[1];
+            }
+        }
+        assign q   = v[2];
+        assign all = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("d", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        // A held input reaches the output on the SECOND edge, and the comb
+        // bit itself is there without any edge at all.
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("d", Value::new(0, 1, false));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0, 1, false),
+            "not through after one edge, config={config:?}"
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "through after two edges, config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn a_comb_driven_bit_of_a_dual_slot_word_reaches_both_slots() {
+    // The same pipeline written as a generate-`for`: every iteration is its
+    // own `always_ff`, so the word is written more than once per edge and its
+    // element carries a `next` slot beside its current one.  A dual-slot
+    // element's read-modify-write reads that `next` slot and logs the WHOLE
+    // word, so a combinational bit written only into `current` is carried back
+    // over by the commit and the pipeline stalls a stage.
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        d:   input  logic,
+        q:   output logic,
+    ) {
+        var v: logic<3>;
+        assign v[0] = d;
+        for i in 0..2 :gen_pipe {
+            always_ff {
+                if_reset {
+                    v[i + 1] = 1'b0;
+                } else {
+                    v[i + 1] = v[i];
+                }
+            }
+        }
+        assign q = v[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("d", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("d", Value::new(0, 1, false));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0, 1, false),
+            "not through after one edge, config={config:?}"
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "through after two edges, config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn dynamic_part_select_store_out_of_range_is_dropped() {
-    // `x[i +: 4]` clamps `i` to the last ELEMENT, not the last legal window
-    // start, so on the last few positions the window runs off the top of `x`.
-    // SystemVerilog does not write the out-of-range bits; every backend must
-    // agree, and must leave the rest of `x` alone.  The four widths pick four
-    // different store emitters (scalar, __uint128_t, wide RMW, wide RMW again).
+    // `x[i +: 4]` starting near the top runs the window off the end of `x`.
+    // SystemVerilog writes the in-range bits and ignores the rest, and a
+    // base past the last bit writes nothing at all (IEEE 1800-2023 11.5.1 --
+    // measured against the reference simulators, one of which instead wraps
+    // the index modulo the width).  Every backend must
+    // agree, and must leave the rest of `x` alone.  The four widths pick
+    // four different store emitters (scalar, __uint128_t, wide RMW, wide
+    // RMW again).
     let code = r#"
     module Top (
         i : input  logic<10>,
@@ -22964,13 +23245,15 @@ fn dynamic_part_select_store_out_of_range_is_dropped() {
 
     use num_bigint::BigUint;
     // All ones, then the in-range bits of the 4-bit window replaced by `v`.
+    // A base at or past `width` leaves every bit alone.
     let expect = |width: usize, i: u64, v: u64| {
-        let lo = (i as usize).min(width - 1);
         let mut x = (BigUint::from(1u32) << width) - BigUint::from(1u32);
-        for b in 0..4u64 {
-            let bit = lo as u64 + b;
-            if (bit as usize) < width {
-                x.set_bit(bit, (v >> b) & 1 == 1);
+        if (i as usize) < width {
+            for b in 0..4u64 {
+                let bit = i + b;
+                if (bit as usize) < width {
+                    x.set_bit(bit, (v >> b) & 1 == 1);
+                }
             }
         }
         x
@@ -23034,6 +23317,7 @@ fn wide_dynamic_bit_select_store_gate() {
             },
         },
         dst_ff_current_offset: -1,
+        comb_direct: false,
         token: TokenRange::default(),
     };
 
@@ -23079,6 +23363,7 @@ fn dynamic_index_store_stays_compiled_above_64_bits() {
             },
         },
         dst_ff_current_base_offset: -1,
+        comb_direct: false,
     };
 
     for width in [65, 96, 128, 200] {
@@ -24285,7 +24570,8 @@ fn wide_ff_word_aligned_slice_and_element_writes() {
     // Both writes reduce to a full-width write at a shifted offset, so the
     // risk is a wrong offset silently clobbering a neighbour — hence the
     // read-back of every element once all of them are written.  The index is
-    // one bit wider than the element count to drive the clamp.
+    // one bit wider than the element count, so half the iterations are out
+    // of range: those write nothing and read the element default.
     let code = r#"
     module Top (
         i_clk: input  clock,
@@ -24317,10 +24603,21 @@ fn wide_ff_word_aligned_slice_and_element_writes() {
 
     let elem = |i: u64| -> u128 { 0x1111_2222_3333_4444_5555_6666_7777_0000u128 + i as u128 };
     let lo_val = |i: u64| -> u128 { 0x0102_0304_0506_0708_090A_0B0C_0D0E_0F10u128 + i as u128 };
-    // An out-of-range index clamps to the last element.
+    // An out-of-range index writes nothing, so only the first four land.
     let mut expected = [0u128; 4];
-    for i in 0..8u64 {
-        expected[i.min(3) as usize] = elem(i);
+    for i in 0..4u64 {
+        expected[i as usize] = elem(i);
+    }
+    // An out-of-range READ is the element type's default, which is x where
+    // the storage is 4-state and zero where it is not.
+    fn element_default(in_range: bool, want: u128, width: usize, config: &Config) -> Value {
+        if in_range {
+            Value::from_u128(want, 0, width, false)
+        } else if config.use_4state {
+            Value::new_x(width, false)
+        } else {
+            Value::from_u128(0, 0, width, false)
+        }
     }
 
     for config in wide_ff_event_configs() {
@@ -24338,10 +24635,16 @@ fn wide_ff_word_aligned_slice_and_element_writes() {
             sim.set("i_d", Value::from_u128(elem(i), 0, 128, false));
             sim.set("i_e", Value::from_u128(lo_val(i), 0, 128, false));
             sim.step(&clk);
-            for (name, want) in [("o_hi", elem(i)), ("o_lo", lo_val(i)), ("o_el", elem(i))] {
+            for (name, want) in [
+                ("o_hi", Value::from_u128(elem(i), 0, 128, false)),
+                ("o_lo", Value::from_u128(lo_val(i), 0, 128, false)),
+                // `r[i_idx]` is out of range from i=4 on: nothing is written
+                // and the read-back is the element default.
+                ("o_el", element_default(i < 4, elem(i), 128, &config)),
+            ] {
                 assert_eq!(
                     sim.get(name).unwrap(),
-                    Value::from_u128(want, 0, 128, false),
+                    want,
                     "{name} i={i} config={config:?}"
                 );
             }
@@ -27014,6 +27317,107 @@ fn a_falling_edge_flop_fires_inside_the_step_that_contains_the_fall() {
 }
 
 #[test]
+fn a_derived_clock_fires_once_per_step_when_the_master_also_drives_an_inversion() {
+    // A clock the master INVERTS reaches its active level when the master
+    // falls, so it is fired from `fire_derived_clock_batch`, whose chain loop
+    // then looks for clocks that rose BECAUSE that batch committed.  That
+    // search read `prev_derived_clock_values`, which is refreshed once per
+    // step at the very end -- so a divided clock the post-commit loop had
+    // ALREADY fired earlier in the same step still read `prev == 0, now == 1`
+    // and fired a second time.  Every count on the divided domain doubled.
+    //
+    // The two domains share nothing but the master clock, and the trigger is
+    // any inversion at all -- a `clock_negedge` (the only way to write an
+    // integrated clock gate in Veryl) or a plain `~clk`.
+    let template = r#"
+    module Top (
+        clk: input  'm clock          ,
+        rst: input  'm reset_async_low,
+        cnt: output 'd logic<8>       ,
+        tog: output 'm logic          ,
+    ) {
+        // Divide by two: a flop fed by its own inverse.
+        var half: 'm logic;
+        always_ff (clk, rst) {
+            if_reset {
+                half = 1'b0;
+            } else {
+                half = ~half;
+            }
+        }
+
+        // A divider is where a new clock root is born.
+        var ck: 'd clock          ;
+        var rs: 'd reset_async_low;
+        unsafe (cdc) {
+            assign ck = half;
+            assign rs = rst;
+        }
+
+        var c: 'd logic<8>;
+        always_ff (ck, rs) {
+            if_reset {
+                c = 0;
+            } else {
+                c = c + 1;
+            }
+        }
+        assign cnt = c;
+
+        // The inversion, connected to nothing but the master clock.
+        COMPANION
+        var t: 'm logic;
+        always_ff (cki, rst) {
+            if_reset {
+                t = 1'b0;
+            } else {
+                t = ~t;
+            }
+        }
+        assign tog = t;
+    }
+    "#;
+
+    for (label, companion) in [
+        ("clock_negedge", "let cki: '_ clock_negedge = clk;"),
+        ("inverted clock", "let cki: '_ clock = ~clk;"),
+    ] {
+        let code = template.replace("COMPANION", companion);
+
+        for config in Config::all() {
+            dbg!(&config, label);
+
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            let rst = sim.get_reset("rst").unwrap();
+            sim.step_reset(&clk, &rst);
+
+            for k in 1..=8u64 {
+                sim.step(&clk);
+                // `ck` rises on the odd master edges only.
+                assert_eq!(
+                    sim.get("cnt").unwrap(),
+                    Value::new(k.div_ceil(2), 8, false),
+                    "the divided-clock counter after {k} master edges, with a \
+                     {label} companion (JIT={} 4st={})",
+                    config.use_jit,
+                    config.use_4state,
+                );
+                // The companion itself still fires exactly once per step.
+                assert_eq!(
+                    sim.get("tog").unwrap(),
+                    Value::new(k % 2, 1, false),
+                    "the {label} flop after {k} master edges (JIT={} 4st={})",
+                    config.use_jit,
+                    config.use_4state,
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn an_async_reset_the_design_produces_itself_asserts_when_it_falls() {
     // `rst_l` falls as a consequence of the very edge that sets `f`.  SV
     // reacts to that fall in the same time step (`always @(posedge clk or
@@ -27794,5 +28198,1116 @@ fn msb_after_member_access_of_array_element() {
             "1'b0",
             "config={config:?}"
         );
+    }
+}
+
+#[test]
+fn a_parameter_override_is_converted_to_the_declared_type() {
+    // IEEE 1800-2023 23.10: an override is converted to the parameter's
+    // DECLARED type, so a wider value keeps only the low bits. The parameter's
+    // own variable was already fitted, so the wrapper read correctly; what was
+    // stored for the next level down was not, and the child -- which declares
+    // the parameter wide -- got the untruncated value whole.
+    //
+    // The emitted SystemVerilog prints `def0` under every reference simulator
+    // this port is checked against.
+    let code = r#"
+    module Child #(
+        param P: logic<64> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        assign o = P;
+    }
+    module Wrap #(
+        param P: logic<16> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        inst u: Child #( P: P ) ( o: o );
+    }
+    module WideWrap #(
+        param P: logic<64> = 0,
+    ) (
+        o: output logic<64>,
+    ) {
+        inst u: Child #( P: P ) ( o: o );
+    }
+    module Top (
+        o: output logic<64>,
+        w: output logic<64>,
+    ) {
+        inst u : Wrap     #( P: 64'h123456789abcdef0 ) ( o: o );
+        inst uw: WideWrap #( P: 64'h123456789abcdef0 ) ( o: w );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xdef0, 64, false));
+        // The control: a wrapper wide enough to hold the value must still
+        // pass all of it down, so the fix cannot be "truncate everything".
+        assert_eq!(
+            sim.get("w").unwrap(),
+            Value::new(0x123456789abcdef0, 64, false)
+        );
+    }
+}
+
+#[test]
+fn a_string_parameter_survives_being_passed_down() {
+    // `TypeKind::width` answers `Some(1)` for `string`, which is in the
+    // widthless bucket, so a conversion driven by the presence of a width
+    // rather than by `is_bit_sized` fits the text to one bit and loses it.
+    let code = r#"
+    module Leaf #(
+        param S: string = "",
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = if S == "nonempty" ? 8'ha5 : 8'h00;
+    }
+    module Wrap #(
+        param S: string = "",
+    ) (
+        o: output logic<8>,
+    ) {
+        inst u: Leaf #( S: S ) ( o: o );
+    }
+    module Top (
+        trig: input  logic<8>,
+        o   : output logic<8>,
+    ) {
+        var inner: logic<8>;
+        inst u: Wrap #( S: "nonempty" ) ( o: inner );
+        assign o = inner | trig;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("trig", Value::new(0, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap(), Value::new(0xa5, 8, false));
+    }
+}
+
+#[test]
+fn a_parameter_override_reaches_a_module_through_an_alias() {
+    // `get_overridden_params` resolved each parameter name in the namespace of
+    // the symbol the instantiation names -- for an `alias module` that is the
+    // ALIAS's namespace, where the parameters do not live. The loop skips a
+    // name it cannot resolve, so every override through an alias was dropped
+    // in SILENCE: no diagnostic, and the child ran at its default.
+    //
+    // The direct instantiation is the control; both must read 31.
+    let code = r#"
+    module Leaf #(
+        param V: u32 = 0,
+    ) (
+        o: output logic<8>,
+    ) {
+        assign o = V as 8;
+    }
+    alias module LeafAlias = Leaf;
+    // A second parameter whose WIDTH names the first, overridden in the
+    // opposite order to the declaration: binding order comes from the
+    // component's parameter list, which is empty for an alias, so this is
+    // where the alias's own `get_parameters` shows.
+    module Wide #(
+        param W: u32       = 8,
+        param M: logic<W>  = 0,
+    ) (
+        o: output logic<16>,
+    ) {
+        assign o = M as 16;
+    }
+    alias module WideAlias = Wide;
+    module Top (
+        direct: output logic<8> ,
+        viaal : output logic<8> ,
+        wdir  : output logic<16>,
+        walias: output logic<16>,
+    ) {
+        inst ud: Leaf      #( V: 31 ) ( o: direct );
+        inst ua: LeafAlias #( V: 31 ) ( o: viaal  );
+        inst uw: Wide      #( M: 16'habc, W: 16 ) ( o: wdir   );
+        inst uv: WideAlias #( M: 16'habc, W: 16 ) ( o: walias );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("direct").unwrap(), Value::new(31, 8, false));
+        assert_eq!(sim.get("viaal").unwrap(), Value::new(31, 8, false));
+        assert_eq!(sim.get("wdir").unwrap(), Value::new(0xabc, 16, false));
+        assert_eq!(sim.get("walias").unwrap(), Value::new(0xabc, 16, false));
+    }
+}
+
+#[test]
+fn two_always_ff_blocks_on_one_word_keep_nba_semantics() {
+    // One packed word carries both bits, so the FF table keys them together and
+    // `assigned` holds only the last block that wrote the word. The exemption
+    // that lets a block read what it wrote itself then cleared the second
+    // block's read of the FIRST block's bit, and the word dropped to comb: the
+    // two stages collapsed into one edge instead of forming a shift register.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        d  : input  logic   ,
+        q  : output logic<2>,
+    ) {
+        var v: logic<2>;
+        always_ff (clk, rst) {
+            if_reset { v[0] = 0; } else { v[0] = d; }
+        }
+        always_ff (clk, rst) {
+            if_reset { v[1] = 0; } else { v[1] = v[0]; }
+        }
+        assign q = v;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+
+        sim.set("d", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        // One cycle of `d`, then the pulse walks the two stages.
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0b01, 2, false),
+            "stage 1 only, config={config:?}"
+        );
+
+        sim.set("d", Value::new(0, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0b10, 2, false),
+            "stage 2 only, config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn interface_array_element_struct_field_keeps_the_instance_array() {
+    // Importing an interface instance array prepends the instance's array
+    // dimensions to each member's type, but not to `part_select.base` -- the
+    // whole-variable type a struct member carries, and the one the select
+    // split reads its array dimensions from. So `arr[k].member.field` put the
+    // `[k]` in the WIDTH select: `veryl check` bounds-checked it against the
+    // FIELD's width (`invalid_select`, "[1] > 1" for a 1-bit field), the
+    // simulator refused to read it (`unsupported_description`), and where it
+    // did run it touched the field's lowest sub-element instead of element k.
+    let code = r#"
+    package Pkg {
+        struct req_t {
+            rw  : logic,
+            addr: logic<8>,
+        }
+    }
+    interface BusIf {
+        var req_valid: logic;
+        var req_data : Pkg::req_t;
+    }
+    module Top (
+        i_clk   : input  clock,
+        o_rw0   : output logic,
+        o_rw1   : output logic,
+        o_addr0 : output logic<8>,
+        o_addr1 : output logic<8>,
+        o_whole1: output logic<9>,
+    ) {
+        inst arr: BusIf [2];
+
+        assign arr[0].req_valid     = 1'b0;
+        assign arr[1].req_valid     = 1'b0;
+        // Per-field writes through the array index: the shape that broke.
+        assign arr[0].req_data.rw   = 1'b0;
+        assign arr[1].req_data.rw   = 1'b1;
+        assign arr[0].req_data.addr = 8'h5a;
+        assign arr[1].req_data.addr = 8'ha5;
+
+        assign o_rw0    = arr[0].req_data.rw;
+        assign o_rw1    = arr[1].req_data.rw;
+        assign o_addr0  = arr[0].req_data.addr;
+        assign o_addr1  = arr[1].req_data.addr;
+        // The whole-struct read is the control: it worked throughout, and it
+        // is what the ports used as the workaround.
+        assign o_whole1 = arr[1].req_data as 9;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // The two elements must stay distinct, and a 1-bit field must accept
+        // index 1 exactly as an 8-bit one does.
+        assert_eq!(sim.get("o_rw0").unwrap(), Value::new(0, 1, false));
+        assert_eq!(sim.get("o_rw1").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_addr0").unwrap(), Value::new(0x5a, 8, false));
+        assert_eq!(sim.get("o_addr1").unwrap(), Value::new(0xa5, 8, false));
+        // `rw` is the first-declared member, so it takes the HIGH bit.
+        assert_eq!(sim.get("o_whole1").unwrap(), Value::new(0x1a5, 9, false));
+    }
+}
+
+#[test]
+fn an_elaboration_time_system_function_in_a_runtime_expression_is_a_value() {
+    // `$clog2`/`$bits`/`$onehot` in an ordinary expression -- not a `const`
+    // initialiser, which is where the analyzer already folds them -- used to
+    // PANIC the simulator at elaboration (`unreachable!("system function
+    // calls are resolved by the analyzer")`), on lines `veryl check`,
+    // `veryl build` and the reference simulators all accept, of the shape
+    // `assign addr = haddr_i >> $clog2(AHB_DATA_WIDTH / 8);`
+    //
+    // The function arm matters on its own: there the argument is constant
+    // only at the CALL site, so no analyzer-side fold could reach it.
+    let code = r#"
+    package pk {
+        struct st {
+            a: logic<12>,
+            b: logic<4> ,
+        }
+    }
+    module Top #(
+        param DW: u32 = 64,
+    ) (
+        a : input  logic<32>,
+        y0: output logic<32>,
+        y1: output logic<32>,
+        y2: output logic   ,
+        y3: output logic<32>,
+        y4: output logic<32>,
+    ) {
+        function sh (n: input u32, v: input logic<32>) -> logic<32> {
+            return v >> $clog2(n);
+        }
+        assign y0 = a >> $clog2(DW / 8);
+        assign y1 = a + $bits(pk::st);
+        assign y2 = $onehot(4'b0100);
+        assign y3 = sh(DW / 8, a);
+        assign y4 = a >> $clog2($bits(pk::st));
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x1238, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("y0").unwrap(), Value::new(0x247, 32, false));
+        assert_eq!(sim.get("y1").unwrap(), Value::new(0x1248, 32, false));
+        assert_eq!(sim.get("y2").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("y3").unwrap(), Value::new(0x247, 32, false));
+        assert_eq!(sim.get("y4").unwrap(), Value::new(0x123, 32, false));
+    }
+}
+
+#[test]
+fn a_packed_array_of_an_enum_indexes_by_the_array_not_the_element() {
+    // `flatten_struct_union_enum` composed the shape of a packed array of a
+    // user enum with the ENUM's own width outermost and the declared packed
+    // dimensions inside it, so `e3_t<8>` measured as [3, 8] rather than
+    // [8, 3]. The select bound then came from the element: `i[3]` on an
+    // eight-element array was rejected as "out of range [3] > 3" while
+    // `i[2]` was accepted, and an ordinary packed array of a user enum is
+    // written that way.
+    //
+    // The VALUES are what this asserts, not just that it elaborates: getting
+    // the order right has to select the element the emitted SystemVerilog
+    // does.
+    let code = r#"
+    package pk {
+        enum e3_t: logic<3> {
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }
+    }
+    module Top (
+        i : input  pk::e3_t<8>,
+        o0: output logic      ,
+        o3: output logic      ,
+        o7: output logic      ,
+    ) {
+        assign o0 = i[0] == pk::e3_t::HIGH;
+        assign o3 = i[3] == pk::e3_t::HIGH;
+        assign o7 = i[7] == pk::e3_t::HIGH;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // element 7..0, MSB first: LOW LOW LOW LOW HIGH LOW LOW HIGH
+        sim.set(
+            "i",
+            Value::new(0b100_100_100_100_011_100_100_011, 24, false),
+        );
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o0").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o3").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o7").unwrap(), Value::new(0, 1, false));
+    }
+}
+
+#[test]
+fn a_runtime_index_into_a_packed_enum_array_writes_the_whole_element() {
+    // `build_dynamic_bit_select` collapses (width_shape, kind_width) to a flat
+    // single-bit view whenever `kind_width > 1`, because for a struct the
+    // analyzer has already folded the element stride and any field offset into
+    // the index as an absolute BIT position. A packed array of an ENUM does
+    // not work that way: its element stride stays in the SHAPE and the index
+    // arrives as an element number. Flattening it left the index unscaled AND
+    // the window one bit wide, so `r[idx] = HIGH` set a single bit at bit
+    // `idx` -- silently, with the right total width and no diagnostic.
+    //
+    // The plain-logic twin is the control: same bits, same stride, and it was
+    // always correct, so a mismatch between the two is the defect and nothing
+    // else.
+    let code = r#"
+    package pk {
+        const N: u32 = 8;
+        enum e3_t: logic<3> {
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }
+    }
+    module Top (
+        idx: input  logic<3> ,
+        oe : output logic<24>,
+        ol : output logic<24>,
+    ) {
+        var re: pk::e3_t<pk::N>;
+        always_comb {
+            for i in 0..pk::N {
+                re[i] = pk::e3_t::LOW;
+            }
+            re[idx] = pk::e3_t::HIGH;
+        }
+        var rl: logic<pk::N, 3>;
+        always_comb {
+            for i in 0..pk::N {
+                rl[i] = 3'b100;
+            }
+            rl[idx] = 3'b011;
+        }
+        assign oe = re;
+        assign ol = rl;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for idx in 0..8u64 {
+            sim.set("idx", Value::new(idx, 3, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let e = sim.get("oe").unwrap();
+            let l = sim.get("ol").unwrap();
+            assert_eq!(e, l, "idx={idx}: the enum array must match the logic twin");
+        }
+    }
+}
+
+/// The six argument forms of `$bits`/`$size`, with the numbers every
+/// reference simulator agrees on.
+/// The two defects fail differently, so they are checked apart: one panics
+/// before the other's rows are ever read.
+#[track_caller]
+fn bits_and_size(decls: &str, exprs: &[&str], expected: &[u64]) {
+    let body: String = exprs
+        .iter()
+        .enumerate()
+        .map(|(i, e)| format!("        assign o{i} = trig + {e};\n"))
+        .collect();
+    let ports: String = (0..exprs.len())
+        .map(|i| format!("        o{i}: output logic<32>,\n"))
+        .collect();
+    let code = format!(
+        r#"
+    package pk {{
+        struct st {{
+            a: logic<12>,
+            b: logic<4> ,
+        }}
+        enum e3_t: logic<3> {{
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }}
+    }}
+    module Top (
+        trig: input logic<32>,
+{ports}    ) {{
+{decls}
+{body}    }}
+    "#
+    );
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("trig", Value::new(0, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (i, want) in expected.iter().enumerate() {
+            assert_eq!(
+                sim.get(&format!("o{i}")).unwrap(),
+                Value::new(*want, 32, false),
+                "o{i}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bits_and_size_of_an_unpacked_array_variable_elaborate() {
+    // Both took their answer only when the operand's comptime value was
+    // Numeric or a Type. An unpacked-array variable is neither, so the
+    // expression form reported `unsupported description` and the `const`
+    // form -- the hoist that carries every other system function -- PANICKED
+    // in `Factor::Variable` instead. `$bits` also has to multiply by the
+    // unpacked dimensions, which `Type::total_width` leaves out.
+    //
+    // `o0` goes through a `const`, which is the form that panicked.
+    bits_and_size(
+        "        var arr: logic<8> [7];\n\
+         \x20       let u2 : logic<8> [5, 3] = '{default: '{default: 8'd0}};\n\
+         \x20       const SZ: u32 = $bits(arr);\n\
+         \x20       assign arr = '{default: 8'd0};",
+        &["SZ", "$size(arr)", "$bits(u2)", "$size(u2)"],
+        &[56, 7, 120, 5],
+    );
+}
+
+#[test]
+fn size_answers_the_leading_dimension_not_the_total_bits() {
+    // `$size` shared `Bits`'s body, so it answered total bits. That is the
+    // same number for a struct and for a 1-D vector, which is why it went
+    // unnoticed; for anything with more than one dimension it is not, and
+    // the emitted SystemVerilog carries `$size` verbatim, so the native
+    // column disagreed with every other simulator while both ran.
+    //
+    // The struct and the scalar are the controls: they were already right.
+    bits_and_size(
+        "        var a : logic<32>;\n\
+         \x20       var p2: logic<8, 4>;\n\
+         \x20       var ea: pk::e3_t<8>;\n\
+         \x20       assign a  = 0;\n\
+         \x20       assign p2 = 0;\n\
+         \x20       assign ea = 0;",
+        &[
+            "$bits(pk::st)",
+            "$size(pk::st)",
+            "$bits(a)",
+            "$size(a)",
+            "$bits(p2)",
+            "$size(p2)",
+            "$bits(ea)",
+            "$size(ea)",
+        ],
+        &[16, 16, 32, 32, 32, 8, 24, 8],
+    );
+}
+
+#[test]
+fn whole_unpacked_array_unsized_fill() {
+    // `arr = '0;` on an UNPACKED array.  The fill carries no width of its
+    // own, so SystemVerilog replicates it into every element; the simulator
+    // used to decline the design (`unsupported_description`) because the
+    // single-statement conversion had one destination shape to size it
+    // against and an array is not one.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        d:   input  logic<8>,
+        c0:  output logic<8>,
+        c1:  output logic<8>,
+        c3:  output logic<8>,
+        f0:  output logic<8>,
+        f2:  output logic<8>,
+    ) {
+        var cmb: logic<8> [4];
+        var ff:  logic<8> [3];
+        always_comb {
+            cmb    = '0;
+            cmb[1] = d;
+        }
+        always_ff {
+            if_reset {
+                ff = '1;
+            } else {
+                ff[0] = d;
+            }
+        }
+        assign c0 = cmb[0];
+        assign c1 = cmb[1];
+        assign c3 = cmb[3];
+        assign f0 = ff[0];
+        assign f2 = ff[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        // The analyzer reports the fill against the array type as a
+        // `mismatch_assignment` warning, which `build` and `test` carry on
+        // through; that it does so at all is its own question.
+        let ir = analyze_top_allowing_mismatch_assignment(code, &config, "Top").unwrap();
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("d", Value::new(0xa5, 8, false));
+        sim.step_reset(&clk, &rst);
+
+        // The reset fill reached every element, not just the first.
+        assert_eq!(
+            sim.get("f2").unwrap(),
+            Value::new(0xff, 8, false),
+            "'1 fill must reach the last element, config={config:?}"
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("f0").unwrap(),
+            Value::new(0xa5, 8, false),
+            "the element write still lands, config={config:?}"
+        );
+
+        // The comb fill is overwritten at index 1 and holds elsewhere.
+        assert_eq!(
+            sim.get("c1").unwrap(),
+            Value::new(0xa5, 8, false),
+            "config={config:?}"
+        );
+        for name in ["c0", "c3"] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(0, 8, false),
+                "{name} must be the fill, config={config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unsized_all_ones_compares_equal_above_128_bits() {
+    // `x == '1` must be true at every width.  The two compiling backends
+    // filled the sentinel to the whole ALLOCATION rather than to the target
+    // width -- `native_bytes(196)` is 32, so the fill was 256 bits of ones
+    // against a value whose own bits 196..255 are zero, and the comparison
+    // came out false above 128 bits.  The interpreter was right throughout,
+    // and so were the reference simulators on the same generated SV.
+    let code = r#"
+    module Top (
+        a129: input  logic<129>,
+        a160: input  logic<160>,
+        a196: input  logic<196>,
+        o   : output logic<6>  ,
+    ) {
+        assign o[0] = a129 == '1;
+        assign o[1] = a160 == '1;
+        assign o[2] = a196 == '1;
+        assign o[3] = a129 == '0;
+        assign o[4] = a160 == '0;
+        assign o[5] = a196 == '0;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let ones = |w: usize| (BigUint::from(1u32) << w) - BigUint::from(1u32);
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (name, w) in [("a129", 129usize), ("a160", 160), ("a196", 196)] {
+            sim.set(name, Value::new_biguint(ones(w), w, false));
+        }
+        // The three all-ones probes hold; the three all-zero ones do not.
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0b000111, 6, false),
+            "all-ones config={config:?}"
+        );
+
+        for (name, w) in [("a129", 129usize), ("a160", 160), ("a196", 196)] {
+            sim.set(name, Value::new_biguint(BigUint::from(0u32), w, false));
+        }
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0b111000, 6, false),
+            "all-zero config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn display_string_argument_renders_text() {
+    // `%s` rendered its argument with `format_dec`, so a string came out as
+    // the decimal of its bytes; and a `string` const reached the expression
+    // conversion as a variable reference, which panicked looking for a
+    // `VariableMeta` that a string never has. Verilator prints the three
+    // lines below verbatim.
+    let code = r#"
+    package Pkg {
+        const NAME: string = "world";
+    }
+    module Top (
+        i_clk: input clock,
+    ) {
+        const HERE: string = "here";
+        initial {
+            $write("[%s]", "inline");
+            $write("[%s]", HERE);
+            $write("[%s]", Pkg::NAME);
+            // A non-string argument still renders as characters, not a
+            // number: `%s` of 8'd65 is "A" in SystemVerilog too.
+            $write("[%s]", 8'd65);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(output, "[inline][here][world][A]");
+    }
+}
+
+#[test]
+fn a_runtime_indexed_write_reports_the_read_elements_between_its_endpoints() {
+    use crate::ir::module::ReadOffsets;
+    use crate::ir::{
+        ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
+        ProtoStatement, VarOffset,
+    };
+
+    // `gather_variable_offsets` reports a runtime-indexed write as its FIRST
+    // and LAST element only, so that a big array does not cost the dependency
+    // analysis an O(N²) expansion. The elements between them are written just
+    // as surely: an ordering pass that binds readers to writers by exact
+    // offset must still see them, or a reader of a middle element is free to
+    // run BEFORE the loop that fills it and the array keeps only its
+    // endpoints.
+    //
+    // The end-to-end shape needs the
+    // per-element copies a DE-ALIASED input port emits, which this harness
+    // cannot build (cross-test DUT reuse needs two test tops running in one
+    // process). This pins the mechanism instead, and it is the mechanism the
+    // three call sites share.
+    let value = |v: u64| ProtoExpression::Value {
+        value: Value::new(v, 8, false),
+        width: 8,
+        expr_context: ExpressionContext {
+            width: 8,
+            signed: false,
+        },
+    };
+    let scalar_read = |off: isize| ProtoExpression::Variable {
+        var_offset: VarOffset::Comb(off),
+        select: None,
+        dynamic_select: None,
+        width: 8,
+        var_full_width: 8,
+        expr_context: ExpressionContext {
+            width: 8,
+            signed: false,
+        },
+    };
+    let reader = |src: isize, dst: isize| {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: 8,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: scalar_read(src),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: Default::default(),
+        })
+    };
+    // `a[k] = v` over 24 elements of 4 bytes each, based at 100.
+    let writer = ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+        dst_base: VarOffset::Comb(100),
+        dst_stride: 4,
+        dst_num_elements: 24,
+        dst_index_expr: value(0),
+        dst_width: 8,
+        select: None,
+        dynamic_select: None,
+        rhs_select: None,
+        expr: value(7),
+        dst_ff_current_base_offset: 0,
+        comb_direct: false,
+    });
+
+    // Readers of element 0 (the base), element 5, element 23 (the last) and
+    // of an offset that is INSIDE the span but not on its stride.
+    let stmts = vec![
+        writer,
+        reader(100, 900),
+        reader(120, 904),
+        reader(122, 908),
+        reader(192, 912),
+    ];
+    let reads = ReadOffsets::collect(&stmts);
+    let mut interior = vec![];
+    reads.interior_writes(&stmts[0], &mut interior);
+
+    // Element 5 only: the endpoints are already reported by
+    // `gather_variable_offsets`, 122 is not an element, and nothing reads the
+    // other twenty.
+    assert_eq!(interior, vec![VarOffset::Comb(120)]);
+
+    // And the base+last encoding it complements is unchanged.
+    let mut ins = vec![];
+    let mut outs = vec![];
+    stmts[0].gather_variable_offsets(&mut ins, &mut outs);
+    assert_eq!(outs, vec![VarOffset::Comb(100), VarOffset::Comb(192)]);
+}
+
+#[test]
+fn out_of_range_unpacked_element_index_reads_default_and_drops_write() {
+    // An index past the last ELEMENT of an unpacked array: IEEE 1800-2023
+    // 7.4.6 reads the element type's default there and 11.5.1 writes
+    // nothing.  Both directions used to clamp to the last element, which
+    // returns a live neighbour on a read and OVERWRITES one on a write.
+    // Measured: the 4-state reference simulators drop the write and read x,
+    // and a 2-state one, like this simulator, reads the element default.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        idx: input  logic<4>,
+        wen: input  logic   ,
+        rd : output logic<8>,
+        e13: output logic<8>,
+        e14: output logic<8>,
+    ) {
+        var mem: logic<8> [15];
+        always_ff {
+            if_reset {
+                for i in 0..15 {
+                    mem[i] = 8'h00;
+                }
+            } else {
+                if wen {
+                    mem[idx] = 8'hff;
+                }
+            }
+        }
+        assign rd  = mem[idx];
+        assign e13 = mem[13];
+        assign e14 = mem[14];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("idx", Value::new(0, 4, false));
+        sim.set("wen", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        // Index 15 of a 15-entry array: the write must leave both the last
+        // element and its neighbour alone.
+        sim.set("idx", Value::new(15, 4, false));
+        sim.set("wen", Value::new(1, 1, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("e14").unwrap(),
+            Value::new(0, 8, false),
+            "an out-of-range write must not land on the last element, config={config:?}"
+        );
+        assert_eq!(
+            sim.get("e13").unwrap(),
+            Value::new(0, 8, false),
+            "an out-of-range write must not land anywhere, config={config:?}"
+        );
+
+        // With element 14 written, the out-of-range read must still be the
+        // element default rather than that element.
+        sim.set("idx", Value::new(14, 4, false));
+        sim.step(&clk);
+        sim.set("wen", Value::new(0, 1, false));
+        sim.set("idx", Value::new(15, 4, false));
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("e14").unwrap(),
+            Value::new(0xff, 8, false),
+            "the in-range write must land, config={config:?}"
+        );
+        let want = if config.use_4state {
+            Value::new_x(8, false)
+        } else {
+            Value::new(0, 8, false)
+        };
+        assert_eq!(
+            sim.get("rd").unwrap(),
+            want,
+            "an out-of-range read must be the element default, config={config:?}"
+        );
+    }
+}
+
+#[test]
+fn const_struct_array_member_folds_per_element() {
+    // A member read of a const ARRAY of structs (`ENC[i].m`) folded to x.
+    // Only a scalar struct const carried its value through the struct-member
+    // symbol route; the array literal's per-element values were dropped, so
+    // every field read came back unknown -- silently at the parameter level,
+    // and as a bogus `invalid_select` where the value reached a bit select.
+    let code = r#"
+    package Pkg {
+        struct enc_t {
+            e: u32,
+            m: u32,
+        }
+        const ENC: enc_t [2] = '{enc_t'{e: 8, m: 23}, enc_t'{e: 11, m: 52}};
+        function man_bits (
+            f: input u32,
+        ) -> u32 {
+            return ENC[f].m;
+        }
+    }
+    module Top (
+        o_m0: output logic<32>,
+        o_e1: output logic<32>,
+        o_fn: output logic<32>,
+    ) {
+        const M0: u32 = Pkg::ENC[0].m;
+        const E1: u32 = Pkg::ENC[1].e;
+        const FN: u32 = Pkg::man_bits(1);
+        assign o_m0 = M0;
+        assign o_e1 = E1;
+        assign o_fn = FN;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // The second-declared member takes the low bits, so reading `.m` as
+        // the whole struct would give 23 for element 0 too: `o_e1` is what
+        // separates a correct field offset from a truncation.
+        assert_eq!(sim.get("o_m0").unwrap(), Value::new(23, 32, false));
+        assert_eq!(sim.get("o_e1").unwrap(), Value::new(11, 32, false));
+        assert_eq!(sim.get("o_fn").unwrap(), Value::new(52, 32, false));
+    }
+}
+
+#[test]
+fn string_array_const_element_keeps_its_text() {
+    // A `string`'s declared width is the nominal 1 bit that every widthless
+    // kind reports, so every place that fitted an element to it kept one bit
+    // of the text: the array literal's own elements, a package const read
+    // through the symbol route, and a function's return variable. The
+    // comparisons below are against the text itself, so a truncated element
+    // fails them.
+    let code = r#"
+    package Pkg {
+        const NAMES: string [3] = '{"a.hex", "b.hex", "c.hex"};
+        function pick (
+            i: input u32,
+        ) -> string {
+            return NAMES[i];
+        }
+    }
+    module Top (
+        i_clk : input  clock,
+        o_pkg0: output logic,
+        o_pkg2: output logic,
+        o_fn  : output logic,
+        o_local: output logic,
+    ) {
+        const LOCAL: string [2] = '{"one", "two"};
+        assign o_pkg0  = Pkg::NAMES[0] == "a.hex";
+        assign o_pkg2  = Pkg::NAMES[2] == "c.hex";
+        assign o_fn    = Pkg::pick(1) == "b.hex";
+        assign o_local = LOCAL[1] == "two";
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_pkg0").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_pkg2").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_fn").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_local").unwrap(), Value::new(1, 1, false));
+    }
+}
+
+#[test]
+fn nested_self_call_is_composition_not_recursion() {
+    // The inliner marked the callee as expanding BEFORE converting its
+    // arguments, so a call to the same function inside an argument tripped the
+    // recursion guard: `f(f(x))` aborted elaboration with `recursive function
+    // "f" cannot be inlined`, and so did a call whose argument expands to one
+    // transitively. An argument is evaluated at the call site, before the call,
+    // so none of it is recursion. `testcases/error/recursive_function.veryl`
+    // is the negative control: genuine self-recursion stays rejected.
+    //
+    // The argument has to be non-constant: with a literal the analyzer folds
+    // the whole call before the inliner sees it and the test passes whether or
+    // not the guard is right.
+    let code = r#"
+    package Pkg {
+        function mul2 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return {x[6:0], 1'b0} ^ (if x[7] ? 8'h1b : 8'h00);
+        }
+        // Directly nested.
+        function mul4 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return mul2(mul2(x));
+        }
+        // Nested through a DIFFERENT function that itself expands to `mul2`:
+        // the guard has to follow the expansion, not the name at the call.
+        function mul8 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return mul2(mul4(x));
+        }
+    }
+    module Top (
+        i_clk: input clock,
+        o_m2 : output logic<8>,
+        o_m4 : output logic<8>,
+        o_m8 : output logic<8>,
+        o_sib: output logic<8>,
+        o_cs : output logic<8>,
+    ) {
+        #[allow(initial_assign)]
+        var seed: logic<8>;
+        initial {
+            seed = 8'h57;
+        }
+        assign o_m2  = Pkg::mul2(seed);
+        assign o_m4  = Pkg::mul4(seed);
+        assign o_m8  = Pkg::mul8(seed);
+        // Two sibling calls in one expression, and the nesting written at the
+        // call site: the same guard rejected both.
+        assign o_sib = Pkg::mul2(seed) ^ Pkg::mul2(~seed);
+        assign o_cs  = Pkg::mul2(Pkg::mul2(seed));
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // FIPS 197 xtime: 0x57 -> 0xae -> 0x47 -> 0x8e.
+        assert_eq!(sim.get("o_m2").unwrap(), Value::new(0xae, 8, false));
+        assert_eq!(sim.get("o_m4").unwrap(), Value::new(0x47, 8, false));
+        assert_eq!(sim.get("o_m8").unwrap(), Value::new(0x8e, 8, false));
+        assert_eq!(sim.get("o_cs").unwrap(), Value::new(0x47, 8, false));
+        // ~0x57 = 0xa8 -> 0x4b; 0xae ^ 0x4b = 0xe5.
+        assert_eq!(sim.get("o_sib").unwrap(), Value::new(0xe5, 8, false));
+    }
+}
+
+#[test]
+fn const_from_a_function_call_with_an_unpacked_array_argument() {
+    // The argument binding in `FunctionCall::eval_value` evaluated each actual
+    // to ONE value, and an unpacked array has none: `get_value(&[])` wants an
+    // index per dimension, so the `?` bailed and the whole const came out
+    // `unresolved_expression`. The simulator's own inliner already copied such
+    // an argument element by element; the analyzer's const evaluation did not.
+    //
+    // The actual arrives in two shapes depending on the context -- a variable
+    // reference and an already-folded `NumericArray` -- and only fixing both
+    // resolves every call site.
+    let code = r#"
+    package Pkg {
+        const N    : u32     = 3;
+        const SIZES: u32 [N] = '{10, 1, 2};
+
+        function max_of (
+            v: input u32 [N],
+        ) -> u32 {
+            var m: u32;
+            m = 0;
+            for i in 0..N {
+                if v[i] >: m {
+                    m = v[i];
+                }
+            }
+            return m;
+        }
+        const MAX: u32 = max_of(SIZES);
+
+        // The scalar control: this always resolved, so a failure here would
+        // mean something other than the array argument broke.
+        function plus_one (
+            v: input u32,
+        ) -> u32 {
+            return v + 1;
+        }
+        const ONE_MORE: u32 = plus_one(9);
+    }
+    module Top (
+        i_clk : input  clock,
+        o_max : output logic<32>,
+        o_ctrl: output logic<32>,
+        o_elem: output logic<32>,
+    ) {
+        assign o_max  = Pkg::MAX;
+        assign o_ctrl = Pkg::ONE_MORE;
+        // Reading an element of the same const directly: the control that
+        // says the const itself was never the problem.
+        assign o_elem = Pkg::SIZES[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_max").unwrap(), Value::new(10, 32, false));
+        assert_eq!(sim.get("o_ctrl").unwrap(), Value::new(10, 32, false));
+        assert_eq!(sim.get("o_elem").unwrap(), Value::new(10, 32, false));
     }
 }

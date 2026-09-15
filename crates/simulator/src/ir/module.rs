@@ -394,13 +394,24 @@ impl ProtoModule {
                         event_gates.insert(event.clone(), gates);
                         s
                     }
-                    _ => batch_compiled_statements(stmts.to_statements(
-                        ff_ptr,
-                        ff_len,
-                        comb_ptr,
-                        comb_len,
-                        self.use_4state,
-                    )),
+                    _ => {
+                        let mut s = stmts.to_statements(
+                            ff_ptr,
+                            ff_len,
+                            comb_ptr,
+                            comb_len,
+                            self.use_4state,
+                        );
+                        // Testbench blocks store into FF slots directly; see
+                        // `make_ff_stores_direct`.  Gates are planned for clock
+                        // events only, so an initial/final block always lands
+                        // here.  `is_initial` covers every `initial` block, not
+                        // just the first.
+                        if event.is_initial() || *event == Event::Final {
+                            crate::ir::statement::make_ff_stores_direct(&mut s);
+                        }
+                        batch_compiled_statements(s)
+                    }
                 };
                 (event.clone(), s)
             })
@@ -447,6 +458,9 @@ impl ProtoModule {
                     ProtoStatement::TbMethodCall { .. } => "TbMethod".to_string(),
                     ProtoStatement::Break => "Break".to_string(),
                     ProtoStatement::CompiledBlock(_) => "NestedCB".to_string(),
+                    &ProtoStatement::HierAssign(_) => {
+                        unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+                    }
                 };
                 *hist.entry(kind).or_insert(0) += 1;
             }
@@ -1200,6 +1214,9 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
             ProtoStatement::CompiledBlock(_) => "CB",
             ProtoStatement::SequentialBlock(_) => "SeqBlock",
             ProtoStatement::TbMethodCall { .. } => "TbMethod",
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         };
         eprintln!("[stmtord] {module_name} {tag} {path} {kind} tok={tok} out={outs:?} in={ins:?}");
         match s {
@@ -1343,6 +1360,9 @@ fn collect_event_written_comb(
             ),
             // No comb writes.
             ProtoStatement::Break => true,
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
     let mut out = HashSet::default();
@@ -1439,6 +1459,9 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
                 }
             }
             ProtoStatement::Break => true,
+            ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
     let mut out = Vec::new();
@@ -2010,6 +2033,10 @@ pub(crate) fn analyze_dependency(
             // boundaries, so the dependency survives as an edge between
             // distinct atoms.
             let atoms = self_referenced_bit_atoms(table);
+            // A runtime-indexed write names its first and last element only,
+            // so nothing here would order a reader of a MIDDLE element after
+            // the loop that fills it. See `ReadOffsets`.
+            let read_offsets = ReadOffsets::collect(table.values());
 
             let mut dag = Dag::<Node, ()>::new();
             let mut dag_nodes: HashMap<Node, _> = HashMap::default();
@@ -2030,6 +2057,8 @@ pub(crate) fn analyze_dependency(
                 let mut inputs = vec![];
                 let mut outputs = vec![];
                 x.gather_variable_offsets(&mut inputs, &mut outputs);
+                let interior_from = outputs.len();
+                read_offsets.interior_writes(x, &mut outputs);
                 let stmt_node = Node::Statement(*id);
                 let stmt = dag.add_node(stmt_node);
                 dag_nodes.insert(stmt_node, stmt);
@@ -2044,6 +2073,9 @@ pub(crate) fn analyze_dependency(
                 if split_here {
                     x.gather_reads_with_ranges(&mut bit_reads);
                     gather_bit_aware_outputs(x, &mut bit_writes);
+                    // An interior element is written whole; `gather_bit_aware_outputs`
+                    // keeps the base+last encoding and would leave it out.
+                    bit_writes.extend(outputs[interior_from..].iter().map(|off| (*off, None)));
                 }
 
                 edges.clear();
@@ -2803,6 +2835,7 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
                 rhs_select: None,
                 expr: (**expr).clone(),
                 dst_ff_current_offset: a.dst_ff_current_offset,
+                comb_direct: a.comb_direct,
                 token: a.token,
             }));
             hi = lo;
@@ -3185,6 +3218,7 @@ fn split_one_copy(
             rhs_select: None,
             expr,
             dst_ff_current_offset: a.dst_ff_current_offset,
+            comb_direct: a.comb_direct,
             token: a.token,
         }));
     }
@@ -3821,6 +3855,79 @@ pub(crate) fn ranges_overlap(a: BitRange, b: BitRange) -> bool {
     }
 }
 
+/// The offsets some statement in a scope reads, indexed for span lookup.
+///
+/// A runtime-indexed write reports only its FIRST and LAST element
+/// (`gather_variable_offsets`), so an ordering pass that binds readers to
+/// writers by exact offset never binds a reader of a middle element. That
+/// reader is then free to run BEFORE the loop that fills it, which reads as
+/// "the array kept only its endpoints".
+///
+/// Materializing every element would be the O(N²) expansion the base+last
+/// encoding exists to avoid, so only offsets something actually READS are
+/// materialized: a memory written by a loop and read by another runtime
+/// index costs nothing here.
+pub(crate) struct ReadOffsets {
+    comb: Vec<isize>,
+    ff: Vec<isize>,
+}
+
+impl ReadOffsets {
+    pub(crate) fn collect<'a>(statements: impl IntoIterator<Item = &'a ProtoStatement>) -> Self {
+        let mut comb = Vec::new();
+        let mut ff = Vec::new();
+        let mut ins = Vec::new();
+        let mut outs = Vec::new();
+        let mut reads = Vec::new();
+        for s in statements {
+            ins.clear();
+            outs.clear();
+            s.gather_variable_offsets(&mut ins, &mut outs);
+            reads.clear();
+            s.gather_reads_with_ranges(&mut reads);
+            for off in ins.iter().copied().chain(reads.iter().map(|(o, _)| *o)) {
+                if off.is_ff() { &mut ff } else { &mut comb }.push(off.raw());
+            }
+        }
+        for v in [&mut comb, &mut ff] {
+            v.sort_unstable();
+            v.dedup();
+        }
+        Self { comb, ff }
+    }
+
+    /// Every interior element `stmt` writes through a runtime index that
+    /// something reads. Appends; the caller clears.
+    pub(crate) fn interior_writes(&self, stmt: &ProtoStatement, out: &mut Vec<VarOffset>) {
+        let mut spans = Vec::new();
+        stmt.gather_dynamic_write_spans(&mut spans);
+        for (base, stride, num) in spans {
+            self.interior_of(base, stride, num, out);
+        }
+    }
+
+    /// The elements of `(base, stride, num)` BETWEEN its endpoints that
+    /// something reads. The endpoints themselves are already reported by
+    /// `gather_variable_offsets`.
+    fn interior_of(&self, base: VarOffset, stride: isize, num: usize, out: &mut Vec<VarOffset>) {
+        if num <= 2 || stride == 0 {
+            return;
+        }
+        let sorted = if base.is_ff() { &self.ff } else { &self.comb };
+        let last = base.raw() + stride * (num as isize - 1);
+        let (lo, hi) = (base.raw().min(last), base.raw().max(last));
+        let from = sorted.partition_point(|o| *o < lo);
+        for &o in sorted[from..].iter().take_while(|o| **o <= hi) {
+            // Strided, so an offset inside the range is not necessarily an
+            // element of it.
+            if o == base.raw() || o == last || (o - base.raw()) % stride != 0 {
+                continue;
+            }
+            out.push(VarOffset::new(base.is_ff(), o));
+        }
+    }
+}
+
 /// Collect (offset, bit_range) outputs for bit-aware SCC analysis.
 /// Only captures writes that are precisely bit-ranged (via Assign.select);
 /// everything else falls back to full-width (None).
@@ -4246,6 +4353,9 @@ fn compute_scc_stats(sorted: &[ProtoStatement]) -> (usize, usize, usize) {
                     ProtoStatement::CompiledBlock(_) => "CompiledBlock",
                     ProtoStatement::SequentialBlock(_) => "SequentialBlock",
                     ProtoStatement::TbMethodCall { .. } => "TbMethodCall",
+                    &ProtoStatement::HierAssign(_) => {
+                        unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+                    }
                 };
                 *kind_hist.entry(kind).or_insert(0) += 1;
                 for &off in &stmt_outputs[idx] {
@@ -5058,6 +5168,11 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
     let mut var_last_use: HashMap<VarOffset, usize> = HashMap::default();
     let mut levels: Vec<usize> = Vec::with_capacity(sorted.len());
 
+    // The sort this pass reorders binds a runtime-indexed write to readers of
+    // its interior elements; leveling has to see the same writes or it hoists
+    // those readers straight back above the write. See `ReadOffsets`.
+    let read_offsets = ReadOffsets::collect(&sorted);
+
     for stmt in &sorted {
         let mut inputs = vec![];
         let mut outputs = vec![];
@@ -5077,6 +5192,7 @@ fn reorder_by_level(sorted: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
                 stmt.gather_variable_offsets(&mut inputs, &mut outputs);
             }
         }
+        read_offsets.interior_writes(stmt, &mut outputs);
 
         let raw_level = inputs
             .iter()
@@ -5292,6 +5408,7 @@ fn cond_hoist_transform(stmts: &mut Vec<ProtoStatement>, context: &mut Context) 
                     rhs_select: None,
                     expr: cond_expr,
                     dst_ff_current_offset: 0,
+                    comb_direct: false,
                     token: TokenRange::default(),
                 });
                 let new_cond = PE::Variable {
@@ -6604,12 +6721,24 @@ impl Conv<&air::Module> for ProtoModule {
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
             .map(|(event, stmts)| {
+                // A testbench FF store writes its slot directly, which only
+                // the interpreter does (`make_ff_stores_direct`); a compiled
+                // chunk would push into the cycle write log instead, and
+                // nothing applies one outside an event.  `precompile_tb_bodies`
+                // is safe regardless: its own predicate declines any statement
+                // that writes an FF.
+                let tb_ff_store = (event.is_initial() || event == Event::Final)
+                    && stmts.iter().any(ProtoStatement::writes_ff);
                 #[cfg(not(target_family = "wasm"))]
                 let stmts = if event.is_initial() {
                     precompile_tb_bodies(context, stmts, &tb_private)
                 } else {
                     stmts
                 };
+                if tb_ff_store {
+                    let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
+                    return (event, stmts);
+                }
                 let stmts = match event_gates.remove(&event) {
                     Some(gates) if !context.config.use_4state => {
                         let (stmts, chunked) = try_jit_gated(context, stmts, gates);
@@ -7294,6 +7423,7 @@ fn rename_versions(
                     },
                 },
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: stmts[p.after].token().unwrap_or_default(),
             }));
     }
@@ -7519,6 +7649,7 @@ mod event_written_comb_tests {
             rhs_select: None,
             expr: lit(0, w),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: TokenRange::default(),
         })
     }
@@ -7535,6 +7666,7 @@ mod event_written_comb_tests {
             rhs_select: None,
             expr: lit(0, 32),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         })
     }
 

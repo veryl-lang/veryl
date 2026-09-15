@@ -13,6 +13,11 @@ pub type AssignTarget = (VarId, Option<usize>, BigUint);
 #[derive(Clone, Debug)]
 pub struct FfTableEntry {
     pub assigned: Option<usize>,
+    /// More than one always_ff declaration writes this key. `assigned` keeps
+    /// only the last of them, so the exemption for a block reading what it
+    /// wrote itself would clear a read of what another block wrote: the bits
+    /// differ but the key, a whole packed word, is the same.
+    pub multi_assigned: bool,
     /// `(decl_index, assign_target, src_read_mask, from_ff)` per reference.
     /// `assign_target` is `None` for condition expressions and similar
     /// non-assign contexts. Empty `src_read_mask` = unavailable (fall back
@@ -27,6 +32,7 @@ impl FfTableEntry {
     fn update_is_ff(&mut self, self_key: (VarId, usize), unsafe_reads: &UnsafeSelfReads) {
         if let Some(assigned_decl) = self.assigned {
             let readable = !unsafe_reads.contains(&(assigned_decl, self_key.0, self_key.1));
+            let multi_assigned = self.multi_assigned;
             // FF classification rules (strict NBA semantics):
             // - A variable may be treated as comb (ff_opt) only if no always_ff
             //   block reads it (cross-block NBA races would be violated).
@@ -43,6 +49,12 @@ impl FfTableEntry {
                         return false;
                     }
                     if *decl != assigned_decl {
+                        return true;
+                    }
+                    // With a second writing block the exemption cannot hold:
+                    // this read may be of a bit that block wrote, and `refered`
+                    // records only the array index, not which bits.
+                    if multi_assigned {
                         return true;
                     }
                     match assign_target {
@@ -119,6 +131,7 @@ impl FfTable {
             })
             .or_insert_with(|| FfTableEntry {
                 assigned: None,
+                multi_assigned: false,
                 refered: vec![(decl, assign_target, src_read_mask, from_ff)],
                 is_ff: false,
                 assigned_comb: None,
@@ -129,10 +142,14 @@ impl FfTable {
         self.table
             .entry((id, index))
             .and_modify(|x| {
+                if x.assigned.is_some_and(|d| d != decl) {
+                    x.multi_assigned = true;
+                }
                 x.assigned = Some(decl);
             })
             .or_insert(FfTableEntry {
                 assigned: Some(decl),
+                multi_assigned: false,
                 refered: vec![],
                 is_ff: false,
                 assigned_comb: None,
@@ -145,6 +162,7 @@ impl FfTable {
             .and_modify(|x| x.assigned_comb = Some(decl))
             .or_insert(FfTableEntry {
                 assigned: None,
+                multi_assigned: false,
                 refered: vec![],
                 is_ff: false,
                 assigned_comb: Some(decl),

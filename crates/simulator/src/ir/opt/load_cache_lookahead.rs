@@ -112,6 +112,9 @@ fn walk_stmt(s: &ProtoStatement, idx: usize, reads: &mut FutureReads) {
         | ProtoStatement::CompiledBlock(_)
         | ProtoStatement::TbMethodCall { .. }
         | ProtoStatement::Break => {}
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 

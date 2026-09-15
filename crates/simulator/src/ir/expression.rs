@@ -18,6 +18,32 @@ use veryl_parser::token_range::TokenRange;
 /// mask that may not have been needed, nothing more.
 const UNMASKED_BITS_DEPTH: usize = 16;
 
+/// Value an out-of-range dynamic index reads.
+///
+/// IEEE 1800-2023 7.4.6 gives it the element type's default, which is `x`
+/// in 4-state storage and zero in 2-state.  The address is still clamped
+/// so the load stays inside the allocation; only the value the caller sees
+/// comes from here.
+pub fn out_of_range_read(width: usize, signed: bool, use_4state: bool) -> Value {
+    if use_4state {
+        Value::new_x(width, signed)
+    } else {
+        Value::new(0, width, signed)
+    }
+}
+
+/// Whether a runtime index can leave an array of `num_elements`.
+///
+/// A 10-bit index into 1024 entries never can, so the guards below and in
+/// the two compiling backends are emitted only where they can fire.  Width
+/// zero is the unsized all-bit sentinel, whose value is filled from its
+/// context rather than its own width, so it is never ruled out here.
+pub fn index_may_exceed(index_width: usize, num_elements: usize) -> bool {
+    index_width == 0
+        || index_width >= usize::BITS as usize
+        || (1usize << index_width) > num_elements
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExpressionContext {
     pub width: usize,
@@ -116,12 +142,10 @@ impl Expression {
                     read_native_value(*value, *native_bytes, *use_4state, read_width, *signed)
                 };
                 if let Some(dyn_sel) = dynamic_select {
-                    let idx = dyn_sel
-                        .index_expr
-                        .eval(mask_cache)
-                        .to_usize()
-                        .unwrap_or(0)
-                        .min(dyn_sel.num_elements.saturating_sub(1));
+                    let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+                    if idx >= dyn_sel.num_elements {
+                        return out_of_range_read(*width, *signed, *use_4state);
+                    }
                     let end = idx * dyn_sel.elem_width;
                     let beg = end + dyn_sel.window - 1;
                     val.select(beg, end)
@@ -197,14 +221,11 @@ impl Expression {
                 width,
                 signed,
             } => {
-                if *num_elements == 0 {
-                    return Value::new(0, *width, *signed);
-                }
                 let idx_val = index_expr.eval(mask_cache);
-                let idx = idx_val
-                    .to_usize()
-                    .unwrap_or(0)
-                    .min(num_elements.saturating_sub(1));
+                let idx = idx_val.to_usize().unwrap_or(0);
+                if idx >= *num_elements {
+                    return out_of_range_read(*width, *signed, *use_4state);
+                }
                 #[cfg(debug_assertions)]
                 debug_assert!(
                     stride.checked_mul(idx as isize).is_some(),
@@ -223,12 +244,10 @@ impl Expression {
                     read_native_value(ptr, *native_bytes, *use_4state, read_width, *signed)
                 };
                 if let Some(dyn_sel) = dynamic_select {
-                    let idx = dyn_sel
-                        .index_expr
-                        .eval(mask_cache)
-                        .to_usize()
-                        .unwrap_or(0)
-                        .min(dyn_sel.num_elements.saturating_sub(1));
+                    let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+                    if idx >= dyn_sel.num_elements {
+                        return out_of_range_read(*width, *signed, *use_4state);
+                    }
                     let end = idx * dyn_sel.elem_width;
                     let beg = end + dyn_sel.window - 1;
                     value.select(beg, end)
@@ -2032,6 +2051,7 @@ pub fn build_dynamic_bit_select(
     width_shape: &veryl_analyzer::ir::ShapeRef,
     select: &air::VarSelect,
     kind_width: usize,
+    index_is_absolute_bits: bool,
 ) -> Result<ProtoDynamicBitSelect, SimulatorError> {
     // The analyzer already folds the element stride and any struct field offset
     // into the select index as an absolute *bit* position. For a non-trivial
@@ -2039,8 +2059,18 @@ pub fn build_dynamic_bit_select(
     // would re-apply the stride, double-scaling the index/window/clamp. Collapse
     // to a flat single-bit view so the folded index passes through unscaled;
     // plain logic (kind_width == 1) is already flat.
+    //
+    // That holds only where the stride really was folded in. A packed array of
+    // an ENUM (`e3_t<8>`: shape [8],
+    // kind_width 3) keeps its element stride in the SHAPE, and the index
+    // arrives as an element number. Flattening that left the index unscaled
+    // AND the window one bit wide, so a runtime-indexed write landed a single
+    // bit at the index instead of the element -- silently, with the right
+    // total width. `index_is_absolute_bits` is the caller's answer, because
+    // only it knows the kind.
     let flat_storage: [Option<usize>; 1];
     let (width_shape, kind_width) = if kind_width > 1
+        && index_is_absolute_bits
         && let Some(total) = width_shape.total()
     {
         flat_storage = [Some(total * kind_width)];
@@ -2355,8 +2385,49 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let width = comptime.r#type.total_width().unwrap();
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
+                    // A `param` is never written, so reading one whole is
+                    // reading its value.  Lowering it to storage instead hides
+                    // that from the identity folding in the `Binary` and
+                    // `Ternary` arms below: a parameter-gated expression of
+                    // the shape `full_q || (Pass && wvalid_i)`
+                    // then keeps a read of the gated-off operand, and a
+                    // consumer that rings the cell reports a combinational
+                    // loop the design does not have.
+                    //
+                    // `VarKind::Const` does NOT belong here even though it
+                    // reads as the stronger word: `build_for_statement` gives
+                    // it to the iterator of a RUNTIME for-loop, whose value
+                    // changes every iteration.
+                    //
+                    // Scalar `U64` values only: that is what those foldings
+                    // match, and inlining a wide constant at every read site
+                    // would grow the code for nothing.  The storage stays
+                    // allocated -- hierarchical references and waveform dumps
+                    // still resolve the parameter by name.
+                    if select.is_empty() && index.dimension() == 0 {
+                        let scope = context.scope();
+                        if let Some(var) = scope.analyzer_context.variables.get(id)
+                            && var.kind == air::VarKind::Param
+                            && let [value @ Value::U64(v)] = var.value.as_slice()
+                            && v.width as usize == width
+                        {
+                            return Ok(ProtoExpression::Value {
+                                value: value.clone(),
+                                width,
+                                expr_context,
+                            });
+                        }
+                    }
+
                     // Try constant index first
-                    let (select_val, const_index, need_dynamic_select, width_shape, kind_width) = {
+                    let (
+                        select_val,
+                        const_index,
+                        need_dynamic_select,
+                        width_shape,
+                        kind_width,
+                        index_is_absolute_bits,
+                    ) = {
                         let scope = context.scope();
                         let meta = scope.variable_meta.get(id).unwrap();
                         let select_val = if !select.is_empty() {
@@ -2376,12 +2447,14 @@ impl Conv<&air::Expression> for ProtoExpression {
                         let select_val = if need_dynamic { None } else { select_val };
                         let width_shape = meta.r#type.width().clone();
                         let kind_width = meta.r#type.kind.width().unwrap_or(1);
+                        let index_is_absolute_bits = !meta.r#type.kind.is_enum();
                         (
                             select_val,
                             const_index,
                             need_dynamic,
                             width_shape,
                             kind_width,
+                            index_is_absolute_bits,
                         )
                     };
                     let dynamic_select = if need_dynamic_select {
@@ -2390,6 +2463,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                             &width_shape,
                             select,
                             kind_width,
+                            index_is_absolute_bits,
                         )?)
                     } else {
                         None
@@ -2502,8 +2576,38 @@ impl Conv<&air::Expression> for ProtoExpression {
                         ctx.signed = signed;
                         Ok(inner)
                     }
+                    // `$bits`/`$size`/`$clog2`/`$onehot` are elaboration-time
+                    // values. The analyzer folds one that sits in a `const`
+                    // initialiser, because it evaluates the whole RHS -- but
+                    // one in an ordinary expression, or in a function body
+                    // where the argument only becomes constant at the call
+                    // site, arrives here as a call, on a line `veryl check`,
+                    // `veryl build` and Verilator all accept. Evaluate it,
+                    // and report an unsupported description rather than
+                    // panicking when it will not evaluate.
                     _ => {
-                        unreachable!("system function calls are resolved by the analyzer")
+                        let scope = context.scope();
+                        let value = call.eval_value(&mut scope.analyzer_context);
+                        let Some(value) = value else {
+                            return Err(SimulatorError::unsupported_description(
+                                &call.comptime.token,
+                            ));
+                        };
+                        // Sized by the VALUE, not by `comptime`: these calls
+                        // are built on an unknown comptime (`is_const` is all
+                        // it carries), so its type has no width and its
+                        // context has width zero. A literal's own width is
+                        // what the surrounding context then extends.
+                        let width = value.width();
+                        let expr_context = ExpressionContext {
+                            width,
+                            signed: false,
+                        };
+                        Ok(ProtoExpression::Value {
+                            value,
+                            width,
+                            expr_context,
+                        })
                     }
                 },
                 air::Factor::Anonymous(comptime) | air::Factor::Unknown(comptime) => {
@@ -2842,6 +2946,62 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let false_expr: ProtoExpression = Conv::conv(context, false_expr.as_ref())?;
                 let width = comptime.expr_context.width;
                 let expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+                // A constant condition picks one arm at elaboration, and the
+                // arm it cannot pick must not be left in the tree:
+                // `gather_variable` walks both arms of a `Ternary`, so the
+                // dead arm still contributes a read, and where a consumer
+                // rings the cell that phantom read closes a combinational
+                // loop the design does not have. A synchronous FIFO whose
+                // pass-through arm is gated by a parameter is written exactly
+                // this way, and such cells ring each other.  This is the
+                // Ternary counterpart of the
+                // `0 && X` identity folding in the Binary arm above.
+                //
+                // An arm that already carries the ternary's width and context
+                // replaces the node outright; `apply_context` pushes both onto
+                // each arm, so that is the normal case. Otherwise the node
+                // stays and only the dead arm is swapped for a zero of its own
+                // width and signedness -- the live arm, the width and the
+                // node's extension (by BOTH arms' signedness, LRM 11.4.11)
+                // are then all unchanged, so either form is bit-exact.
+                if let ProtoExpression::Value {
+                    value: Value::U64(v),
+                    ..
+                } = &cond
+                    && v.mask_xz == 0
+                {
+                    let took_true = v.payload != 0;
+                    let (taken, dead) = if took_true {
+                        (true_expr, false_expr)
+                    } else {
+                        (false_expr, true_expr)
+                    };
+                    if taken.width() == width && *taken.expr_context() == expr_context {
+                        return Ok(taken);
+                    }
+                    let dead = if dead.width() > 0 {
+                        ProtoExpression::Value {
+                            value: Value::new(0, dead.width(), dead.expr_context().signed),
+                            width: dead.width(),
+                            expr_context: *dead.expr_context(),
+                        }
+                    } else {
+                        dead
+                    };
+                    let (true_expr, false_expr) = if took_true {
+                        (taken, dead)
+                    } else {
+                        (dead, taken)
+                    };
+                    return Ok(ProtoExpression::Ternary {
+                        cond: Box::new(cond),
+                        true_expr: Box::new(true_expr),
+                        false_expr: Box::new(false_expr),
+                        width,
+                        expr_context,
+                    });
+                }
 
                 Ok(ProtoExpression::Ternary {
                     cond: Box::new(cond),

@@ -17,7 +17,7 @@ use crate::ir::write_log::static_field_byte_span;
 use crate::ir::{
     ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement, ProtoExpression,
     ProtoForBound, ProtoForRange, ProtoForStatement, ProtoStatement, ProtoSystemFunctionCall,
-    VarOffset, native_bytes, veryl_aot_sysfn_print,
+    VarOffset, index_may_exceed, native_bytes, veryl_aot_sysfn_print,
 };
 use crate::{HashMap, HashSet};
 use std::cell::RefCell;
@@ -602,6 +602,9 @@ impl LocalAnalysis {
             ProtoStatement::SystemFunctionCall(_)
             | ProtoStatement::TbMethodCall { .. }
             | ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 
@@ -761,6 +764,9 @@ impl LocalAnalysis {
                 self.poison(s);
             }
             ProtoStatement::TbMethodCall { .. } | ProtoStatement::Break => {}
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 }
@@ -841,8 +847,20 @@ fn emit_wide_const(
         Value::U64(x) if x.width == 0 => {
             let target = ctx_width.max(proto_width);
             let count = wide_words(native_bytes(target));
+            // Fill to the TARGET WIDTH, not to the whole allocation:
+            // `native_bytes(196)` is 32, and a 256-bit fill makes `a == '1`
+            // false because `a`'s own bits 196..255 are zero.
             let d = if x.payload != 0 {
-                vec![u64::MAX; count]
+                let mut v = vec![u64::MAX; count];
+                let rem = target % 64;
+                let top = target / 64;
+                if rem != 0 {
+                    v[top] = (1u64 << rem) - 1;
+                }
+                for w in v.iter_mut().skip(top + usize::from(rem != 0)) {
+                    *w = 0;
+                }
+                v
             } else {
                 vec![0u64; count]
             };
@@ -915,11 +933,26 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
                 let res_nb = native_bytes(dyn_sel.window);
                 let res_nw = wide_words(res_nb);
                 let t = next_wide_tmp();
+                // An out-of-range index reads the element default, so the
+                // scratch is zeroed instead of filled from the clamped one.
+                let (g0, g1) = match oob_cond(
+                    "_di_raw",
+                    dyn_sel.index_expr.width(),
+                    dyn_sel.num_elements,
+                ) {
+                    Some(c) => (
+                        format!("if ({c}) {{ "),
+                        format!(
+                            " }} else {{ for (unsigned _z = 0; _z < {res_nw}u; ++_z) _w{t}[_z] = 0; }}"
+                        ),
+                    ),
+                    None => (String::new(), String::new()),
+                };
                 pre.push_str(&format!(
                     "uint64_t _w{t}[{res_nw}]; \
                      {{ uint64_t _di_raw = (uint64_t)({idx}); \
                         uint64_t _di = _di_raw < {max_idx}ull ? _di_raw : {max_idx}ull; \
-                        vw_lshr_win((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {res_nb}u, {src_nb}u); }} \
+                        {g0}vw_lshr_win((uint8_t*)_w{t}, (const uint8_t*)({buf} + {off:#x}), _di * {ew}ull, {res_nb}u, {src_nb}u);{g1} }} \
                      vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {mask}u); ",
                     ew = dyn_sel.elem_width,
                     mask = wpack(res_nb, dyn_sel.window),
@@ -1030,11 +1063,25 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             // Clamp the index once; the address below references `_wi{t}`,
             // which lives in the same flat `pre` block.
             pre.push_str(&format!(
-                "uint64_t _wi{t} = (uint64_t)({idx}); _wi{t} = _wi{t} < {max} ? _wi{t} : {max}; ",
+                "uint64_t _wr{t} = (uint64_t)({idx}); \
+                 uint64_t _wi{t} = _wr{t} < {max} ? _wr{t} : {max}; ",
                 max = max_idx,
             ));
             let elem =
                 format!("((uint8_t*)({buf} + {off:#x} + (intptr_t){stride} * (intptr_t)_wi{t}))");
+            // Out of range reads the element default, which is a zeroed
+            // scratch of the same size rather than the clamped neighbour.
+            let elem = match oob_cond(&format!("_wr{t}"), index_expr.width(), *num_elements) {
+                Some(c) => {
+                    let z = next_wide_tmp();
+                    pre.push_str(&format!(
+                        "uint64_t _w{z}[{nw}] = {{0}}; ",
+                        nw = wide_words(*element_native_bytes),
+                    ));
+                    format!("(({c}) ? {elem} : (uint8_t*)_w{z})")
+                }
+                None => elem,
+            };
             let Some((lo, nbits)) = sel_window else {
                 return Some(WideRef {
                     addr: elem,
@@ -2375,6 +2422,9 @@ fn collect_uncovered(stmt: &ProtoStatement, out: &mut Vec<String>) {
         ProtoStatement::SystemFunctionCall(_) => out.push("SysFn".to_string()),
         ProtoStatement::TbMethodCall { .. } => out.push("TbMethodCall".to_string()),
         ProtoStatement::Break => out.push("Break".to_string()),
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -2614,6 +2664,38 @@ fn width_mask(width: usize) -> u64 {
     }
 }
 
+/// C test that a runtime index is inside its array, or `None` where the
+/// index's own width cannot reach past the last element.
+///
+/// IEEE 1800-2023 gives an out-of-range index the element type's default
+/// on a read (7.4.6) and no effect at all on a write (11.5.1); clamping it
+/// to the last element, which is what the emitted address arithmetic does,
+/// returns a neighbour and overwrites one.  Where the index cannot leave
+/// the array -- a power-of-two memory, say -- nothing is emitted and the
+/// access stays straight-line.
+fn oob_cond(idx_var: &str, index_width: usize, num_elements: usize) -> Option<String> {
+    index_may_exceed(index_width, num_elements).then(|| format!("{idx_var} < {num_elements}ull"))
+}
+
+/// Opening and closing text of the guard a dynamic store runs under.
+fn oob_guard(idx_var: &str, index_width: usize, num_elements: usize) -> (String, String) {
+    match oob_cond(idx_var, index_width, num_elements) {
+        Some(c) => (format!("if ({c}) {{ "), " }".to_string()),
+        None => (String::new(), String::new()),
+    }
+}
+
+/// Wrap the value a dynamic read produces so an out-of-range index yields
+/// the element default, which is zero: this emitter is 2-state only.
+fn oob_read(value: String, conds: &[Option<String>]) -> String {
+    let live: Vec<&str> = conds.iter().flatten().map(String::as_str).collect();
+    if live.is_empty() {
+        value
+    } else {
+        format!("(({}) ? ({value}) : 0)", live.join(" && "))
+    }
+}
+
 /// How a bit-field store may treat the sub-word it writes into, when the
 /// whole sub-word is redefined by a group of disjoint stores (see
 /// `plan_field_groups`).
@@ -2819,6 +2901,9 @@ fn comb_touches(
         // testbench call can reach anything.
         ProtoStatement::CompiledBlock(_) | ProtoStatement::TbMethodCall { .. } => false,
         ProtoStatement::Break => true,
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -3437,6 +3522,9 @@ fn const_cone_partition(
             }
             // TB-method writes are not modeled either.
             ProtoStatement::TbMethodCall { .. } => false,
+            &ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
     let mut wranges: WRanges = Vec::new();
@@ -4188,8 +4276,9 @@ fn emit_event_ff_assign_wide_dynsel_field(
     let rhs = emit_expr_root(&a.expr)?;
     let d = next_wide_tmp();
     let reg = format!("_w{d}");
+    let (g0, g1) = oob_guard(&format!("_di{d}"), ds.index_expr.width(), ne);
     let mut body = format!(
-        "uint64_t _di{d} = (uint64_t)({idx}); if (_di{d} > {max}ull) _di{d} = {max}ull; \
+        "uint64_t _di{d} = (uint64_t)({idx}); {g0}if (_di{d} > {max}ull) _di{d} = {max}ull; \
          uint64_t _bo{d} = _di{d} * {ew}ull; \
          uint64_t _wi{d} = _bo{d} >> 6, _sh{d} = _bo{d} & 63ull; ",
         max = ne - 1,
@@ -4218,7 +4307,7 @@ fn emit_event_ff_assign_wide_dynsel_field(
     body.push_str(&emit_wide_ff_rmw_tail(
         &reg, nb, packed, dst_raw, cur_off, None,
     ));
-    Some(format!("{{ {body} }}"))
+    Some(format!("{{ {body}{g1} }}"))
 }
 
 /// Event-path wide FF write at a RUNTIME index neither `_dynsel*` sibling can
@@ -4275,11 +4364,12 @@ fn emit_event_ff_assign_wide_dynsel_general(
     // `clip_window_to_width` drops the write outright once the window's LOW
     // bit is past the width, so the guard covers the log push too: an
     // out-of-range index must leave no entry, not re-log the old value.
+    let (g0, g1) = oob_guard("_di_raw", ds.index_expr.width(), ne);
     Some(format!(
         "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
             uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
             uint64_t _sh = _di * {ew}ull; \
-            if (_sh < {dw}ull) {{ {inner} }} }}",
+            {g0}if (_sh < {dw}ull) {{ {inner} }}{g1} }}",
         max_idx = ne - 1,
         dw = a.dst_width,
     ))
@@ -4315,7 +4405,7 @@ fn emit_event_ff_assign_wide_dynsel(
     let r = emit_wide_operand(&a.expr, nb, &mut pre)?;
     let d = next_wide_tmp();
     pre.push_str(&format!(
-        "uint64_t _di{d} = (uint64_t)({idx}); \
+        "uint64_t _di{d} = _dir{d}; \
          if (_di{d} > {max}ull) _di{d} = {max}ull; \
          uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
          vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
@@ -4346,7 +4436,10 @@ fn emit_event_ff_assign_wide_dynsel(
             nb,
         ),
     );
-    Some(format!("{{ {pre}{flag}{store}{push} }}"))
+    let (g0, g1) = oob_guard(&format!("_dir{d}"), ds.index_expr.width(), ne);
+    Some(format!(
+        "{{ uint64_t _dir{d} = (uint64_t)({idx}); {g0}{pre}{flag}{store}{push}{g1} }}"
+    ))
 }
 
 /// Event-path FF write (static dst): pushes a WriteLogEntry at the
@@ -4402,12 +4495,10 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
         let max_idx = ne - 1;
         let idx = emit_expr(&dyn_sel.index_expr)?;
         let body = format!(
-            "uint64_t _di_raw = (uint64_t)({idx}); \
-             uint64_t _di = _di_raw < {max} ? _di_raw : {max}; \
+            "uint64_t _di = _di_raw < {max} ? _di_raw : {max}; \
              uint64_t _sh = _di * {ew}ull; \
              uint64_t _m = ((((uint64_t)*((const {ct}*)(ff_values + {dst})) & ~(0x{vm:x}ULL << _sh)) | \
                  (((uint64_t)({rhs}) & 0x{vm:x}ULL) << _sh)) & 0x{dw:x}ULL);",
-            idx = idx,
             max = max_idx,
             ew = ew,
             ct = cty,
@@ -4426,7 +4517,10 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
             )
         };
         let push = emit_log_push(&log_off, "_m", nb);
-        return Some(format!("{{ {body} {store} {push} }}"));
+        let (g0, g1) = oob_guard("_di_raw", dyn_sel.index_expr.width(), ne);
+        return Some(format!(
+            "{{ uint64_t _di_raw = (uint64_t)({idx}); {g0}{body} {store} {push}{g1} }}"
+        ));
     }
     if let Some((hi, lo)) = a.select {
         let nbits = hi.checked_sub(lo)?.checked_add(1)?;
@@ -4558,13 +4652,14 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
             stride = a.dst_stride,
         )
     };
+    let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-            uint64_t _wval = {pay}; \
+            {g0}uint64_t _wval = {pay}; \
             {store}\
             unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
-            {push} }});",
+            {push}{g1} }});",
         idx = idx,
         max = max_idx,
         pay = payload,
@@ -4670,12 +4765,13 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
         &format!("_c{d}"),
         &emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), "_woff", nb),
     );
+    let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
         "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-            {pre}{flag}{store}\
+            {g0}{pre}{flag}{store}\
             unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
-            {push} }}",
+            {push}{g1} }}",
         idx = idx,
         max = max_idx,
         pre = pre,
@@ -6181,6 +6277,12 @@ fn split_entry_function(
 /// directly; FF-target writes push WriteLogEntries like the event path.
 pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     reset_wide_tmp();
+    // A comb list can carry FF-target assigns (the comb-to-ff hoist), and each
+    // emits an UNCHECKED write-log push: the push code is unchecked because an
+    // entry prologue is supposed to have reserved the room.  Count them the way
+    // the event path does, so the prologue below can.
+    EVENT_NARROW_PUSHES.with(|c| c.set(0));
+    EVENT_WIDE_PUSHES.with(|c| c.set(0));
     // Splitting the monolithic body into ~chunk_size-stmt static functions
     // gives gcc -O3 smaller register-allocation and stack-frame scopes per
     // chunk and bounds spill locality (the unsplit body regresses L1d
@@ -6573,12 +6675,24 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         );
     }
 
+    // Every entry this module exports reserves the whole body's worst case:
+    // each is a way in to code whose pushes are unchecked, and a run-once
+    // entry only ever over-reserves.  `> u32::MAX` pushes cannot be reserved
+    // in one call, so bail to Cranelift (which checks per push) rather than
+    // under-reserve -- the event path makes the same choice.
+    let reserve_prologue = {
+        let narrow = u32::try_from(EVENT_NARROW_PUSHES.with(|c| c.get())).ok()?;
+        let wide = u32::try_from(EVENT_WIDE_PUSHES.with(|c| c.get())).ok()?;
+        emit_reserve_prologue(narrow, wide)
+    };
+
     if chunks.len() == 1 && const_chunks == 0 && cone_segments.is_empty() {
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
              \x20   (void)write_log;\n",
         );
+        body.push_str(&reserve_prologue);
         body.push_str(&chunk_bodies[0]);
         body.push_str("}\n");
     } else {
@@ -6604,6 +6718,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 "__attribute__((visibility(\"default\")))\n\
                  void veryl_aot_eval_const(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n",
             );
+            body.push_str(&reserve_prologue);
             for i in 0..const_chunks {
                 body.push_str(&format!(
                     "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
@@ -7022,7 +7137,10 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             .map(|&(_, _, s)| s.state_off)
             .chain(egroups.iter().map(|eg| eg.state_off))
             .collect();
-        let entry_preamble = cone_gate_rearm_preamble(&state_offs, rearm_mask);
+        let entry_preamble = format!(
+            "{reserve_prologue}{}",
+            cone_gate_rearm_preamble(&state_offs, rearm_mask)
+        );
         body.push_str(&split_entry_function(
             &entry_prologue,
             &entry_preamble,
@@ -7536,7 +7654,10 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // refinement can land an FF write here (e.g. function output args).
             // emit_event_ff_assign returns None on uncovered patterns, safely
             // bailing the module to Cranelift.
-            if a.dst.is_ff() {
+            // `comb_direct` is a combinational write that merely lands in
+            // ff_values: it must NOT be logged, so it takes the plain store
+            // path below with `ff_values` as its buffer.
+            if a.dst.is_ff() && !a.comb_direct {
                 return emit_event_ff_assign(a, se_from);
             }
             // A runtime-indexed bit-slice store. A ≤64-bit dst is the scalar
@@ -7548,9 +7669,13 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     return None;
                 }
                 if a.dst_width > 64 {
-                    // A static bit-select / rhs_select / sign-extend combined
-                    // with the dynamic index isn't modelled here — bail those.
-                    if a.select.is_some() || eff_rhs_select.is_some() || se_from.is_some() {
+                    // `a.select` is DEAD on this shape: `eval_step` takes the
+                    // dynamic_select arm and never reads it (the two are
+                    // `if`/`else if`), so the window alone places the field.
+                    // Declining on it took the whole comb list to Cranelift.
+                    // `rhs_select` does shape the value and is applied below;
+                    // a sign-extending store still declines.
+                    if se_from.is_some() {
                         return None;
                     }
                     let ew = dyn_sel.elem_width;
@@ -7576,17 +7701,30 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     // emit_wide_narrow_field_store, byte-identical to it.
                     if win <= 64 {
                         let mut pre = String::new();
-                        let sv = wide_shift_amount(eff_expr, &mut pre)?;
+                        // `rhs_select` picks the field the reference takes with
+                        // `value.select(beg, end)` before the window write.
+                        let sv = match eff_rhs_select {
+                            Some((rhs_hi, rhs_lo)) => {
+                                let nbits = rhs_hi.checked_sub(rhs_lo)?.checked_add(1)?;
+                                if nbits > 64 {
+                                    return None;
+                                }
+                                let f = emit_wide_rhs_field(eff_expr, rhs_hi, rhs_lo, &mut pre)?;
+                                format!("((const veryl_u64_ua*)({}))[0]", f.addr)
+                            }
+                            None => wide_shift_amount(eff_expr, &mut pre)?,
+                        };
                         let wm: u64 = if win == 64 {
                             u64::MAX
                         } else {
                             (1u64 << win) - 1
                         };
+                        let (g0, g1) = oob_guard("_di_raw", dyn_sel.index_expr.width(), ne);
                         return Some(format!(
                             "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
                                 uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
                                 uint64_t _sh = _di * {ew}ull; \
-                                if (_sh < {dw}ull) {{ \
+                                {g0}if (_sh < {dw}ull) {{ \
                                 uint64_t _wi = _sh >> 6; \
                                 uint64_t _b = _sh & 63; \
                                 __uint128_t _m = ((__uint128_t){wm:#x}ULL) << _b; \
@@ -7598,19 +7736,26 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                                 veryl_u64_ua* _d = ((veryl_u64_ua*)(comb_values + {store_off:#x})) + _wi; \
                                 _d[0] = (_d[0] & ~_m0) | (((uint64_t)_v) & _m0); \
                                 if (_m1) _d[1] = (_d[1] & ~_m1) | (((uint64_t)(_v >> 64)) & _m1); \
-                                }} }}",
+                                }}{g1} }}",
                             dw = a.dst_width,
                         ));
+                    }
+                    // A window wider than 64 bits with an rhs_select would need
+                    // the field materialized at nb bytes, not just its low
+                    // word; leave that shape to Cranelift until a design asks.
+                    if eff_rhs_select.is_some() {
+                        return None;
                     }
                     let mut pre = String::new();
                     // rhs value (masked to `win` below) as an nb-byte buffer.
                     let r = emit_wide_operand(eff_expr, nb, &mut pre)?;
                     let merge =
                         emit_wide_dynsel_merge(&dst, &r.addr, "_sh", win, a.dst_width, nb, nw);
+                    let (g0, g1) = oob_guard("_di_raw", dyn_sel.index_expr.width(), ne);
                     return Some(format!(
                         "{{ {pre}uint64_t _di_raw = (uint64_t)({idx}); \
                             uint64_t _di = _di_raw < {max_idx} ? _di_raw : {max_idx}; \
-                            uint64_t _sh = _di * {ew}ull; {merge} }}"
+                            uint64_t _sh = _di * {ew}ull; {g0}{merge}{g1} }}"
                     ));
                 }
             }
@@ -7625,15 +7770,22 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // rhs_select (field extract + store); the rhs_select + dst-select
             // combination stays on Cranelift.
             if a.dst_width > 128 || (a.dst_width > 64 && eff_expr.builds_wide_pointer()) {
-                let VarOffset::Comb(store_off) = a.dst else {
-                    return None;
+                // Same destination rule as the scalar store below: a
+                // `comb_direct` write is combinational but lands in
+                // ff_values, and must not be logged.  Without the FF arm a
+                // wide write of that kind declines here and takes the whole
+                // comb list to Cranelift with it.
+                let (dst_buf, store_off) = match a.dst {
+                    VarOffset::Comb(o) => ("comb_values", o),
+                    VarOffset::Ff(o) if a.comb_direct => ("ff_values", o),
+                    VarOffset::Ff(_) => return None,
                 };
                 if store_off < 0 {
                     return None;
                 }
                 let nb = native_bytes(a.dst_width);
                 let nw = wide_words(nb);
-                let dst = format!("(uint8_t*)(comb_values + {store_off:#x})");
+                let dst = format!("(uint8_t*)({dst_buf} + {store_off:#x})");
                 let dmask = wpack(nb, a.dst_width);
                 // Non-foldable rhs_select (rhs isn't a plain variable):
                 // extract `value.select(rhs_hi, rhs_lo)` from the wide RHS,
@@ -7694,7 +7846,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                             None,
                             |k| {
                                 format!(
-                                    "(veryl_u64_ua*)(comb_values + {:#x})",
+                                    "(veryl_u64_ua*)({dst_buf} + {:#x})",
                                     store_off + (k as isize) * 8
                                 )
                             },
@@ -7939,12 +8091,13 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     }
                 }
             };
-            // FF targets returned via emit_event_ff_assign above, so the
-            // destination here is always comb.
-            let VarOffset::Comb(store_off) = a.dst else {
-                return None;
+            // FF targets returned via emit_event_ff_assign above unless they
+            // are `comb_direct`, which stores straight into ff_values.
+            let (buf, store_off) = match a.dst {
+                VarOffset::Comb(o) => ("comb_values", o),
+                VarOffset::Ff(o) if a.comb_direct => ("ff_values", o),
+                VarOffset::Ff(_) => return None,
             };
-            let buf = "comb_values";
             // Clean-store elision (see expr_emits_clean): the stores below
             // re-mask to dst_width only to canonicalize a dirty RHS.  Only
             // the bare form qualifies — a sign-extending store dirties
@@ -7975,15 +8128,17 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 // `dst_width`; clip the field mask as `clip_window_to_width`
                 // does.
                 let dwmask = width_mask(a.dst_width);
+                let (g0, g1) =
+                    oob_guard("_idx_raw", dyn_sel.index_expr.width(), dyn_sel.num_elements);
                 return Some(format!(
                     "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
-                        uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
+                        {g0}uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
                         uint64_t _sh = _idx * {ew}; \
                         uint64_t _m = (0x{vmask:x}ULL << _sh) & 0x{dwmask:x}ULL; \
                         uint64_t _v = ((uint64_t)({rhs})) & 0x{vmask:x}ULL; \
                         {ct} _o = *(({ct}*)({b} + {o:#x})); \
                         *(({ct}*)({b} + {o:#x})) = \
-                          ({ct})((_o & ({ct})(~_m)) | ({ct})((_v << _sh) & _m)); }}",
+                          ({ct})((_o & ({ct})(~_m)) | ({ct})((_v << _sh) & _m));{g1} }}",
                     idx = idx_str,
                     max = max_idx,
                     ew = dyn_sel.elem_width,
@@ -8031,9 +8186,32 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                         lo = lo,
                     ));
                 }
-                // A full-width [63:0] select on a 64-bit dst is a plain store;
-                // the single-u64 mask math below would overflow (`1u64 << 64`).
-                if nbits == 64 && lo == 0 {
+                // A select that covers the whole destination is a plain store:
+                // `Value::assign` intersects the field with `gen_mask(width)`,
+                // so a `beg` past the top writes every bit and nothing else,
+                // which a real design does carry.  It also keeps a 64-bit
+                // field away from the masked-store math below, which works in
+                // a single u64 and would overflow on one (`1u64 << 64`).
+                if lo == 0 && nbits >= a.dst_width {
+                    // The store writes the whole native word, so the bits above
+                    // the declared width come from the rhs. Every other store
+                    // path masks them off, and the loads rely on it: a full load
+                    // is reported clean because storage is canonical.
+                    //
+                    // One u64 holds the mask: a destination wider than 64 bits
+                    // has returned above, so `dst_width` is 63 or less here.
+                    let native_bits = nb * 8;
+                    if a.dst_width > 0 && a.dst_width < native_bits && !rhs_clean {
+                        let mask = (1u64 << a.dst_width) - 1;
+                        return Some(format!(
+                            "*(({ct}*)({b} + {o:#x})) = ({ct})(((uint64_t)({rhs})) & 0x{m:x}ULL);",
+                            ct = cty,
+                            b = buf,
+                            o = store_off,
+                            rhs = rhs_str,
+                            m = mask,
+                        ));
+                    }
                     return Some(format!(
                         "*(({ct}*)({b} + {o:#x})) = ({ct})({rhs});",
                         ct = cty,
@@ -8176,8 +8354,10 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                 return None;
             }
             // Event-path dynamic FF write (e.g. register file by rd index):
-            // direct element store + WriteLogEntry push.
-            if event_mode() && a.dst_base.is_ff() {
+            // direct element store + WriteLogEntry push. A combinational write
+            // that happens to land in FF storage takes neither: it stores
+            // directly and pushes nothing, so it falls back below.
+            if event_mode() && a.dst_base.is_ff() && !a.comb_direct {
                 return emit_event_ff_assign_dynamic(a);
             }
             // Mirror ProtoAssignDynamicStatement::eval_step (comb target).
@@ -8266,11 +8446,12 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                         src = r.addr,
                     )
                 };
+                let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
                 return Some(format!(
                     "{{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
                         uint8_t* _pa = (uint8_t*)(comb_values + {base:#x} + (intptr_t){stride} * (intptr_t)_idx); \
-                        {store} }}",
+                        {g0}{store}{g1} }}",
                     idx = idx_str,
                     max = max_idx,
                     base = base_off,
@@ -8324,10 +8505,11 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     m = dwmask,
                 )
             };
+            let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
             Some(format!(
                 "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                     uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                    {store} }});",
+                    {g0}{store}{g1} }});",
                 idx = idx_str,
                 max = max_idx,
                 store = store,
@@ -8373,6 +8555,9 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
             // testbench Module that contains them stays on the
             // Cranelift dispatch path.
             None
+        }
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
         }
     }
 }
@@ -8866,21 +9051,28 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 }
                 let idx_str = emit_expr(&dyn_sel.index_expr)?;
                 let max_idx = dyn_sel.num_elements.saturating_sub(1);
+                let oob = oob_cond("_idx_raw", dyn_sel.index_expr.width(), dyn_sel.num_elements);
                 if *var_full_width <= 128 {
                     let load = emit_var_load(var_offset, *var_full_width)?;
                     if dyn_sel.window < 64 {
                         let mask = (1u64 << dyn_sel.window) - 1;
                         // Result is <= 64 bits; cast down so a __uint128_t
                         // load (65..128-bit var) still yields a scalar.
+                        let value = oob_read(
+                            format!(
+                                "(uint64_t)((({load}) >> (_idx * {ew})) & 0x{mask:x}ULL)",
+                                load = load,
+                                ew = dyn_sel.elem_width,
+                                mask = mask,
+                            ),
+                            std::slice::from_ref(&oob),
+                        );
                         return Some(format!(
                             "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                                 uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                                (uint64_t)((({load}) >> (_idx * {ew})) & 0x{mask:x}ULL); }})",
+                                {value}; }})",
                             idx = idx_str,
                             max = max_idx,
-                            load = load,
-                            ew = dyn_sel.elem_width,
-                            mask = mask,
                         ));
                     }
                     // 64..128-bit window (e.g. an 80-bit element of a 160-bit
@@ -8892,15 +9084,21 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         (1u128 << dyn_sel.window) - 1
                     };
                     let (mhi, mlo) = ((m >> 64) as u64, m as u64);
+                    let value = oob_read(
+                        format!(
+                            "(((__uint128_t)({load})) >> (_idx * {ew})) \
+                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)",
+                            load = load,
+                            ew = dyn_sel.elem_width,
+                        ),
+                        std::slice::from_ref(&oob),
+                    );
                     return Some(format!(
                         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                            ((((__uint128_t)({load})) >> (_idx * {ew})) \
-                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)); }})",
+                            ({value}); }})",
                         idx = idx_str,
                         max = max_idx,
-                        load = load,
-                        ew = dyn_sel.elem_width,
                     ));
                 }
                 if dyn_sel.window > 64 {
@@ -8921,6 +9119,13 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         (1u128 << dyn_sel.window) - 1
                     };
                     let (mhi, mlo) = ((m >> 64) as u64, m as u64);
+                    let value = oob_read(
+                        format!(
+                            "(((__uint128_t)_v1 << 64) | (__uint128_t)_v0) \
+                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)"
+                        ),
+                        std::slice::from_ref(&oob),
+                    );
                     return Some(format!(
                         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
@@ -8931,8 +9136,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                             uint64_t _q2 = (_w + 2) < {nw}ull ? _p[_w + 2] : 0; \
                             uint64_t _v0 = _s == 0 ? _q0 : ((_q0 >> _s) | (_q1 << (64 - _s))); \
                             uint64_t _v1 = _s == 0 ? _q1 : ((_q1 >> _s) | (_q2 << (64 - _s))); \
-                            ((((__uint128_t)_v1 << 64) | (__uint128_t)_v0) \
-                             & (((__uint128_t)0x{mhi:x}ULL << 64) | (__uint128_t)0x{mlo:x}ULL)); }})",
+                            ({value}); }})",
                         idx = idx_str,
                         max = max_idx,
                         ew = dyn_sel.elem_width,
@@ -8954,6 +9158,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     return None;
                 }
                 let nw = wide_words(native_bytes(*var_full_width));
+                let value = oob_read(format!("_vv & 0x{mask:x}ULL"), &[oob]);
                 return Some(format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
@@ -8962,14 +9167,13 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         uint64_t _lo = _w < {nw}ull ? _p[_w] : 0; \
                         uint64_t _hi = (_w + 1) < {nw}ull ? _p[_w + 1] : 0; \
                         uint64_t _vv = _s == 0 ? _lo : ((_lo >> _s) | (_hi << (64 - _s))); \
-                        (_vv & 0x{mask:x}ULL); }})",
+                        ({value}); }})",
                     idx = idx_str,
                     max = max_idx,
                     ew = dyn_sel.elem_width,
                     b = buf,
                     off = off,
                     nw = nw,
-                    mask = mask,
                 ));
             }
             // Wide (>128-bit) underlying variable.  A static narrow (≤64-bit)
@@ -10118,7 +10322,26 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     ));
                 }
             }
-            for (sub, repeat, elem_width) in elements {
+            // Bits each element sits above: `Value::concat` appends every
+            // element in full and the consumer truncates to `width`, so an
+            // element reaching past the top keeps only its low part.  Walking
+            // right-to-left gives the count below each one, which clips the
+            // slot so the shift stays representable, which a concatenation of
+            // a variable far wider than its result needs.
+            let mut below_of: Vec<usize> = vec![0; elements.len()];
+            {
+                let mut below = 0usize;
+                for (i, (sub, repeat, elem_width)) in elements.iter().enumerate().rev() {
+                    below_of[i] = below;
+                    let w = if sub.width() == 0 {
+                        *elem_width
+                    } else {
+                        sub.width()
+                    };
+                    below = below.saturating_add(w.saturating_mul(*repeat));
+                }
+            }
+            for (i, (sub, repeat, elem_width)) in elements.iter().enumerate() {
                 if concat_elem_is_empty(sub, *repeat) {
                     continue;
                 }
@@ -10129,6 +10352,18 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 } else {
                     sub.width()
                 };
+                let below = below_of[i];
+                if below >= *width {
+                    // Entirely above the result: contributes nothing.
+                    continue;
+                }
+                let room = *width - below;
+                if room < sub_width && *repeat > 1 {
+                    // Each repeat would clip at a different offset; that is not
+                    // what the loop below emits.  Leave it to Cranelift.
+                    return None;
+                }
+                let sub_width = sub_width.min(room);
                 if sub_width == 0 || sub_width > 128 {
                     return None;
                 }
@@ -10244,13 +10479,27 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 let max_idx = num_elements.saturating_sub(1);
                 let max_sel = dyn_sel.num_elements.saturating_sub(1);
                 let mask = (1u64 << dyn_sel.window) - 1;
+                let value = oob_read(
+                    format!(
+                        "(_el >> (_bsel * {ew})) & 0x{mask:x}ULL",
+                        ew = dyn_sel.elem_width
+                    ),
+                    &[
+                        oob_cond("_idx_raw", index_expr.width(), *num_elements),
+                        oob_cond(
+                            "_bsel_raw",
+                            dyn_sel.index_expr.width(),
+                            dyn_sel.num_elements,
+                        ),
+                    ],
+                );
                 return Some(format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {maxi} ? _idx_raw : {maxi}; \
                         uint64_t _el = (uint64_t)*((const {ct}*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); \
                         uint64_t _bsel_raw = (uint64_t)({bsel}); \
                         uint64_t _bsel = _bsel_raw < {maxs} ? _bsel_raw : {maxs}; \
-                        ((_el >> (_bsel * {ew})) & 0x{mask:x}ULL); }})",
+                        ({value}); }})",
                     idx = idx_str,
                     maxi = max_idx,
                     ct = cty,
@@ -10259,8 +10508,6 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                     stride = stride,
                     bsel = sel_str,
                     maxs = max_sel,
-                    ew = dyn_sel.elem_width,
-                    mask = mask,
                 ));
             }
             // Wide (>16 native-byte) array element: a static narrow (≤64-bit)
@@ -10283,7 +10530,10 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         let addr = format!(
                             "({buf} + {base_off:#x} + (intptr_t){stride} * (intptr_t)_idx)"
                         );
-                        let read = emit_wide_select_read_at(&addr, *lo, nbits);
+                        let read = oob_read(
+                            emit_wide_select_read_at(&addr, *lo, nbits),
+                            &[oob_cond("_idx_raw", index_expr.width(), *num_elements)],
+                        );
                         return Some(format!(
                             "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                                 uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
@@ -10308,15 +10558,21 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 };
                 let idx_str = emit_expr(index_expr)?;
                 let max_idx = num_elements.saturating_sub(1);
+                let value = oob_read(
+                    format!(
+                        "(__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx))",
+                        b = buf,
+                        off = base_off,
+                        stride = stride,
+                    ),
+                    &[oob_cond("_idx_raw", index_expr.width(), *num_elements)],
+                );
                 let load = format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                        (__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); }})",
+                        {value}; }})",
                     idx = idx_str,
                     max = max_idx,
-                    b = buf,
-                    off = base_off,
-                    stride = stride,
                 );
                 if needs_clean && *width < 128 {
                     return Some(mask_u128(&load, *width));
@@ -10342,15 +10598,21 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 };
                 let idx_str = emit_expr(index_expr)?;
                 let max_idx = num_elements.saturating_sub(1);
+                let value = oob_read(
+                    format!(
+                        "(__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx))",
+                        b = buf,
+                        off = base_off,
+                        stride = stride,
+                    ),
+                    &[oob_cond("_idx_raw", index_expr.width(), *num_elements)],
+                );
                 let load = format!(
                     "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                         uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                        (__uint128_t)*((const veryl_u128_ua*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); }})",
+                        {value}; }})",
                     idx = idx_str,
                     max = max_idx,
-                    b = buf,
-                    off = base_off,
-                    stride = stride,
                 );
                 let shifted = format!("(((__uint128_t)({load})) >> {lo})");
                 if nbits >= 128 {
@@ -10393,16 +10655,22 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // exactly once and `idx` is reusable.  Compatible with
             // gcc/clang; we already require gcc to compile the .so.
             let max_idx = num_elements.saturating_sub(1);
+            let load = oob_read(
+                format!(
+                    "(uint64_t)*((const {ct}*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx))",
+                    ct = cty,
+                    b = buf,
+                    off = base_off,
+                    stride = stride,
+                ),
+                &[oob_cond("_idx_raw", index_expr.width(), *num_elements)],
+            );
             let load_expr = format!(
                 "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
                     uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-                    (uint64_t)*((const {ct}*)({b} + {off:#x} + (intptr_t){stride} * (intptr_t)_idx)); }})",
+                    {load}; }})",
                 idx = idx_str,
                 max = max_idx,
-                ct = cty,
-                b = buf,
-                off = base_off,
-                stride = stride,
             );
             if let Some((hi, lo)) = select {
                 let nbits = hi.checked_sub(*lo)?.checked_add(1)?;
@@ -10830,6 +11098,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 4),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10897,6 +11166,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xdeadbeef, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10922,6 +11192,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 64),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10941,6 +11212,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -10978,6 +11250,7 @@ mod tests {
             rhs_select: None,
             expr: signed_var_expr(VarOffset::Comb(0x8), 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11001,6 +11274,7 @@ mod tests {
             rhs_select: None,
             expr: signed_var_expr(VarOffset::Comb(0x8), 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11024,6 +11298,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 4),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11047,6 +11322,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xf, 4),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
@@ -11138,11 +11414,122 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x0123_4567_89ab_cdef, 64),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_event_function(&[ProtoStatement::Assign(a)], false, &[])
             .expect("a full-width select must emit");
         assert!(src.contains("0xffffffffffffffffULL"), "{src}");
+    }
+
+    #[test]
+    fn a_select_that_covers_the_whole_destination_masks_a_dirty_rhs() {
+        // `Value::assign` intersects the field with the destination's width, so
+        // a select whose top is past it writes every bit and nothing else: a
+        // plain store, not the read-modify-write below it.  The bits above the
+        // declared width still have to go, or a later full-width load -- which
+        // is reported clean because storage is canonical -- reads the rhs's own.
+        let assign = |expr: ProtoExpression| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(0x40),
+                dst_width: 12,
+                select: Some((15, 0)),
+                dynamic_select: None,
+                rhs_select: None,
+                expr,
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            })
+        };
+        // A 16-bit read carries four bits the destination does not.
+        let dirty = emit_stmt(&assign(var_expr(VarOffset::Comb(0), 16))).expect("must emit");
+        assert!(dirty.contains("0xfffULL"), "{dirty}");
+        assert!(
+            !dirty.contains("_o"),
+            "a covering select is not an RMW: {dirty}"
+        );
+        // A value already inside the width needs no mask.
+        let clean = emit_stmt(&assign(const_expr(0xa, 12))).expect("must emit");
+        assert!(!clean.contains("0xfffULL"), "{clean}");
+    }
+
+    #[test]
+    fn a_concat_element_wider_than_the_result_keeps_its_low_part() {
+        // `Value::concat` appends every element in full and the consumer
+        // truncates, so an element reaching past the top contributes only the
+        // bits under it.  Sizing its slot at the declared width instead put a
+        // shift of more than 128 in front of the emitter, which declined and
+        // took the whole comb list to Cranelift.  An unsized fill is where a
+        // slot outruns the result: it carries no width of its own, so the
+        // declared one is all there is.
+        let e = ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(const_expr(1, 0)), 1, 192),
+                (Box::new(var_expr(VarOffset::Comb(0x40), 8)), 1, 8),
+            ],
+            width: 64,
+            expr_context: ctx(64, false),
+        };
+        let assign = ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(0x80),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: e,
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        });
+        assert!(
+            emit_function(&[assign]).is_some(),
+            "a slot wider than the result must stay AOT-covered"
+        );
+    }
+
+    #[test]
+    fn comb_entry_reserves_the_room_its_own_pushes_need() {
+        // A comb list can carry an FF-target assign, and that emits a write-log
+        // push. The push is UNCHECKED: it assumes an entry prologue already
+        // reserved the room. The comb entry emitted no prologue at all, so the
+        // pushes ran past the pool and corrupted the heap.
+        let ff = ProtoAssignStatement {
+            dst: VarOffset::Ff(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 64),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(ff)]).expect("an FF store must emit");
+        assert!(
+            src.contains(")(_lb, 1u, 0u)"),
+            "the comb entry must reserve for the one narrow push its body makes: {src}"
+        );
+
+        // The control: a comb-only body pushes nothing, so it must carry NO
+        // reserve. Without this the assertion above would also pass on a
+        // prologue emitted unconditionally, which would hide a miscount.
+        let comb = ProtoAssignStatement {
+            dst: VarOffset::Comb(0),
+            dst_width: 64,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x1234, 64),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        };
+        let src = emit_function(&[ProtoStatement::Assign(comb)]).expect("a comb store must emit");
+        assert!(
+            !src.contains(")(_lb, "),
+            "a body with no push must not reserve: {src}"
+        );
     }
 
     #[test]
@@ -11161,6 +11548,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let s = emit_stmt(&ProtoStatement::Assign(a.clone())).expect("wide field store must emit");
@@ -11222,6 +11610,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11264,6 +11653,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xff, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11295,6 +11685,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(0x1234_5678_9abc_def0, 64),
                     dst_ff_current_offset: i * 8,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -11343,6 +11734,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xff, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).expect("must emit as a function");
@@ -11367,6 +11759,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let if_stmt = ProtoIfStatement {
@@ -11397,6 +11790,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xabc, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let if_stmt = ProtoIfStatement {
@@ -11422,6 +11816,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(i as u64, 32),
                     dst_ff_current_offset: 0,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -11509,6 +11904,7 @@ mod tests {
             rhs_select: None,
             expr: src,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         assert!(
@@ -11570,6 +11966,7 @@ mod tests {
             rhs_select: None,
             expr: var_expr_signed(VarOffset::Comb(0), 100),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         // -6 in 100-bit two's complement.
@@ -11603,6 +12000,7 @@ mod tests {
             rhs_select: None,
             expr: var_expr_signed(VarOffset::Comb(0), 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let Some(dst) = run_wide_field_store(assign, "wsx_single", 0xfb) else {
@@ -11654,6 +12052,7 @@ mod tests {
             rhs_select: None,
             expr: e,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("a zero-repeat element must stay AOT-covered");
@@ -11760,6 +12159,7 @@ mod tests {
             rhs_select: None,
             expr: add,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
@@ -11815,6 +12215,7 @@ mod tests {
             rhs_select: None,
             expr: add,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit add must stay AOT-covered");
@@ -11870,6 +12271,7 @@ mod tests {
             rhs_select: None,
             expr: mul,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("66-bit product must stay AOT-covered");
@@ -11913,6 +12315,7 @@ mod tests {
             rhs_select: None,
             expr: mul,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign]).expect("signed 66-bit product must stay AOT-covered");
@@ -11962,6 +12365,7 @@ mod tests {
             rhs_select: None,
             expr: concat,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12140,6 +12544,7 @@ mod tests {
                 rhs_select: rsel,
                 expr: slice(),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12218,6 +12623,7 @@ mod tests {
             rhs_select: Some((159, 32)),
             expr: or192,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12317,6 +12723,7 @@ mod tests {
                 expr_context: ctx(192, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src_txt = emit_function(&[stmt]).expect("must stay AOT-covered");
@@ -12379,6 +12786,7 @@ mod tests {
                 rhs_select: Some((150, 125)),
                 expr: or192(),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12463,6 +12871,7 @@ mod tests {
             rhs_select: None,
             expr: and192,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let src = emit_function(&[assign])
@@ -12533,6 +12942,7 @@ mod tests {
                 rhs_select: None,
                 expr: e,
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12590,7 +13000,9 @@ mod tests {
         for (idx, want80, want96, want64) in [
             (0u32, e0, t[0], g[0]),
             (1, e1, t[1], g[1]),
-            (2, e1, t[2], g[1]), // out-of-range indexes clamp to the last element
+            // Index 2 is in range for the 3-element triple and past the end
+            // of the two 2-element arrays, which read the element default.
+            (2, 0, t[2], 0),
         ] {
             comb[96..100].copy_from_slice(&idx.min(7).to_le_bytes());
             comb[100..104].copy_from_slice(&idx.to_le_bytes());
@@ -12665,6 +13077,7 @@ mod tests {
                 rhs_select: None,
                 expr: e,
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             })
         };
@@ -12714,8 +13127,8 @@ mod tests {
             comb[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
         }
         let mut log = vec![0u64; 16];
-        // Index 3 is out of range and clamps to the last element.
-        for (idx, elem) in [(0u32, 0usize), (1, 1), (2, 2), (3, 2)] {
+        // Index 3 is out of range, and reads the element default.
+        for (idx, elem) in [(0u32, Some(0usize)), (1, Some(1)), (2, Some(2)), (3, None)] {
             comb[72..76].copy_from_slice(&idx.to_le_bytes());
             unsafe {
                 (module.func)(
@@ -12735,11 +13148,11 @@ mod tests {
                 &slice_bits(&words, 400, 160)[..],
                 "[559:400]"
             );
-            assert_eq!(
-                &comb[128..152],
-                &slice_bits(&words, elem * 192, 192)[..],
-                "element {idx}"
-            );
+            let want_elem = match elem {
+                Some(e) => slice_bits(&words, e * 192, 192),
+                None => vec![0u8; 24],
+            };
+            assert_eq!(&comb[128..152], &want_elem[..], "element {idx}");
             assert_eq!(
                 &comb[152..176],
                 &slice_bits(&words, 449, 192)[..],
@@ -13156,6 +13569,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xab, 8),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         emit_stmt(&ProtoStatement::Assign(a)).unwrap()
@@ -13192,6 +13606,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(1, 1),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13213,6 +13628,7 @@ mod tests {
                 expr_context: ctx(hi - lo + 1, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13271,6 +13687,7 @@ mod tests {
                 expr_context: ctx(32, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -13476,6 +13893,7 @@ mod tests {
                 expr_context: ctx(1, false),
             },
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let mut stmts = vec![bit_store(0x40, 8), self_read];
@@ -13502,6 +13920,7 @@ mod tests {
                     rhs_select: None,
                     expr: const_expr(((b % 2) == 0) as u64, 1),
                     dst_ff_current_offset: 0,
+                    comb_direct: false,
                     token: dummy_token(),
                 })
             })
@@ -13627,6 +14046,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xdeadbeef, 32),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         };
         let s = emit_stmt(&ProtoStatement::AssignDynamic(a)).unwrap();
         assert!(s.contains("_idx_raw"));
@@ -13651,6 +14071,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0, 32),
             dst_ff_current_base_offset: 0x40,
+            comb_direct: false,
         };
         assert!(emit_stmt(&ProtoStatement::AssignDynamic(a)).is_none());
     }
@@ -13670,6 +14091,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1111, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let inner_b = ProtoStatement::Assign(ProtoAssignStatement {
@@ -13680,6 +14102,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x2222, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let cb = CompiledBlockStatement {
@@ -13714,6 +14137,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xabc, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let cb = CompiledBlockStatement {
@@ -14026,6 +14450,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0xa, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         });
         let for_stmt = ProtoForStatement {
@@ -14214,6 +14639,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(7, 32),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(a)]).unwrap();
@@ -14464,6 +14890,7 @@ mod tests {
             rhs_select: None,
             expr: dyn_read,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_function(&[ProtoStatement::Assign(assign)]).unwrap();
@@ -14501,7 +14928,8 @@ mod tests {
             written, 0xcccc,
             "DynamicVariable read should fetch element 2"
         );
-        // Out-of-range idx should clamp to last element (0xdddd, index 3).
+        // An out-of-range idx reads the element default, not the neighbour
+        // the clamped address points at.
         comb[16..20].copy_from_slice(&99u32.to_le_bytes());
         unsafe {
             (module.func)(
@@ -14513,8 +14941,8 @@ mod tests {
         }
         let written = u32::from_le_bytes(comb[20..24].try_into().unwrap());
         assert_eq!(
-            written, 0xdddd,
-            "out-of-range idx should clamp to last element"
+            written, 0,
+            "out-of-range idx should read the element default"
         );
 
         let _ = fs::remove_dir_all(&tmp);
@@ -14882,6 +15310,7 @@ mod tests {
             rhs_select: None,
             expr: rhs,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -15220,6 +15649,7 @@ mod tests {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         })
     }
@@ -15236,6 +15666,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0, 32),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         })
     }
 
@@ -15402,6 +15833,7 @@ mod tests {
                 rhs_select: None,
                 expr: var_expr(VarOffset::Ff(0), 16),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             }),
             cassign(0x20, 32, var_expr(VarOffset::Ff(8), 32)),
@@ -15413,6 +15845,7 @@ mod tests {
                 rhs_select: None,
                 expr: var_expr(VarOffset::Ff(2), 16),
                 dst_ff_current_offset: 0,
+                comb_direct: false,
                 token: dummy_token(),
             }),
         ];
@@ -15687,6 +16120,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let narrow = || ProtoAssignStatement {
@@ -15697,6 +16131,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 32),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let emit = |a: ProtoAssignStatement, clock: bool| {
@@ -15725,6 +16160,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let src = emit_event_function(&[ProtoStatement::Assign(a)], true, &[]).expect("must emit");
@@ -15759,6 +16195,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x5_a5a5_a5a5, 35),
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: dummy_token(),
         };
         let gate = EventGate {
@@ -15834,6 +16271,7 @@ mod tests {
             rhs_select: None,
             expr: const_expr(0x1234, 32),
             dst_ff_current_offset: 0x40,
+            comb_direct: false,
             token: dummy_token(),
         };
         let gate = EventGate {
