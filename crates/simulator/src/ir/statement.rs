@@ -18,6 +18,7 @@ use crate::ir::write_log::{
 use crate::ir::{Expression, ProtoExpression, Value};
 use crate::output_buffer;
 use crate::simulator_error::SimulatorError;
+use num_bigint::BigUint;
 use std::sync::Arc;
 use veryl_analyzer::conv::utils::eval_array_literal;
 use veryl_analyzer::ir as air;
@@ -25,7 +26,7 @@ use veryl_analyzer::ir::{
     AssertKind, SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant,
 };
 use veryl_analyzer::ir::{ControlFlow, FunctionCall, VarId};
-use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue};
+use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue, byte_value_to_string_lossy};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 
@@ -709,7 +710,7 @@ fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
                     }
                     's' | 'S' => {
                         if let Some(v) = values.get(arg_idx) {
-                            result.push_str(&v.format_dec());
+                            result.push_str(&byte_value_to_string_lossy(v));
                         }
                         arg_idx += 1;
                     }
@@ -1779,6 +1780,53 @@ impl ProtoStatement {
         }
     }
 
+    /// The element spans this statement writes through a runtime index, as
+    /// `(base, stride, num_elements)`.
+    ///
+    /// `gather_variable_offsets` reports such a write as its FIRST and LAST
+    /// element only, to keep `analyze_dependency` off an O(N²) expansion. The
+    /// elements between them are written just as surely, so an ordering pass
+    /// that binds readers to writers by exact offset needs the span as well:
+    /// without it a read of a middle element sees no writer and is free to
+    /// run before the loop that fills it.
+    pub fn gather_dynamic_write_spans(&self, out: &mut Vec<(VarOffset, isize, usize)>) {
+        match self {
+            ProtoStatement::AssignDynamic(x) if x.dst_num_elements > 2 => {
+                out.push((x.dst_base, x.dst_stride, x.dst_num_elements));
+            }
+            ProtoStatement::AssignDynamic(_)
+            | ProtoStatement::Assign(_)
+            | ProtoStatement::SystemFunctionCall(_)
+            | ProtoStatement::TbMethodCall { .. }
+            | ProtoStatement::Break => {}
+            ProtoStatement::If(x) => {
+                for s in x.true_side.iter().chain(&x.false_side) {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::Case(x) => {
+                for s in x.arms.iter().flat_map(|a| &a.body).chain(&x.default) {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::For(x) => {
+                for s in &x.body {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::SequentialBlock(body) => {
+                for s in body {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+            ProtoStatement::CompiledBlock(x) => {
+                for s in x.original_stmts.iter() {
+                    s.gather_dynamic_write_spans(out);
+                }
+            }
+        }
+    }
+
     /// Same as `gather_variable_offsets` but fully expands dynamic reads
     /// and writes to every element offset. Used by dead-store elimination
     /// (`dup_assign_dce`) so a runtime-indexed read keeps every element it
@@ -2669,12 +2717,10 @@ impl AssignStatement {
             value
         };
         if let Some(dyn_sel) = &self.dynamic_select {
-            let idx = dyn_sel
-                .index_expr
-                .eval(mask_cache)
-                .to_usize()
-                .unwrap_or(0)
-                .min(dyn_sel.num_elements.saturating_sub(1));
+            let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+            if idx >= dyn_sel.num_elements {
+                return;
+            }
             let end = idx * dyn_sel.elem_width;
             let beg = end + dyn_sel.window - 1;
             let Some((beg, end)) = clip_window_to_width(beg, end, self.dst_width) else {
@@ -2787,14 +2833,14 @@ impl AssignStatement {
 
 impl AssignDynamicStatement {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
-        if self.dst_num_elements == 0 {
+        let idx_val = self.dst_index_expr.eval(mask_cache);
+        let idx = idx_val.to_usize().unwrap_or(0);
+        // IEEE 1800-2023 11.5.1: a write through an out-of-range index has
+        // no effect.  Clamping, which is what this did, overwrites the last
+        // element with a value the design meant for nobody.
+        if idx >= self.dst_num_elements {
             return;
         }
-        let idx_val = self.dst_index_expr.eval(mask_cache);
-        let idx = idx_val
-            .to_usize()
-            .unwrap_or(0)
-            .min(self.dst_num_elements.saturating_sub(1));
         let dst = unsafe { self.dst_base_ptr.offset(self.dst_stride * idx as isize) };
 
         let value = self.expr.eval(mask_cache);
@@ -2826,12 +2872,10 @@ impl AssignDynamicStatement {
             }
         };
         if let Some(dyn_sel) = &self.dynamic_select {
-            let dyn_idx = dyn_sel
-                .index_expr
-                .eval(mask_cache)
-                .to_usize()
-                .unwrap_or(0)
-                .min(dyn_sel.num_elements.saturating_sub(1));
+            let dyn_idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
+            if dyn_idx >= dyn_sel.num_elements {
+                return;
+            }
             let end = dyn_idx * dyn_sel.elem_width;
             let beg = end + dyn_sel.window - 1;
             let Some((beg, end)) = clip_window_to_width(beg, end, self.dst_width) else {
@@ -3332,11 +3376,39 @@ fn extract_display_args(
     }
 
     for input in iter {
-        let proto: ProtoExpression = Conv::conv(context, &input.0).ok()?;
+        // A `string` exists only at elaboration and has no simulator variable
+        // behind it, so its bytes are taken here. Converting it as a variable
+        // reference looks for a `VariableMeta` that was never created.
+        let proto = if let Some(x) = string_arg_expression(&input.0) {
+            x
+        } else {
+            Conv::conv(context, &input.0).ok()?
+        };
         exprs.push(proto);
     }
 
     Some((format_str, exprs))
+}
+
+/// A constant `string` argument, as the byte value `%s` renders.
+fn string_arg_expression(expr: &air::Expression) -> Option<ProtoExpression> {
+    let air::Expression::Term(factor) = expr else {
+        return None;
+    };
+    let comptime = factor_comptime(factor.as_ref())?;
+    if comptime.r#type.kind != TypeKind::String {
+        return None;
+    }
+    let ValueVariant::Numeric(value) = &comptime.value else {
+        return None;
+    };
+    Some(ProtoExpression::Value {
+        value: value.clone(),
+        // The value's own width, not the type's: a `string` type carries no
+        // usable width (`total_width()` is 1 for it).
+        width: value.width(),
+        expr_context: (&comptime.expr_context).into(),
+    })
 }
 
 fn factor_comptime(factor: &air::Factor) -> Option<&veryl_analyzer::ir::Comptime> {
@@ -4955,10 +5027,15 @@ pub fn parse_hex_content(content: &str, width: usize) -> Vec<AnalyzerValue> {
 }
 
 /// `sink` returns false to stop early.  A token carrying a character outside
-/// `[0-9a-fA-F_]`, or a value past 64 bits, is dropped.
+/// `[0-9a-fA-F_]` is dropped, and so is one whose value does not fit the
+/// accumulator: 64 bits, or the element's own width where that is wider.
 fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -> bool) {
     let len = bytes.len();
     let mut i = 0usize;
+    // An element wider than a `u64` needs a wider accumulator, and only then:
+    // a hex image is read word by word, so the narrow path carries every
+    // ordinary load.
+    let cap_bits = width.max(64);
 
     while i < len {
         let c = bytes[i];
@@ -4991,6 +5068,7 @@ fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -
             i += 1;
         }
         let mut acc = 0u64;
+        let mut wide: Option<BigUint> = None;
         let mut digits = 0usize;
         let mut ok = true;
         while i < len {
@@ -5011,14 +5089,27 @@ fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -
                     continue;
                 }
             };
-            ok &= acc >> 60 == 0;
-            acc = (acc << 4) | d as u64;
+            // The word has outgrown the fast accumulator and the element can
+            // hold more: carry what is read so far into the wide one, which
+            // then applies the same "room for one more digit" rule.
+            if wide.is_none() && acc >> 60 != 0 && cap_bits > 64 && !is_address {
+                wide = Some(BigUint::from(acc));
+            }
+            if let Some(w) = &mut wide {
+                ok &= w.bits() as usize + 4 <= cap_bits;
+                *w = (std::mem::take(w) << 4u32) | BigUint::from(d);
+            } else {
+                ok &= acc >> 60 == 0;
+                acc = (acc << 4) | d as u64;
+            }
             digits += 1;
             i += 1;
         }
         if ok && digits > 0 {
             let item = if is_address {
                 HexItem::Address(acc)
+            } else if let Some(w) = wide {
+                HexItem::Word(AnalyzerValue::new_biguint(w, width, false))
             } else {
                 HexItem::Word(AnalyzerValue::new(acc, width, false))
             };
