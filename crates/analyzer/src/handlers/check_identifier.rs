@@ -41,6 +41,7 @@ enum Kind {
     Reg,
     Struct,
     StructItem,
+    Typedef,
     Union,
     UnionItem,
     Var,
@@ -116,6 +117,7 @@ impl CheckIdentifier {
             Kind::Reg => &opt.prefix_reg,
             Kind::Struct => &opt.prefix_struct,
             Kind::StructItem => &None,
+            Kind::Typedef => &None,
             Kind::Union => &opt.prefix_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.prefix_var,
@@ -143,6 +145,7 @@ impl CheckIdentifier {
             Kind::Reg => &opt.suffix_reg,
             Kind::Struct => &opt.suffix_struct,
             Kind::StructItem => &None,
+            Kind::Typedef => &None,
             Kind::Union => &opt.suffix_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.suffix_var,
@@ -170,6 +173,7 @@ impl CheckIdentifier {
             Kind::Reg => &opt.case_reg,
             Kind::Struct => &opt.case_struct,
             Kind::StructItem => &None,
+            Kind::Typedef => &None,
             Kind::Union => &opt.case_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.case_var,
@@ -197,6 +201,7 @@ impl CheckIdentifier {
             Kind::Reg => &opt.re_required_reg,
             Kind::Struct => &opt.re_required_struct,
             Kind::StructItem => &None,
+            Kind::Typedef => &None,
             Kind::Union => &opt.re_required_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.re_required_var,
@@ -224,6 +229,7 @@ impl CheckIdentifier {
             Kind::Reg => &opt.re_forbidden_reg,
             Kind::Struct => &opt.re_forbidden_struct,
             Kind::StructItem => &None,
+            Kind::Typedef => &None,
             Kind::Union => &opt.re_forbidden_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.re_forbidden_var,
@@ -495,6 +501,24 @@ impl VerylGrammarTrait for CheckIdentifier {
     fn var_declaration(&mut self, arg: &VarDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token.token, Kind::Var)
+        }
+        Ok(())
+    }
+
+    fn let_declaration(&mut self, arg: &LetDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let token = &arg.identifier.identifier_token.token;
+            // `let _ = ...` discards the value; there is no name to check.
+            if !is_anonymous_token(token) {
+                self.check(token, Kind::Var);
+            }
+        }
+        Ok(())
+    }
+
+    fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.check(&arg.identifier.identifier_token.token, Kind::Typedef)
         }
         Ok(())
     }
