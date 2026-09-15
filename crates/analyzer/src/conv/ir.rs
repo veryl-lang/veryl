@@ -227,7 +227,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
             && !x.is_proto
         {
             context.push_namespace(symbol.found.inner_namespace());
-            context.in_test_module = x.test.is_some();
+            context.in_test_module = x.test.is_some() || x.testbench;
             if let Some(x) = x.default_clock {
                 let path = VarPath::new(symbol_table::get(x).unwrap().token.text);
                 context.set_default_clock(path, x);
