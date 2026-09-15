@@ -1,5 +1,6 @@
 use crate::analyzer_error::{
-    AnalyzerError, ComponentInterfaceMismatchKind, MismatchTypeKind, UnevaluableValueKind,
+    AnalyzerError, ComponentInterfaceMismatchKind, MismatchAssignmentKind, MismatchTypeKind,
+    UnevaluableValueKind,
 };
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
@@ -395,6 +396,7 @@ impl Conv<&WithGenericParameterItem> for () {
                             context.insert_error(AnalyzerError::mismatch_assignment(
                                 "number",
                                 &x.bound.to_string(),
+                                MismatchAssignmentKind::Normal,
                                 &token,
                                 &[],
                             ));
@@ -405,6 +407,7 @@ impl Conv<&WithGenericParameterItem> for () {
                             context.insert_error(AnalyzerError::mismatch_assignment(
                                 "type",
                                 &x.bound.to_string(),
+                                MismatchAssignmentKind::Normal,
                                 &token,
                                 &[],
                             ));

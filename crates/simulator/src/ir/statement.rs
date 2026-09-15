@@ -3806,6 +3806,38 @@ fn conv_assign_statements(
                     return Ok(result);
                 }
 
+                // The unsized all-bit fill (`arr = '0;`).  It carries no
+                // width of its own -- the sentinel is a zero-width value --
+                // so SystemVerilog replicates it into every element, and the
+                // single-statement path below, which needs one destination
+                // shape to size it against, declines the design instead.
+                if dst0.select.is_empty()
+                    && let air::Expression::Term(factor) = &src.expr
+                    && let air::Factor::Value(comptime) = factor.as_ref()
+                    && comptime.r#type.array.is_empty()
+                    && matches!(&comptime.value, ValueVariant::Numeric(v) if v.width() == 0)
+                {
+                    let mut result = Vec::with_capacity(total);
+                    for i in 0..total {
+                        let mut new_dst = dst0.clone();
+                        new_dst
+                            .index
+                            .append(&air::VarIndex::from_index(i, &dst_shape));
+                        let element_assign = air::AssignStatement {
+                            dst: vec![new_dst],
+                            width: src.width,
+                            expr: src.expr.clone(),
+                            token: src.token,
+                        };
+                        let proto: ProtoAssignStatement = Conv::conv(context, &element_assign)?;
+                        result.push(ProtoStatement::Assign(proto));
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
+
                 // A const array on the RHS (`s = pk::TBL;`).
                 if dst0.select.is_empty()
                     && let Some((comptime, values)) = const_array_operand(&src.expr)

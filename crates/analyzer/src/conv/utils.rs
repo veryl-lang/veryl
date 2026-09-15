@@ -1,6 +1,7 @@
 use crate::analyzer_error::{
     AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForRangeKind,
-    InvalidForStepKind, MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
+    InvalidForStepKind, MismatchAssignmentKind, MismatchTypeKind, MultipleDefaultKind,
+    UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -1361,13 +1362,14 @@ pub fn eval_type(
                             let member = symbol_table::get(*x).unwrap();
                             let name = member.token.text;
 
-                            if let SymbolKind::StructMember(x) = member.kind {
+                            if let SymbolKind::StructMember(x) = &member.kind {
                                 if symbol.found.token.text == x.r#type.token.beg.text {
                                     // Prevent cyclic reference
                                     continue;
                                 }
 
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
+                                check_unpacked_member(c, &member, &x.r#type.token, &r#type);
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
@@ -1391,13 +1393,14 @@ pub fn eval_type(
                         for x in &x.members {
                             let member = symbol_table::get(*x).unwrap();
                             let name = member.token.text;
-                            if let SymbolKind::UnionMember(x) = member.kind {
+                            if let SymbolKind::UnionMember(x) = &member.kind {
                                 if symbol.found.token.text == x.r#type.token.beg.text {
                                     // Prevent cyclic reference
                                     continue;
                                 }
 
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
+                                check_unpacked_member(c, &member, &x.r#type.token, &r#type);
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
@@ -1695,6 +1698,25 @@ pub fn eval_type(
         r#type.set_concrete_width(width);
     }
     Ok(r#type)
+}
+
+/// A struct/union member is emitted inside a `struct packed`, where an unpacked
+/// array is illegal SystemVerilog. Spelling one directly (`m: t [8]`) is a
+/// parse error, but a `type` alias carries one past the grammar.
+fn check_unpacked_member(
+    context: &mut Context,
+    member: &Symbol,
+    token: &TokenRange,
+    r#type: &ir::Type,
+) {
+    if context.in_generic || r#type.array.is_empty() {
+        return;
+    }
+
+    context.insert_error(AnalyzerError::unpacked_struct_union_member(
+        &member.token.to_string(),
+        token,
+    ));
 }
 
 fn check_struct_union_members(
@@ -4459,12 +4481,22 @@ pub fn check_compatibility(
         check_implicit_clock_conversion(context, dst, src, token);
         return;
     }
-    if !dst.compatible(src, context.in_generic) {
-        let src_type = src.r#type.to_string();
-        let dst_type = dst.to_string();
+    // The unpacked dimensions are asked on their own axis rather than inside
+    // `compatible`, which answers from the element kind for a 2-state, clock or
+    // reset destination and never reaches its array branch for one. The answer
+    // only refines the help: the severity is the same conservative warning.
+    let kind = if dst.array_shape_mismatch(src) {
+        Some(MismatchAssignmentKind::ArrayShape)
+    } else if !dst.compatible(src, context.in_generic) {
+        Some(MismatchAssignmentKind::Normal)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
         context.insert_error(AnalyzerError::mismatch_assignment(
-            &src_type,
-            &dst_type,
+            &src.r#type.to_string(),
+            &dst.to_string(),
+            kind,
             token,
             &[],
         ));

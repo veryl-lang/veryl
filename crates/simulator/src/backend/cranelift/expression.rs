@@ -777,19 +777,33 @@ impl ProtoExpression {
                     if is_wide_ptr(target) {
                         let nb = calc_native_bytes(target);
                         let count = nb / 8;
-                        let payload_digits = if payload_bit {
-                            vec![u64::MAX; count]
-                        } else {
-                            vec![0u64; count]
-                        };
-                        let payload = emit_wide_const(builder, &payload_digits, nb);
-                        let mask_xz = if context.use_4state {
-                            let mask_digits = if mask_xz_bit {
-                                vec![u64::MAX; count]
+                        // Fill to the TARGET WIDTH, not to the whole
+                        // allocation: `calc_native_bytes(196)` is 32, and a
+                        // 256-bit fill made `a == '1` false because `a`'s own
+                        // bits 196..255 are zero.  The <=128 path below masks
+                        // with `gen_mask_for_width`, which is why only the
+                        // wide one was wrong.
+                        let digits = |set: bool| -> Vec<u64> {
+                            if !set {
+                                return vec![0u64; count];
+                            }
+                            let mut v = vec![u64::MAX; count];
+                            let rem = target % 64;
+                            if rem != 0 {
+                                v[target / 64] = (1u64 << rem) - 1;
+                                for w in v.iter_mut().skip(target / 64 + 1) {
+                                    *w = 0;
+                                }
                             } else {
-                                vec![0u64; count]
-                            };
-                            Some(emit_wide_const(builder, &mask_digits, nb))
+                                for w in v.iter_mut().skip(target / 64) {
+                                    *w = 0;
+                                }
+                            }
+                            v
+                        };
+                        let payload = emit_wide_const(builder, &digits(payload_bit), nb);
+                        let mask_xz = if context.use_4state {
+                            Some(emit_wide_const(builder, &digits(mask_xz_bit), nb))
                         } else {
                             None
                         };
@@ -2686,8 +2700,12 @@ impl ProtoExpression {
         };
 
         let width = expr_context.width;
-        let x_width = x.width();
-        let y_width = y.width();
+        // `materialized_width`, not `width()`: the unsized all-bit sentinel
+        // (`'1`) reports width 0 and is filled from its context, and a 0 here
+        // tells the marshaller there is nothing to resize -- which left the
+        // high words of a >128-bit operand zeroed, so `x == '1` was false.
+        let x_width = x.materialized_width();
+        let y_width = y.materialized_width();
 
         let (x_payload, x_mask_xz) = x.build_binary(context, builder)?;
         let (y_payload, y_mask_xz) = y.build_binary(context, builder)?;
