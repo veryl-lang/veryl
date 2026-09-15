@@ -6773,6 +6773,49 @@ fn const_array_whole_assign_multi_dim() {
 }
 
 #[test]
+fn unsized_all_bit_const_fills_the_declared_width() {
+    // `'1` and `'0` are unsized sentinels carrying ONE bit; the declared type
+    // is what says how far to replicate it. A packed multi-dimensional const
+    // is where getting that wrong shows: the sentinel's bit was stamped with
+    // the declared width instead of replicated, so `logic<8, 32> = '1` read
+    // as 1 in element 0 and x above it, while the emitted SystemVerilog was
+    // correct.
+    let code = r#"
+    package pk {
+        const ONES_W8  : logic<8>     = '1;
+        const ONES_W65 : logic<65>    = '1;
+        const ONES_2D  : logic<8, 32> = '1;
+        const ZEROS_2D : logic<8, 32> = '0;
+    }
+    module Top (
+        a: output logic<8> ,
+        b: output logic<32>,
+        c: output logic<32>,
+        d: output logic<32>,
+        e: output logic<32>,
+    ) {
+        assign a = pk::ONES_W8;
+        assign b = pk::ONES_W65[64:33];
+        assign c = pk::ONES_2D[0];
+        assign d = pk::ONES_2D[7];
+        assign e = pk::ZEROS_2D[7];
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("a").unwrap(), Value::new(0xff, 8, false));
+        assert_eq!(sim.get("b").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("d").unwrap(), Value::new(0xffff_ffff, 32, false));
+        assert_eq!(sim.get("e").unwrap(), Value::new(0, 32, false));
+    }
+}
+
+#[test]
 fn const_array_as_operand() {
     // A single-element array must take the same paths as a wider one.
     let code = r#"
@@ -29033,5 +29076,238 @@ fn out_of_range_unpacked_element_index_reads_default_and_drops_write() {
             want,
             "an out-of-range read must be the element default, config={config:?}"
         );
+    }
+}
+
+#[test]
+fn const_struct_array_member_folds_per_element() {
+    // A member read of a const ARRAY of structs (`ENC[i].m`) folded to x.
+    // Only a scalar struct const carried its value through the struct-member
+    // symbol route; the array literal's per-element values were dropped, so
+    // every field read came back unknown -- silently at the parameter level,
+    // and as a bogus `invalid_select` where the value reached a bit select.
+    let code = r#"
+    package Pkg {
+        struct enc_t {
+            e: u32,
+            m: u32,
+        }
+        const ENC: enc_t [2] = '{enc_t'{e: 8, m: 23}, enc_t'{e: 11, m: 52}};
+        function man_bits (
+            f: input u32,
+        ) -> u32 {
+            return ENC[f].m;
+        }
+    }
+    module Top (
+        o_m0: output logic<32>,
+        o_e1: output logic<32>,
+        o_fn: output logic<32>,
+    ) {
+        const M0: u32 = Pkg::ENC[0].m;
+        const E1: u32 = Pkg::ENC[1].e;
+        const FN: u32 = Pkg::man_bits(1);
+        assign o_m0 = M0;
+        assign o_e1 = E1;
+        assign o_fn = FN;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // The second-declared member takes the low bits, so reading `.m` as
+        // the whole struct would give 23 for element 0 too: `o_e1` is what
+        // separates a correct field offset from a truncation.
+        assert_eq!(sim.get("o_m0").unwrap(), Value::new(23, 32, false));
+        assert_eq!(sim.get("o_e1").unwrap(), Value::new(11, 32, false));
+        assert_eq!(sim.get("o_fn").unwrap(), Value::new(52, 32, false));
+    }
+}
+
+#[test]
+fn string_array_const_element_keeps_its_text() {
+    // A `string`'s declared width is the nominal 1 bit that every widthless
+    // kind reports, so every place that fitted an element to it kept one bit
+    // of the text: the array literal's own elements, a package const read
+    // through the symbol route, and a function's return variable. The
+    // comparisons below are against the text itself, so a truncated element
+    // fails them.
+    let code = r#"
+    package Pkg {
+        const NAMES: string [3] = '{"a.hex", "b.hex", "c.hex"};
+        function pick (
+            i: input u32,
+        ) -> string {
+            return NAMES[i];
+        }
+    }
+    module Top (
+        i_clk : input  clock,
+        o_pkg0: output logic,
+        o_pkg2: output logic,
+        o_fn  : output logic,
+        o_local: output logic,
+    ) {
+        const LOCAL: string [2] = '{"one", "two"};
+        assign o_pkg0  = Pkg::NAMES[0] == "a.hex";
+        assign o_pkg2  = Pkg::NAMES[2] == "c.hex";
+        assign o_fn    = Pkg::pick(1) == "b.hex";
+        assign o_local = LOCAL[1] == "two";
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_pkg0").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_pkg2").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_fn").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_local").unwrap(), Value::new(1, 1, false));
+    }
+}
+
+#[test]
+fn nested_self_call_is_composition_not_recursion() {
+    // The inliner marked the callee as expanding BEFORE converting its
+    // arguments, so a call to the same function inside an argument tripped the
+    // recursion guard: `f(f(x))` aborted elaboration with `recursive function
+    // "f" cannot be inlined`, and so did a call whose argument expands to one
+    // transitively. An argument is evaluated at the call site, before the call,
+    // so none of it is recursion. `testcases/error/recursive_function.veryl`
+    // is the negative control: genuine self-recursion stays rejected.
+    //
+    // The argument has to be non-constant: with a literal the analyzer folds
+    // the whole call before the inliner sees it and the test passes whether or
+    // not the guard is right.
+    let code = r#"
+    package Pkg {
+        function mul2 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return {x[6:0], 1'b0} ^ (if x[7] ? 8'h1b : 8'h00);
+        }
+        // Directly nested.
+        function mul4 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return mul2(mul2(x));
+        }
+        // Nested through a DIFFERENT function that itself expands to `mul2`:
+        // the guard has to follow the expansion, not the name at the call.
+        function mul8 (
+            x: input logic<8>,
+        ) -> logic<8> {
+            return mul2(mul4(x));
+        }
+    }
+    module Top (
+        i_clk: input clock,
+        o_m2 : output logic<8>,
+        o_m4 : output logic<8>,
+        o_m8 : output logic<8>,
+        o_sib: output logic<8>,
+        o_cs : output logic<8>,
+    ) {
+        #[allow(initial_assign)]
+        var seed: logic<8>;
+        initial {
+            seed = 8'h57;
+        }
+        assign o_m2  = Pkg::mul2(seed);
+        assign o_m4  = Pkg::mul4(seed);
+        assign o_m8  = Pkg::mul8(seed);
+        // Two sibling calls in one expression, and the nesting written at the
+        // call site: the same guard rejected both.
+        assign o_sib = Pkg::mul2(seed) ^ Pkg::mul2(~seed);
+        assign o_cs  = Pkg::mul2(Pkg::mul2(seed));
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // FIPS 197 xtime: 0x57 -> 0xae -> 0x47 -> 0x8e.
+        assert_eq!(sim.get("o_m2").unwrap(), Value::new(0xae, 8, false));
+        assert_eq!(sim.get("o_m4").unwrap(), Value::new(0x47, 8, false));
+        assert_eq!(sim.get("o_m8").unwrap(), Value::new(0x8e, 8, false));
+        assert_eq!(sim.get("o_cs").unwrap(), Value::new(0x47, 8, false));
+        // ~0x57 = 0xa8 -> 0x4b; 0xae ^ 0x4b = 0xe5.
+        assert_eq!(sim.get("o_sib").unwrap(), Value::new(0xe5, 8, false));
+    }
+}
+
+#[test]
+fn const_from_a_function_call_with_an_unpacked_array_argument() {
+    // The argument binding in `FunctionCall::eval_value` evaluated each actual
+    // to ONE value, and an unpacked array has none: `get_value(&[])` wants an
+    // index per dimension, so the `?` bailed and the whole const came out
+    // `unresolved_expression`. The simulator's own inliner already copied such
+    // an argument element by element; the analyzer's const evaluation did not.
+    //
+    // The actual arrives in two shapes depending on the context -- a variable
+    // reference and an already-folded `NumericArray` -- and only fixing both
+    // resolves every call site.
+    let code = r#"
+    package Pkg {
+        const N    : u32     = 3;
+        const SIZES: u32 [N] = '{10, 1, 2};
+
+        function max_of (
+            v: input u32 [N],
+        ) -> u32 {
+            var m: u32;
+            m = 0;
+            for i in 0..N {
+                if v[i] >: m {
+                    m = v[i];
+                }
+            }
+            return m;
+        }
+        const MAX: u32 = max_of(SIZES);
+
+        // The scalar control: this always resolved, so a failure here would
+        // mean something other than the array argument broke.
+        function plus_one (
+            v: input u32,
+        ) -> u32 {
+            return v + 1;
+        }
+        const ONE_MORE: u32 = plus_one(9);
+    }
+    module Top (
+        i_clk : input  clock,
+        o_max : output logic<32>,
+        o_ctrl: output logic<32>,
+        o_elem: output logic<32>,
+    ) {
+        assign o_max  = Pkg::MAX;
+        assign o_ctrl = Pkg::ONE_MORE;
+        // Reading an element of the same const directly: the control that
+        // says the const itself was never the problem.
+        assign o_elem = Pkg::SIZES[0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_max").unwrap(), Value::new(10, 32, false));
+        assert_eq!(sim.get("o_ctrl").unwrap(), Value::new(10, 32, false));
+        assert_eq!(sim.get("o_elem").unwrap(), Value::new(10, 32, false));
     }
 }

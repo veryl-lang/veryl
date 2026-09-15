@@ -25,6 +25,10 @@ pub struct Config {
     pub instance_depth_limit: usize,
     pub instance_total_limit: usize,
     pub function_instance_depth_limit: usize,
+    /// Recursion bound for `eval_factor_path`. Distinct from the function
+    /// limit above: a `const` chain costs one level per link and is not a
+    /// function instantiation at all.
+    pub symbol_eval_depth_limit: usize,
     pub evaluate_size_limit: usize,
     pub evaluate_array_limit: usize,
     pub defines: HashSet<StrId>,
@@ -66,6 +70,7 @@ impl Default for Config {
             instance_depth_limit: 1024,
             instance_total_limit: 1024 * 1024,
             function_instance_depth_limit: 24,
+            symbol_eval_depth_limit: 48,
             evaluate_size_limit: 1024 * 1024,
             evaluate_array_limit: 128,
             defines: HashSet::default(),
@@ -94,7 +99,7 @@ pub struct Context {
     pub inst_signatures: HashMap<StrId, Signature>,
     pub modport_signatures: Vec<HashMap<StrId, Signature>>,
     pub instance_history: InstanceHistory,
-    /// Recursion depth of `eval_factor_path`, bounded by `function_instance_depth_limit`.
+    /// Recursion depth of `eval_factor_path`, bounded by `symbol_eval_depth_limit`.
     pub function_eval_depth: usize,
     /// Recorded when `function_eval_depth`'s limit is hit, since the eval path
     /// may swallow an inserted error.

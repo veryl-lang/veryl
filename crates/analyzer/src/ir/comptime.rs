@@ -396,7 +396,8 @@ pub enum ValueVariant {
 impl ValueVariant {
     pub fn expand_value(&mut self, width: usize) {
         if let ValueVariant::Numeric(x) = self {
-            x.expand(width, false);
+            let expanded = x.expand(width, false).into_owned();
+            *x = expanded;
         }
     }
 

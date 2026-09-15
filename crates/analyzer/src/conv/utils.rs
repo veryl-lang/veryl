@@ -902,8 +902,13 @@ fn eval_array_literal_expressions(
         part_type.width_mut().drain(0..expr.select.len());
 
         if let Some(mut part_value) = expr.expr.eval_value(context) {
-            let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
-            part_value.trunc(part_width);
+            // A `string` has no declared width -- `total_width()` answers 1 for
+            // it -- so the element carries its own, and truncating to the
+            // declared type would leave one bit of the text.
+            if !part_type.is_string() {
+                let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
+                part_value.trunc(part_width);
+            }
 
             value = if let Some(x) = value {
                 Some(x.concat(&part_value))
@@ -971,8 +976,12 @@ fn insert_const_variable(
 /// source variable (inherited/sliced array params) keep the source width, so a
 /// narrower signed source must be sign-extended -- the array-literal path can't
 /// hit this because it evaluates each element in the destination type context.
-/// A `None` width (e.g. `string`) is left untouched.
+/// A width that isn't a real one is left untouched: `None`, and `string`, whose
+/// `total_width()` answers 1 while the text lives in the element itself.
 fn fit_array_elements(mut values: Vec<Value>, r#type: &ir::Type) -> Vec<Value> {
+    if r#type.is_string() {
+        return values;
+    }
     if let Some(total_width) = r#type.total_width() {
         for value in &mut values {
             if value.width() > total_width {
@@ -1178,8 +1187,16 @@ pub fn eval_struct_member(
                         x
                     } else {
                         let expr = x.value.as_ref().ok_or_else(|| ir_error!(token))?;
-                        let (_, mut expr) = eval_expr(context, Some(r#type.clone()), expr, false)?;
-                        expr.eval_comptime(context, None).clone()
+                        let (comptime, mut expr) =
+                            eval_expr(context, Some(r#type.clone()), expr, false)?;
+                        // An array literal's per-element values are carried by
+                        // the comptime `eval_expr` builds; `eval_comptime`
+                        // alone leaves an array literal unevaluated.
+                        if matches!(comptime.value, ValueVariant::NumericArray(_)) {
+                            comptime
+                        } else {
+                            expr.eval_comptime(context, None).clone()
+                        }
                     };
 
                     member_path.add_prelude(&path.0);
@@ -1191,17 +1208,27 @@ pub fn eval_struct_member(
                             // part_select encodes the bit position of the field: the sum of
                             // all pos values gives the LSB (end), and the last entry's type
                             // width gives the field width (beg = end + width - 1).
-                            if let ValueVariant::Numeric(ref full_value) = comptime.value.clone() {
-                                let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
-                                if let Some(width) =
-                                    x.part_select.last().and_then(|ps| ps.r#type.total_width())
-                                {
-                                    let beg = end + width - 1;
-                                    comptime.value =
-                                        ValueVariant::Numeric(full_value.select(beg, end));
-                                }
+                            let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
+                            if let Some(width) =
+                                x.part_select.last().and_then(|ps| ps.r#type.total_width())
+                            {
+                                let beg = end + width - 1;
+                                comptime.value = match &comptime.value {
+                                    ValueVariant::Numeric(v) => {
+                                        ValueVariant::Numeric(v.select(beg, end))
+                                    }
+                                    // Every element holds a whole struct, so the
+                                    // field is taken element by element and the
+                                    // array dimension stays on the type.
+                                    ValueVariant::NumericArray(v) => ValueVariant::NumericArray(
+                                        v.iter().map(|v| v.select(beg, end)).collect(),
+                                    ),
+                                    v => v.clone(),
+                                };
                             }
-                            comptime.r#type = get_member_type(context, member_symbol)?;
+                            let mut member_type = get_member_type(context, member_symbol)?;
+                            member_type.array = r#type.array.clone();
+                            comptime.r#type = member_type;
                             return Ok(ir::Factor::Value(comptime));
                         }
                     }
@@ -2428,7 +2455,7 @@ pub fn eval_factor_path(
     // resolved to a base case here; otherwise it recurses until the native
     // stack overflows.
     context.function_eval_depth += 1;
-    let ret = if context.function_eval_depth > context.config.function_instance_depth_limit {
+    let ret = if context.function_eval_depth > context.config.symbol_eval_depth_limit {
         if context.function_eval_overflow.is_none() {
             context.function_eval_overflow = Some((token, context.function_eval_depth));
         }
@@ -2492,6 +2519,7 @@ fn eval_factor_path_inner(
             Err(ir_error!(token))
         } else {
             let index = array_select.to_index();
+            let array = comptime.r#type.array.clone();
             comptime.r#type.array.drain(0..index.dimension());
 
             comptime.is_const &= index.is_const() && width_select.is_const();
@@ -2499,13 +2527,33 @@ fn eval_factor_path_inner(
             // The whole-array value doesn't describe a selected part of it; drop
             // it so consumers resolve the selection from the variable table.
             if (index.dimension() > 0 || !width_select.is_empty())
-                && matches!(comptime.value, ValueVariant::NumericArray(_))
+                && let ValueVariant::NumericArray(values) = &comptime.value
             {
-                comptime.value = ValueVariant::Unknown;
+                // Except for a `string`: it has no width to lay out, so the
+                // variable table holds nothing to resolve against and the
+                // element has to be folded here.
+                let element = if comptime.r#type.is_string() && width_select.is_empty() {
+                    index
+                        .eval_value(context)
+                        .and_then(|x| array.calc_index(&x))
+                        .and_then(|x| values.get(x))
+                        .cloned()
+                } else {
+                    None
+                };
+                comptime.value = match element {
+                    Some(x) => ValueVariant::Numeric(x),
+                    None => ValueVariant::Unknown,
+                };
             }
 
             comptime.token = token;
-            if comptime.r#type.is_type() {
+            // A `string` read is only ever its value: there is no variable
+            // behind it for a later stage to look up.
+            let is_folded_string = comptime.r#type.is_string()
+                && width_select.is_empty()
+                && matches!(comptime.value, ValueVariant::Numeric(_));
+            if comptime.r#type.is_type() || is_folded_string {
                 Ok(ir::Factor::Value(comptime))
             } else {
                 // Params arrive with evaluated=true (set by eval_expr), which
@@ -2770,8 +2818,15 @@ fn fold_symbol_select(
     }
 
     let flat = array.calc_index(&indices)?;
-    let (beg, end) = select.eval_value(context, &element, false)?;
-    comptime.value = ValueVariant::Numeric(values.get(flat)?.select(beg, end));
+    let value = values.get(flat)?;
+    comptime.value = if comptime.r#type.is_string() && select.is_empty() {
+        // An empty select reads the declared width, which for a `string` is the
+        // nominal 1 bit rather than the text the element holds.
+        ValueVariant::Numeric(value.clone())
+    } else {
+        let (beg, end) = select.eval_value(context, &element, false)?;
+        ValueVariant::Numeric(value.select(beg, end))
+    };
     Some(comptime)
 }
 
