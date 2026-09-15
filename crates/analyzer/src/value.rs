@@ -86,16 +86,8 @@ pub fn string_to_byte_value(s: &str) -> Value {
     }
 }
 
-/// Convert a byte-packed Value back to a String (inverse of string_to_byte_value).
-pub fn byte_value_to_string(value: &Value) -> Option<String> {
-    let width = value.width();
-    if width == 0 {
-        return Some(String::new());
-    }
-    if !width.is_multiple_of(8) {
-        return None;
-    }
-    let num_bytes = width / 8;
+/// The value's bytes, most significant first, zero-filled above its width.
+fn byte_value_bytes(value: &Value, num_bytes: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; num_bytes];
     match value {
         Value::U64(v) => {
@@ -114,7 +106,27 @@ pub fn byte_value_to_string(value: &Value) -> Option<String> {
             }
         }
     }
-    String::from_utf8(bytes).ok()
+    bytes
+}
+
+/// Convert a byte-packed Value back to a String (inverse of string_to_byte_value).
+pub fn byte_value_to_string(value: &Value) -> Option<String> {
+    let width = value.width();
+    if width == 0 {
+        return Some(String::new());
+    }
+    if !width.is_multiple_of(8) {
+        return None;
+    }
+    String::from_utf8(byte_value_bytes(value, width / 8)).ok()
+}
+
+/// Text for a `%s` argument. Unlike `byte_value_to_string` this always
+/// renders characters: a width that is not a whole number of bytes is
+/// zero-extended to one, and bytes that are not valid UTF-8 are replaced.
+pub fn byte_value_to_string_lossy(value: &Value) -> String {
+    let num_bytes = value.width().div_ceil(8);
+    String::from_utf8_lossy(&byte_value_bytes(value, num_bytes)).into_owned()
 }
 
 /// Convert a BigUint to u128. Returns the low 128 bits.

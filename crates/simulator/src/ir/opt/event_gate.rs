@@ -284,6 +284,9 @@ fn stmt_ranges(s: &ProtoStatement, reads: &mut Vec<Range>, writes: &mut Vec<Rang
         ProtoStatement::SystemFunctionCall(_)
         | ProtoStatement::TbMethodCall { .. }
         | ProtoStatement::Break => {}
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -1075,6 +1078,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: off,
+            comb_direct: false,
             token: TokenRange::default(),
         };
         ProtoStatement::SequentialBlock(vec![ProtoStatement::Assign(assign); n])
@@ -1102,6 +1106,7 @@ mod tests {
                 },
             },
             dst_ff_current_offset: -1,
+            comb_direct: false,
             token: TokenRange::default(),
         };
         ProtoStatement::Assign(assign)

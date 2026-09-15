@@ -1,5 +1,6 @@
 use crate::analyzer_error::{
-    AnalyzerError, ComponentInterfaceMismatchKind, MismatchTypeKind, UnevaluableValueKind,
+    AnalyzerError, ComponentInterfaceMismatchKind, MismatchAssignmentKind, MismatchTypeKind,
+    UnevaluableValueKind,
 };
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
@@ -395,6 +396,7 @@ impl Conv<&WithGenericParameterItem> for () {
                             context.insert_error(AnalyzerError::mismatch_assignment(
                                 "number",
                                 &x.bound.to_string(),
+                                MismatchAssignmentKind::Normal,
                                 &token,
                                 &[],
                             ));
@@ -405,6 +407,7 @@ impl Conv<&WithGenericParameterItem> for () {
                             context.insert_error(AnalyzerError::mismatch_assignment(
                                 "type",
                                 &x.bound.to_string(),
+                                MismatchAssignmentKind::Normal,
                                 &token,
                                 &[],
                             ));
@@ -1016,6 +1019,7 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     check_assign_clock_domain(context, d, &comptime, &token);
                 }
                 let statement = ir::Statement::Assign(ir::AssignStatement {
+                    hier_dst: None,
                     dst,
                     width,
                     expr,

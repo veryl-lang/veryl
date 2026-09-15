@@ -63,6 +63,52 @@ fn analyze(code: &str) -> Vec<AnalyzerError> {
     errors
 }
 
+#[test]
+fn a_long_const_chain_is_not_a_function_instantiation() {
+    // A `const` that refers to another `const` costs one level of
+    // `eval_factor_path` per link, and an external reference re-derives the
+    // whole chain: each component gets a fresh `Context`, `Context::inherit`
+    // does not carry `variables`, so a consumer cannot see the values the
+    // defining package already folded. That recursion used to be charged
+    // against the function-instantiation limit, which a const chain is not,
+    // so a long chain was rejected partway with a diagnostic pointing at its
+    // first link.
+    //
+    // This runs on an explicit stack: libtest gives each test a fraction of
+    // the main thread's, and these frames are large in a debug build, so the
+    // harness aborts well before either bound. The bound is not what protects
+    // the stack; it is only kept below it.
+    fn chain(n: usize) -> String {
+        let mut s = String::from("package pk {\n    const C0: logic<32> = 32'd0;\n");
+        for i in 1..=n {
+            s += &format!("    const C{i}: logic<32> = C{} + 32'd1;\n", i - 1);
+        }
+        s += "}\nmodule Top (\n    y: output logic<32>,\n) {\n";
+        s += &format!("    assign y = pk::C{n};\n}}\n");
+        s
+    }
+
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            assert!(
+                analyze(&chain(37)).is_empty(),
+                "a 37-link const chain is ordinary SystemVerilog and must elaborate"
+            );
+            // And the bound still bites, and REPORTS rather than aborting.
+            let errors = analyze(&chain(48));
+            assert!(
+                errors
+                    .iter()
+                    .any(|x| matches!(x, AnalyzerError::ExceedLimit { .. })),
+                "past the bound it must be reported"
+            );
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
 #[track_caller]
 fn comb_loop_analysis_is_complete(code: &str) -> bool {
     symbol_table::clear();
@@ -1269,6 +1315,81 @@ fn cyclic_file_dependency() {
         errors[0],
         AnalyzerError::CyclicFileDependency { .. }
     ));
+}
+
+#[test]
+fn duplicated_identifier_clock_domain_label() {
+    use crate::analyzer_error::DuplicatedIdentifierKind;
+
+    // A clock-domain label occupies the scope's ordinary namespace, so `'i`
+    // and `i` collide. Reported both ways round: the label used to reuse
+    // whatever symbol resolved under its name, variable included, so only the
+    // label-first order errored.
+    let label_first = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_i: input  'i clock,
+        y    : output 'a logic,
+    ) {
+        var i: 'a logic;
+        var j: 'i logic;
+        always_ff (clk_a) { i = 1; }
+        always_ff (clk_i) { j = 1; }
+        assign y = i;
+    }
+    "#;
+    let var_first = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_b: input  'b clock,
+        y    : output 'a logic,
+    ) {
+        var i: 'a logic;
+        var j: 'i logic;
+        always_ff (clk_a) { i = 1; }
+        always_ff (clk_b) { j = 1; }
+        assign y = i;
+    }
+    "#;
+    for (name, code) in [("label first", label_first), ("var first", var_first)] {
+        let errors = analyze(code);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                AnalyzerError::DuplicatedIdentifier {
+                    // The help names the colliding identifier: a reader sees
+                    // `"i" is duplicated` and has to be told which label.
+                    kind: DuplicatedIdentifierKind::ClockDomain { name },
+                    ..
+                } if name == "i"
+            )),
+            "{name}: {errors:?}"
+        );
+    }
+
+    // A label that does not collide stays silent, and so does a second use of
+    // the same label -- that is what the symbol reuse is for.
+    let code = r#"
+    module ModuleA (
+        clk_a: input  'a clock,
+        clk_i: input  'i clock,
+        y    : output 'a logic,
+    ) {
+        var n: 'a logic;
+        var j: 'i logic;
+        var k: 'i logic;
+        always_ff (clk_a) { n = 1; }
+        always_ff (clk_i) { j = 1; k = j; }
+        assign y = n;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::DuplicatedIdentifier { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -5594,6 +5715,9 @@ fn invalid_type_declaration() {
 
 #[test]
 fn mismatch_assignment() {
+    // The unpacked dimensions disagree. No SystemVerilog tool accepts that, so
+    // the help says which axis is wrong, but the severity stays the warning the
+    // rest of this test covers: the check is conservative.
     let code = r#"
     module ModuleA {
         let _a: logic[2] = 1;
@@ -5603,7 +5727,10 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::MismatchAssignment {
+            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+            ..
+        }
     ));
 
     let code = r#"
@@ -5616,8 +5743,34 @@ fn mismatch_assignment() {
     let errors = analyze(code);
     assert!(matches!(
         errors[0],
-        AnalyzerError::MismatchAssignment { .. }
+        AnalyzerError::MismatchAssignment {
+            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+            ..
+        }
     ));
+
+    // A 2-state destination answers `compatible` from its element kind alone,
+    // so the dimensions were never compared and the whole 2-state half of the
+    // type system reported nothing. Clock and reset arrays answer the same way.
+    let code = r#"
+    module ModuleA {
+        var _a: bit<8>[4];
+        var _b: bit<8>[2];
+        assign _a = _b;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors.iter().any(|x| matches!(
+            x,
+            AnalyzerError::MismatchAssignment {
+                kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
 
     let code = r#"
     module ModuleA {
@@ -9913,6 +10066,52 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    // A width select strides by the element's own width, which for a user type
+    // lives in the kind rather than the width shape. Writing every element of
+    // `some_enum<N>` covers the variable; taking the stride as one bit leaves
+    // all but the low N bits looking undriven.
+    let code = r#"
+    package Pkg {
+        enum e_t: logic<5> {
+            A = 5'd0,
+            B = 5'd1,
+        }
+    }
+    module ModuleA (
+        i_d: input  logic<4, 5>,
+        o_d: output Pkg::e_t<4>,
+    ) {
+        for i in 0..4 :g_loop {
+            assign o_d[i] = i_d[i] as Pkg::e_t;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // The same shape one element short must still be reported, so the case
+    // above is not passing because the check stopped looking.
+    let code = r#"
+    package Pkg {
+        enum e_t: logic<5> {
+            A = 5'd0,
+            B = 5'd1,
+        }
+    }
+    module ModuleA (
+        i_d: input  logic<4, 5>,
+        o_d: output Pkg::e_t<4>,
+    ) {
+        for i in 0..3 :g_loop {
+            assign o_d[i] = i_d[i] as Pkg::e_t;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
 }
 
 #[test]
@@ -13657,6 +13856,98 @@ fn clock_domain_function_call() {
             return x;
         }
         assign o_a = FuncF(i_a);
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn clock_domain_if_reset_else_if_condition() {
+    // An `else if` of the `if_reset` chain gates its body exactly as a plain
+    // `if` does, so a foreign-domain condition there is a crossing, and it went
+    // unreported: `Conv<&IfResetStatement>` did not push the condition's domain
+    // the way `Conv<&IfStatement>` does.
+    for cond in ["cond_i", "!cond_i"] {
+        let code = format!(
+            r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'b logic,
+        o_a   : output 'a logic,
+    ) {{
+        always_ff (i_clk, i_rst) {{
+            if_reset {{
+                o_a = 1'b0;
+            }} else if {cond} {{
+                o_a = 1'b1;
+            }}
+        }}
+    }}
+    "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. })),
+            "cond={cond}: {errors:?}"
+        );
+    }
+
+    // The trailing `else` is gated by the same condition and is reported too.
+    let code = r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'b logic,
+        o_a   : output 'a logic,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_a = 1'b0;
+            } else if cond_i {
+                o_a = 1'b1;
+            } else {
+                o_a = 1'b0;
+            }
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|e| matches!(e, AnalyzerError::MismatchClockDomain { .. }))
+            .count(),
+        2,
+        "{errors:?}"
+    );
+
+    // A same-domain condition stays accepted, and so does an `if_reset` with
+    // no `else if` at all -- the reset is the only gate there.
+    let code = r#"
+    module ModuleA (
+        i_clk : input  'a clock,
+        i_rst : input  'a reset_async_low,
+        cond_i: input  'a logic,
+        o_a   : output 'a logic,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_a = 1'b0;
+            } else if cond_i {
+                o_a = 1'b1;
+            } else {
+                o_a = 1'b0;
+            }
+        }
     }
     "#;
     let errors = analyze(code);
