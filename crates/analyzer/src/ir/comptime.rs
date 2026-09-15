@@ -317,6 +317,27 @@ pub struct Comptime {
 }
 
 impl Comptime {
+    /// Rebase a struct/union member onto the whole variable's type, and report
+    /// the array dimensions a select has to be split on.
+    ///
+    /// `part_select.base` is the type as DECLARED, so it misses an array the
+    /// member picked up afterwards: importing an interface instance array
+    /// prepends the instance's dimensions to each member's own type, not to
+    /// the base it was declared with. Taking the larger of the two keeps both
+    /// -- an array of structs (`s[2].f`, on the base) and a member of an
+    /// interface array (`arr[2].s.f`, on the member).
+    pub fn rebase_part_select(&mut self) -> usize {
+        if let Some(part_select) = &self.part_select {
+            let own = self.r#type.array.clone();
+            let mut base = part_select.base.clone();
+            if own.dims() > base.array.dims() {
+                base.array = own;
+            }
+            self.r#type = base;
+        }
+        self.r#type.array.dims()
+    }
+
     pub fn create_unknown(token: TokenRange) -> Self {
         Self {
             value: ValueVariant::Unknown,
@@ -652,6 +673,25 @@ impl Type {
         Some(self.kind.width()? * self.width.total()?)
     }
 
+    /// Every bit the type holds, unpacked dimensions included. This is what
+    /// `$bits` answers; `total_width` stops at one element.
+    pub fn total_bits(&self) -> Option<usize> {
+        Some(self.total_width()? * self.array.total()?)
+    }
+
+    /// Elements in the leftmost dimension, which is what `$size` answers:
+    /// the outermost unpacked dimension, else the outermost packed one, else
+    /// the kind's own width (a struct or enum is one packed vector).
+    pub fn leading_dimension(&self) -> Option<usize> {
+        if let Some(x) = self.array.first() {
+            *x
+        } else if let Some(x) = self.width.first() {
+            *x
+        } else {
+            self.kind.width()
+        }
+    }
+
     /// An unevaluated width (generics) counts as single-bit to avoid
     /// false positives.
     pub fn is_single_bit_plain(&self) -> bool {
@@ -832,10 +872,16 @@ impl Type {
                 self.kind = x.r#type.kind.clone();
                 self.signed = x.r#type.signed;
                 let mut array = x.r#type.array.clone();
-                let mut width = x.r#type.width.clone();
                 array.append(&mut self.array);
-                width.append(&mut self.width);
                 self.array = array;
+                // The DECLARED packed dimensions are the outer ones and the
+                // enum's own width the innermost: `e3_t<8>` emits
+                // `p_e3_t [8-1:0]`, eight elements of three bits. Composing
+                // them the other way round bounded an index by the element's
+                // width, so `i[3]` on an eight-element array was rejected as
+                // "out of range [3] > 3" while `i[2]` was accepted.
+                let mut width = self.width.clone();
+                width.append(&mut x.r#type.width.clone());
                 self.set_concrete_width(width);
             }
             _ => (),
@@ -1043,6 +1089,14 @@ impl TypeKind {
             | TypeKind::AbstractInterface(_)
             | TypeKind::Void => false,
         }
+    }
+
+    /// True for a user `enum`, whose element width lives in the kind while
+    /// its packed dimensions stay in the shape. The dynamic-select lowering
+    /// asks, because that is the one kind whose select index is an element
+    /// number rather than an absolute bit position.
+    pub fn is_enum(&self) -> bool {
+        matches!(self, TypeKind::Enum(_))
     }
 
     pub fn width(&self) -> Option<usize> {

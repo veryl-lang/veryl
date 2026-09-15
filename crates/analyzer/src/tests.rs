@@ -9986,6 +9986,52 @@ fn unassign_variable() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
+
+    // A width select strides by the element's own width, which for a user type
+    // lives in the kind rather than the width shape. Writing every element of
+    // `some_enum<N>` covers the variable; taking the stride as one bit leaves
+    // all but the low N bits looking undriven.
+    let code = r#"
+    package Pkg {
+        enum e_t: logic<5> {
+            A = 5'd0,
+            B = 5'd1,
+        }
+    }
+    module ModuleA (
+        i_d: input  logic<4, 5>,
+        o_d: output Pkg::e_t<4>,
+    ) {
+        for i in 0..4 :g_loop {
+            assign o_d[i] = i_d[i] as Pkg::e_t;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // The same shape one element short must still be reported, so the case
+    // above is not passing because the check stopped looking.
+    let code = r#"
+    package Pkg {
+        enum e_t: logic<5> {
+            A = 5'd0,
+            B = 5'd1,
+        }
+    }
+    module ModuleA (
+        i_d: input  logic<4, 5>,
+        o_d: output Pkg::e_t<4>,
+    ) {
+        for i in 0..3 :g_loop {
+            assign o_d[i] = i_d[i] as Pkg::e_t;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnassignVariable { .. }));
 }
 
 #[test]

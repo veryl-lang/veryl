@@ -28231,3 +28231,330 @@ fn two_always_ff_blocks_on_one_word_keep_nba_semantics() {
         );
     }
 }
+
+#[test]
+fn interface_array_element_struct_field_keeps_the_instance_array() {
+    // Importing an interface instance array prepends the instance's array
+    // dimensions to each member's type, but not to `part_select.base` -- the
+    // whole-variable type a struct member carries, and the one the select
+    // split reads its array dimensions from. So `arr[k].member.field` put the
+    // `[k]` in the WIDTH select: `veryl check` bounds-checked it against the
+    // FIELD's width (`invalid_select`, "[1] > 1" for a 1-bit field), the
+    // simulator refused to read it (`unsupported_description`), and where it
+    // did run it touched the field's lowest sub-element instead of element k.
+    let code = r#"
+    package Pkg {
+        struct req_t {
+            rw  : logic,
+            addr: logic<8>,
+        }
+    }
+    interface BusIf {
+        var req_valid: logic;
+        var req_data : Pkg::req_t;
+    }
+    module Top (
+        i_clk   : input  clock,
+        o_rw0   : output logic,
+        o_rw1   : output logic,
+        o_addr0 : output logic<8>,
+        o_addr1 : output logic<8>,
+        o_whole1: output logic<9>,
+    ) {
+        inst arr: BusIf [2];
+
+        assign arr[0].req_valid     = 1'b0;
+        assign arr[1].req_valid     = 1'b0;
+        // Per-field writes through the array index: the shape that broke.
+        assign arr[0].req_data.rw   = 1'b0;
+        assign arr[1].req_data.rw   = 1'b1;
+        assign arr[0].req_data.addr = 8'h5a;
+        assign arr[1].req_data.addr = 8'ha5;
+
+        assign o_rw0    = arr[0].req_data.rw;
+        assign o_rw1    = arr[1].req_data.rw;
+        assign o_addr0  = arr[0].req_data.addr;
+        assign o_addr1  = arr[1].req_data.addr;
+        // The whole-struct read is the control: it worked throughout, and it
+        // is what the ports used as the workaround.
+        assign o_whole1 = arr[1].req_data as 9;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        // The two elements must stay distinct, and a 1-bit field must accept
+        // index 1 exactly as an 8-bit one does.
+        assert_eq!(sim.get("o_rw0").unwrap(), Value::new(0, 1, false));
+        assert_eq!(sim.get("o_rw1").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o_addr0").unwrap(), Value::new(0x5a, 8, false));
+        assert_eq!(sim.get("o_addr1").unwrap(), Value::new(0xa5, 8, false));
+        // `rw` is the first-declared member, so it takes the HIGH bit.
+        assert_eq!(sim.get("o_whole1").unwrap(), Value::new(0x1a5, 9, false));
+    }
+}
+
+#[test]
+fn an_elaboration_time_system_function_in_a_runtime_expression_is_a_value() {
+    // `$clog2`/`$bits`/`$onehot` in an ordinary expression -- not a `const`
+    // initialiser, which is where the analyzer already folds them -- used to
+    // PANIC the simulator at elaboration (`unreachable!("system function
+    // calls are resolved by the analyzer")`), on lines `veryl check`,
+    // `veryl build` and the reference simulators all accept, of the shape
+    // `assign addr = haddr_i >> $clog2(AHB_DATA_WIDTH / 8);`
+    //
+    // The function arm matters on its own: there the argument is constant
+    // only at the CALL site, so no analyzer-side fold could reach it.
+    let code = r#"
+    package pk {
+        struct st {
+            a: logic<12>,
+            b: logic<4> ,
+        }
+    }
+    module Top #(
+        param DW: u32 = 64,
+    ) (
+        a : input  logic<32>,
+        y0: output logic<32>,
+        y1: output logic<32>,
+        y2: output logic   ,
+        y3: output logic<32>,
+        y4: output logic<32>,
+    ) {
+        function sh (n: input u32, v: input logic<32>) -> logic<32> {
+            return v >> $clog2(n);
+        }
+        assign y0 = a >> $clog2(DW / 8);
+        assign y1 = a + $bits(pk::st);
+        assign y2 = $onehot(4'b0100);
+        assign y3 = sh(DW / 8, a);
+        assign y4 = a >> $clog2($bits(pk::st));
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x1238, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("y0").unwrap(), Value::new(0x247, 32, false));
+        assert_eq!(sim.get("y1").unwrap(), Value::new(0x1248, 32, false));
+        assert_eq!(sim.get("y2").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("y3").unwrap(), Value::new(0x247, 32, false));
+        assert_eq!(sim.get("y4").unwrap(), Value::new(0x123, 32, false));
+    }
+}
+
+#[test]
+fn a_packed_array_of_an_enum_indexes_by_the_array_not_the_element() {
+    // `flatten_struct_union_enum` composed the shape of a packed array of a
+    // user enum with the ENUM's own width outermost and the declared packed
+    // dimensions inside it, so `e3_t<8>` measured as [3, 8] rather than
+    // [8, 3]. The select bound then came from the element: `i[3]` on an
+    // eight-element array was rejected as "out of range [3] > 3" while
+    // `i[2]` was accepted, and an ordinary packed array of a user enum is
+    // written that way.
+    //
+    // The VALUES are what this asserts, not just that it elaborates: getting
+    // the order right has to select the element the emitted SystemVerilog
+    // does.
+    let code = r#"
+    package pk {
+        enum e3_t: logic<3> {
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }
+    }
+    module Top (
+        i : input  pk::e3_t<8>,
+        o0: output logic      ,
+        o3: output logic      ,
+        o7: output logic      ,
+    ) {
+        assign o0 = i[0] == pk::e3_t::HIGH;
+        assign o3 = i[3] == pk::e3_t::HIGH;
+        assign o7 = i[7] == pk::e3_t::HIGH;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        // element 7..0, MSB first: LOW LOW LOW LOW HIGH LOW LOW HIGH
+        sim.set(
+            "i",
+            Value::new(0b100_100_100_100_011_100_100_011, 24, false),
+        );
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o0").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o3").unwrap(), Value::new(1, 1, false));
+        assert_eq!(sim.get("o7").unwrap(), Value::new(0, 1, false));
+    }
+}
+
+#[test]
+fn a_runtime_index_into_a_packed_enum_array_writes_the_whole_element() {
+    // `build_dynamic_bit_select` collapses (width_shape, kind_width) to a flat
+    // single-bit view whenever `kind_width > 1`, because for a struct the
+    // analyzer has already folded the element stride and any field offset into
+    // the index as an absolute BIT position. A packed array of an ENUM does
+    // not work that way: its element stride stays in the SHAPE and the index
+    // arrives as an element number. Flattening it left the index unscaled AND
+    // the window one bit wide, so `r[idx] = HIGH` set a single bit at bit
+    // `idx` -- silently, with the right total width and no diagnostic.
+    //
+    // The plain-logic twin is the control: same bits, same stride, and it was
+    // always correct, so a mismatch between the two is the defect and nothing
+    // else.
+    let code = r#"
+    package pk {
+        const N: u32 = 8;
+        enum e3_t: logic<3> {
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }
+    }
+    module Top (
+        idx: input  logic<3> ,
+        oe : output logic<24>,
+        ol : output logic<24>,
+    ) {
+        var re: pk::e3_t<pk::N>;
+        always_comb {
+            for i in 0..pk::N {
+                re[i] = pk::e3_t::LOW;
+            }
+            re[idx] = pk::e3_t::HIGH;
+        }
+        var rl: logic<pk::N, 3>;
+        always_comb {
+            for i in 0..pk::N {
+                rl[i] = 3'b100;
+            }
+            rl[idx] = 3'b011;
+        }
+        assign oe = re;
+        assign ol = rl;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for idx in 0..8u64 {
+            sim.set("idx", Value::new(idx, 3, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let e = sim.get("oe").unwrap();
+            let l = sim.get("ol").unwrap();
+            assert_eq!(e, l, "idx={idx}: the enum array must match the logic twin");
+        }
+    }
+}
+
+/// The six argument forms of `$bits`/`$size`, with the numbers every
+/// reference simulator agrees on.
+/// The two defects fail differently, so they are checked apart: one panics
+/// before the other's rows are ever read.
+#[track_caller]
+fn bits_and_size(decls: &str, exprs: &[&str], expected: &[u64]) {
+    let body: String = exprs
+        .iter()
+        .enumerate()
+        .map(|(i, e)| format!("        assign o{i} = trig + {e};\n"))
+        .collect();
+    let ports: String = (0..exprs.len())
+        .map(|i| format!("        o{i}: output logic<32>,\n"))
+        .collect();
+    let code = format!(
+        r#"
+    package pk {{
+        struct st {{
+            a: logic<12>,
+            b: logic<4> ,
+        }}
+        enum e3_t: logic<3> {{
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }}
+    }}
+    module Top (
+        trig: input logic<32>,
+{ports}    ) {{
+{decls}
+{body}    }}
+    "#
+    );
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("trig", Value::new(0, 32, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (i, want) in expected.iter().enumerate() {
+            assert_eq!(
+                sim.get(&format!("o{i}")).unwrap(),
+                Value::new(*want, 32, false),
+                "o{i}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bits_and_size_of_an_unpacked_array_variable_elaborate() {
+    // Both took their answer only when the operand's comptime value was
+    // Numeric or a Type. An unpacked-array variable is neither, so the
+    // expression form reported `unsupported description` and the `const`
+    // form -- the hoist that carries every other system function -- PANICKED
+    // in `Factor::Variable` instead. `$bits` also has to multiply by the
+    // unpacked dimensions, which `Type::total_width` leaves out.
+    //
+    // `o0` goes through a `const`, which is the form that panicked.
+    bits_and_size(
+        "        var arr: logic<8> [7];\n\
+         \x20       let u2 : logic<8> [5, 3] = '{default: '{default: 8'd0}};\n\
+         \x20       const SZ: u32 = $bits(arr);\n\
+         \x20       assign arr = '{default: 8'd0};",
+        &["SZ", "$size(arr)", "$bits(u2)", "$size(u2)"],
+        &[56, 7, 120, 5],
+    );
+}
+
+#[test]
+fn size_answers_the_leading_dimension_not_the_total_bits() {
+    // `$size` shared `Bits`'s body, so it answered total bits. That is the
+    // same number for a struct and for a 1-D vector, which is why it went
+    // unnoticed; for anything with more than one dimension it is not, and
+    // the emitted SystemVerilog carries `$size` verbatim, so the native
+    // column disagreed with every other simulator while both ran.
+    //
+    // The struct and the scalar are the controls: they were already right.
+    bits_and_size(
+        "        var a : logic<32>;\n\
+         \x20       var p2: logic<8, 4>;\n\
+         \x20       var ea: pk::e3_t<8>;\n\
+         \x20       assign a  = 0;\n\
+         \x20       assign p2 = 0;\n\
+         \x20       assign ea = 0;",
+        &[
+            "$bits(pk::st)",
+            "$size(pk::st)",
+            "$bits(a)",
+            "$size(a)",
+            "$bits(p2)",
+            "$size(p2)",
+            "$bits(ea)",
+            "$size(ea)",
+        ],
+        &[16, 16, 32, 32, 32, 8, 24, 8],
+    );
+}

@@ -3978,7 +3978,14 @@ fn conv_assign_statements(
 
         for dst in &src.dst {
             let id = dst.id;
-            let (select, need_dynamic, const_index, width_shape, kind_width) = {
+            let (
+                select,
+                need_dynamic,
+                const_index,
+                width_shape,
+                kind_width,
+                index_is_absolute_bits,
+            ) = {
                 let scope = context.scope();
                 let meta = scope.variable_meta.get(&id).unwrap();
 
@@ -3998,7 +4005,15 @@ fn conv_assign_statements(
                 };
                 let width_shape = meta.r#type.width().clone();
                 let kind_width = meta.r#type.kind.width().unwrap_or(1);
-                (select, need_dynamic, const_index, width_shape, kind_width)
+                let index_is_absolute_bits = !meta.r#type.kind.is_enum();
+                (
+                    select,
+                    need_dynamic,
+                    const_index,
+                    width_shape,
+                    kind_width,
+                    index_is_absolute_bits,
+                )
             };
 
             let dynamic_select = if need_dynamic {
@@ -4007,6 +4022,7 @@ fn conv_assign_statements(
                     &width_shape,
                     &dst.select,
                     kind_width,
+                    index_is_absolute_bits,
                 )?)
             } else {
                 None
@@ -4296,7 +4312,15 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         let in_initial = context.in_initial;
         let in_comb = context.in_comb;
 
-        let (select, dst_width, const_index, need_dynamic_select, width_shape, kind_width) = {
+        let (
+            select,
+            dst_width,
+            const_index,
+            need_dynamic_select,
+            width_shape,
+            kind_width,
+            index_is_absolute_bits,
+        ) = {
             let scope = context.scope();
             let meta = scope.variable_meta.get(&id).unwrap();
             let select = if !dst.select.is_empty() {
@@ -4315,6 +4339,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             let select = if need_dynamic { None } else { select };
             let width_shape = meta.r#type.width().clone();
             let kind_width = meta.r#type.kind.width().unwrap_or(1);
+            let index_is_absolute_bits = !meta.r#type.kind.is_enum();
             (
                 select,
                 dst_width,
@@ -4322,6 +4347,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 need_dynamic,
                 width_shape,
                 kind_width,
+                index_is_absolute_bits,
             )
         };
 
@@ -4331,6 +4357,7 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 &width_shape,
                 &dst.select,
                 kind_width,
+                index_is_absolute_bits,
             )?)
         } else {
             None
@@ -4469,6 +4496,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             need_dynamic_select,
             width_shape,
             kind_width,
+            index_is_absolute_bits,
         ) = {
             let scope = context.scope();
             let meta = scope.variable_meta.get(&id).unwrap();
@@ -4492,6 +4520,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
             let select = if need_dynamic { None } else { select };
             let width_shape = meta.r#type.width().clone();
             let kind_width = meta.r#type.kind.width().unwrap_or(1);
+            let index_is_absolute_bits = !meta.r#type.kind.is_enum();
             (
                 index,
                 select,
@@ -4502,6 +4531,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
                 need_dynamic,
                 width_shape,
                 kind_width,
+                index_is_absolute_bits,
             )
         };
 
@@ -4511,6 +4541,7 @@ impl Conv<&air::AssignStatement> for ProtoAssignStatement {
                 &width_shape,
                 &dst.select,
                 kind_width,
+                index_is_absolute_bits,
             )?)
         } else {
             None
