@@ -8,3 +8,17 @@ pub function foo_func_1::<W: u32> (
 pub function foo_func_2 () -> u32 {
     return 2;
 }
+
+pub function foo_func_3::<T: type> (
+    a: input T,
+    b: input T,
+) -> T {
+    return a + b;
+}
+
+pub function foo_func_4::<T: type> (
+    a: input T,
+    b: input T,
+) -> T {
+    return foo_func_3::<T>(a, b);
+}
