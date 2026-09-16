@@ -21445,6 +21445,22 @@ fn sv_keyword_usage_let_and_type() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
 
+    // `let` inside a block is a separate production from the declaration.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        always_comb {
+            let within: logic = i_a;
+            o_x = within;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
     let code = r#"
     module ModuleA (
         i_a: input  logic,

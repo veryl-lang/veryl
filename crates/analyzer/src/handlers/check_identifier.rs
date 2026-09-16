@@ -516,6 +516,17 @@ impl VerylGrammarTrait for CheckIdentifier {
         Ok(())
     }
 
+    // A `let` inside a block is its own production; it names a variable too.
+    fn let_statement(&mut self, arg: &LetStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            let token = &arg.identifier.identifier_token.token;
+            if !is_anonymous_token(token) {
+                self.check(token, Kind::Var);
+            }
+        }
+        Ok(())
+    }
+
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token.token, Kind::Typedef)
