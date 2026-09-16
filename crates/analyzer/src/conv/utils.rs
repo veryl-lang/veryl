@@ -3017,6 +3017,7 @@ pub fn eval_factor_symbol(
             // defined namespace. Not while sizing a declared width, where a
             // component instantiating itself would name its own scope.
             if !context.sizing_component_width()
+                && !context.is_global_func_caller(&symbol.found.namespace)
                 && let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
@@ -4045,7 +4046,16 @@ pub fn get_port_connects(
         let (dst_path, dst_select) = if let Some(x) = &port.inst_port_item_opt {
             let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
             let dst = dst.first().ok_or_else(|| ir_error!(token))?;
-            (dst.0.clone(), dst.1.clone())
+            let mut path = dst.0.clone();
+            // An explicit modport selects a view of the interface; its members
+            // still live under the interface instance, not under that view.
+            if let Some(identifier) = x.expression.unwrap_identifier()
+                && let Ok(symbol) = symbol_table::resolve(identifier)
+                && matches!(symbol.found.kind, SymbolKind::Modport(_))
+            {
+                path.0.pop();
+            }
+            (path, dst.1.clone())
         } else {
             (port_path.clone(), VarSelect::default())
         };
@@ -4384,39 +4394,22 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             let ret = conv_function(context, definition, path);
             ret?;
         } else {
-            let generic_arg_paths = if is_global {
-                path.sig
-                    .generic_parameters
-                    .iter()
-                    .filter_map(|(_, x)| x.to_var_path())
-                    .collect()
-            } else {
-                vec![]
-            };
-
             let mut local_context = Context::default();
             local_context.var_id = context.var_id;
             local_context.inherit(context);
             local_context.extract_var_paths(context, &path.path, &array);
 
-            for path in &generic_arg_paths {
-                // Copy var path referenced as resolved generic arg from the given context
-                if let Some((var_id, comptime)) = context.find_path(path)
-                    && let Some(var) = context.variables.get(&var_id)
-                {
-                    local_context
-                        .var_paths
-                        .insert(path.clone(), (var_id, comptime));
-                    local_context.variables.insert(var_id, var.clone());
-                }
+            let caller = is_global
+                .then(|| local_context.current_namespace())
+                .flatten();
+            if let Some(namespace) = &caller {
+                local_context.push_global_func_caller(namespace.clone());
             }
 
             let ret = conv_function(&mut local_context, definition, path);
 
-            for path in &generic_arg_paths {
-                if let Some((var_id, _)) = local_context.var_paths.remove(path) {
-                    local_context.variables.remove(&var_id);
-                }
+            if caller.is_some() {
+                local_context.pop_global_func_caller();
             }
 
             context.extract_function(&mut local_context, &path.path, &array);
