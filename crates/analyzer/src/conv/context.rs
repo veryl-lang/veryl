@@ -129,6 +129,7 @@ pub struct Context {
     pub allow_component_as_factor: bool,
     /// Depth of `size_in_component_scope`.
     component_sizing: usize,
+    global_func_callers: Vec<Namespace>,
     pub in_test_module: bool,
     pub in_dependency: bool,
     pub in_global_func: Option<Token>,
@@ -289,6 +290,7 @@ impl Context {
         std::mem::swap(&mut self.converting_funcs, &mut tgt.converting_funcs);
         std::mem::swap(&mut self.errors, &mut tgt.errors);
         std::mem::swap(&mut self.namespaces, &mut tgt.namespaces);
+        std::mem::swap(&mut self.global_func_callers, &mut tgt.global_func_callers);
         self.disalbe_const_opt = tgt.disalbe_const_opt;
         self.in_generic = tgt.in_generic;
         self.allow_component_as_factor = tgt.allow_component_as_factor;
@@ -967,6 +969,21 @@ impl Context {
 
     pub fn pop_namespace(&mut self) {
         self.namespaces.pop();
+    }
+
+    pub fn push_global_func_caller(&mut self, namespace: Namespace) {
+        self.global_func_callers.push(namespace);
+    }
+
+    pub fn pop_global_func_caller(&mut self) {
+        self.global_func_callers.pop();
+    }
+
+    /// Whether the namespace is a caller's one.
+    pub fn is_global_func_caller(&self, namespace: &Namespace) -> bool {
+        self.global_func_callers
+            .iter()
+            .any(|x| namespace.included(x))
     }
 
     pub fn enter_component_sizing(&mut self) {
