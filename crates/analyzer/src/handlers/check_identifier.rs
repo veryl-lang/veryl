@@ -30,6 +30,8 @@ enum Kind {
     FunctionOutput,
     Instance,
     Interface,
+    Label,
+    LoopVar,
     Modport,
     Module,
     Package,
@@ -118,6 +120,8 @@ impl CheckIdentifier {
             Kind::Struct => &opt.prefix_struct,
             Kind::StructItem => &None,
             Kind::Typedef => &None,
+            Kind::Label => &None,
+            Kind::LoopVar => &None,
             Kind::Union => &opt.prefix_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.prefix_var,
@@ -146,6 +150,8 @@ impl CheckIdentifier {
             Kind::Struct => &opt.suffix_struct,
             Kind::StructItem => &None,
             Kind::Typedef => &None,
+            Kind::Label => &None,
+            Kind::LoopVar => &None,
             Kind::Union => &opt.suffix_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.suffix_var,
@@ -174,6 +180,8 @@ impl CheckIdentifier {
             Kind::Struct => &opt.case_struct,
             Kind::StructItem => &None,
             Kind::Typedef => &None,
+            Kind::Label => &None,
+            Kind::LoopVar => &None,
             Kind::Union => &opt.case_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.case_var,
@@ -202,6 +210,8 @@ impl CheckIdentifier {
             Kind::Struct => &opt.re_required_struct,
             Kind::StructItem => &None,
             Kind::Typedef => &None,
+            Kind::Label => &None,
+            Kind::LoopVar => &None,
             Kind::Union => &opt.re_required_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.re_required_var,
@@ -230,6 +240,8 @@ impl CheckIdentifier {
             Kind::Struct => &opt.re_forbidden_struct,
             Kind::StructItem => &None,
             Kind::Typedef => &None,
+            Kind::Label => &None,
+            Kind::LoopVar => &None,
             Kind::Union => &opt.re_forbidden_union,
             Kind::UnionItem => &None,
             Kind::Var => &opt.re_forbidden_var,
@@ -530,6 +542,40 @@ impl VerylGrammarTrait for CheckIdentifier {
     fn type_def_declaration(&mut self, arg: &TypeDefDeclaration) -> Result<(), ParolError> {
         if let HandlerPoint::Before = self.point {
             self.check(&arg.identifier.identifier_token.token, Kind::Typedef)
+        }
+        Ok(())
+    }
+
+    // Loop variables and block labels are emitted by name too.
+    fn for_statement(&mut self, arg: &ForStatement) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.check(&arg.identifier.identifier_token.token, Kind::LoopVar)
+        }
+        Ok(())
+    }
+
+    fn generate_for_declaration(&mut self, arg: &GenerateForDeclaration) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.check(&arg.identifier.identifier_token.token, Kind::LoopVar)
+        }
+        Ok(())
+    }
+
+    fn generate_named_block(&mut self, arg: &GenerateNamedBlock) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point {
+            self.check(&arg.identifier.identifier_token.token, Kind::Label)
+        }
+        Ok(())
+    }
+
+    fn generate_optional_named_block(
+        &mut self,
+        arg: &GenerateOptionalNamedBlock,
+    ) -> Result<(), ParolError> {
+        if let HandlerPoint::Before = self.point
+            && let Some(x) = &arg.generate_optional_named_block_opt
+        {
+            self.check(&x.identifier.identifier_token.token, Kind::Label)
         }
         Ok(())
     }
