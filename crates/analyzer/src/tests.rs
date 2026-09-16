@@ -21721,3 +21721,124 @@ fn msb_in_assign_destination_is_rejected_without_panic() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn sv_keyword_usage_let_and_type() {
+    // https://github.com/veryl-lang/veryl/issues/3397
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        let within: logic = i_a;
+        assign o_x = within;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    // `let` inside a block is a separate production from the declaration.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        always_comb {
+            let within: logic = i_a;
+            o_x = within;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        type table = logic<8>;
+        assign o_x = i_a;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        let ok_name: logic = i_a;
+        let _: logic = i_a;
+        type ok_t = logic<8>;
+        assign o_x = ok_name;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn sv_keyword_usage_loop_var_and_label() {
+    // https://github.com/veryl-lang/veryl/issues/3397
+    // A loop variable and a generate block label are emitted by name too.
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<4>,
+    ) {
+        always_comb {
+            for within in 0..4 {
+                o_x[within] = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<4>,
+    ) {
+        for within in 0..4 :g {
+            assign o_x[within] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<4>,
+    ) {
+        for i in 0..4 :table {
+            assign o_x[i] = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        if 1 :table {
+            assign o_x = i_a;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+}
