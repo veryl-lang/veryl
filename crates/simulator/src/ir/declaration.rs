@@ -4,7 +4,7 @@ use crate::ir::derived_clock::EdgeCandidate;
 use crate::ir::expression::{ExpressionContext, build_dynamic_bit_select};
 use crate::ir::external::{ProtoExternalComponent, ProtoExternalConnect};
 use crate::ir::module::{
-    BitRange, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
+    BitRange, ReadOffsets, gather_bit_aware_outputs, merge_event_statements, ranges_overlap,
 };
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
@@ -285,21 +285,32 @@ fn stable_topo_sort_impl(
     let mut stmt_reads: Vec<Vec<(VarOffset, BitRange)>> = Vec::with_capacity(n);
     let mut writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
     {
+        // A runtime-indexed write is reported as its first and last element
+        // only; the elements between them have to be materialized here or
+        // their readers bind to no writer at all. See `ReadOffsets`.
+        let read_offsets = ReadOffsets::collect(&statements);
         let mut ins = vec![];
         let mut bit_outs = vec![];
+        let mut interior = vec![];
         for (i, s) in statements.iter().enumerate() {
             ins.clear();
             let mut outs = vec![];
             s.gather_variable_offsets(&mut ins, &mut outs);
-            stmt_outputs.push(outs);
             let mut reads = vec![];
             s.gather_reads_with_ranges(&mut reads);
             stmt_reads.push(reads);
             bit_outs.clear();
             gather_bit_aware_outputs(s, &mut bit_outs);
+            interior.clear();
+            read_offsets.interior_writes(s, &mut interior);
+            // An interior element carries no bit range of its own: the write
+            // covers the whole element.
+            outs.extend_from_slice(&interior);
+            bit_outs.extend(interior.iter().map(|off| (*off, None)));
             for &(off, br) in &bit_outs {
                 writer_ranges.entry(off).or_default().push((i, br));
             }
+            stmt_outputs.push(outs);
         }
     }
 
@@ -1113,9 +1124,24 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
         match src {
             air::Declaration::Comb(x) => {
                 let mut comb_statements = vec![];
+                let prev_in_comb = context.in_comb;
+                context.in_comb = true;
+                let mut conv_err = None;
                 for stmt in &x.statements {
-                    let stmts: Vec<ProtoStatement> = Conv::conv(context, stmt)?;
-                    comb_statements.extend(stmts);
+                    match Conv::conv(context, stmt) {
+                        Ok(stmts) => {
+                            let stmts: Vec<ProtoStatement> = stmts;
+                            comb_statements.extend(stmts);
+                        }
+                        Err(e) => {
+                            conv_err = Some(e);
+                            break;
+                        }
+                    }
+                }
+                context.in_comb = prev_in_comb;
+                if let Some(e) = conv_err {
+                    return Err(e);
                 }
                 #[allow(unused_mut)]
                 let mut comb_statements = if comb_statements.len() > 1 {
@@ -1726,6 +1752,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select: None,
                         expr: proto_expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -1744,6 +1771,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -1767,6 +1795,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: 0, // not FF
+                        comb_direct: false,
                         token: TokenRange::default(),
                     }));
                 }
@@ -1825,6 +1854,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                                     rhs_select: None,
                                     expr: parent_expr,
                                     dst_ff_current_offset: 0, // not FF
+                                    comb_direct: false,
                                     token: TokenRange::default(),
                                 },
                             ));
@@ -1846,6 +1876,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 rhs_select: None,
                 expr: proto_expr.clone(),
                 dst_ff_current_offset: 0, // not FF
+                comb_direct: false,
                 token: TokenRange::default(),
             }));
         }
@@ -1913,6 +1944,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     parent_need_dynamic,
                     parent_width_shape,
                     parent_kind_width,
+                    parent_index_is_absolute_bits,
                 ) = {
                     let parent_scope = context.scope();
                     let parent_meta = parent_scope.variable_meta.get(&parent_dst.id).unwrap();
@@ -1936,6 +1968,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                     let width = parent_meta.width;
                     let width_shape = parent_meta.r#type.width().clone();
                     let kind_width = parent_meta.r#type.kind.width().unwrap_or(1);
+                    let index_is_absolute_bits = !parent_meta.r#type.kind.is_enum();
                     (
                         parent_index,
                         select,
@@ -1943,6 +1976,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         need_dynamic,
                         width_shape,
                         kind_width,
+                        index_is_absolute_bits,
                     )
                 };
 
@@ -1952,6 +1986,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         &parent_width_shape,
                         &parent_dst.select,
                         parent_kind_width,
+                        parent_index_is_absolute_bits,
                     )?)
                 } else {
                     None
@@ -1994,6 +2029,18 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 // A concat field spanning multiple parent array elements
                 // has no single rhs_select window.
                 if multi_dst && parent_element_indices.len() != 1 {
+                    return Err(SimulatorError::unsupported_description(&parent_dst.token));
+                }
+
+                // Outside element-wise wiring the child advances alongside the
+                // parent, so the two element counts have to agree. They do not
+                // when a port and its connection disagree on the unpacked
+                // dimensions, which is illegal SystemVerilog (IEEE 1800-2023
+                // 7.6) and which the analyzer reports as `mismatch_assignment`
+                // -- at Warning severity, so the design still reaches here.
+                // Too few child elements ran off the end; too many were
+                // dropped without a word.
+                if !element_wise && parent_element_indices.len() != child_meta.elements.len() {
                     return Err(SimulatorError::unsupported_description(&parent_dst.token));
                 }
 
@@ -2042,6 +2089,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                         rhs_select,
                         expr: child_expr,
                         dst_ff_current_offset: parent_element.current_offset(),
+                        comb_direct: false,
                         token: TokenRange::default(),
                     });
 

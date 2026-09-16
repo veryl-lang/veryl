@@ -307,9 +307,21 @@ impl CreateSymbolTable {
             }
         } else {
             let canonical = resource_table::canonical_str_id(token.text);
+            // A clock-domain label is inserted under its bare name, so `'i`
+            // takes `i` out of the scope's variable namespace.  Saying only
+            // that the name is duplicated sends the reader looking for a
+            // second variable that does not exist, and the declaration that
+            // caused it can be anywhere in the module.
+            let collides_with_clock_domain =
+                symbol_table::resolve((token, &self.get_namespace(token)))
+                    .is_ok_and(|x| matches!(x.found.kind, SymbolKind::ClockDomain));
             let kind = if canonical != token.text {
                 DuplicatedIdentifierKind::RawIdentifier {
                     raw: token.text.to_string(),
+                }
+            } else if collides_with_clock_domain {
+                DuplicatedIdentifierKind::ClockDomain {
+                    name: canonical.to_string(),
                 }
             } else {
                 DuplicatedIdentifierKind::Normal
@@ -364,7 +376,14 @@ impl CreateSymbolTable {
         }
 
         let token = &clock_domain.identifier.identifier_token.token;
-        let id = if let Ok(symbol) = symbol_table::resolve((token, &self.get_namespace(token))) {
+        // Reuse only a symbol that IS a clock domain: this is how the second
+        // and later uses of `'i` find the first one.  Reusing ANY resolvable
+        // symbol let a label adopt a variable's identity, which made the same
+        // module compile or not depending on which was written first.
+        let resolved = symbol_table::resolve((token, &self.get_namespace(token)))
+            .ok()
+            .filter(|x| matches!(x.found.kind, SymbolKind::ClockDomain));
+        let id = if let Some(symbol) = resolved {
             symbol.found.id
         } else {
             let symbol = Symbol::new(
@@ -374,7 +393,21 @@ impl CreateSymbolTable {
                 false,
                 DocComment::default(),
             );
-            symbol_table::insert(token, symbol).unwrap()
+            match symbol_table::insert(token, symbol) {
+                Some(id) => id,
+                // The name is already something else in this scope.  Report it
+                // the way the other direction is reported and carry on with the
+                // implicit domain, which keeps the rest of the module checkable.
+                None => {
+                    let name = token.to_string();
+                    self.errors.push(AnalyzerError::duplicated_identifier(
+                        &name,
+                        DuplicatedIdentifierKind::ClockDomain { name: name.clone() },
+                        &token.into(),
+                    ));
+                    return SymClockDomain::Implicit;
+                }
+            }
         };
         SymClockDomain::Explicit(id)
     }

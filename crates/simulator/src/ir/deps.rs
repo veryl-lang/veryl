@@ -153,6 +153,9 @@ pub fn collect_stmt_deps(stmt: &ProtoStatement, deps: &mut StmtDeps) {
             }
         }
         ProtoStatement::TbMethodCall { .. } => {}
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 

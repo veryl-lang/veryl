@@ -393,13 +393,15 @@ impl SystemFunctionCall {
 
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
         match &self.kind {
+            // Both take the operand's TYPE, whatever its value variant is: an
+            // unpacked-array variable has no single numeric value but its type
+            // is fully sized.
             SystemFunctionKind::Bits(x) => {
                 let mut expr = x.0.clone();
                 let comptime = expr.eval_comptime(context, None);
                 let value = match &comptime.value {
-                    ValueVariant::Numeric(_) => comptime.r#type.total_width(),
-                    ValueVariant::Type(x) => x.total_width(),
-                    _ => None,
+                    ValueVariant::Type(x) => x.total_bits(),
+                    _ => comptime.r#type.total_bits(),
                 };
                 value.map(|x| Value::new(x as u64, 32, false))
             }
@@ -407,9 +409,8 @@ impl SystemFunctionCall {
                 let mut expr = x.0.clone();
                 let comptime = expr.eval_comptime(context, None);
                 let value = match &comptime.value {
-                    ValueVariant::Numeric(_) => comptime.r#type.total_width(),
-                    ValueVariant::Type(x) => x.total_width(),
-                    _ => None,
+                    ValueVariant::Type(x) => x.leading_dimension(),
+                    _ => comptime.r#type.leading_dimension(),
                 };
                 value.map(|x| Value::new(x as u64, 32, false))
             }

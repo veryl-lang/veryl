@@ -1,0 +1,13 @@
+module unpacked_struct_union_member {
+    struct member_t {
+        q: logic<32>,
+    }
+    type member_array_t = member_t [8];
+
+    struct wrapper_t {
+        digest: member_array_t,
+    }
+
+    var r: wrapper_t;
+    assign r.digest[0].q = 0;
+}

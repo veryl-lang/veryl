@@ -1076,13 +1076,14 @@ pub enum AnalyzerError {
     #[diagnostic(
         severity(Warning),
         code(mismatch_assignment),
-        help(""),
+        help("{kind}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
     #[error("\"{src}\" can't be assigned to \"{dst}\"")]
     MismatchAssignment {
         src: String,
         dst: String,
+        kind: MismatchAssignmentKind,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -1449,6 +1450,22 @@ pub enum AnalyzerError {
     )]
     #[error("2-state member and 4-state member are mixed in the same struct/union")]
     MixedStructUnionMember {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(unpacked_struct_union_member),
+        help("declare \"{identifier}\" with a packed array type, or move the array outside the struct/union"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" has an unpacked array type, which a struct/union member can't have")]
+    UnpackedStructUnionMember {
+        identifier: String,
         #[source_code]
         input: MultiSources,
         #[label("Error location")]
@@ -2391,6 +2408,7 @@ impl AnalyzerError {
             AnalyzerError::UnresolvableGenericExpression { input, .. } => input,
             AnalyzerError::UnsignedArithShift { input, .. } => input,
             AnalyzerError::UnusedReturn { input, .. } => input,
+            AnalyzerError::UnpackedStructUnionMember { input, .. } => input,
             AnalyzerError::UnusedVariable { input, .. } => input,
             AnalyzerError::WrongSeparator { input, .. } => input,
             AnalyzerError::ZeroWidthNumber { input, .. } => input,
@@ -2516,6 +2534,7 @@ impl AnalyzerError {
             AnalyzerError::UnknownUnsafe { token_source, .. } => *token_source,
             AnalyzerError::UnresolvableGenericExpression { token_source, .. } => *token_source,
             AnalyzerError::UnusedReturn { token_source, .. } => *token_source,
+            AnalyzerError::UnpackedStructUnionMember { token_source, .. } => *token_source,
             AnalyzerError::UnusedVariable { token_source, .. } => *token_source,
             AnalyzerError::WrongSeparator { token_source, .. } => *token_source,
             AnalyzerError::InvalidWavedrom { token_source, .. } => *token_source,
@@ -3149,6 +3168,7 @@ impl AnalyzerError {
     pub fn mismatch_assignment(
         src: &str,
         dst: &str,
+        kind: MismatchAssignmentKind,
         token: &TokenRange,
         inst_context: &[TokenRange],
     ) -> Self {
@@ -3156,6 +3176,7 @@ impl AnalyzerError {
         AnalyzerError::MismatchAssignment {
             src: src.to_string(),
             dst: dst.to_string(),
+            kind,
             input,
             error_location: token.into(),
             inst_context,
@@ -3358,6 +3379,14 @@ impl AnalyzerError {
     }
     pub fn mixed_struct_union_member(token: &TokenRange) -> Self {
         AnalyzerError::MixedStructUnionMember {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn unpacked_struct_union_member(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::UnpackedStructUnionMember {
+            identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
@@ -4180,10 +4209,32 @@ impl fmt::Display for MultipleDefaultKind {
     }
 }
 
+/// Refines the `mismatch_assignment` help. The severity stays a warning: the
+/// check is conservative and a false positive must not stop a build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MismatchAssignmentKind {
+    Normal,
+    /// The unpacked dimensions disagree, which no SystemVerilog tool accepts
+    /// and which the simulator reports for itself when it reaches one.
+    ArrayShape,
+}
+
+impl fmt::Display for MismatchAssignmentKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MismatchAssignmentKind::Normal => "".fmt(f),
+            MismatchAssignmentKind::ArrayShape => {
+                "the unpacked dimensions disagree; give both sides the same ones".fmt(f)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DuplicatedIdentifierKind {
     Normal,
     RawIdentifier { raw: String },
+    ClockDomain { name: String },
 }
 
 impl fmt::Display for DuplicatedIdentifierKind {
@@ -4194,6 +4245,12 @@ impl fmt::Display for DuplicatedIdentifierKind {
                 write!(
                     f,
                     "r#-prefixed identifier \"{raw}\" is treated as the same identifier without the prefix"
+                )
+            }
+            DuplicatedIdentifierKind::ClockDomain { name } => {
+                write!(
+                    f,
+                    "a clock domain label shares one identifier namespace with ordinary declarations, so '{name} and {name} collide in the same scope"
                 )
             }
         }

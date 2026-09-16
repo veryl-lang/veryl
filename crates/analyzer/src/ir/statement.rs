@@ -819,9 +819,31 @@ fn compute_assign_target(
     Some((dst.id, arr_idx, mask))
 }
 
+/// A write into a variable of a child module instance (`dut.u_core.mem[0]`),
+/// which only a testbench block may do. The target is not in the writing
+/// module's scope, so it stays a path here and the simulator resolves it to a
+/// buffer offset once the instance tree is elaborated — the write-side mirror
+/// of [`crate::ir::HierVarRef`].
+#[derive(Clone, Debug)]
+pub struct HierAssignDestination {
+    /// Instance names from the referencing module down to the target module.
+    pub inst_path: Vec<StrId>,
+    /// Variable path within the target module.
+    pub var_path: VarPath,
+    pub index: VarIndex,
+    pub select: VarSelect,
+    pub comptime: Comptime,
+    pub token: TokenRange,
+}
+
 #[derive(Clone)]
 pub struct AssignStatement {
     pub dst: Vec<AssignDestination>,
+    /// Set instead of `dst` for a testbench write into a child instance.
+    /// `dst` is then empty, so every consumer that walks local destinations
+    /// (assign coverage, FF gathering, loop detection) correctly sees this
+    /// statement as writing nothing in THIS module.
+    pub hier_dst: Option<Box<HierAssignDestination>>,
     pub width: Option<usize>,
     pub expr: Expression,
     pub token: TokenRange,

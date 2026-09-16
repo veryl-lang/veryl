@@ -735,6 +735,7 @@ mod tests {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: TokenRange::default(),
         })
     }
