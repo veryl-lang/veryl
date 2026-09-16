@@ -151,17 +151,23 @@ impl Expression {
                     // The target is self-contained (a type or a width
                     // literal): finalize it with its own context.
                     y.apply_context(context, yc);
-                    as_target_is_type = matches!(y.comptime().value, ValueVariant::Type(_));
                     // A numeric cast (`x as 16`) carries the width as the
-                    // literal's VALUE; a type cast carries it as the width.
-                    let cast_width = if as_target_is_type {
-                        yc.width
-                    } else {
-                        y.comptime()
+                    // literal's VALUE; a type cast carries it in the target
+                    // TYPE. The target's comptime `r#type` is the `Type`
+                    // meta-type, whose width is the placeholder 1, so `yc.width`
+                    // is not the cast width: reading it sized every named-type
+                    // cast to 1 bit wherever no outer context overrode it.
+                    let cast_width = match &y.comptime().value {
+                        ValueVariant::Type(t) => {
+                            as_target_is_type = true;
+                            t.total_width().unwrap_or(0)
+                        }
+                        _ => y
+                            .comptime()
                             .get_value()
                             .ok()
                             .and_then(|v| v.to_usize())
-                            .unwrap_or(0)
+                            .unwrap_or(0),
                     };
                     let inner = ExpressionContext {
                         width: xc.width.max(cast_width),

@@ -29344,3 +29344,37 @@ fn const_from_a_function_call_with_an_unpacked_array_argument() {
         assert_eq!(sim.get("o_elem").unwrap(), Value::new(10, 32, false));
     }
 }
+
+#[test]
+fn named_type_cast_in_display_argument() {
+    // https://github.com/veryl-lang/veryl/issues/3404
+    // A named-type cast (`as u32`) in a self-determined position was sized
+    // to 1 bit, so `$display` printed only the LSB of the result. An
+    // assignment or a comparison supplied an outer width and hid it, which
+    // is why this has to go through `$display` rather than `$assert`.
+    let code = r#"
+    #[test(t)]
+    module t {
+        var a: u32;
+        var b: u32;
+        initial {
+            a = 7;
+            b = 3;
+            $display("%d %d %d %d", (a as u32) * (b as u32), (a as u32) + (b as u32), (a as u32) << 2, (a as 32) * (b as 32));
+        }
+    }
+    "#;
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze_top(code, &config, "t")
+            .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+        let module_name = ir.name.to_string();
+        let result = run_native_testbench(ir, None, module_name).unwrap();
+        let output = output_buffer::take();
+        assert_eq!(result, TestResult::Pass, "config: {config:?}");
+        assert!(
+            output.contains("21 10 28 21"),
+            "config={config:?} output={output:?}"
+        );
+    }
+}
