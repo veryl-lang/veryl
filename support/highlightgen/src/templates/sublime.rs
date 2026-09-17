@@ -23,10 +23,18 @@ contexts:
     - match: '\{{keyword_start}}embed\{{keyword_end}}'
       scope: keyword.declaration.veryl
       push: embed-header
+    - match: '\{{keyword_start}}function\{{keyword_end}}'
+      scope: keyword.declaration.veryl
+      push: function-name
+    - match: '\{{keyword_start}}(?:module|interface|package|struct|enum|union|type)\{{keyword_end}}'
+      scope: keyword.declaration.veryl
+      push: type-name
     - match: '\{{keyword_start}}(?:{{#each structure}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\{{keyword_end}}'
       scope: keyword.declaration.veryl
-    - match: '\{{keyword_start}}(?:{{#each statement}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}}|{{#each literal}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\{{keyword_end}}'
+    - match: '\{{keyword_start}}(?:{{#each statement}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\{{keyword_end}}'
       scope: keyword.other.veryl
+    - match: '\{{keyword_start}}(?:{{#each literal}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\{{keyword_end}}'
+      scope: constant.language.veryl
     - match: '\{{keyword_start}}(?:{{#each conditional}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}}|{{#each repeat}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\{{keyword_end}}'
       scope: keyword.control.veryl
     - match: '\{{keyword_start}}(?:{{#each type}}{{{this}}}{{#unless @last}}|{{/unless}}{{/each}})\{{keyword_end}}'
@@ -63,6 +71,24 @@ contexts:
     - match: '\s+'
     - match: '\{{identifier}}'
       scope: constant.language.clock-domain.veryl
+      pop: true
+    - match: '(?=\S)'
+      pop: true
+
+  function-name:
+    - include: comments
+    - match: '\s+'
+    - match: '\{{identifier}}'
+      scope: entity.name.function.veryl
+      pop: true
+    - match: '(?=\S)'
+      pop: true
+
+  type-name:
+    - include: comments
+    - match: '\s+'
+    - match: '\{{identifier}}'
+      scope: entity.name.type.veryl
       pop: true
     - match: '(?=\S)'
       pop: true

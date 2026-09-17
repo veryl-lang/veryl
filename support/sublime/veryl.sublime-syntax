@@ -18,10 +18,18 @@ contexts:
     - match: '{{keyword_start}}embed{{keyword_end}}'
       scope: keyword.declaration.veryl
       push: embed-header
+    - match: '{{keyword_start}}function{{keyword_end}}'
+      scope: keyword.declaration.veryl
+      push: function-name
+    - match: '{{keyword_start}}(?:module|interface|package|struct|enum|union|type){{keyword_end}}'
+      scope: keyword.declaration.veryl
+      push: type-name
     - match: '{{keyword_start}}(?:embed|enum|function|include|interface|modport|module|package|proto|pub|struct|union|unsafe){{keyword_end}}'
       scope: keyword.declaration.veryl
-    - match: '{{keyword_start}}(?:alias|always_comb|always_ff|assign|as|bind|block|connect|const|final|gen|import|initial|inst|let|mixin|param|return|break|type|var|false|lsb|msb|true){{keyword_end}}'
+    - match: '{{keyword_start}}(?:alias|always_comb|always_ff|assign|as|bind|block|connect|const|final|gen|import|initial|inst|let|mixin|param|return|break|type|var){{keyword_end}}'
       scope: keyword.other.veryl
+    - match: '{{keyword_start}}(?:false|lsb|msb|true){{keyword_end}}'
+      scope: constant.language.veryl
     - match: '{{keyword_start}}(?:case|default|else|if_reset|if|inside|outside|switch|for|in|repeat|rev|step){{keyword_end}}'
       scope: keyword.control.veryl
     - match: '{{keyword_start}}(?:bit|bbool|lbool|clock|clock_posedge|clock_negedge|f32|f64|i8|i16|i32|i64|logic|reset|reset_async_high|reset_async_low|reset_sync_high|reset_sync_low|signed|string|tri|p8|p16|p32|p64|u8|u16|u32|u64){{keyword_end}}'
@@ -58,6 +66,24 @@ contexts:
     - match: '\s+'
     - match: '{{identifier}}'
       scope: constant.language.clock-domain.veryl
+      pop: true
+    - match: '(?=\S)'
+      pop: true
+
+  function-name:
+    - include: comments
+    - match: '\s+'
+    - match: '{{identifier}}'
+      scope: entity.name.function.veryl
+      pop: true
+    - match: '(?=\S)'
+      pop: true
+
+  type-name:
+    - include: comments
+    - match: '\s+'
+    - match: '{{identifier}}'
+      scope: entity.name.type.veryl
       pop: true
     - match: '(?=\S)'
       pop: true
