@@ -1134,11 +1134,11 @@ impl Variable {
     pub fn prepend_array_at_path(&mut self, array: &ShapeRef, path_offset: usize) {
         if !array.is_empty() {
             if let Some(total_array) = array.total() {
-                let value = self.value.clone();
-                let assigned = self.assigned.clone();
+                let value_len = self.value.len();
+                let assigned_len = self.assigned.len();
                 for _ in 0..total_array.saturating_sub(1) {
-                    self.value.append(&mut value.clone());
-                    self.assigned.append(&mut assigned.clone());
+                    self.value.extend_from_within(..value_len);
+                    self.assigned.extend_from_within(..assigned_len);
                 }
             }
             // Unknown extents still contribute dimensions and select path offsets.
