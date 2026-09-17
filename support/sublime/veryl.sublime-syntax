@@ -9,6 +9,7 @@ variables:
   identifier: '(?:r#)?[a-zA-Z_][0-9a-zA-Z_$]*'
   keyword_start: '(?<![0-9a-zA-Z_$#])'
   keyword_end: '(?![0-9a-zA-Z_$])'
+  digits: '[0-9]+(?:_[0-9]+)*'
 
 contexts:
   main:
@@ -27,12 +28,39 @@ contexts:
       scope: storage.type.veryl
     - match: '{{keyword_start}}(?:converse|inout|input|output|same){{keyword_end}}'
       scope: storage.modifier.veryl
-    - match: '`[a-zA-Z0-9_]+'
-      scope: constant.language.veryl
+    # Numeric forms must precede clock-domain quotes and ordinary digits.
+    - include: numbers
+    - match: "'\\{"
+      scope: punctuation.section.sequence.begin.veryl
+    - match: "'"
+      scope: constant.language.clock-domain.veryl
+      push: clock-domain
     - match: '\$[a-zA-Z_][0-9a-zA-Z_$]*'
       scope: variable.other.veryl
     - match: '{{identifier}}'
       scope: variable.other.veryl
+
+  numbers:
+    # Do not consume numeric prefixes of identifiers such as 'data_bus or 'xray.
+    - match: '{{digits}}\.{{digits}}[eE][+-]?{{digits}}{{keyword_end}}'
+      scope: constant.numeric.float.veryl
+    - match: '{{digits}}\.{{digits}}{{keyword_end}}'
+      scope: constant.numeric.float.veryl
+    - match: "(?:{{digits}})?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*{{keyword_end}}"
+      scope: constant.numeric.integer.veryl
+    - match: "(?:{{digits}})?'[01xzXZ]{{keyword_end}}"
+      scope: constant.numeric.integer.veryl
+    - match: '{{digits}}{{keyword_end}}'
+      scope: constant.numeric.integer.veryl
+
+  clock-domain:
+    - include: comments
+    - match: '\s+'
+    - match: '{{identifier}}'
+      scope: constant.language.clock-domain.veryl
+      pop: true
+    - match: '(?=\S)'
+      pop: true
 
   embed-header:
     - include: comments
