@@ -12705,7 +12705,27 @@ fn unevaluable_value_case_condition() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleC (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+    ) {
+        let c: logic<2> = 2'd0;
+
+        always_comb {
+          case i_sel {
+            c..=1  : o_b = i_a[0];
+            default: o_b = i_a[1];
+          }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleD (
@@ -12741,7 +12761,104 @@ fn unevaluable_value_case_condition() {
     "#;
 
     let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleE (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+    ) {
+        let c: logic<2> = 2'd0;
+
+        assign o_b = case i_sel {
+            c..=1  : i_a[0],
+            default: i_a[1],
+        };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn unevaluable_value_inside_operand() {
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        o_b: output logic   ,
+    ) {
+        const ONE: bit<3> = 3'd1;
+
+        always_comb {
+            o_b = inside i_a { 3'd0, ONE, 2..=3, 3'b1xx };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { i_b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        let b: logic<3> = 3'd1;
+        always_comb {
+            o_c = inside i_a { b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { 0..=i_b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { i_b..=1 };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

@@ -3423,7 +3423,7 @@ fn range_item_pattern(context: &mut Context, range_item: &RangeItem) -> IrResult
     let mut lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
 
     let comptime = lo.eval_comptime(context, None);
-    if !comptime.is_const {
+    if !comptime.is_const && range_item.range.range_opt.is_none() {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
             &range_item.into(),
@@ -3434,13 +3434,8 @@ fn range_item_pattern(context: &mut Context, range_item: &RangeItem) -> IrResult
         return Ok(ir::CasePattern::Eq(Box::new(lo)));
     };
     let mut hi: ir::Expression = Conv::conv(context, opt.expression.as_ref())?;
-    let comptime = hi.eval_comptime(context, None);
-    if !comptime.is_const {
-        context.insert_error(AnalyzerError::unevaluable_value(
-            UnevaluableValueKind::CaseCondition,
-            &range_item.into(),
-        ));
-    }
+    hi.eval_comptime(context, None);
+
     let inclusive = matches!(opt.range_operator.as_ref(), RangeOperator::DotDotEqu(_));
     Ok(ir::CasePattern::Range {
         lo: Box::new(lo),
@@ -3486,7 +3481,7 @@ fn range_item(
 
     let comptime = exp.eval_comptime(context, None);
     let lo_value = comptime.get_value().ok().and_then(|v| v.to_usize());
-    if !comptime.is_const {
+    if !comptime.is_const && range_item.range.range_opt.is_none() {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
             &range_item.into(),
@@ -3498,12 +3493,6 @@ fn range_item(
 
         let token: TokenRange = range_item.into();
         let comptime = exp0.eval_comptime(context, None);
-        if !comptime.is_const {
-            context.insert_error(AnalyzerError::unevaluable_value(
-                UnevaluableValueKind::CaseCondition,
-                &token,
-            ));
-        }
 
         // An empty exclusive range (constant `lo >= hi`) miscompiles: the emitter's
         // `(hi)-1` underflows an unsigned `hi == 0` to a near-universal range.
