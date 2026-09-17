@@ -7942,6 +7942,28 @@ fn referring_before_definition() {
         errors[0],
         AnalyzerError::ReferringBeforeDefinition { .. }
     ));
+
+    let code = r#"
+    module ModuleA #(
+        param W: u32    = 8,
+        param V: bit<W> = 0,
+    ) {}
+    module ModuleB::<B: u32> #(
+        param W: u32    = B,
+        param V: bit<W> = 0,
+    ) {
+        inst u: ModuleA #(
+            W: W,
+            V: V,
+        );
+    }
+    module ModuleC {
+        inst u: ModuleB::<8>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
