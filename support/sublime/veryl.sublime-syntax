@@ -43,6 +43,9 @@ contexts:
     - match: "'"
       scope: constant.language.clock-domain.veryl
       push: clock-domain
+    # Longest operators first. Comment contexts have priority over / and *.
+    - match: '<<<=|>>>=|<<=|>>=|<<<|>>>|==\?|!=\?|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<>|\*\*|<<|>>|<=|>=|<:|>:|==|!=|&&|\|\||~\^|~&|~\||->|<-|\+:|-:|[+*/%=<>?&|^~!-]'
+      scope: keyword.operator.veryl
     - match: '\$[a-zA-Z_][0-9a-zA-Z_$]*'
       scope: variable.other.veryl
     - match: '{{identifier}}'
