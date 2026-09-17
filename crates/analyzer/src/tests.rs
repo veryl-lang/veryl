@@ -7975,6 +7975,115 @@ fn referring_before_definition() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    // A width the analyzer cannot evaluate says nothing about where the
+    // constant was declared.
+    let code = r#"
+    module ModuleA {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 0;
+        let _a: bit<W> = C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Binding the constant must not cost the checks a bound constant gets.
+    let code = r#"
+    module ModuleA {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 0;
+        var _a: bit<W>;
+        always_comb {
+            C  = 1;
+            _a = C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
+    );
+
+    // A dropped value takes the generate branch out of the IR, and every
+    // check inside it.
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 1;
+        if C == 1 :g {
+            always_comb {
+                o_a = 1;
+            }
+            always_comb {
+                o_a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. }))
+    );
+
+    // Without the declared signedness the fold reads 8'hff as positive and
+    // drops the branch.
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        const W: u32           = $sv::get_width(1);
+        const C: signed bit<W> = 8'hff;
+        if C <: 0 :g {
+            always_comb {
+                o_a = 1;
+            }
+            always_comb {
+                o_a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. }))
+    );
+
+    // Here the value, rather than the width, is what cannot be evaluated.
+    let code = r#"
+    module ModuleA {
+        const C: bit<8> = $sv::get_val();
+        var _a: bit<8>;
+        always_comb {
+            C  = 1;
+            _a = C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
+    );
 }
 
 #[test]
