@@ -7964,6 +7964,17 @@ fn referring_before_definition() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        const A: bit<$sv::WIDTH> = 0,
+    ) {
+        let _a: bit<$sv::WIDTH> = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
