@@ -1032,19 +1032,22 @@ pub fn eval_const_assign(
         }
         _ => {
             match &comptime.value {
-                ValueVariant::Numeric(value)
-                    if let Some(total_width) = comptime.r#type.total_width() =>
-                {
+                ValueVariant::Numeric(value) => {
                     let mut value = value.clone();
+                    // Giving up on a width that will not resolve would leave the
+                    // constant out of the path table, where a later reference to
+                    // it reads as one placed ahead of its own declaration.
                     if !comptime.r#type.is_string() {
                         // Normalize to the declared type: extend by the RHS's own
                         // signedness, then adopt the type's signed flag — downstream folds
                         // (==, <:, /, ternary, casts) trust it, and a stray RHS flag
                         // diverges from the emitted SV.
-                        if value.width() < total_width && value.width() != 0 {
-                            value = value.expand(total_width, value.signed()).into_owned();
+                        if let Some(total_width) = comptime.r#type.total_width() {
+                            if value.width() < total_width && value.width() != 0 {
+                                value = value.expand(total_width, value.signed()).into_owned();
+                            }
+                            value.trunc(total_width);
                         }
-                        value.trunc(total_width);
                         value.set_signed(r#type.signed);
                     }
 
@@ -1093,15 +1096,10 @@ pub fn eval_const_assign(
                     comptime.value = ValueVariant::Type(x.clone());
                     context.insert_var_path(path.clone(), comptime);
                 }
-                _ => {
-                    // An unknown value, and a numeric one whose declared width has no
-                    // total yet: a width naming a generic parameter or a `$sv` item
-                    // can't be resolved here, so the value can't be normalized to the
-                    // declared type. Register the path anyway so that a later
-                    // reference resolves through `find_path` instead of the symbol
-                    // route, where the declaration order check would answer for a
-                    // parameter that simply never made it into `var_paths`.
-                    context.insert_var_path(path.clone(), comptime);
+                ValueVariant::Unknown => {
+                    // The variable behind the path is what the const-assignment
+                    // check and the simulator look for.
+                    insert_const_variable(context, dst, kind, r#type, comptime, vec![]);
                 }
             }
         }
