@@ -1032,25 +1032,11 @@ pub fn eval_const_assign(
         }
         _ => {
             match &comptime.value {
-                ValueVariant::Numeric(_)
-                    if context.in_generic && comptime.r#type.total_width().is_none() =>
+                ValueVariant::Numeric(value)
+                    if let Some(total_width) = comptime.r#type.total_width() =>
                 {
-                    // A width naming a generic parameter has no total until an
-                    // argument is applied, so the value can't be normalized to the
-                    // declared type. Register the path the way an unknown value is
-                    // registered so that a later reference resolves through
-                    // `find_path` instead of the symbol route, where the declaration
-                    // order check would answer for a parameter that simply never
-                    // made it into `var_paths`.
-                    context.insert_var_path(path.clone(), comptime);
-                }
-                ValueVariant::Numeric(value) => {
                     let mut value = value.clone();
                     if !comptime.r#type.is_string() {
-                        let total_width = comptime
-                            .r#type
-                            .total_width()
-                            .ok_or_else(|| ir_error!(token))?;
                         // Normalize to the declared type: extend by the RHS's own
                         // signedness, then adopt the type's signed flag — downstream folds
                         // (==, <:, /, ternary, casts) trust it, and a stray RHS flag
@@ -1107,7 +1093,14 @@ pub fn eval_const_assign(
                     comptime.value = ValueVariant::Type(x.clone());
                     context.insert_var_path(path.clone(), comptime);
                 }
-                ValueVariant::Unknown => {
+                _ => {
+                    // An unknown value, and a numeric one whose declared width has no
+                    // total yet: a width naming a generic parameter or a `$sv` item
+                    // can't be resolved here, so the value can't be normalized to the
+                    // declared type. Register the path anyway so that a later
+                    // reference resolves through `find_path` instead of the symbol
+                    // route, where the declaration order check would answer for a
+                    // parameter that simply never made it into `var_paths`.
                     context.insert_var_path(path.clone(), comptime);
                 }
             }
