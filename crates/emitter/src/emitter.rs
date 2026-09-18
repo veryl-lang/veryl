@@ -583,7 +583,7 @@ impl Emitter {
                     return;
                 }
 
-                self.process_comment(x, will_push);
+                self.process_comment(&x.comments, will_push);
             }
             Mode::Align => {
                 self.aligner.token(x);
@@ -593,13 +593,13 @@ impl Emitter {
         self.last_token = Some(x.clone());
     }
 
-    fn process_comment(&mut self, x: &VerylToken, will_push: bool) {
-        if x.comments.is_empty() {
+    fn process_comment(&mut self, comments: &[Token], will_push: bool) {
+        if comments.is_empty() {
             return;
         }
-        let mut cs: Vec<CommentDoc> = Vec::with_capacity(x.comments.len());
+        let mut cs: Vec<CommentDoc> = Vec::with_capacity(comments.len());
         let mut prev_line = self.src_line;
-        for c in &x.comments {
+        for c in comments {
             let raw = resource_table::get_str_value(c.text).unwrap();
             let is_line_comment = raw.ends_with('\n');
             let trimmed: String = if is_line_comment {
@@ -629,6 +629,15 @@ impl Emitter {
             node = doc::indent_by(1, node);
         }
         self.emit_doc(node);
+    }
+
+    /// The guards `process_token` applies to comments, for a caller that held
+    /// them back. `src_line` must be the line they were held back from.
+    fn deferred_comment(&mut self, comments: &[Token], will_push: bool) {
+        if self.mode != Mode::Build || self.build_opt.strip_comments || self.skip_comment {
+            return;
+        }
+        self.process_comment(comments, will_push);
     }
 
     fn token(&mut self, x: &VerylToken) {
@@ -1459,10 +1468,16 @@ impl Emitter {
             &arg.identifier.identifier_token,
             None,
         ));
-        self.token_will_push(&arg.l_brace.l_brace_token.replace(&format!("{prefix}begin")));
+        // The brace carries the comments written at the top of the block, and
+        // emitting them with it would put them between `begin` and the label.
+        let mut begin = arg.l_brace.l_brace_token.replace(&format!("{prefix}begin"));
+        let comments = std::mem::take(&mut begin.comments);
+        self.token_will_push(&begin);
         self.space(1);
         self.colon(&arg.colon);
         self.identifier(&arg.identifier);
+        self.src_line = arg.l_brace.l_brace_token.token.line;
+        self.deferred_comment(&comments, true);
         for (i, x) in arg.generate_named_block_list.iter().enumerate() {
             self.newline_list(i);
             self.generate_group(&x.generate_group);
@@ -6049,7 +6064,7 @@ impl VerylWalker for Emitter {
             // the semicolon's own line so `Doc::Comments` carries the
             // correct gap into the renderer.
             self.src_line = arg.semicolon.semicolon_token.token.line;
-            self.process_comment(&arg.semicolon.semicolon_token, false);
+            self.deferred_comment(&arg.semicolon.semicolon_token.comments, false);
         }
     }
 
