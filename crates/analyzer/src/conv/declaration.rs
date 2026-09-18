@@ -1234,6 +1234,7 @@ fn conv_function(
                         let direction = match variable.kind {
                             VarKind::Input => Direction::Input,
                             VarKind::Output => Direction::Output,
+                            VarKind::Inout => Direction::Inout,
                             _ => unreachable!(),
                         };
 
