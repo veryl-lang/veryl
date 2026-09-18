@@ -99,6 +99,22 @@ fn type_before_name(unexpected_token: TokenType, expected_tokens: &ExpectedToken
     unexpected_token.is_type_keyword() && expected_tokens.any(TokenType::Var)
 }
 
+fn clock_domain_name_as_number<'a>(
+    unexpected_token: TokenType,
+    text: Option<&'a str>,
+    expected_tokens: &ExpectedTokens,
+) -> Option<&'a str> {
+    // 'off and 'd0 lex as number literals, so the clock domain never reaches the parser.
+    if !matches!(unexpected_token, TokenType::Based | TokenType::AllBit)
+        || !expected_tokens.any(TokenType::Quote)
+    {
+        return None;
+    }
+    let name = text?.strip_prefix('\'')?;
+    name.starts_with(|c: char| c.is_ascii_alphabetic())
+        .then_some(name)
+}
+
 fn block_or_if_after_else(
     unexpected_tokens: &[UnexpectedToken],
     expected_tokens: &ExpectedTokens,
@@ -156,6 +172,10 @@ impl From<parol_runtime::SyntaxError> for SyntaxError {
                 help = "port declaration is in the form '<name>: <direction> <type>'".to_string();
             } else if type_before_name(token, &expected_tokens) {
                 help = "variable declaration is in the form 'var <name>: <type>;'".to_string();
+            } else if let Some(name) = clock_domain_name_as_number(token, text, &expected_tokens) {
+                help = format!(
+                    "'{name}' is also a number literal, use the raw identifier form: 'r#{name}"
+                );
             } else if keyword_as_identifier(token, &expected_tokens) {
                 help = format!(
                     "'{}' is a reserved keyword and cannot be used as an identifier",

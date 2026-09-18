@@ -526,6 +526,50 @@ fn parse_error_help_systemverilog_style_declaration() {
 }
 
 #[test]
+fn parse_error_help_clock_domain_name() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input 'off clock,
+    ) {}
+    "#;
+
+    assert_eq!(
+        &help_message(code),
+        "'off' is also a number literal, use the raw identifier form: 'r#off"
+    );
+}
+
+#[test]
+fn clock_domain_name_not_shadowed_by_number() {
+    // 'hclk starts with the number 'hc, 'xclk with 'x.
+    let code = r#"module ModuleA (
+    i_clk : input  'hclk clock,
+    i_dat : input  'hclk logic,
+    o_dat : output 'hclk logic,
+    i_dat2: input  'xclk logic,
+    o_dat2: output 'xclk logic,
+) {
+    var r_dat: 'hclk logic;
+    let w_dat: 'xclk logic = i_dat2;
+    assign r_dat  = i_dat;
+    assign o_dat  = r_dat;
+    assign o_dat2 = w_dat;
+}"#;
+    let parser = Parser::parse(code, &"");
+    assert!(parser.is_ok(), "{:?}", parser.err());
+}
+
+#[test]
+fn number_literal_keeps_priority_over_clock_domain_name() {
+    success("let a: logic = 8'h1f;");
+    success("let a: logic = 'h0;");
+    success("let a: logic = 'x;");
+    success("let a: logic = 'd0;");
+    // The Generic scanner mode has no Quote token to fall back to.
+    success("let a: logic = A::<'h10>::B;");
+}
+
+#[test]
 fn parse_error_location_points_at_divergence() {
     use crate::ParserError;
 

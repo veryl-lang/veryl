@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+ParserError::SyntaxError
+
+  × Unexpected token: 'number'
+   ╭─[../../testcases/error/clock_domain_name_as_number.veryl:2:18]
+ 1 │ module ModuleA (
+ 2 │     i_clk: input 'off clock,
+   ·                  ──┬─
+   ·                    ╰── Error location
+ 3 │ ) {}
+   ╰────
+  help: 'off' is also a number literal, use the raw identifier form: 'r#off

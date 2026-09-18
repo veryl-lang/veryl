@@ -15051,7 +15051,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 4:
     ///
-    /// `BasedTerm: <INITIAL, Generic>/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ : Token;`
+    /// `BasedTerm: <INITIAL, Generic>/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ ?! /[0-9a-zA-Z_$]/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn based_term(&mut self, based_term: &ParseTreeType<'t>) -> Result<()> {
@@ -15070,7 +15070,7 @@ impl<'t, 'u> VerylGrammarAuto<'t, 'u> {
 
     /// Semantic action for production 5:
     ///
-    /// `AllBitTerm: <INITIAL, Generic>/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/ : Token;`
+    /// `AllBitTerm: <INITIAL, Generic>/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/ ?! /[0-9a-zA-Z_$]/ : Token;`
     ///
     #[parol_runtime::function_name::named]
     fn all_bit_term(&mut self, all_bit_term: &ParseTreeType<'t>) -> Result<()> {

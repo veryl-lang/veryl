@@ -1,0 +1,3 @@
+module ModuleA (
+    i_clk: input 'off clock,
+) {}
