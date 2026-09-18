@@ -8068,6 +8068,31 @@ fn referring_before_definition() {
             .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. }))
     );
 
+    // The array path binds the constant too, so the same checks apply.
+    let code = r#"
+    module ModuleA {
+        const W: u32        = $sv::get_width(1);
+        const C: bit<W> [2] = '{0, 1};
+        var _a: bit<W>;
+        always_comb {
+            C[0] = 1;
+            _a   = C[0];
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
+    );
+
     // Here the value, rather than the width, is what cannot be evaluated.
     let code = r#"
     module ModuleA {
@@ -8086,6 +8111,68 @@ fn referring_before_definition() {
             .iter()
             .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
     );
+}
+
+#[test]
+fn referring_inactive_definition() {
+    // The declaration sits before the reference; the guard is what it cannot
+    // reach.
+    let code = r#"
+    module ModuleA {
+        #[ifdef(FOO)]
+        const W: u32 = 8;
+        var _a: bit<W>;
+        always_comb {
+            _a = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringInactiveDefinition { .. }))
+    );
+
+    // With the define in hand there is nothing to report, so the verdict is
+    // the guard's state and not its presence.
+    let errors = analyze_with_defines(code, &["FOO"]);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        #[ifdef(FOO)]
+        var w: logic;
+        assign o_a = w;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringInactiveDefinition { .. }))
+    );
+
+    // The same guard on both sides leaves nothing to report.
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        #[ifdef(FOO)]
+        var w: logic;
+        #[ifdef(FOO)]
+        assign o_a = w;
+        #[ifndef(FOO)]
+        assign o_a = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

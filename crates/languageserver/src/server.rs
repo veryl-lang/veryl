@@ -806,6 +806,7 @@ impl Server {
                                             | AnalyzerError::UnevaluableValue { .. }
                                             | AnalyzerError::MismatchType { .. }
                                             | AnalyzerError::ReferringBeforeDefinition { .. }
+                                            | AnalyzerError::ReferringInactiveDefinition { .. }
                                     )
                                 }
                             })

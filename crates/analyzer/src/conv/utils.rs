@@ -16,6 +16,7 @@ use crate::ir::{
     Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex, VarKind,
     VarPath, VarPathSelect, VarSelect, Variable,
 };
+use crate::namespace::DefineContext;
 use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, GenericMap, ProtoBound,
     Symbol, SymbolKind, TbComponentKind, TypeKind,
@@ -617,6 +618,18 @@ pub fn eval_size(
     }
 }
 
+/// A declaration the active defines guard out is not one placed further down,
+/// and saying so sends the reader to the wrong line.
+fn report_unreachable_definition(context: &mut Context, definition: Token, reference: &TokenRange) {
+    let define_context: DefineContext = definition.into();
+    let error = if define_context.is_active(&context.config.defines) {
+        AnalyzerError::referring_before_definition(&definition.to_string(), reference)
+    } else {
+        AnalyzerError::referring_inactive_definition(&definition.to_string(), reference)
+    };
+    context.insert_error(error);
+}
+
 /// A write to a variable declared further down is invisible to every analysis,
 /// while the emitter still emits it.
 pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
@@ -633,10 +646,7 @@ pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
             .find_path(&VarPath::new(symbol.found.token.text))
             .is_none()
     {
-        context.insert_error(AnalyzerError::referring_before_definition(
-            &token.text.to_string(),
-            &token.into(),
-        ));
+        report_unreachable_definition(context, symbol.found.token, &token.into());
     }
 }
 
@@ -886,8 +896,7 @@ fn eval_array_literal_expressions(
     context: &mut Context,
     r#type: &ir::Type,
     exprs: Vec<ArrayLiteralExpression>,
-    token: TokenRange,
-) -> IrResult<Vec<Value>> {
+) -> IrResult<Option<Vec<Value>>> {
     let mut ret = vec![];
 
     let mut value: Option<Value> = None;
@@ -908,7 +917,11 @@ fn eval_array_literal_expressions(
             // it -- so the element carries its own, and truncating to the
             // declared type would leave one bit of the text.
             if !part_type.is_string() {
-                let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
+                // The parts of one element are concatenated, so a width that
+                // will not resolve would lay them out at their own widths.
+                let Some(part_width) = part_type.total_width() else {
+                    return Ok(None);
+                };
                 part_value.trunc(part_width);
             }
 
@@ -928,7 +941,7 @@ fn eval_array_literal_expressions(
         ret.push(x);
     }
 
-    Ok(ret)
+    Ok(Some(ret))
 }
 
 /// Fold an array-literal expression into its per-element values, or `None`
@@ -938,14 +951,11 @@ fn eval_array_literal_values(
     r#type: &ir::Type,
     expr: &mut ir::Expression,
 ) -> IrResult<Option<Vec<Value>>> {
-    let token = expr.token_range();
     let Some(exprs) = eval_array_literal(context, Some(&r#type.array), Some(r#type.width()), expr)?
     else {
         return Ok(None);
     };
-    Ok(Some(eval_array_literal_expressions(
-        context, r#type, exprs, token,
-    )?))
+    eval_array_literal_expressions(context, r#type, exprs)
 }
 
 /// Register a const/param variable from its element `values`. The scalar arm
@@ -1025,9 +1035,9 @@ pub fn eval_const_assign(
         ir::Expression::ArrayLiteral(_, _)
             if !matches!(comptime.value, ValueVariant::NumericArray(_)) =>
         {
-            let Some(values) = eval_array_literal_values(context, r#type, expr)? else {
-                return Err(ir_error!(token));
-            };
+            // A constant absent from the path table reads as one placed ahead
+            // of its own declaration, so it is bound valueless instead.
+            let values = eval_array_literal_values(context, r#type, expr)?.unwrap_or_default();
             insert_const_variable(context, dst, kind, r#type, comptime, values);
         }
         _ => {
@@ -3024,10 +3034,7 @@ pub fn eval_factor_symbol(
                 && let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
             }
 
             // Reached while a width names a parameter of a component whose body
@@ -3254,10 +3261,7 @@ pub fn eval_factor_symbol(
                 }
             });
             if module_variable {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
             }
             return eval_struct_member(context, &symbol.found, &path, VarPath::default(), token);
         }
@@ -3334,10 +3338,7 @@ pub fn eval_factor_symbol(
         SymbolKind::Variable(x) => {
             // Module local variable should be found through context.find_path
             if x.affiliation == Affiliation::Module {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
             }
 
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;

@@ -1558,6 +1558,22 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(referring_inactive_definition),
+        help("guard the reference as the definition is guarded"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("\"{identifier}\" is referred where its definition is inactive.")]
+    ReferringInactiveDefinition {
+        identifier: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(reserved_identifier),
         help("prefix `__` can't be used"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2378,6 +2394,7 @@ impl AnalyzerError {
             AnalyzerError::PrivateMember { input, .. } => input,
             AnalyzerError::PrivateNamespace { input, .. } => input,
             AnalyzerError::ReferringBeforeDefinition { input, .. } => input,
+            AnalyzerError::ReferringInactiveDefinition { input, .. } => input,
             AnalyzerError::ReservedIdentifier { input, .. } => input,
             AnalyzerError::StatementAfterIfReset { input, .. } => input,
             AnalyzerError::SvKeywordUsage { input, .. } => input,
@@ -2508,6 +2525,7 @@ impl AnalyzerError {
             AnalyzerError::PrivateMember { token_source, .. } => *token_source,
             AnalyzerError::PrivateNamespace { token_source, .. } => *token_source,
             AnalyzerError::ReferringBeforeDefinition { token_source, .. } => *token_source,
+            AnalyzerError::ReferringInactiveDefinition { token_source, .. } => *token_source,
             AnalyzerError::ReservedIdentifier { token_source, .. } => *token_source,
             AnalyzerError::StatementAfterIfReset { token_source, .. } => *token_source,
             AnalyzerError::SvKeywordUsage { token_source, .. } => *token_source,
@@ -3435,6 +3453,14 @@ impl AnalyzerError {
     }
     pub fn referring_before_definition(identifier: &str, token: &TokenRange) -> Self {
         AnalyzerError::ReferringBeforeDefinition {
+            identifier: identifier.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn referring_inactive_definition(identifier: &str, token: &TokenRange) -> Self {
+        AnalyzerError::ReferringInactiveDefinition {
             identifier: identifier.to_string(),
             input: source(token),
             error_location: token.into(),
