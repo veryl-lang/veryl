@@ -139,6 +139,35 @@ fn modport_connection_indexed_interface_preserves_selection() {
 }
 
 #[test]
+fn modport_connection_unknown_interface_array_size() {
+    let code = r#"
+        package p {
+            const N: u32 = $sv::foo_pkg::BAR;
+            enum cmd_e { A, B, }
+            struct payload_t { data: logic<8>, }
+        }
+        interface my_if {
+            var cmd: p::cmd_e;
+            var payload: p::payload_t;
+            var data: logic<8>;
+            modport master { cmd: output, payload: output, data: output, }
+        }
+        module leaf (m_if: modport my_if::master,) {
+            always_comb {
+                m_if.cmd = p::cmd_e::A;
+                m_if.payload = p::payload_t'{data: 0};
+                m_if.data = 0;
+            }
+        }
+        module top {
+            inst ifs: my_if [p::N + 1];
+            inst u: leaf (m_if: ifs[p::N].master,);
+        }
+    "#;
+    assert!(analyze(code).is_empty());
+}
+
+#[test]
 fn modport_connection_imported_function_preserves_capture_binding() {
     let code = r#"
         interface Bus {
