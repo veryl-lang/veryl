@@ -1,0 +1,15 @@
+module Module93 {
+    var inner: logic;
+    assign inner = 1;
+}
+
+#[testbench]
+module Module93Tb {
+    inst dut: Module93;
+
+    var seen: logic;
+
+    initial {
+        seen = dut.inner;
+    }
+}
