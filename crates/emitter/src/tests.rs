@@ -5310,3 +5310,61 @@ endmodule
     println!("ret\n{}exp\n{}", ret, expect);
     assert_eq!(ret, expect);
 }
+
+#[test]
+fn generate_block_label_and_leading_comment() {
+    // A label written on an earlier line must not widen the gap below it.
+    let code = r#"module ModuleA {
+    :label_a {
+        // on the same line as the label
+        let _a: logic = 1;
+    }
+
+    :label_b
+
+
+    {
+        // three lines below the label
+        let _b: logic = 1;
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    if (1) begin :label_a
+        // on the same line as the label
+        logic _a; always_comb _a = 1;
+    end
+
+    if (1) begin :label_b
+        // three lines below the label
+        logic _b; always_comb _b = 1;
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn generate_block_leading_comment_is_stripped() {
+    let code = r#"module ModuleA {
+    :label_a {
+        // stripped with every other comment
+        let _a: logic = 1;
+    }
+}
+"#;
+
+    let mut metadata = Metadata::create_default("prj").unwrap();
+    metadata.build.strip_comments = true;
+
+    let ret = emit(&metadata, code);
+
+    assert!(!ret.contains("stripped with every other comment"));
+    assert!(ret.contains("begin :label_a"));
+}
