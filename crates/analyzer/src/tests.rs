@@ -7944,6 +7944,148 @@ fn referring_before_definition() {
         errors[0],
         AnalyzerError::ReferringBeforeDefinition { .. }
     ));
+
+    let code = r#"
+    module ModuleA #(
+        param W: u32    = 8,
+        param V: bit<W> = 0,
+    ) {}
+    module ModuleB::<B: u32> #(
+        param W: u32    = B,
+        param V: bit<W> = 0,
+    ) {
+        inst u: ModuleA #(
+            W: W,
+            V: V,
+        );
+    }
+    module ModuleC {
+        inst u: ModuleB::<8>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA #(
+        const A: bit<$sv::WIDTH> = 0,
+    ) {
+        let _a: bit<$sv::WIDTH> = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // A width the analyzer cannot evaluate says nothing about where the
+    // constant was declared.
+    let code = r#"
+    module ModuleA {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 0;
+        let _a: bit<W> = C;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Binding the constant must not cost the checks a bound constant gets.
+    let code = r#"
+    module ModuleA {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 0;
+        var _a: bit<W>;
+        always_comb {
+            C  = 1;
+            _a = C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::ReferringBeforeDefinition { .. }))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
+    );
+
+    // A dropped value takes the generate branch out of the IR, and every
+    // check inside it.
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        const W: u32    = $sv::get_width(1);
+        const C: bit<W> = 1;
+        if C == 1 :g {
+            always_comb {
+                o_a = 1;
+            }
+            always_comb {
+                o_a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. }))
+    );
+
+    // Without the declared signedness the fold reads 8'hff as positive and
+    // drops the branch.
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        const W: u32           = $sv::get_width(1);
+        const C: signed bit<W> = 8'hff;
+        if C <: 0 :g {
+            always_comb {
+                o_a = 1;
+            }
+            always_comb {
+                o_a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MultipleAssignment { .. }))
+    );
+
+    // Here the value, rather than the width, is what cannot be evaluated.
+    let code = r#"
+    module ModuleA {
+        const C: bit<8> = $sv::get_val();
+        var _a: bit<8>;
+        always_comb {
+            C  = 1;
+            _a = C;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::InvalidAssignment { .. }))
+    );
 }
 
 #[test]
@@ -12565,7 +12707,27 @@ fn unevaluable_value_case_condition() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleC (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+    ) {
+        let c: logic<2> = 2'd0;
+
+        always_comb {
+          case i_sel {
+            c..=1  : o_b = i_a[0];
+            default: o_b = i_a[1];
+          }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleD (
@@ -12601,7 +12763,104 @@ fn unevaluable_value_case_condition() {
     "#;
 
     let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleE (
+        i_sel: input  logic<2>,
+        i_a  : input  logic<3>,
+        o_b  : output logic,
+    ) {
+        let c: logic<2> = 2'd0;
+
+        assign o_b = case i_sel {
+            c..=1  : i_a[0],
+            default: i_a[1],
+        };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn unevaluable_value_inside_operand() {
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        o_b: output logic   ,
+    ) {
+        const ONE: bit<3> = 3'd1;
+
+        always_comb {
+            o_b = inside i_a { 3'd0, ONE, 2..=3, 3'b1xx };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { i_b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        let b: logic<3> = 3'd1;
+        always_comb {
+            o_c = inside i_a { b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnevaluableValue { .. }));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { 0..=i_b };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<3>,
+        i_b: input  logic<3>,
+        o_c: output logic   ,
+    ) {
+        always_comb {
+            o_c = inside i_a { i_b..=1 };
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]

@@ -291,6 +291,22 @@ fn undetermined_width() {
         Err(x) => panic!("unexpected error: {x:?}"),
         Ok(_) => panic!("expected UndeterminedWidth"),
     }
+
+    // The same width reached through a module const.
+    let code = r#"
+    module Top (
+        c: output logic,
+    ) {
+        const W: u32    = $sv::some_pkg::WIDTH;
+        const X: bit<W> = 1;
+        assign c = X[0];
+    }
+    "#;
+
+    assert!(matches!(
+        analyze_top(code, &Config::default(), "Top"),
+        Err(SimulatorError::UndeterminedWidth { .. })
+    ));
 }
 
 #[test]
