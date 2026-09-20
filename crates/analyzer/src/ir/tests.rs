@@ -996,7 +996,7 @@ fn array() {
     let code = r#"
     package PackageA {
         struct StructA {
-            x: logic,
+            x: logic<1>,
             y: logic,
         }
     }
@@ -2127,7 +2127,7 @@ fn union() {
         }
 
         struct StructA {
-            v: logic,
+            v: logic<1>,
             w: logic<3>,
         }
 
@@ -2229,7 +2229,7 @@ fn generics_resolve() {
             b: Type ,
         }
 
-        var a: logic  ;
+        var a: logic<1>;
         var b: StructA;
 
         always_ff {
