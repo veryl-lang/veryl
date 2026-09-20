@@ -1557,6 +1557,14 @@ impl Type {
         matches!(self.kind, TypeKind::Inferred)
     }
 
+    /// A `logic`/`bit` declared with no width and no array: a scalar in the
+    /// SystemVerilog sense, which has no dimension to select.
+    pub fn is_scalar(&self) -> bool {
+        matches!(self.kind, TypeKind::Bit | TypeKind::Logic)
+            && self.width.is_empty()
+            && self.array.is_empty()
+    }
+
     pub fn can_be_default_clock(&self) -> bool {
         self.kind.is_clock() && self.width.is_empty() && self.array.is_empty()
     }
