@@ -29378,3 +29378,119 @@ fn named_type_cast_in_display_argument() {
         );
     }
 }
+
+#[test]
+fn runtime_function_conditional_return() {
+    // Issue #3433: use runtime inputs so constant evaluation cannot hide
+    // missing control flow in the analyzer's function body.
+    let code = r#"
+    module Top (d: input logic<8>, q: output logic<8>, twice: output logic<8>) {
+        function f(x: input logic<8>) -> logic<8> {
+            if x == 8'd0 { return x + 8'd1; }
+            return x + 8'd2;
+        }
+        always_comb {
+            q = f(d);
+            twice = f(d) + f(d + 8'd1);
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (input, expected, twice) in [(0, 1, 4), (5, 7, 15), (0, 1, 4)] {
+            sim.set("d", Value::new(input, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(expected, 8, false),
+                "{config:?}"
+            );
+            assert_eq!(
+                sim.get("twice").unwrap(),
+                Value::new(twice, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn runtime_function_nested_loop_return() {
+    let code = r#"
+    module Top (d: input logic<8>, q: output logic<8>, s: output logic<8>) {
+        function f(x: input logic<8>, seen: output logic<8>) -> logic<8> {
+            seen = 0;
+            for i in 0..3 {
+                for j in 0..3 {
+                    if x == i * 3 + j { return seen; }
+                    seen = seen + 8'd1;
+                }
+                seen = seen + 8'd10;
+            }
+            seen = seen + 8'd100;
+            return seen;
+        }
+        always_comb { q = f(d, s); }
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (input, expected) in [(0, 0), (1, 1), (4, 14), (9, 139), (0, 0)] {
+            sim.set("d", Value::new(input, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for output in ["q", "s"] {
+                assert_eq!(
+                    sim.get(output).unwrap(),
+                    Value::new(expected, 8, false),
+                    "{output}, input={input}, {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn runtime_function_return_preserves_external_writes_and_output_copyout() {
+    let code = r#"
+    interface Bus { var data: logic<8>; }
+    module Top (
+        d: input logic<8>, q: output logic<8>,
+        m: output logic<8>, b: output logic<8>, o: output logic<8>,
+    ) {
+        inst bus: Bus;
+        function overwrite () {
+            m = 99;
+            bus.data = 99;
+        }
+        function f(x: input logic<8>, result: output logic<8>) -> logic<8> {
+            m = 10;
+            bus.data = 20;
+            result = 30;
+            if x == 0 { return 8'd1; }
+            overwrite();
+            result = 99;
+            return 8'd2;
+        }
+        always_comb { q = f(d, o); }
+        assign b = bus.data;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (input, expected) in [
+            (0, [1, 10, 20, 30]),
+            (1, [2, 99, 99, 99]),
+            (0, [1, 10, 20, 30]),
+        ] {
+            sim.set("d", Value::new(input, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (output, expected) in ["q", "m", "b", "o"].into_iter().zip(expected) {
+                assert_eq!(
+                    sim.get(output).unwrap(),
+                    Value::new(expected, 8, false),
+                    "{output}, input={input}, {config:?}"
+                );
+            }
+        }
+    }
+}
