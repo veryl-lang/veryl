@@ -351,15 +351,17 @@ pub struct RtSegment {
 /// the allocator sizes with it, so it lives here rather than in either.
 pub(crate) const GUARD_STATE_HEADER_BYTES: usize = 8;
 
-const AUTO_OFF_STREAK: u32 = 1024;
+pub(crate) const AUTO_OFF_STREAK: u32 = 1024;
 
 /// Every this many settle passes, auto-offed segments get re-armed for one
 /// more try.  Off is a per-phase verdict, not a per-workload one: a segment
 /// trained during boot churn (a core spinning through reset toggles every
 /// input) can skip 40-90% of evals in steady state, and without a retry the
-/// boot verdict is permanent.  A re-armed hopeless segment re-expires after
-/// `AUTO_OFF_STREAK` dirty checks, bounding the retry at ~0.1% of evals.
-pub(crate) const REARM_EVALS: u64 = 1 << 20;
+/// boot verdict is permanent.  The epoch has to fall well inside a run: a
+/// longer one may never fire, and the boot verdict stands after all.  A
+/// re-armed hopeless segment re-expires after `AUTO_OFF_STREAK` dirty checks,
+/// bounding the retry at `AUTO_OFF_STREAK / REARM_EVALS` of its evals.
+pub(crate) const REARM_EVALS: u64 = 1 << 14;
 
 /// Per-`Ir` runtime state: one shadow of the compare bytes per segment.
 pub struct ConeGateState {

@@ -579,15 +579,22 @@ pub fn run_native_testbench_capped(
     run_native_testbench_timed(ir, dump, module_name, max_cycles).map(|(r, _)| r)
 }
 
-/// Like [`run_native_testbench_capped`], and additionally reports how long
-/// [`derive_testbench`] took, for a caller that measures simulation and has to
-/// take that build work out of its span.
+/// Like [`run_native_testbench_capped`], and additionally reports how long the
+/// per-run build took (constructing and initialising the [`Simulator`] and
+/// [`derive_testbench`]), for a caller that measures simulation and has to take
+/// that build work out of its span.
 pub fn run_native_testbench_timed(
     ir: Ir,
     dump: Option<WaveDumper>,
     module_name: String,
     max_cycles: Option<u64>,
 ) -> Result<(TestResult, std::time::Duration), SimulatorError> {
+    // `Instant::now` panics on wasm, where the playground runs the testbench.
+    // The span opens before `Simulator::new` because construction builds the
+    // settle filter's span table, which `derive_testbench` builds instead when
+    // the filter is off.
+    #[cfg(not(target_family = "wasm"))]
+    let t_build = std::time::Instant::now();
     // The dump attaches after `init_components` so component trace
     // variables (registered during `create`) land in the waveform header.
     let mut sim = Simulator::new(ir, None);
@@ -601,15 +608,11 @@ pub fn run_native_testbench_timed(
     if let Some(dump) = dump {
         sim.attach_dump(dump);
     }
-    // `Instant::now` panics on wasm, where the playground runs the testbench,
-    // so the derivation span is measured off-wasm only.
-    #[cfg(not(target_family = "wasm"))]
-    let t_derive = std::time::Instant::now();
     let blocks = derive_testbench(&mut sim, &module_name)?;
     #[cfg(not(target_family = "wasm"))]
-    let derive_el = t_derive.elapsed();
+    let build_el = t_build.elapsed();
     #[cfg(target_family = "wasm")]
-    let derive_el = std::time::Duration::ZERO;
+    let build_el = std::time::Duration::ZERO;
     // `tb_dirty` keys on the statements' addresses: `blocks` stays put
     // until the run is over.
     let slices: Vec<&[TestbenchStatement]> = blocks.iter().map(Vec::as_slice).collect();
@@ -666,7 +669,7 @@ pub fn run_native_testbench_timed(
     }
     sim.dump_event_diag();
 
-    Ok((result, derive_el))
+    Ok((result, build_el))
 }
 
 /// One `initial` block's control state.  The statement tree is walked with

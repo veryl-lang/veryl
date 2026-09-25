@@ -71,18 +71,18 @@ struct TestReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
     runtime_s: f64,
-    /// Simulation-only wall time: `Simulator::new`, component init, memory
-    /// preload and the cycle loop — the boundary a warm build re-runs.  What
+    /// Simulation-only wall time: the memory preload and the cycle loop.  What
     /// the elaborated design alone determines stays out of it, whether that is
-    /// the IR build and AOT compile before the run or the testbench derivation
-    /// inside it; `runtime_s` covers those.
+    /// the IR build and AOT compile before the run or the per-run build inside
+    /// it; `runtime_s` covers those.
     /// `None` for non-native tests and native tests that never reached execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     sim_s: Option<f64>,
-    /// The build work `sim_s` excludes but the run still did: deriving the
-    /// testbench from the IR, redone on every invocation even where the IR
-    /// build and the AOT compile are cached.  Diagnostic; `sim_s + derive_s`
-    /// is the whole run span.  Reported whenever `sim_s` is.
+    /// The build work `sim_s` excludes but the run still did: constructing and
+    /// initialising the simulator and deriving the testbench from the IR,
+    /// redone on every invocation even where the IR build and the AOT compile
+    /// are cached.  Diagnostic; `sim_s + derive_s` is the whole run span.
+    /// Reported whenever `sim_s` is.
     #[serde(skip_serializing_if = "Option::is_none")]
     derive_s: Option<f64>,
     /// Captured `$display`/`$write` output.
@@ -542,7 +542,7 @@ impl CmdTest {
                                     if let Some(secs) = run_secs {
                                         tally_timings.push((pending.test_name.clone(), secs));
                                     }
-                                    // The derivation belongs with the build.
+                                    // The per-run build belongs with the build.
                                     let sim_s = run_secs.map(|s| (s - derive_secs).max(0.0));
                                     let derive_s = sim_s.map(|_| derive_secs);
                                     #[cfg(feature = "profile")]
