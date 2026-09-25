@@ -193,6 +193,30 @@ pub(crate) struct FunctionValueCache {
     values: HashMap<FunctionValueKey, Value>,
 }
 
+/// The element values behind an unpacked-array actual argument: the folded
+/// array a const reference carries, or the elements of the variable it names.
+/// A partial index is left unresolved -- it would need the element stride, and
+/// guessing one is worse than the caller's existing `None` path.
+fn array_arg_values(context: &mut Context, expr: &Expression, len: usize) -> Option<Vec<Value>> {
+    let Expression::Term(factor) = expr else {
+        return None;
+    };
+    match factor.as_ref() {
+        crate::ir::Factor::Value(comptime) => match &comptime.value {
+            ValueVariant::NumericArray(values) => values.get(0..len).map(<[Value]>::to_vec),
+            _ => None,
+        },
+        crate::ir::Factor::Variable(id, index, select, _) => {
+            if !select.is_empty() || !index.eval_value(context)?.is_empty() {
+                return None;
+            }
+            let src = context.variables.get(id)?;
+            src.value.get(0..len).map(<[Value]>::to_vec)
+        }
+        _ => None,
+    }
+}
+
 impl FunctionCall {
     pub fn eval_type(&mut self, context: &mut Context) {
         self.comptime.is_const = self.eval_comptime_flag(context);
@@ -213,7 +237,7 @@ impl FunctionCall {
 
     fn eval_value_inner(&self, context: &mut Context) -> Option<Value> {
         let func = context.functions.get(&self.id)?;
-        let cacheable = func.is_const && self.outputs.is_empty();
+        let mut cacheable = func.is_const && self.outputs.is_empty();
         let func = if let Some(x) = &self.index {
             func.get_function(x)
         } else {
@@ -226,8 +250,27 @@ impl FunctionCall {
         // Evaluate every actual in order, even on a cache hit. Defer copy-in
         // until all actuals are ready: an actual can call this same function
         // and overwrite its formals while the outer call is still evaluating.
+        let mut evaluated_arrays = Vec::new();
         for (path, expr) in &self.inputs {
             let id = *func.arg_map.get(path)?;
+            let total = context
+                .variables
+                .get(&id)?
+                .r#type
+                .total_array()
+                .unwrap_or(1);
+            if total > 1 {
+                // An unpacked array has no single value to evaluate --
+                // `get_value(&[])` wants one index per dimension -- so the
+                // whole-array actual has to be copied element by element, the
+                // way the simulator's inliner does for the same shape.  Having
+                // no `Value`, it cannot key a cache entry either, so a call
+                // taking one is evaluated every time.
+                let values = array_arg_values(context, expr, total)?;
+                cacheable = false;
+                evaluated_arrays.push((id, values));
+                continue;
+            }
             let value = expr.eval_value(context)?;
             if cacheable {
                 input_bits = input_bits.saturating_add(value.width().max(64));
@@ -238,6 +281,9 @@ impl FunctionCall {
         for (id, value) in evaluated_inputs {
             let var = context.variable_mut(&id)?;
             var.set_value(&[], value, None);
+        }
+        for (id, values) in evaluated_arrays {
+            context.variable_mut(&id)?.value = values;
         }
         let key = cacheable.then(|| FunctionValueKey {
             id: self.id,
@@ -648,6 +694,16 @@ impl Arguments {
                             .collect();
                         outputs.push((path.clone(), dst));
                     }
+                    // `inout` is copy-in / copy-out: the actual is read on entry
+                    // and written back on return.
+                    Direction::Inout => {
+                        inputs.push((path.clone(), expr));
+                        let dst = dst
+                            .into_iter()
+                            .filter_map(|x| x.to_assign_destination(context, false))
+                            .collect();
+                        outputs.push((path.clone(), dst));
+                    }
                     _ => (),
                 }
             } else {
@@ -674,6 +730,14 @@ impl Arguments {
                         Direction::Output => {
                             let dst = actual_member.to_assign_destination(context, false);
                             if let Some(dst) = dst {
+                                outputs.push((arg_path, vec![dst]));
+                            }
+                        }
+                        Direction::Inout => {
+                            if let Some(expr) = actual_member.clone().to_expression(context) {
+                                inputs.push((arg_path.clone(), expr));
+                            }
+                            if let Some(dst) = actual_member.to_assign_destination(context, false) {
                                 outputs.push((arg_path, vec![dst]));
                             }
                         }

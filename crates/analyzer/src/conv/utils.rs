@@ -1,6 +1,7 @@
 use crate::analyzer_error::{
     AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForRangeKind,
-    InvalidForStepKind, MismatchTypeKind, MultipleDefaultKind, UnevaluableValueKind,
+    InvalidForStepKind, MismatchAssignmentKind, MismatchTypeKind, MultipleDefaultKind,
+    UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -15,6 +16,7 @@ use crate::ir::{
     Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex, VarKind,
     VarPath, VarPathSelect, VarSelect, Variable,
 };
+use crate::namespace::DefineContext;
 use crate::symbol::{
     self, Affiliation, ClockDomain, EnumMemberValue, GenericBoundKind, GenericMap, ProtoBound,
     Symbol, SymbolKind, TbComponentKind, TypeKind,
@@ -616,6 +618,18 @@ pub fn eval_size(
     }
 }
 
+/// A declaration the active defines guard out is not one placed further down,
+/// and saying so sends the reader to the wrong line.
+fn report_unreachable_definition(context: &mut Context, definition: Token, reference: &TokenRange) {
+    let define_context: DefineContext = definition.into();
+    let error = if define_context.is_active(&context.config.defines) {
+        AnalyzerError::referring_before_definition(&definition.to_string(), reference)
+    } else {
+        AnalyzerError::referring_inactive_definition(&definition.to_string(), reference)
+    };
+    context.insert_error(error);
+}
+
 /// A write to a variable declared further down is invisible to every analysis,
 /// while the emitter still emits it.
 pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
@@ -632,10 +646,7 @@ pub fn check_assign_before_definition<T: Into<SymbolPathNamespace>>(
             .find_path(&VarPath::new(symbol.found.token.text))
             .is_none()
     {
-        context.insert_error(AnalyzerError::referring_before_definition(
-            &token.text.to_string(),
-            &token.into(),
-        ));
+        report_unreachable_definition(context, symbol.found.token, &token.into());
     }
 }
 
@@ -727,6 +738,7 @@ pub fn eval_assign_statement(
             dst.select = select;
 
             let statement = ir::Statement::Assign(ir::AssignStatement {
+                hier_dst: None,
                 dst: vec![dst],
                 width,
                 expr: expr.expr,
@@ -738,6 +750,7 @@ pub fn eval_assign_statement(
         check_reset_non_elaborative(context, expr);
 
         let statement = ir::Statement::Assign(ir::AssignStatement {
+            hier_dst: None,
             dst: vec![dst.clone()],
             width,
             expr: expr.clone(),
@@ -786,10 +799,8 @@ pub fn eval_array_range_assign(
     let Some((_, mut comptime)) = context.find_path(&lhs.0) else {
         return Ok(None);
     };
-    if let Some(part_select) = &comptime.part_select {
-        comptime.r#type = part_select.base.clone();
-    }
-    let (array_select, _) = select.split(comptime.r#type.array.dims());
+    let array_dims = comptime.rebase_part_select();
+    let (array_select, _) = select.split(array_dims);
     if !array_select.is_range() {
         return Ok(None);
     }
@@ -885,8 +896,7 @@ fn eval_array_literal_expressions(
     context: &mut Context,
     r#type: &ir::Type,
     exprs: Vec<ArrayLiteralExpression>,
-    token: TokenRange,
-) -> IrResult<Vec<Value>> {
+) -> IrResult<Option<Vec<Value>>> {
     let mut ret = vec![];
 
     let mut value: Option<Value> = None;
@@ -903,8 +913,17 @@ fn eval_array_literal_expressions(
         part_type.width_mut().drain(0..expr.select.len());
 
         if let Some(mut part_value) = expr.expr.eval_value(context) {
-            let part_width = part_type.total_width().ok_or_else(|| ir_error!(token))?;
-            part_value.trunc(part_width);
+            // A `string` has no declared width -- `total_width()` answers 1 for
+            // it -- so the element carries its own, and truncating to the
+            // declared type would leave one bit of the text.
+            if !part_type.is_string() {
+                // The parts of one element are concatenated, so a width that
+                // will not resolve would lay them out at their own widths.
+                let Some(part_width) = part_type.total_width() else {
+                    return Ok(None);
+                };
+                part_value.trunc(part_width);
+            }
 
             value = if let Some(x) = value {
                 Some(x.concat(&part_value))
@@ -922,7 +941,7 @@ fn eval_array_literal_expressions(
         ret.push(x);
     }
 
-    Ok(ret)
+    Ok(Some(ret))
 }
 
 /// Fold an array-literal expression into its per-element values, or `None`
@@ -932,14 +951,11 @@ fn eval_array_literal_values(
     r#type: &ir::Type,
     expr: &mut ir::Expression,
 ) -> IrResult<Option<Vec<Value>>> {
-    let token = expr.token_range();
     let Some(exprs) = eval_array_literal(context, Some(&r#type.array), Some(r#type.width()), expr)?
     else {
         return Ok(None);
     };
-    Ok(Some(eval_array_literal_expressions(
-        context, r#type, exprs, token,
-    )?))
+    eval_array_literal_expressions(context, r#type, exprs)
 }
 
 /// Register a const/param variable from its element `values`. The scalar arm
@@ -972,8 +988,12 @@ fn insert_const_variable(
 /// source variable (inherited/sliced array params) keep the source width, so a
 /// narrower signed source must be sign-extended -- the array-literal path can't
 /// hit this because it evaluates each element in the destination type context.
-/// A `None` width (e.g. `string`) is left untouched.
+/// A width that isn't a real one is left untouched: `None`, and `string`, whose
+/// `total_width()` answers 1 while the text lives in the element itself.
 fn fit_array_elements(mut values: Vec<Value>, r#type: &ir::Type) -> Vec<Value> {
+    if r#type.is_string() {
+        return values;
+    }
     if let Some(total_width) = r#type.total_width() {
         for value in &mut values {
             if value.width() > total_width {
@@ -1004,7 +1024,7 @@ pub fn eval_const_assign(
     {
         comptime.value = ValueVariant::Numeric(value);
     }
-    let comptime = comptime.clone();
+    let mut comptime = comptime.clone();
     let path = &dst.path;
     let r#type = &dst.comptime.r#type;
     let token = expr.token_range();
@@ -1015,15 +1035,39 @@ pub fn eval_const_assign(
         ir::Expression::ArrayLiteral(_, _)
             if !matches!(comptime.value, ValueVariant::NumericArray(_)) =>
         {
-            let Some(values) = eval_array_literal_values(context, r#type, expr)? else {
-                return Err(ir_error!(token));
-            };
+            // A constant absent from the path table reads as one placed ahead
+            // of its own declaration, so it is bound valueless instead.
+            let values = eval_array_literal_values(context, r#type, expr)?.unwrap_or_default();
             insert_const_variable(context, dst, kind, r#type, comptime, values);
         }
         _ => {
             match &comptime.value {
                 ValueVariant::Numeric(value) => {
-                    let id = context.insert_var_path(path.clone(), comptime.clone());
+                    let mut value = value.clone();
+                    // Giving up on a width that will not resolve would leave the
+                    // constant out of the path table, where a later reference to
+                    // it reads as one placed ahead of its own declaration.
+                    if !comptime.r#type.is_string() {
+                        // Normalize to the declared type: extend by the RHS's own
+                        // signedness, then adopt the type's signed flag — downstream folds
+                        // (==, <:, /, ternary, casts) trust it, and a stray RHS flag
+                        // diverges from the emitted SV.
+                        if let Some(total_width) = comptime.r#type.total_width() {
+                            if value.width() < total_width && value.width() != 0 {
+                                value = value.expand(total_width, value.signed()).into_owned();
+                            }
+                            value.trunc(total_width);
+                        }
+                        value.set_signed(r#type.signed);
+                    }
+
+                    // Keep constant metadata consistent with the stored Variable:
+                    // later folds can also read the value without a variable table.
+                    comptime.value = ValueVariant::Numeric(value.clone());
+                    // A later reference has its own expression context, not the
+                    // initializer's width/signedness cached by eval_expr.
+                    comptime.evaluated = false;
+                    let id = context.insert_var_path(path.clone(), comptime);
 
                     for x in r#type.expand_struct_union(path, &[], None) {
                         let r#type = x.part_select.last().unwrap().r#type.clone();
@@ -1035,23 +1079,6 @@ pub fn eval_const_assign(
                         // its lowest field.
                         comptime.part_select = Some(x);
                         context.insert_var_path_with_id(path, id, comptime);
-                    }
-
-                    let mut value = value.clone();
-                    if !comptime.r#type.is_string() {
-                        let total_width = comptime
-                            .r#type
-                            .total_width()
-                            .ok_or_else(|| ir_error!(token))?;
-                        // Normalize to the declared type: extend by the RHS's own
-                        // signedness, then adopt the type's signed flag — downstream folds
-                        // (==, <:, /, ternary, casts) trust it, and a stray RHS flag
-                        // diverges from the emitted SV.
-                        if value.width() < total_width && value.width() != 0 {
-                            value = value.expand(total_width, value.signed()).into_owned();
-                        }
-                        value.trunc(total_width);
-                        value.set_signed(r#type.signed);
                     }
 
                     let array_limit = context.config.evaluate_array_limit;
@@ -1080,7 +1107,9 @@ pub fn eval_const_assign(
                     context.insert_var_path(path.clone(), comptime);
                 }
                 ValueVariant::Unknown => {
-                    context.insert_var_path(path.clone(), comptime);
+                    // The variable behind the path is what the const-assignment
+                    // check and the simulator look for.
+                    insert_const_variable(context, dst, kind, r#type, comptime, vec![]);
                 }
             }
         }
@@ -1179,8 +1208,16 @@ pub fn eval_struct_member(
                         x
                     } else {
                         let expr = x.value.as_ref().ok_or_else(|| ir_error!(token))?;
-                        let (_, mut expr) = eval_expr(context, Some(r#type.clone()), expr, false)?;
-                        expr.eval_comptime(context, None).clone()
+                        let (comptime, mut expr) =
+                            eval_expr(context, Some(r#type.clone()), expr, false)?;
+                        // An array literal's per-element values are carried by
+                        // the comptime `eval_expr` builds; `eval_comptime`
+                        // alone leaves an array literal unevaluated.
+                        if matches!(comptime.value, ValueVariant::NumericArray(_)) {
+                            comptime
+                        } else {
+                            expr.eval_comptime(context, None).clone()
+                        }
                     };
 
                     member_path.add_prelude(&path.0);
@@ -1192,17 +1229,27 @@ pub fn eval_struct_member(
                             // part_select encodes the bit position of the field: the sum of
                             // all pos values gives the LSB (end), and the last entry's type
                             // width gives the field width (beg = end + width - 1).
-                            if let ValueVariant::Numeric(ref full_value) = comptime.value.clone() {
-                                let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
-                                if let Some(width) =
-                                    x.part_select.last().and_then(|ps| ps.r#type.total_width())
-                                {
-                                    let beg = end + width - 1;
-                                    comptime.value =
-                                        ValueVariant::Numeric(full_value.select(beg, end));
-                                }
+                            let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
+                            if let Some(width) =
+                                x.part_select.last().and_then(|ps| ps.r#type.total_width())
+                            {
+                                let beg = end + width - 1;
+                                comptime.value = match &comptime.value {
+                                    ValueVariant::Numeric(v) => {
+                                        ValueVariant::Numeric(v.select(beg, end))
+                                    }
+                                    // Every element holds a whole struct, so the
+                                    // field is taken element by element and the
+                                    // array dimension stays on the type.
+                                    ValueVariant::NumericArray(v) => ValueVariant::NumericArray(
+                                        v.iter().map(|v| v.select(beg, end)).collect(),
+                                    ),
+                                    v => v.clone(),
+                                };
                             }
-                            comptime.r#type = get_member_type(context, member_symbol)?;
+                            let mut member_type = get_member_type(context, member_symbol)?;
+                            member_type.array = r#type.array.clone();
+                            comptime.r#type = member_type;
                             return Ok(ir::Factor::Value(comptime));
                         }
                     }
@@ -1363,13 +1410,14 @@ pub fn eval_type(
                             let member = symbol_table::get(*x).unwrap();
                             let name = member.token.text;
 
-                            if let SymbolKind::StructMember(x) = member.kind {
+                            if let SymbolKind::StructMember(x) = &member.kind {
                                 if symbol.found.token.text == x.r#type.token.beg.text {
                                     // Prevent cyclic reference
                                     continue;
                                 }
 
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
+                                check_unpacked_member(c, &member, &x.r#type.token, &r#type);
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
@@ -1393,13 +1441,14 @@ pub fn eval_type(
                         for x in &x.members {
                             let member = symbol_table::get(*x).unwrap();
                             let name = member.token.text;
-                            if let SymbolKind::UnionMember(x) = member.kind {
+                            if let SymbolKind::UnionMember(x) = &member.kind {
                                 if symbol.found.token.text == x.r#type.token.beg.text {
                                     // Prevent cyclic reference
                                     continue;
                                 }
 
                                 let r#type = x.r#type.to_ir_type(c, TypePosition::Variable)?;
+                                check_unpacked_member(c, &member, &x.r#type.token, &r#type);
                                 members.push(ir::TypeKindMember { name, r#type });
                             }
                         }
@@ -1697,6 +1746,25 @@ pub fn eval_type(
         r#type.set_concrete_width(width);
     }
     Ok(r#type)
+}
+
+/// A struct/union member is emitted inside a `struct packed`, where an unpacked
+/// array is illegal SystemVerilog. Spelling one directly (`m: t [8]`) is a
+/// parse error, but a `type` alias carries one past the grammar.
+fn check_unpacked_member(
+    context: &mut Context,
+    member: &Symbol,
+    token: &TokenRange,
+    r#type: &ir::Type,
+) {
+    if context.in_generic || r#type.array.is_empty() {
+        return;
+    }
+
+    context.insert_error(AnalyzerError::unpacked_struct_union_member(
+        &member.token.to_string(),
+        token,
+    ));
 }
 
 fn check_struct_union_members(
@@ -2397,6 +2465,76 @@ fn classify_hier_reference(context: &Context, path: &VarPath) -> HierReference {
     }
 }
 
+/// The write-side counterpart of the `HierReference::Resolved` arm in
+/// [`eval_factor_path_inner`]: turns `dut.u_core.mem[0]` on the left of an
+/// assignment into a [`ir::HierAssignDestination`], which the simulator
+/// resolves to a buffer offset after elaboration.
+///
+/// Returns `None` when the path is not a hierarchical reference at all, so the
+/// caller can fall through to its ordinary "destination not found" handling.
+/// Like the read side this is testbench-only; a hierarchical write from RTL is
+/// reported as an invisible identifier.
+pub fn to_hier_assign_destination(
+    context: &mut Context,
+    dst: VarPathSelect,
+) -> IrResult<Option<ir::HierAssignDestination>> {
+    let (path, select, token) = dst.into();
+    let HierReference::Resolved {
+        inst_path,
+        var_path,
+        r#type,
+        part_select,
+    } = classify_hier_reference(context, &path)
+    else {
+        return Ok(None);
+    };
+
+    if !context.in_tb_block {
+        context.insert_error(AnalyzerError::invisible_identifier(
+            &path.0[1].to_string(),
+            &token,
+        ));
+        return Err(ir_error!(token));
+    }
+
+    let mut comptime = Comptime::from_type(*r#type, ClockDomain::None, token);
+
+    let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+    let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+    let width_select = if let Some(part_select) = &part_select {
+        part_select.to_base_select(context, &width_select)
+    } else {
+        eval_width_select(context, &var_path, &comptime.r#type, width_select)
+    }
+    .ok_or_else(|| ir_error!(token))?;
+
+    // An array RANGE destination would need one write per covered element;
+    // `to_assign_destinations` does that for local paths and has no
+    // hierarchical twin, so reject it rather than write the wrong element.
+    if array_select.is_range() {
+        return Err(ir_error!(token));
+    }
+
+    let index = array_select.to_index();
+    comptime.r#type.array.drain(0..index.dimension());
+    if !width_select.is_empty() {
+        comptime.r#type.flatten_struct_union_enum();
+        if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
+            comptime.r#type.set_concrete_width(width);
+        }
+    }
+    comptime.token = token;
+
+    Ok(Some(ir::HierAssignDestination {
+        inst_path,
+        var_path,
+        index,
+        select: width_select,
+        comptime,
+        token,
+    }))
+}
+
 pub fn eval_factor_path(
     context: &mut Context,
     symbol_path: GenericSymbolPath,
@@ -2408,7 +2546,7 @@ pub fn eval_factor_path(
     // resolved to a base case here; otherwise it recurses until the native
     // stack overflows.
     context.function_eval_depth += 1;
-    let ret = if context.function_eval_depth > context.config.function_instance_depth_limit {
+    let ret = if context.function_eval_depth > context.config.symbol_eval_depth_limit {
         if context.function_eval_overflow.is_none() {
             context.function_eval_overflow = Some((token, context.function_eval_depth));
         }
@@ -2451,11 +2589,9 @@ fn eval_factor_path_inner(
     };
 
     if let Some((var_id, mut comptime)) = found {
-        if let Some(part_select) = &comptime.part_select {
-            comptime.r#type = part_select.base.clone();
-        }
+        let array_dims = comptime.rebase_part_select();
 
-        let (array_select, width_select) = select.split(comptime.r#type.array.dims());
+        let (array_select, width_select) = select.split(array_dims);
 
         // Array select type check
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
@@ -2474,6 +2610,7 @@ fn eval_factor_path_inner(
             Err(ir_error!(token))
         } else {
             let index = array_select.to_index();
+            let array = comptime.r#type.array.clone();
             comptime.r#type.array.drain(0..index.dimension());
 
             comptime.is_const &= index.is_const() && width_select.is_const();
@@ -2481,13 +2618,33 @@ fn eval_factor_path_inner(
             // The whole-array value doesn't describe a selected part of it; drop
             // it so consumers resolve the selection from the variable table.
             if (index.dimension() > 0 || !width_select.is_empty())
-                && matches!(comptime.value, ValueVariant::NumericArray(_))
+                && let ValueVariant::NumericArray(values) = &comptime.value
             {
-                comptime.value = ValueVariant::Unknown;
+                // Except for a `string`: it has no width to lay out, so the
+                // variable table holds nothing to resolve against and the
+                // element has to be folded here.
+                let element = if comptime.r#type.is_string() && width_select.is_empty() {
+                    index
+                        .eval_value(context)
+                        .and_then(|x| array.calc_index(&x))
+                        .and_then(|x| values.get(x))
+                        .cloned()
+                } else {
+                    None
+                };
+                comptime.value = match element {
+                    Some(x) => ValueVariant::Numeric(x),
+                    None => ValueVariant::Unknown,
+                };
             }
 
             comptime.token = token;
-            if comptime.r#type.is_type() {
+            // A `string` read is only ever its value: there is no variable
+            // behind it for a later stage to look up.
+            let is_folded_string = comptime.r#type.is_string()
+                && width_select.is_empty()
+                && matches!(comptime.value, ValueVariant::Numeric(_));
+            if comptime.r#type.is_type() || is_folded_string {
                 Ok(ir::Factor::Value(comptime))
             } else {
                 // Params arrive with evaluated=true (set by eval_expr), which
@@ -2752,8 +2909,15 @@ fn fold_symbol_select(
     }
 
     let flat = array.calc_index(&indices)?;
-    let (beg, end) = select.eval_value(context, &element, false)?;
-    comptime.value = ValueVariant::Numeric(values.get(flat)?.select(beg, end));
+    let value = values.get(flat)?;
+    comptime.value = if comptime.r#type.is_string() && select.is_empty() {
+        // An empty select reads the declared width, which for a `string` is the
+        // nominal 1 bit rather than the text the element holds.
+        ValueVariant::Numeric(value.clone())
+    } else {
+        let (beg, end) = select.eval_value(context, &element, false)?;
+        ValueVariant::Numeric(value.select(beg, end))
+    };
     Some(comptime)
 }
 
@@ -2866,13 +3030,11 @@ pub fn eval_factor_symbol(
             // defined namespace. Not while sizing a declared width, where a
             // component instantiating itself would name its own scope.
             if !context.sizing_component_width()
+                && !context.is_global_func_caller(&symbol.found.namespace)
                 && let Some(namespace) = context.current_namespace()
                 && symbol.found.namespace.included(&namespace)
             {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
             }
 
             // Reached while a width names a parameter of a component whose body
@@ -3099,10 +3261,7 @@ pub fn eval_factor_symbol(
                 }
             });
             if module_variable {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
             }
             return eval_struct_member(context, &symbol.found, &path, VarPath::default(), token);
         }
@@ -3179,10 +3338,7 @@ pub fn eval_factor_symbol(
         SymbolKind::Variable(x) => {
             // Module local variable should be found through context.find_path
             if x.affiliation == Affiliation::Module {
-                context.insert_error(AnalyzerError::referring_before_definition(
-                    &symbol.found.token.to_string(),
-                    &token,
-                ));
+                report_unreachable_definition(context, symbol.found.token, &token);
             }
 
             let r#type = x.r#type.to_ir_type(context, TypePosition::Variable)?;
@@ -3268,7 +3424,7 @@ fn range_item_pattern(context: &mut Context, range_item: &RangeItem) -> IrResult
     let mut lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
 
     let comptime = lo.eval_comptime(context, None);
-    if !comptime.is_const {
+    if !comptime.is_const && range_item.range.range_opt.is_none() {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
             &range_item.into(),
@@ -3279,13 +3435,8 @@ fn range_item_pattern(context: &mut Context, range_item: &RangeItem) -> IrResult
         return Ok(ir::CasePattern::Eq(Box::new(lo)));
     };
     let mut hi: ir::Expression = Conv::conv(context, opt.expression.as_ref())?;
-    let comptime = hi.eval_comptime(context, None);
-    if !comptime.is_const {
-        context.insert_error(AnalyzerError::unevaluable_value(
-            UnevaluableValueKind::CaseCondition,
-            &range_item.into(),
-        ));
-    }
+    hi.eval_comptime(context, None);
+
     let inclusive = matches!(opt.range_operator.as_ref(), RangeOperator::DotDotEqu(_));
     Ok(ir::CasePattern::Range {
         lo: Box::new(lo),
@@ -3331,7 +3482,7 @@ fn range_item(
 
     let comptime = exp.eval_comptime(context, None);
     let lo_value = comptime.get_value().ok().and_then(|v| v.to_usize());
-    if !comptime.is_const {
+    if !comptime.is_const && range_item.range.range_opt.is_none() {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
             &range_item.into(),
@@ -3343,12 +3494,6 @@ fn range_item(
 
         let token: TokenRange = range_item.into();
         let comptime = exp0.eval_comptime(context, None);
-        if !comptime.is_const {
-            context.insert_error(AnalyzerError::unevaluable_value(
-                UnevaluableValueKind::CaseCondition,
-                &token,
-            ));
-        }
 
         // An empty exclusive range (constant `lo >= hi`) miscompiles: the emitter's
         // `(hi)-1` underflows an unsigned `hi == 0` to a near-universal range.
@@ -3705,6 +3850,30 @@ fn size_in_component_scope(
     ret
 }
 
+/// Follow `alias module` / `alias interface` to the symbol that declares the
+/// parameters. The chain is bounded the way the instantiation checker bounds
+/// it: a revisited symbol ends the walk rather than looping.
+fn resolve_alias_target(symbol: &Rc<Symbol>) -> Rc<Symbol> {
+    let mut current = Rc::clone(symbol);
+    let mut visited = vec![current.id];
+    loop {
+        let target = match &current.kind {
+            SymbolKind::AliasModule(x) => &x.target,
+            SymbolKind::AliasInterface(x) => &x.target,
+            _ => return current,
+        };
+        let path: SymbolPathNamespace = (&target.generic_path(), &current.namespace).into();
+        let Ok(resolved) = symbol_table::resolve(&path) else {
+            return current;
+        };
+        if visited.contains(&resolved.found.id) {
+            return current;
+        }
+        visited.push(resolved.found.id);
+        current = Rc::clone(&resolved.found);
+    }
+}
+
 pub fn get_overridden_params(
     context: &mut Context,
     arg: &ComponentInstantiation,
@@ -3712,7 +3881,13 @@ pub fn get_overridden_params(
     let token: TokenRange = arg.scoped_identifier.as_ref().into();
     let symbol =
         symbol_table::resolve(arg.scoped_identifier.as_ref()).map_err(|_| ir_error!(token))?;
-    let component_namespace = symbol.found.inner_namespace();
+    // An `alias module` has its own namespace, and the parameters live in the
+    // TARGET's. Resolving them in the alias's finds nothing, and the loop
+    // below skips what it cannot resolve -- so every override through an
+    // alias was dropped in silence. `get_parameters` is empty for an alias
+    // too, which would leave the declaration order below unknown.
+    let component = resolve_alias_target(&symbol.found);
+    let component_namespace = component.inner_namespace();
 
     let params: Vec<_> = if let Some(ref x) = arg.component_instantiation_opt1 {
         if let Some(x) = &x.inst_parameter.inst_parameter_opt {
@@ -3728,8 +3903,7 @@ pub fn get_overridden_params(
     // the values are bound in declaration order: by the time one is sized,
     // everything its width may legally name is already bound. An instantiation
     // may write them in any order.
-    let order: HashMap<StrId, usize> = symbol
-        .found
+    let order: HashMap<StrId, usize> = component
         .kind
         .get_parameters()
         .iter()
@@ -3804,6 +3978,27 @@ pub fn get_overridden_params(
                 ));
             }
 
+            // An override is converted to the parameter's DECLARED type
+            // (IEEE 1800-2023 23.10), so a wider value keeps only the low
+            // bits. The variable the parameter becomes is fitted on its own,
+            // which is why the wrapper reads correctly; what is stored here is
+            // what the next level down is handed, and an untruncated value
+            // there reaches a wider child parameter whole.
+            //
+            // `is_bit_sized` is the gate, not the presence of a width:
+            // `TypeKind::width` answers `Some(1)` for `string` as well, and
+            // fitting a `string` parameter to one bit loses the text.
+            if !is_type_param
+                && let Some(r#type) = &target_type
+                && r#type.kind.is_bit_sized()
+                && let Some(width) = r#type
+                    .total_width()
+                    .zip(r#type.total_array())
+                    .map(|(w, n)| w * n)
+            {
+                expr.0.value.trunc_value(width);
+            }
+
             context.insert_override(VarPath::new(name), expr);
         }
 
@@ -3844,7 +4039,16 @@ pub fn get_port_connects(
         let (dst_path, dst_select) = if let Some(x) = &port.inst_port_item_opt {
             let dst: Vec<VarPathSelect> = Conv::conv(context, x.expression.as_ref())?;
             let dst = dst.first().ok_or_else(|| ir_error!(token))?;
-            (dst.0.clone(), dst.1.clone())
+            let mut path = dst.0.clone();
+            // An explicit modport selects a view of the interface; its members
+            // still live under the interface instance, not under that view.
+            if let Some(identifier) = x.expression.unwrap_identifier()
+                && let Ok(symbol) = symbol_table::resolve(identifier)
+                && matches!(symbol.found.kind, SymbolKind::Modport(_))
+            {
+                path.0.pop();
+            }
+            (path, dst.1.clone())
         } else {
             (port_path.clone(), VarSelect::default())
         };
@@ -4065,6 +4269,7 @@ pub fn expand_connect(
                 {
                     let width = dst.total_width(context);
                     let statement = ir::Statement::Assign(ir::AssignStatement {
+                        hier_dst: None,
                         dst: vec![dst],
                         width,
                         expr: src,
@@ -4113,6 +4318,7 @@ pub fn expand_connect_const(
                 if let Some(dst) = dst.to_assign_destination(context, false) {
                     let width = dst.total_width(context);
                     let statement = ir::Statement::Assign(ir::AssignStatement {
+                        hier_dst: None,
                         dst: vec![dst],
                         width,
                         expr: src,
@@ -4181,39 +4387,22 @@ fn get_function(context: &mut Context, path: &FuncPath, token: TokenRange) -> Ir
             let ret = conv_function(context, definition, path);
             ret?;
         } else {
-            let generic_arg_paths = if is_global {
-                path.sig
-                    .generic_parameters
-                    .iter()
-                    .filter_map(|(_, x)| x.to_var_path())
-                    .collect()
-            } else {
-                vec![]
-            };
-
             let mut local_context = Context::default();
             local_context.var_id = context.var_id;
             local_context.inherit(context);
             local_context.extract_var_paths(context, &path.path, &array);
 
-            for path in &generic_arg_paths {
-                // Copy var path referenced as resolved generic arg from the given context
-                if let Some((var_id, comptime)) = context.find_path(path)
-                    && let Some(var) = context.variables.get(&var_id)
-                {
-                    local_context
-                        .var_paths
-                        .insert(path.clone(), (var_id, comptime));
-                    local_context.variables.insert(var_id, var.clone());
-                }
+            let caller = is_global
+                .then(|| local_context.current_namespace())
+                .flatten();
+            if let Some(namespace) = &caller {
+                local_context.push_global_func_caller(namespace.clone());
             }
 
             let ret = conv_function(&mut local_context, definition, path);
 
-            for path in &generic_arg_paths {
-                if let Some((var_id, _)) = local_context.var_paths.remove(path) {
-                    local_context.variables.remove(&var_id);
-                }
+            if caller.is_some() {
+                local_context.pop_global_func_caller();
             }
 
             context.extract_function(&mut local_context, &path.path, &array);
@@ -4413,12 +4602,22 @@ pub fn check_compatibility(
         check_implicit_clock_conversion(context, dst, src, token);
         return;
     }
-    if !dst.compatible(src, context.in_generic) {
-        let src_type = src.r#type.to_string();
-        let dst_type = dst.to_string();
+    // The unpacked dimensions are asked on their own axis rather than inside
+    // `compatible`, which answers from the element kind for a 2-state, clock or
+    // reset destination and never reaches its array branch for one. The answer
+    // only refines the help: the severity is the same conservative warning.
+    let kind = if dst.array_shape_mismatch(src) {
+        Some(MismatchAssignmentKind::ArrayShape)
+    } else if !dst.compatible(src, context.in_generic) {
+        Some(MismatchAssignmentKind::Normal)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
         context.insert_error(AnalyzerError::mismatch_assignment(
-            &src_type,
-            &dst_type,
+            &src.r#type.to_string(),
+            &dst.to_string(),
+            kind,
             token,
             &[],
         ));

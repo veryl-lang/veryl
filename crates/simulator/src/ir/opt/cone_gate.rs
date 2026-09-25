@@ -1010,6 +1010,9 @@ pub(crate) fn has_side_effects(s: &ProtoStatement) -> bool {
         ProtoStatement::SystemFunctionCall(_)
         | ProtoStatement::CompiledBlock(_)
         | ProtoStatement::TbMethodCall { .. } => true,
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -1027,6 +1030,31 @@ fn first_span(owner: &[(usize, usize, u32)], s: usize) -> usize {
         j -= 1;
     }
     j
+}
+
+/// `first_span` over the sorted FF element spans of the hazard graph, given
+/// the prefix maxima of their ends.
+///
+/// The walk `first_span` does cannot be reused: the owner entries it scans
+/// are equal or disjoint, whereas these come from each statement's MERGED
+/// out ranges and can nest one inside another.  A walk stops at the first
+/// span that does not reach `s` and leaves everything under it unvisited.
+/// The prefix maxima are non-decreasing, so the first one past `s` is the
+/// earliest span that can still reach it.
+fn first_ff_span(max_end: &[usize], s: usize) -> usize {
+    max_end.partition_point(|&e| e <= s)
+}
+
+/// Largest end among each prefix of `spans`, which must be sorted.
+fn prefix_max_end(spans: &[(usize, usize)]) -> Vec<usize> {
+    let mut run = 0;
+    spans
+        .iter()
+        .map(|&(_, e)| {
+            run = run.max(e);
+            run
+        })
+        .collect()
 }
 
 fn merge_ranges(v: &mut Vec<(usize, usize)>) {
@@ -1089,6 +1117,12 @@ struct StmtInfo {
     in_comb: Vec<(usize, usize)>,
     in_ff: Vec<(usize, usize)>,
     out_comb: Vec<(usize, usize)>,
+    /// FF element spans this statement writes.  A combinational write into
+    /// an FF word joins no cone (it sets `unbounded`), but the hazard graph
+    /// still has to order it against the statements that READ those bytes:
+    /// those resolve through `ff_owner` and are tracked, so the
+    /// untracked-footprint chain does not cover the pair.
+    out_ff: Vec<(usize, usize)>,
     /// A read or write fell outside every known variable.
     unbounded: bool,
 }
@@ -1131,6 +1165,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
             in_comb: Vec::new(),
             in_ff: Vec::new(),
             out_comb: Vec::new(),
+            out_ff: Vec::new(),
             unbounded: false,
         };
         let mut node: Option<u32> = None;
@@ -1149,7 +1184,12 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
                         }
                     }
                 },
-                VarOffset::Ff(_) => {
+                VarOffset::Ff(x) => {
+                    if *x >= 0
+                        && let Some(span) = inputs.ff_owner.span(*x as usize)
+                    {
+                        info.out_ff.push(span);
+                    }
                     info.unbounded = true; // FF-writing: root only
                     if diag() {
                         root_reason(4);
@@ -1195,6 +1235,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
         merge_ranges(&mut info.in_comb);
         merge_ranges(&mut info.in_ff);
         merge_ranges(&mut info.out_comb);
+        merge_ranges(&mut info.out_ff);
         info.node = if info.unbounded || outs.is_empty() {
             root
         } else {
@@ -1397,10 +1438,63 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
             }
         }
     }
+    // RAW + WAR per (reader, FF element span).  A combinational write into
+    // an FF word is unbounded, but its readers resolve through `ff_owner`
+    // and are tracked, so the chain below -- which assumes tracked
+    // statements never touch untracked bytes -- leaves that pair free to
+    // swap.  One such swap flips a settle back-edge and costs the whole
+    // comb list an extra pass.  WAW needs no edges here: every FF writer is
+    // unbounded, so the chain below already keeps them in order.
+    let mut ff_spans: Vec<(usize, usize)> = infos.iter().flat_map(|i| i.out_ff.clone()).collect();
+    ff_spans.sort_unstable();
+    ff_spans.dedup();
+    if !ff_spans.is_empty() {
+        let ff_max_end = prefix_max_end(&ff_spans);
+        let mut ff_writers: Vec<Vec<u32>> = vec![Vec::new(); ff_spans.len()];
+        for (i, info) in infos.iter().enumerate() {
+            for &(s, e) in &info.out_ff {
+                let mut j = first_ff_span(&ff_max_end, s);
+                while j < ff_spans.len() && ff_spans[j].0 < e {
+                    if ff_spans[j].1 > s {
+                        ff_writers[j].push(i as u32);
+                    }
+                    j += 1;
+                }
+            }
+        }
+        for (i, info) in infos.iter().enumerate() {
+            for &(s, e) in &info.in_ff {
+                let mut j = first_ff_span(&ff_max_end, s);
+                while j < ff_spans.len() && ff_spans[j].0 < e {
+                    if ff_spans[j].1 > s {
+                        let w = &ff_writers[j];
+                        let mut k = w.partition_point(|&x| (x as usize) < i);
+                        if let Some(p) = k.checked_sub(1) {
+                            add_edge(w[p], i as u32, &mut csucc, &mut cdeg);
+                        }
+                        // A self-reading writer orders via the untracked chain
+                        // below, so skip past itself. It can appear more than
+                        // once: unlike the comb side, whose owner spans are
+                        // disjoint by construction, these come from each
+                        // statement's MERGED out ranges, and two of one
+                        // statement's ranges can reach the same span.
+                        while w.get(k) == Some(&(i as u32)) {
+                            k += 1;
+                        }
+                        if let Some(&q) = w.get(k) {
+                            add_edge(i as u32, q, &mut csucc, &mut cdeg);
+                        }
+                    }
+                    j += 1;
+                }
+            }
+        }
+    }
     // Untracked-footprint chain: statements whose reads or writes fall
     // outside the owner tables can only conflict with each other (tracked
-    // statements never touch those bytes), so keeping their relative order
-    // is a sufficient conservative constraint.
+    // statements never touch those bytes, except for the FF spans handled
+    // just above), so keeping their relative order is a sufficient
+    // conservative constraint.
     let mut prev_special: Option<u32> = None;
     for (i, info) in infos.iter().enumerate() {
         if info.unbounded || has_side_effects(&stmts[i]) {
@@ -1889,6 +1983,7 @@ mod tests {
             in_comb: ins.to_vec(),
             in_ff: vec![],
             out_comb: outs.to_vec(),
+            out_ff: vec![],
             unbounded: false,
         };
         let infos = [
@@ -2241,5 +2336,24 @@ mod tests {
         assert_eq!(first_span(&owner, 16), 4);
         // A byte past every entry yields an empty scan rather than a panic.
         assert_eq!(first_span(&owner, 24), 5);
+    }
+
+    #[test]
+    fn first_ff_span_starts_before_a_span_that_nests_a_later_one() {
+        // A statement's merged out ranges fuse adjacent elements, so one
+        // entry can contain another's.  Starting at the first entry whose
+        // START is past the byte stops at the nested span and never reaches
+        // the one that covers it, leaving a reader bound to no writer.
+        let spans = vec![(0usize, 20usize), (1, 2), (5, 8)];
+        let max_end = prefix_max_end(&spans);
+        assert_eq!(first_ff_span(&max_end, 6), 0);
+        assert_eq!(first_ff_span(&max_end, 18), 0);
+
+        // Equal spans, the shape aliased storage gives the comb side.
+        let spans = vec![(0usize, 8usize), (8, 16), (16, 24)];
+        let max_end = prefix_max_end(&spans);
+        assert_eq!(first_ff_span(&max_end, 8), 1);
+        // A byte past every entry yields an empty scan rather than a panic.
+        assert_eq!(first_ff_span(&max_end, 24), 3);
     }
 }

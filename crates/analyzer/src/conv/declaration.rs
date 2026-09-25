@@ -1,5 +1,6 @@
 use crate::analyzer_error::{
-    AnalyzerError, ComponentInterfaceMismatchKind, MismatchTypeKind, UnevaluableValueKind,
+    AnalyzerError, ComponentInterfaceMismatchKind, MismatchAssignmentKind, MismatchTypeKind,
+    UnevaluableValueKind,
 };
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
@@ -395,6 +396,7 @@ impl Conv<&WithGenericParameterItem> for () {
                             context.insert_error(AnalyzerError::mismatch_assignment(
                                 "number",
                                 &x.bound.to_string(),
+                                MismatchAssignmentKind::Normal,
                                 &token,
                                 &[],
                             ));
@@ -405,6 +407,7 @@ impl Conv<&WithGenericParameterItem> for () {
                             context.insert_error(AnalyzerError::mismatch_assignment(
                                 "type",
                                 &x.bound.to_string(),
+                                MismatchAssignmentKind::Normal,
                                 &token,
                                 &[],
                             ));
@@ -1016,6 +1019,7 @@ impl Conv<&AssignDeclaration> for ir::Declaration {
                     check_assign_clock_domain(context, d, &comptime, &token);
                 }
                 let statement = ir::Statement::Assign(ir::AssignStatement {
+                    hier_dst: None,
                     dst,
                     width,
                     expr,
@@ -1230,6 +1234,7 @@ fn conv_function(
                         let direction = match variable.kind {
                             VarKind::Input => Direction::Input,
                             VarKind::Output => Direction::Output,
+                            VarKind::Inout => Direction::Inout,
                             _ => unreachable!(),
                         };
 
@@ -1324,13 +1329,14 @@ fn conv_function(
             c.in_tb_block = in_tb_block;
             c.in_initial = in_initial;
             c.disalbe_const_opt = disable_const_opt;
-            let statements = match statements {
+            let mut statements = match statements {
                 Ok(statements) => statements,
                 Err(error) => {
                     c.finish_function_effect();
                     return Err(error);
                 }
             };
+            super::function_return::lower_returns(c, &mut statements.0, ret_id, token);
             c.record_function_statement_writes(&statements.0);
             c.finish_function_effect();
 

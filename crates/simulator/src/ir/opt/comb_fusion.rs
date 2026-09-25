@@ -860,7 +860,12 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
         let ProtoStatement::Assign(last_a) = &stmts[last] else {
             unreachable!()
         };
-        let (dst, ff_cur, token) = (last_a.dst, last_a.dst_ff_current_offset, last_a.token);
+        let (dst, ff_cur, comb_direct, token) = (
+            last_a.dst,
+            last_a.dst_ff_current_offset,
+            last_a.comb_direct,
+            last_a.token,
+        );
         let mut stores: Vec<ProtoStatement> = Vec::with_capacity(slices.len());
         for &(shi, slo) in &slices {
             let sw = shi - slo + 1;
@@ -951,6 +956,7 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
                         },
                     },
                     dst_ff_current_offset: ff_cur,
+                    comb_direct,
                     token,
                 },
             ));
@@ -1561,6 +1567,7 @@ mod tests {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: Default::default(),
         })
     }
@@ -1820,6 +1827,7 @@ mod tests {
             rhs_select: None,
             expr,
             dst_ff_current_offset: 0,
+            comb_direct: false,
             token: Default::default(),
         })
     }
@@ -2565,6 +2573,7 @@ mod tests {
             rhs_select: None,
             expr: var(0x308, 8),
             dst_ff_current_base_offset: 0,
+            comb_direct: false,
         });
         let stmts = vec![
             assign(0x8, 8, var(0x100, 8)),

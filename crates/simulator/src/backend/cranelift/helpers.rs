@@ -146,12 +146,15 @@ pub(crate) fn gen_mask_for_width(width: usize) -> u128 {
     }
 }
 
-/// Clamped index → shift amount for dynamic bit select.
-pub(crate) fn build_dynamic_select_shift(
+/// Clamped index → shift amount for a dynamic bit select, plus the test
+/// that the index is inside the array, which the clamp computes anyway.
+/// `None` for the second half means the index's own width cannot reach
+/// past the last element, so the caller emits no guard at all.
+pub(crate) fn build_dynamic_select_shift_checked(
     dyn_sel: &ProtoDynamicBitSelect,
     context: &mut CraneliftContext,
     builder: &mut FunctionBuilder,
-) -> Option<CraneliftValue> {
+) -> Option<(CraneliftValue, Option<CraneliftValue>)> {
     // A zero-element select has no clamp target; leave the statement to the
     // interpreter rather than underflow `num_elements - 1` below.
     if dyn_sel.num_elements == 0 {
@@ -165,7 +168,9 @@ pub(crate) fn build_dynamic_select_shift(
         .icmp(IntCC::UnsignedLessThan, idx_payload, num_elem);
     let clamped = builder.ins().select(in_bounds, idx_payload, max_idx);
     let shift = builder.ins().imul_imm_s(clamped, dyn_sel.elem_width as i64);
-    Some(shift)
+    let in_range = crate::ir::index_may_exceed(dyn_sel.index_expr.width(), dyn_sel.num_elements)
+        .then_some(in_bounds);
+    Some((shift, in_range))
 }
 
 // ── Wide (>128-bit) helper utilities ────────────────────────────────
@@ -181,6 +186,27 @@ pub(crate) fn alloc_wide_zero(builder: &mut FunctionBuilder, nb: usize) -> Crane
         builder
             .ins()
             .store(MemFlagsData::trusted(), zero, ptr, (i * 8) as i32);
+    }
+    ptr
+}
+
+/// Storage an out-of-range wide read is pointed at: the element type's
+/// default value, which is zero with the 4-state mask half set to x.  The
+/// slot pool hands back used memory, so every word is written.
+pub(crate) fn alloc_wide_out_of_range(
+    builder: &mut FunctionBuilder,
+    nb: usize,
+    use_4state: bool,
+) -> CraneliftValue {
+    let total = if use_4state { nb * 2 } else { nb };
+    let ptr = alloc_wide_slot(builder, total);
+    let zero = builder.ins().iconst(I64, 0);
+    let ones = builder.ins().iconst(I64, -1);
+    for i in 0..(total / 8) {
+        let v = if i * 8 >= nb { ones } else { zero };
+        builder
+            .ins()
+            .store(MemFlagsData::trusted(), v, ptr, (i * 8) as i32);
     }
     ptr
 }

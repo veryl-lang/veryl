@@ -91,6 +91,17 @@ pub struct Context {
     pub chunk_cache: HashMap<*const air::Component, ChunkCacheEntry>,
     pub expanding_functions: HashSet<VarId>,
     pub in_initial: bool,
+    /// True while converting an `always_comb` / `assign` body.
+    ///
+    /// A combinational write reaches FF storage where an `always_ff` writes
+    /// OTHER bits of the same packed word, or where a runtime-indexed array
+    /// forced every element FF.  It has no NBA delay, so it stores directly
+    /// into the current slot and pushes no write-log entry; see
+    /// `ProtoAssignStatement::comb_direct`.
+    pub in_comb: bool,
+    /// Next-slot mirrors of `comb_direct` writes, drained by the
+    /// `Vec<ProtoStatement>` conversion that wraps the statement.
+    pub comb_ff_mirror: Vec<ProtoStatement>,
     /// True while converting a de-aliased DUT's subtree, so only the topmost
     /// boundary is de-aliased — the DUT's internals stay aliased (they relocate
     /// uniformly with it, no per-cycle boundary copies on hot paths).

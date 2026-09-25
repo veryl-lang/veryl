@@ -325,6 +325,9 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             | ProtoTbMethodKind::RandomGetSeed { .. } => {}
         },
         ProtoStatement::Break => {}
+        &ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 

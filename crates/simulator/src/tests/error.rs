@@ -188,6 +188,68 @@ fn combinational_loop_closed_inside_one_arm_of_a_case() {
 }
 
 #[test]
+fn no_combinational_loop_through_a_parameter_gated_arm() {
+    // A synchronous FIFO gates its pass-through arm with a parameter, and
+    // such cells ring each other.
+    // At `Pass = 0` the cell's outputs come from flops alone, so keeping the
+    // gated-off operand as a read reports a loop the design does not have.
+    //
+    // Both values are checked from one shape: dropping the phantom edge must
+    // not cost the analysis the real edge at `Pass = 1`.
+    let code = |pass: u32| {
+        format!(
+            r#"
+    module Cell #(
+        param Pass: bit = 1,
+    ) (
+        clk_i   : input  clock   ,
+        wvalid_i: input  logic   ,
+        wdata_i : input  logic<8>,
+        rvalid_o: output logic   ,
+        rdata_o : output logic<8>,
+    ) {{
+        var storage: logic<8>;
+        var full_q : logic   ;
+        always_ff (clk_i) {{
+            storage = wdata_i;
+            full_q  = 1'b1;
+        }}
+        assign rvalid_o = full_q || (Pass && wvalid_i);
+        assign rdata_o  = if (full_q || Pass == 1'b0) ? storage : wdata_i;
+    }}
+
+    module Top (
+        clk_i: input  clock   ,
+        seed : input  logic<8>,
+        o    : output logic<8>,
+    ) {{
+        var a: logic<8>;
+        var b: logic<8>;
+        var v: logic   ;
+        inst u: Cell #(
+            Pass: {pass},
+        ) (
+            clk_i             ,
+            wvalid_i: 1'b1    ,
+            wdata_i : a       ,
+            rvalid_o: v       ,
+            rdata_o : b       ,
+        );
+        assign a = b + seed;
+        assign o = if v ? b : 8'd0;
+    }}
+    "#
+        )
+    };
+
+    assert!(analyze_top(&code(0), &Config::default(), "Top").is_ok());
+    assert!(matches!(
+        analyze_top_allowing_comb_loop(&code(1), &Config::default(), "Top"),
+        Err(SimulatorError::CombinationalLoop { .. })
+    ));
+}
+
+#[test]
 fn undetermined_width() {
     // An unevaluatable width used to panic during IR construction.
     let code = r#"
@@ -229,6 +291,22 @@ fn undetermined_width() {
         Err(x) => panic!("unexpected error: {x:?}"),
         Ok(_) => panic!("expected UndeterminedWidth"),
     }
+
+    // The same width reached through a module const.
+    let code = r#"
+    module Top (
+        c: output logic,
+    ) {
+        const W: u32    = $sv::some_pkg::WIDTH;
+        const X: bit<W> = 1;
+        assign c = X[0];
+    }
+    "#;
+
+    assert!(matches!(
+        analyze_top(code, &Config::default(), "Top"),
+        Err(SimulatorError::UndeterminedWidth { .. })
+    ));
 }
 
 #[test]
@@ -369,4 +447,64 @@ fn dynamic_index_leaving_a_sub_array() {
             "{body}"
         );
     }
+}
+
+/// A port connection whose unpacked dimensions disagree with the port's is
+/// illegal SystemVerilog (IEEE 1800-2023 7.6) and the analyzer reports it at
+/// Warning severity, so `build` and `test` still reach the simulator. The two
+/// directions fail differently, so they are checked apart: one is caught by
+/// the assertion, the other only by the value it never computes.
+#[track_caller]
+fn port_dimension_mismatch(child_port: &str, child_drive: &str, parent_var: &str) {
+    let code = format!(
+        r#"
+    package pk {{
+        enum e3_t: logic<3> {{
+            HIGH = 3'b011,
+            LOW  = 3'b100,
+        }}
+    }}
+    module Child (
+        o: output {child_port},
+    ) {{
+        always_comb {{
+            {child_drive}
+        }}
+    }}
+    module Top (
+        y: output logic<3>,
+    ) {{
+        var r: {parent_var};
+        inst u: Child (
+            o: r,
+        );
+        assign y = r[0];
+    }}
+    "#
+    );
+
+    let result = analyze_top_allowing_mismatch_assignment(&code, &Config::default(), "Top");
+    assert!(
+        matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
+        "{child_port} <- {parent_var}"
+    );
+}
+
+#[test]
+fn parent_array_longer_than_the_port_it_is_wired_to() {
+    // Used to index off the end of the child's elements and abort.
+    port_dimension_mismatch("pk::e3_t<4>", "o = 12'b011_100_100_011;", "pk::e3_t [4]");
+}
+
+#[test]
+fn parent_array_shorter_than_the_port_it_is_wired_to() {
+    // Used to wire the leading elements and drop the rest in silence.
+    // The elements are driven one by one: a whole-array assignment is
+    // declined earlier, which would make this test pass without the fix.
+    port_dimension_mismatch(
+        "pk::e3_t [4]",
+        "o[0] = pk::e3_t::HIGH; o[1] = pk::e3_t::LOW; \
+         o[2] = pk::e3_t::HIGH; o[3] = pk::e3_t::LOW;",
+        "pk::e3_t [2]",
+    );
 }
