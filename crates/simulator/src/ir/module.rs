@@ -85,6 +85,9 @@ pub struct Module {
     /// `derived_clock::master_downstream`): what `partial_settle_master` runs
     /// right after the master toggles, the rest of the design being settled.
     pub derived_clock_master_stmts: Vec<Statement>,
+    /// See `FallPartial`.
+    pub fall_partial_groups: Vec<FallPartialSettle>,
+    pub fall_partial_group_of: Vec<u32>,
     pub derived_clock_master_passes: usize,
     pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
     /// Diagnostic: number of non-trivial strongly-connected components in
@@ -183,6 +186,8 @@ pub struct ProtoModule {
     pub derived_clock_master_eval: ProtoStatements,
     pub derived_clock_master_passes: usize,
     pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
+    /// `None` when no subset was small enough to pay.
+    pub fall_partial: Option<Arc<FallPartial>>,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
     /// See `Module::whole_comb`.  Built in `conv()` and shared
@@ -542,6 +547,20 @@ impl ProtoModule {
         };
         let derived_clock_eval_stmts = closure_stmts(&self.derived_clock_eval);
         let derived_clock_master_stmts = closure_stmts(&self.derived_clock_master_eval);
+        let (fall_partial_groups, fall_partial_group_of) = match self.fall_partial.as_ref() {
+            Some(fp) => (
+                fp.groups
+                    .iter()
+                    .map(|g| FallPartialSettle {
+                        stmts: closure_stmts(&g.stmts),
+                        passes: g.passes,
+                        whole: g.whole.clone(),
+                    })
+                    .collect(),
+                fp.group_of.clone(),
+            ),
+            None => (Vec::new(), Vec::new()),
+        };
 
         #[cfg(debug_assertions)]
         self.validate_offsets();
@@ -556,6 +575,8 @@ impl ProtoModule {
             derived_clock_eval_passes: self.derived_clock_eval_passes,
             whole_derived_clock: self.whole_derived_clock.clone(),
             derived_clock_master_stmts,
+            fall_partial_groups,
+            fall_partial_group_of,
             derived_clock_master_passes: self.derived_clock_master_passes,
             whole_derived_clock_master: self.whole_derived_clock_master.clone(),
 
@@ -710,6 +731,212 @@ const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
 const DERIVED_CLOCK_KEY_DOMAIN: u128 = 0xD3C1_0CE0_D3C1_0CE0_D3C1_0CE0_D3C1_0CE0;
 /// Same for the closure's master-toggle subset.
 const DERIVED_CLOCK_MASTER_KEY_DOMAIN: u128 = 0x3A57_E2C1_3A57_E2C1_3A57_E2C1_3A57_E2C1;
+/// Same for the subset that feeds the falling-edge batch.
+const FALL_PARTIAL_KEY_DOMAIN: u128 = 0xFA11_9A27_FA11_9A27_FA11_9A27_FA11_9A27;
+
+/// Statements a settle must run so the flops of the covered clocks, and the
+/// clocks themselves, see what a full settle would give them.  It replaces
+/// the settle before a batch of covered clocks no component listens to.
+pub struct FallPartial {
+    /// Group of each derived clock; `u32::MAX` where it is not covered.
+    pub group_of: Vec<u32>,
+    /// One closure per group.  A batch runs only the groups its clocks name.
+    pub groups: Vec<FallPartialGroup>,
+}
+
+/// One group of `FallPartial`, before lowering.  Its closure is
+/// backward-closed, so groups can run in any order.
+pub struct FallPartialGroup {
+    pub stmts: ProtoStatements,
+    pub passes: usize,
+    pub whole: Option<Arc<dyn crate::backend::CompiledWhole>>,
+}
+
+/// A `FallPartialGroup` after lowering: what `Ir::fall_partial_settle` runs.
+pub struct FallPartialSettle {
+    pub stmts: Vec<Statement>,
+    pub passes: usize,
+    pub whole: Option<Arc<dyn CompiledWhole>>,
+}
+
+/// A group whose closure exceeds this share of the comb (in %) is not
+/// built: a batch holding it would save too little over a full settle.
+const FALL_PARTIAL_MAX_PCT: usize = 3;
+
+/// The union of the groups may not exceed this share of the comb (in %), so
+/// even a batch holding every group settles a small part of it.  Groups that
+/// overlap each compile their own copy of what they share.
+const FALL_PARTIAL_UNION_PCT: usize = 12;
+
+/// `VERYL_FALL_PARTIAL=0` builds no subset, so every falling-edge batch
+/// takes the full settle.
+fn fall_partial_on() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("VERYL_FALL_PARTIAL").as_deref() != Ok("0"))
+}
+
+/// `(per group, union)` statement caps for a comb of `n` statements.
+fn fall_partial_caps(n: usize) -> (usize, usize) {
+    #[cfg(test)]
+    if let Some(caps) = TEST_FALL_PARTIAL_CAPS.with(|c| c.get()) {
+        return caps;
+    }
+    (
+        n * FALL_PARTIAL_MAX_PCT / 100,
+        n * FALL_PARTIAL_UNION_PCT / 100,
+    )
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_FALL_PARTIAL_CAPS: std::cell::Cell<Option<(usize, usize)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+type MaybeWhole = Option<Arc<dyn CompiledWhole>>;
+
+type FallPartialProtos = Vec<(Vec<ProtoStatement>, usize, MaybeWhole)>;
+
+/// Choose the falling-edge subset; `None` when no group fits the caps.
+fn build_fall_partial(
+    sched: &DerivedClockSchedule,
+    pre_jit_stmts: &[ProtoStatement],
+    events: &HashMap<Event, Vec<ProtoStatement>>,
+    mut compile: impl FnMut(&[ProtoStatement], u128) -> MaybeWhole,
+) -> Option<(FallPartialProtos, Vec<u32>)> {
+    let (cap, budget) = fall_partial_caps(pre_jit_stmts.len());
+    let event_stmts = |clk: &crate::ir::DerivedClock| -> &[ProtoStatement] {
+        events
+            .get(&Event::Clock(clk.var_id))
+            .map_or(&[], |v| v.as_slice())
+    };
+    let candidates: Vec<usize> = sched
+        .clocks
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.current_offset.is_ff() && c.master_gated)
+        .map(|(i, _)| i)
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    let mut closure = crate::ir::derived_clock::ReadClosure::new(
+        pre_jit_stmts,
+        candidates
+            .iter()
+            .flat_map(|&ci| event_stmts(&sched.clocks[ci])),
+    );
+    // `None` for a clock whose closure is over the cap: its group never fits.
+    let mut dep_of: HashMap<usize, Option<Vec<usize>>> = HashMap::default();
+    for &ci in &candidates {
+        let clk = &sched.clocks[ci];
+        // The clock's own net is seeded too: the batch re-reads it after
+        // this settle to drop a clock that did not really fall.
+        let mut seeds: Vec<VarOffset> = vec![clk.current_offset];
+        for st in event_stmts(clk) {
+            closure.comb_reads(st, &mut seeds);
+        }
+        seeds.sort_unstable_by_key(|o| (o.is_ff(), o.raw()));
+        seeds.dedup();
+        dep_of.insert(ci, closure.closure(&seeds, cap));
+    }
+    let offset_owner: HashMap<VarOffset, usize> = sched
+        .clocks
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.current_offset.is_ff())
+        .map(|(i, c)| (c.current_offset, i))
+        .collect();
+    // A gate fires only when its source does, so a batch holding a gate also
+    // holds its ancestors: group a clock with the clock it is gated from, the
+    // read of `clk_o = clk_i & en` that is itself a derived clock.  The enable
+    // can come from another domain and is not followed; single-read copies
+    // are, since a gated clock is often an alias of the gate's output.
+    let mut gate_parent: HashMap<usize, usize> = HashMap::default();
+    let mut ins: Vec<VarOffset> = Vec::new();
+    let mut outs: Vec<VarOffset> = Vec::new();
+    for &ci in &candidates {
+        let mut off = sched.clocks[ci].current_offset;
+        for _ in 0..16 {
+            let [si] = closure.writers_of(off) else {
+                break;
+            };
+            ins.clear();
+            outs.clear();
+            pre_jit_stmts[*si].gather_variable_offsets(&mut ins, &mut outs);
+            if let Some(&parent) = ins.iter().find_map(|i| offset_owner.get(i))
+                && parent != ci
+            {
+                gate_parent.insert(ci, parent);
+                break;
+            }
+            if let [only] = ins[..] {
+                off = only;
+                continue;
+            }
+            break;
+        }
+    }
+    let mut children: HashMap<usize, Vec<usize>> = HashMap::default();
+    for (&c, &p) in &gate_parent {
+        children.entry(p).or_default().push(c);
+    }
+    // A group is a root plus everything gated from it.
+    let mut chains: Vec<(Vec<usize>, Vec<usize>)> = Vec::new();
+    'root: for &root in &candidates {
+        if gate_parent.contains_key(&root) {
+            continue;
+        }
+        let mut members = vec![root];
+        let mut k = 0;
+        while k < members.len() {
+            if let Some(kids) = children.get(&members[k]) {
+                for &j in kids {
+                    if !members.contains(&j) {
+                        members.push(j);
+                    }
+                }
+            }
+            k += 1;
+        }
+        let mut union: HashSet<usize> = HashSet::default();
+        for m in &members {
+            match dep_of.get(m) {
+                Some(Some(d)) => union.extend(d.iter().copied()),
+                _ => continue 'root,
+            }
+        }
+        if union.len() > cap {
+            continue;
+        }
+        let mut dep: Vec<usize> = union.into_iter().collect();
+        dep.sort_unstable();
+        chains.push((members, dep));
+    }
+    chains.sort_unstable_by_key(|(m, d)| (d.len(), m[0]));
+    let mut group_of = vec![u32::MAX; sched.clocks.len()];
+    let mut groups: FallPartialProtos = Vec::new();
+    let mut union: HashSet<usize> = HashSet::default();
+    for (members, dep) in &chains {
+        let added = dep.iter().filter(|s| !union.contains(s)).count();
+        if union.len() + added > budget {
+            continue;
+        }
+        union.extend(dep.iter().copied());
+        for &m in members {
+            group_of[m] = groups.len() as u32;
+        }
+        let protos = extract_eval_proto_stmts(dep, pre_jit_stmts);
+        let passes = compute_required_passes("fall-partial", &protos);
+        let whole = compile(&protos, FALL_PARTIAL_KEY_DOMAIN);
+        groups.push((protos, passes, whole));
+    }
+    if groups.is_empty() {
+        None
+    } else {
+        Some((groups, group_of))
+    }
+}
 
 fn jit_chunk_size() -> usize {
     std::env::var("VERYL_JIT_CHUNK_SIZE")
@@ -6735,6 +6962,7 @@ impl Conv<&air::Module> for ProtoModule {
             derived_clock_master_passes,
             whole_derived_clock_master,
             closure_touched,
+            fall_partial,
         ) = if derived_clock_vars.is_empty() {
             (
                 DerivedClockSchedule::default(),
@@ -6745,6 +6973,7 @@ impl Conv<&air::Module> for ProtoModule {
                 1,
                 None,
                 crate::HashSet::default(),
+                None,
             )
         } else {
             let (sched, eval_indices, master_indices) = build_derived_clock_schedule(
@@ -6794,6 +7023,27 @@ impl Conv<&air::Module> for ProtoModule {
             let master_protos = extract_eval_proto_stmts(&master_indices, &pre_jit_stmts);
             let master_passes = compute_required_passes("derived-clock-master", &master_protos);
             let whole_master = compile_closure(&master_protos, DERIVED_CLOCK_MASTER_KEY_DOMAIN);
+            let fall_partial = if fall_partial_on() {
+                build_fall_partial(
+                    &sched,
+                    &pre_jit_stmts,
+                    &all_event_statements,
+                    &mut compile_closure,
+                )
+                .map(|(protos, group_of)| {
+                    let groups = protos
+                        .into_iter()
+                        .map(|(p, passes, whole)| FallPartialGroup {
+                            stmts: try_jit(context, p),
+                            passes,
+                            whole,
+                        })
+                        .collect();
+                    FallPartial { group_of, groups }
+                })
+            } else {
+                None
+            };
             let eval = try_jit(context, eval_protos);
             let master_eval = try_jit(context, master_protos);
             (
@@ -6805,6 +7055,7 @@ impl Conv<&air::Module> for ProtoModule {
                 master_passes,
                 whole_master,
                 closure_touched,
+                fall_partial,
             )
         };
 
@@ -7032,6 +7283,7 @@ impl Conv<&air::Module> for ProtoModule {
             derived_clock_master_eval,
             derived_clock_master_passes,
             whole_derived_clock_master,
+            fall_partial: fall_partial.map(Arc::new),
             nontrivial_comb_scc,
             whole_comb,
             whole_events,

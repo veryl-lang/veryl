@@ -979,6 +979,31 @@ impl Simulator {
         self.fire_asserted_derived_resets();
     }
 
+    /// The falling-edge groups that settle enough for `batch`, or `None`
+    /// when it needs the full settle.  A clean comb is already settled.
+    fn fall_partial_groups(&self, batch: &[usize]) -> Option<SmallVec<[u32; 8]>> {
+        if !self.comb_dirty || self.ir.fall_partial_groups.is_empty() {
+            return None;
+        }
+        let mut groups: SmallVec<[u32; 8]> = SmallVec::new();
+        for &i in batch {
+            let gi = self.ir.fall_partial_group_of[i];
+            if gi == u32::MAX {
+                return None;
+            }
+            // Staging reads a component's inputs, which no group was built from.
+            let event = Event::Clock(self.ir.derived_clock_schedule.clocks[i].var_id);
+            if self.components.iter().any(|c| c.listens_to(&event)) {
+                return None;
+            }
+            if !groups.contains(&gi) {
+                groups.push(gi);
+            }
+        }
+        groups.sort_unstable();
+        Some(groups)
+    }
+
     fn fire_derived_clock_batch_once(&mut self, batch: &[usize]) {
         let watch_enabled = !self.watch_vars.is_empty();
         let has_components = !self.components.is_empty();
@@ -2440,8 +2465,13 @@ impl Simulator {
                 }
             }
             if !fall.is_empty() {
-                // The partial settle only refreshed the clock closure.
-                self.settle_comb_if_stale();
+                // The partial settle only refreshed the clock closure.  The
+                // subset leaves the pending trigger set alone: everything it
+                // moves is downstream of an event already in it.
+                match self.fall_partial_groups(&fall) {
+                    Some(groups) => self.ir.fall_partial_settle(&mut self.mask_cache, &groups),
+                    None => self.settle_comb_if_stale(),
+                }
                 fall.retain(|i| {
                     let clk = &self.ir.derived_clock_schedule.clocks[*i];
                     self.read_derived_clock_bit(clk) == 1

@@ -132,6 +132,9 @@ pub struct Ir {
     pub derived_clock_master_stmts: Vec<Statement>,
     pub derived_clock_master_passes: usize,
     pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
+    /// See `module::FallPartial`; empty when no subset was small enough.
+    pub fall_partial_groups: Vec<crate::ir::module::FallPartialSettle>,
+    pub fall_partial_group_of: Vec<u32>,
     /// Snapshotted from `Config::aot_c_validate`: when set, `settle_comb` /
     /// `step` dual-run the AOT-C and Cranelift paths and panic on divergence.
     pub aot_c_validate: bool,
@@ -193,6 +196,7 @@ pub struct Ir {
     whole_comb_fallback_recorded: AtomicBool,
     whole_derived_clock_fallback_recorded: AtomicBool,
     whole_derived_clock_master_fallback_recorded: AtomicBool,
+    whole_fall_partial_fallback_recorded: AtomicBool,
     pub(crate) whole_event_fallback_recorded: AtomicBool,
     /// `[ran, fell_back]` dispatch tallies.  The `*_fallback_recorded` flags
     /// above latch on the FIRST fallback and so cannot say how much of a run
@@ -200,10 +204,13 @@ pub struct Ir {
     pub(crate) whole_comb_dispatch: [AtomicU64; 2],
     pub(crate) whole_derived_clock_dispatch: [AtomicU64; 2],
     pub(crate) whole_derived_clock_master_dispatch: [AtomicU64; 2],
+    pub(crate) whole_fall_partial_dispatch: [AtomicU64; 2],
     pub(crate) whole_event_dispatch: [AtomicU64; 2],
     /// Event gate skips on the per-statement path.  `Ir` is not `Sync` and
     /// the gates run on the simulator's own thread, so this needs no atomic.
     pub(crate) event_gate_skips: std::cell::Cell<u64>,
+    /// Falling-edge batches settled by `fall_partial_settle`.
+    pub(crate) fall_partial_runs: std::cell::Cell<u64>,
     /// Whether the whole-comb backend's run-once constant-cone entry has
     /// executed for THIS instance.  Per-instance (not per-artifact): a
     /// shared `.so` serves many simulators, each with fresh comb buffers.
@@ -228,6 +235,7 @@ impl Drop for Ir {
                 "whole_derived_clock_master",
                 &self.whole_derived_clock_master_dispatch,
             ),
+            ("whole_fall_partial", &self.whole_fall_partial_dispatch),
             ("whole_event", &self.whole_event_dispatch),
         ] {
             let (ran, fell_back) = (c[0].load(Ordering::Relaxed), c[1].load(Ordering::Relaxed));
@@ -288,6 +296,8 @@ impl Ir {
             derived_clock_master_stmts: module.derived_clock_master_stmts,
             derived_clock_master_passes: module.derived_clock_master_passes,
             whole_derived_clock_master: module.whole_derived_clock_master,
+            fall_partial_groups: module.fall_partial_groups,
+            fall_partial_group_of: module.fall_partial_group_of,
             aot_c_validate: config.aot_c_validate,
             aot_c_validate_stride: config.aot_c_validate_stride,
             whole_events: module.whole_events,
@@ -312,12 +322,15 @@ impl Ir {
             whole_comb_fallback_recorded: Default::default(),
             whole_derived_clock_fallback_recorded: Default::default(),
             whole_derived_clock_master_fallback_recorded: Default::default(),
+            whole_fall_partial_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             whole_comb_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_derived_clock_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_derived_clock_master_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
+            whole_fall_partial_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_event_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             event_gate_skips: std::cell::Cell::new(0),
+            fall_partial_runs: std::cell::Cell::new(0),
             const_cone_done: Default::default(),
         };
         // Bake the WriteLogBuffer's heap-stable address into every
@@ -575,6 +588,11 @@ impl Ir {
         for s in &mut self.derived_clock_master_stmts {
             patch_stmt_log_buf(s, log_buf);
         }
+        for g in &mut self.fall_partial_groups {
+            for s in &mut g.stmts {
+                patch_stmt_log_buf(s, log_buf);
+            }
+        }
     }
 
     /// Re-evaluate just the derived-clock dependency closure.
@@ -629,6 +647,64 @@ impl Ir {
             }
         }
         self.run_chunked_partial_settle_master(mask_cache);
+    }
+
+    /// Settle only what the falling-edge batch reads.  The comb stays dirty:
+    /// the batch's own settle is the cycle's full one.
+    pub fn fall_partial_settle(&self, mask_cache: &mut MaskCache, groups: &[u32]) {
+        self.fall_partial_runs.set(self.fall_partial_runs.get() + 1);
+        for &gi in groups {
+            let group = &self.fall_partial_groups[gi as usize];
+            if let Some(whole) = group.whole.as_ref() {
+                if self.aot_c_validate {
+                    let checked = crate::backend::validate::fall_partial_settle(
+                        self,
+                        whole.as_ref(),
+                        gi as usize,
+                        mask_cache,
+                    );
+                    match checked {
+                        Some(DispatchOutcome::Done) => {
+                            self.whole_fall_partial_dispatch[0].fetch_add(1, Ordering::Relaxed);
+                        }
+                        Some(DispatchOutcome::NotReady) => {
+                            self.whole_fall_partial_dispatch[1].fetch_add(1, Ordering::Relaxed);
+                            if !self
+                                .whole_fall_partial_fallback_recorded
+                                .swap(true, Ordering::Relaxed)
+                            {
+                                residency::record_fallback(
+                                    "whole_fall_partial",
+                                    &self.name.to_string(),
+                                );
+                            }
+                        }
+                        None => {}
+                    }
+                    continue;
+                }
+                if self.dispatch_whole_closure(
+                    whole.as_ref(),
+                    group.passes,
+                    &self.whole_fall_partial_dispatch,
+                    &self.whole_fall_partial_fallback_recorded,
+                    "whole_fall_partial",
+                ) {
+                    continue;
+                }
+            }
+            self.run_chunked_fall_partial(gi as usize, mask_cache);
+        }
+    }
+
+    /// Cranelift-only run of one falling-edge group, the validate reference.
+    pub(crate) fn run_chunked_fall_partial(&self, group: usize, mask_cache: &mut MaskCache) {
+        let group = &self.fall_partial_groups[group];
+        for _ in 0..group.passes {
+            for stmt in &group.stmts {
+                dispatch_stmt_fast(stmt, mask_cache);
+            }
+        }
     }
 
     /// Run a whole-compiled closure for `passes` passes, tallying into

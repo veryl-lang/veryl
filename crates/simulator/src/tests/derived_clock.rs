@@ -755,6 +755,10 @@ fn gated_clock_closure_order_with_a_backward_edge() {
             continue;
         }
         exercised += 1;
+        // The falling-edge subset settles the same values by another route,
+        // so it repairs a reversed order before the negative control below
+        // can observe it.  This test is about the closure's own order.
+        ir.fall_partial_groups.clear();
         ir.derived_clock_eval_stmts.reverse();
         ir.derived_clock_master_stmts.reverse();
         // Any order of N statements converges in N passes.
@@ -766,6 +770,7 @@ fn gated_clock_closure_order_with_a_backward_edge() {
         // closure used to get.  Without this the test would also pass on an
         // order that never needed the extra passes.
         let mut one = analyze(code, &config);
+        one.fall_partial_groups.clear();
         one.derived_clock_eval_stmts.reverse();
         one.derived_clock_master_stmts.reverse();
         one.derived_clock_eval_passes = 1;
@@ -1216,4 +1221,438 @@ fn a_closure_output_read_as_data_stays_current_without_a_settle_of_its_own() {
             );
         }
     }
+}
+
+/// `analyze` with the falling-edge subset's caps set to `caps`: these tests
+/// are about what the subset settles, not about when it pays.
+fn analyze_fall_capped(code: &str, config: &Config, caps: (usize, usize)) -> Ir {
+    use crate::ir::module::TEST_FALL_PARTIAL_CAPS;
+    TEST_FALL_PARTIAL_CAPS.with(|c| c.set(Some(caps)));
+    let ir = analyze(code, config);
+    TEST_FALL_PARTIAL_CAPS.with(|c| c.set(None));
+    ir
+}
+
+fn analyze_fall_uncapped(code: &str, config: &Config) -> Ir {
+    analyze_fall_capped(code, config, (usize::MAX, usize::MAX))
+}
+
+/// Group of the derived clock `name`, `u32::MAX` when not covered.
+fn fall_group_of(sim: &Simulator, name: &str) -> u32 {
+    let vid = sim
+        .ir
+        .module_variables
+        .variables
+        .iter()
+        .find(|(_, v)| v.path.to_string() == name)
+        .map(|(id, _)| *id)
+        .unwrap_or_else(|| panic!("no variable {name}"));
+    let i = sim
+        .ir
+        .derived_clock_schedule
+        .clocks
+        .iter()
+        .position(|c| c.var_id == vid)
+        .unwrap_or_else(|| panic!("{name} is not a derived clock"));
+    sim.ir.fall_partial_group_of[i]
+}
+
+/// Two falling-edge domains in separate groups, both firing on every master
+/// fall.  Each flop must sample what the posedge commit just produced, which
+/// only the settle before the batch can give it.
+#[test]
+fn fall_partial_settles_every_group_the_batch_names() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input     logic,
+        o_a  : output    logic<8>,
+        o_p  : output    logic<8>,
+        o_q  : output    logic<8>,
+        o_b  : output    logic<8>,
+        o_c  : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else { a += 1; }
+        }
+        let b: logic<8> = a * 3 + 1;
+        let c: logic<8> = a ^ 8'h5a;
+        let clk_p: '_ clock_negedge = i_clk;
+        let clk_q: '_ clock_negedge = i_clk & i_en;
+        var p: logic<8>;
+        var q: logic<8>;
+        always_ff (clk_p) { p = b; }
+        always_ff (clk_q) { q = c; }
+        assign o_a = a;
+        assign o_p = p;
+        assign o_q = q;
+        // A second reader keeps `b` and `c` from being folded into the flops.
+        assign o_b = b;
+        assign o_c = c;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze_fall_uncapped(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let (gp, gq) = (fall_group_of(&sim, "clk_p"), fall_group_of(&sim, "clk_q"));
+        assert!(
+            gp != u32::MAX && gq != u32::MAX && gp != gq,
+            "both clocks covered, in separate groups: {gp} {gq}, {config:?}"
+        );
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_en", Value::new(1, 1, false));
+        sim.step_reset(&clk, &rst);
+        let runs = sim.ir.fall_partial_runs.get();
+        for _ in 0..6 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let p = sim.get("o_p").unwrap().payload_u128() as u64;
+            let q = sim.get("o_q").unwrap().payload_u128() as u64;
+            assert_eq!(p, (a * 3 + 1) & 0xff, "clk_p sampled a stale b, {config:?}");
+            assert_eq!(q, a ^ 0x5a, "clk_q sampled a stale c, {config:?}");
+        }
+        assert!(
+            sim.ir.fall_partial_runs.get() > runs,
+            "the subset never ran, {config:?}"
+        );
+    }
+}
+
+/// A runtime-indexed read names the array's first and last element only; the
+/// static writer of the element it actually reads must still be settled.
+#[test]
+fn fall_partial_settles_the_writer_of_a_runtime_indexed_read() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_sel: input     logic<2>,
+        o_a  : output    logic<8>,
+        o_q  : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else { a += 1; }
+        }
+        var w: logic<8> [4];
+        assign w[0] = a;
+        assign w[1] = a + 1;
+        assign w[2] = a + 2;
+        assign w[3] = a + 3;
+        let clk_n: '_ clock_negedge = i_clk;
+        var q: logic<8>;
+        always_ff (clk_n) { q = w[i_sel]; }
+        assign o_a = a;
+        assign o_q = q;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze_fall_uncapped(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        assert_ne!(fall_group_of(&sim, "clk_n"), u32::MAX, "{config:?}");
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_sel", Value::new(1, 2, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..6 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let q = sim.get("o_q").unwrap().payload_u128() as u64;
+            assert_eq!(
+                q,
+                (a + 1) & 0xff,
+                "negedge flop sampled a stale w[1], {config:?}"
+            );
+        }
+    }
+}
+
+/// The converse: a runtime-indexed write names its first and last element
+/// only, yet it is what writes the middle element the flop reads.
+#[test]
+fn fall_partial_settles_a_runtime_indexed_writer() {
+    let code = r#"
+    module Top (
+        i_clk : input  '_ clock,
+        i_rst : input  '_ reset,
+        i_wsel: input     logic<2>,
+        o_a   : output    logic<8>,
+        o_q   : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else { a += 1; }
+        }
+        var v: logic<8> [4];
+        always_comb {
+            v[i_wsel] = a + 5;
+        }
+        let clk_n: '_ clock_negedge = i_clk;
+        var q: logic<8>;
+        always_ff (clk_n) { q = v[1]; }
+        assign o_a = a;
+        assign o_q = q;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze_fall_uncapped(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        assert_ne!(fall_group_of(&sim, "clk_n"), u32::MAX, "{config:?}");
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_wsel", Value::new(1, 2, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..6 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let q = sim.get("o_q").unwrap().payload_u128() as u64;
+            assert_eq!(
+                q,
+                (a + 5) & 0xff,
+                "negedge flop sampled a stale v[1], {config:?}"
+            );
+        }
+    }
+}
+
+/// A batch holding a clock the subset does not cover takes the full settle,
+/// even when another clock in it is covered.
+#[test]
+fn fall_partial_leaves_a_partly_covered_batch_to_the_full_settle() {
+    let mut ports = String::new();
+    let mut chain = String::new();
+    for i in 1..=16 {
+        ports.push_str(&format!("        o_c{i}: output logic<8>,\n"));
+        chain.push_str(&format!(
+            "        var c{i}: logic<8>;\n        assign c{i} = c{} + {i};\n        assign o_c{i} = c{i};\n",
+            i - 1
+        ));
+    }
+    let code = format!(
+        r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input     logic,
+{ports}        o_a  : output    logic<8>,
+        o_p  : output    logic<8>,
+        o_q  : output    logic<8>,
+    ) {{
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {{
+            if_reset {{ a = 0; }} else {{ a += 1; }}
+        }}
+        let b: logic<8> = a * 3 + 1;
+        var c0: logic<8>;
+        assign c0 = a;
+{chain}
+        let clk_p: '_ clock_negedge = i_clk;
+        let clk_q: '_ clock_negedge = i_clk & i_en;
+        var p: logic<8>;
+        var q: logic<8>;
+        always_ff (clk_p) {{ p = b; }}
+        always_ff (clk_q) {{ q = c16; }}
+        assign o_a = a;
+        assign o_p = p;
+        assign o_q = q;
+    }}
+    "#
+    );
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze_fall_capped(&code, &config, (8, usize::MAX));
+        let mut sim = Simulator::new(ir, None);
+        assert_ne!(fall_group_of(&sim, "clk_p"), u32::MAX, "{config:?}");
+        assert_eq!(fall_group_of(&sim, "clk_q"), u32::MAX, "{config:?}");
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_en", Value::new(1, 1, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..6 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let p = sim.get("o_p").unwrap().payload_u128() as u64;
+            let q = sim.get("o_q").unwrap().payload_u128() as u64;
+            assert_eq!(p, (a * 3 + 1) & 0xff, "{config:?}");
+            assert_eq!(
+                q,
+                (a + 136) & 0xff,
+                "clk_q sampled a stale chain, {config:?}"
+            );
+        }
+    }
+}
+
+/// A covered clock's group settles the clock's own net, which the batch
+/// re-reads after the settle, even when its flops read nothing combinational.
+#[test]
+fn fall_partial_group_settles_the_clock_net() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input     logic,
+        o_q  : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else { a += 1; }
+        }
+        let clk_n: '_ clock_negedge = i_clk & i_en;
+        var q: logic<8>;
+        always_ff (clk_n) { q = a; }
+        assign o_q = q;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze_fall_uncapped(code, &config);
+        let sim = Simulator::new(ir, None);
+        let g = fall_group_of(&sim, "clk_n");
+        assert_ne!(g, u32::MAX, "{config:?}");
+        assert!(
+            !sim.ir.fall_partial_groups[g as usize].stmts.is_empty(),
+            "the group does not settle clk_n, {config:?}"
+        );
+    }
+}
+
+/// A comb the settle filter has proved clean needs no settle at all, so the
+/// subset does not run there either.
+#[test]
+fn fall_partial_skips_a_clean_comb() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_run: input     logic,
+        o_a  : output    logic<8>,
+        o_p  : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else if i_run { a += 1; }
+        }
+        let b: logic<8> = a * 3 + 1;
+        let clk_p: '_ clock_negedge = i_clk;
+        var p: logic<8>;
+        always_ff (clk_p) { p = b; }
+        assign o_a = a;
+        assign o_p = p;
+    }
+    "#;
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze_fall_uncapped(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_run", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+        let runs = sim.ir.fall_partial_runs.get();
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        // Without the flop optimizations there is no settle filter, and the
+        // comb reads as dirty on every edge.
+        if !config.disable_ff_opt {
+            assert_eq!(
+                sim.ir.fall_partial_runs.get(),
+                runs,
+                "the subset ran on a clean comb, {config:?}"
+            );
+        }
+        sim.set("i_run", Value::new(1, 1, false));
+        let runs = sim.ir.fall_partial_runs.get();
+        for _ in 0..4 {
+            sim.step(&clk);
+            let a = sim.get("o_a").unwrap().payload_u128() as u64;
+            let p = sim.get("o_p").unwrap().payload_u128() as u64;
+            assert_eq!(p, (a * 3 + 1) & 0xff, "{config:?}");
+        }
+        assert!(
+            sim.ir.fall_partial_runs.get() > runs,
+            "the subset never ran, {config:?}"
+        );
+    }
+}
+
+/// A validate run compares the subset's whole-module backend against its
+/// Cranelift reference, and counts what it compared.
+#[test]
+fn fall_partial_is_compared_under_validate() {
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module FallPartialValidate (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+        o_p  : output    logic<8>,
+    ) {
+        var a: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset { a = 0; } else { a += 1; }
+        }
+        let b: logic<8> = a * 3 + 1;
+        let clk_p: '_ clock_negedge = i_clk;
+        var p: logic<8>;
+        always_ff (clk_p) { p = b; }
+        assign o_a = a;
+        assign o_b = b;
+        assign o_p = p;
+    }
+    "#;
+    let config = Config {
+        use_4state: false,
+        use_jit: true,
+        aot_c: true,
+        aot_c_event: true,
+        aot_c_async: false,
+        aot_c_validate: true,
+        aot_c_min_stmts: 0,
+        ..Default::default()
+    };
+    {
+        use crate::ir::module::TEST_FALL_PARTIAL_CAPS;
+        TEST_FALL_PARTIAL_CAPS.with(|c| c.set(Some((usize::MAX, usize::MAX))));
+        let ir = analyze_top(code, &config, "FallPartialValidate").unwrap();
+        TEST_FALL_PARTIAL_CAPS.with(|c| c.set(None));
+        assert!(
+            ir.fall_partial_groups.iter().any(|g| g.whole.is_some()),
+            "no whole-module handle for the subset"
+        );
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        // The tallies publish when the Ir is dropped.
+    }
+    // A platform whose AOT-C artifact never loads falls back instead, and is
+    // counted as such.
+    let compared: u64 = crate::residency::dispatch_counts()
+        .into_iter()
+        .filter(|(k, _, _)| {
+            k.starts_with("whole_fall_partial:") && k.contains("FallPartialValidate")
+        })
+        .map(|(_, ran, fell_back)| ran + fell_back)
+        .sum();
+    assert!(
+        compared > 0,
+        "a validate run compared no falling-edge settle"
+    );
 }

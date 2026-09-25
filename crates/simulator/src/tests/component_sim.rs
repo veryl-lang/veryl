@@ -1252,6 +1252,68 @@ fn component_on_gated_clock_fires_with_the_gate() {
 }
 
 #[test]
+fn component_on_a_falling_edge_stages_settled_inputs() {
+    // Staging reads the component's inputs, which the falling-edge subset
+    // was not built from: a batch a component listens to must be settled in
+    // full, or the mirror samples `w` from before the rising edge.
+    let code = r#"
+    module Counter (
+        clk: input clock,
+        rst: input reset,
+        cnt: output logic<8>,
+    ) {
+        always_ff {
+            if_reset { cnt = 0; }
+            else { cnt += 1; }
+        }
+    }
+
+    #[test(comp_test)]
+    module comp_test {
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var cnt: logic<8>;
+        var q_comp: logic<8>;
+        var q_rtl: logic<8>;
+        let w: logic<8> = cnt + 1;
+        let clk_n: '_ clock_negedge = clk;
+
+        inst dut: Counter (clk, rst, cnt);
+
+        always_ff (clk_n) { q_rtl = cnt; }
+        // A reader outside the component keeps `w` in storage.
+        var w_rtl: logic<8>;
+        always_ff (clk) { w_rtl = w; }
+
+        inst mirror: $comp::mirror ( clk: clk_n, d: w, q: q_comp );
+
+        initial {
+            q_comp = 0;
+            rst.assert();
+            clk.next(3);
+            $assert(q_rtl == cnt, "rtl flop on the falling edge");
+            $assert(q_comp == cnt + 1, "component staged a settled w");
+            clk.next(2);
+            $assert(q_comp == cnt + 1, "component staged a settled w");
+            $finish();
+        }
+    }
+    "#;
+    use crate::ir::module::TEST_FALL_PARTIAL_CAPS;
+    TEST_FALL_PARTIAL_CAPS.with(|c| c.set(Some((usize::MAX, usize::MAX))));
+    let results = run_component_test(code, "comp_test");
+    TEST_FALL_PARTIAL_CAPS.with(|c| c.set(None));
+    for (config, _, sim) in &results {
+        assert!(
+            sim.ir.fall_partial_group_of.iter().any(|g| *g != u32::MAX),
+            "the falling-edge clock is not covered, {config:?}"
+        );
+    }
+    assert_all_pass(&results);
+}
+
+#[test]
 fn component_on_reset_fires_on_reset_edges() {
     // A connected reset port fires `on_reset` on every reset edge, and all
     // of them precede the first `on_clock` (the component asserts the
