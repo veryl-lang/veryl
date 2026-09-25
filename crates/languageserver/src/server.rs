@@ -1367,7 +1367,9 @@ fn completion_symbol(
 
     let mut items = Vec::new();
 
-    let prj = resource_table::get_str_id(&metadata.project.name).unwrap();
+    // Not interned yet when no source of the project has been analyzed, e.g. every open
+    // file has a syntax error.
+    let prj = resource_table::insert_str(&metadata.project.name);
 
     for symbol in symbol_table::get_all() {
         let top_level_item = symbol.namespace.paths.len() <= 1;
