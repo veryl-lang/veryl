@@ -77,13 +77,24 @@ module Module25E {
 }
 
 module Module25F #(
-    param WIDTH: u32 = 8,
+    param WIDTH: u32  = 8           ,
+    const TYPE : type = logic<WIDTH>,
 ) (
     i_a: input  logic<WIDTH>,
     i_b: input  logic<WIDTH>,
     o_c: output logic<WIDTH>,
+    i_d: input  TYPE        ,
+    i_e: input  TYPE        ,
+    o_f: output TYPE        ,
+    o_g: output TYPE        ,
 ) {
-    assign o_c = veryl_sample4::foo_func_1::<WIDTH>(i_a, i_b);
+    type T = logic<WIDTH>;
+
+    always_comb {
+        o_c = veryl_sample4::foo_func_1::<WIDTH>(i_a, i_b);
+        o_f = veryl_sample4::foo_func_3::<TYPE>(i_d, i_e);
+        o_g = veryl_sample4::foo_func_4::<T>(i_d, i_e);
+    }
 }
 
 module Module25G {

@@ -25,7 +25,10 @@ pub use context::{Context, Conv};
 pub use declaration::ProtoDeclaration;
 pub use derived_clock::{DerivedClock, DerivedClockSchedule, DerivedReset, EdgeCandidate};
 pub use event::Event;
-pub use expression::{Expression, ExpressionContext, ProtoDynamicBitSelect, ProtoExpression};
+pub use expression::{
+    Expression, ExpressionContext, ProtoDynamicBitSelect, ProtoExpression, index_may_exceed,
+    out_of_range_read,
+};
 pub use external::{
     ExternalComponentInst, ExternalConnectInst, ProtoExternalComponent, ProtoExternalConnect,
 };

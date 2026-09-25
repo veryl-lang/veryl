@@ -317,6 +317,27 @@ pub struct Comptime {
 }
 
 impl Comptime {
+    /// Rebase a struct/union member onto the whole variable's type, and report
+    /// the array dimensions a select has to be split on.
+    ///
+    /// `part_select.base` is the type as DECLARED, so it misses an array the
+    /// member picked up afterwards: importing an interface instance array
+    /// prepends the instance's dimensions to each member's own type, not to
+    /// the base it was declared with. Taking the larger of the two keeps both
+    /// -- an array of structs (`s[2].f`, on the base) and a member of an
+    /// interface array (`arr[2].s.f`, on the member).
+    pub fn rebase_part_select(&mut self) -> usize {
+        if let Some(part_select) = &self.part_select {
+            let own = self.r#type.array.clone();
+            let mut base = part_select.base.clone();
+            if own.dims() > base.array.dims() {
+                base.array = own;
+            }
+            self.r#type = base;
+        }
+        self.r#type.array.dims()
+    }
+
     pub fn create_unknown(token: TokenRange) -> Self {
         Self {
             value: ValueVariant::Unknown,
@@ -375,7 +396,19 @@ pub enum ValueVariant {
 impl ValueVariant {
     pub fn expand_value(&mut self, width: usize) {
         if let ValueVariant::Numeric(x) = self {
-            x.expand(width, false);
+            let expanded = x.expand(width, false).into_owned();
+            *x = expanded;
+        }
+    }
+
+    /// Drop the bits above `width`. Narrower values are left alone: a
+    /// parameter's use site sizes them, and widening here would change what
+    /// every existing override means.
+    pub fn trunc_value(&mut self, width: usize) {
+        if let ValueVariant::Numeric(x) = self
+            && x.width() > width
+        {
+            x.trunc(width);
         }
     }
 
@@ -641,6 +674,25 @@ impl Type {
         Some(self.kind.width()? * self.width.total()?)
     }
 
+    /// Every bit the type holds, unpacked dimensions included. This is what
+    /// `$bits` answers; `total_width` stops at one element.
+    pub fn total_bits(&self) -> Option<usize> {
+        Some(self.total_width()? * self.array.total()?)
+    }
+
+    /// Elements in the leftmost dimension, which is what `$size` answers:
+    /// the outermost unpacked dimension, else the outermost packed one, else
+    /// the kind's own width (a struct or enum is one packed vector).
+    pub fn leading_dimension(&self) -> Option<usize> {
+        if let Some(x) = self.array.first() {
+            *x
+        } else if let Some(x) = self.width.first() {
+            *x
+        } else {
+            self.kind.width()
+        }
+    }
+
     /// An unevaluated width (generics) counts as single-bit to avoid
     /// false positives.
     pub fn is_single_bit_plain(&self) -> bool {
@@ -660,6 +712,33 @@ impl Type {
 
     pub fn total_array(&self) -> Option<usize> {
         self.array.total()
+    }
+
+    /// Whether an incompatibility is a mismatch of the UNPACKED dimensions.
+    /// That one is illegal SystemVerilog (IEEE 1800-2023 7.6 at a port, an
+    /// unmatched array assignment elsewhere) and it miscompiles in silence,
+    /// so the diagnostic names it rather than reporting a bare
+    /// incompatibility.
+    pub fn array_shape_mismatch(&self, src: &Comptime) -> bool {
+        if self.is_unknown()
+            || self.is_systemverilog()
+            || src.r#type.is_unknown()
+            || src.r#type.is_systemverilog()
+        {
+            return false;
+        }
+        // An UNSIZED fill (`'0` / `'1`) has no width of its own -- the
+        // sentinel is `bit<0>` -- and SystemVerilog lets it fill any target,
+        // an unpacked array included. It is not a shape mismatch, and calling
+        // it one rejects `mem = '0;`, which every port writes.
+        if src.r#type.array.is_empty()
+            && let ValueVariant::Numeric(x) = &src.value
+            && x.width() == 0
+        {
+            return false;
+        }
+        (self.is_array() || src.r#type.is_array())
+            && !array_compatible(&self.array, &src.r#type.array)
     }
 
     pub fn compatible(&self, src: &Comptime, in_generic: bool) -> bool {
@@ -821,10 +900,16 @@ impl Type {
                 self.kind = x.r#type.kind.clone();
                 self.signed = x.r#type.signed;
                 let mut array = x.r#type.array.clone();
-                let mut width = x.r#type.width.clone();
                 array.append(&mut self.array);
-                width.append(&mut self.width);
                 self.array = array;
+                // The DECLARED packed dimensions are the outer ones and the
+                // enum's own width the innermost: `e3_t<8>` emits
+                // `p_e3_t [8-1:0]`, eight elements of three bits. Composing
+                // them the other way round bounded an index by the element's
+                // width, so `i[3]` on an eight-element array was rejected as
+                // "out of range [3] > 3" while `i[2]` was accepted.
+                let mut width = self.width.clone();
+                width.append(&mut x.r#type.width.clone());
                 self.set_concrete_width(width);
             }
             _ => (),
@@ -1001,6 +1086,47 @@ pub enum TypeKind {
 }
 
 impl TypeKind {
+    /// Whether `width()` is a real BIT width. It answers `Some(1)` for a
+    /// whole bucket of kinds that have no bit width at all -- `String`,
+    /// `F32`/`F64`, `Type`, a module or interface handle -- so anything that
+    /// resizes a value by it has to ask this first.
+    pub fn is_bit_sized(&self) -> bool {
+        match self {
+            TypeKind::Clock
+            | TypeKind::ClockPosedge
+            | TypeKind::ClockNegedge
+            | TypeKind::Reset
+            | TypeKind::ResetAsyncHigh
+            | TypeKind::ResetAsyncLow
+            | TypeKind::ResetSyncHigh
+            | TypeKind::ResetSyncLow
+            | TypeKind::Bit
+            | TypeKind::Logic => true,
+            TypeKind::Union(_) | TypeKind::Struct(_) | TypeKind::Enum(_) => true,
+            TypeKind::F32
+            | TypeKind::F64
+            | TypeKind::Type
+            | TypeKind::String
+            | TypeKind::Unknown
+            | TypeKind::SystemVerilog
+            | TypeKind::Module(_)
+            | TypeKind::Interface(_)
+            | TypeKind::Modport(_, _)
+            | TypeKind::Package(_)
+            | TypeKind::Instance(_, _)
+            | TypeKind::AbstractInterface(_)
+            | TypeKind::Void => false,
+        }
+    }
+
+    /// True for a user `enum`, whose element width lives in the kind while
+    /// its packed dimensions stay in the shape. The dynamic-select lowering
+    /// asks, because that is the one kind whose select index is an element
+    /// number rather than an absolute bit position.
+    pub fn is_enum(&self) -> bool {
+        matches!(self, TypeKind::Enum(_))
+    }
+
     pub fn width(&self) -> Option<usize> {
         match self {
             TypeKind::Clock

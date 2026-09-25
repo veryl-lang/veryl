@@ -5,8 +5,8 @@ use crate::conv::utils::{
     build_for_statement, case_patterns, check_assign_before_definition, check_assign_clock_domain,
     eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable, expand_connect,
     expand_connect_const, function_call, get_return_str, hoist_component_method_call,
-    single_function_call_factor, switch_condition, tb_method_call, try_infer_decl_type,
-    try_infer_var_assign,
+    single_function_call_factor, switch_condition, tb_method_call, to_hier_assign_destination,
+    try_infer_decl_type, try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -201,6 +201,7 @@ impl Conv<&ConcatenationAssignment> for ir::StatementBlock {
             check_assign_clock_domain(context, d, &comptime, &token);
         }
         let statement = ir::Statement::Assign(ir::AssignStatement {
+            hier_dst: None,
             dst,
             width,
             expr,
@@ -297,6 +298,7 @@ fn conv_tb_method_call_assignment(
         .and_then(|x| context.check_size(x, token));
     Ok(Some(ir::StatementBlock(vec![ir::Statement::Assign(
         ir::AssignStatement {
+            hier_dst: None,
             dst: vec![dst],
             width,
             expr: temp,
@@ -348,6 +350,31 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             eval_array_range_assign(context, &dst, &x.assignment.expression, token)?
                         {
                             return Ok(ir::StatementBlock(statements));
+                        }
+
+                        if let Some(hier_dst) = to_hier_assign_destination(context, dst.clone())? {
+                            // Testbench write into a child instance; the RHS is
+                            // evaluated against the target's type exactly as a
+                            // local destination's would be.
+                            let ctx_type = hier_dst.comptime.r#type.clone();
+                            let (_, expr) = eval_expr(
+                                context,
+                                Some(ctx_type),
+                                &x.assignment.expression,
+                                false,
+                            )?;
+                            let width = hier_dst
+                                .select
+                                .eval_value(context, &hier_dst.comptime.r#type, false)
+                                .map(|(beg, end)| beg - end + 1);
+                            let statement = ir::Statement::Assign(ir::AssignStatement {
+                                dst: vec![],
+                                hier_dst: Some(Box::new(hier_dst)),
+                                width,
+                                expr,
+                                token,
+                            });
+                            return Ok(ir::StatementBlock(vec![statement]));
                         }
 
                         if let Some(mut dst) = dst.to_assign_destination(context, false) {
@@ -402,6 +429,7 @@ impl Conv<&IdentifierStatement> for ir::StatementBlock {
                             let _ = expr.eval_comptime(context, width);
 
                             let statement = ir::AssignStatement {
+                                hier_dst: None,
                                 dst: vec![dst],
                                 width,
                                 expr,
@@ -709,6 +737,10 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
 
         let mut false_side = vec![];
         let mut else_if_break = false;
+        // The trailing `else` is gated by the conditions above it. Only the
+        // last live one is carried here, so a crossing in an earlier `else if`
+        // of the same chain still goes unreported.
+        let mut last_cond_comptime: Option<ir::Comptime> = None;
 
         for x in &value.if_reset_statement_list {
             let (comptime, cond) = eval_expr(context, None, &x.expression, false)?;
@@ -725,8 +757,15 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
                 continue;
             }
 
-            let true_side: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
-            let true_side = true_side.0;
+            // An `else if` of the reset chain gates its body exactly as a plain
+            // `if` does, so its clock domain has to reach the writes inside it.
+            // Without this a foreign-domain condition here goes unreported.
+            let true_side: ir::IrResult<ir::StatementBlock> = context
+                .with_condition_domain(comptime.clone(), |c| {
+                    Conv::conv(c, x.statement_block.as_ref())
+                });
+            let true_side = true_side?.0;
+            last_cond_comptime = Some(comptime);
 
             // The uncovered-branch check that motivates this in `if` is comb-only;
             // here it just keeps a dead always-true node out of the IR.
@@ -748,7 +787,16 @@ impl Conv<&IfResetStatement> for ir::StatementBlock {
         if let Some(x) = &value.if_reset_statement_opt
             && !else_if_break
         {
-            let block: ir::StatementBlock = Conv::conv(context, x.statement_block.as_ref())?;
+            let block: ir::StatementBlock = match last_cond_comptime {
+                Some(cond) => {
+                    let block: ir::IrResult<ir::StatementBlock> = context
+                        .with_condition_domain(cond, |c| Conv::conv(c, x.statement_block.as_ref()));
+                    block?
+                }
+                // `if_reset { .. } else { .. }`: the reset is the only gate and
+                // it is same-domain by construction.
+                None => Conv::conv(context, x.statement_block.as_ref())?,
+            };
 
             append_leaf_false(&mut false_side, block.0);
         }
@@ -783,6 +831,7 @@ impl Conv<&ReturnStatement> for ir::Statement {
                 false,
             )?;
             Ok(ir::Statement::Assign(ir::AssignStatement {
+                hier_dst: None,
                 dst: vec![dst],
                 width,
                 expr,

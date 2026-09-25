@@ -426,6 +426,9 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
             }
         }
         ProtoStatement::Break => {}
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
     }
 }
 
@@ -703,6 +706,9 @@ impl Rewriter<'_> {
             ProtoStatement::CompiledBlock(_)
             | ProtoStatement::TbMethodCall { .. }
             | ProtoStatement::Break => {}
+            ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
         }
     }
 }
