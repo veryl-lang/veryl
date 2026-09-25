@@ -7009,7 +7009,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             }
             cg_decl = format!(
                 "static unsigned long long cg_tk[{n}], cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
-                 static unsigned long long cg_gsk[{ng}], cg_grn[{ng}];\n\
+                 static unsigned long long cg_gsk[{ng}], cg_grn[{ng}], cg_gs[{n}];\n\
                  static const unsigned cg_stoff[{n}] = {{{offs}}};\n\n",
                 n = guards.len(),
                 ng = egroups.len().max(1),
@@ -7022,7 +7022,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             cg_print = format!(
                 "    if ((++cg_calls & 0x3fff) == 0) {{\n\
                  \x20     __builtin_printf(\"[cg] evals=%llu\", cg_calls);\n\
-                 \x20     for (int z = 0; z < {n}; z++) __builtin_printf(\" %llu/%llu/%llu:c%u:f%u:o%u\", cg_tk[z], cg_sk[z], cg_rn[z], (unsigned)comb_values[cg_stoff[z] + 1], (unsigned)comb_values[cg_stoff[z] + 3], (unsigned)comb_values[cg_stoff[z] + 2]);\n\
+                 \x20     for (int z = 0; z < {n}; z++) __builtin_printf(\" %llu/%llu/%llu:c%u:f%u:o%u:g%llu\", cg_tk[z], cg_sk[z], cg_rn[z], (unsigned)comb_values[cg_stoff[z] + 1], (unsigned)comb_values[cg_stoff[z] + 3], (unsigned)comb_values[cg_stoff[z] + 2], cg_gs[z]);\n\
                  \x20     for (int z = 0; z < {ng}; z++) __builtin_printf(\" G%llu/%llu\", cg_gsk[z], cg_grn[z]);\n\
                  \x20     __builtin_printf(\"\\n\");\n\
                  \x20   }}\n",
@@ -7089,12 +7089,23 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                          \x20   }\n",
                     );
                 }
-                // A member skipped by its group's verdict paid no compare, so
-                // its own streak (that compare's economics) is left alone.
+                // A member skipped by its group's verdict decays its streak as
+                // a clean compare would: otherwise only dirty settles reach its
+                // own compare, the streak climbs to auto-off, and auto-off
+                // bypasses the group's verdict as well.
                 let group_clean = match group_of_guard[gi] {
                     Some(g) => format!(
-                        "if (comb_values[{:#x}]) cg_run = 0; else ",
-                        egroups[g].state_off as usize + 1
+                        "if (comb_values[{off:#x}]) {{ cg_run = 0; {dbg}\
+                         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
+                         \x20         cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
+                         \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4); }} }} else ",
+                        off = egroups[g].state_off as usize + 1,
+                        dbg = if cg_dbg {
+                            format!("cg_gs[{gi}]++; ")
+                        } else {
+                            String::new()
+                        },
+                        decay = s.off_decay,
                     ),
                     None => String::new(),
                 };
@@ -14755,6 +14766,73 @@ mod tests {
     #[test]
     fn emit_stmt_break() {
         assert_eq!(emit_stmt(&ProtoStatement::Break).as_deref(), Some("break;"));
+    }
+
+    #[test]
+    fn a_member_skipped_by_its_group_decays_its_streak() {
+        use crate::ir::opt::cone_gate::{ConeGroup, ConeSegment};
+        let assign = |dst: isize, src: isize| {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Comb(dst),
+                dst_width: 32,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: ProtoExpression::Variable {
+                    var_offset: VarOffset::Comb(src),
+                    select: None,
+                    dynamic_select: None,
+                    width: 32,
+                    var_full_width: 32,
+                    expr_context: ExpressionContext {
+                        width: 32,
+                        signed: false,
+                    },
+                },
+                dst_ff_current_offset: 0,
+                comb_direct: false,
+                token: dummy_token(),
+            })
+        };
+        let seg = |k: usize, src: u32, state_off: u32| ConeSegment {
+            block_lo: k,
+            block_hi: k + 1,
+            stmt_lo: k,
+            stmt_hi: k + 1,
+            state_off,
+            compare: vec![(false, src, src + 4)],
+            backedge: vec![],
+            compare_pre: vec![],
+            replay: vec![],
+            off_decay: 7,
+            trigger: vec![],
+            internal: vec![],
+            cone: String::new(),
+        };
+        set_cone_segments(
+            vec![seg(0, 0x00, 0x100), seg(1, 0x10, 0x140)],
+            vec![ConeGroup {
+                node: 0,
+                segments: vec![0, 1],
+                compare: vec![(false, 0x00, 0x04)],
+                off_decay: 1,
+                parent: None,
+                state_off: 0x180,
+                cone: String::new(),
+            }],
+            0,
+        );
+        let src = emit_function(&[assign(0x10, 0x00), assign(0x20, 0x10)]);
+        clear_cone_segments();
+        let src = src.expect("must emit");
+        assert!(
+            src.contains("cg_run = 0; { uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);"),
+            "{src}"
+        );
+        assert!(
+            src.contains("cg_stk = cg_stk > 7u ? cg_stk - 7u : 0;"),
+            "{src}"
+        );
     }
 
     #[test]
