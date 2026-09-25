@@ -44,7 +44,6 @@ impl Source {
 
     /// Keep a bounded excerpt around `span` while retaining the one-based
     /// `span_line` it had in the complete source buffer.
-    #[cfg(test)]
     pub(crate) fn excerpt(
         path: String,
         text: &str,

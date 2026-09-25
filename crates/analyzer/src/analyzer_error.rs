@@ -25,6 +25,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -41,6 +43,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -56,6 +60,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -75,6 +81,8 @@ pub enum AnalyzerError {
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -99,6 +107,8 @@ pub enum AnalyzerError {
         #[label(collection, "function declared here")]
         function_definition: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -121,6 +131,8 @@ pub enum AnalyzerError {
         #[label(collection, "\"{output}\" is declared as an output here")]
         output_declaration: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -141,6 +153,8 @@ pub enum AnalyzerError {
         #[label(collection, "dependency passes through this statement")]
         dependency_sites: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -156,6 +170,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -173,6 +189,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -190,6 +208,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -206,6 +226,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -222,6 +244,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -239,6 +263,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -256,6 +282,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -271,6 +299,9 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -286,6 +317,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -303,6 +336,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -321,6 +356,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -336,6 +373,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -353,6 +392,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -370,6 +411,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -388,6 +431,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -403,6 +448,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -420,6 +467,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -436,6 +485,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -453,6 +504,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -468,6 +521,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -485,6 +540,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -507,6 +564,8 @@ pub enum AnalyzerError {
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -522,6 +581,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -537,6 +598,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -554,6 +617,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -569,6 +634,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(severity(Error),
@@ -585,6 +652,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -601,6 +670,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -616,6 +687,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -631,6 +704,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -648,6 +723,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -665,6 +742,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -680,6 +759,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -697,6 +778,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -717,6 +800,8 @@ pub enum AnalyzerError {
         //#[label(collection, "instantiated at")]
         //inst_context: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -733,6 +818,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -749,6 +836,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -767,6 +856,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -785,6 +876,8 @@ pub enum AnalyzerError {
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -802,6 +895,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -817,6 +912,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -833,6 +930,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -849,6 +948,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -866,6 +967,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -883,6 +986,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -899,6 +1004,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -914,6 +1021,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -930,6 +1039,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -945,6 +1056,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -962,6 +1075,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -979,6 +1094,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -996,6 +1113,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1012,6 +1131,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1028,6 +1149,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1045,6 +1168,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1068,6 +1193,8 @@ pub enum AnalyzerError {
         #[label(collection, "generated from")]
         member_source: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1086,6 +1213,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1106,6 +1235,8 @@ pub enum AnalyzerError {
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1127,6 +1258,8 @@ pub enum AnalyzerError {
         #[label(collection, "instantiated at")]
         inst_context: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1145,6 +1278,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1162,6 +1297,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1179,6 +1316,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1198,6 +1337,8 @@ pub enum AnalyzerError {
         #[label("clock domain {other_domain}")]
         other_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1215,6 +1356,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1233,6 +1376,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1251,6 +1396,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1267,6 +1414,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1282,6 +1431,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1297,6 +1448,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1313,6 +1466,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1329,6 +1484,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1344,6 +1501,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1360,6 +1519,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1375,6 +1536,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1392,6 +1555,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1407,6 +1572,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1423,6 +1590,8 @@ pub enum AnalyzerError {
         #[label(collection, "Not reset")]
         error_locations: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1438,6 +1607,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1455,6 +1626,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1470,6 +1643,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1486,6 +1661,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1502,6 +1679,8 @@ pub enum AnalyzerError {
         #[label(collection, "Assigned")]
         error_locations: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1521,6 +1700,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1537,6 +1718,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1553,6 +1736,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1569,6 +1754,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1585,6 +1772,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1601,6 +1790,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1616,6 +1807,8 @@ pub enum AnalyzerError {
         #[label("Outside the if_reset/else chain")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1632,6 +1825,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1649,6 +1844,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1669,6 +1866,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1685,6 +1884,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1700,6 +1901,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1720,6 +1923,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1736,6 +1941,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1751,6 +1958,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1767,6 +1976,8 @@ pub enum AnalyzerError {
         #[label(collection, "Covered")]
         error_locations: Vec<SourceSpan>,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1783,6 +1994,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1798,6 +2011,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1814,6 +2029,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1830,6 +2047,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1846,6 +2065,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1863,6 +2084,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1880,6 +2103,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1897,6 +2122,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1914,6 +2141,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1929,6 +2158,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1946,6 +2177,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1963,6 +2196,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1979,6 +2214,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -1997,6 +2234,8 @@ pub enum AnalyzerError {
         #[label("Definition")]
         definition_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -2013,6 +2252,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -2029,6 +2270,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -2046,6 +2289,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 
     #[diagnostic(
@@ -2062,6 +2307,8 @@ pub enum AnalyzerError {
         #[label("Error location")]
         error_location: SourceSpan,
         token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
     },
 }
 
@@ -2186,6 +2433,82 @@ mod ordered_context_tests {
     }
 }
 
+/// Where the instance a diagnostic arose in was instantiated: the diagnostic
+/// itself only points at the definition, which every instance shares.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstanceNote {
+    path: String,
+    input: MultiSources,
+    offset: usize,
+    len: usize,
+}
+
+impl InstanceNote {
+    pub fn new(path: String, token: &TokenRange) -> Self {
+        let span: SourceSpan = token.into();
+        let text = token.source().get_text();
+        let (input, span) = match Source::excerpt(
+            token.source().to_string(),
+            &text,
+            &span,
+            token.beg.line as usize,
+            1,
+        ) {
+            Some((source, span)) => (
+                MultiSources {
+                    sources: vec![source],
+                },
+                span,
+            ),
+            None => (source(token), span),
+        };
+        InstanceNote {
+            path,
+            input,
+            offset: span.offset(),
+            len: span.len(),
+        }
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn span(&self) -> SourceSpan {
+        (self.offset, self.len).into()
+    }
+}
+
+impl fmt::Display for InstanceNote {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "reported inside {}", self.path)
+    }
+}
+
+impl std::error::Error for InstanceNote {}
+
+impl Diagnostic for InstanceNote {
+    fn severity(&self) -> Option<Severity> {
+        Some(Severity::Advice)
+    }
+
+    fn code(&self) -> Option<Box<dyn fmt::Display + '_>> {
+        Some(Box::new("instantiated_here"))
+    }
+
+    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
+        Some(&self.input)
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
+        Some(Box::new(std::iter::once(miette::LabeledSpan::new(
+            Some("Instantiated here".to_string()),
+            self.offset,
+            self.len,
+        ))))
+    }
+}
+
 /// `miette::Severity`, in a form the diagnostic cache can serialize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CachedSeverity {
@@ -2230,6 +2553,7 @@ pub struct CachedDiagnostic {
     labels: Vec<(Option<String>, usize, usize)>,
     /// Path of the file that owns the diagnostic, for attribution.
     token_path: Option<String>,
+    instance: Option<InstanceNote>,
 }
 
 impl CachedDiagnostic {
@@ -2258,6 +2582,7 @@ impl CachedDiagnostic {
             sources: error.input_sources().clone(),
             labels,
             token_path,
+            instance: error.instance().cloned(),
         }
     }
 
@@ -2310,6 +2635,9 @@ impl Diagnostic for CachedDiagnostic {
         Some(Box::new(labels.into_iter().map(|(label, offset, len)| {
             miette::LabeledSpan::new(label, offset, len)
         })))
+    }
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        Some(Box::new(self.instance.iter().map(|x| x as &dyn Diagnostic)))
     }
 }
 
@@ -2448,6 +2776,272 @@ impl AnalyzerError {
         }
     }
 
+    /// A diagnostic reached through another instance is not a new one.
+    pub fn same_report(&mut self, other: &mut AnalyzerError) -> bool {
+        let this_instance = self.instance_mut().take();
+        let other_instance = other.instance_mut().take();
+        let ret = self == other;
+        *self.instance_mut() = this_instance;
+        *other.instance_mut() = other_instance;
+        ret
+    }
+
+    pub fn instance_mut(&mut self) -> &mut Option<InstanceNote> {
+        match self {
+            AnalyzerError::AmbiguousElsif { instance, .. } => instance,
+            AnalyzerError::AmbiguousIdentifier { instance, .. } => instance,
+            AnalyzerError::AnonymousIdentifierUsage { instance, .. } => instance,
+            AnalyzerError::CallNonFunction { instance, .. } => instance,
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { instance, .. } => instance,
+            AnalyzerError::FunctionOutputInAlwaysFf { instance, .. } => instance,
+            AnalyzerError::CombinationalLoop { instance, .. } => instance,
+            AnalyzerError::CombinationalLoopPositionOverflow { instance, .. } => instance,
+            AnalyzerError::CyclicTypeDependency { instance, .. } => instance,
+            AnalyzerError::CyclicFileDependency { instance, .. } => instance,
+            AnalyzerError::DuplicateArgument { instance, .. } => instance,
+            AnalyzerError::DuplicateEnumVariant { instance, .. } => instance,
+            AnalyzerError::DuplicatedIdentifier { instance, .. } => instance,
+            AnalyzerError::ExceedLimit { instance, .. } => instance,
+            AnalyzerError::FixedTypeWithSignedModifier { instance, .. } => instance,
+            AnalyzerError::ForLoopOverflow { instance, .. } => instance,
+            AnalyzerError::IncludeFailure { instance, .. } => instance,
+            AnalyzerError::IncompatProto { instance, .. } => instance,
+            AnalyzerError::InfiniteRecursion { instance, .. } => instance,
+            AnalyzerError::InvalidAssignment { instance, .. } => instance,
+            AnalyzerError::InvalidCast { instance, .. } => instance,
+            AnalyzerError::InvalidClock { instance, .. } => instance,
+            AnalyzerError::InvalidClockDomain { instance, .. } => instance,
+            AnalyzerError::InvalidConnectOperand { instance, .. } => instance,
+            AnalyzerError::InvalidDirection { instance, .. } => instance,
+            AnalyzerError::InvalidEmbed { instance, .. } => instance,
+            AnalyzerError::InvalidEmbedIdentifier { instance, .. } => instance,
+            AnalyzerError::InvalidEnumVariant { instance, .. } => instance,
+            AnalyzerError::InvalidFactor { instance, .. } => instance,
+            AnalyzerError::InvalidIdentifier { instance, .. } => instance,
+            AnalyzerError::InvalidImport { instance, .. } => instance,
+            AnalyzerError::InvalidMixin { instance, .. } => instance,
+            AnalyzerError::InvalidUnsizedLiteral { instance, .. } => instance,
+            AnalyzerError::InvalidLogicalOperand { instance, .. } => instance,
+            AnalyzerError::UnsignedArithShift { instance, .. } => instance,
+            AnalyzerError::InvalidLsb { instance, .. } => instance,
+            AnalyzerError::InvalidModifier { instance, .. } => instance,
+            AnalyzerError::InvalidModportItem { instance, .. } => instance,
+            AnalyzerError::InvalidMsb { instance, .. } => instance,
+            AnalyzerError::InvalidNumberCharacter { instance, .. } => instance,
+            AnalyzerError::InvalidOperand { instance, .. } => instance,
+            AnalyzerError::InvalidPortDefaultValue { instance, .. } => instance,
+            AnalyzerError::InvalidRange { instance, .. } => instance,
+            AnalyzerError::InvalidReset { instance, .. } => instance,
+            AnalyzerError::InvalidSelect { instance, .. } => instance,
+            AnalyzerError::InvalidSizeType { instance, .. } => instance,
+            AnalyzerError::InvalidRangeAssign { instance, .. } => instance,
+            AnalyzerError::NonConstantSelectWidth { instance, .. } => instance,
+            AnalyzerError::InvalidStatement { instance, .. } => instance,
+            AnalyzerError::InvalidInitialAssign { instance, .. } => instance,
+            AnalyzerError::InvalidForRange { instance, .. } => instance,
+            AnalyzerError::InvalidForStep { instance, .. } => instance,
+            AnalyzerError::InvalidTbUsage { instance, .. } => instance,
+            AnalyzerError::MissingTbPort { instance, .. } => instance,
+            AnalyzerError::UnknownTbPort { instance, .. } => instance,
+            AnalyzerError::ComponentInterfaceMismatch { instance, .. } => instance,
+            AnalyzerError::InvalidTest { instance, .. } => instance,
+            AnalyzerError::InvalidTypeDeclaration { instance, .. } => instance,
+            AnalyzerError::InvisibleIndentifier { instance, .. } => instance,
+            AnalyzerError::LastItemWithDefine { instance, .. } => instance,
+            AnalyzerError::LastItemWithDefineInModport { instance, .. } => instance,
+            AnalyzerError::MemberAccessOnArray { instance, .. } => instance,
+            AnalyzerError::MismatchAssignment { instance, .. } => instance,
+            AnalyzerError::ImplicitClockConversion { instance, .. } => instance,
+            AnalyzerError::InvalidClockAssignment { instance, .. } => instance,
+            AnalyzerError::NonPositiveValue { instance, .. } => instance,
+            AnalyzerError::ZeroSize { instance, .. } => instance,
+            AnalyzerError::NonPortableDependency { instance, .. } => instance,
+            AnalyzerError::MismatchAttributeArgs { instance, .. } => instance,
+            AnalyzerError::MismatchClockDomain { instance, .. } => instance,
+            AnalyzerError::MismatchFunctionArg { instance, .. } => instance,
+            AnalyzerError::MismatchFunctionArity { instance, .. } => instance,
+            AnalyzerError::MismatchGenericsArity { instance, .. } => instance,
+            AnalyzerError::MismatchType { instance, .. } => instance,
+            AnalyzerError::MissingClockDomain { instance, .. } => instance,
+            AnalyzerError::MissingClockSignal { instance, .. } => instance,
+            AnalyzerError::MissingDefaultArgument { instance, .. } => instance,
+            AnalyzerError::MissingIfReset { instance, .. } => instance,
+            AnalyzerError::GenericInferenceFailed { instance, .. } => instance,
+            AnalyzerError::TypeInferenceConflict { instance, .. } => instance,
+            AnalyzerError::TypeInferenceNotSupported { instance, .. } => instance,
+            AnalyzerError::MissingPort { instance, .. } => instance,
+            AnalyzerError::MissingResetSignal { instance, .. } => instance,
+            AnalyzerError::MissingResetStatement { instance, .. } => instance,
+            AnalyzerError::MissingTri { instance, .. } => instance,
+            AnalyzerError::MixedFunctionArgument { instance, .. } => instance,
+            AnalyzerError::MixedStructUnionMember { instance, .. } => instance,
+            AnalyzerError::MultipleAssignment { instance, .. } => instance,
+            AnalyzerError::MultipleDefault { instance, .. } => instance,
+            AnalyzerError::PrivateMember { instance, .. } => instance,
+            AnalyzerError::PrivateNamespace { instance, .. } => instance,
+            AnalyzerError::ReferringBeforeDefinition { instance, .. } => instance,
+            AnalyzerError::ReferringInactiveDefinition { instance, .. } => instance,
+            AnalyzerError::ReservedIdentifier { instance, .. } => instance,
+            AnalyzerError::StatementAfterIfReset { instance, .. } => instance,
+            AnalyzerError::SvKeywordUsage { instance, .. } => instance,
+            AnalyzerError::SvWithImplicitReset { instance, .. } => instance,
+            AnalyzerError::TooLargeEnumVariant { instance, .. } => instance,
+            AnalyzerError::TooLargeNumber { instance, .. } => instance,
+            AnalyzerError::ZeroWidthNumber { instance, .. } => instance,
+            AnalyzerError::TooMuchEnumVariant { instance, .. } => instance,
+            AnalyzerError::UnassignVariable { instance, .. } => instance,
+            AnalyzerError::UnassignableOutput { instance, .. } => instance,
+            AnalyzerError::UncoveredBranch { instance, .. } => instance,
+            AnalyzerError::UndefinedIdentifier { instance, .. } => instance,
+            AnalyzerError::UnenclosedInnerIfExpression { instance, .. } => instance,
+            AnalyzerError::UnevaluableValue { instance, .. } => instance,
+            AnalyzerError::UnexpandableModport { instance, .. } => instance,
+            AnalyzerError::UnknownAttribute { instance, .. } => instance,
+            AnalyzerError::UnknownEmbedLang { instance, .. } => instance,
+            AnalyzerError::UnknownEmbedWay { instance, .. } => instance,
+            AnalyzerError::UnknownIncludeWay { instance, .. } => instance,
+            AnalyzerError::UnknownMember { instance, .. } => instance,
+            AnalyzerError::UnknownMsb { instance, .. } => instance,
+            AnalyzerError::UnknownParam { instance, .. } => instance,
+            AnalyzerError::UnknownPort { instance, .. } => instance,
+            AnalyzerError::UnknownUnsafe { instance, .. } => instance,
+            AnalyzerError::UnresolvableGenericExpression { instance, .. } => instance,
+            AnalyzerError::UnusedReturn { instance, .. } => instance,
+            AnalyzerError::UnpackedStructUnionMember { instance, .. } => instance,
+            AnalyzerError::UnusedVariable { instance, .. } => instance,
+            AnalyzerError::WrongSeparator { instance, .. } => instance,
+            AnalyzerError::InvalidWavedrom { instance, .. } => instance,
+        }
+    }
+
+    pub fn instance(&self) -> Option<&InstanceNote> {
+        match self {
+            AnalyzerError::AmbiguousElsif { instance, .. } => instance.as_ref(),
+            AnalyzerError::AmbiguousIdentifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::AnonymousIdentifierUsage { instance, .. } => instance.as_ref(),
+            AnalyzerError::CallNonFunction { instance, .. } => instance.as_ref(),
+            AnalyzerError::SideEffectFunctionCallInAlwaysFf { instance, .. } => instance.as_ref(),
+            AnalyzerError::FunctionOutputInAlwaysFf { instance, .. } => instance.as_ref(),
+            AnalyzerError::CombinationalLoop { instance, .. } => instance.as_ref(),
+            AnalyzerError::CombinationalLoopPositionOverflow { instance, .. } => instance.as_ref(),
+            AnalyzerError::CyclicTypeDependency { instance, .. } => instance.as_ref(),
+            AnalyzerError::CyclicFileDependency { instance, .. } => instance.as_ref(),
+            AnalyzerError::DuplicateArgument { instance, .. } => instance.as_ref(),
+            AnalyzerError::DuplicateEnumVariant { instance, .. } => instance.as_ref(),
+            AnalyzerError::DuplicatedIdentifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::ExceedLimit { instance, .. } => instance.as_ref(),
+            AnalyzerError::FixedTypeWithSignedModifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::ForLoopOverflow { instance, .. } => instance.as_ref(),
+            AnalyzerError::IncludeFailure { instance, .. } => instance.as_ref(),
+            AnalyzerError::IncompatProto { instance, .. } => instance.as_ref(),
+            AnalyzerError::InfiniteRecursion { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidAssignment { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidCast { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidClock { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidClockDomain { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidConnectOperand { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidDirection { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidEmbed { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidEmbedIdentifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidEnumVariant { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidFactor { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidIdentifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidImport { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidMixin { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidUnsizedLiteral { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidLogicalOperand { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnsignedArithShift { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidLsb { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidModifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidModportItem { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidMsb { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidNumberCharacter { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidOperand { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidPortDefaultValue { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidRange { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidReset { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidSelect { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidSizeType { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidRangeAssign { instance, .. } => instance.as_ref(),
+            AnalyzerError::NonConstantSelectWidth { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidStatement { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidInitialAssign { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidForRange { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidForStep { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidTbUsage { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingTbPort { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownTbPort { instance, .. } => instance.as_ref(),
+            AnalyzerError::ComponentInterfaceMismatch { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidTest { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidTypeDeclaration { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvisibleIndentifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::LastItemWithDefine { instance, .. } => instance.as_ref(),
+            AnalyzerError::LastItemWithDefineInModport { instance, .. } => instance.as_ref(),
+            AnalyzerError::MemberAccessOnArray { instance, .. } => instance.as_ref(),
+            AnalyzerError::MismatchAssignment { instance, .. } => instance.as_ref(),
+            AnalyzerError::ImplicitClockConversion { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidClockAssignment { instance, .. } => instance.as_ref(),
+            AnalyzerError::NonPositiveValue { instance, .. } => instance.as_ref(),
+            AnalyzerError::ZeroSize { instance, .. } => instance.as_ref(),
+            AnalyzerError::NonPortableDependency { instance, .. } => instance.as_ref(),
+            AnalyzerError::MismatchAttributeArgs { instance, .. } => instance.as_ref(),
+            AnalyzerError::MismatchClockDomain { instance, .. } => instance.as_ref(),
+            AnalyzerError::MismatchFunctionArg { instance, .. } => instance.as_ref(),
+            AnalyzerError::MismatchFunctionArity { instance, .. } => instance.as_ref(),
+            AnalyzerError::MismatchGenericsArity { instance, .. } => instance.as_ref(),
+            AnalyzerError::MismatchType { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingClockDomain { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingClockSignal { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingDefaultArgument { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingIfReset { instance, .. } => instance.as_ref(),
+            AnalyzerError::GenericInferenceFailed { instance, .. } => instance.as_ref(),
+            AnalyzerError::TypeInferenceConflict { instance, .. } => instance.as_ref(),
+            AnalyzerError::TypeInferenceNotSupported { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingPort { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingResetSignal { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingResetStatement { instance, .. } => instance.as_ref(),
+            AnalyzerError::MissingTri { instance, .. } => instance.as_ref(),
+            AnalyzerError::MixedFunctionArgument { instance, .. } => instance.as_ref(),
+            AnalyzerError::MixedStructUnionMember { instance, .. } => instance.as_ref(),
+            AnalyzerError::MultipleAssignment { instance, .. } => instance.as_ref(),
+            AnalyzerError::MultipleDefault { instance, .. } => instance.as_ref(),
+            AnalyzerError::PrivateMember { instance, .. } => instance.as_ref(),
+            AnalyzerError::PrivateNamespace { instance, .. } => instance.as_ref(),
+            AnalyzerError::ReferringBeforeDefinition { instance, .. } => instance.as_ref(),
+            AnalyzerError::ReferringInactiveDefinition { instance, .. } => instance.as_ref(),
+            AnalyzerError::ReservedIdentifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::StatementAfterIfReset { instance, .. } => instance.as_ref(),
+            AnalyzerError::SvKeywordUsage { instance, .. } => instance.as_ref(),
+            AnalyzerError::SvWithImplicitReset { instance, .. } => instance.as_ref(),
+            AnalyzerError::TooLargeEnumVariant { instance, .. } => instance.as_ref(),
+            AnalyzerError::TooLargeNumber { instance, .. } => instance.as_ref(),
+            AnalyzerError::ZeroWidthNumber { instance, .. } => instance.as_ref(),
+            AnalyzerError::TooMuchEnumVariant { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnassignVariable { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnassignableOutput { instance, .. } => instance.as_ref(),
+            AnalyzerError::UncoveredBranch { instance, .. } => instance.as_ref(),
+            AnalyzerError::UndefinedIdentifier { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnenclosedInnerIfExpression { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnevaluableValue { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnexpandableModport { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownAttribute { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownEmbedLang { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownEmbedWay { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownIncludeWay { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownMember { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownMsb { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownParam { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownPort { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnknownUnsafe { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnresolvableGenericExpression { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnusedReturn { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnpackedStructUnionMember { instance, .. } => instance.as_ref(),
+            AnalyzerError::UnusedVariable { instance, .. } => instance.as_ref(),
+            AnalyzerError::WrongSeparator { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidWavedrom { instance, .. } => instance.as_ref(),
+        }
+    }
+
     pub fn token_source(&self) -> TokenSource {
         match self {
             AnalyzerError::AmbiguousElsif { token_source, .. } => *token_source,
@@ -2582,6 +3176,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn ambiguous_identifier(identifier: &str, token: &TokenRange) -> Self {
@@ -2590,6 +3185,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn anonymous_identifier_usage(token: &TokenRange) -> Self {
@@ -2597,6 +3193,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn call_non_function(identifier: &str, kind: &str, token: &TokenRange) -> Self {
@@ -2607,6 +3204,7 @@ impl AnalyzerError {
             error_location: token.into(),
             inst_context: vec![],
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn side_effect_function_call_in_always_ff(
@@ -2637,6 +3235,7 @@ impl AnalyzerError {
             external_writes,
             function_definition,
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn function_output_in_always_ff(
@@ -2656,6 +3255,7 @@ impl AnalyzerError {
             error_location: token.into(),
             output_declaration,
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn combinational_loop(
@@ -2677,6 +3277,7 @@ impl AnalyzerError {
             loop_participants: loop_participants.to_vec(),
             dependency_sites: dependency_sites.to_vec(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn combinational_loop_position_overflow(token: &TokenRange) -> Self {
@@ -2684,6 +3285,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn cyclic_type_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
@@ -2693,6 +3295,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn cyclic_file_dependency(start: &str, end: &str, token: &TokenRange) -> Self {
@@ -2702,6 +3305,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn duplicate_argument(identifier: &str, token: &TokenRange) -> Self {
@@ -2710,6 +3314,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn duplicate_enum_variant(identifier: &str, token: &TokenRange) -> Self {
@@ -2718,6 +3323,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn duplicated_identifier(
@@ -2731,6 +3337,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn exceed_limit(kind: ExceedLimitKind, value: usize, token: &TokenRange) -> Self {
@@ -2740,6 +3347,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn fixed_type_with_signed_modifier(token: &TokenRange) -> Self {
@@ -2747,6 +3355,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn include_failure(name: &str, cause: &str, token: &TokenRange) -> Self {
@@ -2756,6 +3365,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn incompat_proto(
@@ -2771,6 +3381,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn infinite_recursion(token: &TokenRange) -> Self {
@@ -2778,6 +3389,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_assignment(identifier: &str, kind: &str, token: &TokenRange) -> Self {
@@ -2787,6 +3399,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_cast(from: &str, to: &str, token: &TokenRange) -> Self {
@@ -2796,6 +3409,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_clock(identifier: &str, token: &TokenRange) -> Self {
@@ -2804,6 +3418,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_clock_domain(token: &TokenRange) -> Self {
@@ -2811,6 +3426,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_connect_operand(
@@ -2824,6 +3440,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_direction(kind: &str, token: &TokenRange) -> Self {
@@ -2832,6 +3449,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_embed(way: &str, lang: &str, token: &TokenRange) -> Self {
@@ -2841,6 +3459,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_embed_identifier(token: &TokenRange) -> Self {
@@ -2848,6 +3467,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_enum_variant(identifier: &str, encoding: &str, token: &TokenRange) -> Self {
@@ -2857,6 +3477,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_factor(
@@ -2873,6 +3494,7 @@ impl AnalyzerError {
             error_location: token.into(),
             inst_context,
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_identifier(identifier: &str, rule: &str, token: &TokenRange) -> Self {
@@ -2882,6 +3504,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_import(token: &TokenRange) -> Self {
@@ -2889,6 +3512,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_mixin(identifier: &str, reason: &str, token: &TokenRange) -> Self {
@@ -2898,6 +3522,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_unsized_literal(token: &TokenRange) -> Self {
@@ -2905,6 +3530,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_logical_operand(op: bool, token: &TokenRange) -> Self {
@@ -2918,6 +3544,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unsigned_arith_shift(token: &TokenRange) -> Self {
@@ -2925,6 +3552,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_lsb(token: &TokenRange) -> Self {
@@ -2932,6 +3560,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_modifier(kind: &str, reason: InvalidModifierKind, token: &TokenRange) -> Self {
@@ -2941,6 +3570,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_modport_item(
@@ -2954,6 +3584,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_msb(token: &TokenRange) -> Self {
@@ -2961,6 +3592,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_number_character(cause: char, kind: &str, token: &TokenRange) -> Self {
@@ -2970,6 +3602,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_operand(kind: &str, op: &str, token: &TokenRange) -> Self {
@@ -2979,6 +3612,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_port_default_value(
@@ -2990,6 +3624,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_range(cause: &str, token: &TokenRange) -> Self {
@@ -2998,6 +3633,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_reset(identifier: &str, token: &TokenRange) -> Self {
@@ -3006,6 +3642,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_select(
@@ -3020,6 +3657,7 @@ impl AnalyzerError {
             error_location: token.into(),
             inst_context,
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_size_type(token: &TokenRange) -> Self {
@@ -3027,6 +3665,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_range_assign(token: &TokenRange) -> Self {
@@ -3034,6 +3673,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn non_constant_select_width(token: &TokenRange) -> Self {
@@ -3041,6 +3681,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_statement(kind: &str, token: &TokenRange) -> Self {
@@ -3049,6 +3690,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_initial_assign(identifier: &str, token: &TokenRange) -> Self {
@@ -3057,6 +3699,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn non_portable_dependency(item: &str, project: &str, token: &TokenRange) -> Self {
@@ -3066,6 +3709,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_for_range(kind: InvalidForRangeKind, token: &TokenRange) -> Self {
@@ -3075,6 +3719,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_for_step(cause: InvalidForStepKind, token: &TokenRange) -> Self {
@@ -3083,6 +3728,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn for_loop_overflow(token: &TokenRange) -> Self {
@@ -3090,6 +3736,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_test(cause: InvalidTestKind, token: &TokenRange) -> Self {
@@ -3098,6 +3745,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_tb_usage(token: &TokenRange) -> Self {
@@ -3105,6 +3753,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_tb_port(name: &str, port: &str, token: &TokenRange) -> Self {
@@ -3114,6 +3763,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_tb_port(name: &str, port: &str, token: &TokenRange) -> Self {
@@ -3123,6 +3773,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn component_interface_mismatch(
@@ -3144,6 +3795,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_type_declaration(kind: &str, token: &TokenRange) -> Self {
@@ -3152,6 +3804,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invisible_identifier(identifier: &str, token: &TokenRange) -> Self {
@@ -3160,6 +3813,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn last_item_with_define(token: &TokenRange) -> Self {
@@ -3167,6 +3821,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn last_item_with_define_in_modport(
@@ -3183,6 +3838,7 @@ impl AnalyzerError {
             error_location: token.into(),
             member_source,
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn member_access_on_array(
@@ -3198,6 +3854,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mismatch_assignment(
@@ -3216,6 +3873,7 @@ impl AnalyzerError {
             error_location: token.into(),
             inst_context,
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn implicit_clock_conversion(
@@ -3232,6 +3890,7 @@ impl AnalyzerError {
             error_location: token.into(),
             inst_context,
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_clock_assignment(dst: &str, token: &TokenRange) -> Self {
@@ -3240,6 +3899,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn non_positive_value(value: &str, typ: &str, token: &TokenRange) -> Self {
@@ -3249,6 +3909,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn zero_size(token: &TokenRange) -> Self {
@@ -3256,6 +3917,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mismatch_attribute_args(name: &str, expected: String, token: &TokenRange) -> Self {
@@ -3265,6 +3927,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mismatch_clock_domain(
@@ -3280,6 +3943,7 @@ impl AnalyzerError {
             error_location: token.into(),
             other_location: other_token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mismatch_function_arg(name: &str, src: &str, token: &TokenRange) -> Self {
@@ -3289,6 +3953,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mismatch_function_arity(
@@ -3304,6 +3969,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mismatch_generics_arity(
@@ -3319,6 +3985,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mismatch_type(kind: MismatchTypeKind, token: &TokenRange) -> Self {
@@ -3327,6 +3994,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_clock_domain(token: &TokenRange) -> Self {
@@ -3334,6 +4002,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_clock_signal(token: &TokenRange) -> Self {
@@ -3341,6 +4010,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_default_argument(identifier: &str, token: &TokenRange) -> Self {
@@ -3349,6 +4019,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn generic_inference_failed(identifier: &str, token: &TokenRange) -> Self {
@@ -3357,6 +4028,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn type_inference_conflict(identifier: &str, token: &TokenRange) -> Self {
@@ -3365,6 +4037,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn type_inference_not_supported(token: &TokenRange) -> Self {
@@ -3372,6 +4045,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_if_reset(token: &TokenRange) -> Self {
@@ -3379,6 +4053,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_port(name: &str, port: &str, token: &TokenRange) -> Self {
@@ -3388,6 +4063,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_reset_signal(token: &TokenRange) -> Self {
@@ -3395,6 +4071,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_reset_statement(name: &str, token: &TokenRange, tokens: &[TokenRange]) -> Self {
@@ -3403,6 +4080,7 @@ impl AnalyzerError {
             input: source(token),
             error_locations: tokens.iter().map(|x| x.into()).collect(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn missing_tri(token: &TokenRange) -> Self {
@@ -3410,6 +4088,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mixed_function_argument(token: &TokenRange) -> Self {
@@ -3417,6 +4096,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn mixed_struct_union_member(token: &TokenRange) -> Self {
@@ -3424,6 +4104,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unpacked_struct_union_member(identifier: &str, token: &TokenRange) -> Self {
@@ -3432,6 +4113,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn multiple_assignment(
@@ -3444,6 +4126,7 @@ impl AnalyzerError {
             input: source(token),
             error_locations: assigned.iter().map(|x| x.into()).collect(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn multiple_default(
@@ -3457,6 +4140,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn private_member(name: &str, token: &TokenRange) -> Self {
@@ -3465,6 +4149,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn private_namespace(name: &str, token: &TokenRange) -> Self {
@@ -3473,6 +4158,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn referring_before_definition(identifier: &str, token: &TokenRange) -> Self {
@@ -3481,6 +4167,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn referring_inactive_definition(identifier: &str, token: &TokenRange) -> Self {
@@ -3489,6 +4176,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn reserved_identifier(identifier: &str, token: &TokenRange) -> Self {
@@ -3497,6 +4185,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn statement_after_if_reset(token: &TokenRange) -> Self {
@@ -3504,6 +4193,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn sv_keyword_usage(identifier: &str, token: &TokenRange) -> Self {
@@ -3512,6 +4202,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn sv_with_implicit_reset(token: &TokenRange) -> Self {
@@ -3519,6 +4210,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn too_large_enum_variant(
@@ -3534,6 +4226,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn too_large_number(width: usize, token: &TokenRange) -> Self {
@@ -3542,6 +4235,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn zero_width_number(token: &TokenRange) -> Self {
@@ -3549,6 +4243,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn too_much_enum_variant(
@@ -3564,6 +4259,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unassign_variable(identifier: &str, token: &TokenRange) -> Self {
@@ -3572,6 +4268,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unassignable_output(token: &TokenRange) -> Self {
@@ -3579,6 +4276,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn uncovered_branch(identifier: &str, token: &TokenRange, covered: &[TokenRange]) -> Self {
@@ -3587,6 +4285,7 @@ impl AnalyzerError {
             input: source(token),
             error_locations: covered.iter().map(|x| x.into()).collect(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn undefined_identifier(identifier: &str, token: &TokenRange) -> Self {
@@ -3595,6 +4294,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unenclosed_inner_if_expression(token: &TokenRange) -> Self {
@@ -3602,6 +4302,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unevaluable_value(kind: UnevaluableValueKind, token: &TokenRange) -> Self {
@@ -3610,6 +4311,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unexpandable_modport(identifier: &str, token: &TokenRange) -> Self {
@@ -3618,6 +4320,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_attribute(name: &str, token: &TokenRange) -> Self {
@@ -3626,6 +4329,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_embed_lang(name: &str, token: &TokenRange) -> Self {
@@ -3635,6 +4339,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_embed_way(name: &str, token: &TokenRange) -> Self {
@@ -3644,6 +4349,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_include_way(name: &str, token: &TokenRange) -> Self {
@@ -3653,6 +4359,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_member(name: &str, member: &str, token: &TokenRange) -> Self {
@@ -3662,6 +4369,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_msb(token: &TokenRange) -> Self {
@@ -3669,6 +4377,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_param(name: &str, param: &str, token: &TokenRange) -> Self {
@@ -3678,6 +4387,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_port(name: &str, port: &str, token: &TokenRange) -> Self {
@@ -3687,6 +4397,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unknown_unsafe(name: &str, token: &TokenRange) -> Self {
@@ -3695,6 +4406,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unresolvable_generic_expression(
@@ -3708,6 +4420,7 @@ impl AnalyzerError {
             error_location: token.into(),
             definition_location: definition_token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unused_return(identifier: &str, token: &TokenRange) -> Self {
@@ -3716,6 +4429,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn unused_variable(identifier: &str, token: &TokenRange) -> Self {
@@ -3724,6 +4438,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn invalid_wavedrom(cause: InvalidWavedromKind, token: &TokenRange) -> Self {
@@ -3732,6 +4447,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
     pub fn wrong_seperator(separator: &str, token: &TokenRange) -> Self {
@@ -3742,6 +4458,7 @@ impl AnalyzerError {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
+            instance: None,
         }
     }
 }

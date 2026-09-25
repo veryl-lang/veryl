@@ -1,11 +1,15 @@
 use crate::HashMap;
 use crate::conv::context::Config;
 use crate::ir::{Component, Signature};
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
+use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Default)]
 pub struct InstanceHistory {
-    pub hierarchy: Vec<Signature>,
+    /// The site is `None` for a component evaluated other than by
+    /// instantiation.
+    hierarchy: Vec<(Signature, Option<TokenRange>)>,
     /// `Arc`-wrapped so repeated `get` hands out references instead of
     /// deep-cloning the component tree — matters on testbench-heavy designs.
     full: HashMap<Signature, Option<(Arc<Component>, bool)>>,
@@ -27,12 +31,30 @@ impl InstanceHistory {
     }
 
     pub fn get_current_signature(&self) -> Option<&Signature> {
-        self.hierarchy.last()
+        self.hierarchy.last().map(|(sig, _)| sig)
+    }
+
+    /// Outermost first. Stops at an entry evaluated at its defaults: nothing
+    /// above it can have decided the values below.
+    pub fn overridden_frames(&self) -> Vec<(&Signature, &TokenRange)> {
+        let mut ret: Vec<_> = self
+            .hierarchy
+            .iter()
+            .rev()
+            .map_while(|(sig, site)| {
+                site.as_ref()
+                    .filter(|_| sig.has_overrides())
+                    .map(|x| (sig, x))
+            })
+            .collect();
+        ret.reverse();
+        ret
     }
 
     pub fn push(
         &mut self,
         mut sig: Signature,
+        site: Option<TokenRange>,
         config: &Config,
     ) -> Result<bool, InstanceHistoryError> {
         sig.normalize();
@@ -42,15 +64,17 @@ impl InstanceHistory {
         if self.full.len() > config.instance_total_limit {
             return Err(InstanceHistoryError::ExceedTotalLimit(self.full.len()));
         }
-        if self.hierarchy.contains(&sig) {
+        if self.hierarchy.iter().any(|(x, _)| *x == sig) {
             return Err(InstanceHistoryError::InfiniteRecursion);
         }
-        if self.full.contains_key(&sig) {
-            Ok(false)
-        } else {
-            self.hierarchy.push(sig.clone());
-            self.full.insert(sig, None);
-            Ok(true)
+        // Pushed even when cached: the caller pops after every success.
+        self.hierarchy.push((sig.clone(), site));
+        match self.full.entry(sig) {
+            Entry::Occupied(_) => Ok(false),
+            Entry::Vacant(x) => {
+                x.insert(None);
+                Ok(true)
+            }
         }
     }
 

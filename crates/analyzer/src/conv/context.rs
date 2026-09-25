@@ -1,4 +1,4 @@
-use crate::analyzer_error::{AnalyzerError, ExceedLimitKind};
+use crate::analyzer_error::{AnalyzerError, ExceedLimitKind, InstanceNote};
 use crate::conv::conv_profiler::{ConvProfile, ConvProfileGuard};
 use crate::conv::instance::{InstanceHistory, InstanceHistoryError};
 use crate::ir::{
@@ -583,9 +583,43 @@ impl Context {
             }
         }
 
-        if !replaced && !self.errors.contains(&error) {
-            self.errors.push(error);
+        if !replaced {
+            let note = self.instance_note();
+            let existing = self
+                .errors
+                .iter_mut()
+                .position(|x| x.same_report(&mut error));
+            if let Some(existing) = existing {
+                // Raised without an override too, so no instance explains it.
+                if note.is_none() {
+                    *self.errors[existing].instance_mut() = None;
+                }
+            } else {
+                *error.instance_mut() = note;
+                self.errors.push(error);
+            }
         }
+    }
+
+    fn instance_note(&self) -> Option<InstanceNote> {
+        // Only where the values are written and where they arrive matter;
+        // a recursive instantiation would otherwise list every level.
+        const KEPT_AT_EACH_END: usize = 2;
+
+        let frames = self.instance_history.overridden_frames();
+        let (_, outermost_site) = frames.first()?;
+        let mut path: Vec<_> = frames
+            .iter()
+            .map(|(sig, site)| format!("{}: {}", site.beg.text, sig.to_overridden_string()))
+            .collect();
+        if path.len() > KEPT_AT_EACH_END * 2 + 1 {
+            let elided = path.len() - KEPT_AT_EACH_END * 2;
+            path.splice(
+                KEPT_AT_EACH_END..path.len() - KEPT_AT_EACH_END,
+                [format!("({elided} more)")],
+            );
+        }
+        Some(InstanceNote::new(path.join(" -> "), outermost_site))
     }
 
     pub fn insert_modport(&mut self, name: StrId, members: Vec<(StrId, Direction)>) {
@@ -840,8 +874,12 @@ impl Context {
         f(self)
     }
 
-    pub fn push_instance_history(&mut self, x: Signature) -> Result<bool, InstanceHistoryError> {
-        self.instance_history.push(x, &self.config)
+    pub fn push_instance_history(
+        &mut self,
+        x: Signature,
+        site: Option<TokenRange>,
+    ) -> Result<bool, InstanceHistoryError> {
+        self.instance_history.push(x, site, &self.config)
     }
 
     pub fn pop_instance_history(&mut self) {

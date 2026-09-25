@@ -3630,6 +3630,24 @@ pub fn get_component(
     sig: &Signature,
     token: TokenRange,
 ) -> IrResult<Arc<ir::Component>> {
+    get_component_at(context, sig, token, None)
+}
+
+/// Records `token` as the instantiation site for diagnostics raised inside.
+pub fn get_instantiated_component(
+    context: &mut Context,
+    sig: &Signature,
+    token: TokenRange,
+) -> IrResult<Arc<ir::Component>> {
+    get_component_at(context, sig, token, Some(token))
+}
+
+fn get_component_at(
+    context: &mut Context,
+    sig: &Signature,
+    token: TokenRange,
+    site: Option<TokenRange>,
+) -> IrResult<Arc<ir::Component>> {
     // Normalize before any cache operations so keys always match what push() stores.
     let mut sig = sig.clone();
     sig.normalize();
@@ -3641,7 +3659,7 @@ pub fn get_component(
             // if the `in_generic` flag is set.
             // Such result should be removed from the cache and be created again.
             context.remove_instance_history(sig);
-            get_component(context, sig, token)
+            get_component_at(context, sig, token, site)
         } else {
             Ok(component)
         }
@@ -3656,7 +3674,7 @@ pub fn get_component(
             return Ok(Arc::new(ir::Component::SystemVerilog(component)));
         }
 
-        let err = context.push_instance_history(sig.clone());
+        let err = context.push_instance_history(sig.clone(), site);
 
         if let Err(x) = err {
             match x {
@@ -3703,13 +3721,9 @@ pub fn get_component(
 
                         let component = Arc::new(ir::Component::Module(component));
                         c.set_instance_history(sig, component.clone());
-                        c.pop_instance_history();
                         Ok(component)
                     }
-                    Err(x) => {
-                        c.pop_instance_history();
-                        Err(x)
-                    }
+                    Err(x) => Err(x),
                 }
             }
             SymbolKind::Interface(x) if !x.is_proto => {
@@ -3722,18 +3736,11 @@ pub fn get_component(
                 };
 
                 let component: IrResult<ir::Interface> = Conv::conv(c, x);
-                match component {
-                    Ok(component) => {
-                        let component = Arc::new(ir::Component::Interface(component));
-                        c.set_instance_history(sig, component.clone());
-                        c.pop_instance_history();
-                        Ok(component)
-                    }
-                    Err(x) => {
-                        c.pop_instance_history();
-                        Err(x)
-                    }
-                }
+                component.map(|component| {
+                    let component = Arc::new(ir::Component::Interface(component));
+                    c.set_instance_history(sig, component.clone());
+                    component
+                })
             }
             SymbolKind::Module(x) if x.is_proto => {
                 let definition =
@@ -3753,18 +3760,16 @@ pub fn get_component(
 
                         let component = Arc::new(ir::Component::Module(component));
                         c.set_instance_history(sig, component.clone());
-                        c.pop_instance_history();
                         Ok(component)
                     }
-                    Err(x) => {
-                        c.pop_instance_history();
-                        Err(x)
-                    }
+                    Err(x) => Err(x),
                 }
             }
             _ => Err(ir_error!(token)),
         });
 
+        // Outside the block so an early `?` in it cannot skip the pop.
+        context.pop_instance_history();
         context.pop_generic_map();
         ret
     }
