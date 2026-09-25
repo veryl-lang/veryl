@@ -5,6 +5,7 @@ use crate::namespace::Namespace;
 use crate::symbol::GenericMap;
 use crate::symbol::{GenericBoundKind, SymbolId, SymbolKind, TypeKind};
 use crate::symbol_path::GenericSymbolPath;
+use crate::value::Value;
 use crate::{scope, symbol_table};
 use std::fmt;
 use veryl_parser::resource_table::StrId;
@@ -33,6 +34,59 @@ impl Signature {
             generic_parameters: vec![],
             modport_signatures: vec![],
         }
+    }
+
+    /// A connected interface counts only when it was itself overridden.
+    pub fn has_overrides(&self) -> bool {
+        !self.parameters.is_empty()
+            || !self.generic_parameters.is_empty()
+            || self
+                .modport_signatures
+                .iter()
+                .any(|(_, sig)| sig.has_overrides())
+    }
+
+    /// A value with no plain rendering is left out rather than shown as bits.
+    pub fn to_overridden_string(&self) -> String {
+        let symbol = symbol_table::get(self.symbol).unwrap();
+        let mut ret = symbol.token.text.to_string();
+
+        if !self.generic_parameters.is_empty() {
+            let args: Vec<_> = self
+                .generic_parameters
+                .iter()
+                .map(|(_, x)| x.to_string())
+                .collect();
+            ret.push_str(&format!("::<{}>", args.join(", ")));
+        }
+
+        let params: Vec<_> = self
+            .parameters
+            .iter()
+            .filter_map(|(name, value)| {
+                let value = match value {
+                    ValueVariant::Numeric(x) => plain_number(x)?,
+                    ValueVariant::Type(x) => x.to_string(),
+                    ValueVariant::NumericArray(_) | ValueVariant::Unknown => return None,
+                };
+                Some(format!("{name}: {value}"))
+            })
+            .collect();
+        if !params.is_empty() {
+            ret.push_str(&format!(" #({})", params.join(", ")));
+        }
+
+        let ports: Vec<_> = self
+            .modport_signatures
+            .iter()
+            .filter(|(_, sig)| sig.has_overrides())
+            .map(|(name, sig)| format!("{name}: {}", sig.to_overridden_string()))
+            .collect();
+        if !ports.is_empty() {
+            ret.push_str(&format!(" ({})", ports.join(", ")));
+        }
+
+        ret
     }
 
     pub fn is_compatible(
@@ -224,5 +278,12 @@ impl fmt::Display for Signature {
         }
 
         ret.fmt(f)
+    }
+}
+
+fn plain_number(x: &Value) -> Option<String> {
+    match x {
+        Value::U64(v) if x.signed() => v.to_i64().map(|v| v.to_string()),
+        _ => x.to_u64().map(|v| v.to_string()),
     }
 }

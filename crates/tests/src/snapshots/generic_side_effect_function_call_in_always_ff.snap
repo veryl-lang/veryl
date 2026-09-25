@@ -27,3 +27,14 @@ side_effect_function_call_in_always_ff (https://doc.veryl-lang.org/book/07_appen
  12 │     }
     ╰────
   help: move the external write into this always_ff, or use an output argument connected to a variable declared inside it
+
+Advice: instantiated_here
+
+  ☞ reported inside u: Generic::<Pkg>
+    ╭─[../../testcases/error/generic_side_effect_function_call_in_always_ff.veryl:32:10]
+ 31 │ ) {
+ 32 │     inst u: Generic::<Pkg> (
+    ·          ┬
+    ·          ╰── Instantiated here
+ 33 │         clk: clk,
+    ╰────

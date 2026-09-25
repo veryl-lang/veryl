@@ -875,15 +875,29 @@ fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
         })
         .unwrap_or_default();
 
-    // Non-primary labels become navigable related-information.
-    let related_information: Option<Vec<DiagnosticRelatedInformation>> =
-        miette_diag.source_code().and_then(|sc| {
-            let related: Vec<_> = participants
+    // Non-primary labels and related diagnostics become navigable
+    // related-information.
+    let mut related: Vec<_> = miette_diag
+        .source_code()
+        .map(|sc| {
+            participants
                 .iter()
                 .filter_map(|label| label_to_related(label, sc))
-                .collect();
-            (!related.is_empty()).then_some(related)
-        });
+                .collect()
+        })
+        .unwrap_or_default();
+    for diag in miette_diag.related().into_iter().flatten() {
+        let (Some(sc), Some(labels)) = (diag.source_code(), diag.labels()) else {
+            continue;
+        };
+        for label in labels {
+            if let Some(mut x) = label_to_related(&label, sc) {
+                x.message = diag.to_string();
+                related.push(x);
+            }
+        }
+    }
+    let related_information = (!related.is_empty()).then_some(related);
 
     let code = miette_diag
         .code()

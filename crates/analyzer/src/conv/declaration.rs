@@ -22,9 +22,9 @@ use crate::conv::utils::{
     check_assign_clock_domain, eval_array_range_assign, eval_assign_statement, eval_clock,
     eval_const_assign, eval_expr, eval_factor_symbol, eval_factor_symbol_external,
     eval_generate_for_range, eval_reset, eval_size, eval_type, eval_variable, expand_connect,
-    expand_connect_const, expand_input_connect, get_component, get_overridden_params,
-    get_port_connects, get_return_str, insert_port_connect, try_infer_decl_type,
-    try_infer_var_assign, var_path_to_assign_destination,
+    expand_connect_const, expand_input_connect, get_component, get_instantiated_component,
+    get_overridden_params, get_port_connects, get_return_str, insert_port_connect,
+    try_infer_decl_type, try_infer_var_assign, var_path_to_assign_destination,
 };
 use crate::conv::{Affiliation, Context, Conv};
 use crate::definition_table::{self, Definition};
@@ -1655,7 +1655,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             sig.add_modport_signature(port_name, modport_sig);
         }
 
-        let component = context.block(|c| get_component(c, &sig, token));
+        let component = context.block(|c| get_instantiated_component(c, &sig, token));
 
         context.pop_override();
         context.pop_modport_signatures();

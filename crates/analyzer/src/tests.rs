@@ -8,40 +8,24 @@ use veryl_parser::Parser;
 use veryl_parser::doc_comment_table;
 use veryl_parser::resource_table;
 
-mod comb_loop_diagnostic_tests;
-
 mod comb_loop_adversarial_tests;
-
 mod comb_loop_conservative_tests;
-
-mod comb_loop_incomplete_tests;
-
-mod comb_loop_interface_tests;
-
-mod comb_loop_interface_function_tests;
-
-mod comb_loop_procedural_tests;
-
-mod comb_loop_retained_state_tests;
-
+mod comb_loop_diagnostic_tests;
 mod comb_loop_function_tests;
-
+mod comb_loop_incomplete_tests;
+mod comb_loop_interface_function_tests;
+mod comb_loop_interface_tests;
 mod comb_loop_module_tests;
-
 mod comb_loop_positional_tests;
-
+mod comb_loop_procedural_tests;
 mod comb_loop_replication_tests;
-
-mod constant_evaluation_tests;
-
+mod comb_loop_retained_state_tests;
 mod comb_loop_sparse_tests;
-
-mod modport_connection_tests;
-
-mod interface_array_tests;
-
 mod comb_loop_summary_tests;
-
+mod constant_evaluation_tests;
+mod instantiation_note_tests;
+mod interface_array_tests;
+mod modport_connection_tests;
 mod statement_after_if_reset_tests;
 
 #[track_caller]

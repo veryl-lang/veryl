@@ -312,6 +312,47 @@ async fn combinational_loop_diagnostic() {
 
 #[tokio::test]
 #[ntest::timeout(60000)]
+async fn instantiation_note_diagnostic() {
+    let mut server = TestServer::new(Backend::new);
+
+    let req = build_initialize(1);
+    server.send_request(req).await;
+    let _ = server.recv_response().await;
+
+    let req = build_initialized();
+    server.send_request(req).await;
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "window/logMessage");
+
+    let code = "module Leaf #(param W: u32 = 1) (i: input logic<8>, o: output logic) {\n    assign o = i[W + 5];\n}\nmodule Top (i: input logic<8>, o: output logic) {\n    inst l: Leaf #(W: 9) (i, o);\n}\n";
+    let req = build_did_open(code);
+    server.send_request(req).await;
+
+    // did_open log
+    let _ = server.recv_notification().await;
+
+    // diagnostics
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "textDocument/publishDiagnostics");
+    let diags = res.params().unwrap()["diagnostics"].as_array().unwrap();
+    let diag = diags
+        .iter()
+        .find(|x| x["code"] == "invalid_select")
+        .unwrap_or_else(|| panic!("expected invalid_select, got: {diags:?}"));
+    let related = diag["relatedInformation"].as_array().unwrap();
+    assert_eq!(related.len(), 1, "{diag}");
+    assert_eq!(
+        related[0]["message"],
+        Value::from("reported inside l: Leaf #(W: 9)")
+    );
+    assert_eq!(
+        related[0]["location"]["range"]["start"]["line"],
+        Value::from(4)
+    );
+}
+
+#[tokio::test]
+#[ntest::timeout(60000)]
 async fn progress() {
     let mut server = TestServer::new(Backend::new);
 
