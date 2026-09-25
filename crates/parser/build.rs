@@ -51,8 +51,9 @@ fn generate_token_type() {
     let par_content = fs::read_to_string("veryl.par").expect("Failed to read veryl.par");
 
     // Only match lines with scanner specification <...> to exclude grammar rules
-    let re = Regex::new(r"^(\w+)\s*:\s*<[^>]+>(?:'([^']+)'|[^\s]+)\s*:\s*Token\s*;")
-        .expect("Invalid regex");
+    let re =
+        Regex::new(r"^(\w+)\s*:\s*<[^>]+>(?:'([^']+)'|[^\s]+)(?:\s*\?[!=]\s*\S+)?\s*:\s*Token\s*;")
+            .expect("Invalid regex");
     let keyword_re = Regex::new(r":\s*Token\s*;\s*//\s*Keyword").expect("Invalid keyword regex");
     let type_re =
         Regex::new(r":\s*Token\s*;\s*//\s*Keyword:\s*Type").expect("Invalid type keyword regex");
@@ -103,6 +104,9 @@ fn generate_token_type() {
                 is_keyword,
                 is_type,
             });
+        } else if line_trimmed.contains('<') {
+            // A terminal missing from TokenType degrades its diagnostics to "error".
+            panic!("Failed to extract a token definition: {}", line_trimmed);
         }
     }
 
