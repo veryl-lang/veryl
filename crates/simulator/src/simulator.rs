@@ -147,6 +147,16 @@ pub struct Simulator {
     /// `last_event`'s watch slice of `watch_pool`, cached alongside
     /// `last_event_stmts`.
     last_event_watch: Option<(u32, u32)>,
+    /// Trigger bit of `last_event`; `None` when the analysis never indexed it.
+    last_event_trigger: Option<usize>,
+    /// Events fired since the last settle, one bit per
+    /// `Ir::cone_trigger_events` entry; empty when the trigger analysis is
+    /// off.  Handed to the cone-gate guards through the comb buffer.
+    trigger_pending: Vec<u64>,
+    trigger_index: HashMap<Event, usize>,
+    /// `VERYL_STATE_DIGEST=1`: a running hash of the FF storage after every
+    /// step, printed on drop, to compare two runs' whole flop history.
+    state_digest: Option<(u64, u64)>,
     /// `VERYL_SETTLE_FILTER_DIAG=1`: print settle counts on drop.
     settle_diag: bool,
     settles_run: u64,
@@ -496,6 +506,14 @@ impl Simulator {
         let n_derived = ir.derived_clock_schedule.clocks.len();
         let n_derived_resets = ir.derived_clock_schedule.resets.len();
         let components_pending = !ir.external_components.is_empty();
+        // Everything counts as fired before the first settle.
+        let trigger_pending_init = vec![u64::MAX; ir.cone_trigger_words as usize];
+        let trigger_index_init: HashMap<Event, usize> = ir
+            .cone_trigger_events
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.clone(), i))
+            .collect();
         let mut ret = Self {
             ir,
             time: 0,
@@ -534,6 +552,11 @@ impl Simulator {
             comb_watch_scratch: Vec::new(),
             last_event_writes_comb: false,
             last_event_watch: None,
+            last_event_trigger: None,
+            trigger_pending: trigger_pending_init,
+            trigger_index: trigger_index_init,
+            state_digest: (env::var("VERYL_STATE_DIGEST").as_deref() == Ok("1"))
+                .then_some((0xcbf2_9ce4_8422_2325, 0)),
             settle_diag: env::var("VERYL_SETTLE_FILTER_DIAG").as_deref() == Ok("1"),
             settles_run: 0,
             settles_skipped: 0,
@@ -1072,13 +1095,57 @@ impl Simulator {
         if self.clock_toggle_dirties {
             self.comb_dirty = true;
         }
+        // Set outside any event's statements; the analysis gives every master
+        // clock its own bit.
+        if !self.trigger_pending.is_empty() {
+            let bit = self.trigger_index[&Event::Clock(var_id)];
+            self.trigger_pending[bit / 64] |= 1u64 << (bit % 64);
+        }
+    }
+
+    /// Storage is about to change outside the event model (a testbench store,
+    /// a component, a variable set by id): no guard may skip on its mask.
+    #[inline]
+    fn widen_trigger(&mut self) {
+        if self.trigger_pending.is_empty() {
+            return;
+        }
+        self.trigger_pending.iter_mut().for_each(|w| *w = u64::MAX);
+    }
+
+    /// One step's flop state into the running digest (`VERYL_STATE_DIGEST`).
+    #[cold]
+    #[inline(never)]
+    fn fold_state_digest(&mut self) {
+        let Some((h, n)) = self.state_digest.as_mut() else {
+            return;
+        };
+        let mut x = *h;
+        for chunk in self.ir.ff_values.chunks(8) {
+            let mut w = [0u8; 8];
+            w[..chunk.len()].copy_from_slice(chunk);
+            x = (x ^ u64::from_le_bytes(w)).wrapping_mul(0x0000_0100_0000_01b3);
+            x ^= x >> 29;
+        }
+        *h = x;
+        *n += 1;
     }
 
     /// Settle the comb list with whichever engine is configured.
     #[inline]
     fn do_settle_comb(&mut self) {
         self.settles_run += 1;
+        if self.trigger_pending.is_empty() {
+            self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
+            return;
+        }
+        let off = self.ir.cone_trigger_off as usize;
+        for (k, w) in self.trigger_pending.iter().enumerate() {
+            let o = off + k * 8;
+            self.ir.comb_values[o..o + 8].copy_from_slice(&w.to_le_bytes());
+        }
         self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
+        self.trigger_pending.iter_mut().for_each(|w| *w = 0);
     }
 
     /// Evaluate the derived-clock closure (its master-downstream subset when
@@ -1183,7 +1250,10 @@ impl Simulator {
         // logic value moves — compare only the storage below it.
         let limit = (self.ir.cone_state_base as usize).min(self.ir.comb_values.len());
         let before = self.ir.comb_values[..limit].to_vec();
+        // The oracle settle must not consume what the real next settle needs.
+        let pending = self.trigger_pending.clone();
         self.do_settle_comb();
+        self.trigger_pending = pending;
         self.comb_dirty = false;
         if let Some(i) = before
             .iter()
@@ -1415,11 +1485,13 @@ impl Simulator {
 
     pub fn mark_comb_dirty(&mut self) {
         self.comb_dirty = true;
+        self.widen_trigger();
     }
 
     /// `mark_comb_dirty` for a testbench store that may reach FF storage.
     pub fn mark_ff_written(&mut self) {
         self.comb_dirty = true;
+        self.widen_trigger();
         self.invalidate_event_gates();
     }
 
@@ -1563,6 +1635,9 @@ impl Simulator {
             self.dump_watch_changes(tag);
         }
 
+        if self.state_digest.is_some() {
+            self.fold_state_digest();
+        }
         self.dump_variables();
     }
 
@@ -1622,6 +1697,7 @@ impl Simulator {
             }
         }
         self.comb_dirty = true;
+        self.widen_trigger();
         for c in &components {
             if c.host.failed() {
                 let mut msgs = vec![];
@@ -1671,6 +1747,7 @@ impl Simulator {
         self.components = components;
         if wrote {
             self.comb_dirty = true;
+            self.widen_trigger();
             // A waveform's gate hears about writes only through the log.  The
             // test is what keeps a run without one off this path entirely.
             if self.dump.is_some() {
@@ -1783,8 +1860,18 @@ impl Simulator {
             self.last_event_writes_comb =
                 !self.ir.event_comb_writes.contains_key(event) || self.dirty_events.contains(event);
             self.last_event_watch = self.event_comb_watch.get(event).copied();
+            self.last_event_trigger = self.trigger_index.get(event).copied();
             (ptr, wptr)
         };
+        if !self.trigger_pending.is_empty() {
+            match self.last_event_trigger {
+                Some(bit) => self.trigger_pending[bit / 64] |= 1u64 << (bit % 64),
+                // An event with statements the analysis never indexed could
+                // write anything; one without writes nothing.
+                None if !stmts_ptr.is_null() => self.widen_trigger(),
+                None => {}
+            }
+        }
 
         // Writes outside the FF write log (comb bytes, readmemh, tb-method
         // returns) bypass the commit compare, so the settle filter must
@@ -2378,6 +2465,9 @@ impl Simulator {
         if self.settle_filter.is_none() {
             self.comb_dirty = true;
         }
+        if self.state_digest.is_some() {
+            self.fold_state_digest();
+        }
         self.dump_variables();
     }
 
@@ -2599,6 +2689,7 @@ impl Simulator {
             write_native_value(ptr, nb, self.ir.use_4state, &val);
         }
         self.comb_dirty = true;
+        self.widen_trigger();
         // An FF store from outside any event; see `invalidate_event_gates`.
         let ff = self.ir.ff_values.as_ptr() as usize;
         let in_ff = (ff..ff + self.ir.ff_values.len()).contains(&(ptr as usize));
@@ -2680,6 +2771,12 @@ impl Simulator {
 
 impl Drop for Simulator {
     fn drop(&mut self) {
+        if let Some((h, n)) = self.state_digest {
+            eprintln!(
+                "[state_digest] module={} steps={n} ff={h:016x}",
+                self.ir.name
+            );
+        }
         if self.settle_diag {
             eprintln!(
                 "[settle_filter] module={} settles_run={} settles_skipped={} filter_on={} armed={} clock_toggle_dirties={} dirty_from_event={} dirty_from_commit={} dirty_from_closure={} closure_watch={:?} first_commit_hits={:?}",

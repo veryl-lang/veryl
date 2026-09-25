@@ -172,6 +172,10 @@ pub struct Ir {
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// See `Module::cone_state_base`.
     pub cone_state_base: u32,
+    /// See `Module::cone_trigger_off`.
+    pub cone_trigger_off: u32,
+    pub cone_trigger_words: u32,
+    pub cone_trigger_events: Vec<Event>,
     /// See `Module::event_gate_flags`.
     pub event_gate_flags: Vec<u32>,
     /// See `Module::settle_info`.
@@ -298,6 +302,9 @@ impl Ir {
             closure_out_watch: module.closure_out_watch,
             event_comb_writes: module.event_comb_writes,
             cone_state_base: module.cone_state_base,
+            cone_trigger_off: module.cone_trigger_off,
+            cone_trigger_words: module.cone_trigger_words,
+            cone_trigger_events: module.cone_trigger_events,
             event_gate_flags: module.event_gate_flags,
             settle_info: module.settle_info,
             cone_segments: module.cone_segments,
@@ -873,6 +880,19 @@ impl Ir {
         // wrong.  Debug instrument, quadratic in buffer size.
         static CHECK: OnceLock<bool> = OnceLock::new();
         let check = *CHECK.get_or_init(|| env::var("VERYL_CONE_GATE_CHECK").as_deref() == Ok("1"));
+        // `VERYL_CONE_TRIGGER_CHECK=1`: where the mask says clean, compare
+        // anyway and report a disagreement.
+        static TRIGGER_CHECK: OnceLock<bool> = OnceLock::new();
+        let trigger_check = *TRIGGER_CHECK
+            .get_or_init(|| env::var("VERYL_CONE_TRIGGER_CHECK").as_deref() == Ok("1"));
+        // `VERYL_CONE_TRIGGER_CHECK_MAX=N`: stop after N reports.
+        static TRIGGER_CHECK_MAX: OnceLock<u64> = OnceLock::new();
+        let trigger_check_max = *TRIGGER_CHECK_MAX.get_or_init(|| {
+            env::var("VERYL_CONE_TRIGGER_CHECK_MAX")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(u64::MAX)
+        });
         let mut slot = self.cone_gate_state.borrow_mut();
         let state = slot.get_or_insert_with(|| {
             crate::ir::opt::cone_gate::ConeGateState::new(self.cone_segments.len())
@@ -907,6 +927,8 @@ impl Ir {
                 }
             }
         }
+        let trig = self.cone_trigger_off as usize;
+        state.load_pending(&self.comb_values[trig..trig + self.cone_trigger_words as usize * 8]);
         let n = self.comb_statements.len();
         let mut i = 0usize;
         let mut si = 0usize;
@@ -914,7 +936,55 @@ impl Ir {
             if let Some(seg) = self.cone_segments.get(si)
                 && seg.lo == i
             {
-                if state.check_clean(si, seg, &self.ff_values, &self.comb_values) {
+                let mask_clean = state.mask_clean(si, seg);
+                if mask_clean && trigger_check {
+                    // A clean mask promises every compared byte is where the
+                    // last run left it.
+                    if let Some((is_ff, off)) =
+                        state.first_moved(si, seg, &self.ff_values, &self.comb_values)
+                    {
+                        let fired: Vec<String> = self
+                            .cone_trigger_events
+                            .iter()
+                            .enumerate()
+                            .filter(|(b, _)| state.pending_bit(*b))
+                            .map(|(_, e)| format!("{e:?}"))
+                            .collect();
+                        let mask: Vec<String> = self
+                            .cone_trigger_events
+                            .iter()
+                            .enumerate()
+                            .filter(|(b, _)| seg.trigger[b / 64] >> (b % 64) & 1 == 1)
+                            .map(|(_, e)| format!("{e:?}"))
+                            .collect();
+                        eprintln!(
+                            "[cone_gate] TRIGGER WRONG SKIP seg {si} [{}..{}) {}: {} {:#x} ({}) settle={} fired={:?} mask={:?}",
+                            seg.lo,
+                            seg.hi,
+                            seg.cone,
+                            if is_ff { "ff" } else { "comb" },
+                            off,
+                            self.var_name_at(VarOffset::new(is_ff, off as isize))
+                                .unwrap_or_else(|| "?".to_string()),
+                            state.evals,
+                            fired,
+                            mask,
+                        );
+                        eprintln!(
+                            "[cone_gate]   compare={:x?} compare_pre={:x?} replay={:x?} backedge={:x?}",
+                            seg.compare, seg.compare_pre, seg.replay, seg.backedge
+                        );
+                        state.trigger_reports += 1;
+                        if state.trigger_reports >= trigger_check_max {
+                            panic!("[cone_gate] TRIGGER WRONG SKIP: report limit reached");
+                        }
+                    }
+                }
+                // A replaying skip also needs the replayed span unmoved
+                // (`compare_pre`), which the mask does not cover.
+                let mask_ok = mask_clean
+                    && (seg.replay.is_empty() || state.pre_clean(si, seg, &self.comb_values));
+                if mask_ok || state.check_clean(si, seg, &self.ff_values, &self.comb_values) {
                     if check {
                         // Oracle: a real run starts from the PRE-replay
                         // state (its inputs just compared clean), so run
@@ -989,6 +1059,38 @@ impl Ir {
             dispatch_stmt_fast(&self.comb_statements[i], mask_cache);
             i += 1;
         }
+    }
+
+    /// Hierarchical name of the variable element whose storage holds `off`
+    /// (diagnostics).
+    pub fn var_name_at(&self, off: VarOffset) -> Option<String> {
+        let raw = off.raw();
+        if raw < 0 {
+            return None;
+        }
+        let base = if off.is_ff() {
+            self.ff_values.as_ptr()
+        } else {
+            self.comb_values.as_ptr()
+        } as usize
+            + raw as usize;
+        fn find(module: &ModuleVariables, addr: usize, prefix: &str) -> Option<String> {
+            for v in module.variables.values() {
+                for (k, &p) in v.current_values.iter().enumerate() {
+                    let p = p as usize;
+                    if (p..p + v.native_bytes.max(1)).contains(&addr) {
+                        return Some(format!("{prefix}{}[{k}]", v.path));
+                    }
+                }
+            }
+            for child in &module.children {
+                if let Some(n) = find(child, addr, &format!("{prefix}{}.", child.name)) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+        find(&self.module_variables, base, "")
     }
 
     /// Number of statements in comb_statements (for profiling).

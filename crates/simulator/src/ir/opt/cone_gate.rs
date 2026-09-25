@@ -32,6 +32,7 @@
 //! `AUTO_OFF_STREAK`), so the bet is bounded from both ends.
 
 use crate::HashMap;
+use crate::ir::Event;
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::{
@@ -51,6 +52,27 @@ pub struct FfOwner {
 }
 
 impl FfOwner {
+    /// Index of the run covering `x`, padding included.
+    fn run_index(&self, x: usize) -> Option<usize> {
+        let i = self
+            .runs
+            .partition_point(|&(s, ..)| s <= x)
+            .checked_sub(1)?;
+        let (s, stride, count, _) = self.runs[i];
+        (x < s + count * stride).then_some(i)
+    }
+
+    fn runs_in(&self, s: usize, e: usize) -> impl Iterator<Item = usize> + '_ {
+        let first = self
+            .runs
+            .partition_point(|&(rs, stride, count, _)| rs + count * stride <= s);
+        self.runs[first..]
+            .iter()
+            .take_while(move |&&(rs, ..)| rs < e)
+            .enumerate()
+            .map(move |(k, _)| first + k)
+    }
+
     /// The element span covering `x`.  `None` also when `x` lands in the
     /// padding a stride wider than the element leaves behind each one.
     fn span(&self, x: usize) -> Option<(usize, usize)> {
@@ -148,10 +170,31 @@ pub struct ConeGateInputs {
     pub comb_var: Vec<(usize, usize, u32)>,
     /// Merged comb byte ranges any event statement can write.
     pub event_written_comb: Vec<(usize, usize)>,
+    /// Firing `trigger_events[i]` sets bit `i` of the pending mask; empty
+    /// turns the trigger analysis off.
+    pub trigger_events: Vec<Event>,
+    /// `event_writes[i]` is what `trigger_events[i]` can write.
+    pub event_writes: Vec<EventWrites>,
+    /// Master input clock storage and its bit: the simulator writes the level
+    /// outside any event's statements.
+    pub master_clocks: Vec<(VarOffset, usize)>,
+    /// `(next slot, current slot)` of every dual-slot FF element: an event
+    /// names the next slot, the readers the current one.
+    pub ff_next_alias: Vec<(usize, usize)>,
     /// Construct it empty: it derives from `node_parent` and nothing else.
     /// Living here means the re-conversions of one DUT share it, since they
     /// take these inputs from the pipeline cache.
     pub(crate) tour: std::sync::OnceLock<Tour>,
+}
+
+/// The storage one event's statements can write, as element base offsets in
+/// the same space as the owner tables.  `wild`: some write could not be
+/// bounded, so the event's bit goes into every mask.
+#[derive(Clone, Debug, Default)]
+pub struct EventWrites {
+    pub comb: Vec<isize>,
+    pub ff: Vec<isize>,
+    pub wild: bool,
 }
 
 /// One gated contiguous statement range of the reordered schedule.
@@ -176,6 +219,11 @@ pub struct Segment {
     /// than ~1/(decay+1) drifts to auto-off instead of resetting the
     /// streak on each stray skip.
     pub off_decay: u32,
+    /// The events whose writes can reach a byte of `compare` or `replay`,
+    /// directly or through the comb statements between (see
+    /// `ConeGateState::mask_clean`).  All ones when no mask can describe the
+    /// segment, empty when the analysis is off.
+    pub trigger: Vec<u64>,
     /// Owning cone's hierarchical path (diagnostics).
     pub cone: String,
 }
@@ -254,6 +302,10 @@ pub struct ConeSegment {
     pub replay: Vec<(u32, u32)>,
     /// See `Segment::off_decay`.
     pub off_decay: u32,
+    /// See `Segment::trigger`.
+    pub trigger: Vec<u64>,
+    /// See `RtSegment::internal`.
+    pub internal: Vec<(u32, u32)>,
     /// Owning cone's hierarchical path (diagnostics).
     pub cone: String,
 }
@@ -283,6 +335,11 @@ pub struct RtSegment {
     pub replay: Vec<(u32, u32)>,
     /// See `Segment::off_decay`.
     pub off_decay: u32,
+    /// See `Segment::trigger`.
+    pub trigger: Vec<u64>,
+    /// Compared bytes the segment rewrites before reading (its internal chain
+    /// state): not inputs, so the trigger oracle leaves them out.
+    pub internal: Vec<(u32, u32)>,
     pub cone: String,
 }
 
@@ -319,8 +376,10 @@ pub struct ConeGateState {
     streak: Vec<u32>,
     /// Pre-run backedge snapshot scratch (reused across segments).
     prerun: Vec<u8>,
+    pending: Vec<u64>,
     /// Settle passes seen, driving the `REARM_EVALS` retry of off segments.
-    evals: u64,
+    pub evals: u64,
+    pub trigger_reports: u64,
     pub skipped: u64,
     pub ran: u64,
     pub next_report: u64,
@@ -339,7 +398,9 @@ impl ConeGateState {
             off: vec![false; nseg],
             streak: vec![0; nseg],
             prerun: Vec::new(),
+            pending: Vec::new(),
             evals: 0,
+            trigger_reports: 0,
             skipped: 0,
             ran: 0,
             next_report: 1 << 18,
@@ -425,6 +486,64 @@ impl ConeGateState {
         true
     }
 
+    /// The `compare_pre` spans still hold what the last run left there, which
+    /// a replaying mask-only skip needs.  `false` when the shadows cannot
+    /// answer (off, unprimed).
+    pub fn pre_clean(&self, si: usize, seg: &RtSegment, comb: &[u8]) -> bool {
+        if self.off[si] || !self.primed[si] {
+            return false;
+        }
+        let mut pos = 0usize;
+        for &(s, e) in &seg.compare_pre {
+            let (s, e) = (s as usize, e as usize);
+            let n = e - s;
+            if self.shadows_pre[si].len() < pos + n
+                || comb[s..e] != self.shadows_pre[si][pos..pos + n]
+            {
+                return false;
+            }
+            pos += n;
+        }
+        true
+    }
+
+    /// The first compared input byte that differs from the last run's shadow,
+    /// for the trigger oracle.  `internal` and `compare_pre` are left out:
+    /// the mask does not answer for them.
+    pub fn first_moved(
+        &self,
+        si: usize,
+        seg: &RtSegment,
+        ff: &[u8],
+        comb: &[u8],
+    ) -> Option<(bool, usize)> {
+        if self.off[si] || !self.primed[si] {
+            return None;
+        }
+        let mut pos = 0usize;
+        for &(is_ff, s, e) in &seg.compare {
+            let buf: &[u8] = if is_ff { ff } else { comb };
+            let (s, e) = (s as usize, e as usize);
+            let internal = |x: usize| {
+                !is_ff
+                    && seg
+                        .internal
+                        .iter()
+                        .any(|&(a, b)| (a as usize) <= x && x < (b as usize))
+            };
+            if let Some(k) = buf[s..e]
+                .iter()
+                .zip(&self.shadows[si][pos..pos + (e - s)])
+                .enumerate()
+                .position(|(k, (a, b))| a != b && !internal(s + k))
+            {
+                return Some((is_ff, s + k));
+            }
+            pos += e - s;
+        }
+        None
+    }
+
     /// About to run the segment: snapshot its backedge bytes so `refresh`
     /// can decide whether the run changed them.
     #[inline]
@@ -443,12 +562,51 @@ impl ConeGateState {
         }
     }
 
+    /// No event whose writes can reach the compare set has fired since the
+    /// last settle, and the last run converged.  An off segment qualifies
+    /// only without a backedge: with one, the convergence verdict stops being
+    /// refreshed once it is off.  A mask with no bit set would ignore a
+    /// widened pending set, so it never qualifies.
+    #[inline]
+    pub fn mask_clean(&self, si: usize, seg: &RtSegment) -> bool {
+        self.primed[si]
+            && self.converged[si]
+            && (!self.off[si] || seg.backedge.is_empty())
+            && seg.trigger.iter().any(|&m| m != 0)
+            && seg
+                .trigger
+                .iter()
+                .zip(&self.pending)
+                .all(|(m, p)| m & p == 0)
+    }
+
+    #[inline]
+    pub fn load_pending(&mut self, bytes: &[u8]) {
+        self.pending.clear();
+        self.pending.extend(
+            bytes
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|&w| u64::from_le_bytes(w)),
+        );
+    }
+
+    pub fn pending_bit(&self, bit: usize) -> bool {
+        self.pending
+            .get(bit / 64)
+            .is_some_and(|w| w >> (bit % 64) & 1 == 1)
+    }
+
     /// The segment has just run: derive the convergence verdict and snapshot
     /// the compare bytes.
     #[inline]
     pub fn refresh(&mut self, si: usize, seg: &RtSegment, ff: &[u8], comb: &[u8]) {
         self.ran += 1;
         self.per_seg[si].1 += 1;
+        // Primed on every run: an off segment without replay spans can still
+        // take the trigger skip (see `mask_clean`).
+        self.primed[si] = true;
         if self.off[si] {
             return;
         }
@@ -473,7 +631,6 @@ impl ConeGateState {
         for &(s, e) in &seg.replay {
             rp.extend_from_slice(&comb[s as usize..e as usize]);
         }
-        self.primed[si] = true;
     }
 
     /// A skip is happening: re-establish the segment's stored output bytes
@@ -498,6 +655,12 @@ impl ConeGateState {
             pos += len;
         }
     }
+}
+
+/// Default-on; `VERYL_CONE_TRIGGER=0` leaves the guards to their compares.
+pub fn trigger_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_CONE_TRIGGER").as_deref() != Ok("0"))
 }
 
 /// Default-on; `VERYL_CONE_GATE=0` opts out.
@@ -836,6 +999,7 @@ pub fn build_inputs(
     event_written: &crate::HashSet<isize>,
     comb_reloc: &[(isize, isize, usize)],
     use_4state: bool,
+    triggers: TriggerInputs,
 ) -> ConeGateInputs {
     let mut node_parent: Vec<u32> = vec![u32::MAX];
     let mut node_path: Vec<String> = vec![top_name.to_string()];
@@ -844,13 +1008,15 @@ pub fn build_inputs(
     let mut ff_elems: Vec<(usize, usize)> = Vec::new();
     let mut ff_node: Vec<(usize, usize, u32)> = Vec::new();
     let mut comb_var: Vec<(usize, usize, u32)> = Vec::new();
+    let mut ff_next_alias: Vec<(usize, usize)> = Vec::new();
     let add_vars = |vars: &HashMap<VarId, VariableMeta>,
                     id: u32,
                     comb_owner: &mut Vec<(usize, usize, u32)>,
                     ff_runs: &mut Vec<(usize, usize, usize, usize)>,
                     ff_elems: &mut Vec<(usize, usize)>,
                     ff_node: &mut Vec<(usize, usize, u32)>,
-                    comb_var: &mut Vec<(usize, usize, u32)>| {
+                    comb_var: &mut Vec<(usize, usize, u32)>,
+                    ff_next_alias: &mut Vec<(usize, usize)>| {
         for vm in vars.values() {
             ff_elems.clear();
             // A variable past `MAX_TOTAL_COMPARE` can never join a compare set
@@ -877,6 +1043,9 @@ pub fn build_inputs(
                 let (off, nb) = (off as usize, value_size(el.native_bytes, use_4state));
                 if el.current.is_ff() {
                     ff_elems.push((off, nb));
+                    if el.next_offset >= 0 && el.next_offset as usize != off {
+                        ff_next_alias.push((el.next_offset as usize, off));
+                    }
                     // A dual-slot FF is written at its next slot; the owner
                     // span covers both so a write finds its instance.
                     let end = (el.next_offset.max(off as isize) as usize) + nb;
@@ -917,6 +1086,7 @@ pub fn build_inputs(
         &mut ff_elems,
         &mut ff_node,
         &mut comb_var,
+        &mut ff_next_alias,
     );
     let mut stack: Vec<(u32, &ModuleVariableMeta)> = Vec::new();
     for c in children {
@@ -934,6 +1104,7 @@ pub fn build_inputs(
             &mut ff_elems,
             &mut ff_node,
             &mut comb_var,
+            &mut ff_next_alias,
         );
         for c in &m.children {
             stack.push((id, c));
@@ -976,6 +1147,28 @@ pub fn build_inputs(
         }
     }
     merge_ranges(&mut event_written_comb);
+    ff_next_alias.sort_unstable();
+    // A master clock's toggle reports its own event's bit; one no `always_ff`
+    // listens to still gets a bit, for the readers of its level.
+    let TriggerInputs {
+        mut trigger_events,
+        mut event_writes,
+        master_clocks: masters,
+    } = triggers;
+    let mut master_clocks: Vec<(VarOffset, usize)> = Vec::new();
+    if !trigger_events.is_empty() {
+        for (off, vid) in masters {
+            let bit = match trigger_events.iter().position(|e| *e == Event::Clock(vid)) {
+                Some(i) => i,
+                None => {
+                    trigger_events.push(Event::Clock(vid));
+                    event_writes.push(EventWrites::default());
+                    trigger_events.len() - 1
+                }
+            };
+            master_clocks.push((off, bit));
+        }
+    }
     ConeGateInputs {
         node_parent,
         node_path,
@@ -984,8 +1177,22 @@ pub fn build_inputs(
         ff_node,
         comb_var,
         event_written_comb,
+        trigger_events,
+        event_writes,
+        master_clocks,
+        ff_next_alias,
         tour: std::sync::OnceLock::new(),
     }
+}
+
+/// The trigger analysis inputs; `Default` leaves it off.
+#[derive(Default)]
+pub struct TriggerInputs {
+    /// Bit order of the pending mask, shared with the simulator.
+    pub trigger_events: Vec<Event>,
+    pub event_writes: Vec<EventWrites>,
+    /// Master input clock storage and variable.
+    pub master_clocks: Vec<(VarOffset, VarId)>,
 }
 
 /// Does the statement (recursively) have effects a skip could lose?
@@ -1125,6 +1332,8 @@ struct StmtInfo {
     out_ff: Vec<(usize, usize)>,
     /// A read or write fell outside every known variable.
     unbounded: bool,
+    /// A read fell outside every known variable: any writer may feed it.
+    unknown_in: bool,
 }
 
 /// Build the plan: reorder `stmts` so each selected cone forms few contiguous
@@ -1167,6 +1376,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
             out_comb: Vec::new(),
             out_ff: Vec::new(),
             unbounded: false,
+            unknown_in: false,
         };
         let mut node: Option<u32> = None;
         for o in &outs {
@@ -1209,6 +1419,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
                     Some((s0, e0, _)) => info.in_comb.push((s0, e0)),
                     None => {
                         info.unbounded = true;
+                        info.unknown_in = true;
                         if diag() {
                             root_reason(6); // in: comb offset outside every owner span
                             record_miss(*x as usize);
@@ -1219,6 +1430,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
                     Some((s0, e0)) => info.in_ff.push((s0, e0)),
                     None => {
                         info.unbounded = true;
+                        info.unknown_in = true;
                         if diag() {
                             root_reason(7); // in: ff offset outside every owner run
                         }
@@ -1226,6 +1438,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
                 },
                 _ => {
                     info.unbounded = true;
+                    info.unknown_in = true;
                     if diag() {
                         root_reason(8); // in: negative offset
                     }
@@ -1384,7 +1597,7 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
                 start = i;
             }
         }
-        return finish_plan(order, bursts, &infos, inputs, &cones, &writers);
+        return finish_plan(stmts, order, bursts, &infos, inputs, &cones, &writers);
     }
 
     // -- Pass-preserving clustering re-sort: an anchored Kahn over the
@@ -1582,12 +1795,13 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<ConePla
             start = i;
         }
     }
-    finish_plan(order, bursts, &infos, inputs, &cones, &writers)
+    finish_plan(stmts, order, bursts, &infos, inputs, &cones, &writers)
 }
 
 /// Turn the (order, bursts) of either scheduler into gated segments with
 /// their compare sets, applying the static profitability filter.
 fn finish_plan(
+    stmts: &[ProtoStatement],
     order: Vec<u32>,
     bursts: Vec<(usize, usize, usize)>,
     infos: &[StmtInfo],
@@ -1627,23 +1841,15 @@ fn finish_plan(
         let mut replay: Vec<(usize, usize)> = Vec::new();
         for &oi in &order[start..end] {
             for &(s, e) in &infos[oi as usize].out_comb {
-                // Walk EVERY variable span the merged range covers: an
-                // outside writer of any one of them makes the whole range
-                // order-dependent.
+                // Keep only the spans an outside writer can reach: a byte this
+                // burst alone writes already holds what a run would leave.
                 let mut j = first_span(&inputs.comb_owner, s);
-                let shared = loop {
-                    if j >= inputs.comb_owner.len() || inputs.comb_owner[j].0 >= e {
-                        break false;
-                    }
-                    if inputs.comb_owner[j].1 > s
-                        && writers[j].iter().any(|&w| !in_burst[w as usize])
-                    {
-                        break true;
+                while j < inputs.comb_owner.len() && inputs.comb_owner[j].0 < e {
+                    let (os, oe, _) = inputs.comb_owner[j];
+                    if oe > s && writers[j].iter().any(|&w| !in_burst[w as usize]) {
+                        replay.push((os.max(s), oe.min(e)));
                     }
                     j += 1;
-                };
-                if shared {
-                    replay.push((s, e));
                 }
             }
         }
@@ -1738,11 +1944,18 @@ fn finish_plan(
             replay: replay.iter().map(|&(s, e)| (s as u32, e as u32)).collect(),
             bytes,
             off_decay,
+            trigger: Vec::new(),
             cone: inputs.node_path[cones[sl - 1] as usize].clone(),
         });
         seg_nodes.push(cones[sl - 1]);
     }
-    let groups = build_groups(&segments, &seg_nodes, infos, inputs, writers, &order);
+    let groups = {
+        let masks = trigger_masks(stmts, &order, infos, inputs, &segments);
+        for (seg, mask) in segments.iter_mut().zip(masks) {
+            seg.trigger = mask;
+        }
+        build_groups(&segments, &seg_nodes, infos, inputs, writers, &order)
+    };
     if diag() {
         for g in &groups {
             eprintln!(
@@ -1785,6 +1998,276 @@ fn finish_plan(
         segments,
         groups,
     })
+}
+
+/// Schedule sweeps before the trigger analysis gives up on a fixpoint; each
+/// sweep past the first carries a domain across one more back-edge.
+const TRIGGER_MAX_SWEEPS: usize = 16;
+
+fn spans_in(owner: &[(usize, usize, u32)], s: usize, e: usize) -> impl Iterator<Item = usize> + '_ {
+    let first = first_span(owner, s);
+    owner[first..]
+        .iter()
+        .enumerate()
+        .take_while(move |(_, span)| span.0 < e)
+        .filter(move |(_, span)| span.1 > s)
+        .map(move |(k, _)| first + k)
+}
+
+/// `dst |= src`; true when `dst` grew.
+fn or_into(dst: &mut [u64], src: &[u64]) -> bool {
+    let mut grew = false;
+    for (d, &x) in dst.iter_mut().zip(src) {
+        let n = *d | x;
+        grew |= n != *d;
+        *d = n;
+    }
+    grew
+}
+
+/// Writes the trigger analysis does not model: a compiled block without its
+/// originals coarsens a dynamic write to its ends, a method return lands by
+/// variable id, a `$readmemh` names elements the offset gather misses, and an
+/// FF write that is not `comb_direct` lands at the next commit, not in the
+/// settle that runs it.
+fn writes_untracked(s: &ProtoStatement) -> bool {
+    use crate::ir::ProtoSystemFunctionCall as F;
+    use crate::ir::statement::ProtoTbMethodKind as K;
+    match s {
+        ProtoStatement::Assign(a) => a.dst.is_ff() && !a.comb_direct,
+        ProtoStatement::AssignDynamic(a) => a.dst_base.is_ff() && !a.comb_direct,
+        ProtoStatement::Break => false,
+        ProtoStatement::If(x) => x
+            .true_side
+            .iter()
+            .chain(x.false_side.iter())
+            .any(writes_untracked),
+        ProtoStatement::Case(x) => x
+            .arms
+            .iter()
+            .flat_map(|a| a.body.iter())
+            .chain(x.default.iter())
+            .any(writes_untracked),
+        ProtoStatement::For(x) => x.body.iter().any(writes_untracked),
+        ProtoStatement::SequentialBlock(b) => b.iter().any(writes_untracked),
+        ProtoStatement::CompiledBlock(cb) => {
+            cb.original_stmts.is_empty() || cb.original_stmts.iter().any(writes_untracked)
+        }
+        ProtoStatement::SystemFunctionCall(c) => matches!(c, F::Readmemh { .. }),
+        ProtoStatement::TbMethodCall { method, .. } => matches!(
+            method,
+            K::Component { ret: Some(_), .. }
+                | K::RandomGet { ret: Some(_), .. }
+                | K::RandomGetRange { ret: Some(_), .. }
+                | K::RandomGetSeed { ret: Some(_) }
+        ),
+        ProtoStatement::HierAssign(_) => {
+            unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+        }
+    }
+}
+
+/// Per-segment trigger masks (see `Segment::trigger`).
+///
+/// Every owner span carries one domain: the events that can change its bytes,
+/// seeded from the events' writes and the master toggles and carried through
+/// the comb statements until nothing grows.  Whole-variable granularity is
+/// coarse but safe.  A segment's mask is the union over its compare set,
+/// `replay` included.
+///
+/// Empty masks (the analysis off) when there are no trigger bits, when a
+/// statement writes storage the analysis does not model, when an event writes
+/// an FF outside every run, or when the sweep does not settle.
+fn trigger_masks(
+    stmts: &[ProtoStatement],
+    order: &[u32],
+    infos: &[StmtInfo],
+    inputs: &ConeGateInputs,
+    segments: &[Segment],
+) -> Vec<Vec<u64>> {
+    let nev = inputs.trigger_events.len();
+    let off = || vec![Vec::new(); segments.len()];
+    if nev == 0 || segments.is_empty() {
+        return off();
+    }
+    if order
+        .iter()
+        .any(|&oi| writes_untracked(&stmts[oi as usize]))
+    {
+        if diag() {
+            eprintln!(
+                "[cone_gate] trigger: off, a comb statement writes storage the analysis does not model"
+            );
+        }
+        return off();
+    }
+    // One bit past the events is the WILD bit: every mask includes it and
+    // only a widened pending set carries it.
+    let words = (nev + 1).div_ceil(64);
+    let mut zero = vec![0u64; words];
+    zero[nev / 64] |= 1u64 << (nev % 64);
+    // An event whose writes could not be enumerated belongs in every mask.
+    for (bit, ev) in inputs.event_writes.iter().enumerate() {
+        if ev.wild {
+            zero[bit / 64] |= 1u64 << (bit % 64);
+        }
+    }
+    let all = vec![u64::MAX; words];
+    let comb_span = |x: usize| -> Option<usize> {
+        let i = inputs
+            .comb_owner
+            .partition_point(|&(s, _, _)| s <= x)
+            .checked_sub(1)?;
+        (x < inputs.comb_owner[i].1).then_some(i)
+    };
+    let ff_run = |x: usize| -> Option<usize> {
+        inputs.ff_owner.run_index(x).or_else(|| {
+            let i = inputs.ff_next_alias.partition_point(|&(n, _)| n < x);
+            match inputs.ff_next_alias.get(i) {
+                Some(&(n, cur)) if n == x => inputs.ff_owner.run_index(cur),
+                _ => None,
+            }
+        })
+    };
+    let mut comb_dom: Vec<Vec<u64>> = vec![vec![0u64; words]; inputs.comb_owner.len()];
+    let mut ff_dom: Vec<Vec<u64>> = vec![vec![0u64; words]; inputs.ff_owner.runs.len()];
+    let seed = |o: VarOffset,
+                bit: usize,
+                comb_dom: &mut Vec<Vec<u64>>,
+                ff_dom: &mut Vec<Vec<u64>>|
+     -> bool {
+        let raw = o.raw();
+        if raw < 0 {
+            return false;
+        }
+        if o.is_ff() {
+            // FF storage is all variables; an offset outside every run is
+            // one this table does not describe.
+            match ff_run(raw as usize) {
+                Some(r) => ff_dom[r][bit / 64] |= 1u64 << (bit % 64),
+                None => return false,
+            }
+        } else if let Some(j) = comb_span(raw as usize) {
+            comb_dom[j][bit / 64] |= 1u64 << (bit % 64);
+        }
+        // A comb offset no variable owns is read only by statements the
+        // owner tables could not place either, and those run every settle.
+        true
+    };
+    for (bit, ev) in inputs.event_writes.iter().enumerate() {
+        if ev.wild {
+            // Its bit is in every mask already.
+            continue;
+        }
+        for &o in &ev.comb {
+            if !seed(VarOffset::Comb(o), bit, &mut comb_dom, &mut ff_dom) {
+                return off();
+            }
+        }
+        for &o in &ev.ff {
+            if !seed(VarOffset::Ff(o), bit, &mut comb_dom, &mut ff_dom) {
+                return off();
+            }
+        }
+    }
+    for &(o, bit) in &inputs.master_clocks {
+        if !seed(o, bit, &mut comb_dom, &mut ff_dom) {
+            return off();
+        }
+    }
+    let mut dom = vec![0u64; words];
+    let mut settled = false;
+    for _ in 0..TRIGGER_MAX_SWEEPS {
+        let mut changed = false;
+        for &oi in order {
+            let info = &infos[oi as usize];
+            if info.unknown_in {
+                dom.copy_from_slice(&all);
+            } else {
+                dom.fill(0);
+                for &(s, e) in &info.in_comb {
+                    for j in spans_in(&inputs.comb_owner, s, e) {
+                        or_into(&mut dom, &comb_dom[j]);
+                    }
+                }
+                for &(s, e) in &info.in_ff {
+                    for r in inputs.ff_owner.runs_in(s, e) {
+                        or_into(&mut dom, &ff_dom[r]);
+                    }
+                }
+            }
+            for &(s, e) in &info.out_comb {
+                for j in spans_in(&inputs.comb_owner, s, e) {
+                    changed |= or_into(&mut comb_dom[j], &dom);
+                }
+            }
+            for &(s, e) in &info.out_ff {
+                for r in inputs.ff_owner.runs_in(s, e) {
+                    changed |= or_into(&mut ff_dom[r], &dom);
+                }
+            }
+        }
+        if !changed {
+            settled = true;
+            break;
+        }
+    }
+    if !settled {
+        if diag() {
+            eprintln!("[cone_gate] trigger: off, no fixpoint in {TRIGGER_MAX_SWEEPS} sweeps");
+        }
+        return off();
+    }
+    // Last schedule position writing each span.  A settle is one pass, so a
+    // compared byte whose writer runs after the segment changes only at the
+    // next settle, when the pending set that named the event is consumed: such
+    // a segment gets all ones and keeps its compare.
+    let mut comb_last: Vec<usize> = vec![0; inputs.comb_owner.len()];
+    let mut ff_last: Vec<usize> = vec![0; inputs.ff_owner.runs.len()];
+    for (pos, &oi) in order.iter().enumerate() {
+        let info = &infos[oi as usize];
+        for &(s, e) in &info.out_comb {
+            for j in spans_in(&inputs.comb_owner, s, e) {
+                comb_last[j] = comb_last[j].max(pos + 1);
+            }
+        }
+        for &(s, e) in &info.out_ff {
+            for r in inputs.ff_owner.runs_in(s, e) {
+                ff_last[r] = ff_last[r].max(pos + 1);
+            }
+        }
+    }
+    let masks: Vec<Vec<u64>> = segments
+        .iter()
+        .map(|seg| {
+            let mut m = zero.clone();
+            let mut written_late = false;
+            for &(is_ff, s, e) in &seg.compare {
+                let (s, e) = (s as usize, e as usize);
+                if is_ff {
+                    for r in inputs.ff_owner.runs_in(s, e) {
+                        or_into(&mut m, &ff_dom[r]);
+                        written_late |= ff_last[r] > seg.end;
+                    }
+                } else {
+                    for j in spans_in(&inputs.comb_owner, s, e) {
+                        or_into(&mut m, &comb_dom[j]);
+                        written_late |= comb_last[j] > seg.end;
+                    }
+                }
+            }
+            for &(s, e) in &seg.replay {
+                for j in spans_in(&inputs.comb_owner, s as usize, e as usize) {
+                    or_into(&mut m, &comb_dom[j]);
+                }
+            }
+            if written_late {
+                return all.clone();
+            }
+            m
+        })
+        .collect();
+    masks
 }
 
 /// See `Group`.  `seg_nodes[i]` is the cone node of `segments[i]`, `writers`
@@ -1976,6 +2459,10 @@ mod tests {
             comb_var: Vec::new(),
             ff_node: Vec::new(),
             event_written_comb: vec![],
+            trigger_events: Vec::new(),
+            event_writes: Vec::new(),
+            master_clocks: Vec::new(),
+            ff_next_alias: Vec::new(),
             tour: Default::default(),
         };
         let info = |node: u32, ins: &[(usize, usize)], outs: &[(usize, usize)]| StmtInfo {
@@ -1985,6 +2472,7 @@ mod tests {
             out_comb: outs.to_vec(),
             out_ff: vec![],
             unbounded: false,
+            unknown_in: false,
         };
         let infos = [
             info(2, &[(0, 8)], &[(8, 16)]),
@@ -1999,6 +2487,7 @@ mod tests {
             replay,
             bytes: 30,
             off_decay: 0,
+            trigger: Vec::new(),
             cone: String::new(),
         };
         let segments = [
@@ -2355,5 +2844,279 @@ mod tests {
         assert_eq!(first_ff_span(&max_end, 8), 1);
         // A byte past every entry yields an empty scan rather than a panic.
         assert_eq!(first_ff_span(&max_end, 24), 3);
+    }
+
+    /// Owner spans a, b, c, d (comb) and one FF run e.  Events: E0 writes e,
+    /// E1 writes a, E2 is wild.  Schedule: [0] e → b, [1] a → c, [2] b, c → d.
+    fn trigger_fixture() -> (ConeGateInputs, Vec<StmtInfo>, Vec<u32>) {
+        let inputs = ConeGateInputs {
+            node_parent: vec![u32::MAX],
+            node_path: vec!["top".to_string()],
+            comb_owner: vec![(0, 8, 0), (8, 16, 0), (16, 24, 0), (24, 32, 0)],
+            ff_owner: FfOwner {
+                runs: vec![(0, 4, 1, 4)],
+            },
+            comb_var: Vec::new(),
+            ff_node: Vec::new(),
+            event_written_comb: vec![(0, 8)],
+            trigger_events: vec![
+                Event::Clock(VarId::from_raw(1)),
+                Event::Clock(VarId::from_raw(2)),
+                Event::InitialBlock(1),
+            ],
+            event_writes: vec![
+                EventWrites {
+                    comb: vec![],
+                    ff: vec![0],
+                    wild: false,
+                },
+                EventWrites {
+                    comb: vec![0],
+                    ff: vec![],
+                    wild: false,
+                },
+                EventWrites {
+                    wild: true,
+                    ..Default::default()
+                },
+            ],
+            master_clocks: Vec::new(),
+            ff_next_alias: Vec::new(),
+            tour: Default::default(),
+        };
+        let info =
+            |in_comb: &[(usize, usize)], in_ff: &[(usize, usize)], out: (usize, usize)| StmtInfo {
+                node: 0,
+                in_comb: in_comb.to_vec(),
+                in_ff: in_ff.to_vec(),
+                out_comb: vec![out],
+                out_ff: vec![],
+                unbounded: false,
+                unknown_in: false,
+            };
+        let infos = vec![
+            info(&[], &[(0, 4)], (8, 16)),
+            info(&[(0, 8)], &[], (16, 24)),
+            info(&[(8, 16), (16, 24)], &[], (24, 32)),
+        ];
+        (inputs, infos, vec![0, 1, 2])
+    }
+
+    /// A segment scheduled after every writer in the fixture.
+    fn trigger_seg(compare: &[(bool, u32, u32)], replay: &[(u32, u32)]) -> Segment {
+        Segment {
+            start: 3,
+            end: 3,
+            compare: compare.to_vec(),
+            backedge: vec![],
+            replay: replay.to_vec(),
+            bytes: 8,
+            off_decay: 0,
+            trigger: Vec::new(),
+            cone: String::new(),
+        }
+    }
+
+    #[test]
+    fn trigger_masks_carry_event_writes_along_the_schedule() {
+        let (inputs, infos, order) = trigger_fixture();
+        let stmts = vec![ProtoStatement::Break; 3];
+        let segments = [
+            trigger_seg(&[(true, 0, 4)], &[]),                    // reads e
+            trigger_seg(&[(false, 0, 8)], &[]),                   // reads a
+            trigger_seg(&[(false, 8, 16), (false, 16, 24)], &[]), // reads b, c
+            trigger_seg(&[], &[(24, 32)]),                        // replays d
+            trigger_seg(&[(false, 40, 48)], &[]),                 // reads storage nobody writes
+        ];
+        let masks = trigger_masks(&stmts, &order, &infos, &inputs, &segments);
+        const WILD: u64 = 0b1000;
+        // E2's writes could not be enumerated, so every mask carries its bit:
+        // the mask is the only account of it both gate paths share.
+        const E2: u64 = 0b100;
+        assert_eq!(masks[0], vec![WILD | E2 | 0b001]);
+        assert_eq!(masks[1], vec![WILD | E2 | 0b010]);
+        assert_eq!(masks[2], vec![WILD | E2 | 0b011]);
+        assert_eq!(
+            masks[3],
+            vec![WILD | E2 | 0b011],
+            "replay spans join the mask"
+        );
+        assert_eq!(
+            masks[4],
+            vec![WILD | E2],
+            "nothing bounded reaches it: a widened mask or E2 wakes it"
+        );
+    }
+
+    #[test]
+    fn a_segment_before_a_writer_of_what_it_compares_keeps_its_compare() {
+        let (inputs, infos, order) = trigger_fixture();
+        let stmts = vec![ProtoStatement::Break; 3];
+        // A settle is one pass: the segment placed before the writer of c
+        // sees that write only at the next settle, when the pending set no
+        // longer names the event that caused it.  Its mask cannot gate.
+        let mut early = trigger_seg(&[(false, 16, 24)], &[]);
+        early.start = 0;
+        early.end = 1;
+        let mut late_enough = trigger_seg(&[(false, 16, 24)], &[]);
+        late_enough.start = 2;
+        late_enough.end = 2;
+        let masks = trigger_masks(&stmts, &order, &infos, &inputs, &[early, late_enough]);
+        assert_eq!(masks[0], vec![u64::MAX], "placed before the writer of c");
+        assert_eq!(
+            masks[1],
+            vec![0b1000 | 0b100 | 0b010],
+            "placed after it: the precise mask stands"
+        );
+    }
+
+    #[test]
+    fn trigger_masks_treat_an_unplaced_read_as_reached_by_everything() {
+        let (inputs, mut infos, order) = trigger_fixture();
+        infos[0].unknown_in = true;
+        let stmts = vec![ProtoStatement::Break; 3];
+        let segments = [trigger_seg(&[(false, 8, 16)], &[])];
+        let masks = trigger_masks(&stmts, &order, &infos, &inputs, &segments);
+        assert_eq!(masks[0], vec![u64::MAX]);
+    }
+
+    #[test]
+    fn trigger_masks_seed_a_master_clock_toggle() {
+        let (mut inputs, infos, order) = trigger_fixture();
+        // The master's level lives in a and reports E0, which no event
+        // write reaches c through: only the seed puts it in c's mask.
+        inputs.master_clocks = vec![(VarOffset::Comb(0), 0)];
+        let stmts = vec![ProtoStatement::Break; 3];
+        let segments = [trigger_seg(&[(false, 16, 24)], &[])];
+        let masks = trigger_masks(&stmts, &order, &infos, &inputs, &segments);
+        assert_eq!(masks[0], vec![0b1000 | 0b100 | 0b010 | 0b001]);
+    }
+
+    /// A constant store to the 4-byte variable at `dst`.
+    fn const_assign(dst: VarOffset, comb_direct: bool) -> ProtoStatement {
+        use crate::ir::{ExpressionContext, ProtoAssignStatement, ProtoExpression};
+        use veryl_analyzer::value::{Value, ValueU64};
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst,
+            dst_width: 32,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Value {
+                value: Value::U64(ValueU64 {
+                    payload: 1,
+                    mask_xz: 0,
+                    width: 32,
+                    signed: false,
+                }),
+                width: 32,
+                expr_context: ExpressionContext {
+                    width: 32,
+                    signed: false,
+                },
+            },
+            dst_ff_current_offset: if dst.is_ff() { dst.raw() } else { -1 },
+            comb_direct,
+            token: Default::default(),
+        })
+    }
+
+    #[test]
+    fn trigger_masks_go_off_when_a_comb_statement_logs_an_ff_write() {
+        // The logged write lands at the next commit, after whatever events
+        // that step fires, which no mask can name.
+        let (inputs, infos, order) = trigger_fixture();
+        let segments = [trigger_seg(&[(true, 0, 4)], &[])];
+        let mut stmts = vec![ProtoStatement::Break; 3];
+        stmts[0] = const_assign(VarOffset::Ff(0), false);
+        assert!(trigger_masks(&stmts, &order, &infos, &inputs, &segments)[0].is_empty());
+        stmts[0] = ProtoStatement::SequentialBlock(vec![const_assign(VarOffset::Ff(0), false)]);
+        assert!(trigger_masks(&stmts, &order, &infos, &inputs, &segments)[0].is_empty());
+        // A comb write that only lands in FF storage stores in place.
+        stmts[0] = const_assign(VarOffset::Ff(0), true);
+        assert!(!trigger_masks(&stmts, &order, &infos, &inputs, &segments)[0].is_empty());
+    }
+
+    fn rt_seg(trigger: Vec<u64>, backedge: Vec<(u32, u32)>) -> RtSegment {
+        RtSegment {
+            lo: 0,
+            hi: 1,
+            compare: vec![(false, 0, 8)],
+            backedge,
+            compare_pre: vec![],
+            replay: vec![],
+            off_decay: 0,
+            trigger,
+            internal: vec![],
+            cone: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_mask_skip_needs_a_converged_last_run() {
+        let mut st = ConeGateState::new(1);
+        st.load_pending(&0u64.to_le_bytes());
+        let seg = rt_seg(vec![0b1000], vec![]);
+        st.primed[0] = true;
+        assert!(!st.mask_clean(0, &seg), "the last run moved its backedge");
+        st.converged[0] = true;
+        assert!(st.mask_clean(0, &seg));
+        st.load_pending(&0b1000u64.to_le_bytes());
+        assert!(!st.mask_clean(0, &seg), "a pending bit in the mask");
+    }
+
+    #[test]
+    fn an_off_segment_mask_skips_only_without_a_backedge() {
+        // Off, the convergence verdict is no longer refreshed; without a
+        // backedge it is true by construction.
+        let mut st = ConeGateState::new(1);
+        st.load_pending(&0u64.to_le_bytes());
+        st.primed[0] = true;
+        st.converged[0] = true;
+        st.off[0] = true;
+        assert!(st.mask_clean(0, &rt_seg(vec![0b1000], vec![])));
+        assert!(!st.mask_clean(0, &rt_seg(vec![0b1000], vec![(8, 16)])));
+    }
+
+    #[test]
+    fn an_all_zero_mask_never_skips() {
+        // It would ignore even a widened pending set.
+        let mut st = ConeGateState::new(1);
+        st.primed[0] = true;
+        st.converged[0] = true;
+        let seg = rt_seg(vec![0], vec![]);
+        st.load_pending(&0u64.to_le_bytes());
+        assert!(!st.mask_clean(0, &seg));
+        st.load_pending(&u64::MAX.to_le_bytes());
+        assert!(!st.mask_clean(0, &seg));
+    }
+
+    #[test]
+    fn trigger_masks_go_off_when_an_event_write_has_no_home() {
+        let (mut inputs, infos, order) = trigger_fixture();
+        inputs.event_writes[0].ff.push(100);
+        let stmts = vec![ProtoStatement::Break; 3];
+        let segments = [trigger_seg(&[(true, 0, 4)], &[])];
+        let masks = trigger_masks(&stmts, &order, &infos, &inputs, &segments);
+        assert!(masks[0].is_empty());
+        let (inputs, infos, order) = trigger_fixture();
+        let mut off = inputs;
+        off.trigger_events.clear();
+        off.event_writes.clear();
+        assert!(trigger_masks(&stmts, &order, &infos, &off, &segments)[0].is_empty());
+    }
+
+    #[test]
+    fn ff_owner_runs_in_names_every_run_a_range_touches() {
+        let owner = FfOwner {
+            runs: vec![(0, 4, 2, 4), (16, 8, 3, 4), (64, 4, 1, 4)],
+        };
+        assert_eq!(owner.run_index(4), Some(0));
+        assert_eq!(owner.run_index(20), Some(1));
+        assert_eq!(owner.run_index(40), None);
+        assert_eq!(owner.runs_in(0, 8).collect::<Vec<_>>(), vec![0]);
+        assert_eq!(owner.runs_in(6, 20).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(owner.runs_in(40, 70).collect::<Vec<_>>(), vec![2]);
+        assert!(owner.runs_in(40, 60).next().is_none());
     }
 }

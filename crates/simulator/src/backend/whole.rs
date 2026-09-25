@@ -19,6 +19,9 @@ pub struct WholeCombShape<'a> {
     pub const_unsafe: Option<&'a crate::HashSet<isize>>,
     pub cone_segments: &'a [crate::ir::opt::cone_gate::ConeSegment],
     pub cone_groups: &'a [crate::ir::opt::cone_gate::ConeGroup],
+    /// Comb offset of the pending trigger mask the guards pre-test, set even
+    /// when the trigger analysis is off.
+    pub cone_trigger_off: u32,
 }
 
 pub(crate) fn compile_whole_comb(
@@ -53,6 +56,7 @@ pub(crate) fn compile_whole_comb(
             super::aot_c::emit::set_cone_segments(
                 shape.cone_segments.to_vec(),
                 shape.cone_groups.to_vec(),
+                shape.cone_trigger_off,
             );
         }
         let r = backends.try_compile_whole_comb(&ctx, stmts);
