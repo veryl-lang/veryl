@@ -1328,13 +1328,14 @@ fn conv_function(
             c.in_tb_block = in_tb_block;
             c.in_initial = in_initial;
             c.disalbe_const_opt = disable_const_opt;
-            let statements = match statements {
+            let mut statements = match statements {
                 Ok(statements) => statements,
                 Err(error) => {
                     c.finish_function_effect();
                     return Err(error);
                 }
             };
+            super::function_return::lower_returns(c, &mut statements.0, ret_id, token);
             c.record_function_statement_writes(&statements.0);
             c.finish_function_effect();
 
