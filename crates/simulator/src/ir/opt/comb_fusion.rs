@@ -1984,13 +1984,24 @@ pub fn inline_single_readers(
             );
         }
     }
-    if !deleted.iter().any(|&d| d) {
-        return (stmts, fused_offsets);
-    }
-    let mut out = Vec::with_capacity(n);
-    for (i, s) in stmts.into_iter().enumerate() {
-        if !deleted[i] {
-            out.push(s);
+    let mut out = if deleted.iter().any(|&d| d) {
+        let mut out = Vec::with_capacity(n);
+        for (i, s) in stmts.into_iter().enumerate() {
+            if !deleted[i] {
+                out.push(s);
+            }
+        }
+        out
+    } else {
+        stmts
+    };
+    // Substitution builds lanes the pre-inline merge never saw: a one-hot
+    // select takes its transposed-reduction shape only once its row and
+    // product variables are inlined into the output bits.
+    if lane_vector::merge_enabled() {
+        let post_laned = lane_vector::lane_merge(&mut out);
+        if diag() {
+            eprintln!("[comb_fusion] post-inline laned={post_laned}");
         }
     }
     (out, fused_offsets)
@@ -3090,6 +3101,55 @@ mod tests {
         assert!(!adopt_field_defs(None, Some(5), 0.5));
         assert!(adopt_field_defs(Some(5), None, 0.5));
         assert!(!adopt_field_defs(Some(4), Some(5), SEL_MIN_RETIRED / 2.0));
+    }
+
+    #[test]
+    fn merges_the_lanes_inlining_assembles() {
+        // Eight one-bit products `p_j = a[j] & b[j]`, stored as `{p_7, .., p_0}`.
+        // Only once they are inlined does the store hold lanes to merge.
+        let mut stmts: Vec<ProtoStatement> = (0..8)
+            .map(|j| {
+                assign(
+                    0x10 + 8 * j as isize,
+                    1,
+                    binary(
+                        Op::BitAnd,
+                        var_sel(0x100, j, j, 1, false),
+                        var_sel(0x108, j, j, 1, false),
+                        1,
+                    ),
+                )
+            })
+            .collect();
+        stmts.push(assign(
+            0x200,
+            8,
+            ProtoExpression::Concatenation {
+                elements: (0..8)
+                    .rev()
+                    .map(|j| (Box::new(var(0x10 + 8 * j as isize, 1)), 1, 1))
+                    .collect(),
+                width: 8,
+                expr_context: ctx(8),
+            },
+        ));
+        let out = run(stmts);
+        assert_eq!(out.len(), 1, "{out:?}");
+        let ProtoStatement::Assign(a) = &out[0] else {
+            panic!()
+        };
+        let mut e = &a.expr;
+        while let ProtoExpression::Binary {
+            x,
+            op: Op::BitAnd,
+            y,
+            ..
+        } = e
+            && matches!(y.as_ref(), ProtoExpression::Value { .. })
+        {
+            e = x;
+        }
+        assert!(!matches!(e, ProtoExpression::Concatenation { .. }), "{e:?}");
     }
 
     #[test]

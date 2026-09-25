@@ -4,19 +4,23 @@
 //! RTL that transposes a vector (`rev[j][i] = m[i][j]`) and then reduces each
 //! row (`out[j] = |rev[j]`) writes W×N one-bit statements — a sub-word RMW per
 //! bit plus a row variable that exists only to be reduced.  Both passes below
-//! are shape recoveries, not reassociations: every bit of every result is the
-//! same expression it was before.
+//! are shape recoveries: every bit of every result computes what it did
+//! before.
 //!
-//! [`lane_merge`] is legal because the operators it merges are bitwise: bit
-//! `j` of the merged expression is exactly lane `j`.
+//! [`lane_merge`] is legal because bit `j` of the merged expression is
+//! exactly lane `j`: the operators it merges are bitwise, and the one
+//! reduction it absorbs (a masked OR over a transposed row) is rewritten as
+//! a bitwise OR of per-row terms.
 //!
 //! The two run around the field-store coalescing: the fold turns the
 //! reduction rows into one-bit stores of the destination word, the coalescing
 //! gathers them into a concatenation, and the merge collapses that
-//! concatenation to word width.  Both are stages of
+//! concatenation to word width.  The merge runs once more after inlining,
+//! which assembles lane shapes no single statement held before.  Both are
+//! stages of
 //! [`comb_fusion::inline_single_readers`](super::comb_fusion::inline_single_readers),
-//! so a caller that needs every variable to hold its settled value — a
-//! waveform dump — turns them off with the fusion.
+//! so a caller that needs every variable to hold its settled value (a
+//! waveform dump) turns them off with the fusion.
 
 use crate::HashMap;
 use crate::HashSet;
@@ -503,6 +507,9 @@ fn merge_lanes(lanes: &[(&ProtoExpression, usize)], w: usize) -> Option<ProtoExp
             expr_context: ctx(w),
         });
     }
+    if let Some(e) = merge_masked_reduction(lanes, w) {
+        return Some(e);
+    }
     match head {
         ProtoExpression::Variable {
             var_offset,
@@ -618,6 +625,164 @@ fn merge_lanes(lanes: &[(&ProtoExpression, usize)], w: usize) -> Option<ProtoExp
         }
         _ => None,
     }
+}
+
+/// Lanes of the form `|({x_{n-1}[j], .., x_0[j]} & s)` with `s` the same
+/// plain read in every lane: a one-hot select written as a transpose, a
+/// per-bit AND and a reduction.  Bit `j` is `OR_k (x_k[j] & s[k])`, so the
+/// merged word is `OR_k (x_k & {w{s[k]}})` with each `x_k` merged as a lane.
+fn merge_masked_reduction(
+    lanes: &[(&ProtoExpression, usize)],
+    w: usize,
+) -> Option<ProtoExpression> {
+    type Elements = [(Box<ProtoExpression>, usize, usize)];
+    fn split(e: &ProtoExpression) -> Option<(&Elements, &ProtoExpression)> {
+        let ProtoExpression::Unary {
+            op: Op::BitOr,
+            x,
+            width: 1,
+            ..
+        } = e
+        else {
+            return None;
+        };
+        let ProtoExpression::Binary {
+            x,
+            op: Op::BitAnd,
+            y,
+            width: n,
+            ..
+        } = peel_clip(x)
+        else {
+            return None;
+        };
+        let (x, y) = (peel_clip(x), peel_clip(y));
+        let (cat, mask) = match (x, y) {
+            (ProtoExpression::Concatenation { .. }, m) => (x, m),
+            (m, ProtoExpression::Concatenation { .. }) => (y, m),
+            _ => return None,
+        };
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = cat
+        else {
+            unreachable!()
+        };
+        if *width != *n
+            || elements.len() != *n
+            || elements.iter().any(|(_, r, ew)| *r != 1 || *ew != 1)
+            || mask.width() != *n
+        {
+            return None;
+        }
+        Some((elements, mask))
+    }
+    let (head_elems, head_mask) = split(lanes[0].0)?;
+    let n = head_elems.len();
+    let ProtoExpression::Variable {
+        var_offset,
+        select,
+        dynamic_select: None,
+        var_full_width,
+        ..
+    } = head_mask
+    else {
+        return None;
+    };
+    // Bit `k` of the mask is read back as `lo + k` below, which is the
+    // original's bit only if the read spans exactly `n` bits of the variable.
+    let spans_n = match select {
+        Some((hi, lo)) => hi >= lo && hi - lo + 1 == n && *hi < *var_full_width,
+        None => *var_full_width == n,
+    };
+    if !spans_n {
+        return None;
+    }
+    let mut per_lane = Vec::with_capacity(lanes.len());
+    for (e, lane) in lanes {
+        let (elems, mask) = split(e)?;
+        let ProtoExpression::Variable {
+            var_offset: vo,
+            select: sel,
+            dynamic_select: None,
+            var_full_width: vfw,
+            ..
+        } = mask
+        else {
+            return None;
+        };
+        if elems.len() != n || vo != var_offset || sel != select || vfw != var_full_width {
+            return None;
+        }
+        per_lane.push((elems, *lane));
+    }
+    let lo = select.map_or(0, |(_, l)| l);
+    let mut acc: Option<ProtoExpression> = None;
+    for k in 0..n {
+        let kids: Vec<(&ProtoExpression, usize)> = per_lane
+            .iter()
+            .map(|(elems, lane)| (elems[n - 1 - k].0.as_ref(), *lane))
+            .collect();
+        let word = merge_lanes(&kids, w)?;
+        let mask_bit = ProtoExpression::Variable {
+            var_offset: *var_offset,
+            select: Some((lo + k, lo + k)),
+            dynamic_select: None,
+            width: 1,
+            var_full_width: *var_full_width,
+            expr_context: ctx(1),
+        };
+        let term = ProtoExpression::Binary {
+            x: Box::new(word),
+            op: Op::BitAnd,
+            y: Box::new(ProtoExpression::Concatenation {
+                elements: vec![(Box::new(mask_bit), w, 1)],
+                width: w,
+                expr_context: ctx(w),
+            }),
+            width: w,
+            expr_context: ctx(w),
+        };
+        acc = Some(match acc {
+            None => term,
+            Some(a) => ProtoExpression::Binary {
+                x: Box::new(a),
+                op: Op::BitOr,
+                y: Box::new(term),
+                width: w,
+                expr_context: ctx(w),
+            },
+        });
+    }
+    acc
+}
+
+/// Strip the width clips substitution wraps around an operand
+/// (`x & mask(width)`).  Only for operands whose bits above `width` the
+/// caller never reads: the masked reduction rebuilds its row from one-bit
+/// leaves and reads the mask one bit at a time below its width.
+fn peel_clip(mut e: &ProtoExpression) -> &ProtoExpression {
+    while let ProtoExpression::Binary {
+        x,
+        op: Op::BitAnd,
+        y,
+        width,
+        ..
+    } = e
+    {
+        let all = |v: &ProtoExpression| {
+            matches!(v, ProtoExpression::Value { value, .. }
+                if *width <= 64 && value.to_u64() == Some(mask_of(*width)))
+        };
+        if all(y) && x.width() == *width {
+            e = x;
+        } else if all(x) && y.width() == *width {
+            e = y;
+        } else {
+            break;
+        }
+    }
+    e
 }
 
 fn mask_of(w: usize) -> u64 {
@@ -1243,5 +1408,199 @@ mod tests {
         );
         assert_eq!(stmts.len(), 3);
         assert!(dead.is_empty());
+    }
+
+    /// Evaluate the bitwise subset the merge produces, over `env` (offset to
+    /// value), keeping each result to its width.
+    fn eval(e: &ProtoExpression, env: &HashMap<isize, u64>) -> u64 {
+        match e {
+            ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(o),
+                select,
+                width,
+                ..
+            } => {
+                let lo = select.map_or(0, |(_, l)| l);
+                (env[o] >> lo) & mask_of(*width)
+            }
+            ProtoExpression::Value { value, width, .. } => {
+                value.to_u64().unwrap() & mask_of(*width)
+            }
+            ProtoExpression::Unary { op, x, width, .. } => {
+                let v = eval(x, env);
+                match op {
+                    Op::BitOr => (v != 0) as u64,
+                    Op::BitNot => !v & mask_of(*width),
+                    _ => panic!("unexpected unary {op:?}"),
+                }
+            }
+            ProtoExpression::Binary {
+                x, op, y, width, ..
+            } => {
+                let (a, b) = (eval(x, env), eval(y, env));
+                mask_of(*width)
+                    & match op {
+                        Op::BitAnd => a & b,
+                        Op::BitOr => a | b,
+                        Op::BitXor => a ^ b,
+                        _ => panic!("unexpected binary {op:?}"),
+                    }
+            }
+            ProtoExpression::Concatenation { elements, .. } => {
+                let mut acc = 0u64;
+                for (x, r, ew) in elements {
+                    let v = eval(x, env) & mask_of(*ew);
+                    for _ in 0..*r {
+                        acc = (acc << ew) | v;
+                    }
+                }
+                acc
+            }
+            _ => panic!("unexpected expression"),
+        }
+    }
+
+    /// Lane `j` of an `inputs`-way one-hot select as substitution leaves it:
+    /// `|({x_{n-1}[j], .., x_0[j]} & sel)`, every operand wrapped in a clip.
+    fn onehot_lane(j: usize, inputs: usize, sel: ProtoExpression) -> ProtoExpression {
+        onehot_lane_as(j, inputs, sel, false)
+    }
+
+    /// `onehot_lane`, with the mask on the left of the product when `swapped`.
+    fn onehot_lane_as(
+        j: usize,
+        inputs: usize,
+        sel: ProtoExpression,
+        swapped: bool,
+    ) -> ProtoExpression {
+        let clip1 = |e| binop(e, Op::BitAnd, lit(1, 1), 1);
+        let row = concat(
+            (0..inputs)
+                .rev()
+                .map(|k| clip1(bit(0x100 + 8 * k as isize, j, 8)))
+                .collect(),
+        );
+        let row = binop(row, Op::BitAnd, lit(mask_of(inputs), inputs), inputs);
+        let prod = if swapped {
+            binop(sel, Op::BitAnd, row, inputs)
+        } else {
+            binop(row, Op::BitAnd, sel, inputs)
+        };
+        let prod = binop(prod, Op::BitAnd, lit(mask_of(inputs), inputs), inputs);
+        clip1(ProtoExpression::Unary {
+            op: Op::BitOr,
+            x: Box::new(prod),
+            width: 1,
+            expr_context: ctx(1),
+        })
+    }
+
+    fn sel_read(off: isize, w: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: None,
+            dynamic_select: None,
+            width: w,
+            var_full_width: w,
+            expr_context: ctx(w),
+        }
+    }
+
+    /// Merge the one-hot lanes built by `lane`, then check the merged form
+    /// against the original on pseudo-random inputs (mask at `0x40`).
+    fn check_one_hot_merge(lane: impl Fn(usize) -> ProtoExpression, w: usize, inputs: usize) {
+        let original = concat((0..w).rev().map(lane).collect());
+        let mut stmts = vec![store(0x80, w, None, original.clone())];
+        assert_eq!(merge_any(&mut stmts), 1);
+        let merged = expr_of(&stmts[0]);
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..500 {
+            let mut env = HashMap::default();
+            for k in 0..=inputs {
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let off = if k == inputs {
+                    0x40
+                } else {
+                    0x100 + 8 * k as isize
+                };
+                env.insert(off, seed >> 56);
+            }
+            assert_eq!(eval(merged, &env), eval(&original, &env));
+        }
+    }
+
+    #[test]
+    fn merge_reads_a_one_hot_mask_that_starts_above_bit_zero() {
+        let (w, inputs, lo) = (6, 4, 2);
+        let sel = ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0x40),
+            select: Some((lo + inputs - 1, lo)),
+            dynamic_select: None,
+            width: inputs,
+            var_full_width: 8,
+            expr_context: ctx(inputs),
+        };
+        check_one_hot_merge(|j| onehot_lane(j, inputs, sel.clone()), w, inputs);
+    }
+
+    #[test]
+    fn merge_takes_the_one_hot_mask_on_either_side() {
+        let (w, inputs) = (6, 5);
+        check_one_hot_merge(
+            |j| onehot_lane_as(j, inputs, sel_read(0x40, inputs), true),
+            w,
+            inputs,
+        );
+    }
+
+    #[test]
+    fn merge_collapses_a_transposed_one_hot_select() {
+        let (w, inputs) = (6, 5);
+        let lanes: Vec<ProtoExpression> = (0..w)
+            .rev()
+            .map(|j| onehot_lane(j, inputs, sel_read(0x40, inputs)))
+            .collect();
+        let original = concat(lanes);
+        let mut stmts = vec![store(0x80, w, None, original.clone())];
+        assert_eq!(merge_any(&mut stmts), 1);
+        let merged = expr_of(&stmts[0]);
+        assert!(
+            !matches!(unmask(merged), ProtoExpression::Concatenation { .. }),
+            "the lanes were left in place"
+        );
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        for _ in 0..500 {
+            let mut env = HashMap::default();
+            for k in 0..inputs {
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                env.insert(0x100 + 8 * k as isize, seed >> 56);
+            }
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            env.insert(0x40, seed >> 59);
+            assert_eq!(eval(merged, &env), eval(&original, &env));
+        }
+    }
+
+    #[test]
+    fn merge_rejects_a_one_hot_select_whose_mask_varies_by_lane() {
+        let (w, inputs) = (6, 5);
+        let lanes: Vec<ProtoExpression> = (0..w)
+            .rev()
+            .map(|j| {
+                onehot_lane(
+                    j,
+                    inputs,
+                    sel_read(if j == 3 { 0x48 } else { 0x40 }, inputs),
+                )
+            })
+            .collect();
+        let mut stmts = vec![store(0x80, w, None, concat(lanes))];
+        assert_eq!(merge_any(&mut stmts), 0);
     }
 }

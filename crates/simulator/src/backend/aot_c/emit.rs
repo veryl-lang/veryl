@@ -8915,9 +8915,7 @@ fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
     Some(s)
 }
 
-/// `ProtoExpression` → parenthesized C expression (typed `uint64_t`;
-/// width truncation happens at store time via the dst cast).  `None`
-/// if the variant or operator isn't supported.
+/// `VERYL_AOT_C_BITMERGE=0` opts bit-test merging out.
 fn bitmerge_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var("VERYL_AOT_C_BITMERGE").as_deref() != Ok("0"))
@@ -8934,8 +8932,13 @@ fn bitmerge_enabled() -> bool {
 /// same-variable groups, ≈26% of static operators (the small scalar core
 /// has almost none).
 ///
-/// Returns `None` when no group of ≥2 same-variable bit tests exists —
-/// the normal expression path then applies.  Mixed leaves keep their
+/// An Or tree also folds leaves that take the same bit of several variables:
+/// `|(a[b] & c[b])` over a family of bits becomes `((a & c) & mask) != 0`.  A
+/// same-width bitwise op feeding a reduction lowers to this shape, and left
+/// per-bit it costs the C compiler far more than its size suggests.
+///
+/// Returns `None` when neither kind of group has ≥2 members: the normal
+/// expression path then applies.  Mixed leaves keep their
 /// usual emission and join the folded groups with the tree's operator
 /// (And/Or are commutative and associative, so regrouping is sound).
 /// A negated leaf under Or, and any bit claimed both positive and
@@ -8995,6 +8998,69 @@ fn emit_bit_test_merge(expr: &ProtoExpression) -> Option<String> {
         };
         Some((ff, off, bit, full))
     }
+    /// The variables one conjunction tests: (is_ff, offset, full width).
+    type ConjVars = Vec<(bool, isize, usize)>;
+    /// A conjunction taking the same bit of several variables (`a[b] & c[b]`):
+    /// the variables, sorted so the group key is stable, and the bit.
+    fn as_same_bit_conj(e: &ProtoExpression) -> Option<(ConjVars, usize)> {
+        fn flatten_and<'a>(e: &'a ProtoExpression, out: &mut Vec<&'a ProtoExpression>) {
+            match e {
+                ProtoExpression::Binary {
+                    x,
+                    op: Op::BitAnd,
+                    y,
+                    expr_context,
+                    ..
+                } if expr_context.width == 1 && !expr_context.signed => {
+                    flatten_and(x, out);
+                    flatten_and(y, out);
+                }
+                _ => out.push(e),
+            }
+        }
+        let ProtoExpression::Binary {
+            op: Op::BitAnd,
+            expr_context,
+            ..
+        } = e
+        else {
+            return None;
+        };
+        if expr_context.width != 1 || expr_context.signed {
+            return None;
+        }
+        let mut parts: Vec<&ProtoExpression> = Vec::new();
+        flatten_and(e, &mut parts);
+        let mut vars: ConjVars = Vec::new();
+        let mut bit: Option<usize> = None;
+        for p in parts {
+            // A width-1 conjunction reads only bit 0 of a constant operand, and
+            // width clips lower to `& 1`, so an all-ones constant is the
+            // identity and drops out.  Any other constant is left to the
+            // ordinary path.
+            if let ProtoExpression::Value { value, .. } = p {
+                match value {
+                    Value::U64(v) if v.mask_xz & 1 == 0 && v.payload & 1 == 1 => continue,
+                    _ => return None,
+                }
+            }
+            let (ff, off, b, full) = as_bit_test(p)?;
+            if *bit.get_or_insert(b) != b {
+                return None;
+            }
+            // The same variable twice would make the AND idempotent rather
+            // than a two-operand test; leave those to the ordinary path.
+            if vars.iter().any(|&(f, o, _)| f == ff && o == off) {
+                return None;
+            }
+            vars.push((ff, off, full));
+        }
+        if vars.len() < 2 {
+            return None;
+        }
+        vars.sort_unstable();
+        Some((vars, bit?))
+    }
     let mut leaves: Vec<&ProtoExpression> = Vec::new();
     flatten(expr, op, &mut leaves);
     if leaves.len() < 2 {
@@ -9011,9 +9077,17 @@ fn emit_bit_test_merge(expr: &ProtoExpression) -> Option<String> {
         count: usize,
         conflict: bool,
     }
+    // One family of `a[b] & c[b]` leaves, keyed by the variables they test.
+    struct ConjGroup<'a> {
+        mask: u64,
+        fulls: Vec<usize>,
+        leaves: Vec<&'a ProtoExpression>,
+    }
     // BTreeMap: deterministic iteration — the emitted text feeds the
     // artifact cache key, so an unstable group order would re-key every run.
     let mut groups: std::collections::BTreeMap<(bool, isize), Group> =
+        std::collections::BTreeMap::new();
+    let mut conj: std::collections::BTreeMap<Vec<(bool, isize)>, ConjGroup> =
         std::collections::BTreeMap::new();
     let mut others: Vec<&ProtoExpression> = Vec::new();
     for &leaf in &leaves {
@@ -9063,10 +9137,37 @@ fn emit_bit_test_merge(expr: &ProtoExpression) -> Option<String> {
                 }
                 g.count += 1;
             }
-            None => others.push(leaf),
+            None => {
+                // Or only: under And the conjunction is already flattened, and
+                // under Xor a repeated bit would toggle instead of being
+                // absorbed.  A negated conjunction has no masked-test form.
+                if op == Op::BitOr
+                    && !neg
+                    && let Some((vars, bit)) = as_same_bit_conj(leaf)
+                {
+                    let key: Vec<(bool, isize)> =
+                        vars.iter().map(|&(ff, off, _)| (ff, off)).collect();
+                    let g = conj.entry(key).or_insert_with(|| ConjGroup {
+                        mask: 0,
+                        fulls: vars.iter().map(|&(_, _, full)| full).collect(),
+                        leaves: Vec::new(),
+                    });
+                    for (slot, &(_, _, full)) in g.fulls.iter_mut().zip(vars.iter()) {
+                        *slot = (*slot).max(full);
+                    }
+                    // A repeated bit is idempotent under Or, so the mask
+                    // absorbs it and the leaf still counts toward the group.
+                    g.mask |= 1u64 << bit;
+                    g.leaves.push(leaf);
+                } else {
+                    others.push(leaf);
+                }
+            }
         }
     }
-    if !groups.values().any(|g| !g.conflict && g.count >= 2) {
+    if !groups.values().any(|g| !g.conflict && g.count >= 2)
+        && !conj.values().any(|g| g.leaves.len() >= 2)
+    {
         return None;
     }
     let mut parts: Vec<String> = Vec::new();
@@ -9117,6 +9218,30 @@ fn emit_bit_test_merge(expr: &ProtoExpression) -> Option<String> {
             _ => format!("((uint64_t)((({load}) & {:#x}ULL) != 0))", g.mask),
         });
     }
+    for (key, g) in &conj {
+        if g.leaves.len() < 2 {
+            // One pair is already three operations either way; only a family
+            // pays for the regrouping.
+            for leaf in &g.leaves {
+                parts.push(emit_expr_inner(leaf, true)?);
+            }
+            continue;
+        }
+        let mut loads = Vec::with_capacity(key.len());
+        for (&(ff, off), &full) in key.iter().zip(g.fulls.iter()) {
+            let vo = if ff {
+                VarOffset::Ff(off)
+            } else {
+                VarOffset::Comb(off)
+            };
+            loads.push(format!("({})", emit_var_load(&vo, full)?));
+        }
+        parts.push(format!(
+            "((uint64_t)((({}) & {:#x}ULL) != 0))",
+            loads.join(" & "),
+            g.mask
+        ));
+    }
     for o in others {
         parts.push(emit_expr_inner(o, true)?);
     }
@@ -9128,6 +9253,9 @@ fn emit_bit_test_merge(expr: &ProtoExpression) -> Option<String> {
     Some(format!("({})", parts.join(joiner)))
 }
 
+/// `ProtoExpression` → parenthesized C expression (typed `uint64_t`;
+/// width truncation happens at store time via the dst cast).  `None`
+/// if the variant or operator isn't supported.
 pub fn emit_expr(expr: &ProtoExpression) -> Option<String> {
     emit_expr_inner(expr, true)
 }
@@ -15812,6 +15940,82 @@ mod tests {
         let e = bjoin(Op::BitXor, vec![bnot(bit(0x0, 0, 16)), bit(0x0, 1, 16)]);
         let src = emit_bit_test_merge(&e).unwrap();
         assert!(src.contains("0x1ULL ^"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_folds_an_or_of_same_bit_conjunctions() {
+        // (a[0]&b[0]) | (a[1]&b[1]) | (a[2]&b[2]) -> ((a & b) & 0x7) != 0.
+        let e = bjoin(
+            Op::BitOr,
+            (0..3)
+                .map(|b| bjoin(Op::BitAnd, vec![bit(0x0, b, 16), bit(0x8, b, 16)]))
+                .collect(),
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("& 0x7ULL) != 0"), "{src}");
+        // Each operand is loaded once at full width; no per-bit shifts remain.
+        assert_eq!(src.matches("comb_values + 0x0").count(), 1, "{src}");
+        assert_eq!(src.matches("comb_values + 0x8").count(), 1, "{src}");
+        assert!(!src.contains(">>"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_bails_when_a_conjunction_crosses_bits() {
+        // a[0]&b[1] is not a bit of `a & b`; there is no single mask for it.
+        let e = bjoin(
+            Op::BitOr,
+            vec![
+                bjoin(Op::BitAnd, vec![bit(0x0, 0, 16), bit(0x8, 1, 16)]),
+                bjoin(Op::BitAnd, vec![bit(0x0, 1, 16), bit(0x8, 2, 16)]),
+            ],
+        );
+        assert!(emit_bit_test_merge(&e).is_none());
+    }
+
+    #[test]
+    fn bitmerge_leaves_a_lone_conjunction_alone() {
+        // One pair costs the same either way; only a family is regrouped.
+        let e = bjoin(
+            Op::BitOr,
+            vec![
+                bjoin(Op::BitAnd, vec![bit(0x0, 0, 16), bit(0x8, 0, 16)]),
+                bit(0x10, 3, 16),
+            ],
+        );
+        assert!(emit_bit_test_merge(&e).is_none());
+    }
+
+    #[test]
+    fn bitmerge_emits_a_lone_conjunction_beside_a_folded_group() {
+        let e = bjoin(
+            Op::BitOr,
+            vec![
+                bjoin(Op::BitAnd, vec![bit(0x0, 0, 16), bit(0x8, 0, 16)]),
+                bit(0x10, 1, 16),
+                bit(0x10, 2, 16),
+            ],
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("& 0x6ULL) != 0"), "{src}");
+        assert!(src.contains("comb_values + 0x0"), "{src}");
+        assert!(src.contains("comb_values + 0x8"), "{src}");
+    }
+
+    #[test]
+    fn bitmerge_drops_an_all_ones_constant_from_a_conjunction() {
+        let e = bjoin(
+            Op::BitOr,
+            (0..3)
+                .map(|b| {
+                    bjoin(
+                        Op::BitAnd,
+                        vec![bit(0x0, b, 16), bit(0x8, b, 16), const_expr(1, 1)],
+                    )
+                })
+                .collect(),
+        );
+        let src = emit_bit_test_merge(&e).unwrap();
+        assert!(src.contains("& 0x7ULL) != 0"), "{src}");
     }
 
     #[test]
