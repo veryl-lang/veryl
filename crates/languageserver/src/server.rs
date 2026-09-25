@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use futures::executor::block_on;
 use ropey::Rope;
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tower_lsp_server::Client;
 use tower_lsp_server::ls_types::ClientCapabilities;
 use tower_lsp_server::ls_types::Uri as Url;
@@ -832,8 +832,12 @@ impl Server {
                 );
             } else {
                 block_on(self.client.log_message(
-                    MessageType::INFO,
-                    format!("failed to load metadata: {}", url.as_str()),
+                    MessageType::ERROR,
+                    format!(
+                        "failed to load metadata: {}: {}",
+                        url.as_str(),
+                        metadata_error_message(&path)
+                    ),
                 ));
             }
 
@@ -848,6 +852,22 @@ impl Server {
             Analyzer::drop_file(path_id, None);
         }
     }
+}
+
+/// Why `Veryl.toml` could not be loaded for `path`, including the underlying TOML error that
+/// names the offending key and its position.
+fn metadata_error_message(path: &Path) -> String {
+    let err = match Metadata::search_from(path).and_then(Metadata::load) {
+        Ok(_) => return "unknown error".to_string(),
+        Err(x) => x,
+    };
+    let mut message = err.to_string();
+    let mut source = std::error::Error::source(&err);
+    while let Some(x) = source {
+        message.push_str(&format!(": {x}"));
+        source = x.source();
+    }
+    message
 }
 
 fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
@@ -1603,6 +1623,32 @@ mod tests {
             requires: vec![],
             groups: vec![],
         }
+    }
+
+    #[test]
+    fn metadata_error_names_the_bad_key() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Veryl.toml"),
+            "[project]
+name = \"t\"
+version = \"0.1.0\"
+
+[test]
+no_such_option = true
+",
+        )
+        .unwrap();
+        let message = metadata_error_message(&dir.path().join("src/top.veryl"));
+        assert!(message.starts_with("toml load failed: "), "{message}");
+        assert!(message.contains("no_such_option"), "{message}");
+    }
+
+    #[test]
+    fn metadata_error_without_veryl_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let message = metadata_error_message(&dir.path().join("top.veryl"));
+        assert!(message.contains("Veryl.toml is not found"), "{message}");
     }
 
     #[test]
