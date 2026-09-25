@@ -351,6 +351,9 @@ impl Server {
                         vec![]
                     };
                     items.append(&mut completion_keyword());
+                    if let Some(text) = self.get_line(url, line) {
+                        set_completion_edit_ranges(&mut items, &text, line, column);
+                    }
                     Some(CompletionResponse::Array(items))
                 }
                 _ => None,
@@ -1519,6 +1522,42 @@ fn current_namespace(url: &Url, line: usize, column: usize) -> Option<Namespace>
     ret_func.or(ret)
 }
 
+/// Replaces the typed text that each item's insert text starts with, so `$cl` completes to
+/// `$clog2` and `$tb::c` to `$tb::clock_gen` instead of keeping the `$` / `$tb::` typed before
+/// the editor's word, which does not include `$` or `:`.
+fn set_completion_edit_ranges(
+    items: &mut [CompletionItem],
+    text: &str,
+    line: usize,
+    column: usize,
+) {
+    let before: Vec<char> = text.chars().take(column - 1).collect();
+    let is_word = |c: &char| c.is_alphanumeric() || *c == '_';
+    let is_path = |c: &char| is_word(c) || *c == '$' || *c == ':';
+    let word_len = before.iter().rev().take_while(|c| is_word(c)).count();
+    let path_len = before.iter().rev().take_while(|c| is_path(c)).count();
+
+    let line = (line - 1) as u32;
+    let end = Position::new(line, (column - 1) as u32);
+    for item in items.iter_mut() {
+        let Some(new_text) = item.insert_text.take() else {
+            continue;
+        };
+        let replace_len = (word_len..=path_len)
+            .rev()
+            .find(|&len| {
+                let typed: String = before[before.len() - len..].iter().collect();
+                new_text.starts_with(&typed)
+            })
+            .unwrap_or(word_len);
+        let start = Position::new(line, end.character - replace_len as u32);
+        item.text_edit = Some(CompletionTextEdit::Edit(TextEdit {
+            range: Range::new(start, end),
+            new_text,
+        }));
+    }
+}
+
 fn completion_keyword() -> Vec<CompletionItem> {
     let mut items = Vec::new();
     for keyword in KEYWORDS {
@@ -1603,6 +1642,58 @@ mod tests {
             requires: vec![],
             groups: vec![],
         }
+    }
+
+    fn edit_range(line_text: &str, insert_text: &str) -> (u32, u32, String) {
+        let mut items = vec![CompletionItem {
+            label: insert_text.to_string(),
+            insert_text: Some(insert_text.to_string()),
+            ..Default::default()
+        }];
+        let column = line_text.chars().count() + 1;
+        set_completion_edit_ranges(&mut items, line_text, 3, column);
+        let Some(CompletionTextEdit::Edit(edit)) = items[0].text_edit.take() else {
+            panic!("expected a text edit");
+        };
+        assert_eq!(items[0].insert_text, None);
+        assert_eq!(edit.range.start.line, 2);
+        (
+            edit.range.start.character,
+            edit.range.end.character,
+            edit.new_text,
+        )
+    }
+
+    #[test]
+    fn completion_replaces_typed_dollar_prefix() {
+        assert_eq!(
+            edit_range("    a = $cl", "$clog2"),
+            (8, 11, "$clog2".to_string())
+        );
+        assert_eq!(
+            edit_range("    inst c: $tb::c", "$tb::clock_gen"),
+            (12, 18, "$tb::clock_gen".to_string())
+        );
+    }
+
+    #[test]
+    fn completion_falls_back_to_the_typed_word() {
+        assert_eq!(
+            edit_range("    x = pkg::fo", "foo"),
+            (13, 15, "foo".to_string())
+        );
+        assert_eq!(
+            edit_range("    x = clk", "clock"),
+            (8, 11, "clock".to_string())
+        );
+        assert_eq!(
+            edit_range("    x = cl", "$clog2"),
+            (8, 10, "$clog2".to_string())
+        );
+        assert_eq!(
+            edit_range("    x = ", "module"),
+            (8, 8, "module".to_string())
+        );
     }
 
     #[test]
