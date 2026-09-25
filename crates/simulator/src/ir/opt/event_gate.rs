@@ -1128,6 +1128,10 @@ mod tests {
             comb_var: vec![(0, 8, 0), (8, 16, 1), (16, 24, 2), (24, 32, 3), (32, 40, 4)],
             ff_node: Vec::new(),
             event_written_comb: vec![],
+            trigger_events: Vec::new(),
+            event_writes: Vec::new(),
+            master_clocks: Vec::new(),
+            ff_next_alias: Vec::new(),
             tour: Default::default(),
         };
         // Deliberately not in tour order, so a missing sort shows up.
@@ -1180,6 +1184,10 @@ mod tests {
             comb_var: Vec::new(),
             ff_node: vec![(0, 4, 1), (4, 8, 2)],
             event_written_comb: vec![],
+            trigger_events: Vec::new(),
+            event_writes: Vec::new(),
+            master_clocks: Vec::new(),
+            ff_next_alias: Vec::new(),
             tour: Default::default(),
         };
         let mut scratch = ff_block(0, 1);

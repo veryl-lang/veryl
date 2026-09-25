@@ -135,6 +135,11 @@ pub struct Module {
     /// First byte of the cone-gate state region at the comb buffer's tail;
     /// logic storage ends here.
     pub cone_state_base: u32,
+    /// The pending trigger mask at the head of that region, one bit per
+    /// `cone_trigger_events` entry.
+    pub cone_trigger_off: u32,
+    pub cone_trigger_words: u32,
+    pub cone_trigger_events: Vec<Event>,
     /// Comb-buffer offsets of the event gates' idle flags (`event_gate`),
     /// cleared by writes the gates cannot see.
     pub event_gate_flags: Vec<u32>,
@@ -206,6 +211,10 @@ pub struct ProtoModule {
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// See `Module::cone_state_base`.
     pub cone_state_base: u32,
+    /// See `Module::cone_trigger_off`.
+    pub cone_trigger_off: u32,
+    pub cone_trigger_words: u32,
+    pub cone_trigger_events: Vec<Event>,
     /// Comb-buffer offsets of the event gates' idle flags (`event_gate`),
     /// cleared by writes the gates cannot see.
     pub event_gate_flags: Vec<u32>,
@@ -502,6 +511,8 @@ impl ProtoModule {
                         compare_pre: s.compare_pre.clone(),
                         replay: s.replay.clone(),
                         off_decay: s.off_decay,
+                        trigger: s.trigger.clone(),
+                        internal: s.internal.clone(),
                         cone: s.cone.clone(),
                     })
                     .collect()
@@ -573,6 +584,9 @@ impl ProtoModule {
             cone_segments,
             event_comb_writes: self.event_comb_writes.clone(),
             cone_state_base: self.cone_state_base,
+            cone_trigger_off: self.cone_trigger_off,
+            cone_trigger_words: self.cone_trigger_words,
+            cone_trigger_events: self.cone_trigger_events.clone(),
             event_gate_flags: self.event_gate_flags.clone(),
             settle_info: Arc::clone(&self.settle_info),
         }
@@ -1376,6 +1390,116 @@ fn collect_event_written_comb(
     Some(out)
 }
 
+/// The event order the cone gate's trigger analysis indexes by.  Elaboration
+/// fixes it and the simulator reads it back, so both sides see one order.
+fn trigger_event_order(events: &HashMap<Event, Vec<ProtoStatement>>) -> Vec<Event> {
+    let mut keys: Vec<Event> = events.keys().cloned().collect();
+    keys.sort_by_key(|e| format!("{e:?}"));
+    keys
+}
+
+/// What each event can write (`cone_gate::EventWrites`); an event whose
+/// writes cannot be bounded is `wild`.
+fn collect_event_writes_each(
+    events: &HashMap<Event, Vec<ProtoStatement>>,
+) -> (Vec<Event>, Vec<cone_gate::EventWrites>) {
+    use crate::ir::statement::ProtoTbMethodKind;
+    /// Elements past this a dynamic write leaves unbounded rather than named.
+    const MAX_NAMED_ELEMENTS: usize = 1 << 20;
+    /// Push the element base offsets `s` can write onto `(comb, ff)`, both
+    /// slots of a dual-slot FF; `false` when a write cannot be bounded.
+    fn walk_writes(s: &ProtoStatement, out: &mut (Vec<isize>, Vec<isize>)) -> bool {
+        match s {
+            ProtoStatement::Assign(a) => {
+                if a.dst.is_ff() {
+                    out.1.push(a.dst.raw());
+                    out.1.push(a.dst_ff_current_offset);
+                } else {
+                    out.0.push(a.dst.raw());
+                }
+                true
+            }
+            ProtoStatement::AssignDynamic(a) => {
+                if a.dst_num_elements > MAX_NAMED_ELEMENTS {
+                    return false;
+                }
+                let side = if a.dst_base.is_ff() {
+                    &mut out.1
+                } else {
+                    &mut out.0
+                };
+                for k in 0..a.dst_num_elements.max(1) {
+                    side.push(a.dst_base.raw() + a.dst_stride * k as isize);
+                }
+                true
+            }
+            ProtoStatement::If(x) => x
+                .true_side
+                .iter()
+                .chain(x.false_side.iter())
+                .all(|s| walk_writes(s, out)),
+            ProtoStatement::Case(x) => x
+                .arms
+                .iter()
+                .flat_map(|a| a.body.iter())
+                .chain(x.default.iter())
+                .all(|s| walk_writes(s, out)),
+            ProtoStatement::SequentialBlock(inner) => inner.iter().all(|s| walk_writes(s, out)),
+            ProtoStatement::CompiledBlock(cb) => {
+                !cb.original_stmts.is_empty()
+                    && cb.original_stmts.iter().all(|s| walk_writes(s, out))
+            }
+            ProtoStatement::For(f) => {
+                if f.var_offset.is_ff() {
+                    out.1.push(f.var_offset.raw());
+                } else {
+                    out.0.push(f.var_offset.raw());
+                }
+                f.body.iter().all(|s| walk_writes(s, out))
+            }
+            ProtoStatement::SystemFunctionCall(c) => {
+                !matches!(c, crate::ir::ProtoSystemFunctionCall::Readmemh { .. })
+            }
+            ProtoStatement::TbMethodCall { method, .. } => !matches!(
+                method,
+                ProtoTbMethodKind::Component { ret: Some(_), .. }
+                    | ProtoTbMethodKind::RandomGet { ret: Some(_), .. }
+                    | ProtoTbMethodKind::RandomGetRange { ret: Some(_), .. }
+                    | ProtoTbMethodKind::RandomGetSeed { ret: Some(_) }
+            ),
+            ProtoStatement::Break => true,
+            ProtoStatement::HierAssign(_) => {
+                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
+            }
+        }
+    }
+    let order = trigger_event_order(events);
+    let mut writes = Vec::with_capacity(order.len());
+    for k in &order {
+        let stmts = &events[k];
+        let mut out = (Vec::new(), Vec::new());
+        let ew = if stmts.iter().all(|s| walk_writes(s, &mut out)) {
+            let (mut comb, mut ff) = out;
+            comb.sort_unstable();
+            comb.dedup();
+            ff.sort_unstable();
+            ff.dedup();
+            cone_gate::EventWrites {
+                comb,
+                ff,
+                wild: false,
+            }
+        } else {
+            cone_gate::EventWrites {
+                wild: true,
+                ..Default::default()
+            }
+        };
+        writes.push(ew);
+    }
+    (order, writes)
+}
+
 /// Comb byte ranges `(lo, hi)` — element base offsets, `lo == hi` for a
 /// static write, `hi` the last element of a dynamic one — one event's
 /// statements can write, for the settle filter.  `None` when a write
@@ -1829,12 +1953,14 @@ fn run_comb_pipeline(
                 try_jit_with_boundaries(context, unified_sorted, &bounds, true, helpers);
             // Bring ranges into the FINAL storage space piecewise: a merged
             // span can straddle relayout units that land apart.
+            // Live bytes only: a function-inline scratch copy's owner span can
+            // reach bytes no layout unit kept, which now belong to another unit.
             let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
                 let mut out: Vec<(u32, u32)> = Vec::new();
                 for &(cs, ce) in v {
                     match layout.as_deref() {
                         Some(sched) => {
-                            for (ns, ne) in sched.translate_range(cs as isize, ce as isize) {
+                            for (ns, ne) in sched.translate_range_live(cs as isize, ce as isize) {
                                 out.push((ns as u32, ne as u32));
                             }
                         }
@@ -1853,16 +1979,21 @@ fn run_comb_pipeline(
             // the stored run.  The backedge ranges must stay exact: a gap
             // byte the segment legitimately rewrites would read as
             // non-convergence.
-            let coalesce = |v: &mut Vec<(u32, u32)>| {
+            // Bridging a gap of up to 32 bytes buys one memcmp call less.  The
+            // trigger oracle needs the exact set: a bridged byte another writer
+            // moves is not a wrong skip.
+            let exact = std::env::var("VERYL_CONE_TRIGGER_CHECK").as_deref() == Ok("1");
+            let coalesce_gap = |v: &mut Vec<(u32, u32)>, gap: u32| {
                 let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
                 for &(cs, ce) in v.iter() {
                     match out.last_mut() {
-                        Some(p) if cs <= p.1 + 32 => p.1 = p.1.max(ce),
+                        Some(p) if cs <= p.1 + gap => p.1 = p.1.max(ce),
                         _ => out.push((cs, ce)),
                     }
                 }
                 *v = out;
             };
+            let coalesce = |v: &mut Vec<(u32, u32)>| coalesce_gap(v, if exact { 0 } else { 32 });
             // FF storage is never relaid out.
             let translate_compare = |v: &[(bool, u32, u32)]| -> Vec<(bool, u32, u32)> {
                 let mut ffs: Vec<(u32, u32)> = Vec::new();
@@ -1899,10 +2030,11 @@ fn run_comb_pipeline(
                 // every run is converged by construction and the backedge
                 // snapshot plus its post-run compare would only ever confirm
                 // that; an empty set skips both.
+                let internal = translate_pairs(&s.backedge);
                 let backedge = if required_comb_passes == 1 {
                     Vec::new()
                 } else {
-                    translate_pairs(&s.backedge)
+                    internal.clone()
                 };
                 let mut replay = translate_pairs(&s.replay);
                 coalesce(&mut replay);
@@ -1921,6 +2053,8 @@ fn run_comb_pipeline(
                     compare_pre,
                     replay,
                     off_decay: s.off_decay,
+                    trigger: s.trigger.clone(),
+                    internal,
                     cone: s.cone.clone(),
                 });
             }
@@ -5858,6 +5992,51 @@ impl Conv<&air::Module> for ProtoModule {
         } else {
             None
         };
+        // Part of the pipeline key: the masks they yield live in the cached plan.
+        let trigger_inputs: cone_gate::TriggerInputs = if cone_event_written.is_some()
+            && cone_gate::trigger_enabled()
+        {
+            let (trigger_events, event_writes) = collect_event_writes_each(&all_event_statements);
+            let master_clocks: Vec<(VarOffset, VarId)> = src
+                .variables
+                .iter()
+                .filter(|(_, v)| v.r#type.is_clock())
+                .filter_map(|(vid, _)| {
+                    let el = variable_meta.get(vid)?.elements.first()?;
+                    Some((el.current, *vid))
+                })
+                .collect();
+            cone_gate::TriggerInputs {
+                trigger_events,
+                event_writes,
+                master_clocks,
+            }
+        } else {
+            Default::default()
+        };
+        let trigger_digest: u64 = {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut h = DefaultHasher::new();
+            for (e, w) in trigger_inputs
+                .trigger_events
+                .iter()
+                .zip(&trigger_inputs.event_writes)
+            {
+                format!("{e:?}").hash(&mut h);
+                w.comb.hash(&mut h);
+                w.ff.hash(&mut h);
+                w.wild.hash(&mut h);
+            }
+            let mut masters: Vec<(isize, bool, String)> = trigger_inputs
+                .master_clocks
+                .iter()
+                .map(|(o, v)| (o.raw(), o.is_ff(), format!("{v:?}")))
+                .collect();
+            masters.sort();
+            masters.hash(&mut h);
+            h.finish()
+        };
         let key = {
             let base = comb_pipeline_key(
                 unified_fp,
@@ -5874,6 +6053,7 @@ impl Conv<&air::Module> for ProtoModule {
                 let mut h = DefaultHasher::new();
                 comb_fusion::enabled(context.config.use_4state).hash(&mut h);
                 cone_event_written.is_some().hash(&mut h);
+                trigger_digest.hash(&mut h);
                 if let Some(extra) = &aux_extra_base {
                     extra.hash(&mut h);
                 }
@@ -5967,6 +6147,7 @@ impl Conv<&air::Module> for ProtoModule {
                             &evt,
                             &context.comb_reloc,
                             context.config.use_4state,
+                            trigger_inputs,
                         )
                     });
 
@@ -6033,6 +6214,23 @@ impl Conv<&air::Module> for ProtoModule {
         // mutates on every settle (streaks, shadows), which the settle
         // filter's skip oracle must exclude from its no-op comparison.
         let cone_state_base = context.comb_total_bytes as u32;
+        let cone_trigger_words = cached
+            .cone_segments
+            .iter()
+            .map(|s| s.trigger.len())
+            .max()
+            .unwrap_or(0);
+        let cone_trigger_events: Vec<Event> = if cone_trigger_words > 0 {
+            cached
+                .cone_inputs
+                .as_deref()
+                .map(|ci| ci.trigger_events.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let cone_trigger_off = context.comb_total_bytes as u32;
+        context.comb_total_bytes += cone_trigger_words * 8;
         let cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment> = {
             let mut segs: Vec<_> = cached.cone_segments.as_ref().clone();
             for s in &mut segs {
@@ -6773,6 +6971,7 @@ impl Conv<&air::Module> for ProtoModule {
                     const_unsafe: const_unsafe_comb.as_ref(),
                     cone_segments: &cone_segments,
                     cone_groups: &cone_groups,
+                    cone_trigger_off,
                 },
             )
         };
@@ -6845,6 +7044,9 @@ impl Conv<&air::Module> for ProtoModule {
             closure_out_watch,
             event_comb_writes,
             cone_state_base,
+            cone_trigger_off,
+            cone_trigger_words: cone_trigger_words as u32,
+            cone_trigger_events,
             event_gate_flags,
             event_gates: event_gate_chunks,
             settle_info: Default::default(),

@@ -47,6 +47,8 @@ pub struct CombLayoutSchedule {
     /// disjoint.  A unit keeps its internal layout: `x` in `[old_start,
     /// old_end)` lands at `new_start + (x - old_start)`.
     units: Vec<(isize, isize, isize)>,
+    /// Sorted `(new_start, new_end)` of every unit.
+    dest: Vec<(isize, isize)>,
     /// One past the highest byte any placed unit occupies.  The comb buffer
     /// must be at least this large (it never exceeds the old total by more
     /// than alignment padding, and usually undercuts it).
@@ -94,6 +96,53 @@ impl CombLayoutSchedule {
             };
             out.push((nx, nx + (seg_end - x)));
             x = seg_end;
+        }
+        out
+    }
+
+    fn dest_covered(&self, x: isize) -> bool {
+        let i = self.dest.partition_point(|&(s, _)| s <= x);
+        i.checked_sub(1).is_some_and(|i| x < self.dest[i].1)
+    }
+
+    /// `translate_range` minus the bytes another unit now lives on.  A byte
+    /// outside every unit keeps its offset (a rename temp the layout never
+    /// saw), but where a placed unit landed the old byte belongs to someone
+    /// else, so that piece is dropped.
+    pub fn translate_range_live(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
+        let mut out: Vec<(isize, isize)> = Vec::new();
+        let mut x = start;
+        while x < end {
+            let i = self.units.partition_point(|&(s, _, _)| s <= x);
+            match i.checked_sub(1) {
+                Some(k) if x < self.units[k].1 => {
+                    let (s, e, n) = self.units[k];
+                    let seg_end = e.min(end);
+                    out.push((n + (x - s), n + (seg_end - s)));
+                    x = seg_end;
+                }
+                _ => {
+                    let next = self
+                        .units
+                        .get(i)
+                        .map(|u| u.0)
+                        .unwrap_or(isize::MAX)
+                        .min(end);
+                    let mut y = x;
+                    while y < next {
+                        let dead = self.dest_covered(y);
+                        let mut z = y + 1;
+                        while z < next && self.dest_covered(z) == dead {
+                            z += 1;
+                        }
+                        if !dead {
+                            out.push((y, z));
+                        }
+                        y = z;
+                    }
+                    x = next;
+                }
+            }
         }
         out
     }
@@ -591,8 +640,11 @@ pub fn build_schedule(
     if placed.is_empty() {
         return None;
     }
+    let mut dest: Vec<(isize, isize)> = placed.iter().map(|&(s, e, n)| (n, n + (e - s))).collect();
+    dest.sort_unstable();
     let sched = CombLayoutSchedule {
         units: placed,
+        dest,
         buffer_end,
         hot_units,
         total_units,
@@ -721,8 +773,12 @@ mod tests {
     use super::*;
 
     fn sched(units: Vec<(isize, isize, isize)>, end: usize) -> CombLayoutSchedule {
+        let mut dest: Vec<(isize, isize)> =
+            units.iter().map(|&(s, e, n)| (n, n + (e - s))).collect();
+        dest.sort_unstable();
         CombLayoutSchedule {
             units,
+            dest,
             buffer_end: end,
             hot_units: 0,
             total_units: 0,
@@ -739,6 +795,23 @@ mod tests {
         assert_eq!(s.translate(64), 144);
         assert_eq!(s.translate(71), 151);
         assert_eq!(s.translate(100), 100); // past every unit
+    }
+
+    #[test]
+    fn live_translation_drops_what_another_unit_landed_on() {
+        // [16, 32) moves down to 0, onto old storage nothing owns any more;
+        // [64, 72) moves to 144.
+        let s = sched(vec![(16, 32, 0), (64, 72, 144)], 160);
+        // Old [0, 8) is dead: the first unit's destination covers it.
+        assert!(s.translate_range_live(0, 8).is_empty());
+        // Old [8, 40): the dead prefix goes, the unit moves, the untouched
+        // tail stays where it is.
+        assert_eq!(s.translate_range_live(8, 40), vec![(0, 16), (32, 40)]);
+        // Storage no unit touched or landed on keeps its offset.
+        assert_eq!(s.translate_range_live(40, 60), vec![(40, 60)]);
+        assert_eq!(s.translate_range_live(60, 70), vec![(60, 64), (144, 150)]);
+        // The plain translation keeps the dead prefix at its old offset.
+        assert_eq!(s.translate_range(0, 8), vec![(0, 8)]);
     }
 
     #[test]

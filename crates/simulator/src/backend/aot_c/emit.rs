@@ -416,6 +416,8 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
     static CONE_GROUPS: std::cell::RefCell<Vec<crate::ir::opt::cone_gate::ConeGroup>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    /// Comb offset of the pending trigger mask.
+    static CONE_TRIGGER_OFF: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// Install the cone-gate segments and groups for the next comb emit.
@@ -423,14 +425,17 @@ thread_local! {
 pub fn set_cone_segments(
     segs: Vec<crate::ir::opt::cone_gate::ConeSegment>,
     groups: Vec<crate::ir::opt::cone_gate::ConeGroup>,
+    trigger_off: u32,
 ) {
     CONE_SEGMENTS.with(|s| *s.borrow_mut() = segs);
     CONE_GROUPS.with(|g| *g.borrow_mut() = groups);
+    CONE_TRIGGER_OFF.with(|t| t.set(trigger_off));
 }
 
 pub fn clear_cone_segments() {
     CONE_SEGMENTS.with(|s| s.borrow_mut().clear());
     CONE_GROUPS.with(|g| g.borrow_mut().clear());
+    CONE_TRIGGER_OFF.with(|t| t.set(0));
 }
 
 fn clear_current_local() {
@@ -5271,10 +5276,8 @@ fn emit_event_function(
     // stays in `veryl_aot_eval` ahead of the parts, so it dominates every
     // unchecked push.
     src.push_str(&split_entry_function(
-        "",
         &emit_reserve_prologue(narrow_pushes, wide_pushes),
         &units,
-        false,
     ));
     Some(src)
 }
@@ -6215,29 +6218,41 @@ const ENTRY_SIG: &str = "(uint8_t *__restrict__ ff_values, uint8_t *__restrict__
                          uint64_t *__restrict__ write_log, intptr_t ff_delta)";
 const ENTRY_ARGS: &str = "(ff_values, comb_values, write_log, ff_delta)";
 
+/// The emitted twin of `ConeGateState::mask_clean`.  With a backedge the
+/// convergence byte is kept only while the guard is on.  `None` for a mask
+/// with no bit set, which would ignore a widened pending set.
+fn trigger_pretest_cond(trigger: &[u64], trigger_off: usize, has_backedge: bool) -> Option<String> {
+    let words: Vec<String> = trigger
+        .iter()
+        .enumerate()
+        .filter(|&(_, &m)| m != 0)
+        .map(|(w, &m)| {
+            format!("(((const veryl_u64_ua*)(comb_values + {trigger_off:#x}))[{w}] & {m:#x}ULL)")
+        })
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    let off = if has_backedge { "!cg_off && " } else { "" };
+    Some(format!(
+        "{off}cgst[0] && cgst[1] && !({})",
+        words.join(" | ")
+    ))
+}
+
 /// Lay the dispatcher's top-level units out over one or more functions and
 /// return the C for all of them.
-fn split_entry_function(
-    prologue: &str,
-    entry_preamble: &str,
-    units: &[String],
-    cg_dbg: bool,
-) -> String {
+fn split_entry_function(entry_preamble: &str, units: &[String]) -> String {
     const SIG: &str = ENTRY_SIG;
     const ARGS: &str = ENTRY_ARGS;
     let total: usize = units.iter().map(String::len).sum();
-    // The debug prologue's counters are function-scope statics that the units
-    // reference, so that build stays whole.  The entry preamble runs once per
-    // eval and so belongs to `veryl_aot_eval` itself in both layouts — never
-    // to a part function.
+    // The entry preamble runs once per eval and so belongs to
+    // `veryl_aot_eval` itself in both layouts, never to a part function.
     // `VERYL_AOT_C_ENTRY_SPLIT=0` keeps one function, for A/B and bisection.
     let split = total > ENTRY_SPLIT_MIN_BYTES
-        && !cg_dbg
-        && prologue.is_empty()
         && std::env::var("VERYL_AOT_C_ENTRY_SPLIT").as_deref() != Ok("0");
     if !split {
-        let mut out =
-            format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{entry_preamble}{prologue}");
+        let mut out = format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{entry_preamble}");
         for u in units {
             out.push_str(u);
         }
@@ -6741,6 +6756,10 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             v
         };
         let cg_dbg = std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1");
+        // `VERYL_CONE_TRIGGER_CHECK=1`: where the mask claims clean on an
+        // armed guard, compare anyway and report the first disagreement.
+        let trig_check = std::env::var("VERYL_CONE_TRIGGER_CHECK").as_deref() == Ok("1");
+        let trigger_off = CONE_TRIGGER_OFF.with(|t| t.get()) as usize;
         let mut guard_of_seg: Vec<Option<usize>> = vec![None; cone_segments.len()];
         let guards: Vec<(usize, usize, &crate::ir::opt::cone_gate::ConeSegment)> = cone_segments
             .iter()
@@ -6877,6 +6896,55 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             }
             f.push_str("    return 1;\n}\n\n");
             body.push_str(&f);
+            if trig_check {
+                let mut f = format!(
+                    "static int cg_cmpx_{gi}(const uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values) {{\n"
+                );
+                let mut acc = 0usize;
+                for &(is_ff, a, b) in &s.compare {
+                    let l = (b - a) as usize;
+                    let buf = if is_ff { "ff_values" } else { "comb_values" };
+                    // Internal scratch the segment rewrites before reading is
+                    // not an input; compare around it.
+                    let mut pieces: Vec<(u32, u32)> = vec![(a, b)];
+                    if !is_ff {
+                        for &(ia, ib) in &s.internal {
+                            pieces = pieces
+                                .into_iter()
+                                .flat_map(|(x, y)| {
+                                    let mut out = Vec::new();
+                                    if ib <= x || ia >= y {
+                                        out.push((x, y));
+                                    } else {
+                                        if ia > x {
+                                            out.push((x, ia));
+                                        }
+                                        if ib < y {
+                                            out.push((ib, y));
+                                        }
+                                    }
+                                    out
+                                })
+                                .collect();
+                        }
+                    }
+                    for (x, y) in pieces {
+                        emit_cmp_range(
+                            &mut f,
+                            format!("{buf} + {x:#x}"),
+                            format!(
+                                "comb_values + {sh:#x}",
+                                sh = shadow_abs + acc + (x - a) as usize
+                            ),
+                            (y - x) as usize,
+                            "return 0;",
+                        );
+                    }
+                    acc += l;
+                }
+                f.push_str("    return 1;\n}\n\n");
+                body.push_str(&f);
+            }
         }
         for (g, eg) in egroups.iter().enumerate() {
             let mut f = format!(
@@ -6903,22 +6971,33 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         // one guarded cone segment or one bare chunk call each — so
         // `split_entry_function` can lay them out across several functions.
         let mut entry_units: Vec<String> = Vec::new();
-        let mut entry_prologue = String::new();
         // Emit-time debug (VERYL_CONE_GATE_DIAG=1 at emit): per-segment
-        // skip/run counters printed every ~1M evals.  Statics are fine for a
-        // debug build of the artifact.
+        // skip/run counters printed every 16K evals.  File-scope statics, so
+        // the units referencing them can still be laid out across parts.
+        let mut cg_decl = String::new();
+        let mut cg_print = String::new();
         if cg_dbg && !guards.is_empty() {
-            entry_prologue.push_str(&format!(
-                "    static unsigned long long cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
-                 \x20   static unsigned long long cg_gsk[{ng}], cg_grn[{ng}];\n\
-                 \x20   static const unsigned cg_stoff[{n}] = {{{offs}}};\n\
-                 \x20   uint8_t *cg_st[{n}]; for (int z = 0; z < {n}; z++) cg_st[z] = comb_values + cg_stoff[z];\n\
-                 \x20   if ((++cg_calls & 0x3fff) == 0) {{\n\
-                 \x20     __builtin_printf(\"[cg] evals=%llu\", cg_calls);\n\
-                 \x20     for (int z = 0; z < {n}; z++) __builtin_printf(\" %llu/%llu:c%u:f%u\", cg_sk[z], cg_rn[z], (unsigned)cg_st[z][1], (unsigned)cg_st[z][3]);\n\
-                 \x20     for (int z = 0; z < {ng}; z++) __builtin_printf(\" G%llu/%llu\", cg_gsk[z], cg_grn[z]);\n\
-                 \x20     __builtin_printf(\"\\n\");\n\
-                 \x20   }}\n",
+            // Maps the `[cg]` counter columns to the segments.
+            for (gi, &(_, _, s)) in guards.iter().enumerate() {
+                eprintln!(
+                    "[cg-map] gi={gi} stmts=[{}..{}) cb={} {}",
+                    s.stmt_lo,
+                    s.stmt_hi,
+                    s.compare
+                        .iter()
+                        .map(|&(_, a, b)| (b - a) as usize)
+                        .sum::<usize>()
+                        + s.compare_pre
+                            .iter()
+                            .map(|&(a, b)| (b - a) as usize)
+                            .sum::<usize>(),
+                    s.cone
+                );
+            }
+            cg_decl = format!(
+                "static unsigned long long cg_tk[{n}], cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
+                 static unsigned long long cg_gsk[{ng}], cg_grn[{ng}];\n\
+                 static const unsigned cg_stoff[{n}] = {{{offs}}};\n\n",
                 n = guards.len(),
                 ng = egroups.len().max(1),
                 offs = guards
@@ -6926,8 +7005,19 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                     .map(|&(_, _, s)| format!("{:#x}", s.state_off))
                     .collect::<Vec<_>>()
                     .join(", "),
-            ));
+            );
+            cg_print = format!(
+                "    if ((++cg_calls & 0x3fff) == 0) {{\n\
+                 \x20     __builtin_printf(\"[cg] evals=%llu\", cg_calls);\n\
+                 \x20     for (int z = 0; z < {n}; z++) __builtin_printf(\" %llu/%llu/%llu:c%u:f%u:o%u\", cg_tk[z], cg_sk[z], cg_rn[z], (unsigned)comb_values[cg_stoff[z] + 1], (unsigned)comb_values[cg_stoff[z] + 3], (unsigned)comb_values[cg_stoff[z] + 2]);\n\
+                 \x20     for (int z = 0; z < {ng}; z++) __builtin_printf(\" G%llu/%llu\", cg_gsk[z], cg_grn[z]);\n\
+                 \x20     __builtin_printf(\"\\n\");\n\
+                 \x20   }}\n",
+                n = guards.len(),
+                ng = egroups.len().max(1),
+            );
         }
+        body.push_str(&cg_decl);
         let mut gi = 0usize;
         let mut i = const_chunks;
         while i < chunks.len() {
@@ -7002,14 +7092,43 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                 let pre_shadow_abs = prerun_abs + be;
                 let shadow_abs = prerun_abs + be + pb;
                 let replay_abs = prerun_abs + be + pb + cb;
+                // Trigger pre-test.  A replaying segment takes the full compare
+                // instead: its skip also needs the replayed span unmoved, and
+                // there is no `compare_pre`-only comparator here.
+                let pretest = if s.replay.is_empty() {
+                    trigger_pretest_cond(&s.trigger, trigger_off, !s.backedge.is_empty())
+                } else {
+                    None
+                };
+                let trigger_clean = match pretest {
+                    None => String::new(),
+                    Some(cond) => {
+                        let check = if trig_check {
+                            format!(
+                                "if (!cg_off && cgst[1] && !cg_cmpx_{gi}(ff_values, comb_values)) {{ \
+                                 static int t_said; if (!t_said) {{ t_said = 1; \
+                                 __builtin_printf(\"[cone_gate] TRIGGER WRONG SKIP guard {gi}\\n\"); }} }} "
+                            )
+                        } else {
+                            String::new()
+                        };
+                        let dbg = if cg_dbg {
+                            format!("cg_tk[{gi}]++; ")
+                        } else {
+                            String::new()
+                        };
+                        format!("if ({cond}) {{ {check}{dbg}cg_run = 0; }} else ")
+                    }
+                };
                 // An off segment never consults its shadows, so the whole
                 // maintenance path is skipped -- mirroring the Rust
-                // `before_run`/`refresh` early returns.
+                // `before_run`/`refresh` early returns.  `cgst[0]` is still
+                // set: the trigger pre-test serves off segments too.
                 unit.push_str(&format!(
                     "    {{ uint8_t *cgst = comb_values + {st:#x};\n\
                      \x20     int cg_run = 1;\n\
                      \x20     int cg_off = cgst[2];\n\
-                     \x20     if (!cg_off && cgst[0] && cgst[1]) {{\n\
+                     \x20     {trigger_clean}if (!cg_off && cgst[0] && cgst[1]) {{\n\
                      \x20       {group_clean}if (cg_cmp_{gi}(ff_values, comb_values)) {{\n\
                      \x20         cg_run = 0;\n\
                      \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
@@ -7106,10 +7225,11 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                     ));
                     acc += l;
                 }
+                unit.push_str("        }\n");
                 if cg_dbg {
                     unit.push_str(&format!("        cg_rn[{gi}]++;\n"));
                 }
-                unit.push_str("        cgst[0] = 1;\n        }\n      }\n    }\n");
+                unit.push_str("        cgst[0] = 1;\n      }\n    }\n");
                 gi += 1;
                 i = k2;
             } else {
@@ -7137,16 +7257,9 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             .map(|&(_, _, s)| s.state_off)
             .chain(egroups.iter().map(|eg| eg.state_off))
             .collect();
-        let entry_preamble = format!(
-            "{reserve_prologue}{}",
-            cone_gate_rearm_preamble(&state_offs, rearm_mask)
-        );
-        body.push_str(&split_entry_function(
-            &entry_prologue,
-            &entry_preamble,
-            &entry_units,
-            cg_dbg,
-        ));
+        let rearm = cone_gate_rearm_preamble(&state_offs, rearm_mask);
+        let entry_preamble = format!("{reserve_prologue}{rearm}{cg_print}");
+        body.push_str(&split_entry_function(&entry_preamble, &entry_units));
     }
     if comb_noslp {
         // The marker line is the cheapest way to carry the verdict to
@@ -15218,6 +15331,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn trigger_pretest_requires_convergence() {
+        let c = trigger_pretest_cond(&[0b1000], 0x40, false).unwrap();
+        assert!(c.contains("cgst[0] && cgst[1] && "), "{c}");
+        assert!(!c.contains("cg_off"), "{c}");
+        // The convergence byte of an off guard with a backedge is stale.
+        let c = trigger_pretest_cond(&[0b1000], 0x40, true).unwrap();
+        assert!(c.starts_with("!cg_off && cgst[0] && cgst[1] && "), "{c}");
+    }
+
+    #[test]
+    fn an_all_zero_trigger_mask_gets_no_pretest() {
+        assert!(trigger_pretest_cond(&[0, 0], 0x40, false).is_none());
+        let c = trigger_pretest_cond(&[0, 0b1], 0x40, false).unwrap();
+        assert!(c.contains("[1] & 0x1ULL"), "{c}");
+        assert!(!c.contains("))[0]"), "{c}");
+    }
+
     // Below the threshold the dispatcher stays one function; above it the
     // units are laid out over several, in order, losing none.
     #[test]
@@ -15225,27 +15356,25 @@ mod tests {
         let small: Vec<String> = (0..4)
             .map(|i| format!("    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n"))
             .collect();
-        let out = split_entry_function("", "", &small, false);
+        let out = split_entry_function("", &small);
         assert_eq!(out.matches("veryl_aot_eval").count(), 1, "{out}");
 
         // Units of ~64 KiB each: enough of them to clear both thresholds.
         let big: Vec<String> = (0..32)
             .map(|i| format!("    /* {i} {} */\n", "x".repeat(64 * 1024)))
             .collect();
-        let out = split_entry_function("", "", &big, false);
+        let out = split_entry_function("", &big);
         // Only the definitions carry `void`; the calls do not.
         let parts = out.matches("void veryl_aot_eval_p").count();
         assert!(parts >= 8, "{parts} parts is too few for 2 MB");
         for i in 0..32 {
             assert!(out.contains(&format!("/* {i} ")), "unit {i} was dropped");
         }
-        // The debug build keeps its function-scope counters, so it stays whole.
-        assert_eq!(
-            split_entry_function("", "", &big, true)
-                .matches("void veryl_aot_eval_p")
-                .count(),
-            0
-        );
+        // The preamble stays in `veryl_aot_eval`, ahead of the part calls.
+        let out = split_entry_function("    int pre;\n", &big);
+        assert_eq!(out.matches("int pre;").count(), 1);
+        assert!(out.find("int pre;") > out.find("void veryl_aot_eval("));
+        assert!(out.find("int pre;") < out.find("    veryl_aot_eval_p0("));
     }
 
     #[test]
