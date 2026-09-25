@@ -260,6 +260,21 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(zero_size),
+        help("width and array size must be greater than 0"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("size is evaluated to 0")]
+    ZeroSize {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(fixed_type_with_signed_modifier),
         help("remove 'signed` modifier"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2390,6 +2405,7 @@ impl AnalyzerError {
             AnalyzerError::MultipleDefault { input, .. } => input,
             AnalyzerError::NonConstantSelectWidth { input, .. } => input,
             AnalyzerError::NonPositiveValue { input, .. } => input,
+            AnalyzerError::ZeroSize { input, .. } => input,
             AnalyzerError::NonPortableDependency { input, .. } => input,
             AnalyzerError::PrivateMember { input, .. } => input,
             AnalyzerError::PrivateNamespace { input, .. } => input,
@@ -2500,6 +2516,7 @@ impl AnalyzerError {
             AnalyzerError::ImplicitClockConversion { token_source, .. } => *token_source,
             AnalyzerError::InvalidClockAssignment { token_source, .. } => *token_source,
             AnalyzerError::NonPositiveValue { token_source, .. } => *token_source,
+            AnalyzerError::ZeroSize { token_source, .. } => *token_source,
             AnalyzerError::NonPortableDependency { token_source, .. } => *token_source,
             AnalyzerError::MismatchAttributeArgs { token_source, .. } => *token_source,
             AnalyzerError::MismatchClockDomain { token_source, .. } => *token_source,
@@ -3229,6 +3246,13 @@ impl AnalyzerError {
         AnalyzerError::NonPositiveValue {
             value: value.to_string(),
             typ: typ.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+        }
+    }
+    pub fn zero_size(token: &TokenRange) -> Self {
+        AnalyzerError::ZeroSize {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

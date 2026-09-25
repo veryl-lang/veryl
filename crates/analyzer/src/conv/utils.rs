@@ -605,10 +605,17 @@ pub fn eval_size(
         context.insert_error(AnalyzerError::invalid_size_type(&token));
         return Err(ir_error!(token));
     }
-    if let Ok(x) = comptime.get_value() {
-        let value = x.to_usize().unwrap_or(0);
+    // Only a value that is really zero is a zero size. One with X/Z bits, or
+    // one too wide for `usize`, is not known and must not be reported as
+    // zero; a non-constant cast operand reaches here the same way.
+    if let Ok(x) = comptime.get_value()
+        && let Some(value) = x.to_usize()
+    {
         let value = context.check_size(value, expr.token_range());
+        // A zero size emits `[X-1:0]`, which tools disagree on: Verilator
+        // rejects it and most others silently make it 2 bits.
         if value == Some(0) {
+            context.insert_error(AnalyzerError::zero_size(&expr.token_range()));
             Ok((comptime, None))
         } else {
             Ok((comptime, value))
