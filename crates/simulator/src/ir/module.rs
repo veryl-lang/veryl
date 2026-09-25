@@ -2137,23 +2137,32 @@ fn run_comb_pipeline(
     // old offset space); the caller replays the schedule on them and on
     // every other offset-bearing structure the pipeline does not own.
     let layout = layout_inputs.and_then(|li| {
-        // Plan-space ranges: the space the layout translates from.
-        let cone_reads: Vec<Vec<(u32, u32)>> = match &cone_plan {
-            Some(p) if comb_layout::cone_layout() => p
-                .segments
+        // Plan-space ranges: the space the layout translates from.  Group
+        // compares rank ahead of their members', whose own compare is paid
+        // only when the group is dirty.
+        let comb_ranges = |compare: &[(bool, u32, u32)], extra: &[(u32, u32)]| {
+            let mut r: Vec<(u32, u32)> = compare
                 .iter()
-                .map(|sg| {
-                    let mut r: Vec<(u32, u32)> = sg
-                        .compare
+                .filter(|&&(is_ff, _, _)| !is_ff)
+                .map(|&(_, a, b)| (a, b))
+                .chain(extra.iter().copied())
+                .collect();
+            r.sort_unstable();
+            r
+        };
+        let cone_reads: Vec<Vec<(u32, u32)>> = match &cone_plan {
+            Some(p) if comb_layout::cone_layout() => {
+                let mut out: Vec<Vec<(u32, u32)>> = Vec::new();
+                if p.segments.len() >= cone_gate::SPLIT_MIN_SEGS {
+                    out.extend(p.groups.iter().map(|g| comb_ranges(&g.compare, &[])));
+                }
+                out.extend(
+                    p.segments
                         .iter()
-                        .filter(|&&(is_ff, _, _)| !is_ff)
-                        .map(|&(_, a, b)| (a, b))
-                        .collect();
-                    r.extend(sg.replay.iter().copied());
-                    r.sort_unstable();
-                    r
-                })
-                .collect(),
+                        .map(|sg| comb_ranges(&sg.compare, &sg.replay)),
+                );
+                out
+            }
             _ => Vec::new(),
         };
         comb_layout::build_schedule(
