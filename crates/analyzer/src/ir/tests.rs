@@ -1,3 +1,5 @@
+mod function_return;
+
 use crate::conv::Context;
 use crate::ir::Ir;
 use crate::{Analyzer, attribute_table, symbol_table};

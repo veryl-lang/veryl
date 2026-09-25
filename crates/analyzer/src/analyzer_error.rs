@@ -4019,6 +4019,7 @@ impl fmt::Display for InvalidWavedromKind {
 pub enum InvalidModifierKind {
     NotTopModule,
     NotClockReset,
+    NetInFunction,
 }
 
 impl fmt::Display for InvalidModifierKind {
@@ -4028,6 +4029,7 @@ impl fmt::Display for InvalidModifierKind {
             InvalidModifierKind::NotClockReset => {
                 "the given type is not a single bit clock nor a single bit reset".fmt(f)
             }
+            InvalidModifierKind::NetInFunction => "a function argument can't be a net type".fmt(f),
         }
     }
 }

@@ -53,8 +53,9 @@ CommentsTerm          : <INITIAL, Generic, EmbedHeader,                         
 StringLiteralTerm     : <INITIAL         ,                                         Attr>"\u{0022}(?:\\[\u{0022}\\fnt]|[^\u{0022}\\\u0000-\u001F])*\u{0022}"                   : Token;
 ExponentTerm          : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+(?:_[0-9]+)*/                   : Token;
 FixedPointTerm        : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*\.[0-9]+(?:_[0-9]+)*/                                              : Token;
-BasedTerm             : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/              : Token;
-AllBitTerm            : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/                                                    : Token;
+// Without the lookahead a number literal eats the head of a clock domain name like 'hclk
+BasedTerm             : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'s?[bodh][0-9a-fA-FxzXZ]+(?:_[0-9a-fA-FxzXZ]+)*/ ?! /[0-9a-zA-Z_$]/ : Token;
+AllBitTerm            : <INITIAL, Generic                                              >/(?:[0-9]+(?:_[0-9]+)*)?'[01xzXZ]/ ?! /[0-9a-zA-Z_$]/                                 : Token;
 BaseLessTerm          : <INITIAL, Generic                                              >/[0-9]+(?:_[0-9]+)*/                                                                  : Token;
 MinusColonTerm        : <INITIAL                                                       >'-:'                                                                                  : Token;
 MinusGTTerm           : <INITIAL                                                       >'->'                                                                                  : Token;
