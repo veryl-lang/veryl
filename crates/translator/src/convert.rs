@@ -155,6 +155,54 @@ impl<'a> Converter<'a> {
         util::node_text(node, self.src)
     }
 
+    /// Text of an expression-bearing node, rewritten into Veryl syntax: casts
+    /// become `as` and `c ? a : b` becomes `if c ? a : b`.
+    fn expr_text(&self, node: &RefNode) -> String {
+        expr::expr_text_to_veryl(self.rewrite_conditionals(node).trim())
+    }
+
+    /// Source text of `node` with every conditional (`?:`) expression inside it
+    /// replaced by a Veryl `if` expression, which needs the leading `if`.
+    fn rewrite_conditionals(&self, node: &RefNode) -> String {
+        let text = self.node_text(node);
+        if text.is_empty() {
+            return String::new();
+        }
+        let start = text.as_ptr() as usize - self.src.as_ptr() as usize;
+        let end = start + text.len();
+
+        let mut conditionals = Vec::new();
+        walk_skip(node.clone(), |n| {
+            if let RefNode::ConditionalExpression(x) = n {
+                conditionals.push(*x);
+                Walk::Skip
+            } else {
+                Walk::Continue
+            }
+        });
+
+        let mut out = String::new();
+        let mut pos = start;
+        for x in conditionals {
+            let (predicate, _, _, then_expr, _, else_expr) = &x.nodes;
+            let span = self.node_text(&RefNode::ConditionalExpression(x));
+            let span_start = span.as_ptr() as usize - self.src.as_ptr() as usize;
+            out.push_str(&self.src[pos..span_start]);
+            out.push_str(&format!(
+                "if {} ? {} : {}",
+                self.rewrite_conditionals(&RefNode::CondPredicate(predicate))
+                    .trim(),
+                self.rewrite_conditionals(&RefNode::Expression(then_expr))
+                    .trim(),
+                self.rewrite_conditionals(&RefNode::Expression(else_expr))
+                    .trim(),
+            ));
+            pos = span_start + span.len();
+        }
+        out.push_str(&self.src[pos..end]);
+        out
+    }
+
     fn node_line(&self, node: &RefNode) -> usize {
         util::node_line(node)
     }
@@ -347,7 +395,7 @@ impl<'a> Converter<'a> {
     fn emit_continuous_assign(&mut self, node: &RefNode) {
         for n in node.clone().into_iter() {
             if let RefNode::NetAssignment(_) = n {
-                let text = expr::expr_text_to_veryl(self.node_text(&n).trim());
+                let text = self.expr_text(&n);
                 self.w.str("assign ");
                 self.w.str(&text);
                 self.w.str(";");
@@ -491,7 +539,7 @@ impl<'a> Converter<'a> {
                 seen_lhs = true;
                 Walk::Skip
             } else if seen_lhs && rhs.is_empty() && matches!(n, RefNode::Expression(_)) {
-                rhs = expr::expr_text_to_veryl(self.node_text(n).trim());
+                rhs = self.expr_text(n);
                 Walk::Skip
             } else {
                 Walk::Continue
@@ -843,8 +891,8 @@ impl<'a> Converter<'a> {
     fn emit_subroutine_call_stmt(&mut self, node: &RefNode<'a>) {
         // Render `$display(...);` and friends as-is. Veryl shares most system
         // function names with SystemVerilog so a textual passthrough is fine.
-        let txt = self.node_text(node).trim().trim_end_matches(';').trim();
-        let rewritten = expr::expr_text_to_veryl(txt);
+        let txt = self.rewrite_conditionals(node);
+        let rewritten = expr::expr_text_to_veryl(txt.trim().trim_end_matches(';').trim());
         self.w.str(&rewritten);
         self.w.str(";");
         self.w.newline();
