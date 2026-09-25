@@ -238,6 +238,10 @@ fn comb_element_cover(ir: &Ir) -> Vec<(usize, usize, usize)> {
     out
 }
 
+/// Beyond this many compared bytes, an event is cheaper to settle than to
+/// compare.
+pub(crate) const WATCH_CAP_BYTES: usize = 1024;
+
 /// The settle filter's instantiation-invariant products: span table,
 /// clock-toggle verdict, and the per-event comb-write classification
 /// (scratch no comb statement reads is invisible; a bounded comb-reaching
@@ -277,8 +281,6 @@ fn build_settle_info(ir: &Ir, diag: bool) -> crate::tb_dirty::SettleInfo {
         let k = (off - s) / l;
         Some((s + k * l, (s + (k + 1) * l).min(e)))
     };
-    // Beyond this an event is cheaper to settle than to compare.
-    const WATCH_CAP_BYTES: usize = 1024;
     let mut max_watch = 0usize;
     let mut dirty_events: crate::HashSet<Event> = Default::default();
     let mut event_comb_watch: crate::HashMap<Event, (u32, u32)> = Default::default();

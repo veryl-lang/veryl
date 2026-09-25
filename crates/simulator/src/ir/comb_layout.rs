@@ -164,6 +164,14 @@ pub struct LayoutInputs {
     pub extra_offsets: Vec<VarOffset>,
 }
 
+/// Rank the comb units by the gated segment that compares them, ahead of
+/// first use: a guard re-reads its compare set on every settle it visits.
+/// Default-on; `VERYL_COMB_LAYOUT_CONE=0` opts out.
+pub fn cone_layout() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_COMB_LAYOUT_CONE").as_deref() != Ok("0"))
+}
+
 /// Default-on for 2-state storage; `VERYL_COMB_LAYOUT=0` opts out.  Off on
 /// wasm, which has no whole-comb backend to profit from the reordering.
 pub fn enabled(use_4state: bool) -> bool {
@@ -285,6 +293,36 @@ fn collect_cb_units(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
                 }
             }
             ProtoStatement::SequentialBlock(body) => collect_cb_units(body, out),
+            _ => {}
+        }
+    }
+}
+
+/// Every comb store's footprint: a store covering several units must keep
+/// them adjacent.  Reads stay inside the variable they name, and
+/// runtime-indexed stores are in `collect_dynamic_spans`.
+fn collect_write_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>) {
+    for s in stmts {
+        match s {
+            ProtoStatement::Assign(a) => {
+                if let VarOffset::Comb(o) = a.dst {
+                    let nb = crate::ir::native_bytes(a.dst_width).max(1) as isize;
+                    out.push((o, o + nb));
+                }
+            }
+            ProtoStatement::If(x) => {
+                collect_write_spans(&x.true_side, out);
+                collect_write_spans(&x.false_side, out);
+            }
+            ProtoStatement::Case(x) => {
+                for arm in &x.arms {
+                    collect_write_spans(&arm.body, out);
+                }
+                collect_write_spans(&x.default, out);
+            }
+            ProtoStatement::For(x) => collect_write_spans(&x.body, out),
+            ProtoStatement::SequentialBlock(b) => collect_write_spans(b, out),
+            ProtoStatement::CompiledBlock(cb) => collect_write_spans(&cb.original_stmts, out),
             _ => {}
         }
     }
@@ -447,6 +485,7 @@ pub fn build_schedule(
     events: &HashMap<Event, Vec<ProtoStatement>>,
     extra_offsets: &[VarOffset],
     comb_total: usize,
+    cone_reads: &[Vec<(u32, u32)>],
 ) -> Option<CombLayoutSchedule> {
     if comb_total == 0 {
         return None;
@@ -465,6 +504,10 @@ pub fn build_schedule(
     collect_dynamic_spans(unified, &mut spans);
     for (_, stmts) in &evs {
         collect_dynamic_spans(stmts, &mut spans);
+    }
+    collect_write_spans(unified, &mut spans);
+    for (_, stmts) in &evs {
+        collect_write_spans(stmts, &mut spans);
     }
     spans.retain(|&(s, e)| e > s);
     if diag() {
@@ -569,10 +612,30 @@ pub fn build_schedule(
         );
     }
 
+    // Consumer rank (see `cone_layout`), one segment at a time so each compare
+    // set packs into one run.
+    let mut idx = 0usize;
+    for ranges in cone_reads {
+        for &(a, b) in ranges {
+            let (a, b) = (a as isize, b as isize);
+            let mut i = match units.binary_search_by(|u| u.start.cmp(&a)) {
+                Ok(i) => i,
+                Err(0) => 0,
+                Err(i) => i - 1,
+            };
+            while i < units.len() && units[i].start < b {
+                if units[i].end > a && units[i].rank == usize::MAX {
+                    units[i].rank = idx;
+                    idx += 1;
+                }
+                i += 1;
+            }
+        }
+    }
+
     // -- 4. second sweep: first-use rank over the settle order, then the
     //    events in their deterministic order.
     {
-        let mut idx = 0usize;
         let mut ins: Vec<VarOffset> = Vec::new();
         let mut outs: Vec<VarOffset> = Vec::new();
         let mut sweep = |stmts: &[ProtoStatement], units: &mut [Unit], idx: &mut usize| {
@@ -862,11 +925,38 @@ mod tests {
         // settle order touches offset 8 first, then 0; 4 is cold.
         let unified = vec![assign(8, 8), assign(0, 8)];
         let events = HashMap::default();
-        let sched = build_schedule(&meta_units, &unified, &events, &[], 12).unwrap();
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 12, &[]).unwrap();
         assert_eq!(sched.translate(8), 0); // first used -> packed first
         assert_eq!(sched.translate(0), 4); // second
         assert_eq!(sched.translate(4), 8); // cold -> last
         assert_eq!(sched.buffer_end, 12);
+    }
+
+    #[test]
+    fn packs_compared_units_first() {
+        let meta_units = vec![(0, 4), (4, 8), (8, 12)];
+        let unified = vec![assign(8, 8), assign(0, 8)];
+        let events = HashMap::default();
+        let cone_reads = vec![vec![(4, 8)]];
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 12, &cone_reads).unwrap();
+        assert_eq!(sched.translate(4), 0);
+        assert_eq!(sched.translate(8), 4);
+        assert_eq!(sched.translate(0), 8);
+    }
+
+    #[test]
+    fn store_keeps_the_units_it_covers_together() {
+        let meta_units = vec![(0, 4), (4, 8), (8, 12)];
+        let mut wide = assign(0, 8);
+        if let ProtoStatement::Assign(a) = &mut wide {
+            a.dst_width = 64;
+        }
+        let unified = vec![wide];
+        let events = HashMap::default();
+        let cone_reads = vec![vec![(8, 12)], vec![(4, 8)]];
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 12, &cone_reads).unwrap();
+        assert_eq!(sched.translate(8), 0);
+        assert_eq!(sched.translate(4), sched.translate(0) + 4);
     }
 
     /// A per-call-site array read through a runtime index assumes its old
@@ -915,7 +1005,7 @@ mod tests {
             dyn_read,
         ];
         let events = HashMap::default();
-        let sched = build_schedule(&[(0x20, 0x24)], &unified, &events, &[], 0xa0).unwrap();
+        let sched = build_schedule(&[(0x20, 0x24)], &unified, &events, &[], 0xa0, &[]).unwrap();
         let base = sched.translate(0x40);
         assert_eq!(sched.translate(0x44), base + 4);
         assert_eq!(sched.translate(0x48), base + 8);
@@ -942,7 +1032,7 @@ mod tests {
         });
         let unified = vec![assign(0, 0), for_stmt];
         let events = HashMap::default();
-        let sched = build_schedule(&[(0, 4)], &unified, &events, &[], 0x48).unwrap();
+        let sched = build_schedule(&[(0, 4)], &unified, &events, &[], 0x48, &[]).unwrap();
         // The counter's unit is cold (no gather form ranks it) and packs
         // after the hot var, 8-aligned — inside the packed region, not at
         // its old identity address.
@@ -958,7 +1048,7 @@ mod tests {
         // offset 8 belongs to no meta unit; 4..8 is ghost padding.
         let unified = vec![assign(0, 8)];
         let events = HashMap::default();
-        let sched = build_schedule(&meta_units, &unified, &events, &[], 16).unwrap();
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 16, &[]).unwrap();
         // The promoted unit [8,16) packs first (first use), [0,4) follows.
         assert_eq!(sched.translate(8), 0);
         assert_eq!(sched.translate(0), 8);
@@ -973,7 +1063,7 @@ mod tests {
         let meta_units = vec![(0, 4), (64, 68)];
         let unified = vec![assign(64, 0)];
         let events = HashMap::default();
-        let sched = build_schedule(&meta_units, &unified, &events, &[], 128).unwrap();
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 128, &[]).unwrap();
         assert_eq!(sched.buffer_end, 8);
         assert_eq!(sched.translate(0), 0);
         assert_eq!(sched.translate(64), 4);

@@ -26,7 +26,7 @@ use crate::testbench::TestbenchStatement;
 /// Everything the settle filter derives from a module's storage layout and
 /// event classification.  All of it is offset-based, hence identical for
 /// every instantiation of one `ProtoModule` — built once on first use and
-/// cached through `Ir::settle_info` (an SoC-sized build costs tens of ms).
+/// cached through `Ir::settle_info`.
 pub(crate) struct SettleInfo {
     /// Span table template; re-target per `Ir` with `SpanTable::rebased`.
     pub(crate) table: SpanTable,
@@ -209,7 +209,19 @@ impl SpanTable {
             }
         };
 
-        let mut ff: Vec<Span> = Vec::new();
+        // One span per element in the worst case: millions on an SoC memory.
+        let capacity: usize = {
+            let mut n = 0usize;
+            let mut stack = vec![&ir.module_variables];
+            while let Some(vars) = stack.pop() {
+                for var in vars.variables.values() {
+                    n += var.current_values.len() + var.next_values.len();
+                }
+                stack.extend(vars.children.iter());
+            }
+            n
+        };
+        let mut ff: Vec<Span> = Vec::with_capacity(capacity);
         let mut comb: Vec<Span> = Vec::new();
         let mut stack = vec![&ir.module_variables];
         while let Some(vars) = stack.pop() {

@@ -5022,9 +5022,22 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
             ));
             calls.push_str(&format!("        veryl_evg_{k}_{m}{ENTRY_ARGS};\n"));
         }
+        // Past the settle filter's cap a compare costs more per fire than a
+        // skip saves.  Ungating only makes the group run more often.
+        let spans = g.compare_spans();
+        if spans
+            .iter()
+            .any(|&(_, a, b)| (b - a) as usize > crate::simulator::WATCH_CAP_BYTES)
+        {
+            units[g.lo] = calls;
+            for u in &mut units[g.lo + 1..g.hi] {
+                u.clear();
+            }
+            continue;
+        }
         let shadow = g.state_off as usize + GATE_STATE_HEADER_BYTES;
         let (mut cmp, mut snap, mut acc) = (String::new(), String::new(), 0usize);
-        for &(is_ff, a, b) in &g.compare_spans() {
+        for &(is_ff, a, b) in &spans {
             let l = (b - a) as usize;
             let buf = if is_ff { "ff_values" } else { "comb_values" };
             let sh = shadow + acc;
@@ -7047,12 +7060,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                     if cg_dbg {
                         unit.push_str(&format!("          cg_gsk[{g}]++;\n"));
                     }
-                    unit.push_str(
-                        "        } else {\n\
-                         \x20         { uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgg + 4, 4);\n\
-                         \x20           if (++cg_stk >= 1024u) cgg[2] = 1;\n\
-                         \x20           __builtin_memcpy(cgg + 4, &cg_stk, 4); }\n",
-                    );
+                    unit.push_str(&format!(
+                        "        }} else {{\n\
+                         \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgg + 4, 4);\n\
+                         \x20           if (++cg_stk >= {auto_off}u) cgg[2] = 1;\n\
+                         \x20           __builtin_memcpy(cgg + 4, &cg_stk, 4); }}\n",
+                        auto_off = crate::ir::opt::cone_gate::AUTO_OFF_STREAK,
+                    ));
                     let shadow_abs = gst + GROUP_STATE_HEADER_BYTES;
                     let mut acc = 0usize;
                     for &(is_ff, a, b) in &eg.compare {
@@ -7136,12 +7150,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
                      \x20           __builtin_memcpy(cgst + 4, &cg_stk, 4); }}\n\
                      \x20       }} else {{\n\
                      \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
-                     \x20         if (++cg_stk >= 1024u) cgst[2] = 1;\n\
+                     \x20         if (++cg_stk >= {auto_off}u) cgst[2] = 1;\n\
                      \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4);\n\
                      \x20       }}\n\
                      \x20     }}\n\
                      \x20     if (!cg_run) {{\n",
                     decay = s.off_decay,
+                    auto_off = crate::ir::opt::cone_gate::AUTO_OFF_STREAK,
                 ));
                 if cg_dbg {
                     unit.push_str(&format!("        cg_sk[{gi}]++;\n"));
@@ -16381,6 +16396,47 @@ mod tests {
             e.is_empty(),
             "the unchecked idle run snapshotted, so this skips: {e:?}"
         );
+    }
+
+    #[test]
+    fn emit_event_gate_leaves_a_group_with_a_wide_compare_span_ungated() {
+        if !cc_available() {
+            eprintln!("emit_event_gate_leaves_a_group_with_a_wide_compare_span_ungated: no cc");
+            return;
+        }
+        let a = ProtoAssignStatement {
+            dst: VarOffset::Ff(32),
+            dst_width: 200,
+            select: Some((34, 0)),
+            dynamic_select: None,
+            rhs_select: None,
+            expr: const_expr(0x5_a5a5_a5a5, 35),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: dummy_token(),
+        };
+        let wide = crate::simulator::WATCH_CAP_BYTES as u32 + 1;
+        let gate = EventGate {
+            lo: 0,
+            hi: 1,
+            state_off: 0x90,
+            compare: vec![(false, 0x100, 0x100 + wide)],
+            out_comb: Vec::new(),
+            cone: String::new(),
+        };
+        let src =
+            emit_event_function(&[ProtoStatement::Assign(a)], true, &[gate]).expect("must emit");
+        let mut ff = vec![0u8; 64];
+        let mut comb = vec![0u8; 0x100 + wide as usize + 0x100];
+        let Some(e) = run_wide_ff_event_in(&src, "evgw_run1", &mut ff, &mut comb) else {
+            return;
+        };
+        assert_eq!(e.len(), 1);
+        run_wide_ff_event_in(&src, "evgw_run2", &mut ff, &mut comb).expect("compiles");
+        // A gated group would now skip; an ungated one pushes the write back.
+        ff[32] ^= 0xff;
+        let e = run_wide_ff_event_in(&src, "evgw_run3", &mut ff, &mut comb).expect("compiles");
+        assert_eq!(e.len(), 1, "an ungated group runs on every fire");
     }
 
     #[test]

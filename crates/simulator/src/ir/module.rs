@@ -2137,6 +2137,25 @@ fn run_comb_pipeline(
     // old offset space); the caller replays the schedule on them and on
     // every other offset-bearing structure the pipeline does not own.
     let layout = layout_inputs.and_then(|li| {
+        // Plan-space ranges: the space the layout translates from.
+        let cone_reads: Vec<Vec<(u32, u32)>> = match &cone_plan {
+            Some(p) if comb_layout::cone_layout() => p
+                .segments
+                .iter()
+                .map(|sg| {
+                    let mut r: Vec<(u32, u32)> = sg
+                        .compare
+                        .iter()
+                        .filter(|&&(is_ff, _, _)| !is_ff)
+                        .map(|&(_, a, b)| (a, b))
+                        .collect();
+                    r.extend(sg.replay.iter().copied());
+                    r.sort_unstable();
+                    r
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
         comb_layout::build_schedule(
             &li.meta_units,
             &unified_sorted,
@@ -2145,6 +2164,7 @@ fn run_comb_pipeline(
             // The live total, not the Conv-time one: version_split just
             // bump-allocated its rename temps above it, and they need units too.
             context.comb_total_bytes,
+            &cone_reads,
         )
         .map(Arc::new)
     });
