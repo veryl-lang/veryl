@@ -1272,6 +1272,21 @@ impl Emitter {
         }
     }
 
+    /// Emits every attribute in `attrs` and returns how many of them were
+    /// actually pushed onto `self.attribute` (only `ifdef`/`ifndef`/`elsif`/
+    /// `else`/`test` push; others, like `allow`, do not). The caller must
+    /// close exactly that many via `attribute_end`, not `attrs.len()` --
+    /// otherwise a non-pushing attribute (e.g. `allow`) makes the closing
+    /// loop pop an unrelated entry left on the stack by an enclosing scope,
+    /// emitting a stray `` `endif`` in the wrong place.
+    fn emit_attributes<'a>(&mut self, attrs: impl IntoIterator<Item = &'a Attribute>) -> usize {
+        let before = self.attribute.len();
+        for x in attrs {
+            self.attribute(x);
+        }
+        self.attribute.len() - before
+    }
+
     fn emit_inferred_type(&mut self, token_id: veryl_parser::resource_table::TokenId) {
         if let Some(ir_type) = resolved_type_table::get(&token_id)
             && let Some(name) = ir_type.to_sv_type_name()
@@ -5281,16 +5296,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ModportGroup'
     fn modport_group(&mut self, arg: &ModportGroup) {
-        for x in &arg.modport_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed =
+            self.emit_attributes(arg.modport_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.modport_group_group {
             ModportGroupGroup::LBraceModportListRBrace(x) => {
                 self.modport_list(&x.modport_list);
             }
             ModportGroupGroup::ModportItem(x) => self.modport_item(&x.modport_item),
         }
-        for _ in &arg.modport_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5358,16 +5372,14 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'EnumGroup'
     fn enum_group(&mut self, arg: &EnumGroup) {
-        for x in &arg.enum_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(arg.enum_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.enum_group_group {
             EnumGroupGroup::LBraceEnumListRBrace(x) => {
                 self.enum_list(&x.enum_list);
             }
             EnumGroupGroup::EnumItem(x) => self.enum_item(&x.enum_item),
         }
-        for _ in &arg.enum_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5487,9 +5499,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'StructUnionGroup'
     fn struct_union_group(&mut self, arg: &StructUnionGroup) {
-        for x in &arg.struct_union_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.struct_union_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.struct_union_group_group {
             StructUnionGroupGroup::LBraceStructUnionListRBrace(x) => {
                 self.struct_union_list(&x.struct_union_list);
@@ -5498,7 +5512,7 @@ impl VerylWalker for Emitter {
                 self.struct_union_item(&x.struct_union_item)
             }
         }
-        for _ in &arg.struct_union_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5576,9 +5590,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstParameterGroup'
     fn inst_parameter_group(&mut self, arg: &InstParameterGroup) {
-        for x in &arg.inst_parameter_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.inst_parameter_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.inst_parameter_group_group {
             InstParameterGroupGroup::LBraceInstParameterListRBrace(x) => {
                 self.inst_parameter_list(&x.inst_parameter_list);
@@ -5587,7 +5603,7 @@ impl VerylWalker for Emitter {
                 self.inst_parameter_item(&x.inst_parameter_item)
             }
         }
-        for _ in &arg.inst_parameter_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5626,16 +5642,18 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InstPortGroup'
     fn inst_port_group(&mut self, arg: &InstPortGroup) {
-        for x in &arg.inst_port_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.inst_port_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.inst_port_group_group {
             InstPortGroupGroup::LBraceInstPortListRBrace(x) => {
                 self.inst_port_list(&x.inst_port_list);
             }
             InstPortGroupGroup::InstPortItem(x) => self.inst_port_item(&x.inst_port_item),
         }
-        for _ in &arg.inst_port_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5736,9 +5754,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'WithParameterGroup'
     fn with_parameter_group(&mut self, arg: &WithParameterGroup) {
-        for x in &arg.with_parameter_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.with_parameter_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.with_parameter_group_group {
             WithParameterGroupGroup::LBraceWithParameterListRBrace(x) => {
                 self.with_parameter_list(&x.with_parameter_list);
@@ -5747,7 +5767,7 @@ impl VerylWalker for Emitter {
                 self.with_parameter_item(&x.with_parameter_item)
             }
         }
-        for _ in &arg.with_parameter_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -5841,9 +5861,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PortDeclarationGroup'
     fn port_declaration_group(&mut self, arg: &PortDeclarationGroup) {
-        for x in &arg.port_declaration_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.port_declaration_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.port_declaration_group_group {
             PortDeclarationGroupGroup::LBracePortDeclarationListRBrace(x) => {
                 self.port_declaration_list(&x.port_declaration_list);
@@ -5852,7 +5874,7 @@ impl VerylWalker for Emitter {
                 self.port_declaration_item(&x.port_declaration_item)
             }
         }
-        for _ in &arg.port_declaration_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6197,9 +6219,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ModuleGroup'
     fn module_group(&mut self, arg: &ModuleGroup) {
-        for x in &arg.module_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed =
+            self.emit_attributes(arg.module_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.module_group_group {
             ModuleGroupGroup::LBraceModuleGroupGroupListRBrace(x) => {
                 for (i, x) in x.module_group_group_list.iter().enumerate() {
@@ -6211,7 +6232,7 @@ impl VerylWalker for Emitter {
             }
             ModuleGroupGroup::ModuleItem(x) => self.module_item(&x.module_item),
         }
-        for _ in &arg.module_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6268,9 +6289,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'InterfaceGroup'
     fn interface_group(&mut self, arg: &InterfaceGroup) {
-        for x in &arg.interface_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.interface_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.interface_group_group {
             InterfaceGroupGroup::LBraceInterfaceGroupGroupListRBrace(x) => {
                 for (i, x) in x.interface_group_group_list.iter().enumerate() {
@@ -6282,7 +6305,7 @@ impl VerylWalker for Emitter {
             }
             InterfaceGroupGroup::InterfaceItem(x) => self.interface_item(&x.interface_item),
         }
-        for _ in &arg.interface_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6436,9 +6459,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'GenerateGroup'
     fn generate_group(&mut self, arg: &GenerateGroup) {
-        for x in &arg.generate_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed =
+            self.emit_attributes(arg.generate_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.generate_group_group {
             GenerateGroupGroup::LBraceGenerateGroupGroupListRBrace(x) => {
                 for (i, x) in x.generate_group_group_list.iter().enumerate() {
@@ -6450,7 +6472,7 @@ impl VerylWalker for Emitter {
             }
             GenerateGroupGroup::GenerateItem(x) => self.generate_item(&x.generate_item),
         }
-        for _ in &arg.generate_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6504,9 +6526,8 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'PackageGroup'
     fn package_group(&mut self, arg: &PackageGroup) {
-        for x in &arg.package_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed =
+            self.emit_attributes(arg.package_group_list.iter().map(|x| x.attribute.as_ref()));
         match &*arg.package_group_group {
             PackageGroupGroup::LBracePackageGroupGroupListRBrace(x) => {
                 for (i, x) in x.package_group_group_list.iter().enumerate() {
@@ -6518,7 +6539,7 @@ impl VerylWalker for Emitter {
             }
             PackageGroupGroup::PackageItem(x) => self.package_item(&x.package_item),
         }
-        for _ in &arg.package_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
@@ -6594,9 +6615,11 @@ impl VerylWalker for Emitter {
         if self.in_dependency && attribute::has_test_attribute(arg) {
             return;
         }
-        for x in &arg.description_group_list {
-            self.attribute(&x.attribute);
-        }
+        let pushed = self.emit_attributes(
+            arg.description_group_list
+                .iter()
+                .map(|x| x.attribute.as_ref()),
+        );
         match &*arg.description_group_group {
             DescriptionGroupGroup::LBraceDescriptionGroupGroupListRBrace(x) => {
                 for (i, x) in x.description_group_group_list.iter().enumerate() {
@@ -6608,7 +6631,7 @@ impl VerylWalker for Emitter {
             }
             DescriptionGroupGroup::DescriptionItem(x) => self.description_item(&x.description_item),
         }
-        for _ in &arg.description_group_list {
+        for _ in 0..pushed {
             self.attribute_end();
         }
     }
