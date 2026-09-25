@@ -22470,6 +22470,68 @@ fn invalid_select_scalar() {
         }
     ));
 
+    // An assignment target takes a different conversion path than an
+    // expression, so it is checked separately.
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        assign a[0] = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            x: logic   ,
+            y: logic<2>,
+        }
+        var s: StructA;
+        assign s.x[0] = 0;
+        assign s.y    = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    // A vector target, including a member, stays assignable by select.
+    let code = r#"
+    module ModuleA {
+        struct StructA {
+            x: logic   ,
+            y: logic<2>,
+        }
+        var s: StructA;
+        var w: logic<1>;
+        var v: logic<4>;
+        assign s.x    = 0;
+        assign s.y[1] = 0;
+        assign s.y[0] = 0;
+        assign w[0]   = 0;
+        assign v[3:2] = 0;
+        assign v[1]   = 0;
+        assign v[0]   = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
     // `logic<1>` and a wider vector stay selectable, as does a struct as a
     // whole, which flattens to its width first.
     let code = r#"

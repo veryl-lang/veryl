@@ -402,6 +402,20 @@ fn conv_hierarchical_identifier(
 
     context.select_dims.push(0);
 
+    // An assignment target reaches here rather than through
+    // `ExpressionIdentifier`; a select on a scalar is rejected the same way.
+    if !value.hierarchical_identifier_list.is_empty()
+        && let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        && is_scalar_symbol(&symbol.found)
+    {
+        context.insert_error(AnalyzerError::invalid_select(
+            &InvalidSelectKind::Scalar,
+            &token,
+            &[],
+        ));
+        return Err(ir_error!(token));
+    }
+
     for x in &value.hierarchical_identifier_list {
         if end.is_some() {
             context.insert_error(AnalyzerError::invalid_select(
@@ -431,10 +445,29 @@ fn conv_hierarchical_identifier(
 
     for x in &value.hierarchical_identifier_list0 {
         path.push(x.identifier.identifier_token.token.text);
+        let member_token = x.identifier.identifier_token.token;
         generic_path.paths.push(GenericSymbol {
             base: x.identifier.identifier_token.token,
             arguments: vec![],
         });
+
+        // Same rule for a selected member as an assignment target.
+        if !x.hierarchical_identifier_list0_list.is_empty()
+            && let Ok(symbol) = symbol_table::resolve_base_path(
+                &generic_path,
+                generic_path.paths.len() - 1,
+                member_token.id,
+            )
+            && is_scalar_symbol(&symbol.found)
+        {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::Scalar,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+
         context
             .select_paths
             .push((path.clone(), generic_path.clone()));
