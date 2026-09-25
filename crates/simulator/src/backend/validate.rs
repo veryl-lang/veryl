@@ -156,13 +156,29 @@ pub fn partial_settle_master(ir: &Ir, whole: &dyn CompiledWhole, mask_cache: &mu
     );
 }
 
+/// `partial_settle` for one falling-edge group; `None` on an off-stride call.
+pub fn fall_partial_settle(
+    ir: &Ir,
+    whole: &dyn CompiledWhole,
+    group: usize,
+    mask_cache: &mut MaskCache,
+) -> Option<DispatchOutcome> {
+    partial_settle_with(
+        ir,
+        whole,
+        mask_cache,
+        ir.fall_partial_groups[group].passes,
+        &|ir, mc| ir.run_chunked_fall_partial(group, mc),
+    )
+}
+
 fn partial_settle_with(
     ir: &Ir,
     whole: &dyn CompiledWhole,
     mask_cache: &mut MaskCache,
     passes: usize,
     run_chunked: &dyn Fn(&Ir, &mut MaskCache),
-) {
+) -> Option<DispatchOutcome> {
     // The closure runs on every master edge, several times per cycle, and a
     // sampled call copies both buffers twice, so honour the stride here as
     // `settle_comb` does or the validate run never finishes.
@@ -175,7 +191,7 @@ fn partial_settle_with(
         });
         if !sample {
             run_chunked(ir, mask_cache);
-            return;
+            return None;
         }
     }
 
@@ -194,7 +210,7 @@ fn partial_settle_with(
         if whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) == DispatchOutcome::NotReady {
             crate::output_buffer::truncate_to(out_mark);
             run_chunked(ir, mask_cache);
-            return;
+            return Some(DispatchOutcome::NotReady);
         }
     }
 
@@ -236,6 +252,7 @@ fn partial_settle_with(
         ir.write_log_buffer.count() as u64,
         &skip,
     );
+    Some(DispatchOutcome::Done)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -18,6 +18,7 @@
 
 use crate::HashMap;
 use crate::HashSet;
+use crate::ir::big_array::BigArrayFold;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::VarOffset;
 use smallvec::SmallVec;
@@ -329,6 +330,105 @@ pub fn extract_eval_proto_stmts(
         .iter()
         .filter_map(|i| pre_jit_stmts.get(*i).cloned())
         .collect()
+}
+
+/// Backward closures over the comb, for arbitrary read sets.
+///
+/// A runtime-indexed access reports only its first and last element to
+/// `gather_variable_offsets`, which would miss the writer of a middle element,
+/// so both sides are expanded to every element through one fold.
+pub(crate) struct ReadClosure<'a> {
+    stmts: &'a [ProtoStatement],
+    fold: BigArrayFold,
+    writers: HashMap<VarOffset, Writers>,
+    reads: HashMap<usize, Vec<VarOffset>>,
+}
+
+impl<'a> ReadClosure<'a> {
+    /// `readers` are the statements whose reads will seed a closure; they
+    /// join the fold so an array they alone index is folded too.
+    pub(crate) fn new<'b>(
+        stmts: &'a [ProtoStatement],
+        readers: impl IntoIterator<Item = &'b ProtoStatement>,
+    ) -> Self {
+        let mut fold = BigArrayFold::default();
+        for s in stmts {
+            s.collect_big_arrays(&mut fold);
+        }
+        for s in readers {
+            s.collect_big_arrays(&mut fold);
+        }
+        fold.finish();
+        let mut writers: HashMap<VarOffset, Writers> = HashMap::default();
+        let mut ins: Vec<VarOffset> = Vec::new();
+        let mut outs: Vec<VarOffset> = Vec::new();
+        for (i, stmt) in stmts.iter().enumerate() {
+            ins.clear();
+            outs.clear();
+            stmt.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
+            for off in &outs {
+                if !off.is_ff() {
+                    let w = writers.entry(*off).or_default();
+                    if w.last() != Some(&i) {
+                        w.push(i);
+                    }
+                }
+            }
+        }
+        Self {
+            stmts,
+            fold,
+            writers,
+            reads: HashMap::default(),
+        }
+    }
+
+    /// The comb statements that write `off`, ascending.
+    pub(crate) fn writers_of(&self, off: VarOffset) -> &[usize] {
+        self.writers.get(&off).map_or(&[], |w| w.as_slice())
+    }
+
+    pub(crate) fn comb_reads(&self, stmt: &ProtoStatement, out: &mut Vec<VarOffset>) {
+        let (mut ins, mut outs) = (Vec::new(), Vec::new());
+        stmt.gather_variable_offsets_expanded(&self.fold, &mut ins, &mut outs);
+        out.extend(ins.into_iter().filter(|o| !o.is_ff()));
+    }
+
+    /// The statements `seeds` depend on, ascending: running exactly these,
+    /// in schedule order, gives those reads the values a full settle would.
+    /// `None` once the closure grows past `limit`.
+    pub(crate) fn closure(&mut self, seeds: &[VarOffset], limit: usize) -> Option<Vec<usize>> {
+        let mut dep: HashSet<usize> = HashSet::default();
+        let mut stack: Vec<usize> = Vec::new();
+        for &off in seeds {
+            stack.extend_from_slice(self.writers_of(off));
+        }
+        while let Some(idx) = stack.pop() {
+            if !dep.insert(idx) {
+                continue;
+            }
+            if dep.len() > limit {
+                return None;
+            }
+            if !self.reads.contains_key(&idx) {
+                let mut r = Vec::new();
+                self.comb_reads(&self.stmts[idx], &mut r);
+                r.sort_unstable_by_key(|o| (o.is_ff(), o.raw()));
+                r.dedup();
+                self.reads.insert(idx, r);
+            }
+            for off in &self.reads[&idx] {
+                for &w in self.writers_of(*off) {
+                    if !dep.contains(&w) {
+                        stack.push(w);
+                    }
+                }
+            }
+        }
+        let mut dep: Vec<usize> = dep.into_iter().collect();
+        dep.sort_unstable();
+        Some(dep)
+    }
 }
 
 /// Walks back from `target_offset` through `output_to_writer`.  FF inputs
