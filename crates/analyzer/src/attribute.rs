@@ -20,6 +20,7 @@ pub enum Attribute {
     EnumEncoding(EnumEncodingItem),
     EnumMemberPrefix(StrId),
     Test(Token, Option<StrId>),
+    Testbench,
     CondType(CondTypeItem),
     Align(Vec<AlignItem>),
     Format(Vec<FormatItem>),
@@ -75,6 +76,7 @@ impl fmt::Display for Attribute {
             Attribute::EnumEncoding(x) => format!("enum_encoding({x})"),
             Attribute::EnumMemberPrefix(x) => format!("enum_member_prefix({x})"),
             Attribute::Test(x, _) => format!("test({})", x.text),
+            Attribute::Testbench => String::from("testbench"),
             Attribute::CondType(x) => format!("cond_type({x})"),
             Attribute::Align(x) => {
                 let mut arg = String::new();
@@ -247,6 +249,7 @@ struct Pattern {
     pub gray: StrId,
     pub enum_member_prefix: StrId,
     pub test: StrId,
+    pub testbench: StrId,
     pub cond_type: StrId,
     pub unique: StrId,
     pub unique0: StrId,
@@ -284,6 +287,7 @@ impl Pattern {
             gray: resource_table::insert_str("gray"),
             enum_member_prefix: resource_table::insert_str("enum_member_prefix"),
             test: resource_table::insert_str("test"),
+            testbench: resource_table::insert_str("testbench"),
             cond_type: resource_table::insert_str("cond_type"),
             unique: resource_table::insert_str("unique"),
             unique0: resource_table::insert_str("unique0"),
@@ -462,6 +466,13 @@ impl TryFrom<&veryl_parser::veryl_grammar_trait::Attribute> for Attribute {
                     Err(AttributeError::MismatchArgs(
                         "single identifier".to_string(),
                     ))
+                }
+            }
+            x if x == pat.testbench => {
+                if value.attribute_opt.is_some() {
+                    Err(AttributeError::MismatchArgs("no argument".to_string()))
+                } else {
+                    Ok(Attribute::Testbench)
                 }
             }
             x if x == pat.cond_type => {
