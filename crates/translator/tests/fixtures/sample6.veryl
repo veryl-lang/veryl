@@ -6,11 +6,11 @@ module casts (
     var tmp: logic<16>;
     var cast_out: logic<8>;
     always_ff (clk) {
-        tmp = (a) as logic<16>;
+        tmp = (a) as 16;
         $display("a=%h", a);
     }
 
-    assign cast_out = (tmp + 1) as logic<8>;
+    assign cast_out = (tmp + 1) as 8;
     assign q = cast_out;
 }
 
