@@ -22190,3 +22190,193 @@ fn sv_keyword_usage_loop_var_and_label() {
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
 }
+
+#[test]
+fn invalid_select_scalar() {
+    // https://github.com/veryl-lang/veryl/issues/3411
+    // SV rejects a select on a widthless `logic`/`bit`; `logic<1>` is the
+    // indexable form. The IR gives both a width of 1, so the check reads
+    // the declaration.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var a: logic;
+        assign a   = i_a;
+        assign o_x = a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var a: logic;
+        assign a   = i_a;
+        assign o_x = a[0:0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        assign o_x = i_a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var b: bit;
+        assign b   = 0;
+        assign o_x = b[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    // A scalar member reached through a struct, a modport and an interface
+    // instance.
+    let code = r#"
+    module ModuleA (
+        o_x: output logic,
+    ) {
+        struct S {
+            x: logic,
+        }
+        var s: S;
+        assign s   = 0;
+        assign o_x = s.x[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+        modport mp {
+            a: input,
+        }
+    }
+    module ModuleA (
+        i  : modport InterfaceA::mp,
+        o_x: output  logic,
+    ) {
+        assign o_x = i.a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    let code = r#"
+    interface InterfaceA {
+        var a: logic;
+    }
+    module ModuleA (
+        o_x: output logic,
+    ) {
+        inst u: InterfaceA;
+        assign u.a = 0;
+        assign o_x = u.a[0];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidSelect {
+            kind: crate::analyzer_error::InvalidSelectKind::Scalar,
+            ..
+        }
+    ));
+
+    // `logic<1>` and a wider vector stay selectable, as does a struct as a
+    // whole, which flattens to its width first.
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic,
+        o_x: output logic,
+    ) {
+        var w: logic<1>;
+        var v: logic<4>;
+        assign w   = i_a;
+        assign v   = 0;
+        assign o_x = w[0] | v[2];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic,
+    ) {
+        struct S {
+            x: logic,
+            y: logic<2>,
+        }
+        var s: S;
+        assign s   = 0;
+        assign o_x = s[0] | s.y[1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}

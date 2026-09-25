@@ -4120,10 +4120,23 @@ impl fmt::Display for MismatchTypeKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InvalidSelectKind {
-    WrongOrder { beg: usize, end: usize },
-    OutOfRange { beg: usize, end: usize, size: usize },
-    OutOfDimension { dim: usize, size: usize },
+    WrongOrder {
+        beg: usize,
+        end: usize,
+    },
+    OutOfRange {
+        beg: usize,
+        end: usize,
+        size: usize,
+    },
+    OutOfDimension {
+        dim: usize,
+        size: usize,
+    },
     SelectAfterRange,
+    /// A select on a `logic`/`bit` declared without a width, which
+    /// SystemVerilog rejects; `logic<1>` is the indexable form.
+    Scalar,
 }
 
 impl fmt::Display for InvalidSelectKind {
@@ -4141,6 +4154,9 @@ impl fmt::Display for InvalidSelectKind {
             }
             InvalidSelectKind::OutOfDimension { .. } => "out of dimension".fmt(f),
             InvalidSelectKind::SelectAfterRange => "select after range is not allowed".fmt(f),
+            InvalidSelectKind::Scalar => {
+                "select on a scalar is not allowed, declare it as logic<1> to index it".fmt(f)
+            }
         }
     }
 }
