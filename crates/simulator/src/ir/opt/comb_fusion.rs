@@ -33,6 +33,10 @@
 //! - no statement between the def and the reader rewrites any input of the
 //!   def's RHS, or the def's own offset (the value must be position
 //!   independent over that span).
+//!
+//! A def of one static bit-field follows the same rules, except that its
+//! single reader loads exactly that field, and no other read of the variable
+//! overlaps it, loads it whole or indexes it at runtime.
 
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::event::Event;
@@ -60,6 +64,290 @@ static FORCE_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 /// while the run still passes.  Must be called before analysis.
 pub fn force_disable() {
     FORCE_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Also inline a def of one static bit-field into the single reader of exactly
+/// that field.  Default-on; `VERYL_COMB_FUSION_SEL=0` leaves it out.
+pub fn sel_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERYL_COMB_FUSION_SEL").as_deref() != Ok("0"))
+}
+
+/// Least share of the comb statements the field-def inliner must retire for
+/// its list to be adopted: below it the cone plan is perturbed with too little
+/// volume to repay it.
+const SEL_MIN_RETIRED: f64 = 0.20;
+
+/// Whether the field-def inliner's list is adopted over the baseline's, from
+/// the segment count each one's cone plan gates (`None`: no plan).  Gating more
+/// segments costs more dispatches than the retired statements save.
+pub(crate) fn adopt_field_defs(
+    n_sel: Option<usize>,
+    n_base: Option<usize>,
+    retired_frac: f64,
+) -> bool {
+    n_sel.unwrap_or(usize::MAX) <= n_base.unwrap_or(usize::MAX) && retired_frac >= SEL_MIN_RETIRED
+}
+
+/// Every comb read in an expression and the bits it takes.  `Whole` is an
+/// unselected load; `Dyn` a runtime index or a dynamic base, which may touch
+/// any field.  A `Range` is `plain` when it loads the field unsigned at its
+/// own width, the only form the substitution matches.
+enum ReadSel {
+    Whole,
+    Range(usize, usize, bool),
+    Dyn,
+}
+
+fn collect_reads_expr(e: &ProtoExpression, out: &mut Vec<(isize, ReadSel)>) {
+    match e {
+        ProtoExpression::Variable {
+            var_offset,
+            select,
+            dynamic_select,
+            width,
+            expr_context,
+            ..
+        } => {
+            if let VarOffset::Comb(o) = var_offset {
+                out.push((
+                    *o,
+                    if dynamic_select.is_some() {
+                        ReadSel::Dyn
+                    } else {
+                        match select {
+                            Some((msb, lsb)) => ReadSel::Range(
+                                *msb,
+                                *lsb,
+                                !expr_context.signed && *width == msb - lsb + 1,
+                            ),
+                            None => ReadSel::Whole,
+                        }
+                    },
+                ));
+            }
+            if let Some(ds) = dynamic_select {
+                collect_reads_expr(&ds.index_expr, out);
+            }
+        }
+        ProtoExpression::Value { .. } => {}
+        ProtoExpression::Unary { x, .. } => collect_reads_expr(x, out),
+        ProtoExpression::Binary { x, y, .. } => {
+            collect_reads_expr(x, out);
+            collect_reads_expr(y, out);
+        }
+        ProtoExpression::Concatenation { elements, .. } => {
+            for (x, _, _) in elements {
+                collect_reads_expr(x, out);
+            }
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            collect_reads_expr(cond, out);
+            collect_reads_expr(true_expr, out);
+            collect_reads_expr(false_expr, out);
+        }
+        ProtoExpression::DynamicVariable {
+            base_offset,
+            index_expr,
+            dynamic_select,
+            ..
+        } => {
+            if let VarOffset::Comb(o) = base_offset {
+                out.push((*o, ReadSel::Dyn));
+            }
+            collect_reads_expr(index_expr, out);
+            if let Some(ds) = dynamic_select {
+                collect_reads_expr(&ds.index_expr, out);
+            }
+        }
+        ProtoExpression::HierVariable(_) => {}
+    }
+}
+
+/// The reads of a top-level statement.  `None` for a shape this census does
+/// not model, which disqualifies the candidate.
+fn collect_reads_stmt(s: &ProtoStatement) -> Option<Vec<(isize, ReadSel)>> {
+    let mut out = Vec::new();
+    match s {
+        ProtoStatement::Assign(a) => {
+            collect_reads_expr(&a.expr, &mut out);
+            if let Some(ds) = &a.dynamic_select {
+                collect_reads_expr(&ds.index_expr, &mut out);
+            }
+        }
+        ProtoStatement::If(x) => {
+            if let Some(c) = &x.cond {
+                collect_reads_expr(c, &mut out);
+            }
+            for b in x.true_side.iter().chain(x.false_side.iter()) {
+                out.extend(collect_reads_stmt(b)?);
+            }
+        }
+        _ => return None,
+    }
+    Some(out)
+}
+
+/// A static bit-field range `(msb, lsb)`.
+type Range = (usize, usize);
+/// Every static-range read of one comb offset.
+type RangeReads = HashMap<isize, Vec<Range>>;
+/// Every write of one comb offset: the statement, and the range when the
+/// statement itself is the write (`None` = it may touch any field).
+type RangeWrites = HashMap<isize, Vec<(usize, Option<Range>)>>;
+
+/// Reads of `off` taking exactly `sel` inside one statement, and reads of
+/// `off` that overlap `sel` without being it (which disqualify the def).
+fn count_sel_reads(
+    e: &ProtoExpression,
+    off: isize,
+    sel: (usize, usize),
+    exact: &mut usize,
+    bad: &mut usize,
+) {
+    let mut rs = Vec::new();
+    collect_reads_expr(e, &mut rs);
+    for (o, s) in rs {
+        if o != off {
+            continue;
+        }
+        match s {
+            ReadSel::Range(msb, lsb, true) if (msb, lsb) == sel => *exact += 1,
+            ReadSel::Range(msb, lsb, _) if msb >= sel.1 && sel.0 >= lsb => *bad += 1,
+            ReadSel::Range(..) => {}
+            ReadSel::Whole | ReadSel::Dyn => *bad += 1,
+        }
+    }
+}
+
+/// Substitute the first read of `off[sel]`.  Mirrors `replace_read`, matching
+/// a static bit-field load of exactly `sel` instead of a full-width one.
+fn replace_sel_read(
+    e: &mut ProtoExpression,
+    off: isize,
+    sel: (usize, usize),
+    repl: &mut Option<ProtoExpression>,
+) -> bool {
+    if repl.is_none() {
+        return true;
+    }
+    let w = sel.0 - sel.1 + 1;
+    let is_target = matches!(
+        e,
+        ProtoExpression::Variable {
+            var_offset,
+            select: Some(r),
+            dynamic_select: None,
+            width,
+            expr_context,
+            ..
+        } if *var_offset == VarOffset::Comb(off)
+            && *r == sel
+            && !expr_context.signed
+            && *width == w
+    );
+    if is_target {
+        *e = repl.take().unwrap();
+        return true;
+    }
+    match e {
+        ProtoExpression::Variable { dynamic_select, .. } => {
+            if let Some(d) = dynamic_select {
+                replace_sel_read(&mut d.index_expr, off, sel, repl);
+            }
+        }
+        ProtoExpression::DynamicVariable {
+            index_expr,
+            dynamic_select,
+            ..
+        } => {
+            replace_sel_read(index_expr, off, sel, repl);
+            if let Some(d) = dynamic_select {
+                replace_sel_read(&mut d.index_expr, off, sel, repl);
+            }
+        }
+        ProtoExpression::Unary { x, .. } => {
+            replace_sel_read(x, off, sel, repl);
+        }
+        ProtoExpression::Binary { x, y, .. } => {
+            replace_sel_read(x, off, sel, repl);
+            replace_sel_read(y, off, sel, repl);
+        }
+        ProtoExpression::Concatenation { elements, .. } => {
+            for (x, _, _) in elements {
+                replace_sel_read(x, off, sel, repl);
+            }
+        }
+        ProtoExpression::Ternary {
+            cond,
+            true_expr,
+            false_expr,
+            ..
+        } => {
+            replace_sel_read(cond, off, sel, repl);
+            replace_sel_read(true_expr, off, sel, repl);
+            replace_sel_read(false_expr, off, sel, repl);
+        }
+        ProtoExpression::Value { .. } | ProtoExpression::HierVariable(_) => {}
+    }
+    repl.is_none()
+}
+
+fn count_sel_reads_stmt(
+    s: &ProtoStatement,
+    off: isize,
+    sel: (usize, usize),
+    exact: &mut usize,
+    bad: &mut usize,
+) {
+    match s {
+        ProtoStatement::Assign(a) => {
+            count_sel_reads(&a.expr, off, sel, exact, bad);
+            if let Some(d) = &a.dynamic_select {
+                count_sel_reads(&d.index_expr, off, sel, exact, bad);
+            }
+        }
+        ProtoStatement::If(x) => {
+            if let Some(c) = &x.cond {
+                count_sel_reads(c, off, sel, exact, bad);
+            }
+            for b in x.true_side.iter().chain(x.false_side.iter()) {
+                count_sel_reads_stmt(b, off, sel, exact, bad);
+            }
+        }
+        _ => *bad += 1,
+    }
+}
+
+fn replace_sel_read_stmt(
+    s: &mut ProtoStatement,
+    off: isize,
+    sel: (usize, usize),
+    repl: &mut Option<ProtoExpression>,
+) -> bool {
+    match s {
+        ProtoStatement::Assign(a) => {
+            replace_sel_read(&mut a.expr, off, sel, repl);
+            if let Some(d) = &mut a.dynamic_select {
+                replace_sel_read(&mut d.index_expr, off, sel, repl);
+            }
+        }
+        ProtoStatement::If(x) => {
+            if let Some(c) = &mut x.cond {
+                replace_sel_read(c, off, sel, repl);
+            }
+            for b in x.true_side.iter_mut().chain(x.false_side.iter_mut()) {
+                replace_sel_read_stmt(b, off, sel, repl);
+            }
+        }
+        _ => {}
+    }
+    repl.is_none()
 }
 
 fn diag() -> bool {
@@ -1000,10 +1288,14 @@ fn coalesce_field_stores(mut stmts: Vec<ProtoStatement>) -> (Vec<ProtoStatement>
 /// Returns the contracted statements plus the offsets whose defs were
 /// consumed: their storage is never written again, so anything comparing
 /// raw buffer contents (the dual-run checker) must skip them.
+/// `sel`: also run the field-def inliner.  The caller decides, because the two
+/// statement lists are judged against each other by the cone plans they lead
+/// to (see `adopt_field_defs`).
 pub fn inline_single_readers(
     mut stmts: Vec<ProtoStatement>,
     events: &HashMap<Event, Vec<ProtoStatement>>,
     externals_extra: &HashSet<VarOffset>,
+    sel: bool,
 ) -> (Vec<ProtoStatement>, Vec<isize>) {
     // Folds this pass's own view of the very large arrays; the event walk
     // below sees the same offsets the comb statements do.
@@ -1463,6 +1755,175 @@ pub fn inline_single_readers(
         }
     }
 
+    // -- pass 2c: the same single-reader inlining for a def that writes one
+    //    static bit-field (`y[i] = e`).  The scalar path requires
+    //    `select.is_none()`, so a net assigned field by field stays
+    //    materialised as a read-modify-write into its packed word.
+    let mut inlined_sel = 0usize;
+    if sel {
+        // A read that is not a static range (a whole load, a runtime index, a
+        // shape this census does not model) poisons the offset: it may consume
+        // any field.  So does a read the expanded gather sees and the census
+        // does not, such as an array element reached through a runtime index.
+        let mut sel_reads: HashMap<(isize, Range), Vec<usize>> = HashMap::default();
+        let mut sel_ranges: RangeReads = HashMap::default();
+        let mut sel_poison: HashSet<isize> = HashSet::default();
+        let mut sel_writes: RangeWrites = HashMap::default();
+        let mut seen: HashMap<isize, isize> = HashMap::default();
+        for (i, st) in stmts.iter().enumerate() {
+            e_ins.clear();
+            e_outs.clear();
+            st.gather_variable_offsets_expanded(&fold, &mut e_ins, &mut e_outs);
+            seen.clear();
+            for off in e_ins.drain(..) {
+                if let VarOffset::Comb(o) = off {
+                    *seen.entry(o).or_default() += 1;
+                }
+            }
+            match collect_reads_stmt(st) {
+                Some(rs) => {
+                    for (o, sel) in rs {
+                        *seen.entry(o).or_default() -= 1;
+                        match sel {
+                            ReadSel::Range(msb, lsb, _) => {
+                                sel_reads.entry((o, (msb, lsb))).or_default().push(i);
+                                sel_ranges.entry(o).or_default().push((msb, lsb));
+                            }
+                            _ => {
+                                sel_poison.insert(o);
+                            }
+                        }
+                    }
+                    sel_poison.extend(seen.iter().filter(|&(_, &d)| d != 0).map(|(&o, _)| o));
+                }
+                None => sel_poison.extend(seen.keys().copied()),
+            }
+        }
+        // A writer carries a range only where the statement is the write
+        // itself; any other writer blocks every field, as the scalar path's
+        // offset-level window does.
+        for (o, idxs) in &writes {
+            let v = sel_writes.entry(*o).or_default();
+            for &j in idxs {
+                let r = match &stmts[j] {
+                    ProtoStatement::Assign(a)
+                        if a.dst == VarOffset::Comb(*o) && a.dynamic_select.is_none() =>
+                    {
+                        a.select
+                    }
+                    _ => None,
+                };
+                v.push((j, r));
+            }
+        }
+        let overlaps = |a: (usize, usize), b: (usize, usize)| a.1 <= b.0 && b.1 <= a.0;
+        for i in 0..n {
+            if inlined + inlined_sel >= limit() {
+                break;
+            }
+            if deleted[i] {
+                continue;
+            }
+            let ProtoStatement::Assign(a) = &stmts[i] else {
+                continue;
+            };
+            let (Some(r), None, None) = (a.select, a.dynamic_select.as_ref(), a.rhs_select) else {
+                continue;
+            };
+            let VarOffset::Comb(o) = a.dst else { continue };
+            let w = r.0 - r.1 + 1;
+            if w == 0
+                || w > 64
+                || a.expr.width() == 0
+                || a.expr.width() > 64
+                || a.expr.is_signed_store_leaf()
+                || fold.covers(a.dst)
+                || externals.contains(&o)
+                || opaque_read.contains(&o)
+                || sel_poison.contains(&o)
+            {
+                continue;
+            }
+            let Some(cs) = sel_reads.get(&(o, r)) else {
+                continue;
+            };
+            if cs.len() != 1 {
+                continue;
+            }
+            let r_idx = cs[0];
+            if r_idx <= i || deleted[r_idx] || !rewritable_reader(&stmts[r_idx]) {
+                continue;
+            }
+            if sel_ranges
+                .get(&o)
+                .is_some_and(|v| v.iter().any(|&q| q != r && overlaps(r, q)))
+            {
+                continue;
+            }
+            let (mut exact, mut bad) = (0usize, 0usize);
+            count_sel_reads_stmt(&stmts[r_idx], o, r, &mut exact, &mut bad);
+            if exact != 1 || bad != 0 {
+                continue;
+            }
+            // Position independence, as the scalar path: nothing between the
+            // def and its reader, the reader included, may rewrite an RHS
+            // input or this field, and the RHS must not read the field.
+            e_ins.clear();
+            e_outs.clear();
+            stmts[i].gather_variable_offsets_expanded(&fold, &mut e_ins, &mut e_outs);
+            let sel_window_write = |o: isize, sel: Option<(usize, usize)>, lo: usize, hi: usize| {
+                sel_writes.get(&o).is_some_and(|v| {
+                    v.iter().any(|&(j, q)| {
+                        j > lo
+                            && j < hi
+                            && match (sel, q) {
+                                (Some(x), Some(y)) => overlaps(x, y),
+                                _ => true,
+                            }
+                    })
+                })
+            };
+            let mut blocked = e_ins.iter().any(|off| match off {
+                VarOffset::Comb(io) => *io == o || sel_window_write(*io, None, i, r_idx + 1),
+                VarOffset::Ff(_) => false,
+            });
+            blocked |= sel_window_write(o, Some(r), i, r_idx + 1);
+            if blocked {
+                continue;
+            }
+            let ProtoStatement::Assign(a) = &mut stmts[i] else {
+                unreachable!()
+            };
+            let expr = std::mem::replace(
+                &mut a.expr,
+                ProtoExpression::Value {
+                    value: Value::new(0, 1, false),
+                    width: 1,
+                    expr_context: ExpressionContext {
+                        width: 1,
+                        signed: false,
+                    },
+                },
+            );
+            let mut repl = Some(canonical_wrap(expr, w));
+            if !replace_sel_read_stmt(&mut stmts[r_idx], o, r, &mut repl) {
+                debug_assert!(
+                    false,
+                    "single-reader field read not found at substitution time"
+                );
+                let ProtoStatement::Assign(a) = &mut stmts[i] else {
+                    unreachable!()
+                };
+                a.expr = repl.take().unwrap();
+                continue;
+            }
+            deleted[i] = true;
+            // The word's other fields keep their writers, so its storage is not
+            // retired.
+            inlined_sel += 1;
+        }
+    }
+
     if diag() {
         eprintln!(
             "[comb_fusion] stmts={} folded={} coalesced={} laned={} cse={} dup={} inlined={} veto: shape={} reader={} redef={} external={}",
@@ -1583,7 +2044,7 @@ mod tests {
     }
 
     fn run(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
-        inline_single_readers(stmts, &HashMap::default(), &HashSet::default()).0
+        inline_single_readers(stmts, &HashMap::default(), &HashSet::default(), true).0
     }
 
     fn reads_of(s: &ProtoStatement, off: isize) -> (usize, usize) {
@@ -1682,7 +2143,7 @@ mod tests {
         let stmts = vec![assign(0x0, 8, var(0x100, 8)), assign(0x8, 8, var(0x0, 8))];
         let mut events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         events.insert(Event::Initial, vec![assign(0x0, 8, var(0x200, 8))]);
-        let out = inline_single_readers(stmts, &events, &HashSet::default()).0;
+        let out = inline_single_readers(stmts, &events, &HashSet::default(), true).0;
         assert_eq!(out.len(), 2);
     }
 
@@ -1708,7 +2169,7 @@ mod tests {
         let stmts = vec![assign(0x0, 8, var(0x100, 8)), assign(0x8, 8, var(0x0, 8))];
         let mut events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         events.insert(Event::Initial, vec![assign(0x200, 8, var(0x0, 8))]);
-        let out = inline_single_readers(stmts, &events, &HashSet::default()).0;
+        let out = inline_single_readers(stmts, &events, &HashSet::default(), true).0;
         assert_eq!(out.len(), 2);
     }
 
@@ -1717,7 +2178,7 @@ mod tests {
         let stmts = vec![assign(0x0, 8, var(0x100, 8)), assign(0x8, 8, var(0x0, 8))];
         let mut protect: HashSet<VarOffset> = HashSet::default();
         protect.insert(VarOffset::Comb(0x0));
-        let out = inline_single_readers(stmts, &HashMap::default(), &protect).0;
+        let out = inline_single_readers(stmts, &HashMap::default(), &protect, true).0;
         assert_eq!(out.len(), 2);
     }
 
@@ -2260,7 +2721,7 @@ mod tests {
         ];
         let mut protect: HashSet<VarOffset> = HashSet::default();
         protect.insert(VarOffset::Comb(0x0));
-        let (out, _) = inline_single_readers(stmts, &HashMap::default(), &protect);
+        let (out, _) = inline_single_readers(stmts, &HashMap::default(), &protect, true);
         // The def survives (external), but both readers now read 0x100.
         assert_eq!(out.len(), 3);
         assert_eq!(reads_of(&out[1], 0x0), (0, 0));
@@ -2518,6 +2979,119 @@ mod tests {
         }
     }
 
+    fn var_sel(off: isize, hi: usize, lo: usize, width: usize, signed: bool) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            width,
+            var_full_width: 8,
+            expr_context: ExpressionContext { width, signed },
+        }
+    }
+
+    fn run_sel(stmts: Vec<ProtoStatement>, sel: bool) -> Vec<ProtoStatement> {
+        inline_single_readers(stmts, &HashMap::default(), &HashSet::default(), sel).0
+    }
+
+    fn field_def() -> ProtoStatement {
+        assign_sel(0x0, 8, 3, 0, var(0x100, 4))
+    }
+
+    fn field_reader() -> ProtoStatement {
+        assign(0x8, 4, var_sel(0x0, 3, 0, 4, false))
+    }
+
+    #[test]
+    fn inlines_a_field_def_into_the_reader_of_that_field() {
+        let (out, retired) = inline_single_readers(
+            vec![field_def(), field_reader()],
+            &HashMap::default(),
+            &HashSet::default(),
+            true,
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(reads_of(&out[0], 0x0), (0, 0));
+        // The word's other fields keep their writers.
+        assert!(retired.is_empty());
+        assert_eq!(run_sel(vec![field_def(), field_reader()], false).len(), 2);
+    }
+
+    #[test]
+    fn keeps_a_field_def_another_read_overlaps() {
+        let overlap = assign(0x10, 4, var_sel(0x0, 5, 2, 4, false));
+        assert_eq!(
+            run_sel(vec![field_def(), field_reader(), overlap], true).len(),
+            3
+        );
+        let whole = assign(0x10, 8, var(0x0, 8));
+        assert_eq!(
+            run_sel(vec![field_def(), field_reader(), whole], true).len(),
+            3
+        );
+    }
+
+    #[test]
+    fn keeps_a_field_def_whose_field_is_rewritten_before_the_reader() {
+        let same = assign_sel(0x0, 8, 2, 1, var(0x110, 2));
+        assert_eq!(
+            run_sel(vec![field_def(), same, field_reader()], true).len(),
+            3
+        );
+        let other = assign_sel(0x0, 8, 7, 4, var(0x110, 4));
+        assert_eq!(
+            run_sel(vec![field_def(), other, field_reader()], true).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn keeps_a_field_def_read_signed_or_at_another_width() {
+        let signed = assign(0x8, 4, var_sel(0x0, 3, 0, 4, true));
+        assert_eq!(run_sel(vec![field_def(), signed], true).len(), 2);
+        let wide = assign(0x8, 8, var_sel(0x0, 3, 0, 8, false));
+        assert_eq!(run_sel(vec![field_def(), wide], true).len(), 2);
+    }
+
+    #[test]
+    fn keeps_a_field_def_of_an_element_read_through_a_runtime_index() {
+        // Element 1 of a three-element array at 0x0 with stride 8.
+        let stmts = vec![
+            assign_sel(0x8, 8, 3, 0, var(0x100, 4)),
+            assign(0x200, 4, var_sel(0x8, 3, 0, 4, false)),
+            assign(0x208, 8, dyn_read(0x0, 3)),
+        ];
+        assert_eq!(run_sel(stmts, true).len(), 3);
+    }
+
+    #[test]
+    fn keeps_a_field_def_also_read_inside_a_runtime_bit_index() {
+        let mut arr = dyn_read(0x110, 3);
+        if let ProtoExpression::DynamicVariable { dynamic_select, .. } = &mut arr {
+            *dynamic_select = Some(crate::ir::expression::ProtoDynamicBitSelect {
+                index_expr: Box::new(var_sel(0x0, 3, 0, 4, false)),
+                elem_width: 1,
+                window: 1,
+                num_elements: 8,
+            });
+        }
+        let hidden = assign(0x10, 1, arr);
+        assert_eq!(
+            run_sel(vec![field_def(), field_reader(), hidden], true).len(),
+            3
+        );
+    }
+
+    #[test]
+    fn field_defs_are_adopted_only_when_the_plan_does_not_grow() {
+        assert!(adopt_field_defs(Some(5), Some(5), 0.5));
+        assert!(adopt_field_defs(Some(4), Some(5), 0.5));
+        assert!(!adopt_field_defs(Some(6), Some(5), 0.5));
+        assert!(!adopt_field_defs(None, Some(5), 0.5));
+        assert!(adopt_field_defs(Some(5), None, 0.5));
+        assert!(!adopt_field_defs(Some(4), Some(5), SEL_MIN_RETIRED / 2.0));
+    }
+
     #[test]
     fn keep_knob_truth_table() {
         assert!(cheap_keep(Some("1"), false));
@@ -2539,7 +3113,7 @@ mod tests {
         ];
         let mut events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         events.insert(Event::Initial, vec![assign(0x200, 8, dyn_read(0x0, 3))]);
-        let out = inline_single_readers(stmts, &events, &HashSet::default()).0;
+        let out = inline_single_readers(stmts, &events, &HashSet::default(), true).0;
         assert_eq!(out.len(), 3, "the event-read def must not retire");
         assert!(
             out.iter()
@@ -2553,7 +3127,7 @@ mod tests {
         let stmts = vec![assign(0x8, 8, var(0x100, 8)), assign(0x20, 8, var(0x8, 8))];
         let mut events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         events.insert(Event::Initial, vec![assign(0x200, 8, dyn_read(0x0, 3))]);
-        let out = inline_single_readers(stmts, &events, &HashSet::default()).0;
+        let out = inline_single_readers(stmts, &events, &HashSet::default(), true).0;
         assert_eq!(out.len(), 2);
     }
 
@@ -2582,7 +3156,7 @@ mod tests {
         ];
         let mut events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         events.insert(Event::Initial, vec![ev_write]);
-        let out = inline_single_readers(stmts, &events, &HashSet::default()).0;
+        let out = inline_single_readers(stmts, &events, &HashSet::default(), true).0;
         assert_eq!(out.len(), 3, "the event-written def must not retire");
     }
 
