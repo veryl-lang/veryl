@@ -5,7 +5,7 @@ use miette::{Diagnostic, NamedSource, SourceSpan};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use sv_parser::{Defines, parse_sv_str};
+use sv_parser::{Defines, Locate, parse_sv_pp, preprocess_str};
 use thiserror::Error;
 use veryl_metadata::NewlineStyle;
 
@@ -52,11 +52,27 @@ pub fn translate_str(
 ) -> Result<TranslateOutput, TranslateError> {
     let defines: Defines<std::collections::hash_map::RandomState> = HashMap::new();
     let include_paths: Vec<std::path::PathBuf> = Vec::new();
-    let (tree, _) = parse_sv_str(src, path.as_ref(), &defines, &include_paths, false, false)
-        .map_err(|e| TranslateError::Parse(format!("{e:?}")))?;
+    // The syntax tree's offsets index the preprocessed text, which is not the
+    // input: directives are dropped, macros expanded and whitespace adjusted.
+    // Node text is taken from that text, and diagnostic spans are mapped back
+    // to the input.
+    let (pp, pp_defines) = preprocess_str(
+        src,
+        path.as_ref(),
+        &defines,
+        &include_paths,
+        false,
+        false,
+        0,
+        0,
+    )
+    .map_err(|e| TranslateError::Parse(format!("{e:?}")))?;
+    let pp_src = pp.text().to_string();
+    let (tree, _) =
+        parse_sv_pp(pp, pp_defines, false).map_err(|e| TranslateError::Parse(format!("{e:?}")))?;
 
     let newline = newline_style.newline_str(src);
-    let conv = convert::Converter::new(&tree, src, newline);
+    let conv = convert::Converter::new(&tree, &pp_src, newline);
     let (raw, reports) = conv.run();
 
     let name = path.as_ref().to_string_lossy().into_owned();
@@ -70,12 +86,32 @@ pub fn translate_str(
             kind: r.kind,
             reason: r.reason,
             src: Arc::clone(&shared_src),
-            span: (r.offset, r.len).into(),
+            span: origin_span(&tree, r.offset, r.len, src.len()).into(),
         })
         .collect();
 
     let veryl = if format { format_veryl(&raw) } else { raw };
     Ok(TranslateOutput { veryl, unsupported })
+}
+
+/// Map a span of the preprocessed text back to the input, keeping its length
+/// but clamping it to the input so a span from macro-expanded text stays valid.
+fn origin_span(
+    tree: &sv_parser::SyntaxTree,
+    offset: usize,
+    len: usize,
+    src_len: usize,
+) -> (usize, usize) {
+    let locate = Locate {
+        offset,
+        line: 0,
+        len,
+    };
+    let offset = tree
+        .get_origin(&locate)
+        .map_or(offset, |(_, origin)| origin)
+        .min(src_len);
+    (offset, len.min(src_len - offset))
 }
 
 /// Best-effort: parse + format the generated Veryl text. If parsing fails,
