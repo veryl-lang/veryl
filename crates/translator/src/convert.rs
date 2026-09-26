@@ -3,7 +3,7 @@ mod types;
 mod util;
 
 use crate::writer::Writer;
-use sv_parser::{NodeEvent, RefNode, SyntaxTree, unwrap_node};
+use sv_parser::{AlwaysKeyword, NodeEvent, RefNode, SyntaxTree, unwrap_node};
 
 /// Visitor signal for `walk_skip`. `Skip` causes the matched node's entire
 /// subtree to be skipped (so a handler can claim a node and the walker won't
@@ -357,11 +357,16 @@ impl<'a> Converter<'a> {
     }
 
     fn emit_always(&mut self, node: &RefNode<'a>) {
-        let kw = unwrap_node!(node.clone(), AlwaysKeyword)
-            .map(|i| self.node_text(&i).trim().to_string())
-            .unwrap_or_else(|| "always".to_string());
+        // From the keyword's kind, not its text, which runs on to any comment
+        // that follows it (`always_comb // ...`).
+        let kw = match unwrap_node!(node.clone(), AlwaysKeyword) {
+            Some(RefNode::AlwaysKeyword(AlwaysKeyword::AlwaysComb(_))) => "always_comb",
+            Some(RefNode::AlwaysKeyword(AlwaysKeyword::AlwaysFf(_))) => "always_ff",
+            Some(RefNode::AlwaysKeyword(AlwaysKeyword::AlwaysLatch(_))) => "always_latch",
+            _ => "always",
+        };
 
-        match kw.as_str() {
+        match kw {
             "always_comb" => {
                 self.w.str("always_comb {");
                 self.w.newline();
@@ -418,7 +423,10 @@ impl<'a> Converter<'a> {
     }
 
     fn emit_always_body(&mut self, node: &RefNode<'a>) {
-        if let Some(s) = unwrap_node!(node.clone(), StatementOrNull) {
+        // The block's own statement: the first StatementOrNull would be the
+        // first statement inside a `begin ... end`, and a bare `always_comb
+        // a = b;` has none.
+        if let Some(s) = unwrap_node!(node.clone(), Statement) {
             self.emit_statement(&s);
         }
     }
