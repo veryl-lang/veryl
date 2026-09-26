@@ -1,0 +1,28 @@
+module generate_labels #(
+    param N: i32 = 4,
+) (
+    a: input logic<N>,
+    b: output logic<N>,
+) {
+    for i in 0..N :genblk1 {
+        assign b[i] = a[i];
+    }
+
+    if N == 4 :four {
+        var x: logic;
+        assign x = a[0];
+    } else {
+        var y: logic;
+        assign y = a[0];
+    }
+
+    for j in 0..2 :named {
+        if 1 :genblk1 {
+            var z: logic;
+            assign z = a[j];
+        }
+
+    }
+
+}
+
