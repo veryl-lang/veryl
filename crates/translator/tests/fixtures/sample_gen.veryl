@@ -4,11 +4,11 @@ module gen_test #(
     in: input logic<N>,
     out: output logic<N>,
 ) {
-    for gi in 0..N {
+    for gi in 0..N :g_loop {
         assign out[gi] = in[gi];
     }
 
-    if N > 2 {
+    if N > 2 :g_big {
         assign out = in;
     } else {
         assign out = '0;
