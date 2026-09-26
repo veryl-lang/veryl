@@ -2,23 +2,31 @@
 //! source text. Kept free-standing so the type/expression helpers in sibling
 //! modules can use them without going through the `Converter` state.
 
-use sv_parser::RefNode;
+use sv_parser::{NodeEvent, RefNode};
 
 /// Return the substring of `src` spanning a node, computed from the offsets
-/// of all `Locate` descendants. Returns `""` for nodes without locate info.
+/// of its `Locate` descendants. Whitespace and comments are attached to the
+/// token before them, so they are left out: the span runs from the first to
+/// the last token. Returns `""` for nodes without locate info.
 pub(crate) fn node_text<'a>(node: &RefNode, src: &'a str) -> &'a str {
     let mut start: Option<usize> = None;
     let mut end: usize = 0;
-    for n in node.clone().into_iter() {
-        if let RefNode::Locate(loc) = n {
-            let s = loc.offset;
-            let e = loc.offset + loc.len;
-            if start.is_none() {
-                start = Some(s);
+    let mut in_whitespace = 0usize;
+    for event in node.clone().into_iter().event() {
+        match event {
+            NodeEvent::Enter(RefNode::WhiteSpace(_)) => in_whitespace += 1,
+            NodeEvent::Leave(RefNode::WhiteSpace(_)) => in_whitespace -= 1,
+            NodeEvent::Enter(RefNode::Locate(loc)) if in_whitespace == 0 => {
+                let s = loc.offset;
+                let e = loc.offset + loc.len;
+                if start.is_none() {
+                    start = Some(s);
+                }
+                if e > end {
+                    end = e;
+                }
             }
-            if e > end {
-                end = e;
-            }
+            _ => {}
         }
     }
     if let Some(s) = start

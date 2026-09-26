@@ -1,0 +1,9 @@
+module trailing_comments (
+    a: input logic,
+    b: output logic,
+) {
+    var c: logic;
+    assign c = a;
+    assign b = c;
+}
+
