@@ -318,8 +318,9 @@ fn stable_topo_sort_impl(
     // Dedup per stmt so repeated writes (e.g. multiple case arms touching
     // the same var) don't inflate the downstream in-degree count.
     let mut writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    let mut unique_outs: HashSet<VarOffset> = HashSet::default();
     for (i, outs) in stmt_outputs.iter().enumerate() {
-        let mut unique_outs: HashSet<VarOffset> = HashSet::default();
+        unique_outs.clear();
         for &key in outs {
             if unique_outs.insert(key) {
                 writers.entry(key).or_default().push(i);
@@ -725,24 +726,30 @@ fn stable_topo_sort_impl(
         // full width).  Bounding rather than exact: a statement writing two
         // ranges of one variable keeps a single entry, and answering "can these
         // two clobber" too generously only keeps an edge.
-        let mut spans: HashMap<VarOffset, HashMap<usize, BitRange>> = HashMap::default();
-        for (key, wranges) in &writer_ranges {
-            let per_stmt = spans.entry(*key).or_default();
-            for (p, wr) in wranges {
-                match per_stmt.entry(*p) {
-                    std::collections::hash_map::Entry::Vacant(e) => {
-                        e.insert(*wr);
-                    }
-                    std::collections::hash_map::Entry::Occupied(mut e) => {
-                        let merged = match (*e.get(), *wr) {
+        // Built per variable where it is used: `writer_ranges` lists a
+        // statement's entries together and in statement order, so merging runs
+        // of one statement yields a list a binary search reads.
+        let mut per_stmt_spans: Vec<(usize, BitRange)> = Vec::new();
+        let merge_spans_of = |wranges: &[(usize, BitRange)], out: &mut Vec<(usize, BitRange)>| {
+            out.clear();
+            for &(p, wr) in wranges {
+                match out.last_mut() {
+                    Some((last, merged)) if *last == p => {
+                        *merged = match (*merged, wr) {
                             (Some((ah, al)), Some((bh, bl))) => Some((ah.max(bh), al.min(bl))),
                             _ => None,
                         };
-                        e.insert(merged);
                     }
+                    _ => out.push((p, wr)),
                 }
             }
-        }
+        };
+        let span_of = |spans: &[(usize, BitRange)], p: usize| -> BitRange {
+            spans
+                .binary_search_by_key(&p, |(q, _)| *q)
+                .ok()
+                .and_then(|i| spans[i].1)
+        };
         // How far back a writer looks for one it can clobber.  Past this the
         // scan falls back to the immediate predecessor -- the previous
         // behaviour, and conservative, since an extra WAW edge only constrains.
@@ -751,20 +758,26 @@ fn stable_topo_sort_impl(
             if split_driver.contains(key) {
                 continue;
             }
-            let per_stmt = spans.get(key);
+            let per_stmt = writer_ranges.get(key).map(|wranges| {
+                merge_spans_of(wranges, &mut per_stmt_spans);
+                &per_stmt_spans[..]
+            });
             let mut prevs: Vec<usize> = Vec::new();
             for (i, &next) in writer_indices.iter().enumerate().skip(1) {
                 prevs.clear();
                 match per_stmt {
                     Some(per_stmt) => {
                         let window = i.saturating_sub(MAX_LOOKBACK);
-                        let next_span = per_stmt.get(&next).copied().flatten();
+                        let next_span = span_of(per_stmt, next);
                         // EVERY overlapping writer before it: chaining
                         // consecutive pairs made the order transitive, and one
                         // edge does not.
-                        prevs.extend(writer_indices[window..i].iter().copied().filter(|p| {
-                            ranges_overlap(per_stmt.get(p).copied().flatten(), next_span)
-                        }));
+                        prevs.extend(
+                            writer_indices[window..i]
+                                .iter()
+                                .copied()
+                                .filter(|&p| ranges_overlap(span_of(per_stmt, p), next_span)),
+                        );
                         // Only a truncated scan leaves a pair unordered, so
                         // keep the old chaining there and nothing at all when
                         // the whole prefix is disjoint.
@@ -916,12 +929,8 @@ fn stable_topo_sort_impl(
         return (statements, None, true);
     };
 
-    // Reconstruct statement list in sorted order.
-    let mut result: Vec<Option<ProtoStatement>> = statements.into_iter().map(Some).collect();
-    let sorted: Vec<ProtoStatement> = sorted_indices
-        .into_iter()
-        .map(|i| result[i].take().unwrap())
-        .collect();
+    let mut sorted = statements;
+    crate::ir::module::permute_in_place(&mut sorted, &sorted_indices);
     (sorted, (!hint_blocked).then_some(1), false)
 }
 
