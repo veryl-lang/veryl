@@ -806,7 +806,7 @@ fn synth_system_function_call(
             synthesize_expr(ctx, inner, current, ret_width)
         }
         SystemFunctionKind::Bits(_)
-        | SystemFunctionKind::Size(_)
+        | SystemFunctionKind::Size(..)
         | SystemFunctionKind::Clog2(_) => {
             let value = call.comptime.get_value().map_err(|_| {
                 SynthesizerError::unsupported(

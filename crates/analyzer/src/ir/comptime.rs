@@ -683,14 +683,24 @@ impl Type {
     /// Elements in the leftmost dimension, which is what `$size` answers:
     /// the outermost unpacked dimension, else the outermost packed one, else
     /// the kind's own width (a struct or enum is one packed vector).
-    pub fn leading_dimension(&self) -> Option<usize> {
-        if let Some(x) = self.array.first() {
-            *x
-        } else if let Some(x) = self.width.first() {
-            *x
-        } else {
-            self.kind.width()
+    /// Size of the `n`th dimension (1-based) as numbered by `$size(x, n)`:
+    /// unpacked array dimensions first, then packed ones.
+    pub fn dimension(&self, n: usize) -> Option<usize> {
+        let index = n.checked_sub(1)?;
+        let array = self.array.dims();
+        if index < array {
+            return *self.array.get(index)?;
         }
+        let index = index - array;
+        if self.width.is_empty() {
+            if index == 0 { self.kind.width() } else { None }
+        } else {
+            *self.width.get(index)?
+        }
+    }
+
+    pub fn leading_dimension(&self) -> Option<usize> {
+        self.dimension(1)
     }
 
     /// An unevaluated width (generics) counts as single-bit to avoid

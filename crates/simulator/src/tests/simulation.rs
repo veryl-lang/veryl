@@ -28806,6 +28806,28 @@ fn size_answers_the_leading_dimension_not_the_total_bits() {
 }
 
 #[test]
+fn size_answers_the_requested_dimension() {
+    // `$size(x, n)` numbers unpacked dimensions first, then packed ones,
+    // and `$size(x, 1)` is the same as `$size(x)`.
+    bits_and_size(
+        "        var p2: logic<8, 4>;\n\
+         \x20       let u2 : logic<8> [5, 3] = '{default: '{default: 8'd0}};\n\
+         \x20       var n : u32;\n\
+         \x20       assign p2 = 0;\n\
+         \x20       assign n  = 0;",
+        &[
+            "$size(p2, 1)",
+            "$size(p2, 2)",
+            "$size(u2, 1)",
+            "$size(u2, 2)",
+            "$size(u2, 3)",
+            "$size(n, 1)",
+        ],
+        &[8, 4, 5, 3, 8, 32],
+    );
+}
+
+#[test]
 fn whole_unpacked_array_unsized_fill() {
     // `arr = '0;` on an UNPACKED array.  The fill carries no width of its
     // own, so SystemVerilog replicates it into every element; the simulator
