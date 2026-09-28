@@ -129,14 +129,20 @@ fn million_bit_dangling_recurrences_do_not_enumerate_declared_bits() {
 }
 
 #[test]
-fn wide_dangling_rotate_preserves_incomplete_cycle_search_status() {
-    // This rotate exceeds the separate compatible-cycle search budget. A
-    // completed feedthrough summary must not turn that into a proof of safety.
-    let code = shift_code(257, 3, false, false, true);
-    reset_module_summary_work();
-    assert!(!comb_loop_analysis_is_complete(&code));
-    let (input_edges, walked_edges) = module_summary_work();
-    assert!(walked_edges <= input_edges);
+fn wide_dangling_rotate_is_proven_without_coordinate_expansion() {
+    // The closed finite-domain witness proves this rotation without walking
+    // once per coordinate, even when the output does not observe the cycle.
+    for width in [257, 1_000_003] {
+        let code = shift_code(width, 3, false, false, true);
+        check(&code, true);
+    }
+    // Keep the original completeness-propagation contract under an explicitly
+    // exhausted search. A finished summary cannot claim an unfinished proof.
+    crate::comb_loop_detect::with_cycle_search_limit(0, || {
+        assert!(!comb_loop_analysis_is_complete(&shift_code(
+            257, 3, false, false, true
+        )));
+    });
 }
 
 #[test]

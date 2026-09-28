@@ -1929,24 +1929,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    fn read_keys(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<NodeKey> {
-        if !self.ctx.variables.contains_key(&id) && index.0.is_empty() && select.is_empty() {
-            return self.keys_for_id(id);
-        }
-        let mut keys = Vec::new();
-        let index = self.receiver_index(id, index);
-        let accesses = var_reads(id, &index, select, &mut self.ctx);
-        if accesses.is_empty() {
-            self.status = self.status.max(AnalysisStatus::Partial);
-        }
-        for (idx, span) in accesses {
-            keys.extend(self.bit_part.overlapping_access(id, idx, span));
-        }
-        keys.sort_unstable();
-        keys.dedup();
-        keys
-    }
-
     fn write_keys(&mut self, destination: &AssignDestination) -> Vec<NodeKey> {
         if !self.ctx.variables.contains_key(&destination.id)
             && destination.index.0.is_empty()
@@ -2036,10 +2018,56 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .unwrap_or_else(|| index.clone())
     }
 
+    fn project_read(
+        &mut self,
+        key: NodeKey,
+        version: VersionId,
+        array: ArraySpan,
+        packed: PackedSpan,
+    ) -> VersionId {
+        if array.intersection(key.1) == Some(key.1)
+            && self
+                .key_span(key)
+                .is_some_and(|span| packed.intersection(span) == Some(span))
+        {
+            version
+        } else {
+            self.ssa.projected(version, position_domain(array, packed))
+        }
+    }
+
+    fn read_variable_values(
+        &mut self,
+        id: VarId,
+        index: &VarIndex,
+        select: &VarSelect,
+    ) -> Vec<(NodeKey, VersionId)> {
+        if !self.ctx.variables.contains_key(&id) && index.0.is_empty() && select.is_empty() {
+            return self
+                .keys_for_id(id)
+                .into_iter()
+                .map(|key| (key, self.read_key(key)))
+                .collect();
+        }
+        let index = self.receiver_index(id, index);
+        let accesses = var_reads(id, &index, select, &mut self.ctx);
+        if accesses.is_empty() {
+            self.status = self.status.max(AnalysisStatus::Partial);
+        }
+        let mut values = Vec::new();
+        for (array, packed) in accesses {
+            for key in self.bit_part.overlapping_access(id, array, packed) {
+                let version = self.read_key(key);
+                values.push((key, self.project_read(key, version, array, packed)));
+            }
+        }
+        values
+    }
+
     fn read_variable(&mut self, id: VarId, index: &VarIndex, select: &VarSelect) -> Vec<VersionId> {
-        self.read_keys(id, index, select)
+        self.read_variable_values(id, index, select)
             .into_iter()
-            .map(|key| self.read_key(key))
+            .map(|(_, version)| version)
             .collect()
     }
 
@@ -2060,9 +2088,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             selectors.extend(self.eval_expr(expression));
         }
         let values = self
-            .read_keys(*id, index, select)
+            .read_variable_values(*id, index, select)
             .into_iter()
-            .map(|key| (key, self.read_key(key)))
             .collect();
         let index = self.sample_affine_index(*id, index);
         let sampled = Rc::new(SampledVariable {
@@ -2957,13 +2984,35 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut reads = PackedSpan::whole(expression_width)
             .and_then(|width| requested.intersection(width))
             .map(|span| {
-                self.eval_expr_bits_in(
+                let sources = self.eval_expr_bits_in(
                     expression,
                     requested_array,
                     span,
                     evaluation_context,
                     projection,
-                )
+                );
+                // A whole-value dependency reaches the evaluated result,
+                // not padding or adjacent concatenation fields. Previously
+                // read boundaries in the storage partition hid this distinction.
+                if sources
+                    .sources
+                    .iter()
+                    .any(|(_, relation)| relation.packed.is_none())
+                {
+                    let array = projection
+                        .destination_index
+                        .as_ref()
+                        .filter(|index| !index.index.terms.is_empty())
+                        .and(projection.destination_array)
+                        .unwrap_or(requested_array);
+                    let value = self.ssa.related_definition(sources.sources);
+                    let value = self.ssa.projected(value, position_domain(array, span));
+                    ExpressionSources {
+                        sources: vec![(value, PositionRelation::default())],
+                    }
+                } else {
+                    sources
+                }
             })
             .unwrap_or_default();
         if context.width > expression_width
@@ -3073,10 +3122,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                         source_array,
                                         source_span,
                                     ) {
-                                        if let Some(sampled) = &sampled {
-                                            reads.extend(sampled.values.get(&key).copied());
+                                        let version = if let Some(sampled) = &sampled {
+                                            sampled.values.get(&key).copied()
                                         } else {
-                                            reads.push(self.read_key(key));
+                                            Some(self.read_key(key))
+                                        };
+                                        if let Some(version) = version {
+                                            reads.push(self.project_read(
+                                                key,
+                                                version,
+                                                source_array,
+                                                source_span,
+                                            ));
                                         }
                                     }
                                 }

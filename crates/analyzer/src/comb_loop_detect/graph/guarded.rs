@@ -50,24 +50,43 @@ pub(super) fn guarded_cycle_displacements_cancel(
     cycles: &HashSet<GuardedCycle>,
     budget: &mut SearchBudget,
 ) -> bool {
-    let mut translations = Vec::new();
+    let mut grouped: HashMap<(BitDependency, PathCondition), Vec<FeasiblePosition>> =
+        HashMap::default();
+    let mut all_exact = true;
     for cycle in cycles {
         if !budget.spend_product(cycle.relation.piece_count(), 1) {
             return false;
         }
         if let Some((dependency, feasible)) = cycle.relation.exact_translation() {
-            translations.push(GuardedTranslation {
-                dependency,
-                condition: cycle.condition.clone(),
-                feasible,
-            });
+            grouped
+                .entry((dependency, cycle.condition.clone()))
+                .or_default()
+                .extend(feasible);
+        } else {
+            all_exact = false;
         }
     }
+    // Equivalent translations reached through separate read views describe
+    // one relation on the union of their domains. Coalesce adjacent strips
+    // before composing cycles; enumerating their paths loses that sharing.
+    let translations = grouped
+        .into_iter()
+        .map(|((dependency, condition), mut feasible)| {
+            coalesce_feasible_positions(&mut feasible);
+            GuardedTranslation {
+                dependency,
+                condition,
+                feasible,
+            }
+        })
+        .collect::<Vec<_>>();
 
-    if guarded_translations_cancel(&translations, budget) {
+    if closed_translation_domain(&translations, budget)
+        || guarded_translations_cancel(&translations, budget)
+    {
         return true;
     }
-    if budget.exhausted || translations.len() == cycles.len() {
+    if budget.exhausted || all_exact {
         return false;
     }
     for cycle in cycles {
@@ -93,6 +112,120 @@ pub(super) fn guarded_cycle_displacements_cancel(
     }
 
     guarded_relations_close(cycles, budget)
+}
+
+/// A nonempty finite domain with an enabled successor inside itself contains
+/// a cycle. All translations here must admit one common branch valuation.
+/// Their source domains cover the candidate set by construction, and every
+/// image must remain inside it. This proves rotations without enumerating
+/// positions or searching for a word of width/gcd(width, shift) translations.
+/// Failure of this sufficient check leaves the exact solver unchanged.
+fn closed_translation_domain(cycles: &[GuardedTranslation], budget: &mut SearchBudget) -> bool {
+    let mut condition = PathCondition::default();
+    let mut domain = Vec::new();
+    for cycle in cycles {
+        if !budget.spend_conditions(&condition, &cycle.condition) {
+            return false;
+        }
+        let Some(next) = condition.conjoin_if_compatible(&cycle.condition) else {
+            return false;
+        };
+        condition = next;
+        for &position in &cycle.feasible {
+            if !budget.spend(1) {
+                return false;
+            }
+            let (Some(array), Some(packed)) = (position.array, position.packed) else {
+                return false;
+            };
+            if array.0 >= array.1 || packed.0 >= packed.1 {
+                return false;
+            }
+            domain.push(position);
+        }
+    }
+    if domain.is_empty() {
+        return false;
+    }
+    coalesce_feasible_positions(&mut domain);
+    for cycle in cycles {
+        let Some((array, packed)) = cycle.dependency.exact_offset() else {
+            return false;
+        };
+        for position in &cycle.feasible {
+            let translated = |axis: Option<(isize, isize)>, offset| {
+                let (lo, hi) = axis?;
+                Some((lo.checked_add(offset)?, hi.checked_add(offset)?))
+            };
+            let (Some(array), Some(packed)) = (
+                translated(position.array, array),
+                translated(position.packed, packed),
+            ) else {
+                return false;
+            };
+            let mut covered = false;
+            for region in &domain {
+                if !budget.spend(1) {
+                    return false;
+                }
+                if axis_contains(region.array, Some(array))
+                    && axis_contains(region.packed, Some(packed))
+                {
+                    covered = true;
+                    break;
+                }
+            }
+            if !covered {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+// Merge only rectangles with an identical other axis. This preserves gaps,
+// both positional axes, and every possible transition; it never takes a
+// bounding box of rectangles that would introduce extra points.
+fn coalesce_feasible_positions(positions: &mut Vec<FeasiblePosition>) {
+    for packed in [false, true] {
+        let axes = |position: &FeasiblePosition| {
+            if packed {
+                (position.array, position.packed)
+            } else {
+                (position.packed, position.array)
+            }
+        };
+        positions.sort_unstable_by_key(axes);
+        let mut end = 0;
+        for index in 0..positions.len() {
+            let next = positions[index];
+            if end != 0 {
+                let previous = &mut positions[end - 1];
+                let (fixed, interval) = axes(previous);
+                let (next_fixed, next_interval) = axes(&next);
+                if fixed == next_fixed {
+                    let merged = match (interval, next_interval) {
+                        (None, _) | (_, None) => Some(None),
+                        (Some((lo, hi)), Some((next_lo, next_hi))) if next_lo <= hi => {
+                            Some(Some((lo.min(next_lo), hi.max(next_hi))))
+                        }
+                        _ => None,
+                    };
+                    if let Some(merged) = merged {
+                        if packed {
+                            previous.packed = merged;
+                        } else {
+                            previous.array = merged;
+                        }
+                        continue;
+                    }
+                }
+            }
+            positions[end] = next;
+            end += 1;
+        }
+        positions.truncate(end);
+    }
 }
 
 fn guarded_relations_close(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) -> bool {
@@ -839,6 +972,106 @@ mod fixed_return_tests {
     use super::*;
     use crate::comb_loop_detect::ssa::BranchId;
     use daggy::petgraph::algo::is_cyclic_directed;
+
+    #[test]
+    fn finite_closed_domains_prove_rotations_without_enumerating_coordinates() {
+        for width in [64, 256, 1_000_003] {
+            let mut cycles = vec![
+                GuardedTranslation {
+                    dependency: BitDependency {
+                        array: Some(3),
+                        packed: Some(0),
+                    },
+                    condition: PathCondition::default(),
+                    feasible: vec![FeasiblePosition {
+                        array: Some((0, width - 3)),
+                        packed: Some((0, 1)),
+                    }],
+                },
+                GuardedTranslation {
+                    dependency: BitDependency {
+                        array: Some(3 - width),
+                        packed: Some(0),
+                    },
+                    condition: PathCondition::default(),
+                    feasible: vec![FeasiblePosition {
+                        array: Some((width - 3, width)),
+                        packed: Some((0, 1)),
+                    }],
+                },
+            ];
+            let mut budget = SearchBudget {
+                remaining: 100,
+                exhausted: false,
+            };
+            assert!(closed_translation_domain(&cycles, &mut budget));
+            assert!(!budget.exhausted);
+
+            let branch = BranchId::new(1, 0, 2);
+            cycles[0].condition = PathCondition::default().with_choice(branch, 0);
+            cycles[1].condition = PathCondition::default().with_choice(branch, 1);
+            assert!(!closed_translation_domain(
+                &cycles,
+                &mut SearchBudget::new()
+            ));
+            cycles[0].condition = PathCondition::default();
+            cycles[1].condition = PathCondition::default();
+
+            // A missing source point breaks the invariant: its incoming
+            // image is not a successor state. A bounding box is insufficient.
+            cycles[0].feasible[0].array = Some((0, width - 4));
+            assert!(!closed_translation_domain(
+                &cycles,
+                &mut SearchBudget::new()
+            ));
+            cycles[0].feasible[0].array = None;
+            assert!(!closed_translation_domain(
+                &cycles,
+                &mut SearchBudget::new()
+            ));
+        }
+    }
+
+    #[test]
+    fn coalescing_return_domains_preserves_gaps_and_corners() {
+        let mut seed = 37u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((seed >> 32) % 8) as isize
+        };
+        for count in 1..128 {
+            let mut domains = Vec::new();
+            for index in 0..count {
+                let array = next();
+                let packed = next();
+                domains.push(FeasiblePosition {
+                    array: (index % 13 != 12).then_some((array, array + 1 + next() % 3)),
+                    packed: (index % 17 != 16).then_some((packed, packed + 1 + next() % 3)),
+                });
+            }
+            let original = domains.clone();
+            coalesce_feasible_positions(&mut domains);
+            for array in -1..12 {
+                for packed in -1..12 {
+                    let contains = |domains: &[FeasiblePosition]| {
+                        domains.iter().any(|domain| {
+                            domain
+                                .array
+                                .is_none_or(|(lo, hi)| lo <= array && array < hi)
+                                && domain
+                                    .packed
+                                    .is_none_or(|(lo, hi)| lo <= packed && packed < hi)
+                        })
+                    };
+                    assert_eq!(
+                        contains(&domains),
+                        contains(&original),
+                        "count={count}, point=({array}, {packed})"
+                    );
+                }
+            }
+        }
+    }
 
     // Independent reference: enumerate coordinates in the small guards and
     // detect an ordinary graph cycle for each complete branch valuation.

@@ -49,7 +49,7 @@ use region::{
     ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
 };
-use ssa::{BranchId, DependencyDagNode, PathCondition};
+use ssa::{BranchId, DependencyDagNode, PathCondition, PositionDomain};
 #[cfg(test)]
 pub(crate) use ssa::{
     import_binding_visits, reset_import_binding_visits, reset_source_walk_visits,
@@ -70,11 +70,27 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, Component, Declaration, Expression, Factor, InstDeclaration, Ir, Module, Op,
-    Signature, Statement, SystemFunctionKind, VarSelect, Variable,
+    ArrayLiteralItem, AssignDestination, Component, Comptime, Declaration, Expression, Factor,
+    InstDeclaration, Ir, Module, Op, Shape, Signature, Statement, SystemFunctionKind, VarSelect,
+    Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
+
+#[cfg(test)]
+thread_local! {
+    static ANALYSIS_SIZE: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_analysis_size() {
+    ANALYSIS_SIZE.set((0, 0, 0));
+}
+
+#[cfg(test)]
+pub(crate) fn analysis_size() -> (usize, usize, usize) {
+    ANALYSIS_SIZE.get()
+}
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
     check_inner(ir).0
@@ -235,6 +251,15 @@ fn build_bit_partition(
     let endpoints = HashMap::default();
     let ranges = split_array_spans(accesses, &endpoints);
 
+    #[cfg(test)]
+    {
+        let (atoms, nodes, edges) = ANALYSIS_SIZE.get();
+        ANALYSIS_SIZE.set((
+            atoms + ranges.values().map(Vec::len).sum::<usize>(),
+            nodes,
+            edges,
+        ));
+    }
     BitPartition::new(ranges)
 }
 
@@ -289,7 +314,13 @@ fn collect_instance_summary_spans(
             if let Some((parent, array, packed)) =
                 summary_parent_access(inst, child, node.region, direction, ctx)
             {
-                accesses.entry((parent, array)).or_default().push(packed);
+                if node.kind == SummaryNodeKind::Input {
+                    if let Some(variable) = ctx.variables.get(&parent) {
+                        add_whole_type_access(accesses, parent, &variable.r#type);
+                    }
+                } else {
+                    accesses.entry((parent, array)).or_default().push(packed);
+                }
             }
         }
     }
@@ -482,8 +513,17 @@ fn collect_factor_spans(
 ) {
     match factor {
         Factor::Variable(id, index, select, _) => {
-            for (idx, packed) in var_reads(*id, index, select, ctx) {
-                out.entry((*id, idx)).or_default().push(packed);
+            // Reads project their requested coordinates in SSA. Only writes
+            // need to split storage: crossing read views must not construct
+            // the Cartesian arrangement of all their endpoints.
+            if let Some(variable) = ctx.variables.get(id) {
+                add_whole_type_access(out, *id, &variable.r#type);
+            }
+            for expression in index.0.iter().chain(select.0.iter()) {
+                collect_expr_spans(expression, out, ctx);
+            }
+            if let Some((_, expression)) = &select.1 {
+                collect_expr_spans(expression, out, ctx);
             }
         }
         Factor::FunctionCall(call) => {
@@ -687,6 +727,15 @@ fn build_module_graph_with_trace(
     }
 
     let (graph, complete) = builder.finish();
+    #[cfg(test)]
+    {
+        let (atoms, nodes, edges) = ANALYSIS_SIZE.get();
+        ANALYSIS_SIZE.set((
+            atoms,
+            nodes + graph.node_count(),
+            edges + graph.edge_count(),
+        ));
+    }
     Ok((graph, bit_part, complete))
 }
 
@@ -843,15 +892,9 @@ impl<'a> ModuleGraphBuilder<'a> {
         }
 
         let summary_branches = remap_module_summary_branches(summary, inst);
-        let positioned_sources = summary
-            .edges
-            .iter()
-            .filter(|edge| edge.kind.has_position())
-            .map(|edge| edge.source)
-            .collect::<HashSet<_>>();
         let mut mapped_nodes = Vec::with_capacity(summary.nodes.len());
         let mut endpoint_mappings = Vec::with_capacity(summary.nodes.len());
-        for (index, node) in summary.nodes.iter().enumerate() {
+        for node in &summary.nodes {
             let (mapping, endpoint_mapping) = match node.kind {
                 SummaryNodeKind::Input => {
                     let mapping = map_instance_source_region(
@@ -860,7 +903,6 @@ impl<'a> ModuleGraphBuilder<'a> {
                         inst,
                         child,
                         node.region,
-                        positioned_sources.contains(&index),
                         input_reads.get(&node.region.id).map(Vec::as_slice),
                         bit_part,
                         ctx,
@@ -947,7 +989,6 @@ impl<'a> ModuleGraphBuilder<'a> {
                                 inst,
                                 child,
                                 source_region,
-                                true,
                                 input_reads
                                     .get(&summary.nodes[edge.source].region.id)
                                     .map(Vec::as_slice),
@@ -1165,7 +1206,6 @@ fn map_instance_source_region(
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
-    preserve_position: bool,
     allowed: Option<&[procedure::RegionSource]>,
     bit_part: &BitPartition,
     ctx: &mut Context,
@@ -1181,18 +1221,43 @@ fn map_instance_source_region(
         bit_part,
         ctx,
     );
-    if !preserve_position
-        || parent_sources
-            .nodes
-            .iter()
-            .any(|source| source.offset.is_some())
-    {
+    // Direct storage nodes are safe only when the requested child region
+    // contains the entire mapped parent atom. Otherwise a whole-value child
+    // dependency would erase the actual's slice bounds before applying them.
+    if parent_sources.nodes.iter().all(|source| {
+        let Some((array_offset, packed_offset)) = source.offset else {
+            return false;
+        };
+        let Some(array_start) = translate_position(region.array.start, array_offset) else {
+            return false;
+        };
+        let Some(packed_start) = translate_position(region.packed.start, packed_offset) else {
+            return false;
+        };
+        let array = ArraySpan {
+            start: array_start,
+            length: region.array.length,
+        };
+        let Some(packed) = PackedSpan::new(packed_start, region.packed.length) else {
+            return false;
+        };
+        let parent_packed = bit_part.ranges_of((source.key.0, source.key.1))[source.key.2];
+        array.intersection(source.key.1) == Some(source.key.1)
+            && packed.intersection(parent_packed) == Some(parent_packed)
+    }) {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     }
-    let Some(input) = inst.inputs.iter().find(|input| input.id == region.id) else {
-        return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
-    };
-    let Some(_) = input.single() else {
+    if parent_sources
+        .nodes
+        .iter()
+        .all(|source| source.offset.is_some())
+    {
+        // Preserve exact connection metadata rather than reinterpreting an IR
+        // expression that may not represent an unpacked range as one value.
+        let sources = resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
+        return actuals.project_mapping(graph, region, &sources, budget);
+    }
+    let Some(_) = inst.inputs.iter().find(|input| input.id == region.id) else {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
     let Some(variable) = child.variables.get(&region.id) else {
@@ -1207,10 +1272,47 @@ fn map_instance_source_region(
 #[derive(Default)]
 struct InstanceActuals {
     roots: HashMap<SummaryRegion, NodeIndex>,
+    projections: HashMap<SummaryRegion, NodeIndex>,
     exhausted: bool,
 }
 
 impl InstanceActuals {
+    fn project_mapping(
+        &mut self,
+        graph: &mut DependencyGraph,
+        region: SummaryRegion,
+        sources: &ResolvedInstanceRegionMapping,
+        budget: &mut ExpansionBudget,
+    ) -> ResolvedInstanceRegionMapping {
+        let root = if let Some(&root) = self.projections.get(&region) {
+            Some(root)
+        } else if budget.reserve_work(sources.nodes.len().saturating_add(1)) {
+            let root = graph.add_node(GraphNode {
+                region,
+                domains: vec![PositionDomain {
+                    array_start: region.array.start,
+                    array_length: region.array.length,
+                    packed_start: region.packed.start,
+                    packed_length: region.packed.length,
+                }],
+                diagnostic: None,
+            });
+            self.projections.insert(region, root);
+            add_resolved_dependency_edges(
+                graph,
+                sources,
+                &ResolvedInstanceRegionMapping::from_root(Some(root)),
+                BitDependency::identity(),
+                &PathCondition::default(),
+            );
+            Some(root)
+        } else {
+            self.exhausted = true;
+            None
+        };
+        ResolvedInstanceRegionMapping::from_root(root)
+    }
+
     fn defer(
         &mut self,
         graph: &mut DependencyGraph,
@@ -1234,16 +1336,7 @@ impl InstanceActuals {
             self.exhausted = true;
             None
         };
-        ResolvedInstanceRegionMapping {
-            nodes: root
-                .into_iter()
-                .map(|node| ResolvedMappedNode {
-                    node,
-                    offset: Some((0, 0)),
-                    condition: PathCondition::default(),
-                })
-                .collect(),
-        }
+        ResolvedInstanceRegionMapping::from_root(root)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1264,24 +1357,44 @@ impl InstanceActuals {
         regions.sort_unstable();
         for regions in regions.chunk_by(|left, right| left.id == right.id) {
             let first = regions[0];
-            let expression = inst
+            let input = inst
                 .inputs
                 .iter()
                 .find(|input| input.id == first.id)
-                .and_then(|input| input.single())
-                .expect("deferred inputs have one actual");
-            let width = child.variables[&first.id]
+                .expect("deferred regions have an input actual");
+            let variable = &child.variables[&first.id];
+            let width = variable
                 .total_width()
                 .expect("deferred inputs have known widths");
+            let literal;
+            let flat_type;
+            let (expression, context_type) = if let Some(expression) = input.single() {
+                (expression, &variable.r#type)
+            } else {
+                // IR expands an unpacked slice into one expression per scalar
+                // array element. Restore that positional view for projection;
+                // the flattened coordinates are also used by SummaryRegion.
+                let mut r#type = variable.r#type.clone();
+                r#type.array = Shape::new(vec![Some(input.exprs.len())]);
+                literal = Expression::ArrayLiteral(
+                    input
+                        .exprs
+                        .iter()
+                        .cloned()
+                        .map(|expression| ArrayLiteralItem::Value(Box::new(expression), None))
+                        .collect(),
+                    Box::new(Comptime {
+                        r#type: r#type.clone(),
+                        ..Default::default()
+                    }),
+                );
+                flat_type = r#type;
+                (&literal, &flat_type)
+            };
             let mut analysis =
                 procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
-            let dag = analysis.eval_regions(
-                expression,
-                regions,
-                width,
-                &child.variables[&first.id].r#type,
-                budget.remaining(),
-            );
+            let dag =
+                analysis.eval_regions(expression, regions, width, context_type, budget.remaining());
             complete &= analysis.is_complete();
             analysis.restore(procedure_context);
             if !budget.reserve_dag(&dag) {
@@ -1327,6 +1440,21 @@ struct MappedNode {
 
 struct ResolvedInstanceRegionMapping {
     nodes: Vec<ResolvedMappedNode>,
+}
+
+impl ResolvedInstanceRegionMapping {
+    fn from_root(root: Option<NodeIndex>) -> Self {
+        Self {
+            nodes: root
+                .into_iter()
+                .map(|node| ResolvedMappedNode {
+                    node,
+                    offset: Some((0, 0)),
+                    condition: PathCondition::default(),
+                })
+                .collect(),
+        }
+    }
 }
 
 struct ResolvedMappedNode {

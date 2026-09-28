@@ -18,6 +18,7 @@ mod comb_loop_interface_tests;
 mod comb_loop_module_tests;
 mod comb_loop_positional_tests;
 mod comb_loop_procedural_tests;
+mod comb_loop_read_region_tests;
 mod comb_loop_replication_tests;
 mod comb_loop_retained_state_tests;
 mod comb_loop_sparse_tests;
