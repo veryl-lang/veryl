@@ -16379,6 +16379,142 @@ fn always_comb_preserves_statement_order() {
     }
 }
 
+// A function argument is an assignment-like context: the actual is evaluated
+// at the formal's width, so a signed operand is sign-extended before the
+// operator.
+#[test]
+fn signed_function_argument_takes_formal_width() {
+    let code = r#"
+    package pk {
+        function pf (v: input logic<16>) -> logic<16> {
+            return v;
+        }
+    }
+    module Top (
+        clk: input  clock,
+        a  : input  logic<8>,
+        b  : input  logic<4>,
+        s  : input  logic,
+        w  : input  logic<40>,
+        y0 : output logic<16>,
+        y1 : output logic<16>,
+        y2 : output logic<16>,
+        y3 : output logic<16>,
+        y4 : output logic<16>,
+        y5 : output logic<16>,
+        y6 : output logic<16>,
+        y7 : output logic<16>,
+        z0 : output logic<100>,
+        z1 : output logic<100>,
+    ) {
+        function f (v: input logic<16>) -> logic<16> {
+            return v;
+        }
+        function g (v: input logic<8>, u: input logic<4>) -> logic<16> {
+            return f($signed(v) * $signed(u));
+        }
+        function h (v: input logic<100>) -> logic<100> {
+            return v;
+        }
+        assign y0 = f($signed(a) * $signed(b));
+        assign y1 = f($signed(a) + $signed(b));
+        assign y2 = f(~a);
+        assign y3 = f(if s ? $signed(a) : $signed(b));
+        assign y4 = pk::pf(v: $signed(a) * $signed(b));
+        assign y5 = g(a, b);
+        assign y6 = f($signed(a) >>> 2);
+        always_ff {
+            y7 = f($signed(b) + $signed(b));
+        }
+        assign z0 = h($signed(w) * $signed(w));
+        assign z1 = h($signed(w) + $signed(w));
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let ones100 = (BigUint::from(1u32) << 100u32) - BigUint::from(1u32);
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0xf0, 8, false));
+        sim.set("b", Value::new(0xd, 4, false));
+        sim.set("s", Value::new(1, 1, false));
+        sim.set("w", Value::new((1u64 << 40) - 1, 40, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let clk = sim.get_clock("clk").unwrap();
+        sim.step(&clk);
+        for (name, exp) in [
+            ("y0", 0x0030),
+            ("y1", 0xffed),
+            ("y2", 0xff0f),
+            ("y3", 0xfff0),
+            ("y4", 0x0030),
+            ("y5", 0x0030),
+            ("y6", 0xfffc),
+            ("y7", 0xfffa),
+        ] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(exp, 16, false),
+                "{name} config={config:?}"
+            );
+        }
+        assert_eq!(
+            sim.get("z0").unwrap(),
+            Value::new(1, 100, false),
+            "z0 config={config:?}"
+        );
+        assert_eq!(
+            sim.get("z1").unwrap(),
+            Value::new_biguint(ones100.clone() - BigUint::from(1u32), 100, false),
+            "z1 config={config:?}"
+        );
+    }
+}
+
+// `$signed` of a sized literal sign-extends in a wider context, whether the
+// analyzer folds the expression or the interpreter evaluates it at run time.
+#[test]
+fn signed_cast_of_literal_sign_extends() {
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<16>,
+        y1: output logic<16>,
+        y2: output logic<16>,
+        y3: output logic<16>,
+    ) {
+        function f (v: input logic<16>) -> logic<16> {
+            return v;
+        }
+        const K: logic<16> = $signed(8'hf0) + $signed(4'hd);
+        assign y0 = K;
+        assign y1 = $signed(8'hf0);
+        assign y2 = f($signed(8'hf0) * $signed(4'hd));
+        assign y3 = $signed(a) * $signed(4'hd);
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0xf0, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (name, exp) in [
+            ("y0", 0xffed),
+            ("y1", 0xfff0),
+            ("y2", 0x0030),
+            ("y3", 0x0030),
+        ] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(exp, 16, false),
+                "{name} config={config:?}"
+            );
+        }
+    }
+}
+
 // Regression (#2506): variable reassignment in an inlined function
 // must not be flagged as a combinational loop.
 #[test]
