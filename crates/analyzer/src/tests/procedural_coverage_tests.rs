@@ -306,3 +306,99 @@ fn output_formals_do_not_retain_a_previous_calls_value() {
         "{errors:#?}"
     );
 }
+
+#[test]
+fn runtime_loop_retention_survives_branches_and_function_summaries() {
+    for body in [
+        "held = data;",
+        "if en { held = data; }",
+        "if en { break; } held = data;",
+        "for _j in 0..m { held = data; }",
+    ] {
+        for in_function in [false, true] {
+            let statements = format!("for _i in 0..n {{ {body} }}");
+            let (function, invocation) = if in_function {
+                (
+                    format!("function update() {{ {statements} }}"),
+                    "update();".into(),
+                )
+            } else {
+                (String::new(), statements)
+            };
+            let code = format!(
+                r#"
+                module Top(n: input u32, m: input u32, en: input logic,
+                           data: input logic, o: output logic) {{
+                    var held: logic;
+                    {function}
+                    always_comb {{ {invocation} o = held; }}
+                }}
+            "#
+            );
+            assert!(comb_loop_analysis_is_complete(&code), "{code}");
+            let errors = analyze(&code);
+            assert_eq!(errors.len(), 1, "{code}: {errors:#?}");
+            assert!(
+                matches!(&errors[0], AnalyzerError::UncoveredBranch { identifier, .. }
+                if identifier == "held"),
+                "{code}: {errors:#?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_conditional_captured_write_keeps_the_callers_feedback() {
+    let code = r#"
+        module Top(en: input logic, o: output logic) {
+            var value: logic;
+            function update() { if en { value = 0; } }
+            always_comb {
+                value = !o;
+                update();
+                o = value;
+            }
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::UncoveredBranch { .. })),
+        "{errors:#?}"
+    );
+}
+
+#[test]
+fn runtime_loop_bound_feedback_crosses_a_module_boundary() {
+    let code = r#"
+        module Hold(n: input logic<2>, o: output logic) {
+            var held: logic;
+            always_comb {
+                for i in 0..n { held = i[0]; }
+                o = held;
+            }
+        }
+        module Top(o: output logic) {
+            var n: logic<2>;
+            assign n = {1'b1, o};
+            inst u: Hold(n: n, o: o);
+        }
+    "#;
+    // n is 2 or 3. The final held bit is the inverse of o, so this is
+    // real feedback through the loop bound, not the n=0 retention path.
+    assert!(comb_loop_analysis_is_complete(code));
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+}

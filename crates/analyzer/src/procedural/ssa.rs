@@ -59,6 +59,8 @@ enum Version<K> {
     Definition {
         sources: Vec<(VersionId, PositionRelation)>,
         condition: PathCondition,
+        // Structural joins preserve entry state; value computations read it.
+        reads_entry: bool,
     },
     Phi(Vec<VersionId>),
     Guarded {
@@ -74,6 +76,7 @@ enum Version<K> {
     Projected {
         source: VersionId,
         domain: PositionDomain,
+        reads_entry: bool,
     },
     Replicated {
         source: VersionId,
@@ -436,6 +439,9 @@ impl Replication {
 #[derive(Clone)]
 pub(crate) enum DependencyDagNode<K> {
     External(K),
+    /// A function's unchanged entry value. Importing it preserves the caller's
+    /// value; only an actual read turns a live-on-entry value into a dependency.
+    Retained(K),
     Internal,
     /// Zero or more positive translations along one axis within this node's domain.
     /// Kept as an operation in the DAG; only the circuit graph adds a self edge.
@@ -651,13 +657,34 @@ where
         sources: Vec<(VersionId, PositionRelation)>,
         condition: &PathCondition,
     ) -> VersionId {
-        let mut sources = sources;
+        self.related_value(sources, condition, true)
+    }
+
+    fn related_alias(&mut self, sources: Vec<(VersionId, PositionRelation)>) -> VersionId {
+        self.related_alias_guarded(sources, &PathCondition::default())
+    }
+
+    pub(crate) fn related_alias_guarded(
+        &mut self,
+        sources: Vec<(VersionId, PositionRelation)>,
+        condition: &PathCondition,
+    ) -> VersionId {
+        self.related_value(sources, condition, false)
+    }
+
+    fn related_value(
+        &mut self,
+        mut sources: Vec<(VersionId, PositionRelation)>,
+        condition: &PathCondition,
+        reads_entry: bool,
+    ) -> VersionId {
         sources.sort_unstable();
         sources.dedup();
         let version = self.versions.len();
         self.versions.push(Version::Definition {
             sources,
             condition: condition.clone(),
+            reads_entry,
         });
         version
     }
@@ -681,7 +708,21 @@ where
 
     pub(crate) fn projected(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
         let version = self.versions.len();
-        self.versions.push(Version::Projected { source, domain });
+        self.versions.push(Version::Projected {
+            source,
+            domain,
+            reads_entry: true,
+        });
+        version
+    }
+
+    fn projected_alias(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
+        let version = self.versions.len();
+        self.versions.push(Version::Projected {
+            source,
+            domain,
+            reads_entry: false,
+        });
         version
     }
 
@@ -692,6 +733,7 @@ where
             Version::Projected {
                 source,
                 domain: projected,
+                ..
             } if *projected == domain => *source,
             _ => version,
         }
@@ -1017,6 +1059,7 @@ where
             .expect("unlimited dependency export")
     }
 
+    #[cfg(test)]
     pub(crate) fn try_dependency_dag(
         &self,
         roots: &[VersionId],
@@ -1033,8 +1076,37 @@ where
         &self,
         roots: &[VersionId],
         allowed: impl Fn(&K) -> bool,
+        work: usize,
+        import_work: usize,
+    ) -> Option<DependencyDag<K>>
+    where
+        K: Ord,
+    {
+        self.export_dag(roots, allowed, work, import_work, false)
+    }
+
+    /// A reusable transfer must preserve both entry reads and unchanged
+    /// entries. The caller decides whether a retained entry is subsequently
+    /// read, or merely carried to the caller's own exit.
+    pub(crate) fn try_transfer_dag(
+        &self,
+        roots: &[VersionId],
+        allowed: impl Fn(&K) -> bool,
+        work: usize,
+    ) -> Option<DependencyDag<K>>
+    where
+        K: Ord,
+    {
+        self.export_dag(roots, allowed, work, usize::MAX, true)
+    }
+
+    fn export_dag(
+        &self,
+        roots: &[VersionId],
+        allowed: impl Fn(&K) -> bool,
         mut work: usize,
         mut import_work: usize,
+        retain_entries: bool,
     ) -> Option<DependencyDag<K>>
     where
         K: Ord,
@@ -1056,9 +1128,13 @@ where
             };
             match &self.versions[version] {
                 Version::Entry(_) => {}
-                Version::Definition { sources, .. } => {
+                Version::Definition {
+                    sources,
+                    reads_entry,
+                    ..
+                } => {
                     for (source, _) in sources {
-                        enqueue((*source, true));
+                        enqueue((*source, include_entry || *reads_entry));
                     }
                 }
                 Version::Phi(inputs) => {
@@ -1077,13 +1153,19 @@ where
                             work = work.checked_sub(sources.len())?;
                             for (source, _) in sources {
                                 enqueue((*source, true));
+                                enqueue((*source, false));
                             }
                         }
                     }
                 }
-                Version::Projected { source, .. } | Version::Replicated { source, .. } => {
-                    enqueue((*source, true))
+                Version::Projected {
+                    source,
+                    reads_entry,
+                    ..
+                } => {
+                    enqueue((*source, include_entry || *reads_entry));
                 }
+                Version::Replicated { source, .. } => enqueue((*source, true)),
             }
         }
 
@@ -1107,9 +1189,21 @@ where
             });
             let node = match &self.versions[version] {
                 Version::Entry(key) => {
-                    (include_entry && allowed(key)).then(|| builder.external(*key))
+                    if !allowed(key) {
+                        None
+                    } else if include_entry {
+                        Some(builder.external(*key))
+                    } else if retain_entries {
+                        Some(builder.retained(*key))
+                    } else {
+                        None
+                    }
                 }
-                Version::Definition { sources, condition } => {
+                Version::Definition {
+                    sources,
+                    condition,
+                    reads_entry,
+                } => {
                     work = work.checked_sub(
                         sources
                             .len()
@@ -1118,7 +1212,7 @@ where
                     let inputs = sources
                         .iter()
                         .filter_map(|(source, relation)| {
-                            mapped[&(*source, true)]
+                            mapped[&(*source, include_entry || *reads_entry)]
                                 .map(|source| (source, *relation, condition.clone()))
                         })
                         .collect();
@@ -1161,6 +1255,7 @@ where
                         bindings,
                         branches,
                         &mapped,
+                        include_entry,
                         &mut builder,
                         &mut remaining,
                     )?;
@@ -1169,8 +1264,12 @@ where
                     import_work -= spent;
                     node
                 }
-                Version::Projected { source, domain } => {
-                    let inputs = mapped[&(*source, true)]
+                Version::Projected {
+                    source,
+                    domain,
+                    reads_entry,
+                } => {
+                    let inputs = mapped[&(*source, include_entry || *reads_entry)]
                         .map(|source| {
                             (
                                 source,
@@ -1293,6 +1392,7 @@ where
                 Version::Definition {
                     sources,
                     condition: definition_condition,
+                    reads_entry,
                 } => {
                     reserve_guard_work(work, [&condition, definition_condition])?;
                     let Some(condition) = condition.conjoin_if_compatible(definition_condition)
@@ -1301,7 +1401,11 @@ where
                     };
                     for (input, offset) in sources {
                         enqueue(
-                            (*input, true, relation.compose(*offset)),
+                            (
+                                *input,
+                                include_entry || *reads_entry,
+                                relation.compose(*offset),
+                            ),
                             condition.clone(),
                             work,
                         )?;
@@ -1327,8 +1431,12 @@ where
                     bindings,
                     branches,
                 } => {
-                    for (key, imported_relation, imported_condition) in
-                        dependency_dag_external_sources(graph, *root, initial_relation, work)?
+                    for DagSource {
+                        key,
+                        reads_entry,
+                        relation: imported_relation,
+                        condition: imported_condition,
+                    } in dependency_dag_external_sources(graph, *root, initial_relation, work)?
                     {
                         reserve_guard_work(work, [&imported_condition])?;
                         let imported_condition = imported_condition.remapped(branches);
@@ -1341,7 +1449,7 @@ where
                             enqueue(
                                 (
                                     *source,
-                                    true,
+                                    include_entry || reads_entry,
                                     relation
                                         .compose(*binding_relation)
                                         .compose(imported_relation),
@@ -1352,8 +1460,16 @@ where
                         }
                     }
                 }
-                Version::Projected { source, .. } => {
-                    enqueue((*source, true, relation), condition, work)?;
+                Version::Projected {
+                    source,
+                    reads_entry,
+                    ..
+                } => {
+                    enqueue(
+                        (*source, include_entry || *reads_entry, relation),
+                        condition,
+                        work,
+                    )?;
                 }
                 Version::Replicated {
                     source,
@@ -1376,12 +1492,20 @@ where
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct DagSource<K> {
+    key: K,
+    reads_entry: bool,
+    relation: PositionRelation,
+    condition: PathCondition,
+}
+
 fn dependency_dag_external_sources<K>(
     graph: &DependencyDag<K>,
     root: Option<usize>,
     initial_relation: PositionRelation,
     work: &mut usize,
-) -> Option<Vec<(K, PositionRelation, PathCondition)>>
+) -> Option<Vec<DagSource<K>>>
 where
     K: Copy + Eq + Hash,
 {
@@ -1397,14 +1521,22 @@ where
     reached.insert(start, PathCondition::default());
     let mut queue = VecDeque::from([start]);
     let mut queued = [start].into_iter().collect::<HashSet<_>>();
-    let mut sources: HashMap<(K, PositionRelation), PathCondition> = HashMap::default();
+    let mut sources = HashMap::default();
     while let Some(state @ (node, relation)) = queue.pop_front() {
         #[cfg(test)]
         SOURCE_WALK_VISITS.set(SOURCE_WALK_VISITS.get() + 1);
         queued.remove(&state);
         let condition = reached[&state].clone();
-        if let DependencyDagNode::External(key) = graph.nodes[node] {
-            merge_source(&mut sources, (key, relation), condition, work)?;
+        if let DependencyDagNode::External(key) | DependencyDagNode::Retained(key) =
+            graph.nodes[node]
+        {
+            let reads_entry = matches!(graph.nodes[node], DependencyDagNode::External(_));
+            merge_source(
+                &mut sources,
+                ((key, reads_entry), relation),
+                condition,
+                work,
+            )?;
             continue;
         }
         let relation = if let DependencyDagNode::Replicated { replication } = graph.nodes[node] {
@@ -1439,7 +1571,12 @@ where
     Some(
         sources
             .into_iter()
-            .map(|((key, relation), condition)| (key, relation, condition))
+            .map(|(((key, reads_entry), relation), condition)| DagSource {
+                key,
+                reads_entry,
+                relation,
+                condition,
+            })
             .collect(),
     )
 }
@@ -1625,9 +1762,9 @@ mod tests {
                 )
                 .expect("unguarded source walks need no guard budget")
                 .into_iter()
-                .map(|(key, _, _)| key)
+                .map(|source| (source.key, source.reads_entry))
                 .collect::<HashSet<_>>();
-                assert_eq!(sources, (0..=index).collect());
+                assert_eq!(sources, (0..=index).map(|key| (key, true)).collect());
             }
         }
     }
@@ -1703,7 +1840,15 @@ mod tests {
                 &mut 0,
             )
             .unwrap();
-            assert_eq!(sources, [("source", expected, PathCondition::default())]);
+            assert_eq!(
+                sources,
+                [DagSource {
+                    key: "source",
+                    reads_entry: true,
+                    relation: expected,
+                    condition: PathCondition::default()
+                }]
+            );
         }
     }
 
@@ -2081,6 +2226,87 @@ mod tests {
                     stride == 1 || limit == 256
                 );
             }
+        }
+    }
+
+    #[test]
+    fn imported_retention_preserves_previous_values_and_later_reads() {
+        let mut callee = SsaStore::default();
+        let data = callee.read("data");
+        let value = callee.definition(vec![data]);
+        callee.weak_bind("held", value);
+        let held = callee.read("held");
+        let mut graph = Rc::new(
+            callee
+                .try_transfer_dag(&[held], |_| true, usize::MAX)
+                .unwrap(),
+        );
+        for _depth in 0..3 {
+            for seeded in [false, true] {
+                let mut caller = SsaStore::default();
+                let held = if seeded {
+                    let previous = caller.read("previous");
+                    caller.definition(vec![previous])
+                } else {
+                    caller.read("held")
+                };
+                let data = caller.read("data");
+                let output = caller.imported(
+                    graph.clone(),
+                    graph.roots[0],
+                    Rc::new(HashMap::from_iter([
+                        ("held", vec![(held, PositionRelation::default())]),
+                        ("data", vec![(data, PositionRelation::default())]),
+                    ])),
+                    Rc::default(),
+                );
+                let read = caller.definition(vec![output]);
+                let mut expected = HashSet::from_iter(["data"]);
+                if seeded {
+                    expected.insert("previous");
+                }
+                assert_eq!(caller.root_sources(output), expected);
+                let exported = caller.dependency_dag(&[output, read], |_| true);
+                for (root, observed) in [false, true].into_iter().enumerate() {
+                    if observed && !seeded {
+                        expected.insert("held");
+                    }
+                    let mut work = usize::MAX;
+                    let sources = dependency_dag_external_sources(
+                        &exported,
+                        exported.roots[root],
+                        PositionRelation::default(),
+                        &mut work,
+                    )
+                    .unwrap()
+                    .into_iter()
+                    .map(|source| {
+                        assert!(source.reads_entry);
+                        source.key
+                    })
+                    .collect::<HashSet<_>>();
+                    assert_eq!(sources, expected);
+                }
+            }
+            // A wrapper function must retain the same distinction through
+            // another cached summary, not flatten it into an unconditional read.
+            let mut wrapper = SsaStore::default();
+            let held = wrapper.read("held");
+            let data = wrapper.read("data");
+            let output = wrapper.imported(
+                graph.clone(),
+                graph.roots[0],
+                Rc::new(HashMap::from_iter([
+                    ("held", vec![(held, PositionRelation::default())]),
+                    ("data", vec![(data, PositionRelation::default())]),
+                ])),
+                Rc::default(),
+            );
+            graph = Rc::new(
+                wrapper
+                    .try_transfer_dag(&[output], |_| true, usize::MAX)
+                    .unwrap(),
+            );
         }
     }
 

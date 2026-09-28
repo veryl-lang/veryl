@@ -253,7 +253,6 @@ fn comb_loop_dynamic_write_kill_semantics_an_undominated_value_driving_its_own_d
 }
 
 #[test]
-#[ignore = "coverage is diagnosed; runtime transfer still promotes retention to a value dependency"]
 fn comb_loop_dynamic_loop_zero_trip_retention_is_not_feedback() {
     // Why this case exists: a runtime loop can execute zero times. The value
     // retained on that path infers state, but it is not a same-evaluation read

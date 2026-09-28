@@ -17,6 +17,7 @@ use daggy::petgraph::visit::EdgeRef;
 #[derive(Default)]
 struct TransferNode {
     input: Option<VersionId>,
+    reads_entry: bool,
     domains: Vec<PositionDomain>,
     replication: Option<Replication>,
 }
@@ -106,7 +107,12 @@ impl TransferBuilder {
             // those iterations. Pre-loop input versions keep their guards.
             match &ssa.versions[version] {
                 Version::Entry(_) => unreachable!("entries are handled above"),
-                Version::Definition { sources, .. } => {
+                Version::Definition {
+                    sources,
+                    reads_entry,
+                    ..
+                } => {
+                    self.graph[node].reads_entry = *reads_entry;
                     for &(source, relation) in sources {
                         let source = self.version(ssa, source, start, import_work)?;
                         self.graph.add_edge(source, node, relation);
@@ -124,7 +130,12 @@ impl TransferBuilder {
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
                 }
-                Version::Projected { source, domain } => {
+                Version::Projected {
+                    source,
+                    domain,
+                    reads_entry,
+                } => {
+                    self.graph[node].reads_entry = *reads_entry;
                     self.graph[node].domains.push(*domain);
                     let source = self.version(ssa, *source, start, import_work)?;
                     self.graph
@@ -135,6 +146,7 @@ impl TransferBuilder {
                     domain,
                     replication,
                 } => {
+                    self.graph[node].reads_entry = true;
                     self.graph[node].domains.push(*domain);
                     self.graph[node].replication = Some(*replication);
                     let source = self.version(ssa, *source, start, import_work)?;
@@ -178,6 +190,10 @@ impl TransferBuilder {
                         ITERATION_IMPORT_VISITS.set(ITERATION_IMPORT_VISITS.get() + 1);
                         let copied = self.graph.add_node(TransferNode {
                             input: None,
+                            reads_entry: matches!(
+                                graph.nodes[child],
+                                DependencyDagNode::External(_)
+                            ),
                             domains: graph.domains[child].clone(),
                             replication: match graph.nodes[child] {
                                 DependencyDagNode::Replicated { replication } => Some(replication),
@@ -191,7 +207,9 @@ impl TransferBuilder {
                                 .iter()
                                 .map(|&edge| graph.edges[edge].source),
                         );
-                        if let DependencyDagNode::External(key) = graph.nodes[child] {
+                        if let DependencyDagNode::External(key) | DependencyDagNode::Retained(key) =
+                            graph.nodes[child]
+                        {
                             let sources = bindings.get(&key).map(Vec::as_slice).unwrap_or_default();
                             *import_work = import_work.checked_sub(sources.len())?;
                             for &(source, relation) in sources {
@@ -239,6 +257,7 @@ pub(crate) fn try_close<K: Copy + Eq + Hash>(
             let domains = domain(key).into_iter().collect::<Vec<_>>();
             let root = builder.graph.add_node(TransferNode {
                 input: None,
+                reads_entry: false,
                 domains: domains.clone(),
                 replication: None,
             });
@@ -258,6 +277,7 @@ pub(crate) fn try_close<K: Copy + Eq + Hash>(
         if builder.graph[*input].input.take().is_some() {
             let initial = builder.graph.add_node(TransferNode {
                 input: Some(*entry),
+                reads_entry: false,
                 domains: Vec::new(),
                 replication: None,
             });
@@ -281,8 +301,10 @@ pub(crate) fn try_close<K: Copy + Eq + Hash>(
     for (key, entry, _, root, domains) in outputs {
         let mut output = mapped[root.index()];
         if may_skip {
+            // Taking zero iterations carries the previous value unchanged.
+            // Preserve it for later reads without inventing a read here.
             let entry = project(ssa, entry, &domains);
-            output = ssa.related_definition(vec![
+            output = ssa.related_alias(vec![
                 (output, PositionRelation::default()),
                 (entry, PositionRelation::default()),
             ]);
@@ -306,7 +328,7 @@ fn project<K: Copy + Eq + Hash>(
     }
     let alternatives = domains
         .iter()
-        .map(|&domain| ssa.projected(value, domain))
+        .map(|&domain| ssa.projected_alias(value, domain))
         .collect();
     ssa.phi(alternatives)
 }
@@ -364,16 +386,20 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
     while let Some(component) = queue.pop_front() {
         let nodes = &components[component];
         if cyclic[component] {
+            // Every node is reachable from every other node in the component.
+            // A real read can observe each incoming value on some iteration;
+            // a component of aliases only carries those values unchanged.
+            let reads_entry = nodes.iter().any(|node| graph[*node].reads_entry);
             let sources = incoming[component]
                 .iter()
                 .map(|edge| {
-                    let value = ssa
-                        .related_definition(vec![(mapped[edge.source().index()], *edge.weight())]);
+                    let value =
+                        ssa.related_alias(vec![(mapped[edge.source().index()], *edge.weight())]);
                     let value = project(ssa, value, &graph[edge.target()].domains);
                     (value, stable[component])
                 })
                 .collect();
-            let joined = ssa.related_definition(sources);
+            let joined = ssa.related_value(sources, &PathCondition::default(), reads_entry);
             // Discarding internal path restrictions is conservative; keeping
             // the entry and exit projections still bounds the affected bits.
             for &node in nodes {
@@ -382,11 +408,13 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
         } else {
             let node = nodes[0];
             let value = graph[node].input.unwrap_or_else(|| {
-                ssa.related_definition(
+                ssa.related_value(
                     incoming[component]
                         .iter()
                         .map(|edge| (mapped[edge.source().index()], *edge.weight()))
                         .collect(),
+                    &PathCondition::default(),
+                    graph[node].reads_entry,
                 )
             });
             mapped[node.index()] = if let Some(replication) = graph[node].replication {
@@ -587,6 +615,54 @@ mod tests {
     }
 
     #[test]
+    fn repeated_retention_is_observed_only_by_a_read() {
+        for may_skip in [false, true] {
+            for width in [8, 1 << 30] {
+                let mut ssa = SsaStore::default();
+                let data = ssa.read("data");
+                let checkpoint = ssa.checkpoint();
+                let assigned = ssa.related_definition(vec![(data, PositionRelation::default())]);
+                ssa.weak_bind("held", assigned);
+                let iteration = ssa.capture_and_rollback(checkpoint);
+                ssa.close_repeated_transfer(&iteration, checkpoint, may_skip, |_| {
+                    Some(PositionDomain {
+                        array_start: 0,
+                        array_length: 1,
+                        packed_start: 0,
+                        packed_length: width,
+                    })
+                });
+                let held = ssa.read("held");
+                let observed = ssa.related_definition(vec![(held, PositionRelation::default())]);
+                assert_eq!(ssa.root_sources(held), HashSet::from_iter(["data"]));
+                assert_eq!(
+                    ssa.root_sources(observed),
+                    HashSet::from_iter(["data", "held"])
+                );
+                let dag = ssa.dependency_dag(&[held, observed], |_| true);
+                for (root, expected) in [vec!["data"], vec!["data", "held"]].into_iter().enumerate()
+                {
+                    let mut work = usize::MAX;
+                    let sources = dependency_dag_external_sources(
+                        &dag,
+                        dag.roots[root],
+                        PositionRelation::default(),
+                        &mut work,
+                    )
+                    .unwrap()
+                    .into_iter()
+                    .map(|source| {
+                        assert!(source.reads_entry);
+                        source.key
+                    })
+                    .collect::<HashSet<_>>();
+                    assert_eq!(sources, HashSet::from_iter(expected));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn repeated_transfer_long_chain_stays_structural() {
         const COUNT: usize = 10_000;
         let mut ssa = SsaStore::default();
@@ -700,7 +776,14 @@ mod tests {
                     packed_length: WIDTH,
                 })
             });
-            let roots = (0..KEYS).map(|key| ssa.read(key)).collect::<Vec<_>>();
+            // Observe the exit values: a zero-trip path contributes the
+            // entry value to a subsequent read, but is not itself a read.
+            let roots = (0..KEYS)
+                .map(|key| {
+                    let value = ssa.read(key);
+                    ssa.related_definition(vec![(value, PositionRelation::default())])
+                })
+                .collect::<Vec<_>>();
             let dag = ssa.dependency_dag(&roots, |key| *key < KEYS);
             let mut outgoing = vec![Vec::new(); dag.nodes.len()];
             for edge in &dag.edges {

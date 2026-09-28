@@ -2,7 +2,7 @@
 
 use super::*;
 
-type MappedBindings<K> = Rc<Vec<(K, Vec<(usize, PositionRelation)>)>>;
+type MappedBindings<K> = Rc<Vec<((K, bool), Vec<(usize, PositionRelation)>)>>;
 
 #[derive(PartialEq, Eq, Hash)]
 struct InvocationKey<K> {
@@ -18,7 +18,7 @@ struct Invocation<K> {
 
 pub(crate) struct Imports<K> {
     incoming: HashMap<usize, Vec<Vec<usize>>>,
-    identities: HashMap<(usize, usize, usize), usize>,
+    identities: HashMap<(usize, usize, usize, bool), usize>,
     equivalent: HashMap<InvocationKey<K>, usize>,
     invocations: Vec<Invocation<K>>,
 }
@@ -43,6 +43,7 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
         bindings: &Rc<HashMap<K, Vec<(VersionId, PositionRelation)>>>,
         branches: &Rc<HashMap<BranchId, BranchId>>,
         parent: &HashMap<(VersionId, bool), Option<usize>>,
+        include_entry: bool,
         builder: &mut Builder<K>,
         work: &mut usize,
     ) -> Option<Option<usize>> {
@@ -54,6 +55,7 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
             graph_id,
             Rc::as_ptr(bindings) as usize,
             Rc::as_ptr(branches) as usize,
+            include_entry,
         );
         let invocation = if let Some(&invocation) = self.identities.get(&identity) {
             invocation
@@ -64,15 +66,18 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
             let mut mapped_bindings = Vec::with_capacity(bindings.len());
             for (&key, sources) in bindings.iter() {
                 *work = work.checked_sub(sources.len())?;
-                let mut sources = sources
-                    .iter()
-                    .filter_map(|(source, relation)| {
-                        parent[&(*source, true)].map(|source| (source, *relation))
-                    })
-                    .collect::<Vec<_>>();
-                sources.sort_unstable();
-                sources.dedup();
-                mapped_bindings.push((key, sources));
+                for reads_entry in [false, true] {
+                    let mut sources = sources
+                        .iter()
+                        .filter_map(|(source, relation)| {
+                            parent[&(*source, include_entry || reads_entry)]
+                                .map(|source| (source, *relation))
+                        })
+                        .collect::<Vec<_>>();
+                    sources.sort_unstable();
+                    sources.dedup();
+                    mapped_bindings.push(((key, reads_entry), sources));
+                }
             }
             mapped_bindings.sort_unstable_by_key(|(key, _)| *key);
             let mut mapped_branches = branches
@@ -144,10 +149,15 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
                     )
                 })
                 .collect::<Vec<_>>();
-            if let DependencyDagNode::External(key) = &graph.nodes[child]
-                && let Ok(index) = invocation
-                    .bindings
-                    .binary_search_by_key(key, |(key, _)| *key)
+            if let DependencyDagNode::External(key) | DependencyDagNode::Retained(key) =
+                &graph.nodes[child]
+                && let Ok(index) = invocation.bindings.binary_search_by_key(
+                    &(
+                        *key,
+                        matches!(graph.nodes[child], DependencyDagNode::External(_)),
+                    ),
+                    |(key, _)| *key,
+                )
             {
                 let sources = &invocation.bindings[index].1;
                 *work = work.checked_sub(sources.len())?;
@@ -208,6 +218,13 @@ impl<K> Builder<K> {
     pub(crate) fn external(&mut self, key: K) -> usize {
         let node = self.graph.nodes.len();
         self.graph.nodes.push(DependencyDagNode::External(key));
+        self.graph.domains.push(Vec::new());
+        node
+    }
+
+    pub(crate) fn retained(&mut self, key: K) -> usize {
+        let node = self.graph.nodes.len();
+        self.graph.nodes.push(DependencyDagNode::Retained(key));
         self.graph.domains.push(Vec::new());
         node
     }

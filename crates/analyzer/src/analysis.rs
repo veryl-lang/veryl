@@ -28,8 +28,8 @@ use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, Component, Comptime, Declaration, Expression, Factor,
-    InstDeclaration, Ir, Module, Op, Shape, Signature, Statement, SystemFunctionKind, VarSelect,
-    Variable,
+    ForBound, ForRange, InstDeclaration, Ir, Module, Op, Shape, Signature, Statement,
+    SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
@@ -690,6 +690,16 @@ fn collect_statement_spans(
                 collect_statement_spans(&statement.default, out, ctx);
             }
             Statement::For(statement) => {
+                // Bounds are control reads even when the body never reads
+                // these variables. Without regions their dependencies vanish.
+                let (ForRange::Forward { start, end, .. }
+                | ForRange::Reverse { start, end, .. }
+                | ForRange::Stepped { start, end, .. }) = &statement.range;
+                for bound in [start, end] {
+                    if let ForBound::Expression(expression) = bound {
+                        collect_expr_spans(expression, out, ctx);
+                    }
+                }
                 collect_statement_spans(&statement.body, out, ctx);
             }
             Statement::FunctionCall(call) => {
@@ -1210,6 +1220,9 @@ fn add_dependency_dag(
                 ensure_node(graph, node_map, bit_part, *key)
             }
             DependencyDagNode::External(_) => None,
+            DependencyDagNode::Retained(_) => {
+                unreachable!("circuit export resolves retained entries")
+            }
             DependencyDagNode::Internal | DependencyDagNode::Replicated { .. } => {
                 Some(graph.add_node(GraphNode {
                     // Internal nodes carry no variable identity. The region is

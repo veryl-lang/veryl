@@ -1683,7 +1683,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let graph = this
             .guard_work
             .and_then(|_| {
-                this.ssa.try_dependency_dag(
+                this.ssa.try_transfer_dag(
                     &roots,
                     |key| {
                         key.call_frame.is_none()
@@ -4738,7 +4738,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         };
         let mut bindings = HashMap::default();
         for node in &summary.graph.nodes {
-            let DependencyDagNode::External(key) = node else {
+            let (DependencyDagNode::External(key) | DependencyDagNode::Retained(key)) = node else {
                 continue;
             };
             if !bindings.contains_key(key) {
@@ -4779,13 +4779,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 bindings.clone(),
                 branch_map.clone(),
             );
-            let mut sources = ExpressionSources {
-                sources: vec![(imported, PositionRelation::default())],
-            };
-            sources.extend_whole(controls.iter().copied());
-            let version = self
-                .ssa
-                .related_definition_guarded(sources.sources, &self.path_condition);
+            // The imported body already distinguishes reads from unchanged
+            // captures. Attaching caller controls must not turn retention into
+            // a read of the caller's live-on-entry value.
+            let control = self.ssa.definition(controls.to_vec());
+            let version = self.ssa.related_alias_guarded(
+                vec![
+                    (imported, PositionRelation::default()),
+                    (control, PositionRelation::whole()),
+                ],
+                &self.path_condition,
+            );
             self.bind_key(destination, version);
             self.written.insert(destination);
             let assignment = self.ssa.imported(
@@ -4924,7 +4928,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         actuals.sort_unstable();
         let mut captures = Vec::new();
         for node in &summary.graph.nodes {
-            if let DependencyDagNode::External(key) = node
+            if let DependencyDagNode::External(key) | DependencyDagNode::Retained(key) = node
                 && self.is_module_scope_key(key.node)
             {
                 captures.push((key.node, self.read_key(key.node)));
@@ -5471,7 +5475,7 @@ fn module_dependency_graph(graph: DependencyDag<SsaKey>) -> DependencyDag<NodeKe
                     call_frame: None,
                     aspect: SsaAspect::Value,
                 }) => DependencyDagNode::External(node),
-                DependencyDagNode::External(_) => {
+                DependencyDagNode::External(_) | DependencyDagNode::Retained(_) => {
                     unreachable!("only module values are visible DAG sources")
                 }
                 DependencyDagNode::Internal => DependencyDagNode::Internal,
