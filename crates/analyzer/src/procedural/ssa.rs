@@ -35,11 +35,11 @@ pub(crate) fn source_walk_visits() -> usize {
     SOURCE_WALK_VISITS.get()
 }
 
-pub(super) type VersionId = usize;
+pub(crate) type VersionId = usize;
 
 type SourceMap<K> = HashMap<(K, PositionRelation), PathCondition>;
 
-pub(super) struct SourceCache<K> {
+pub(crate) struct SourceCache<K> {
     summaries: HashMap<(VersionId, bool), Rc<SourceMap<K>>>,
     ignore_position: bool,
 }
@@ -83,14 +83,14 @@ enum Version<K> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct BranchId {
+pub(crate) struct BranchId {
     procedure: usize,
     local: usize,
     arms: usize,
 }
 
 impl BranchId {
-    pub(super) const fn new(procedure: usize, local: usize, arms: usize) -> Self {
+    pub(crate) const fn new(procedure: usize, local: usize, arms: usize) -> Self {
         Self {
             procedure,
             local,
@@ -98,7 +98,7 @@ impl BranchId {
         }
     }
 
-    pub(super) const fn arms(self) -> usize {
+    pub(crate) const fn arms(self) -> usize {
         self.arms
     }
 }
@@ -183,33 +183,33 @@ impl ArmSet {
 /// reject cycles assembled from mutually exclusive arms without enumerating
 /// every combination of independent conditions.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct PathCondition {
+pub(crate) struct PathCondition {
     constraints: Rc<Vec<BranchConstraint>>,
 }
 
 impl PathCondition {
-    pub(super) fn branch_count(&self) -> usize {
+    pub(crate) fn branch_count(&self) -> usize {
         self.constraints.len()
     }
 
     /// Count a constraint and its first arm range as one work unit, preserving
     /// the cost of compact guards. Every additional disjoint range costs
     /// another unit, so a single branch cannot hide an unbounded payload.
-    pub(super) fn work_size(&self) -> usize {
+    pub(crate) fn work_size(&self) -> usize {
         self.constraints.iter().fold(0usize, |cost, constraint| {
             cost.saturating_add(constraint.allowed.ranges.len().max(1))
         })
     }
 
-    pub(super) fn is_unconditional(&self) -> bool {
+    pub(crate) fn is_unconditional(&self) -> bool {
         self.constraints.is_empty()
     }
 
-    pub(super) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
+    pub(crate) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
         self.with_choice_range(branch, arm, arm.saturating_add(1))
     }
 
-    pub(super) fn with_choice_range(&self, branch: BranchId, start: usize, end: usize) -> Self {
+    pub(crate) fn with_choice_range(&self, branch: BranchId, start: usize, end: usize) -> Self {
         debug_assert!(start < end && end <= branch.arms);
         let mut constraints = self.constraints.as_ref().clone();
         let constraint = BranchConstraint {
@@ -227,7 +227,7 @@ impl PathCondition {
 
     /// Joins alternative paths into the least Cartesian condition that covers
     /// every input condition.
-    pub(super) fn try_disjoin_all<'a>(
+    pub(crate) fn try_disjoin_all<'a>(
         conditions: impl IntoIterator<Item = &'a Self>,
         work: &mut usize,
     ) -> Option<Self> {
@@ -245,7 +245,7 @@ impl PathCondition {
         Some(combined)
     }
 
-    pub(super) fn conjoin_if_compatible(&self, other: &Self) -> Option<Self> {
+    pub(crate) fn conjoin_if_compatible(&self, other: &Self) -> Option<Self> {
         let mut constraints = Vec::with_capacity(self.constraints.len() + other.constraints.len());
         let mut left = self.constraints.iter().peekable();
         let mut right = other.constraints.iter().peekable();
@@ -289,7 +289,7 @@ impl PathCondition {
 
     /// Returns true when every branch valuation admitted by `other` is also
     /// admitted by `self`.
-    pub(super) fn covers(&self, other: &Self) -> bool {
+    pub(crate) fn covers(&self, other: &Self) -> bool {
         self.constraints.iter().all(|constraint| {
             other
                 .constraints
@@ -303,7 +303,7 @@ impl PathCondition {
         })
     }
 
-    pub(super) fn branches(&self) -> impl Iterator<Item = BranchId> {
+    pub(crate) fn branches(&self) -> impl Iterator<Item = BranchId> {
         self.constraints
             .iter()
             .map(|constraint| constraint.branch)
@@ -311,7 +311,7 @@ impl PathCondition {
             .into_iter()
     }
 
-    pub(super) fn remapped(&self, branches: &HashMap<BranchId, BranchId>) -> Self {
+    pub(crate) fn remapped(&self, branches: &HashMap<BranchId, BranchId>) -> Self {
         let mut constraints = self
             .constraints
             .iter()
@@ -330,7 +330,7 @@ impl PathCondition {
     }
 
     /// Returns the least Cartesian condition covering either input.
-    pub(super) fn disjoin(&self, other: &Self) -> Self {
+    pub(crate) fn disjoin(&self, other: &Self) -> Self {
         let mut constraints = Vec::new();
         for constraint in self.constraints.iter() {
             let Ok(index) = other
@@ -354,7 +354,7 @@ impl PathCondition {
 
     /// An exact union is Cartesian when the two cubes differ on at most one
     /// branch. Unlike `disjoin`, this never drops cross-branch correlations.
-    pub(super) fn disjoin_exact(&self, other: &Self) -> Option<Self> {
+    pub(crate) fn disjoin_exact(&self, other: &Self) -> Option<Self> {
         if self.covers(other) {
             return Some(self.clone());
         }
@@ -393,13 +393,13 @@ impl PathCondition {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct PositionRelation {
-    pub(super) array: Option<isize>,
-    pub(super) packed: Option<isize>,
+pub(crate) struct PositionRelation {
+    pub(crate) array: Option<isize>,
+    pub(crate) packed: Option<isize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(super) enum Replication {
+pub(crate) enum Replication {
     Array(isize),
     Packed(isize),
 }
@@ -411,7 +411,7 @@ impl Replication {
         }
     }
 
-    pub(super) fn relation(self) -> PositionRelation {
+    pub(crate) fn relation(self) -> PositionRelation {
         match self {
             Self::Array(stride) => PositionRelation {
                 array: Some(stride),
@@ -434,7 +434,7 @@ impl Replication {
 }
 
 #[derive(Clone)]
-pub(super) enum DependencyDagNode<K> {
+pub(crate) enum DependencyDagNode<K> {
     External(K),
     Internal,
     /// Zero or more positive translations along one axis within this node's domain.
@@ -445,34 +445,34 @@ pub(super) enum DependencyDagNode<K> {
 }
 
 #[derive(Clone)]
-pub(super) struct DependencyDagEdge {
-    pub(super) source: usize,
-    pub(super) destination: usize,
-    pub(super) relation: PositionRelation,
-    pub(super) condition: PathCondition,
+pub(crate) struct DependencyDagEdge {
+    pub(crate) source: usize,
+    pub(crate) destination: usize,
+    pub(crate) relation: PositionRelation,
+    pub(crate) condition: PathCondition,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) struct DefinitionSite<N> {
-    pub(super) token: TokenRange,
-    pub(super) data_inputs: Vec<N>,
+pub(crate) struct DefinitionSite<N> {
+    pub(crate) token: TokenRange,
+    pub(crate) data_inputs: Vec<N>,
 }
 
 #[derive(Clone)]
-pub(super) struct DependencyDag<K> {
-    pub(super) nodes: Vec<DependencyDagNode<K>>,
-    pub(super) edges: Vec<DependencyDagEdge>,
-    pub(super) roots: Vec<Option<usize>>,
-    pub(super) domains: Vec<Vec<PositionDomain>>,
-    pub(super) sites: HashMap<usize, DefinitionSite<usize>>,
+pub(crate) struct DependencyDag<K> {
+    pub(crate) nodes: Vec<DependencyDagNode<K>>,
+    pub(crate) edges: Vec<DependencyDagEdge>,
+    pub(crate) roots: Vec<Option<usize>>,
+    pub(crate) domains: Vec<Vec<PositionDomain>>,
+    pub(crate) sites: HashMap<usize, DefinitionSite<usize>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct PositionDomain {
-    pub(super) array_start: usize,
-    pub(super) array_length: usize,
-    pub(super) packed_start: usize,
-    pub(super) packed_length: usize,
+pub(crate) struct PositionDomain {
+    pub(crate) array_start: usize,
+    pub(crate) array_length: usize,
+    pub(crate) packed_start: usize,
+    pub(crate) packed_length: usize,
 }
 
 impl Default for PositionRelation {
@@ -485,14 +485,14 @@ impl Default for PositionRelation {
 }
 
 impl PositionRelation {
-    pub(super) const fn whole() -> Self {
+    pub(crate) const fn whole() -> Self {
         Self {
             array: None,
             packed: None,
         }
     }
 
-    pub(super) fn compose(self, other: Self) -> Self {
+    pub(crate) fn compose(self, other: Self) -> Self {
         Self {
             array: compose_axis(self.array, other.array),
             packed: compose_axis(self.packed, other.packed),
@@ -500,7 +500,7 @@ impl PositionRelation {
     }
 
     #[cfg(test)]
-    pub(super) fn union(self, other: Self) -> Self {
+    pub(crate) fn union(self, other: Self) -> Self {
         Self {
             array: (self.array == other.array).then_some(self.array).flatten(),
             packed: (self.packed == other.packed)
@@ -521,22 +521,22 @@ fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct Checkpoint {
+pub(crate) struct Checkpoint {
     undo_start: usize,
     depth: usize,
     version_start: usize,
 }
 
-pub(super) struct BranchState<K> {
+pub(crate) struct BranchState<K> {
     bindings: HashMap<K, VersionId>,
 }
 
 impl<K> BranchState<K> {
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.bindings.len()
     }
 
-    pub(super) fn unchanged() -> Self {
+    pub(crate) fn unchanged() -> Self {
         Self {
             bindings: HashMap::default(),
         }
@@ -548,7 +548,7 @@ struct Undo<K> {
     previous: Option<VersionId>,
 }
 
-pub(super) struct SsaStore<K> {
+pub(crate) struct SsaStore<K> {
     versions: Vec<Version<K>>,
     // Append-only ranges generated by runtime transfer closure. Their origin
     // survives conversion to ordinary SSA so enclosing loops can budget copies.
@@ -578,7 +578,7 @@ impl<K> SsaStore<K>
 where
     K: Copy + Eq + Hash,
 {
-    pub(super) fn record_site(
+    pub(crate) fn record_site(
         &mut self,
         version: VersionId,
         token: TokenRange,
@@ -606,7 +606,7 @@ where
         version
     }
 
-    pub(super) fn read(&mut self, key: K) -> VersionId {
+    pub(crate) fn read(&mut self, key: K) -> VersionId {
         if let Some(version) = self.current.get(&key) {
             *version
         } else {
@@ -614,11 +614,11 @@ where
         }
     }
 
-    pub(super) fn definition(&mut self, sources: Vec<VersionId>) -> VersionId {
+    pub(crate) fn definition(&mut self, sources: Vec<VersionId>) -> VersionId {
         self.definition_guarded(sources, &PathCondition::default())
     }
 
-    pub(super) fn definition_guarded(
+    pub(crate) fn definition_guarded(
         &mut self,
         sources: Vec<VersionId>,
         condition: &PathCondition,
@@ -632,14 +632,14 @@ where
         )
     }
 
-    pub(super) fn related_definition(
+    pub(crate) fn related_definition(
         &mut self,
         sources: Vec<(VersionId, PositionRelation)>,
     ) -> VersionId {
         self.related_definition_guarded(sources, &PathCondition::default())
     }
 
-    pub(super) fn related_definition_guarded(
+    pub(crate) fn related_definition_guarded(
         &mut self,
         sources: Vec<(VersionId, PositionRelation)>,
         condition: &PathCondition,
@@ -655,7 +655,7 @@ where
         version
     }
 
-    pub(super) fn imported(
+    pub(crate) fn imported(
         &mut self,
         graph: Rc<DependencyDag<K>>,
         root: Option<usize>,
@@ -672,7 +672,7 @@ where
         version
     }
 
-    pub(super) fn projected(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
+    pub(crate) fn projected(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
         let version = self.versions.len();
         self.versions.push(Version::Projected { source, domain });
         version
@@ -680,7 +680,7 @@ where
 
     /// Export into a destination that already enforces `domain`. Other SSA
     /// readers retain the original projection and its intermediate bounds.
-    pub(super) fn root_in_domain(&self, version: VersionId, domain: PositionDomain) -> VersionId {
+    pub(crate) fn root_in_domain(&self, version: VersionId, domain: PositionDomain) -> VersionId {
         match &self.versions[version] {
             Version::Projected {
                 source,
@@ -690,7 +690,7 @@ where
         }
     }
 
-    pub(super) fn replicated(
+    pub(crate) fn replicated(
         &mut self,
         source: VersionId,
         domain: PositionDomain,
@@ -709,7 +709,7 @@ where
         version
     }
 
-    pub(super) fn has_structural_dependency(&self, version: VersionId) -> bool {
+    pub(crate) fn has_structural_dependency(&self, version: VersionId) -> bool {
         let mut visited = HashSet::default();
         let mut queue = VecDeque::from([version]);
         while let Some(version) = queue.pop_front() {
@@ -731,20 +731,20 @@ where
         false
     }
 
-    pub(super) fn bind(&mut self, key: K, version: VersionId) {
+    pub(crate) fn bind(&mut self, key: K, version: VersionId) {
         let previous = self.current.insert(key, version);
         if !self.checkpoints.is_empty() {
             self.undo.push(Undo { key, previous });
         }
     }
 
-    pub(super) fn weak_bind(&mut self, key: K, version: VersionId) {
+    pub(crate) fn weak_bind(&mut self, key: K, version: VersionId) {
         let previous = self.read(key);
         let version = self.phi(vec![previous, version]);
         self.bind(key, version);
     }
 
-    pub(super) fn checkpoint(&mut self) -> Checkpoint {
+    pub(crate) fn checkpoint(&mut self) -> Checkpoint {
         let checkpoint = Checkpoint {
             undo_start: self.undo.len(),
             depth: self.checkpoints.len(),
@@ -754,7 +754,7 @@ where
         checkpoint
     }
 
-    pub(super) fn capture_and_rollback(&mut self, checkpoint: Checkpoint) -> BranchState<K> {
+    pub(crate) fn capture_and_rollback(&mut self, checkpoint: Checkpoint) -> BranchState<K> {
         assert_eq!(checkpoint.depth + 1, self.checkpoints.len());
         assert_eq!(self.checkpoints.pop(), Some(checkpoint.undo_start));
 
@@ -783,7 +783,7 @@ where
     /// Capture bindings changed since an enclosing checkpoint without
     /// disturbing the current transaction. This records an early-exit path
     /// before its nearer branch checkpoint rolls back.
-    pub(super) fn snapshot_since(&self, checkpoint: Checkpoint) -> BranchState<K> {
+    pub(crate) fn snapshot_since(&self, checkpoint: Checkpoint) -> BranchState<K> {
         assert!(checkpoint.depth < self.checkpoints.len());
         assert_eq!(self.checkpoints[checkpoint.depth], checkpoint.undo_start);
 
@@ -796,7 +796,7 @@ where
         BranchState { bindings }
     }
 
-    pub(super) fn merge<'b>(&mut self, states: impl IntoIterator<Item = &'b BranchState<K>>)
+    pub(crate) fn merge<'b>(&mut self, states: impl IntoIterator<Item = &'b BranchState<K>>)
     where
         K: 'b,
     {
@@ -827,7 +827,7 @@ where
 
     /// Merge both expression arms, including bindings retained by either arm.
     /// Each conditional write also depends on the condition's value.
-    pub(super) fn merge_conditional(
+    pub(crate) fn merge_conditional(
         &mut self,
         states: [(&BranchState<K>, &PathCondition); 2],
         controls: &[VersionId],
@@ -874,7 +874,7 @@ where
     /// graph. Condensing its recurrence components models arbitrary positive
     /// iteration counts without enumerating positions or paths. `may_skip`
     /// additionally retains each key's loop-entry version.
-    pub(super) fn try_close_repeated_transfer(
+    pub(crate) fn try_close_repeated_transfer(
         &mut self,
         single_iteration: &BranchState<K>,
         iteration_checkpoint: Checkpoint,
@@ -893,7 +893,7 @@ where
     }
 
     #[cfg(test)]
-    pub(super) fn close_repeated_transfer(
+    pub(crate) fn close_repeated_transfer(
         &mut self,
         single_iteration: &BranchState<K>,
         iteration_checkpoint: Checkpoint,
@@ -912,12 +912,12 @@ where
     }
 
     #[cfg(test)]
-    pub(super) fn root_sources(&self, version: VersionId) -> HashSet<K> {
+    pub(crate) fn root_sources(&self, version: VersionId) -> HashSet<K> {
         self.root_source_relations(version).into_keys().collect()
     }
 
     #[cfg(test)]
-    pub(super) fn root_source_relations(&self, version: VersionId) -> HashMap<K, PositionRelation> {
+    pub(crate) fn root_source_relations(&self, version: VersionId) -> HashMap<K, PositionRelation> {
         let mut sources: HashMap<K, PositionRelation> = HashMap::default();
         for (source, relation, _) in self.root_source_relations_guarded(version) {
             sources
@@ -929,7 +929,7 @@ where
     }
 
     #[cfg(test)]
-    pub(super) fn root_source_relations_guarded(
+    pub(crate) fn root_source_relations_guarded(
         &self,
         version: VersionId,
     ) -> Vec<(K, PositionRelation, PathCondition)> {
@@ -938,7 +938,7 @@ where
             .expect("unlimited source query")
     }
 
-    pub(super) fn try_root_source_relations_guarded(
+    pub(crate) fn try_root_source_relations_guarded(
         &self,
         version: VersionId,
         work: &mut usize,
@@ -947,7 +947,7 @@ where
     }
 
     #[cfg(test)]
-    pub(super) fn root_source_keys_guarded(&self, version: VersionId) -> Vec<(K, PathCondition)> {
+    pub(crate) fn root_source_keys_guarded(&self, version: VersionId) -> Vec<(K, PathCondition)> {
         let mut work = usize::MAX;
         self.try_root_source_keys_guarded(version, &mut work)
             .expect("unlimited source query")
@@ -955,7 +955,7 @@ where
 
     /// Whole-value reads need source identities and guards, not every possible
     /// sum of shifts through an imported DAG. Forget positions before walking.
-    pub(super) fn try_root_source_keys_guarded(
+    pub(crate) fn try_root_source_keys_guarded(
         &self,
         version: VersionId,
         work: &mut usize,
@@ -991,7 +991,7 @@ where
     }
 
     #[cfg(test)]
-    pub(super) fn dependency_dag(
+    pub(crate) fn dependency_dag(
         &self,
         roots: &[VersionId],
         allowed: impl Fn(&K) -> bool,
@@ -1003,7 +1003,7 @@ where
             .expect("unlimited dependency export")
     }
 
-    pub(super) fn try_dependency_dag(
+    pub(crate) fn try_dependency_dag(
         &self,
         roots: &[VersionId],
         allowed: impl Fn(&K) -> bool,
@@ -1015,7 +1015,7 @@ where
         self.try_dependency_dag_with_import_limit(roots, allowed, work, usize::MAX)
     }
 
-    pub(super) fn try_dependency_dag_with_import_limit(
+    pub(crate) fn try_dependency_dag_with_import_limit(
         &self,
         roots: &[VersionId],
         allowed: impl Fn(&K) -> bool,

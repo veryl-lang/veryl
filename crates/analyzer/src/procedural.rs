@@ -1,11 +1,14 @@
-//! Analyzer-IR procedure evaluation for combinational dependency extraction.
+//! Shared analyzer-IR procedure evaluation and SSA construction.
 
-use super::model::SummaryRegion;
-use super::region::{
+pub(crate) mod region;
+pub(crate) mod ssa;
+
+use self::region::SummaryRegion;
+use self::region::{
     ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
 };
-use super::ssa::{
+use self::ssa::{
     BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
     PositionDomain, PositionRelation, Replication, SsaStore, VersionId,
 };
@@ -492,8 +495,8 @@ pub(crate) fn with_procedure_guard_limit<T>(limit: usize, f: impl FnOnce() -> T)
     f()
 }
 
-pub(super) struct FunctionSummaries<'a> {
-    pub(super) tracing: bool,
+pub(crate) struct FunctionSummaries<'a> {
+    pub(crate) tracing: bool,
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
@@ -504,14 +507,14 @@ pub(super) struct FunctionSummaries<'a> {
 /// Reusable module-local evaluation context for independent procedural
 /// declarations. Its large variable and function maps are built once per
 /// active analysis context; SSA and control-flow state remain per analysis.
-pub(super) struct ProcedureContext {
+pub(crate) struct ProcedureContext {
     ctx: Option<Context>,
     module_scope_ids: Rc<HashSet<VarId>>,
     summary_scratch: bool,
 }
 
 impl ProcedureContext {
-    pub(super) fn new(module: &Module) -> Self {
+    pub(crate) fn new(module: &Module) -> Self {
         let mut ctx = Context::default();
         ctx.variables = module.variables.clone();
         ctx.variables.extend(module.interface_members.clone());
@@ -880,7 +883,7 @@ fn module_scope_ids(module: &Module) -> HashSet<VarId> {
         .collect()
 }
 impl<'a> FunctionSummaries<'a> {
-    pub(super) fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
+    pub(crate) fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
         Self {
             tracing: false,
             module,
@@ -1029,7 +1032,7 @@ pub(crate) fn traced_procedure_evaluation_count() -> usize {
     TRACED_PROCEDURE_EVALUATIONS.get()
 }
 
-pub(super) fn analyze<'a>(
+pub(crate) fn analyze<'a>(
     bit_part: &'a BitPartition,
     statements: &[Statement],
     branch_namespace: usize,
@@ -1039,14 +1042,14 @@ pub(super) fn analyze<'a>(
     ProcedureAnalysis::analyze(bit_part, statements, branch_namespace, context, summaries)
 }
 
-pub(super) struct ProcedureResult {
-    pub(super) graph: DependencyDag<NodeKey>,
-    pub(super) destinations: Vec<(NodeKey, Option<usize>)>,
-    pub(super) status: AnalysisStatus,
+pub(crate) struct ProcedureResult {
+    pub(crate) graph: DependencyDag<NodeKey>,
+    pub(crate) destinations: Vec<(NodeKey, Option<usize>)>,
+    pub(crate) status: AnalysisStatus,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum AnalysisStatus {
+pub(crate) enum AnalysisStatus {
     #[default]
     Complete,
     Partial,
@@ -1054,11 +1057,11 @@ pub(super) enum AnalysisStatus {
 }
 
 impl AnalysisStatus {
-    pub(super) fn is_complete(self) -> bool {
+    pub(crate) fn is_complete(self) -> bool {
         self == Self::Complete
     }
 
-    pub(super) fn is_barrier(self) -> bool {
+    pub(crate) fn is_barrier(self) -> bool {
         self == Self::Barrier
     }
 }
@@ -1129,12 +1132,12 @@ impl ExpressionSources {
     }
 }
 
-pub(super) struct ExpressionAnalysis<'a, 's> {
+pub(crate) struct ExpressionAnalysis<'a, 's> {
     inner: Option<ProcedureAnalysis<'a, 's>>,
 }
 
 impl<'a, 's> ExpressionAnalysis<'a, 's> {
-    pub(super) fn new(
+    pub(crate) fn new(
         bit_part: &'a BitPartition,
         context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
@@ -1152,16 +1155,16 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         self.inner.as_mut().expect("expression analysis is active")
     }
 
-    pub(super) fn eval(&mut self, expression: &Expression) -> Vec<RegionSource> {
+    pub(crate) fn eval(&mut self, expression: &Expression) -> Vec<RegionSource> {
         self.inner().use_expression_namespace(expression);
         self.inner().eval_expression_sources(expression)
     }
 
-    pub(super) fn use_namespace(&mut self, namespace: usize) {
+    pub(crate) fn use_namespace(&mut self, namespace: usize) {
         self.inner().branch_namespace = namespace;
     }
 
-    pub(super) fn eval_regions(
+    pub(crate) fn eval_regions(
         &mut self,
         expression: &Expression,
         regions: &[SummaryRegion],
@@ -1201,7 +1204,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         inner.dependency_dag_for_nodes(&roots, work)
     }
 
-    pub(super) fn dependencies(&mut self) -> ProcedureResult {
+    pub(crate) fn dependencies(&mut self) -> ProcedureResult {
         let inner = self.inner();
         let (graph, destinations) = inner.dependency_graph();
         ProcedureResult {
@@ -1211,13 +1214,13 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         }
     }
 
-    pub(super) fn restore(mut self, context: &mut ProcedureContext) {
+    pub(crate) fn restore(mut self, context: &mut ProcedureContext) {
         let mut inner = self.inner.take().expect("expression analysis is active");
         inner.ctx.rollback_analysis_transaction();
         context.restore(inner.ctx);
     }
 
-    pub(super) fn is_complete(&self) -> bool {
+    pub(crate) fn is_complete(&self) -> bool {
         self.inner
             .as_ref()
             .expect("expression analysis is active")
@@ -1227,10 +1230,10 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct RegionSource {
-    pub(super) key: NodeKey,
-    pub(super) offset: Option<(isize, isize)>,
-    pub(super) condition: PathCondition,
+pub(crate) struct RegionSource {
+    pub(crate) key: NodeKey,
+    pub(crate) offset: Option<(isize, isize)>,
+    pub(crate) condition: PathCondition,
 }
 
 struct ProcedureAnalysis<'a, 's> {

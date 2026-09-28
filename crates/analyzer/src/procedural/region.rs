@@ -2,13 +2,13 @@ use crate::HashMap;
 use crate::conv::Context;
 use crate::ir::{AssignDestination, Type, VarId, VarIndex, VarSelect};
 
-pub(super) fn signed_difference(destination: usize, source: usize) -> Option<isize> {
+pub(crate) fn signed_difference(destination: usize, source: usize) -> Option<isize> {
     isize::try_from(destination)
         .ok()?
         .checked_sub(isize::try_from(source).ok()?)
 }
 
-pub(super) fn translate_position(position: usize, offset: isize) -> Option<usize> {
+pub(crate) fn translate_position(position: usize, offset: isize) -> Option<usize> {
     if offset >= 0 {
         position.checked_add(offset.unsigned_abs())
     } else {
@@ -17,17 +17,17 @@ pub(super) fn translate_position(position: usize, offset: isize) -> Option<usize
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct ArraySpan {
-    pub(super) start: usize,
-    pub(super) length: usize,
+pub(crate) struct ArraySpan {
+    pub(crate) start: usize,
+    pub(crate) length: usize,
 }
 
 impl ArraySpan {
-    pub(super) fn end(self) -> Option<usize> {
+    pub(crate) fn end(self) -> Option<usize> {
         self.start.checked_add(self.length)
     }
 
-    pub(super) fn overlaps(self, other: Self) -> bool {
+    pub(crate) fn overlaps(self, other: Self) -> bool {
         let Some(left_end) = self.end() else {
             return false;
         };
@@ -37,14 +37,14 @@ impl ArraySpan {
         self.start < right_end && other.start < left_end
     }
 
-    pub(super) fn intersection(self, other: Self) -> Option<Self> {
+    pub(crate) fn intersection(self, other: Self) -> Option<Self> {
         let start = self.start.max(other.start);
         let end = self.end()?.min(other.end()?);
         let length = end.checked_sub(start)?;
         (length != 0).then_some(Self { start, length })
     }
 
-    pub(super) fn translated(self, from: usize, to: usize) -> Option<Self> {
+    pub(crate) fn translated(self, from: usize, to: usize) -> Option<Self> {
         let start = self.start.checked_sub(from)?.checked_add(to)?;
         (self.length != 0 && start.checked_add(self.length).is_some()).then_some(Self {
             start,
@@ -56,60 +56,60 @@ impl ArraySpan {
 /// Half-open packed-bit interval. Unlike a dense bit mask, its storage and
 /// operations are independent of the declared bit width.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct PackedSpan {
-    pub(super) start: usize,
-    pub(super) length: usize,
+pub(crate) struct PackedSpan {
+    pub(crate) start: usize,
+    pub(crate) length: usize,
 }
 
 impl PackedSpan {
-    pub(super) fn new(start: usize, length: usize) -> Option<Self> {
+    pub(crate) fn new(start: usize, length: usize) -> Option<Self> {
         (length != 0 && start.checked_add(length).is_some()).then_some(Self { start, length })
     }
 
-    pub(super) fn whole(width: usize) -> Option<Self> {
+    pub(crate) fn whole(width: usize) -> Option<Self> {
         Self::new(0, width)
     }
 
-    pub(super) fn from_select(high: usize, low: usize) -> Option<Self> {
+    pub(crate) fn from_select(high: usize, low: usize) -> Option<Self> {
         Self::new(low, high.checked_sub(low)?.checked_add(1)?)
     }
 
-    pub(super) fn end(self) -> usize {
+    pub(crate) fn end(self) -> usize {
         self.start + self.length
     }
 
-    pub(super) fn overlaps(self, other: Self) -> bool {
+    pub(crate) fn overlaps(self, other: Self) -> bool {
         self.start < other.end() && other.start < self.end()
     }
 
-    pub(super) fn intersection(self, other: Self) -> Option<Self> {
+    pub(crate) fn intersection(self, other: Self) -> Option<Self> {
         let start = self.start.max(other.start);
         let end = self.end().min(other.end());
         Self::new(start, end.checked_sub(start)?)
     }
 
-    pub(super) fn translated(self, from: usize, to: usize) -> Option<Self> {
+    pub(crate) fn translated(self, from: usize, to: usize) -> Option<Self> {
         let start = self.start.checked_sub(from)?.checked_add(to)?;
         Self::new(start, self.length)
     }
 }
 
 /// One split unpacked-array interval. Bit precision lives in packed spans.
-pub(super) type IdxKey = (VarId, ArraySpan);
+pub(crate) type IdxKey = (VarId, ArraySpan);
 
 /// `(VarId, array_idx, range_idx)`. `range_idx` indexes the variable's
 /// `BitPartition`, so bit-disjoint reads/writes form disjoint nodes.
-pub(super) type NodeKey = (VarId, ArraySpan, usize);
+pub(crate) type NodeKey = (VarId, ArraySpan, usize);
 
 /// Per `IdxKey`, atomic packed-bit intervals.
 #[derive(Default)]
-pub(super) struct BitPartition {
+pub(crate) struct BitPartition {
     ranges: HashMap<IdxKey, Vec<PackedSpan>>,
     array_spans: HashMap<VarId, Vec<ArraySpan>>,
 }
 
 impl BitPartition {
-    pub(super) fn new(ranges: HashMap<IdxKey, Vec<PackedSpan>>) -> Self {
+    pub(crate) fn new(ranges: HashMap<IdxKey, Vec<PackedSpan>>) -> Self {
         let mut array_spans: HashMap<VarId, Vec<ArraySpan>> = HashMap::default();
         for &(id, span) in ranges.keys() {
             array_spans.entry(id).or_default().push(span);
@@ -129,11 +129,11 @@ impl BitPartition {
         }
     }
 
-    pub(super) fn array_spans(&self, id: VarId) -> &[ArraySpan] {
+    pub(crate) fn array_spans(&self, id: VarId) -> &[ArraySpan] {
         self.array_spans.get(&id).map(Vec::as_slice).unwrap_or(&[])
     }
 
-    pub(super) fn position_overflow(&self) -> Option<VarId> {
+    pub(crate) fn position_overflow(&self) -> Option<VarId> {
         let limit = isize::MAX as usize;
         self.ranges.iter().find_map(|(&(id, array), packed)| {
             let array_overflows = array.start > limit || array.end().is_none_or(|end| end > limit);
@@ -145,11 +145,11 @@ impl BitPartition {
     }
 
     /// Empty slice means the variable's bits are untouched.
-    pub(super) fn ranges_of(&self, key: IdxKey) -> &[PackedSpan] {
+    pub(crate) fn ranges_of(&self, key: IdxKey) -> &[PackedSpan] {
         self.ranges.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    pub(super) fn overlapping(
+    pub(crate) fn overlapping(
         &self,
         key: IdxKey,
         span: PackedSpan,
@@ -161,7 +161,7 @@ impl BitPartition {
             .map(|(i, _)| i)
     }
 
-    pub(super) fn overlapping_access(
+    pub(crate) fn overlapping_access(
         &self,
         id: VarId,
         access: ArraySpan,
@@ -192,7 +192,7 @@ impl BitPartition {
 }
 
 /// Mirrors the packed-region logic of `AssignDestination::eval_assign`.
-pub(super) fn dst_writes(
+pub(crate) fn dst_writes(
     dst: &AssignDestination,
     ctx: &mut Context,
 ) -> Vec<(ArraySpan, PackedSpan)> {
@@ -221,7 +221,7 @@ pub(super) fn dst_writes(
         .unwrap_or_default()
 }
 
-pub(super) fn var_reads(
+pub(crate) fn var_reads(
     id: VarId,
     index: &VarIndex,
     select: &VarSelect,
@@ -282,4 +282,11 @@ fn conservative_select_span(
     } else {
         r#type.total_width().and_then(PackedSpan::whole)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct SummaryRegion {
+    pub(crate) id: VarId,
+    pub(crate) array: ArraySpan,
+    pub(crate) packed: PackedSpan,
 }

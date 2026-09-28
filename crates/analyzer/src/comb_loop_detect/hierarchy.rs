@@ -8,7 +8,7 @@ use crate::{
 /// Actual instantiated specializations in children-before-parents order.
 /// Unevaluable generic templates are not stable bodies and therefore do not
 /// claim the same signature as a concrete default specialization.
-pub(super) fn module_postorder(ir: &Ir) -> Vec<&Module> {
+pub(crate) fn module_postorder(ir: &Ir) -> Vec<&Module> {
     fn visit<'a>(
         module: &'a Module,
         visited: &mut HashSet<Signature>,
@@ -42,7 +42,7 @@ pub(super) fn module_postorder(ir: &Ir) -> Vec<&Module> {
     order
 }
 
-pub(super) fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
+pub(crate) fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
     module
         .declarations
         .iter()

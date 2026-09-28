@@ -1,9 +1,9 @@
 //! Lazy source diagnostics for the constrained dependency graph.
 
-use super::build_module_graph_with_trace;
 use super::graph::{DependencyGraph, compatible_cycle, strongly_connected_components};
 use super::model::{ModuleCombSummary, SummaryRegion};
 use super::region::{ArraySpan, BitPartition, NodeKey};
+use crate::analysis::build_module_graph_with_trace;
 use crate::ir::{Component, Declaration, Module, Signature, VarId, VarPath, Variable};
 use crate::symbol::SymbolId;
 use crate::{AnalyzerError, HashMap, HashSet};
@@ -14,11 +14,11 @@ use std::{collections::VecDeque, rc::Rc};
 use veryl_parser::token_range::TokenRange;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct SummaryEdgeCause {
-    pub(super) inst_declaration: usize,
-    pub(super) child: Signature,
-    pub(super) child_source: SummaryRegion,
-    pub(super) child_destination: SummaryRegion,
+pub(crate) struct SummaryEdgeCause {
+    pub(crate) inst_declaration: usize,
+    pub(crate) child: Signature,
+    pub(crate) child_source: SummaryRegion,
+    pub(crate) child_destination: SummaryRegion,
 }
 
 #[cfg(test)]
@@ -54,16 +54,16 @@ pub(crate) fn diagnostic_instance_probe_count() -> usize {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum TraceKind {
+pub(crate) enum TraceKind {
     None,
     Instances,
     Sources,
 }
 
-pub(super) type DiagnosticReplayCache = HashMap<(Signature, TraceKind), Rc<DependencyGraph>>;
+pub(crate) type DiagnosticReplayCache = HashMap<(Signature, TraceKind), Rc<DependencyGraph>>;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn check_graph(
+pub(crate) fn check_graph(
     module: &Module,
     graph: &DependencyGraph,
     bit_part: &BitPartition,

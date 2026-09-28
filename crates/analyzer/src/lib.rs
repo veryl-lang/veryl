@@ -1,3 +1,4 @@
+mod analysis;
 pub mod analyzer;
 pub mod analyzer_error;
 pub mod attribute;
@@ -17,6 +18,7 @@ pub mod literal_table;
 pub mod msb_table;
 pub mod multi_sources;
 pub mod namespace;
+mod procedural;
 pub mod range_table;
 pub mod reference_table;
 pub mod resolved_type_table;

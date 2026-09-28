@@ -28,23 +28,23 @@ use std::collections::VecDeque;
 use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Debug)]
-pub(super) struct GraphDependency {
-    pub(super) kind: BitDependency,
-    pub(super) condition: PathCondition,
+pub(crate) struct GraphDependency {
+    pub(crate) kind: BitDependency,
+    pub(crate) condition: PathCondition,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct GraphNode {
-    pub(super) region: SummaryRegion,
-    pub(super) domains: Vec<PositionDomain>,
+pub(crate) struct GraphNode {
+    pub(crate) region: SummaryRegion,
+    pub(crate) domains: Vec<PositionDomain>,
     /// Present only for a region belonging to the module currently being
     /// diagnosed. Instance-summary internals deliberately have no synthetic
     /// `VarId` and therefore cannot collide with real variables.
-    pub(super) diagnostic: Option<NodeKey>,
+    pub(crate) diagnostic: Option<NodeKey>,
 }
 
 impl GraphDependency {
-    pub(super) fn unconditional(kind: BitDependency) -> Self {
+    pub(crate) fn unconditional(kind: BitDependency) -> Self {
         Self {
             kind,
             condition: PathCondition::default(),
@@ -52,16 +52,16 @@ impl GraphDependency {
     }
 }
 
-pub(super) struct DependencyGraph {
+pub(crate) struct DependencyGraph {
     graph: Graph<GraphNode, GraphDependency>,
     edges: HashMap<(NodeIndex, NodeIndex, BitDependency), EdgeIndex>,
-    pub(super) sites: HashMap<NodeIndex, DefinitionSite<NodeIndex>>,
-    pub(super) summary_causes: HashMap<EdgeIndex, Vec<SummaryEdgeCause>>,
-    pub(super) active_summary: Option<SummaryEdgeCause>,
+    pub(crate) sites: HashMap<NodeIndex, DefinitionSite<NodeIndex>>,
+    pub(crate) summary_causes: HashMap<EdgeIndex, Vec<SummaryEdgeCause>>,
+    pub(crate) active_summary: Option<SummaryEdgeCause>,
 }
 
 impl DependencyGraph {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             graph: Graph::new(),
             edges: HashMap::default(),
@@ -86,7 +86,7 @@ impl DerefMut for DependencyGraph {
     }
 }
 
-pub(super) fn add_dependency_edge(
+pub(crate) fn add_dependency_edge(
     graph: &mut DependencyGraph,
     source: NodeIndex,
     destination: NodeIndex,
@@ -109,7 +109,7 @@ pub(super) fn add_dependency_edge(
     }
 }
 
-pub(super) fn add_region_dependency(
+pub(crate) fn add_region_dependency(
     graph: &mut DependencyGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     bit_part: &BitPartition,
@@ -126,7 +126,7 @@ pub(super) fn add_region_dependency(
     add_dependency_edge(graph, source, destination, dependency);
 }
 
-pub(super) fn ensure_node(
+pub(crate) fn ensure_node(
     graph: &mut DependencyGraph,
     node_map: &mut HashMap<NodeKey, NodeIndex>,
     bit_part: &BitPartition,
@@ -154,7 +154,7 @@ pub(super) fn ensure_node(
     Some(node)
 }
 
-pub(super) fn node_regions_overlap_with_dependency(
+pub(crate) fn node_regions_overlap_with_dependency(
     source: &GraphNode,
     destination: &GraphNode,
     dependency: BitDependency,
@@ -217,11 +217,11 @@ fn spans_overlap_with_offset(
 }
 
 /// Both passes use explicit worklists, including for long acyclic chains.
-pub(super) fn strongly_connected_components(graph: &DependencyGraph) -> Vec<Vec<NodeIndex>> {
+pub(crate) fn strongly_connected_components(graph: &DependencyGraph) -> Vec<Vec<NodeIndex>> {
     kosaraju_scc(&**graph)
 }
 
-pub(super) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
+pub(crate) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
     let mut induced = Graph::<(), ()>::new();
     let mapped = graph
         .node_indices()
@@ -411,7 +411,7 @@ fn try_cycle_witness(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) 
     found
 }
 
-pub(super) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Option<bool> {
+pub(crate) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Option<bool> {
     let mut budget = SearchBudget::new();
     let found = has_compatible_cycle_with_budget(graph, scc, &mut budget);
     // Count the decision separately from optional diagnostic path recovery.
@@ -598,7 +598,7 @@ fn has_compatible_cycle_with_budget(
 
 /// Recover a feasible first-return path for source diagnostics. Parent indices
 /// keep long paths linear in storage; positions and guards match the decision walk.
-pub(super) fn diagnostic_cycle(
+pub(crate) fn diagnostic_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
 ) -> Option<Vec<EdgeIndex>> {

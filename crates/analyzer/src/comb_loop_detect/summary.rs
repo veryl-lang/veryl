@@ -39,12 +39,12 @@ pub(crate) fn with_module_summary_limit<T>(limit: usize, f: impl FnOnce() -> T) 
     f()
 }
 
-pub(super) struct ExpansionBudget {
+pub(crate) struct ExpansionBudget {
     remaining: usize,
 }
 
 impl ExpansionBudget {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         #[cfg(test)]
         let remaining = SUMMARY_LIMIT.get();
         #[cfg(not(test))]
@@ -52,7 +52,7 @@ impl ExpansionBudget {
         Self { remaining }
     }
 
-    pub(super) fn reserve(&mut self, summary: &ModuleCombSummary) -> bool {
+    pub(crate) fn reserve(&mut self, summary: &ModuleCombSummary) -> bool {
         let remaining = (|| {
             let remaining = self.remaining.checked_sub(summary.nodes.len())?;
             let mut remaining = remaining.checked_sub(summary.edges.len())?;
@@ -69,11 +69,11 @@ impl ExpansionBudget {
         remaining.is_some()
     }
 
-    pub(super) fn remaining(&self) -> usize {
+    pub(crate) fn remaining(&self) -> usize {
         self.remaining
     }
 
-    pub(super) fn reserve_dag<K>(&mut self, graph: &super::ssa::DependencyDag<K>) -> bool {
+    pub(crate) fn reserve_dag<K>(&mut self, graph: &super::ssa::DependencyDag<K>) -> bool {
         let cost = graph
             .domains
             .iter()
@@ -86,7 +86,7 @@ impl ExpansionBudget {
         self.reserve_work(cost)
     }
 
-    pub(super) fn reserve_work(&mut self, cost: usize) -> bool {
+    pub(crate) fn reserve_work(&mut self, cost: usize) -> bool {
         let remaining = self.remaining.checked_sub(cost);
         self.remaining = remaining.unwrap_or(0);
         remaining.is_some()
@@ -104,7 +104,7 @@ pub(crate) fn module_summary_work() -> (usize, usize) {
     (INPUT_EDGES.get(), WALKED_EDGES.get())
 }
 
-pub(super) fn compute_module_summary(
+pub(crate) fn compute_module_summary(
     module: &Module,
     graph: &DependencyGraph,
 ) -> ModuleCombSummary {

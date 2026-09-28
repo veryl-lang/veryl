@@ -220,7 +220,7 @@ impl TransferBuilder {
     }
 }
 
-pub(super) fn try_close<K: Copy + Eq + Hash>(
+pub(crate) fn try_close<K: Copy + Eq + Hash>(
     ssa: &mut SsaStore<K>,
     iteration: &BranchState<K>,
     checkpoint: Checkpoint,

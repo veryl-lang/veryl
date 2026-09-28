@@ -16,7 +16,7 @@ struct Invocation<K> {
     mapped: HashMap<usize, usize>,
 }
 
-pub(super) struct Imports<K> {
+pub(crate) struct Imports<K> {
     incoming: HashMap<usize, Vec<Vec<usize>>>,
     identities: HashMap<(usize, usize, usize), usize>,
     equivalent: HashMap<InvocationKey<K>, usize>,
@@ -36,7 +36,7 @@ impl<K> Default for Imports<K> {
 
 impl<K: Copy + Eq + Hash + Ord> Imports<K> {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn inline(
+    pub(crate) fn inline(
         &mut self,
         graph: &Rc<DependencyDag<K>>,
         root: Option<usize>,
@@ -184,14 +184,14 @@ struct InternalNode {
     replication: Option<Replication>,
 }
 
-pub(super) struct Builder<K> {
-    pub(super) graph: DependencyDag<K>,
+pub(crate) struct Builder<K> {
+    pub(crate) graph: DependencyDag<K>,
     interned: HashMap<InternalNode, usize>,
     replicated_sources: HashMap<usize, usize>,
 }
 
 impl<K> Builder<K> {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             graph: DependencyDag {
                 nodes: Vec::new(),
@@ -205,14 +205,14 @@ impl<K> Builder<K> {
         }
     }
 
-    pub(super) fn external(&mut self, key: K) -> usize {
+    pub(crate) fn external(&mut self, key: K) -> usize {
         let node = self.graph.nodes.len();
         self.graph.nodes.push(DependencyDagNode::External(key));
         self.graph.domains.push(Vec::new());
         node
     }
 
-    pub(super) fn internal(
+    pub(crate) fn internal(
         &mut self,
         inputs: Vec<(usize, PositionRelation, PathCondition)>,
         domains: Vec<PositionDomain>,
@@ -221,7 +221,7 @@ impl<K> Builder<K> {
         self.operation(inputs, domains, site, None)
     }
 
-    pub(super) fn replicated(
+    pub(crate) fn replicated(
         &mut self,
         inputs: Vec<(usize, PositionRelation, PathCondition)>,
         domains: Vec<PositionDomain>,
