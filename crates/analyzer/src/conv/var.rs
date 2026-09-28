@@ -220,6 +220,19 @@ impl Conv<&ExpressionIdentifier> for VarPathSelect {
     }
 }
 
+/// Whether `symbol` is declared as a scalar `logic`/`bit` (no width, no
+/// array). A modport member stands for the interface variable behind it.
+fn is_scalar_symbol(symbol: &Symbol) -> bool {
+    let symbol = match &symbol.kind {
+        SymbolKind::ModportVariableMember(x) => match symbol_table::get(x.variable) {
+            Some(x) => x,
+            None => return false,
+        },
+        _ => symbol.clone(),
+    };
+    symbol.kind.get_type().is_some_and(|x| x.is_scalar())
+}
+
 fn conv_expression_identifier(
     context: &mut Context,
     value: &ExpressionIdentifier,
@@ -233,6 +246,20 @@ fn conv_expression_identifier(
     let mut end: Option<(VarSelectOp, ir::Expression)> = None;
 
     context.select_dims.push(0);
+
+    // SV rejects a select on a scalar, and the IR cannot tell `logic` from
+    // `logic<1>` (both carry a width of 1), so the declaration is checked here.
+    if !value.expression_identifier_list.is_empty()
+        && let Ok(symbol) = symbol_table::resolve(value.scoped_identifier.as_ref())
+        && is_scalar_symbol(&symbol.found)
+    {
+        context.insert_error(AnalyzerError::invalid_select(
+            &InvalidSelectKind::Scalar,
+            &token,
+            &[],
+        ));
+        return Err(ir_error!(token));
+    }
 
     for x in &value.expression_identifier_list {
         if end.is_some() {
@@ -298,6 +325,23 @@ fn conv_expression_identifier(
         // following generate hop resolves there; any other node ends the chain.
         current_scope = hop.as_ref().and_then(instance_module_scope);
 
+        // Same scalar rule for a selected member (`s.x[0]` on a scalar `x`).
+        if !x.expression_identifier_list0_list.is_empty()
+            && let Ok(symbol) = symbol_table::resolve_base_path(
+                &generic_path,
+                generic_path.paths.len() - 1,
+                base_token.id,
+            )
+            && is_scalar_symbol(&symbol.found)
+        {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::Scalar,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+
         context
             .select_paths
             .push((path.clone(), generic_path.clone()));
@@ -358,6 +402,20 @@ fn conv_hierarchical_identifier(
 
     context.select_dims.push(0);
 
+    // An assignment target reaches here rather than through
+    // `ExpressionIdentifier`; a select on a scalar is rejected the same way.
+    if !value.hierarchical_identifier_list.is_empty()
+        && let Ok(symbol) = symbol_table::resolve(value.identifier.as_ref())
+        && is_scalar_symbol(&symbol.found)
+    {
+        context.insert_error(AnalyzerError::invalid_select(
+            &InvalidSelectKind::Scalar,
+            &token,
+            &[],
+        ));
+        return Err(ir_error!(token));
+    }
+
     for x in &value.hierarchical_identifier_list {
         if end.is_some() {
             context.insert_error(AnalyzerError::invalid_select(
@@ -387,10 +445,29 @@ fn conv_hierarchical_identifier(
 
     for x in &value.hierarchical_identifier_list0 {
         path.push(x.identifier.identifier_token.token.text);
+        let member_token = x.identifier.identifier_token.token;
         generic_path.paths.push(GenericSymbol {
             base: x.identifier.identifier_token.token,
             arguments: vec![],
         });
+
+        // Same rule for a selected member as an assignment target.
+        if !x.hierarchical_identifier_list0_list.is_empty()
+            && let Ok(symbol) = symbol_table::resolve_base_path(
+                &generic_path,
+                generic_path.paths.len() - 1,
+                member_token.id,
+            )
+            && is_scalar_symbol(&symbol.found)
+        {
+            context.insert_error(AnalyzerError::invalid_select(
+                &InvalidSelectKind::Scalar,
+                &token,
+                &[],
+            ));
+            return Err(ir_error!(token));
+        }
+
         context
             .select_paths
             .push((path.clone(), generic_path.clone()));
