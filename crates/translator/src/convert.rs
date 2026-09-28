@@ -3,7 +3,7 @@ mod types;
 mod util;
 
 use crate::writer::Writer;
-use sv_parser::{NodeEvent, RefNode, SyntaxTree, unwrap_node};
+use sv_parser::{AlwaysKeyword, NodeEvent, RefNode, SyntaxTree, unwrap_node};
 
 /// Visitor signal for `walk_skip`. `Skip` causes the matched node's entire
 /// subtree to be skipped (so a handler can claim a node and the walker won't
@@ -62,6 +62,9 @@ pub struct Converter<'a> {
     pub reports: Vec<UnsupportedReport>,
     /// Reset signal name within the current always_ff block, if any.
     current_reset: Option<String>,
+    /// Generate constructs seen so far in the current scope, which numbers
+    /// unnamed blocks `genblk1`, `genblk2`, ... as SystemVerilog does.
+    generate_count: usize,
 }
 
 impl<'a> Converter<'a> {
@@ -72,6 +75,7 @@ impl<'a> Converter<'a> {
             w: Writer::new(newline),
             reports: Vec::new(),
             current_reset: None,
+            generate_count: 0,
         }
     }
 
@@ -230,6 +234,7 @@ impl<'a> Converter<'a> {
         self.w.newline();
         self.w.indent();
 
+        self.generate_count = 0;
         self.emit_module_items(node);
 
         self.w.dedent();
@@ -405,11 +410,16 @@ impl<'a> Converter<'a> {
     }
 
     fn emit_always(&mut self, node: &RefNode<'a>) {
-        let kw = unwrap_node!(node.clone(), AlwaysKeyword)
-            .map(|i| self.node_text(&i).trim().to_string())
-            .unwrap_or_else(|| "always".to_string());
+        // From the keyword's kind, not its text, which runs on to any comment
+        // that follows it (`always_comb // ...`).
+        let kw = match unwrap_node!(node.clone(), AlwaysKeyword) {
+            Some(RefNode::AlwaysKeyword(AlwaysKeyword::AlwaysComb(_))) => "always_comb",
+            Some(RefNode::AlwaysKeyword(AlwaysKeyword::AlwaysFf(_))) => "always_ff",
+            Some(RefNode::AlwaysKeyword(AlwaysKeyword::AlwaysLatch(_))) => "always_latch",
+            _ => "always",
+        };
 
-        match kw.as_str() {
+        match kw {
             "always_comb" => {
                 self.w.str("always_comb {");
                 self.w.newline();
@@ -466,7 +476,10 @@ impl<'a> Converter<'a> {
     }
 
     fn emit_always_body(&mut self, node: &RefNode<'a>) {
-        if let Some(s) = unwrap_node!(node.clone(), StatementOrNull) {
+        // The block's own statement: the first StatementOrNull would be the
+        // first statement inside a `begin ... end`, and a bare `always_comb
+        // a = b;` has none.
+        if let Some(s) = unwrap_node!(node.clone(), Statement) {
             self.emit_statement(&s);
         }
     }
@@ -1123,8 +1136,11 @@ impl<'a> Converter<'a> {
             .unwrap_or_default();
         // Collect direct GenerateBlock children.
         let blocks = self.collect_direct(node, |x| matches!(x, RefNode::GenerateBlock(_)));
+        let label = self.generate_label(blocks.first());
         self.w.str("if ");
         self.w.str(&cond);
+        self.w.str(" :");
+        self.w.str(&label);
         self.w.str(" {");
         self.w.newline();
         self.w.indent();
@@ -1163,15 +1179,19 @@ impl<'a> Converter<'a> {
         self.w.str(&var);
         self.w.str(" in ");
         self.w.str(&init);
+        let block = self
+            .collect_direct(node, |x| matches!(x, RefNode::GenerateBlock(_)))
+            .into_iter()
+            .next();
+        let label = self.generate_label(block.as_ref());
         self.w.str("..");
         self.w.str(&limit);
+        self.w.str(" :");
+        self.w.str(&label);
         self.w.str(" {");
         self.w.newline();
         self.w.indent();
-        if let Some(b) = self
-            .collect_direct(node, |x| matches!(x, RefNode::GenerateBlock(_)))
-            .first()
-        {
+        if let Some(b) = &block {
             self.emit_generate_block(b);
         }
         self.w.dedent();
@@ -1192,11 +1212,40 @@ impl<'a> Converter<'a> {
         None
     }
 
+    /// Veryl needs a label on every generate `if`/`for`. Use the block's own
+    /// (`begin : name`) and otherwise the name SystemVerilog gives an unnamed
+    /// block, `genblk<n>` for the n-th generate construct in the scope.
+    fn generate_label(&mut self, block: Option<&RefNode<'a>>) -> String {
+        self.generate_count += 1;
+        let mut label = None;
+        if let Some(block) = block {
+            walk_skip(block.clone(), |n| match n {
+                // Labels of blocks nested inside this one.
+                RefNode::GenerateItem(_) => Walk::Skip,
+                RefNode::GenerateBlockIdentifier(_) => {
+                    // The identifier alone, not a comment after it.
+                    label.get_or_insert_with(|| {
+                        let text = self.node_text(n).trim_start();
+                        let end = text
+                            .find(|c: char| c.is_whitespace() || c == '/')
+                            .unwrap_or(text.len());
+                        text[..end].to_string()
+                    });
+                    Walk::Skip
+                }
+                _ => Walk::Continue,
+            });
+        }
+        label.unwrap_or_else(|| format!("genblk{}", self.generate_count))
+    }
+
     fn emit_generate_block(&mut self, node: &RefNode<'a>) {
         // Delegate to the same pre-order dispatcher used at module level. It
         // walks events and skips matched subtrees, so nested generates are
-        // handled correctly.
+        // handled correctly. A block is a new scope for `genblk` numbering.
+        let outer_count = std::mem::take(&mut self.generate_count);
         self.emit_module_items(node);
+        self.generate_count = outer_count;
     }
 
     fn emit_package(&mut self, node: &RefNode<'a>) {
