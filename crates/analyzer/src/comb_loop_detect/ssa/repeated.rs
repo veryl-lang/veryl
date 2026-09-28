@@ -18,7 +18,7 @@ use daggy::petgraph::visit::EdgeRef;
 struct TransferNode {
     input: Option<VersionId>,
     domains: Vec<PositionDomain>,
-    replication: Option<isize>,
+    replication: Option<Replication>,
 }
 
 type TransferGraph = Graph<TransferNode, PositionRelation>;
@@ -133,10 +133,10 @@ impl TransferBuilder {
                 Version::Replicated {
                     source,
                     domain,
-                    stride,
+                    replication,
                 } => {
                     self.graph[node].domains.push(*domain);
-                    self.graph[node].replication = Some(*stride);
+                    self.graph[node].replication = Some(*replication);
                     let source = self.version(ssa, *source, start, import_work)?;
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
@@ -180,7 +180,7 @@ impl TransferBuilder {
                             input: None,
                             domains: graph.domains[child].clone(),
                             replication: match graph.nodes[child] {
-                                DependencyDagNode::Replicated { stride } => Some(stride),
+                                DependencyDagNode::Replicated { replication } => Some(replication),
                                 _ => None,
                             },
                         });
@@ -330,11 +330,12 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
         .collect::<Vec<_>>();
     let mut stable = vec![PositionRelation::default(); components.len()];
     for node in graph.node_indices() {
-        if graph[node].replication.is_some() {
-            // Replication changes packed coordinates if it participates in
+        if let Some(replication) = graph[node].replication {
+            // Replication changes its axis's coordinates if it participates in
             // an actual runtime recurrence. Otherwise keep it as an operation;
             // its finite repetitions are not procedural feedback.
-            stable[component_of[node.index()]].packed = None;
+            let relation = &mut stable[component_of[node.index()]];
+            *relation = replication.forget_position(*relation);
         }
     }
     for edge in graph.edge_references() {
@@ -388,11 +389,11 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
                         .collect(),
                 )
             });
-            mapped[node.index()] = if let Some(stride) = graph[node].replication {
+            mapped[node.index()] = if let Some(replication) = graph[node].replication {
                 let alternatives = graph[node]
                     .domains
                     .iter()
-                    .map(|&domain| ssa.replicated(value, domain, stride))
+                    .map(|&domain| ssa.replicated(value, domain, replication))
                     .collect();
                 ssa.phi(alternatives)
             } else {
@@ -508,69 +509,79 @@ mod tests {
     }
 
     #[test]
-    fn repeated_transfer_retains_acyclic_packed_replication_at_scale() {
+    fn repeated_transfer_retains_acyclic_replication_at_scale() {
         for width in [8, 1 << 30] {
-            for imported in [false, true] {
-                let mut ssa = SsaStore::default();
-                let input = ssa.read("input");
-                let domain = PositionDomain {
-                    array_start: 1,
-                    array_length: 1,
-                    packed_start: 0,
-                    packed_length: width,
-                };
-                let checkpoint = ssa.checkpoint();
-                let value = if imported {
-                    let mut callee = SsaStore::default();
-                    let source = callee.read("source");
-                    let source = callee.projected(
-                        source,
-                        PositionDomain {
+            for replication in [Replication::Packed(2), Replication::Array(2)] {
+                for imported in [false, true] {
+                    let mut ssa = SsaStore::default();
+                    let input = ssa.read("input");
+                    let domain = match replication {
+                        Replication::Packed(_) => PositionDomain {
+                            array_start: 1,
+                            array_length: 1,
+                            packed_start: 0,
+                            packed_length: width,
+                        },
+                        Replication::Array(_) => PositionDomain {
+                            array_start: 0,
+                            array_length: width,
+                            packed_start: 1,
+                            packed_length: 1,
+                        },
+                    };
+                    let seed_domain = match replication {
+                        Replication::Packed(_) => PositionDomain {
                             packed_length: 2,
                             ..domain
                         },
-                    );
-                    let result = callee.replicated(source, domain, 2);
-                    let dag = callee.dependency_dag(&[result], |_| false);
-                    let root = dag.roots[0];
-                    ssa.imported(
-                        Rc::new(dag),
-                        root,
-                        HashMap::from_iter([(
-                            "source",
-                            vec![(input, PositionRelation::default())],
-                        )])
-                        .into(),
-                        Rc::default(),
-                    )
-                } else {
-                    let source = ssa.projected(
-                        input,
-                        PositionDomain {
-                            packed_length: 2,
+                        Replication::Array(_) => PositionDomain {
+                            array_length: 2,
                             ..domain
                         },
-                    );
-                    ssa.replicated(source, domain, 2)
-                };
-                ssa.bind("value", value);
-                let iteration = ssa.capture_and_rollback(checkpoint);
-                let before = ssa.versions.len();
-                ssa.close_repeated_transfer(&iteration, checkpoint, false, |_| Some(domain));
-                assert!(ssa.versions.len() - before < 20);
-                let value = ssa.read("value");
-                let dag = ssa.dependency_dag(&[value], |_| false);
-                assert!(dag.nodes.len() < 10);
-                let replicas = dag
-                    .nodes
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(node, kind)| {
-                        matches!(kind, DependencyDagNode::Replicated { stride: 2 }).then_some(node)
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(replicas.len(), 1);
-                assert_eq!(dag.domains[replicas[0]], [domain]);
+                    };
+                    let checkpoint = ssa.checkpoint();
+                    let value = if imported {
+                        let mut callee = SsaStore::default();
+                        let source = callee.read("source");
+                        let source = callee.projected(source, seed_domain);
+                        let result = callee.replicated(source, domain, replication);
+                        let dag = callee.dependency_dag(&[result], |_| false);
+                        let root = dag.roots[0];
+                        ssa.imported(
+                            Rc::new(dag),
+                            root,
+                            HashMap::from_iter([(
+                                "source",
+                                vec![(input, PositionRelation::default())],
+                            )])
+                            .into(),
+                            Rc::default(),
+                        )
+                    } else {
+                        let source = ssa.projected(input, seed_domain);
+                        ssa.replicated(source, domain, replication)
+                    };
+                    ssa.bind("value", value);
+                    let iteration = ssa.capture_and_rollback(checkpoint);
+                    let before = ssa.versions.len();
+                    ssa.close_repeated_transfer(&iteration, checkpoint, false, |_| Some(domain));
+                    assert!(ssa.versions.len() - before < 20);
+                    let value = ssa.read("value");
+                    let dag = ssa.dependency_dag(&[value], |_| false);
+                    assert!(dag.nodes.len() < 10);
+                    let replicas = dag
+                        .nodes
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(node, kind)| {
+                            matches!(kind, DependencyDagNode::Replicated { replication: actual }
+                            if *actual == replication)
+                            .then_some(node)
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(replicas.len(), 1);
+                    assert_eq!(dag.domains[replicas[0]], [domain]);
+                }
             }
         }
     }

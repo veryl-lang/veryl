@@ -7,7 +7,7 @@ use super::region::{
 };
 use super::ssa::{
     BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
-    PositionDomain, PositionRelation, SsaStore, VersionId,
+    PositionDomain, PositionRelation, Replication, SsaStore, VersionId,
 };
 use crate::conv::Context;
 use crate::ir::VarId;
@@ -1588,8 +1588,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         ..
                     }) => unreachable!("call-frame storage is not a visible DAG source"),
                     DependencyDagNode::Internal => DependencyDagNode::Internal,
-                    DependencyDagNode::Replicated { stride } => {
-                        DependencyDagNode::Replicated { stride }
+                    DependencyDagNode::Replicated { replication } => {
+                        DependencyDagNode::Replicated { replication }
                     }
                 })
                 .collect(),
@@ -3476,7 +3476,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 let repeated = self.ssa.replicated(
                                     part,
                                     position_domain(requested_array, total),
-                                    stride,
+                                    Replication::Packed(stride),
                                 );
                                 reads.push(
                                     repeated,
@@ -3546,6 +3546,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     } else {
                         1
                     };
+                    let Some(repeated_length) = item_length.checked_mul(count) else {
+                        return ExpressionSources::whole(self.eval_expr(expression));
+                    };
                     match project_repeated_span(
                         requested_array.start,
                         requested_array.length,
@@ -3580,7 +3583,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             reads.extend(item);
                         }
                         RepeatedProjection::Multiple => {
-                            let mut item = self.eval_expr_requested_in(
+                            let item = self.eval_expr_requested_in(
                                 value,
                                 ArraySpan {
                                     start: 0,
@@ -3590,14 +3593,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 context.width,
                                 &item_projection,
                             );
-                            item.forget_array_position();
+                            let Some(item) = self.replicate_array_sources(
+                                item,
+                                item_length,
+                                ArraySpan {
+                                    start: cursor,
+                                    length: repeated_length,
+                                },
+                                requested,
+                                &item_projection,
+                            ) else {
+                                return ExpressionSources::whole(self.eval_expr(expression));
+                            };
                             reads.extend(item);
                         }
                     }
-                    let Some(item_extent) = item_length.checked_mul(count) else {
-                        return ExpressionSources::whole(self.eval_expr(expression));
-                    };
-                    let Some(next) = cursor.checked_add(item_extent) else {
+                    let Some(next) = cursor.checked_add(repeated_length) else {
                         return ExpressionSources::whole(self.eval_expr(expression));
                     };
                     cursor = next;
@@ -3644,7 +3655,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             reads.extend(item);
                         }
                         RepeatedProjection::Multiple => {
-                            let mut item = self.eval_expr_requested_in(
+                            let item = self.eval_expr_requested_in(
                                 default,
                                 ArraySpan {
                                     start: 0,
@@ -3654,7 +3665,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 context.width,
                                 &item_projection,
                             );
-                            item.forget_array_position();
+                            let Some(item) = self.replicate_array_sources(
+                                item,
+                                item_length,
+                                ArraySpan {
+                                    start: cursor,
+                                    length: remaining,
+                                },
+                                requested,
+                                &item_projection,
+                            ) else {
+                                return ExpressionSources::whole(self.eval_expr(expression));
+                            };
                             reads.extend(item);
                         }
                     }
@@ -4674,6 +4696,52 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         ExpressionSources {
             sources: vec![(version, PositionRelation::default())],
         }
+    }
+
+    fn replicate_array_sources(
+        &mut self,
+        sources: ExpressionSources,
+        item_length: usize,
+        output: ArraySpan,
+        packed: PackedSpan,
+        projection: &ProjectionContext,
+    ) -> Option<ExpressionSources> {
+        let stride = isize::try_from(item_length).ok()?;
+        let offset = isize::try_from(output.start).ok()?;
+        let source = self.expression_projection_source(sources, projection);
+        // Preserve the element's internal positions before repeating it. A
+        // bounded translation retains holes in nested literals without
+        // expanding the copies or broadcasting into adjacent literal items.
+        let source = self.ssa.projected(
+            source,
+            position_domain(
+                ArraySpan {
+                    start: 0,
+                    length: item_length,
+                },
+                packed,
+            ),
+        );
+        let repeated = self.ssa.replicated(
+            source,
+            position_domain(
+                ArraySpan {
+                    start: 0,
+                    length: output.length,
+                },
+                packed,
+            ),
+            Replication::Array(stride),
+        );
+        Some(ExpressionSources {
+            sources: vec![(
+                repeated,
+                PositionRelation {
+                    array: Some(offset),
+                    packed: Some(0),
+                },
+            )],
+        })
     }
 
     fn expression_projection_source(

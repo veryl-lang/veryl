@@ -165,8 +165,8 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
                     .filter_map(|input| invocation.mapped.get(input).copied())
                     .collect(),
             });
-            let node = if let DependencyDagNode::Replicated { stride } = graph.nodes[child] {
-                builder.replicated(inputs, graph.domains[child].clone(), site, stride)
+            let node = if let DependencyDagNode::Replicated { replication } = graph.nodes[child] {
+                builder.replicated(inputs, graph.domains[child].clone(), site, replication)
             } else {
                 builder.internal(inputs, graph.domains[child].clone(), site)
             };
@@ -181,7 +181,7 @@ struct InternalNode {
     inputs: Vec<(usize, PositionRelation, PathCondition)>,
     domains: Vec<PositionDomain>,
     site: Option<DefinitionSite<usize>>,
-    replication: Option<isize>,
+    replication: Option<Replication>,
 }
 
 pub(super) struct Builder<K> {
@@ -226,9 +226,9 @@ impl<K> Builder<K> {
         inputs: Vec<(usize, PositionRelation, PathCondition)>,
         domains: Vec<PositionDomain>,
         site: Option<DefinitionSite<usize>>,
-        stride: isize,
+        replication: Replication,
     ) -> usize {
-        self.operation(inputs, domains, site, Some(stride))
+        self.operation(inputs, domains, site, Some(replication))
     }
 
     fn operation(
@@ -236,7 +236,7 @@ impl<K> Builder<K> {
         mut inputs: Vec<(usize, PositionRelation, PathCondition)>,
         mut domains: Vec<PositionDomain>,
         mut site: Option<DefinitionSite<usize>>,
-        mut replication: Option<isize>,
+        mut replication: Option<Replication>,
     ) -> usize {
         inputs.sort_unstable();
         inputs.dedup();
@@ -264,14 +264,16 @@ impl<K> Builder<K> {
         // Repeating complete adjacent blocks of a repetition is one larger
         // repetition. Retain clipping, array coordinates and diagnostic sites;
         // use the recorded seed instead of scanning predecessor paths.
-        if let Some(stride) = replication
+        if let Some(Replication::Packed(stride)) = replication
             && site.is_none()
             && let [(source, relation, condition)] = inputs.as_slice()
             && *relation == PositionRelation::default()
             && condition.is_unconditional()
             && let Some(&seed) = self.replicated_sources.get(source)
             && !self.graph.sites.contains_key(source)
-            && let DependencyDagNode::Replicated { stride: inner } = self.graph.nodes[*source]
+            && let DependencyDagNode::Replicated {
+                replication: Replication::Packed(inner),
+            } = self.graph.nodes[*source]
             && !self.graph.domains[seed].is_empty()
             && self.graph.domains[seed].iter().all(|domain| {
                 domain
@@ -289,7 +291,7 @@ impl<K> Builder<K> {
             && inner_domain.packed_length.is_multiple_of(inner as usize)
         {
             inputs[0].0 = seed;
-            replication = Some(inner);
+            replication = Some(Replication::Packed(inner));
         }
 
         let key = InternalNode {
@@ -303,7 +305,7 @@ impl<K> Builder<K> {
         }
         let node = self.graph.nodes.len();
         self.graph.nodes.push(match replication {
-            Some(stride) => DependencyDagNode::Replicated { stride },
+            Some(replication) => DependencyDagNode::Replicated { replication },
             None => DependencyDagNode::Internal,
         });
         self.graph.domains.push(key.domains.clone());
@@ -346,9 +348,9 @@ mod tests {
         graph: &DependencyDag<u8>,
         choices: &PathCondition,
     ) -> Vec<Vec<HashSet<Point>>> {
-        let mut values = vec![vec![HashSet::default(); 8]; graph.nodes.len()];
+        let mut values = vec![vec![HashSet::default(); 16]; graph.nodes.len()];
         for (node, kind) in graph.nodes.iter().enumerate() {
-            for array in 0..2 {
+            for array in 0..4 {
                 for bit in 0..4 {
                     if !graph.domains[node].is_empty()
                         && !graph.domains[node].iter().any(|domain| {
@@ -368,7 +370,7 @@ mod tests {
                             continue;
                         }
                         assert!(edge.source < node);
-                        for source_array in 0..2 {
+                        for source_array in 0..4 {
                             for source_bit in 0..4 {
                                 if edge.relation.array.is_none_or(|offset| {
                                     source_array as isize + offset == array as isize
@@ -382,11 +384,19 @@ mod tests {
                             }
                         }
                     }
-                    if let DependencyDagNode::Replicated { stride } = kind
-                        && let Some(previous) = bit.checked_sub(*stride as usize)
-                    {
-                        let sources = values[node][array * 4 + previous].clone();
-                        values[node][array * 4 + bit].extend(sources);
+                    if let DependencyDagNode::Replicated { replication } = kind {
+                        let previous = match replication {
+                            Replication::Array(stride) => array
+                                .checked_sub(*stride as usize)
+                                .map(|previous| previous * 4 + bit),
+                            Replication::Packed(stride) => bit
+                                .checked_sub(*stride as usize)
+                                .map(|previous| array * 4 + previous),
+                        };
+                        if let Some(previous) = previous {
+                            let sources = values[node][previous].clone();
+                            values[node][array * 4 + bit].extend(sources);
+                        }
                     }
                 }
             }
@@ -429,7 +439,11 @@ mod tests {
                 let node = raw.nodes.len();
                 raw.nodes.push(if stage % 4 == 0 {
                     DependencyDagNode::Replicated {
-                        stride: 1 + (stage / 4 % 2) as isize,
+                        replication: if stage % 8 == 0 {
+                            Replication::Array(1)
+                        } else {
+                            Replication::Packed(2)
+                        },
                     }
                 } else {
                     DependencyDagNode::Internal
@@ -543,17 +557,23 @@ mod tests {
                     }]
                 };
                 let seed = builder.internal(identity(input), domain(seed_start, 1), None);
-                let inner = builder.replicated(identity(seed), domain(0, 2), None, stride);
+                let inner = builder.replicated(
+                    identity(seed),
+                    domain(0, 2),
+                    None,
+                    Replication::Packed(stride),
+                );
                 let alias = builder.internal(identity(inner), domain(0, 2), None);
-                let outer = builder.replicated(identity(alias), domain(0, 4), None, 2);
+                let outer =
+                    builder.replicated(identity(alias), domain(0, 4), None, Replication::Packed(2));
                 assert_eq!(alias, inner);
                 assert_eq!(
                     outer,
-                    builder.replicated(identity(alias), domain(0, 4), None, 2)
+                    builder.replicated(identity(alias), domain(0, 4), None, Replication::Packed(2))
                 );
                 builder.graph.roots.push(Some(outer));
                 let actual = expanded_sources(&builder.graph, &PathCondition::default());
-                for array in 0..2 {
+                for array in 0..4 {
                     for bit in 0usize..4 {
                         let expected = if array == 1
                             && seed_start < 2

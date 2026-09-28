@@ -1227,18 +1227,19 @@ fn add_dependency_dag(
         .collect::<Vec<_>>();
 
     for (index, node) in dag.nodes.iter().enumerate() {
-        if let DependencyDagNode::Replicated { stride } = node
+        if let DependencyDagNode::Replicated { replication } = node
             && let Some(node) = mapped[index]
         {
             // A bounded positive translation represents every copy without
             // expanding bits, repetitions or paths through function imports.
+            let relation = replication.relation();
             add_dependency_edge(
                 graph,
                 node,
                 node,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(*stride),
+                    array: relation.array,
+                    packed: relation.packed,
                 }),
             );
         }
