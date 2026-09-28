@@ -721,9 +721,7 @@ impl AssignDestination {
                     table.insert_assigned(self.id, index, decl);
                 }
             } else if let Some(total_array) = variable.r#type.total_array() {
-                for i in 0..total_array {
-                    table.insert_assigned(self.id, i, decl);
-                }
+                table.insert_assigned_whole(self.id, total_array, decl);
             }
         }
     }
@@ -735,9 +733,7 @@ impl AssignDestination {
                     table.insert_assigned_comb(self.id, index, decl);
                 }
             } else if let Some(total_array) = variable.r#type.total_array() {
-                for i in 0..total_array {
-                    table.insert_assigned_comb(self.id, i, decl);
-                }
+                table.insert_assigned_comb_whole(self.id, total_array, decl);
             }
         }
     }

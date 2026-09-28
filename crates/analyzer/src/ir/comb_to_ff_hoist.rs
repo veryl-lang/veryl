@@ -45,14 +45,10 @@ pub fn plan_hoists(
         }
     }
 
-    let mut plans = Vec::new();
-    for ((var_id, var_index), entry) in &ff_table.table {
-        let Some(comb_decl_idx) = entry.assigned_comb else {
-            continue;
-        };
-        let refered: Vec<_> = ff_table.refered(*var_id, *var_index).collect();
+    let plan = |var_id: VarId, var_index: usize, comb_decl_idx: usize| {
+        let refered: Vec<_> = ff_table.refered(var_id, var_index).collect();
         if refered.is_empty() {
-            continue;
+            return None;
         }
         // Direct hoist criteria: every reader is from an always_ff block
         // and they all share a single decl index.
@@ -61,33 +57,46 @@ pub fn plan_hoists(
             .filter_map(|(d, _, _, from_ff)| if *from_ff { Some(*d) } else { None })
             .collect();
         if reader_decls.len() != refered.len() {
-            continue;
+            return None;
         }
         reader_decls.sort_unstable();
         reader_decls.dedup();
         if reader_decls.len() != 1 {
-            continue;
+            return None;
         }
         let ff_decl_idx = reader_decls[0];
         if !ff_decls.contains_key(&ff_decl_idx) {
-            continue;
+            return None;
         }
-        let var = match variables.get(var_id) {
-            Some(v) => v,
-            None => continue,
-        };
+        let var = variables.get(&var_id)?;
         // Clock-typed lets must stay in comb scope: the simulator's
         // derived-clock partial-settle re-runs them per step toggle.
         if var.r#type.is_clock() {
-            continue;
+            return None;
         }
-        plans.push(HoistPlan {
-            var_id: *var_id,
-            var_index: *var_index,
+        Some(HoistPlan {
+            var_id,
+            var_index,
             comb_decl_idx,
             ff_decl_idx,
             var_kind: var.kind,
-        });
+        })
+    };
+
+    let mut plans = Vec::new();
+    for ((var_id, var_index), entry) in &ff_table.table {
+        if let Some(comb_decl_idx) = entry.assigned_comb {
+            plans.extend(plan(*var_id, *var_index, comb_decl_idx));
+        }
+    }
+    for (var_id, w) in &ff_table.whole_assigned {
+        if let Some(comb_decl_idx) = w.assigned_comb {
+            for var_index in 0..w.len {
+                if !ff_table.table.contains_key(&(*var_id, var_index)) {
+                    plans.extend(plan(*var_id, var_index, comb_decl_idx));
+                }
+            }
+        }
     }
     plans
 }

@@ -10,8 +10,7 @@ use crate::ir::write_count::{UnsafeSelfReads, unsafe_self_reads};
 /// fall back to per-decl aggregates).
 pub type AssignTarget = (VarId, Option<usize>, BigUint);
 
-/// `(decl_index, assign_target, src_read_mask, from_ff)`: see
-/// [`FfTableEntry::refered`].
+/// One entry of [`FfTableEntry::refered`].
 pub type Refered = (usize, Option<AssignTarget>, BigUint, bool);
 
 /// A reference through an index that does not evaluate, which reaches every
@@ -38,6 +37,72 @@ pub struct FfTableEntry {
     pub assigned_comb: Option<usize>,
 }
 
+/// Writes through an index that does not evaluate, which reach every element
+/// below `len`. An element with an entry of its own has them folded into it;
+/// this describes every other element.
+#[derive(Clone, Debug, Default)]
+pub struct WholeAssigned {
+    pub len: usize,
+    pub assigned: Option<usize>,
+    pub multi_assigned: bool,
+    pub assigned_comb: Option<usize>,
+    is_ff: bool,
+}
+
+fn record_assign(assigned: &mut Option<usize>, multi_assigned: &mut bool, decl: usize) {
+    if assigned.is_some_and(|d| d != decl) {
+        *multi_assigned = true;
+    }
+    *assigned = Some(decl);
+}
+
+/// `index` is `None` for an element no reference names by index.
+fn classify<'a>(
+    assigned_decl: usize,
+    multi_assigned: bool,
+    id: VarId,
+    index: Option<usize>,
+    readable: bool,
+    mut refs: impl Iterator<Item = &'a Refered>,
+) -> bool {
+    // FF classification rules (strict NBA semantics):
+    // - A variable may be treated as comb (ff_opt) only if no always_ff
+    //   block reads it (cross-block NBA races would be violated).
+    // - always_comb / continuous assigns re-evaluate after NBA in SV,
+    //   so they correctly see new FF values; ff_opt is safe for them.
+    // - Within the same always_ff (assigned_decl), a self-reference
+    //   is safe while it still reads what the block started with
+    //   (see `write_count`); every other read must see old values.
+    refs.any(|(decl, assign_target, _src_mask, from_ff)| {
+        if !from_ff {
+            return false;
+        }
+        if *decl != assigned_decl {
+            return true;
+        }
+        // With a second writing block the exemption cannot hold:
+        // this read may be of a bit that block wrote, and `refered`
+        // records only the array index, not which bits.
+        if multi_assigned {
+            return true;
+        }
+        match assign_target {
+            Some((target_id, target_idx, _)) => {
+                if *target_id != id {
+                    return true;
+                }
+                // A dynamic index is conservative → FF.
+                match target_idx {
+                    Some(idx) if Some(*idx) == index => !readable,
+                    Some(_) => true,
+                    None => true,
+                }
+            }
+            None => true,
+        }
+    })
+}
+
 impl FfTableEntry {
     fn update_is_ff(
         &mut self,
@@ -46,48 +111,15 @@ impl FfTableEntry {
         whole: &[WholeRefered],
     ) {
         if let Some(assigned_decl) = self.assigned {
-            let readable = !unsafe_reads.contains(&(assigned_decl, self_key.0, self_key.1));
-            let multi_assigned = self.multi_assigned;
-            // FF classification rules (strict NBA semantics):
-            // - A variable may be treated as comb (ff_opt) only if no always_ff
-            //   block reads it (cross-block NBA races would be violated).
-            // - always_comb / continuous assigns re-evaluate after NBA in SV,
-            //   so they correctly see new FF values; ff_opt is safe for them.
-            // - Within the same always_ff (assigned_decl), a self-reference
-            //   is safe while it still reads what the block started with
-            //   (see `write_count`); every other read must see old values.
-            self.is_ff = self
-                .refered
-                .iter()
-                .chain(whole_refs(whole, self_key.1))
-                .any(|(decl, assign_target, _src_mask, from_ff)| {
-                    if !from_ff {
-                        return false;
-                    }
-                    if *decl != assigned_decl {
-                        return true;
-                    }
-                    // With a second writing block the exemption cannot hold:
-                    // this read may be of a bit that block wrote, and `refered`
-                    // records only the array index, not which bits.
-                    if multi_assigned {
-                        return true;
-                    }
-                    match assign_target {
-                        Some((target_id, target_idx, _)) => {
-                            if *target_id != self_key.0 {
-                                return true;
-                            }
-                            // A dynamic index is conservative → FF.
-                            match target_idx {
-                                Some(idx) if *idx == self_key.1 => !readable,
-                                Some(_) => true,
-                                None => true,
-                            }
-                        }
-                        None => true,
-                    }
-                });
+            let readable = !unsafe_reads.contains(assigned_decl, self_key.0, self_key.1);
+            self.is_ff = classify(
+                assigned_decl,
+                self.multi_assigned,
+                self_key.0,
+                Some(self_key.1),
+                readable,
+                self.refered.iter().chain(whole_refs(whole, self_key.1)),
+            );
         }
     }
 }
@@ -106,14 +138,29 @@ pub struct FfTable {
     /// array read at several runtime indices would otherwise cost readers x
     /// elements entries.
     pub whole_refered: HashMap<VarId, Vec<WholeRefered>>,
+    /// The write side of `whole_refered`.
+    pub whole_assigned: HashMap<VarId, WholeAssigned>,
+    /// The indices in `table` per variable, which a later write through an
+    /// unevaluated index has to reach.
+    indices: HashMap<VarId, Vec<usize>>,
+    /// Record every access per element: the layout the compact form is
+    /// checked against.
+    per_element: bool,
 }
 
 impl FfTable {
+    pub fn per_element() -> Self {
+        Self {
+            per_element: true,
+            ..Default::default()
+        }
+    }
+
     /// `decls` must be the declarations this table was gathered from: what
     /// they write before a self-reference reads decides whether it needs the
     /// register.
     pub fn update_is_ff(&mut self, decls: &[Declaration], context: &mut Context) {
-        let unsafe_reads = unsafe_self_reads(decls, context);
+        let unsafe_reads = unsafe_self_reads(decls, context, self.per_element);
         for (key, entry) in self.table.iter_mut() {
             let whole = self
                 .whole_refered
@@ -121,6 +168,27 @@ impl FfTable {
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             entry.update_is_ff(*key, &unsafe_reads, whole);
+        }
+        for (id, w) in self.whole_assigned.iter_mut() {
+            w.is_ff = false;
+            let Some(assigned_decl) = w.assigned else {
+                continue;
+            };
+            let whole = self
+                .whole_refered
+                .get(id)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            // An element an assign target names has an entry of its own, so
+            // the rest are never the target of a self-reference.
+            w.is_ff = classify(
+                assigned_decl,
+                w.multi_assigned,
+                *id,
+                None,
+                true,
+                whole.iter().map(|(_, r)| r),
+            );
         }
     }
 
@@ -140,6 +208,32 @@ impl FfTable {
         own.iter().chain(whole_refs(whole, index))
     }
 
+    /// `(assigned, multi_assigned, assigned_comb)` of element `index` of `id`.
+    pub fn writers(&self, id: VarId, index: usize) -> (Option<usize>, bool, Option<usize>) {
+        if let Some(x) = self.table.get(&(id, index)) {
+            (x.assigned, x.multi_assigned, x.assigned_comb)
+        } else if let Some(w) = self.whole(id, index) {
+            (w.assigned, w.multi_assigned, w.assigned_comb)
+        } else {
+            (None, false, None)
+        }
+    }
+
+    pub fn has_ff_writer(&self, id: VarId) -> bool {
+        self.whole_assigned
+            .get(&id)
+            .is_some_and(|w| w.assigned.is_some())
+            || self.indices.get(&id).is_some_and(|indices| {
+                indices
+                    .iter()
+                    .any(|i| self.table[&(id, *i)].assigned.is_some())
+            })
+    }
+
+    fn whole(&self, id: VarId, index: usize) -> Option<&WholeAssigned> {
+        self.whole_assigned.get(&id).filter(|w| index < w.len)
+    }
+
     /// Force all always_ff-assigned variables to FF, disabling the
     /// assign_target refinement. Used by --disable-ff-opt for debugging.
     pub fn force_all_ff(&mut self) {
@@ -148,14 +242,43 @@ impl FfTable {
                 entry.is_ff = true;
             }
         }
+        for w in self.whole_assigned.values_mut() {
+            if w.assigned.is_some() {
+                w.is_ff = true;
+            }
+        }
     }
 
     pub fn is_ff(&self, id: VarId, index: usize) -> bool {
         if let Some(x) = self.table.get(&(id, index)) {
             x.is_ff
+        } else if let Some(w) = self.whole(id, index) {
+            w.is_ff
         } else {
             false
         }
+    }
+
+    /// The entry of element `index`, created with what the writes through an
+    /// unevaluated index have recorded for it so far.
+    fn entry(&mut self, id: VarId, index: usize) -> &mut FfTableEntry {
+        let Self {
+            table,
+            whole_assigned,
+            indices,
+            ..
+        } = self;
+        table.entry((id, index)).or_insert_with(|| {
+            indices.entry(id).or_default().push(index);
+            let w = whole_assigned.get(&id).filter(|w| index < w.len);
+            FfTableEntry {
+                assigned: w.and_then(|w| w.assigned),
+                multi_assigned: w.is_some_and(|w| w.multi_assigned),
+                refered: vec![],
+                is_ff: false,
+                assigned_comb: w.and_then(|w| w.assigned_comb),
+            }
+        })
     }
 
     pub fn insert_refered(
@@ -167,19 +290,9 @@ impl FfTable {
         src_read_mask: BigUint,
         from_ff: bool,
     ) {
-        self.table
-            .entry((id, index))
-            .and_modify(|x| {
-                x.refered
-                    .push((decl, assign_target.clone(), src_read_mask.clone(), from_ff))
-            })
-            .or_insert_with(|| FfTableEntry {
-                assigned: None,
-                multi_assigned: false,
-                refered: vec![(decl, assign_target, src_read_mask, from_ff)],
-                is_ff: false,
-                assigned_comb: None,
-            });
+        self.entry(id, index)
+            .refered
+            .push((decl, assign_target, src_read_mask, from_ff));
     }
 
     /// A reference to every element below `total_array` of `id`.
@@ -192,6 +305,19 @@ impl FfTable {
         src_read_mask: BigUint,
         from_ff: bool,
     ) {
+        if self.per_element {
+            for i in 0..total_array {
+                self.insert_refered(
+                    id,
+                    i,
+                    decl,
+                    assign_target.clone(),
+                    src_read_mask.clone(),
+                    from_ff,
+                );
+            }
+            return;
+        }
         if total_array == 0 {
             return;
         }
@@ -202,34 +328,66 @@ impl FfTable {
     }
 
     pub fn insert_assigned(&mut self, id: VarId, index: usize, decl: usize) {
-        self.table
-            .entry((id, index))
-            .and_modify(|x| {
-                if x.assigned.is_some_and(|d| d != decl) {
-                    x.multi_assigned = true;
-                }
-                x.assigned = Some(decl);
-            })
-            .or_insert(FfTableEntry {
-                assigned: Some(decl),
-                multi_assigned: false,
-                refered: vec![],
-                is_ff: false,
-                assigned_comb: None,
-            });
+        let entry = self.entry(id, index);
+        record_assign(&mut entry.assigned, &mut entry.multi_assigned, decl);
     }
 
     pub fn insert_assigned_comb(&mut self, id: VarId, index: usize, decl: usize) {
-        self.table
-            .entry((id, index))
-            .and_modify(|x| x.assigned_comb = Some(decl))
-            .or_insert(FfTableEntry {
-                assigned: None,
-                multi_assigned: false,
-                refered: vec![],
-                is_ff: false,
-                assigned_comb: Some(decl),
-            });
+        self.entry(id, index).assigned_comb = Some(decl);
+    }
+
+    /// A write to every element below `total_array` of `id`.
+    pub fn insert_assigned_whole(&mut self, id: VarId, total_array: usize, decl: usize) {
+        if !self.whole_fits(id, total_array) {
+            for i in 0..total_array {
+                self.insert_assigned(id, i, decl);
+            }
+            return;
+        }
+        let w = self.whole_entry(id, total_array);
+        record_assign(&mut w.assigned, &mut w.multi_assigned, decl);
+        self.for_each_own(id, total_array, |x| {
+            record_assign(&mut x.assigned, &mut x.multi_assigned, decl)
+        });
+    }
+
+    /// The always_comb counterpart of [`Self::insert_assigned_whole`].
+    pub fn insert_assigned_comb_whole(&mut self, id: VarId, total_array: usize, decl: usize) {
+        if !self.whole_fits(id, total_array) {
+            for i in 0..total_array {
+                self.insert_assigned_comb(id, i, decl);
+            }
+            return;
+        }
+        self.whole_entry(id, total_array).assigned_comb = Some(decl);
+        self.for_each_own(id, total_array, |x| x.assigned_comb = Some(decl));
+    }
+
+    fn whole_fits(&self, id: VarId, total_array: usize) -> bool {
+        // Every whole access to a variable spans its whole array.
+        debug_assert!(
+            self.whole_assigned
+                .get(&id)
+                .is_none_or(|w| w.len == total_array)
+        );
+        total_array != 0 && !self.per_element
+    }
+
+    fn whole_entry(&mut self, id: VarId, len: usize) -> &mut WholeAssigned {
+        self.whole_assigned
+            .entry(id)
+            .or_insert_with(|| WholeAssigned {
+                len,
+                ..Default::default()
+            })
+    }
+
+    fn for_each_own(&mut self, id: VarId, len: usize, mut f: impl FnMut(&mut FfTableEntry)) {
+        for i in self.indices.get(&id).into_iter().flatten() {
+            if *i < len {
+                f(self.table.get_mut(&(id, *i)).unwrap());
+            }
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -240,6 +398,17 @@ impl FfTable {
                     "FfTable: variable {:?}[{}] assigned in both always_ff (decl {}) and always_comb (decl {})",
                     id,
                     index,
+                    ff_decl,
+                    comb_decl
+                );
+            }
+        }
+        for (id, w) in &self.whole_assigned {
+            if let (Some(ff_decl), Some(comb_decl)) = (w.assigned, w.assigned_comb) {
+                log::warn!(
+                    "FfTable: variable {:?}[..{}] assigned in both always_ff (decl {}) and always_comb (decl {})",
+                    id,
+                    w.len,
                     ff_decl,
                     comb_decl
                 );
