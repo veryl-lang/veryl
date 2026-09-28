@@ -505,7 +505,7 @@ impl Op {
         x: &mut [(Expression, Option<Expression>)],
         dst: &mut Comptime,
     ) {
-        let mut width = Some(0);
+        let mut width: Option<usize> = Some(0);
         let mut is_const = true;
         let mut is_global = true;
         let mut kind = TypeKind::Bit;
@@ -544,7 +544,8 @@ impl Op {
                     if let Some(total_width) = expr.r#type.total_width()
                         && let Some(width) = &mut width
                     {
-                        *width += total_width * repeat.to_usize().unwrap_or(0);
+                        let repeat = repeat.to_usize_saturating().unwrap_or(0);
+                        *width = (*width).saturating_add(total_width.saturating_mul(repeat));
                     } else {
                         width = None;
                     }
@@ -1439,7 +1440,7 @@ impl Op {
             }
             Op::LogicShiftR => {
                 let x = x.expand(width, signed);
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1471,7 +1472,7 @@ impl Op {
             }
             Op::LogicShiftL => {
                 let x = x.expand(width, signed);
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1511,7 +1512,7 @@ impl Op {
             }
             Op::ArithShiftR => {
                 let x = x.expand(width, signed);
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1576,7 +1577,7 @@ impl Op {
             }
             Op::ArithShiftL => {
                 let x = x.expand(width, signed);
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {
@@ -1662,7 +1663,7 @@ impl Op {
                 // Like the shift arms, accept a >64-bit exponent value
                 // (Value::to_usize is None for every BigUint): non-x/z wide
                 // exponents convert, saturating at usize::MAX.
-                let y = y.to_shift_amount();
+                let y = y.to_usize_saturating();
 
                 match x.as_ref() {
                     Value::U64(x) => {

@@ -487,7 +487,7 @@ impl Conv<&CastingType> for ir::Factor {
                     let comptime: Comptime = Conv::conv(context, x.based.as_ref())?;
 
                     if let Ok(value) = comptime.get_value()
-                        && let Some(value) = value.to_usize()
+                        && let Some(value) = value.to_usize_saturating()
                     {
                         let _ = context.check_size(value, token);
                     }
@@ -499,7 +499,7 @@ impl Conv<&CastingType> for ir::Factor {
                     let comptime: Comptime = Conv::conv(context, x.base_less.as_ref())?;
 
                     if let Ok(value) = comptime.get_value()
-                        && let Some(value) = value.to_usize()
+                        && let Some(value) = value.to_usize_saturating()
                     {
                         let _ = context.check_size(value, token);
                     }

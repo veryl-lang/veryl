@@ -383,3 +383,113 @@ fn nested_function_actuals_do_not_corrupt_constant_folding() {
         .to_u64();
     assert_eq!(result, Some(33), "{ir}");
 }
+
+/// The folded constant of each `assign`, in source order.
+fn folded_assigns(code: &str) -> Vec<Value> {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+    let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+    errors.extend(Analyzer::analyze_post_pass1());
+    errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+    // A multi-bit condition is the point here; it only draws a warning.
+    errors.retain(|e| !matches!(e, AnalyzerError::InvalidLogicalOperand { .. }));
+    assert!(errors.is_empty(), "{errors:#?}");
+    let Component::Module(module) = &ir.components[0] else {
+        panic!("expected module");
+    };
+    let mut ret = vec![];
+    for declaration in &module.declarations {
+        let Declaration::Comb(comb) = declaration else {
+            continue;
+        };
+        for statement in &comb.statements {
+            if let Statement::Assign(assign) = statement {
+                ret.push(assign.expr.eval_value(&mut Context::default()).unwrap());
+            }
+        }
+    }
+    ret
+}
+
+#[test]
+fn wide_constant_as_truth_value_index_and_bound() {
+    // HI is nonzero only above bit 63; ONE and TWO are small values in a wide
+    // type, which `to_usize` cannot convert either.
+    let code = r#"
+    module Top (
+        o0: output logic<32>, o1: output logic<32>, o2: output logic<32>,
+        o3: output logic<32>, o4: output logic<32>, o5: output logic<32>,
+        o6: output logic<32>, o7: output logic<32>,
+    ) {
+        const HI : bit<128> = 128'h1_0000_0000_0000_0000;
+        const ONE: bit<128> = 128'd1;
+        const TWO: bit<128> = 128'd2;
+        const VEC: bit<8>   = 8'b0000_0100;
+        function f_if (x: input bit<128>) -> bit<32> {
+            if x { return 1; }
+            return 0;
+        }
+        function f_case (x: input bit<128>) -> bit<32> {
+            case x {
+                128'h1_0000_0000_0000_0000: return 5;
+                default                   : return 9;
+            }
+        }
+        function f_loop (n: input bit<128>) -> bit<32> {
+            var acc: bit<32>;
+            acc = 0;
+            for _i in 0..n { acc += 1; }
+            return acc;
+        }
+        const K_WIDTH: u32 = if HI ? 8 : 4;
+        assign o0 = if HI ? 7 : 3;
+        assign o1 = if ONE ? 7 : 3;
+        assign o2 = f_if(HI);
+        assign o3 = f_case(HI);
+        assign o4 = {31'b0, VEC[TWO]};
+        assign o5 = f_loop(TWO);
+        assign o6 = K_WIDTH;
+        if HI :g {
+            assign o7 = 1;
+        } else {
+            assign o7 = 0;
+        }
+    }
+    "#;
+    let values: Vec<_> = folded_assigns(code)
+        .iter()
+        .map(|v| v.to_u64().unwrap())
+        .collect();
+    assert_eq!(values, [7, 7, 1, 5, 1, 2, 8, 1]);
+}
+
+#[test]
+fn logical_value_of_a_partly_unknown_condition() {
+    // A known 1 decides the condition whatever the x/z bits; with none, an
+    // `if` and a ternary both take the false side, as in the 2-state simulator.
+    let code = r#"
+    module Top (o0: output logic<4>, o1: output logic<4>, o2: output logic<4>) {
+        function f (c: input logic<2>) -> logic<4> {
+            if c { return 4'b1100; }
+            return 4'b1010;
+        }
+        function g (c: input logic<2>) -> logic<4> {
+            return if c ? 4'b1100 : 4'b1010;
+        }
+        assign o0 = f(2'b1x);
+        assign o1 = f(2'b0x);
+        assign o2 = g(2'b1x);
+    }
+    "#;
+    let values: Vec<_> = folded_assigns(code)
+        .iter()
+        .map(|v| v.to_u64().unwrap())
+        .collect();
+    assert_eq!(values, [0b1100, 0b1010, 0b1100]);
+}

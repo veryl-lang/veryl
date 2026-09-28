@@ -241,6 +241,17 @@ pub fn eval_range_const(
     eval_range_inner(context, range, true)
 }
 
+/// A signed bound is read back as an `i64`, where a saturated value would
+/// wrap negative.
+fn const_for_bound(value: &Value, signed: bool) -> usize {
+    let val = value.to_usize_saturating().unwrap_or(0);
+    if signed {
+        val.min(i64::MAX as usize)
+    } else {
+        val
+    }
+}
+
 fn eval_range_inner(
     context: &mut Context,
     range: &Range,
@@ -268,8 +279,8 @@ fn eval_range_inner(
             ));
             return Err(ir_error!(token));
         }
-        let val = value.to_usize().unwrap_or(0);
-        ir::ForBound::Const(val, beg_comptime.r#type.signed)
+        let signed = beg_comptime.r#type.signed;
+        ir::ForBound::Const(const_for_bound(value, signed), signed)
     } else {
         ir::ForBound::Expression(Box::new(beg))
     };
@@ -293,8 +304,8 @@ fn eval_range_inner(
                 ));
                 return Err(ir_error!(token));
             }
-            let val = value.to_usize().unwrap_or(0);
-            ir::ForBound::Const(val, end_comptime.r#type.signed)
+            let signed = end_comptime.r#type.signed;
+            ir::ForBound::Const(const_for_bound(value, signed), signed)
         } else {
             ir::ForBound::Expression(Box::new(end))
         };
@@ -452,7 +463,10 @@ pub fn eval_array_literal(
                     let repeat = if let Some(repeat) = repeat {
                         let repeat =
                             eval_repeat(context, repeat).ok_or_else(|| ir_error!(token))?;
-                        repeat.to_usize().unwrap_or(0)
+                        let repeat = repeat.to_usize_saturating().unwrap_or(0);
+                        context
+                            .check_size(repeat, token)
+                            .ok_or_else(|| ir_error!(token))?
                     } else {
                         1
                     };
@@ -611,7 +625,7 @@ pub fn eval_size(
     // one too wide for `usize`, is not known and must not be reported as
     // zero; a non-constant cast operand reaches here the same way.
     if let Ok(x) = comptime.get_value()
-        && let Some(value) = x.to_usize()
+        && let Some(value) = x.to_usize_saturating()
     {
         let value = context.check_size(value, expr.token_range());
         // A zero size emits `[X-1:0]`, which tools disagree on: Verilator
@@ -846,7 +860,10 @@ pub fn eval_array_range_assign(
         match item {
             ir::ArrayLiteralItem::Value(expr, repeat) => {
                 let count = if let Some(repeat) = repeat {
-                    match eval_repeat(context, repeat).and_then(|v| v.to_usize()) {
+                    match eval_repeat(context, repeat)
+                        .and_then(|v| v.to_usize_saturating())
+                        .and_then(|n| context.check_size(n, token))
+                    {
                         Some(count) => count,
                         // Non-const repeat: already reported by eval_repeat. Skip the
                         // count below so we don't pile on a spurious dimension error.
@@ -1389,7 +1406,7 @@ pub fn eval_type(
                 x.kind
             }
             ValueVariant::Numeric(x) => {
-                let value = x.to_usize().unwrap_or(0);
+                let value = x.to_usize_saturating().unwrap_or(0);
                 let value = context.check_size(value, path.paths[0].base.into());
                 width.push(value);
                 ir::TypeKind::Bit
@@ -1962,7 +1979,7 @@ fn build_for_range_inner(
         let mut step_expr: ir::Expression = Conv::conv(context, expr)?;
         let step_comptime = step_expr.eval_comptime(context, None);
         let step_value = step_comptime.get_value()?;
-        let step_val = step_value.to_usize().unwrap_or(0);
+        let step_val = step_value.to_usize_saturating().unwrap_or(0);
         let step_negative = step_value.is_semantically_not_positive() && step_val != 0;
         let op: ir::Op = Conv::conv(context, op)?;
 

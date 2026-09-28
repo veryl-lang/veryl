@@ -62,7 +62,7 @@ impl ForBound {
             Self::Const(x, _) => Some(*x),
             Self::Expression(exp) => {
                 let exp = exp.as_ref().clone();
-                exp.eval_value(context)?.to_usize()
+                exp.eval_value(context)?.to_usize_saturating()
             }
         }
     }
@@ -912,7 +912,7 @@ pub struct IfStatement {
 impl IfStatement {
     pub fn eval_value(&self, context: &mut Context) -> ControlFlow {
         if let Some(cond) = self.cond.eval_value(context) {
-            if cond.to_usize().unwrap_or(0) != 0 {
+            if cond.is_true() {
                 for stmt in &self.true_side {
                     if stmt.eval_value(context) == ControlFlow::Break {
                         return ControlFlow::Break;
@@ -1160,7 +1160,7 @@ impl CasePattern {
             let (x, y) = if target_first { (&x, &y) } else { (&y, &x) };
             let signed = x.signed() && y.signed();
             let ret = op.eval_value_binary(x, y, 1, signed, &mut context.mask_cache);
-            ret.to_usize().map(|x| x != 0)
+            ret.truth()
         }
         match self {
             CasePattern::Eq(e) => test(context, Op::EqWildcard, target, value, e, true),

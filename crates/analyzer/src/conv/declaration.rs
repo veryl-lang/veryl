@@ -218,7 +218,7 @@ impl Conv<&GenerateIfDeclaration> for ir::DeclarationBlock {
         let (comptime, _) = eval_expr(context, None, value.expression.as_ref(), false)?;
         let cond = comptime.get_value()?;
 
-        if cond.to_usize().unwrap_or(0) != 0 {
+        if cond.is_true() {
             context.push_hierarchy(label);
 
             let block = context.block(|c| {
@@ -235,7 +235,7 @@ impl Conv<&GenerateIfDeclaration> for ir::DeclarationBlock {
 
                 let cond = comptime.get_value()?;
 
-                if cond.to_usize().unwrap_or(0) != 0 {
+                if cond.is_true() {
                     let label = get_label(&x.generate_optional_named_block, label);
 
                     context.push_hierarchy(label);

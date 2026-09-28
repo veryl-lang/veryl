@@ -476,7 +476,7 @@ impl VarIndex {
         let mut ret = vec![];
         for x in &self.0 {
             let x = x.eval_value(context)?;
-            ret.push(x.to_usize().unwrap_or(0));
+            ret.push(x.to_usize_saturating().unwrap_or(0));
         }
         Some(ret)
     }
@@ -589,11 +589,14 @@ impl VarSelectOp {
     pub fn eval_value(&self, beg: usize, end: usize, is_array: bool) -> (usize, usize) {
         let (beg, end, swap) = match self {
             VarSelectOp::Colon => (beg, end, false),
-            VarSelectOp::PlusColon => ((beg + end).saturating_sub(1), beg, is_array),
+            VarSelectOp::PlusColon => (beg.saturating_add(end).saturating_sub(1), beg, is_array),
             // low = beg - width + 1; compute as (beg + 1) - width so a slice that
             // reaches index 0 (beg + 1 == width) isn't clamped to 1 by the subtraction.
-            VarSelectOp::MinusColon => (beg, (beg + 1).saturating_sub(end), is_array),
-            VarSelectOp::Step => ((beg * end + end).saturating_sub(1), beg * end, is_array),
+            VarSelectOp::MinusColon => (beg, beg.saturating_add(1).saturating_sub(end), is_array),
+            VarSelectOp::Step => {
+                let low = beg.saturating_mul(end);
+                (low.saturating_add(end).saturating_sub(1), low, is_array)
+            }
         };
         if swap { (end, beg) } else { (beg, end) }
     }
@@ -765,7 +768,7 @@ impl VarSelect {
                 let beg = beg.eval_value(context);
 
                 let beg = if let Some(beg) = beg {
-                    beg.to_usize().unwrap_or(0)
+                    beg.to_usize_saturating().unwrap_or(0)
                 } else {
                     // Even if beg is unknown, single select can be determined
                     if self.1.is_none() {
@@ -784,10 +787,10 @@ impl VarSelect {
 
                 let (beg, end) = if let Some((op, x)) = &self.1 {
                     range.set_end(x.token_range());
-                    let end = x.eval_value(context)?.to_usize().unwrap_or(0);
+                    let end = x.eval_value(context)?.to_usize_saturating().unwrap_or(0);
                     // A `-:` width exceeding beg+1 underflows below index 0; `eval_value`
                     // would saturate (hide) the low bound, so reject it as out-of-range.
-                    if matches!(op, VarSelectOp::MinusColon) && end > beg + 1 {
+                    if matches!(op, VarSelectOp::MinusColon) && end > beg.saturating_add(1) {
                         return None;
                     }
                     op.eval_value(beg, end, is_array)
@@ -834,7 +837,7 @@ impl VarSelect {
                             continue;
                         }
 
-                        let beg = beg.to_usize().unwrap_or(0);
+                        let beg = beg.to_usize_saturating().unwrap_or(0);
                         let mut out_of_range = beg >= size;
 
                         if i == dim - 1 {
@@ -911,17 +914,17 @@ impl VarSelect {
             r#type.width()
         };
 
-        let mut beg = 0;
-        let mut end = 0;
+        let mut beg: usize = 0;
+        let mut end: usize = 0;
         let mut base = elem_width;
 
         let dim = self.dimension();
         if r#type.dims() < dim {
             if dim == 1 && r#type.dims() == 0 && !is_array {
                 let x = &self.0[0];
-                let x = x.eval_value(context)?.to_usize().unwrap_or(0);
+                let x = x.eval_value(context)?.to_usize_saturating().unwrap_or(0);
                 let (x, y) = if let Some((op, y)) = &self.1 {
-                    let y = y.eval_value(context)?.to_usize().unwrap_or(0);
+                    let y = y.eval_value(context)?.to_usize_saturating().unwrap_or(0);
                     op.eval_value(x, y, is_array)
                 } else {
                     (x, x)
@@ -936,28 +939,28 @@ impl VarSelect {
             if let Some(w) = w {
                 if i == skip {
                     let x = self.0.get(dim - (i - skip) - 1)?;
-                    let x = x.eval_value(context)?.to_usize().unwrap_or(0);
+                    let x = x.eval_value(context)?.to_usize_saturating().unwrap_or(0);
 
                     let (x, y) = if let Some((op, y)) = &self.1 {
-                        let y = y.eval_value(context)?.to_usize().unwrap_or(0);
+                        let y = y.eval_value(context)?.to_usize_saturating().unwrap_or(0);
                         op.eval_value(x, y, is_array)
                     } else {
                         (x, x)
                     };
 
                     if is_array {
-                        beg += x * base;
-                        end += (y + 1) * base - 1;
+                        beg = beg.saturating_add(x.saturating_mul(base));
+                        end = end.saturating_add(y.saturating_add(1).saturating_mul(base) - 1);
                     } else {
-                        beg += (x + 1) * base - 1;
-                        end += y * base;
+                        beg = beg.saturating_add(x.saturating_add(1).saturating_mul(base) - 1);
+                        end = end.saturating_add(y.saturating_mul(base));
                     }
                 } else if i > skip {
                     let x = self.0.get(dim - (i - skip) - 1)?;
-                    let x = x.eval_value(context)?.to_usize().unwrap_or(0);
+                    let x = x.eval_value(context)?.to_usize_saturating().unwrap_or(0);
 
-                    beg += x * base;
-                    end += x * base;
+                    beg = beg.saturating_add(x.saturating_mul(base));
+                    end = end.saturating_add(x.saturating_mul(base));
                 }
                 base *= w;
             } else {
