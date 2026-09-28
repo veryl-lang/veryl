@@ -1,0 +1,17 @@
+module always_bodies (
+    a: input logic<8>,
+    b: output logic<8>,
+    c: output logic<8>,
+    d: output logic<8>,
+) {
+    always_comb {
+        b = a;
+        c = a;
+    }
+
+    always_comb {
+        d = a;
+    }
+
+}
+
