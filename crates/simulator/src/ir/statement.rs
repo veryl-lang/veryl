@@ -5191,6 +5191,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             result.extend(stmts);
         }
 
+        let (in_comb, in_initial) = (context.in_comb, context.in_initial);
         for (var_path, destinations) in &src.outputs {
             let arg_var_id = body.arg_map.get(var_path).unwrap();
             let scope = context.scope();
@@ -5221,10 +5222,19 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                     None
                 };
 
-                let dst_var = if dst_element.is_ff() {
-                    VarOffset::Ff(dst_element.next_offset)
+                // Same slot choice as an assignment statement: a
+                // combinational write into FF storage has no NBA delay, so a
+                // later read in the same block (a loop's `break` test) sees it.
+                let is_ff = dst_element.is_ff();
+                let current_offset = dst_element.current_offset();
+                let next_offset = dst_element.next_offset;
+                let comb_direct = is_ff && in_comb && !in_initial;
+                let dst_var = if !is_ff {
+                    VarOffset::Comb(current_offset)
+                } else if in_initial || comb_direct {
+                    VarOffset::Ff(current_offset)
                 } else {
-                    VarOffset::Comb(dst_element.current_offset())
+                    VarOffset::Ff(next_offset)
                 };
 
                 result.push(ProtoStatement::Assign(ProtoAssignStatement {
@@ -5234,10 +5244,26 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                     dynamic_select: None,
                     rhs_select: None,
                     expr: arg_expr.clone(),
-                    dst_ff_current_offset: dst_element.current_offset(),
-                    comb_direct: false,
+                    dst_ff_current_offset: current_offset,
+                    comb_direct,
                     token: TokenRange::default(),
                 }));
+                // As for an assignment, the next slot gets the value too: an
+                // `always_ff` read-modify-write reads it, and an initial value
+                // must survive the swap.
+                if (comb_direct || in_initial) && is_ff && next_offset != current_offset {
+                    result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: VarOffset::Ff(next_offset),
+                        dst_width: dst_meta.width,
+                        select,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr: arg_expr.clone(),
+                        dst_ff_current_offset: current_offset,
+                        comb_direct,
+                        token: TokenRange::default(),
+                    }));
+                }
             }
         }
 

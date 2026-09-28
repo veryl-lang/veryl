@@ -31233,3 +31233,176 @@ fn a_concat_written_through_a_static_select_is_scheduled_per_element() {
         }
     }
 }
+
+/// A comb function output into a dual-slot word, the pipeline of
+/// `a_comb_driven_bit_of_a_dual_slot_word_reaches_both_slots`: the bit must
+/// reach the `next` slot the stages read too.
+#[test]
+fn function_output_from_comb_reaches_both_slots() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        d  : input  logic,
+        q  : output logic,
+    ) {
+        function pass (
+            x: input  logic,
+            y: output logic,
+        ) -> logic {
+            y = x;
+            return x;
+        }
+        var v: logic<3>;
+        var r: logic;
+        always_comb {
+            r = pass(d, v[0]);
+        }
+        for i in 0..2 :gen_pipe {
+            always_ff {
+                if_reset {
+                    v[i + 1] = 1'b0;
+                } else {
+                    v[i + 1] = v[i];
+                }
+            }
+        }
+        assign q = v[2];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("d", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("d", Value::new(1, 1, false));
+        sim.step(&clk);
+        sim.set("d", Value::new(0, 1, false));
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(0, 1, false),
+            "not through after one edge, config={config:?}"
+        );
+        sim.step(&clk);
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(1, 1, false),
+            "through after two edges, config={config:?}"
+        );
+    }
+}
+
+/// A function's output argument written from `always_comb` into FF storage
+/// must be visible to the rest of the block, like an assignment is, rather
+/// than being logged and committed at the next edge.  `--disable-ff-opt`
+/// puts every `always_ff` variable in FF storage; a packed word driven partly
+/// by an `always_ff` does so in the default config.
+#[test]
+fn function_output_from_comb_into_ff_storage_is_immediate() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a:   input  logic<8>,
+        o:   output logic<8>,
+        q:   output logic<8>,
+        p:   output logic<8>,
+        m:   output logic<4>,
+        s:   output logic<8>,
+    ) {
+        function bump (
+            x: input  logic<8>,
+            y: output logic<8>,
+        ) -> logic<8> {
+            y = x + 1;
+            return x + 2;
+        }
+        function bump4 (
+            x: input  logic<8>,
+            y: output logic<4>,
+        ) -> logic<8> {
+            y = x[3:0] + 1;
+            return x + 2;
+        }
+        var k: logic<8>;
+        var j: logic<8>;
+        var w: logic<8>;
+        var t: logic<8>;
+        always_comb {
+            k = 0;
+            o = a;
+            for _i in 0..8 {
+                if k >= 3 {
+                    break;
+                }
+                o = bump(o, k);
+            }
+            q = k;
+        }
+        always_comb {
+            j = 0;
+            if a[1] {
+                t = bump(a, j);
+            } else {
+                t = 0;
+            }
+            p = j;
+        }
+        always_ff {
+            if_reset {
+                w[7:4] = 0;
+            } else {
+                w[7:4] = w[7:4] + 1;
+            }
+        }
+        always_comb {
+            w[3:0] = 0;
+            s      = 0;
+            for _i in 0..8 {
+                if w[3:0] >= 3 {
+                    break;
+                }
+                s = bump4(a, w[3:0]);
+            }
+            m = w[3:0];
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(10, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // k = o + 1 = 11 after the first call, which breaks the loop.
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(12, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("q").unwrap(),
+            Value::new(11, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new(11, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("m").unwrap(),
+            Value::new(11, 4, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("s").unwrap(),
+            Value::new(12, 8, false),
+            "{config:?}"
+        );
+    }
+}
