@@ -308,12 +308,24 @@ fn collect_instance_summary_spans(
         if !budget.reserve(summary) {
             continue;
         }
+        let outputs = OutputConnections::new(inst, child, ctx);
         for node in &summary.nodes {
             let direction = match node.kind {
                 SummaryNodeKind::Input | SummaryNodeKind::Interface => Direction::Input,
                 SummaryNodeKind::Output => Direction::Output,
                 SummaryNodeKind::Internal => continue,
             };
+            if node.kind == SummaryNodeKind::Output
+                && let Some(actuals) = outputs.accesses(node.region)
+            {
+                for actual in actuals {
+                    accesses
+                        .entry((actual.parent, actual.array))
+                        .or_default()
+                        .push(actual.packed);
+                }
+                continue;
+            }
             if let Some((parent, array, packed)) =
                 summary_parent_access(inst, child, node.region, direction, ctx)
             {
@@ -935,6 +947,7 @@ impl<'a> ModuleGraphBuilder<'a> {
         let procedure_context = &mut self.procedure_context;
         let function_summaries = &mut self.function_summaries;
         let mut actuals = InstanceActuals::default();
+        let outputs = OutputConnections::new(inst, child, ctx);
         let mut complete = true;
         let mut input_reads: HashMap<VarId, Vec<procedure::RegionSource>> = HashMap::default();
         for inp in &inst.inputs {
@@ -1044,15 +1057,17 @@ impl<'a> ModuleGraphBuilder<'a> {
                     (mapping, None)
                 }
                 SummaryNodeKind::Output => {
-                    let mapping = instance_region_mapping(
-                        inst,
-                        child,
-                        node.region,
-                        Direction::Output,
-                        output_dsts.get(&node.region.id).map(Vec::as_slice),
-                        bit_part,
-                        ctx,
-                    );
+                    let mapping = outputs.mapping(node.region, bit_part).unwrap_or_else(|| {
+                        instance_region_mapping(
+                            inst,
+                            child,
+                            node.region,
+                            Direction::Output,
+                            output_dsts.get(&node.region.id).map(Vec::as_slice),
+                            bit_part,
+                            ctx,
+                        )
+                    });
                     let resolved =
                         resolve_instance_mapping(graph, node_map, bit_part, mapping.clone());
                     (resolved, Some(mapping))
@@ -1562,6 +1577,189 @@ impl InstanceActuals {
 #[derive(Clone)]
 struct InstanceRegionMapping {
     nodes: Vec<MappedNode>,
+}
+
+/// Output destinations are ordered array slices or a packed concatenation.
+/// Build their child coordinates once per instance, using the same IR as the
+/// assignment checks and backends. Unknown or width-changing connections keep
+/// the conservative mapping used for other output expressions.
+struct OutputConnections(HashMap<VarId, Vec<OutputFragment>>);
+
+struct OutputFragment {
+    parent: VarId,
+    child_array: ArraySpan,
+    child_packed: PackedSpan,
+    parent_array: ArraySpan,
+    parent_packed: PackedSpan,
+}
+
+struct OutputAccess {
+    parent: VarId,
+    array: ArraySpan,
+    packed: PackedSpan,
+    offset: (isize, isize),
+}
+
+impl OutputConnections {
+    fn new(inst: &InstDeclaration, child: &Module, ctx: &mut Context) -> Self {
+        let connections = inst
+            .outputs
+            .iter()
+            .filter_map(|output| {
+                let variable = child.variables.get(&output.id)?;
+                let fragments = Self::fragments(variable, &output.dst, ctx)?;
+                Some((output.id, fragments))
+            })
+            .collect();
+        Self(connections)
+    }
+
+    fn fragments(
+        child: &Variable,
+        destinations: &[AssignDestination],
+        ctx: &mut Context,
+    ) -> Option<Vec<OutputFragment>> {
+        let child_array_length = child.r#type.array.total()?;
+        let child_width = child.total_width()?;
+        let child_packed = PackedSpan::whole(child_width)?;
+        let accesses = destinations
+            .iter()
+            .map(|dst| {
+                if !dst.index.is_const() || !dst.select.is_const_with_range() {
+                    return None;
+                }
+                let spans = var_reads(dst.id, &dst.index, &dst.select, ctx);
+                let [(array, packed)] = spans.as_slice() else {
+                    return None;
+                };
+                Some((dst.id, *array, *packed))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let array_length = accesses.iter().try_fold(0usize, |total, (_, array, _)| {
+            total.checked_add(array.length)
+        })?;
+        if array_length == child_array_length
+            && accesses
+                .iter()
+                .all(|(_, _, packed)| packed.length == child_width)
+        {
+            // Unpacked arrays connect in ascending element order. A destination
+            // may cover an entire row of a multidimensional array.
+            let mut start = 0;
+            return Some(
+                accesses
+                    .into_iter()
+                    .map(|(parent, parent_array, parent_packed)| {
+                        let child_array = ArraySpan {
+                            start,
+                            length: parent_array.length,
+                        };
+                        start += parent_array.length;
+                        OutputFragment {
+                            parent,
+                            child_array,
+                            child_packed,
+                            parent_array,
+                            parent_packed,
+                        }
+                    })
+                    .collect(),
+            );
+        }
+
+        let packed_width = accesses.iter().try_fold(0usize, |total, (_, _, packed)| {
+            total.checked_add(packed.length)
+        })?;
+        if child_array_length != 1
+            || packed_width != child_width
+            || accesses.iter().any(|(_, array, _)| array.length != 1)
+        {
+            return None;
+        }
+
+        // A packed concatenation lists its most significant fragment first.
+        // Reverse it so both layouts can be searched in child coordinate order.
+        let mut start = 0;
+        accesses
+            .into_iter()
+            .rev()
+            .map(|(parent, parent_array, parent_packed)| {
+                let child_packed = PackedSpan::new(start, parent_packed.length)?;
+                start += parent_packed.length;
+                Some(OutputFragment {
+                    parent,
+                    child_array: ArraySpan {
+                        start: 0,
+                        length: 1,
+                    },
+                    child_packed,
+                    parent_array,
+                    parent_packed,
+                })
+            })
+            .collect()
+    }
+
+    fn accesses(&self, region: SummaryRegion) -> Option<Vec<OutputAccess>> {
+        let fragments = self.0.get(&region.id)?;
+        // Only one axis varies between fragments. Skip preceding fragments
+        // without rescanning a whole array for each child summary region.
+        let first = fragments.partition_point(|fragment| {
+            fragment.child_array.end().unwrap() <= region.array.start
+                || fragment.child_packed.end() <= region.packed.start
+        });
+        fragments[first..]
+            .iter()
+            .take_while(|fragment| {
+                fragment.child_array.start < region.array.end().unwrap()
+                    && fragment.child_packed.start < region.packed.end()
+            })
+            .map(|fragment| {
+                let array = region
+                    .array
+                    .intersection(fragment.child_array)?
+                    .translated(fragment.child_array.start, fragment.parent_array.start)?;
+                let packed = region
+                    .packed
+                    .intersection(fragment.child_packed)?
+                    .translated(fragment.child_packed.start, fragment.parent_packed.start)?;
+                Some(OutputAccess {
+                    parent: fragment.parent,
+                    array,
+                    packed,
+                    offset: (
+                        signed_difference(fragment.parent_array.start, fragment.child_array.start)?,
+                        signed_difference(
+                            fragment.parent_packed.start,
+                            fragment.child_packed.start,
+                        )?,
+                    ),
+                })
+            })
+            .collect()
+    }
+
+    fn mapping(
+        &self,
+        region: SummaryRegion,
+        bit_part: &BitPartition,
+    ) -> Option<InstanceRegionMapping> {
+        let nodes = self
+            .accesses(region)?
+            .into_iter()
+            .flat_map(|actual| {
+                bit_part
+                    .overlapping_access(actual.parent, actual.array, actual.packed)
+                    .into_iter()
+                    .map(move |key| MappedNode {
+                        key,
+                        offset: Some(actual.offset),
+                        condition: PathCondition::default(),
+                    })
+            })
+            .collect();
+        Some(InstanceRegionMapping { nodes })
+    }
 }
 
 #[derive(Clone)]
