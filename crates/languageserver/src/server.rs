@@ -837,7 +837,11 @@ impl Server {
                 Err(err) => {
                     block_on(self.client.log_message(
                         MessageType::ERROR,
-                        format!("failed to load metadata: {}: {err:?}", url.as_str()),
+                        format!(
+                            "failed to load metadata: {}: {}",
+                            url.as_str(),
+                            error_chain(&err)
+                        ),
                     ));
                 }
             }
@@ -853,6 +857,16 @@ impl Server {
             Analyzer::drop_file(path_id, None);
         }
     }
+}
+
+fn error_chain(err: &dyn std::error::Error) -> String {
+    let mut message = err.to_string();
+    let mut source = err.source();
+    while let Some(x) = source {
+        message.push_str(&format!(": {x}"));
+        source = x.source();
+    }
+    message
 }
 
 fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
@@ -1702,31 +1716,32 @@ mod tests {
 
     #[test]
     fn metadata_error_names_the_bad_key() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("Veryl.toml"),
-            "[project]
+        let err = "[project]
 name = \"t\"
 version = \"0.1.0\"
 
 [test]
 no_such_option = true
-",
-        )
-        .unwrap();
-        let err = Metadata::search_from(dir.path().join("src/top.veryl"))
-            .and_then(Metadata::load)
-            .unwrap_err();
-        let message = format!("{err:?}");
-        assert!(message.starts_with("Deserialize("), "{message}");
+"
+        .parse::<Metadata>()
+        .unwrap_err();
+        let message = error_chain(&err);
+        assert!(message.starts_with("toml load failed: "), "{message}");
+        assert!(message.contains("line 6, column 1"), "{message}");
         assert!(message.contains("no_such_option"), "{message}");
+        assert!(!message.contains("version = "), "{message}");
     }
 
     #[test]
-    fn metadata_error_without_veryl_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        let err = Metadata::search_from(dir.path().join("top.veryl")).unwrap_err();
-        assert!(matches!(err, MetadataError::FileNotFound(_)));
+    fn metadata_error_includes_io_cause() {
+        let err = MetadataError::file_io(
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied"),
+            &PathBuf::from("/prj/Veryl.toml"),
+        );
+        assert_eq!(
+            error_chain(&err),
+            "file I/O error (/prj/Veryl.toml): permission denied"
+        );
     }
 
     #[test]
