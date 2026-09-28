@@ -1,4 +1,8 @@
-//! Shared module analysis pipeline over the analyzer IR.
+//! Module-level IR analysis shared by assignment coverage and cycle detection.
+//!
+//! Lower each procedure once to SSA, query its write effects, and export its
+//! value dependencies to the circuit graph. Module feedthrough remains a
+//! bottom-up analysis because parent partitions depend on child boundaries.
 
 use crate::comb_loop_detect::{diagnostics, graph, hierarchy, model, summary};
 use crate::procedural as procedure;
@@ -45,24 +49,34 @@ pub(crate) fn analysis_size() -> (usize, usize, usize) {
     ANALYSIS_SIZE.get()
 }
 
+pub(crate) struct AnalysisResult {
+    pub(crate) loops: Vec<AnalyzerError>,
+    pub(crate) coverage: Vec<AnalyzerError>,
+    pub(crate) complete: bool,
+}
+
 pub(crate) fn check(ir: &Ir) -> Vec<AnalyzerError> {
-    check_inner(ir).0
+    let result = analyze(ir);
+    let mut errors = result.coverage;
+    errors.extend(result.loops);
+    errors
 }
 
-#[cfg(test)]
-pub(crate) fn is_complete(ir: &Ir) -> bool {
-    check_inner(ir).1
-}
-
-fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
+pub(crate) fn analyze(ir: &Ir) -> AnalysisResult {
     let mut errors = Vec::new();
+    let mut coverage = Vec::new();
     let mut complete = true;
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
 
     let mut diagnostic_replays = DiagnosticReplayCache::default();
     let mut reported = HashSet::default();
     for module in module_postorder(ir) {
-        let (graph, bit_part, module_complete) = match build_module_graph(module, &summaries) {
+        let ModuleAnalysis {
+            graph,
+            bit_part,
+            complete: module_complete,
+            uncovered,
+        } = match build_module_graph(module, &summaries) {
             Ok(result) => result,
             Err(error) => {
                 errors.push(*error);
@@ -71,6 +85,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
                 continue;
             }
         };
+        coverage.extend(procedure::coverage_diagnostics(module, uncovered));
         let cycles_complete = check_graph(
             module,
             &graph,
@@ -86,7 +101,11 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
         complete &= module_complete && cycles_complete;
     }
 
-    (errors, complete)
+    AnalysisResult {
+        loops: errors,
+        coverage,
+        complete,
+    }
 }
 
 /// Split only at observed access endpoints. Runtime and storage depend on the
@@ -713,10 +732,17 @@ fn eval_dst_span(
     Some((flat, span))
 }
 
+pub(crate) struct ModuleAnalysis {
+    pub(crate) graph: DependencyGraph,
+    bit_part: BitPartition,
+    complete: bool,
+    uncovered: Vec<procedure::UncoveredAssignment>,
+}
+
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
-) -> Result<(DependencyGraph, BitPartition, bool), Box<AnalyzerError>> {
+) -> Result<ModuleAnalysis, Box<AnalyzerError>> {
     build_module_graph_with_trace(module, summaries, TraceKind::None)
 }
 
@@ -724,7 +750,7 @@ pub(crate) fn build_module_graph_with_trace(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     tracing: TraceKind,
-) -> Result<(DependencyGraph, BitPartition, bool), Box<AnalyzerError>> {
+) -> Result<ModuleAnalysis, Box<AnalyzerError>> {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
     ctx.variables.extend(module.interface_members.clone());
@@ -751,7 +777,12 @@ pub(crate) fn build_module_graph_with_trace(
         // A partial partition would lose overwrite boundaries and could invent
         // feedback. Follow the existing incomplete-analysis contract: discard
         // this module's graph, propagate incompleteness, and add no diagnostic.
-        return Ok((DependencyGraph::new(), BitPartition::default(), false));
+        return Ok(ModuleAnalysis {
+            graph: DependencyGraph::new(),
+            bit_part: BitPartition::default(),
+            complete: false,
+            uncovered: Vec::new(),
+        });
     };
     if let Some(token) = bit_part.position_overflow().map(|id| {
         module
@@ -768,18 +799,21 @@ pub(crate) fn build_module_graph_with_trace(
     let mut builder = ModuleGraphBuilder::new(module, &bit_part, ctx);
     builder.function_summaries.tracing = tracing == TraceKind::Sources;
     builder.trace_instances = tracing != TraceKind::None;
+    let mut uncovered = Vec::new();
 
     for (declaration_index, declaration) in module.declarations.iter().enumerate() {
         let Declaration::Comb(comb) = declaration else {
             continue;
         };
-        let analysis = procedure::analyze(
+        let mut lowered = procedure::lower(
             &bit_part,
             &comb.statements,
             declaration_index + 1,
             &mut builder.procedure_context,
             &mut builder.function_summaries,
         );
+        uncovered.extend(lowered.uncovered_assignments());
+        let analysis = lowered.dependencies();
         if !analysis.status.is_complete() {
             builder.complete = false;
         }
@@ -809,6 +843,11 @@ pub(crate) fn build_module_graph_with_trace(
         }
     }
 
+    uncovered.extend(
+        builder
+            .function_summaries
+            .uncovered_outputs(&mut builder.procedure_context),
+    );
     let (graph, complete) = builder.finish();
     #[cfg(test)]
     {
@@ -819,7 +858,12 @@ pub(crate) fn build_module_graph_with_trace(
             edges + graph.edge_count(),
         ));
     }
-    Ok((graph, bit_part, complete))
+    Ok(ModuleAnalysis {
+        graph,
+        bit_part,
+        complete,
+        uncovered,
+    })
 }
 
 struct ModuleGraphBuilder<'a> {

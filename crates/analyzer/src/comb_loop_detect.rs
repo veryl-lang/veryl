@@ -8,12 +8,17 @@ pub(crate) mod summary;
 pub(crate) use crate::procedural::{region, ssa};
 
 pub fn check(ir: &crate::ir::Ir) -> Vec<crate::AnalyzerError> {
-    crate::analysis::check(ir)
+    check_with_status(ir).0
+}
+
+fn check_with_status(ir: &crate::ir::Ir) -> (Vec<crate::AnalyzerError>, bool) {
+    let result = crate::analysis::analyze(ir);
+    (result.loops, result.complete)
 }
 
 #[cfg(test)]
 pub(crate) fn is_complete(ir: &crate::ir::Ir) -> bool {
-    crate::analysis::is_complete(ir)
+    check_with_status(ir).1
 }
 
 #[cfg(test)]

@@ -649,19 +649,16 @@ fn captured_coverage_observation() -> (usize, Option<usize>, Option<usize>) {
 }
 
 #[test]
-#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured-region diagnostic count"]
 fn comb_loop_captured_coverage_has_one_diagnostic() {
     assert_eq!(captured_coverage_observation().0, 1);
 }
 
 #[test]
-#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured-region site count"]
 fn comb_loop_captured_coverage_has_one_site() {
     assert_eq!(captured_coverage_observation().1, Some(1));
 }
 
 #[test]
-#[ignore = "SSA latch coverage follow-up after comb-loop migration: captured-region site provenance"]
 fn comb_loop_captured_coverage_uses_retained_bit_site() {
     let code = r#"
         module Top (
@@ -730,13 +727,11 @@ fn branch_weak_write_observation() -> (usize, Option<usize>, bool) {
 }
 
 #[test]
-#[ignore = "SSA latch coverage follow-up after comb-loop migration: merge weak-write diagnostic count"]
 fn comb_loop_branch_weak_writes_share_one_coverage_diagnostic() {
     assert_eq!(branch_weak_write_observation().0, 1);
 }
 
 #[test]
-#[ignore = "SSA latch coverage follow-up after comb-loop migration: merge weak-write sites"]
 fn comb_loop_branch_weak_write_diagnostic_contains_both_sites() {
     assert_eq!(branch_weak_write_observation().1, Some(2));
 }

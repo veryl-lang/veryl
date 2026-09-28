@@ -15452,7 +15452,10 @@ fn dual_jit_wide_dynamic_assign_mixed() {
     }
     "#;
 
-    verify_jit_interpreter_equivalence(code, |dual| {
+    // Partial stores deliberately retain the other elements; the analyzer
+    // must diagnose that even when testing JIT/interpreter equivalence.
+    for use_4state in [false, true] {
+        let mut dual = DualSimulator::new(code, use_4state, Allowed::UncoveredBranch);
         dual.set("sel", Value::new(0, 2, false));
         dual.set("val", Value::new(0xCAFEBABE, 96, false));
         dual.set("a", Value::new(42, 32, false));
@@ -15468,7 +15471,7 @@ fn dual_jit_wide_dynamic_assign_mixed() {
         dual.set("a", Value::new(99, 32, false));
         dual.step_synthetic();
         assert_eq!(dual.get("out").unwrap(), Value::new(100, 32, false));
-    });
+    }
 }
 
 #[test]
@@ -20405,7 +20408,8 @@ fn concat_lhs_with_dynamic_bit_select() {
     "#;
     for config in Config::all() {
         dbg!(&config);
-        let ir = analyze(code, &config);
+        // Retention of the other bits is intentional in this backend test.
+        let ir = analyze_top_inner(code, &config, "Top", Allowed::UncoveredBranch).unwrap();
         let mut sim = Simulator::new(ir, None);
         sim.set("i", Value::new(2, 2, false));
         sim.set("v", Value::new(0b10, 2, false));

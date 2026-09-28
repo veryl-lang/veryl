@@ -8,8 +8,8 @@ uncovered_branch (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.
    ╭─[../../testcases/error/uncovered_branch.veryl:7:13]
  6 │         if a {
  7 │             b = 1;
-   ·             ┬
-   ·             ╰── Covered
+   ·             ───┬──
+   ·                ╰── Covered
  8 │         }
    ╰────
   help:

@@ -26,6 +26,8 @@ enum Allowed {
     Nothing,
     CombLoop,
     MismatchAssignment,
+    UncoveredBranch,
+    CombLoopAndUncoveredBranch,
 }
 
 impl Allowed {
@@ -33,6 +35,11 @@ impl Allowed {
         match self {
             Allowed::Nothing => false,
             Allowed::CombLoop => matches!(error, AnalyzerError::CombinationalLoop { .. }),
+            Allowed::UncoveredBranch => matches!(error, AnalyzerError::UncoveredBranch { .. }),
+            Allowed::CombLoopAndUncoveredBranch => matches!(
+                error,
+                AnalyzerError::CombinationalLoop { .. } | AnalyzerError::UncoveredBranch { .. }
+            ),
             // The unpacked-dimension mismatch is one kind of this warning.
             Allowed::MismatchAssignment => {
                 matches!(error, AnalyzerError::MismatchAssignment { .. })
@@ -114,6 +121,27 @@ fn analyze_top_inner(
     errors.append(&mut Analyzer::analyze_post_pass2(&ir));
 
     dbg!(&errors);
+    if matches!(
+        allow,
+        Allowed::UncoveredBranch | Allowed::CombLoopAndUncoveredBranch
+    ) {
+        assert_eq!(
+            errors
+                .iter()
+                .filter(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+                .count(),
+            1,
+            "this backend regression deliberately leaves a destination uncovered: {errors:?}"
+        );
+    }
+    if allow == Allowed::CombLoopAndUncoveredBranch {
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "coverage must not replace the analyzer's cycle diagnostic: {errors:?}"
+        );
+    }
     let errors: Vec<_> = errors
         .drain(0..)
         .filter(|x| {
@@ -257,7 +285,7 @@ struct DualSimulator {
 
 impl DualSimulator {
     #[track_caller]
-    fn new(code: &str, use_4state: bool) -> Self {
+    fn new(code: &str, use_4state: bool, allow: Allowed) -> Self {
         let jit_config = Config {
             use_4state,
             use_jit: true,
@@ -269,8 +297,8 @@ impl DualSimulator {
             ..Default::default()
         };
 
-        let jit_ir = analyze(code, &jit_config);
-        let interp_ir = analyze(code, &interp_config);
+        let jit_ir = analyze_top_inner(code, &jit_config, "Top", allow).unwrap();
+        let interp_ir = analyze_top_inner(code, &interp_config, "Top", allow).unwrap();
 
         let jit = Simulator::new(jit_ir, None);
         let interp = Simulator::new(interp_ir, None);
@@ -518,7 +546,7 @@ where
     F: Fn(&mut DualSimulator),
 {
     for use_4state in [false, true] {
-        let mut dual = DualSimulator::new(code, use_4state);
+        let mut dual = DualSimulator::new(code, use_4state, Allowed::Nothing);
         driver(&mut dual);
     }
 }

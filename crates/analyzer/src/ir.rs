@@ -18,6 +18,7 @@ mod signature;
 mod statement;
 mod system_function;
 mod utils;
+pub(crate) use utils::has_cond_type;
 mod variable;
 mod width_expr;
 mod write_count;

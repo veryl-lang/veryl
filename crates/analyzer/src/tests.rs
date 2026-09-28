@@ -28,6 +28,7 @@ mod constant_evaluation_tests;
 mod instantiation_note_tests;
 mod interface_array_tests;
 mod modport_connection_tests;
+mod procedural_coverage_tests;
 mod statement_after_if_reset_tests;
 
 #[track_caller]
@@ -11294,7 +11295,11 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+    );
 
     let code = r#"
     module ModuleA {
@@ -11315,7 +11320,11 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+    );
 
     let code = r#"
     module ModuleA {
@@ -11333,7 +11342,11 @@ fn uncovered_branch() {
     "#;
 
     let errors = analyze(code);
-    assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. }))
+    );
 
     let code = r#"
     module ModuleA {
@@ -11376,7 +11389,7 @@ fn uncovered_branch() {
     //"#;
     //
     //let errors = analyze(code);
-    //assert!(matches!(errors[0], AnalyzerError::UncoveredBranch { .. }));
+    //assert!(errors.iter().any(|error| matches!(error, AnalyzerError::UncoveredBranch { .. })));
 
     let code = r#"
     module ModuleA {

@@ -1,5 +1,9 @@
-//! Shared analyzer-IR procedure evaluation and SSA construction.
+//! Shared procedural SSA lowering for value dependencies and assignment coverage.
+//!
+//! Function calls, branches and loop exits are evaluated once. Consumers query
+//! value flow and write effects from that same control-flow analysis.
 
+mod coverage;
 pub(crate) mod region;
 pub(crate) mod ssa;
 
@@ -372,6 +376,24 @@ fn destination_packed_shape(destination: &AssignDestination) -> Cow<'_, [Option<
 struct SsaKey {
     node: NodeKey,
     call_frame: Option<usize>,
+    aspect: SsaAspect,
+}
+
+/// Value flow and definite assignment share control flow, but not data flow.
+/// In particular, `x = x` defines x even though its value reads the entry x.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum SsaAspect {
+    Value,
+    Assignment,
+}
+
+impl SsaKey {
+    fn assignment(self) -> Self {
+        Self {
+            aspect: SsaAspect::Assignment,
+            ..self
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -415,6 +437,7 @@ struct FlowState {
 struct FunctionSummaryKey {
     id: VarId,
     index: Option<Vec<usize>>,
+    constants: Vec<(VarPath, Value)>,
 }
 
 #[derive(Clone)]
@@ -422,10 +445,28 @@ struct FunctionSummary {
     arg_map: HashMap<VarPath, VarId>,
     graph: Rc<DependencyDag<SsaKey>>,
     result: FunctionResultSummary,
-    writes: Vec<(NodeKey, Option<usize>)>,
+    writes: Vec<FunctionWrite>,
+    uncovered: Vec<UncoveredAssignment>,
     opaque_sources: Vec<NodeKey>,
     status: AnalysisStatus,
     repeatable: bool,
+}
+
+#[derive(Clone)]
+struct FunctionWrite {
+    destination: NodeKey,
+    value: Option<usize>,
+    assignment: Option<usize>,
+    sites: Vec<TokenRange>,
+}
+
+/// A region with an exit path that has not assigned it. Sites are carried
+/// through function summaries; callers supply the captured storage's entry
+/// assignment state, while automatic outputs are checked in their own frame.
+#[derive(Clone)]
+pub(crate) struct UncoveredAssignment {
+    pub(crate) id: VarId,
+    pub(crate) sites: Vec<TokenRange>,
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -500,6 +541,7 @@ pub(crate) struct FunctionSummaries<'a> {
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
+    active: HashSet<(VarId, Option<Vec<usize>>)>,
     contexts: Vec<ProcedureContext>,
     module_scope_ids: Rc<HashSet<VarId>>,
 }
@@ -889,6 +931,7 @@ impl<'a> FunctionSummaries<'a> {
             module,
             bit_part,
             summaries: HashMap::default(),
+            active: HashSet::default(),
             // Most modules never need a function summary. Allocate the
             // baseline scratch context lazily so ordinary declarations keep
             // just the reusable top-level procedure context.
@@ -898,22 +941,77 @@ impl<'a> FunctionSummaries<'a> {
     }
 
     fn get(&mut self, call: &FunctionCall, caller_ctx: &mut Context) -> FunctionSummaryLookup {
+        // Captured write coverage depends on which branches a constant actual
+        // selects. Pure functions need no assignment-effect specialization.
+        let specialize = self
+            .module
+            .functions
+            .get(&call.id)
+            .is_some_and(|function| !function.is_const);
+        let mut constants = if specialize {
+            call.inputs
+                .iter()
+                .filter_map(|(path, actual)| {
+                    actual
+                        .comptime()
+                        .is_const
+                        .then(|| actual.eval_value(caller_ctx))
+                        .flatten()
+                        .map(|value| (path.clone(), value))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        constants.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         let key = FunctionSummaryKey {
             id: call.id,
-            index: call.index.clone(),
+            index: call.index.clone().filter(|index| !index.is_empty()),
+            constants,
         };
+        self.get_by_key(key, caller_ctx)
+    }
+
+    fn get_by_key(
+        &mut self,
+        key: FunctionSummaryKey,
+        caller_ctx: &mut Context,
+    ) -> FunctionSummaryLookup {
         if let Some(summary) = self.summaries.get(&key).cloned() {
             return summary.map_or(
                 FunctionSummaryLookup::Recursive,
                 FunctionSummaryLookup::Ready,
             );
         }
+        let identity = (key.id, key.index.clone());
+        if !self.active.insert(identity.clone()) {
+            return FunctionSummaryLookup::Recursive;
+        }
         self.summaries.insert(key.clone(), None);
         let mut context = self
             .contexts
             .pop()
             .unwrap_or_else(|| ProcedureContext::new_summary(Rc::clone(&self.module_scope_ids)));
-        context.prepare_summary(self.module, call.id, call.index.as_deref());
+        context.prepare_summary(self.module, key.id, key.index.as_deref());
+        if let Some(body) =
+            self.module.functions.get(&key.id).and_then(|function| {
+                function.get_function(key.index.as_deref().unwrap_or_default())
+            })
+        {
+            let ctx = context.ctx.as_mut().expect("summary context is available");
+            for (path, value) in &key.constants {
+                if let Some(variable) = body
+                    .arg_map
+                    .get(path)
+                    .and_then(|id| ctx.variables.get_mut(id))
+                {
+                    // Summary contexts clear runtime storage. Allocate the
+                    // scalar formal before applying its declared width.
+                    variable.value = vec![value.clone()];
+                    variable.set_value(&[], value.clone(), None);
+                }
+            }
+        }
         // Function IR is immutable during dependency analysis. Move the one
         // module-wide map down the suspended call chain instead of cloning it
         // into every recursive scratch context, then restore it before the
@@ -922,8 +1020,8 @@ impl<'a> FunctionSummaries<'a> {
         let summary = ProcedureAnalysis::summarize_function(
             self.module,
             self.bit_part,
-            call.id,
-            call.index.as_deref(),
+            key.id,
+            key.index.as_deref(),
             &mut context,
             self,
         )
@@ -931,6 +1029,7 @@ impl<'a> FunctionSummaries<'a> {
         caller_ctx.functions = context.take_functions();
         context.clear_summary();
         self.contexts.push(context);
+        self.active.remove(&identity);
         if let Some(summary) = summary {
             self.summaries.insert(key, Some(summary.clone()));
             FunctionSummaryLookup::Ready(summary)
@@ -939,6 +1038,78 @@ impl<'a> FunctionSummaries<'a> {
             FunctionSummaryLookup::Missing
         }
     }
+
+    pub(crate) fn uncovered_outputs(
+        &mut self,
+        context: &mut ProcedureContext,
+    ) -> Vec<UncoveredAssignment> {
+        let (mut ctx, _) = context.take();
+        let mut functions = self
+            .module
+            .functions
+            .values()
+            .filter(|function| {
+                function
+                    .args
+                    .iter()
+                    .flat_map(|arg| &arg.members)
+                    .any(|(_, _, direction)| *direction == crate::symbol::Direction::Output)
+            })
+            .collect::<Vec<_>>();
+        functions.sort_unstable_by_key(|function| function.id);
+        let mut uncovered = Vec::new();
+        for function in functions {
+            for index in 0..function.functions.len() {
+                let index = VarIndex::from_index(index, &function.array)
+                    .eval_value(&mut ctx)
+                    .filter(|index| !index.is_empty());
+                let key = FunctionSummaryKey {
+                    id: function.id,
+                    index,
+                    constants: Vec::new(),
+                };
+                if let FunctionSummaryLookup::Ready(summary) = self.get_by_key(key, &mut ctx) {
+                    uncovered.extend_from_slice(&summary.uncovered);
+                }
+            }
+        }
+        context.restore(ctx);
+        uncovered
+    }
+}
+
+pub(crate) fn coverage_diagnostics(
+    module: &Module,
+    uncovered: Vec<UncoveredAssignment>,
+) -> Vec<crate::AnalyzerError> {
+    let mut by_variable: HashMap<VarId, Vec<TokenRange>> = HashMap::default();
+    for assignment in uncovered {
+        by_variable
+            .entry(assignment.id)
+            .or_default()
+            .extend(assignment.sites);
+    }
+    let mut variables = by_variable.into_iter().collect::<Vec<_>>();
+    variables.sort_unstable_by_key(|(id, _)| *id);
+    variables
+        .into_iter()
+        .filter_map(|(id, mut sites)| {
+            let variable = module
+                .variables
+                .get(&id)
+                .or_else(|| module.interface_members.get(&id))?;
+            sites.sort_unstable_by_key(|token| token.beg.pos);
+            sites.dedup();
+            if sites.is_empty() {
+                sites.push(variable.token);
+            }
+            Some(crate::AnalyzerError::uncovered_branch(
+                &variable.path.to_string(),
+                &sites[0],
+                &sites,
+            ))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1032,13 +1203,13 @@ pub(crate) fn traced_procedure_evaluation_count() -> usize {
     TRACED_PROCEDURE_EVALUATIONS.get()
 }
 
-pub(crate) fn analyze<'a>(
+pub(crate) fn lower<'a>(
     bit_part: &'a BitPartition,
     statements: &[Statement],
     branch_namespace: usize,
     context: &mut ProcedureContext,
     summaries: &mut FunctionSummaries<'a>,
-) -> ProcedureResult {
+) -> LoweredProcedure {
     ProcedureAnalysis::analyze(bit_part, statements, branch_namespace, context, summaries)
 }
 
@@ -1046,6 +1217,84 @@ pub(crate) struct ProcedureResult {
     pub(crate) graph: DependencyDag<NodeKey>,
     pub(crate) destinations: Vec<(NodeKey, Option<usize>)>,
     pub(crate) status: AnalysisStatus,
+}
+
+struct SsaOutput {
+    key: NodeKey,
+    value: VersionId,
+    assignment: VersionId,
+    sites: Vec<TokenRange>,
+}
+
+/// Owned SSA for one process. Lowering no longer discards its value/effect
+/// graph to produce a loop-detector-specific result. Coverage and circuit
+/// dependency extraction consume the same exits without re-evaluating IR.
+pub(crate) struct LoweredProcedure {
+    ssa: SsaStore<SsaKey>,
+    outputs: Vec<SsaOutput>,
+    module_scope_ids: Rc<HashSet<VarId>>,
+    guard_work: Option<usize>,
+    import_work: usize,
+    status: AnalysisStatus,
+}
+
+impl LoweredProcedure {
+    pub(crate) fn uncovered_assignments(&mut self) -> Vec<UncoveredAssignment> {
+        if !self.status.is_complete() {
+            return Vec::new();
+        }
+        // Coverage is an independent consumer. An incomplete coverage query
+        // must not discard the SSA or suppress a provable circuit cycle.
+        self.guard_work
+            .and_then(|mut work| coverage::uncovered(&mut self.ssa, &self.outputs, &mut work))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn dependencies(mut self) -> ProcedureResult {
+        let roots = self
+            .outputs
+            .iter()
+            .map(|output| output.value)
+            .collect::<Vec<_>>();
+        let graph = self
+            .guard_work
+            .and_then(|_| {
+                self.ssa.try_dependency_dag_with_import_limit(
+                    &roots,
+                    |key| {
+                        #[cfg(test)]
+                        VISIBLE_SOURCE_PROBES.set(VISIBLE_SOURCE_PROBES.get() + 1);
+                        key.aspect == SsaAspect::Value
+                            && key.call_frame.is_none()
+                            && self.module_scope_ids.contains(&key.node.0)
+                    },
+                    usize::MAX,
+                    self.import_work,
+                )
+            })
+            .unwrap_or_else(|| {
+                self.status = AnalysisStatus::Barrier;
+                DependencyDag {
+                    nodes: Vec::new(),
+                    edges: Vec::new(),
+                    domains: Vec::new(),
+                    sites: HashMap::default(),
+                    roots: vec![None; roots.len()],
+                }
+            });
+        let graph = module_dependency_graph(graph);
+        let destinations = self
+            .outputs
+            .into_iter()
+            .map(|output| output.key)
+            .zip(graph.roots.iter().copied())
+            .collect();
+        ProcedureResult {
+            graph,
+            destinations,
+            status: self.status,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -1243,6 +1492,7 @@ struct ProcedureAnalysis<'a, 's> {
     module_scope_ids: Rc<HashSet<VarId>>,
     ssa: SsaStore<SsaKey>,
     written: HashSet<NodeKey>,
+    write_sites: HashMap<NodeKey, Vec<TokenRange>>,
     call_caches: Vec<CallCache>,
     call_frames: Vec<usize>,
     next_call_frame: usize,
@@ -1285,6 +1535,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             module_scope_ids,
             ssa: SsaStore::default(),
             written: HashSet::default(),
+            write_sites: HashMap::default(),
             call_caches: Vec::new(),
             call_frames: Vec::new(),
             next_call_frame: 0,
@@ -1312,7 +1563,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         branch_namespace: usize,
         context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
-    ) -> ProcedureResult {
+    ) -> LoweredProcedure {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
         let mut this = Self::from_context(bit_part, summaries.module, ctx, module_scope_ids);
@@ -1325,10 +1576,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.causal_write_keys = this.process_write_footprint(statements);
         this.branch_namespace = branch_namespace;
         this.eval_block(statements, &[]);
-        let (graph, destinations) = this.dependency_graph();
-        let result = ProcedureResult {
-            graph,
-            destinations,
+        let outputs = this.ssa_outputs(false);
+        let result = LoweredProcedure {
+            ssa: this.ssa,
+            outputs,
+            module_scope_ids: this.module_scope_ids,
+            guard_work: this.guard_work,
+            import_work: this.import_work,
             status: this.status,
         };
         this.ctx.rollback_analysis_transaction();
@@ -1392,6 +1646,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.receiver_indices.pop();
         this.call_caches.pop();
 
+        let uncovered = this.uncovered_assignments(true);
         let result_versions: Vec<(ArraySpan, Vec<(PackedSpan, VersionId)>)> = body
             .ret
             .map(|ret| this.current_region_groups_for_id(ret))
@@ -1410,7 +1665,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .into_iter()
             .map(|destination| {
                 let version = this.read_key(destination);
-                (destination, version)
+                let assignment = this.ssa.read(this.ssa_key(destination).assignment());
+                let assignment = this.ssa.definition(vec![assignment]);
+                (destination, version, assignment)
             })
             .collect::<Vec<_>>();
 
@@ -1418,15 +1675,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .iter()
             .flat_map(|(_, regions)| regions.iter().map(|(_, version)| *version))
             .collect::<Vec<_>>();
-        roots.extend(write_versions.iter().map(|(_, version)| *version));
+        roots.extend(
+            write_versions
+                .iter()
+                .flat_map(|(_, value, assignment)| [*value, *assignment]),
+        );
         let graph = this
             .guard_work
             .and_then(|_| {
                 this.ssa.try_dependency_dag(
                     &roots,
                     |key| {
-                        this.is_visible_source(key)
-                            || (key.call_frame.is_none() && formal_ids.contains(&key.node.0))
+                        key.call_frame.is_none()
+                            && (this.is_module_scope_key(key.node)
+                                || formal_ids.contains(&key.node.0))
                     },
                     FUNCTION_SUMMARY_WORK,
                 )
@@ -1464,11 +1726,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect();
         let writes: Vec<_> = write_versions
             .into_iter()
-            .map(|(destination, _)| {
-                (
-                    destination,
-                    root.next().expect("every function write has a DAG root"),
-                )
+            .map(|(destination, _, _)| FunctionWrite {
+                destination,
+                value: root.next().expect("every function value has a DAG root"),
+                assignment: root
+                    .next()
+                    .expect("every function write effect has a DAG root"),
+                sites: this
+                    .write_sites
+                    .get(&destination)
+                    .cloned()
+                    .unwrap_or_default(),
             })
             .collect();
         debug_assert!(root.next().is_none());
@@ -1494,6 +1762,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 && writes.is_empty()
                 && opaque_sources.is_empty(),
             writes,
+            uncovered,
             opaque_sources,
             status: this.status,
         };
@@ -1531,6 +1800,52 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         (graph, destinations)
     }
 
+    fn ssa_outputs(&mut self, function_outputs: bool) -> Vec<SsaOutput> {
+        let mut keys = self
+            .written
+            .iter()
+            .copied()
+            .filter(|key| {
+                if function_outputs {
+                    !self.is_module_scope_key(*key)
+                        && self
+                            .ctx
+                            .variables
+                            .get(&key.0)
+                            .is_some_and(|variable| variable.kind == crate::ir::VarKind::Output)
+                } else {
+                    self.is_module_scope_key(*key)
+                }
+            })
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys.into_iter()
+            .map(|key| {
+                let value = self.read_key(key);
+                let value = self.key_span(key).map_or(value, |packed| {
+                    self.ssa
+                        .root_in_domain(value, position_domain(key.1, packed))
+                });
+                SsaOutput {
+                    key,
+                    value,
+                    assignment: self.ssa.read(self.ssa_key(key).assignment()),
+                    sites: self.write_sites.get(&key).cloned().unwrap_or_default(),
+                }
+            })
+            .collect()
+    }
+
+    fn uncovered_assignments(&mut self, function_outputs: bool) -> Vec<UncoveredAssignment> {
+        if !self.status.is_complete() {
+            return Vec::new();
+        }
+        let outputs = self.ssa_outputs(function_outputs);
+        self.guard_work
+            .and_then(|mut work| coverage::uncovered(&mut self.ssa, &outputs, &mut work))
+            .unwrap_or_default()
+    }
+
     fn is_module_scope_key(&self, key: NodeKey) -> bool {
         self.module_scope_ids.contains(&key.0)
     }
@@ -1543,7 +1858,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Function)
             .then(|| self.call_frames.last().copied())
             .flatten();
-        SsaKey { node, call_frame }
+        SsaKey {
+            node,
+            call_frame,
+            aspect: SsaAspect::Value,
+        }
     }
 
     fn read_key(&mut self, node: NodeKey) -> VersionId {
@@ -1577,30 +1896,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 sites: HashMap::default(),
             };
         };
-        DependencyDag {
-            nodes: graph
-                .nodes
-                .into_iter()
-                .map(|node| match node {
-                    DependencyDagNode::External(SsaKey {
-                        node,
-                        call_frame: None,
-                    }) => DependencyDagNode::External(node),
-                    DependencyDagNode::External(SsaKey {
-                        call_frame: Some(_),
-                        ..
-                    }) => unreachable!("call-frame storage is not a visible DAG source"),
-                    DependencyDagNode::Internal => DependencyDagNode::Internal,
-                    DependencyDagNode::Replicated { replication } => {
-                        DependencyDagNode::Replicated { replication }
-                    }
-                })
-                .collect(),
-            edges: graph.edges,
-            roots: graph.roots,
-            domains: graph.domains,
-            sites: graph.sites,
-        }
+        module_dependency_graph(graph)
     }
 
     fn is_visible_source(&self, key: &SsaKey) -> bool {
@@ -1608,7 +1904,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // module partition for every declaration makes sparse writes quadratic.
         #[cfg(test)]
         VISIBLE_SOURCE_PROBES.set(VISIBLE_SOURCE_PROBES.get() + 1);
-        key.call_frame.is_none() && self.is_module_scope_key(key.node)
+        key.aspect == SsaAspect::Value
+            && key.call_frame.is_none()
+            && self.is_module_scope_key(key.node)
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
@@ -1828,6 +2126,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let summary_key = FunctionSummaryKey {
             id: call.id,
             index: call.index.clone(),
+            constants: Vec::new(),
         };
         if !visited.insert(summary_key.clone()) {
             return;
@@ -2004,6 +2303,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.bind_key(key, version);
         }
         self.written.insert(key);
+        let assignment = self.ssa_key(key).assignment();
+        let defined = self.ssa.definition(Vec::new());
+        if dynamic {
+            self.ssa.weak_bind(assignment, defined);
+        } else {
+            self.ssa.bind(assignment, defined);
+        }
+        if let Some(token) = self.active_assignment {
+            self.write_sites.entry(key).or_default().push(token);
+        }
     }
 
     fn receiver_index(&self, id: VarId, index: &VarIndex) -> VarIndex {
@@ -2149,7 +2458,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .ssa
             .definition_guarded(dependencies, &self.path_condition);
         for key in keys {
-            if let Some(token) = self.active_assignment {
+            if self.tracing
+                && let Some(token) = self.active_assignment
+            {
                 self.ssa.record_site(version, token, controls);
             }
             self.bind_destination(key, version, dynamic);
@@ -2263,7 +2574,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let version = self
                 .ssa
                 .related_definition_guarded(sources.sources, &self.path_condition);
-            if let Some(token) = self.active_assignment {
+            if self.tracing
+                && let Some(token) = self.active_assignment
+            {
                 self.ssa.record_site(version, token, controls);
             }
             self.bind_destination(key, version, dynamic);
@@ -2441,7 +2754,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         match statement {
             Statement::Assign(assign) => {
                 let previous_assignment = self.active_assignment;
-                self.active_assignment = self.tracing.then_some(assign.token);
+                self.active_assignment = Some(assign.token);
                 self.call_caches.push(Some(EvaluationCache {
                     variables: Some(HashMap::default()),
                     ..EvaluationCache::default()
@@ -2526,6 +2839,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         branches: Vec<(FlowResult, BranchState<SsaKey>, PathCondition)>,
         branch_controls: &[VersionId],
+        assume_covered: bool,
     ) -> FlowResult {
         let Some(continuation_condition) = self.disjoin_paths(
             branches
@@ -2563,6 +2877,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
         self.ssa.merge(&continuation);
+        if assume_covered {
+            // cond_type suppresses this join only. An enclosing ordinary
+            // branch can still retain an unassigned entry on its own path.
+            let keys = continuation
+                .iter()
+                .flat_map(|state| state.keys())
+                .filter(|key| key.aspect == SsaAspect::Assignment)
+                .collect::<HashSet<_>>();
+            for key in keys {
+                let defined = self.ssa.definition(Vec::new());
+                self.ssa.bind(key, defined);
+            }
+        }
         if has_continue {
             self.path_condition = continuation_condition;
             // Share the guarded alternatives across subsequent statements.
@@ -2615,6 +2942,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 (false_flow, false_state, false_condition),
             ],
             &condition,
+            crate::ir::has_cond_type(&statement.token),
         )
     }
 
@@ -2689,7 +3017,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 states.push((flow, state, self.path_condition.clone()));
             }
             self.path_condition = parent_condition;
-            return self.merge_branches(states, &condition);
+            return self.merge_branches(
+                states,
+                &condition,
+                crate::ir::has_cond_type(&statement.token),
+            );
         }
 
         let branch = self.next_branch_id(statement.arms.len() + 1);
@@ -2710,7 +3042,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let state = self.ssa.capture_and_rollback(checkpoint);
         states.push((flow, state, self.path_condition.clone()));
         self.path_condition = parent_condition;
-        self.merge_branches(states, &condition)
+        self.merge_branches(
+            states,
+            &condition,
+            crate::ir::has_cond_type(&statement.token),
+        )
     }
 
     fn eval_for(&mut self, statement: &ForStatement, controls: &[VersionId]) -> FlowResult {
@@ -2767,11 +3103,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Some(width) = statement.var_type.total_width() else {
             return;
         };
-        variable.set_value(
-            &[],
-            Value::new(value as u64, width, statement.var_type.signed),
-            None,
-        );
+        variable.value = vec![Value::new(value as u64, width, statement.var_type.signed)];
     }
 
     fn forget_runtime_iterator_value(&mut self, iterator: VarId) {
@@ -2874,6 +3206,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 may_execute_zero_times,
                 &mut self.import_work,
                 |key| {
+                    if key.aspect == SsaAspect::Assignment {
+                        return None;
+                    }
                     bit_part
                         .ranges_of((key.node.0, key.node.1))
                         .get(key.node.2)
@@ -3811,12 +4146,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return;
         }
         let bit_part = self.bit_part;
-        self.ssa.merge_conditional(states, controls, |key| {
-            bit_part
-                .ranges_of((key.node.0, key.node.1))
-                .get(key.node.2)
-                .map(|packed| position_domain(key.node.1, *packed))
-        });
+        self.ssa.merge_conditional(
+            states,
+            controls,
+            |key| {
+                if key.aspect == SsaAspect::Assignment {
+                    return None;
+                }
+                bit_part
+                    .ranges_of((key.node.0, key.node.1))
+                    .get(key.node.2)
+                    .map(|packed| position_domain(key.node.1, *packed))
+            },
+            |key| key.aspect == SsaAspect::Value,
+        );
     }
 
     fn eval_short_circuit(
@@ -4091,6 +4434,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn constant_truth(&mut self, expression: &Expression) -> Option<bool> {
+        // A runtime operand does not make the other operand's short-circuit
+        // result unknown. This matters for iterator-dependent break paths:
+        // `i == 1 && stop` cannot break the i=0 iteration.
+        if let Expression::Binary(left, op @ (Op::LogicAnd | Op::LogicOr), right, _) = expression {
+            let left = self.constant_truth(left);
+            let right = self.constant_truth(right);
+            return match (op, left, right) {
+                (Op::LogicAnd, Some(false), _) | (Op::LogicAnd, _, Some(false)) => Some(false),
+                (Op::LogicOr, Some(true), _) | (Op::LogicOr, _, Some(true)) => Some(true),
+                (_, Some(left), Some(right)) => Some(if *op == Op::LogicAnd {
+                    left && right
+                } else {
+                    left || right
+                }),
+                _ => None,
+            };
+        }
         expression
             .eval_value(&mut self.ctx)
             .and_then(|value| value.to_usize())
@@ -4331,7 +4691,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .get(&formal)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            self.write_formal_outputs(destinations, formal_versions, controls);
+            self.write_formal_outputs(destinations, formal_versions, controls, call.comptime.token);
         }
 
         let opaque_sources = if statements_have_unknown(&body.statements) {
@@ -4384,17 +4744,38 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             if !bindings.contains_key(key) {
                 bindings.insert(
                     *key,
-                    self.map_summary_node_source(call, summary, key.node)
-                        .sources,
+                    if key.aspect == SsaAspect::Assignment {
+                        if self.is_module_scope_key(key.node) {
+                            let entry = self.ssa.read(self.ssa_key(key.node).assignment());
+                            vec![(entry, PositionRelation::default())]
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        self.map_summary_node_source(call, summary, key.node)
+                            .sources
+                    },
                 );
             }
         }
 
         let bindings = Rc::new(bindings);
-        for (destination, root) in &summary.writes {
+        // Copy-out reads this invocation's automatic formals, even when a
+        // specialized body never writes one of them. Do not reuse a previous
+        // call's formal value. Captured module/interface storage is shared.
+        for formal in summary.arg_map.values() {
+            for key in self.keys_for_id(*formal) {
+                if !self.is_module_scope_key(key) {
+                    let uninitialized = self.ssa.definition(Vec::new());
+                    self.bind_key(key, uninitialized);
+                }
+            }
+        }
+        for write in &summary.writes {
+            let destination = write.destination;
             let imported = self.ssa.imported(
                 summary.graph.clone(),
-                *root,
+                write.value,
                 bindings.clone(),
                 branch_map.clone(),
             );
@@ -4405,8 +4786,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let version = self
                 .ssa
                 .related_definition_guarded(sources.sources, &self.path_condition);
-            self.bind_key(*destination, version);
-            self.written.insert(*destination);
+            self.bind_key(destination, version);
+            self.written.insert(destination);
+            let assignment = self.ssa.imported(
+                summary.graph.clone(),
+                write.assignment,
+                bindings.clone(),
+                branch_map.clone(),
+            );
+            self.ssa
+                .bind(self.ssa_key(destination).assignment(), assignment);
+            self.write_sites
+                .entry(destination)
+                .or_default()
+                .extend_from_slice(&write.sites);
         }
 
         let formal_outputs = call
@@ -4422,7 +4815,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let Some(&formal) = summary.arg_map.get(path) else {
                 continue;
             };
-            self.write_formal_outputs(destinations, &formal_outputs[&formal], controls);
+            self.write_formal_outputs(
+                destinations,
+                &formal_outputs[&formal],
+                controls,
+                call.comptime.token,
+            );
         }
 
         let region_groups = summary
@@ -4792,7 +5190,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         destinations: &[AssignDestination],
         formal_versions: &[(NodeKey, VersionId)],
         controls: &[VersionId],
+        token: TokenRange,
     ) {
+        let previous_assignment = self.active_assignment.replace(token);
         // A concatenated actual is one lvalue. Sample all its selectors after
         // the callee returns, before writing any piece of the concatenation.
         let selectors = destinations
@@ -4827,6 +5227,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 self.bind_whole_destination(destination, sources, controls);
             }
         }
+        self.active_assignment = previous_assignment;
     }
 
     fn write_formal_output(
@@ -5056,5 +5457,32 @@ fn expression_has_unknown(expression: &Expression) -> bool {
         Expression::StructConstructor(_, fields, _) => fields
             .iter()
             .any(|(_, expression)| expression_has_unknown(expression)),
+    }
+}
+
+fn module_dependency_graph(graph: DependencyDag<SsaKey>) -> DependencyDag<NodeKey> {
+    DependencyDag {
+        nodes: graph
+            .nodes
+            .into_iter()
+            .map(|node| match node {
+                DependencyDagNode::External(SsaKey {
+                    node,
+                    call_frame: None,
+                    aspect: SsaAspect::Value,
+                }) => DependencyDagNode::External(node),
+                DependencyDagNode::External(_) => {
+                    unreachable!("only module values are visible DAG sources")
+                }
+                DependencyDagNode::Internal => DependencyDagNode::Internal,
+                DependencyDagNode::Replicated { replication } => {
+                    DependencyDagNode::Replicated { replication }
+                }
+            })
+            .collect(),
+        edges: graph.edges,
+        roots: graph.roots,
+        domains: graph.domains,
+        sites: graph.sites,
     }
 }

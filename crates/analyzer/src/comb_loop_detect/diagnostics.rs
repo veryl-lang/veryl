@@ -241,7 +241,9 @@ fn replay(
     }
     #[cfg(test)]
     DIAGNOSTIC_REPLAYS.set(DIAGNOSTIC_REPLAYS.get() + 1);
-    let (graph, _, _) = build_module_graph_with_trace(module, summaries, tracing).ok()?;
+    let graph = build_module_graph_with_trace(module, summaries, tracing)
+        .ok()?
+        .graph;
     let graph = Rc::new(graph);
     cache.insert(key, Rc::clone(&graph));
     Some(graph)

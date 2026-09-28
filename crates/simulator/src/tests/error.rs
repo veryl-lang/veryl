@@ -115,7 +115,12 @@ fn combinational_loop_through_a_dynamic_bit_write() {
     }
     "#;
 
-    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
+    let result = analyze_top_inner(
+        code,
+        &Config::default(),
+        "Top",
+        Allowed::CombLoopAndUncoveredBranch,
+    );
     assert!(matches!(
         result,
         Err(SimulatorError::CombinationalLoop { .. })

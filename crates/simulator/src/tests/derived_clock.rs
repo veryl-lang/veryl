@@ -1225,16 +1225,16 @@ fn a_closure_output_read_as_data_stays_current_without_a_settle_of_its_own() {
 
 /// `analyze` with the falling-edge subset's caps set to `caps`: these tests
 /// are about what the subset settles, not about when it pays.
-fn analyze_fall_capped(code: &str, config: &Config, caps: (usize, usize)) -> Ir {
+fn analyze_fall_capped(code: &str, config: &Config, caps: (usize, usize), allow: Allowed) -> Ir {
     use crate::ir::module::TEST_FALL_PARTIAL_CAPS;
     TEST_FALL_PARTIAL_CAPS.with(|c| c.set(Some(caps)));
-    let ir = analyze(code, config);
+    let ir = analyze_top_inner(code, config, "Top", allow).unwrap();
     TEST_FALL_PARTIAL_CAPS.with(|c| c.set(None));
     ir
 }
 
 fn analyze_fall_uncapped(code: &str, config: &Config) -> Ir {
-    analyze_fall_capped(code, config, (usize::MAX, usize::MAX))
+    analyze_fall_capped(code, config, (usize::MAX, usize::MAX), Allowed::Nothing)
 }
 
 /// Group of the derived clock `name`, `u32::MAX` when not covered.
@@ -1401,7 +1401,14 @@ fn fall_partial_settles_a_runtime_indexed_writer() {
     "#;
     for config in Config::all() {
         dbg!(&config);
-        let ir = analyze_fall_uncapped(code, &config);
+        // This fixture intentionally retains unselected elements. Check
+        // that coverage is diagnosed while exercising the backend writer.
+        let ir = analyze_fall_capped(
+            code,
+            &config,
+            (usize::MAX, usize::MAX),
+            Allowed::UncoveredBranch,
+        );
         let mut sim = Simulator::new(ir, None);
         assert_ne!(fall_group_of(&sim, "clk_n"), u32::MAX, "{config:?}");
         let clk = sim.get_clock("i_clk").unwrap();
@@ -1466,7 +1473,7 @@ fn fall_partial_leaves_a_partly_covered_batch_to_the_full_settle() {
     );
     for config in Config::all() {
         dbg!(&config);
-        let ir = analyze_fall_capped(&code, &config, (8, usize::MAX));
+        let ir = analyze_fall_capped(&code, &config, (8, usize::MAX), Allowed::Nothing);
         let mut sim = Simulator::new(ir, None);
         assert_ne!(fall_group_of(&sim, "clk_p"), u32::MAX, "{config:?}");
         assert_eq!(fall_group_of(&sim, "clk_q"), u32::MAX, "{config:?}");

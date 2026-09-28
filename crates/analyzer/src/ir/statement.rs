@@ -2,7 +2,7 @@ use crate::AnalyzerError;
 use crate::conv::Context;
 use crate::ir::assign_table::{AssignContext, AssignTable};
 use crate::ir::ff_table::AssignTarget;
-use crate::ir::utils::{allow_missing_reset_statement, has_cond_type};
+use crate::ir::utils::allow_missing_reset_statement;
 use crate::ir::{
     Comptime, Expression, FfTable, FunctionCall, Op, SystemFunctionCall, SystemFunctionInput, Type,
     VarId, VarIndex, VarPath, VarSelect,
@@ -994,10 +994,6 @@ impl IfStatement {
             x.eval_assign(context, &mut false_table, assign_context, &base_tables);
         }
 
-        if assign_context.is_comb() && !has_cond_type(&self.token) {
-            true_table.check_uncoverd(context, &false_table, &base_tables);
-        }
-
         true_table.merge_by_or(context, &mut false_table, false);
         assign_table.merge_by_or(context, &mut true_table, false);
         std::mem::swap(&mut assign_table.refernced, &mut false_table.refernced);
@@ -1309,11 +1305,6 @@ impl CaseStatement {
         }
         let final_referenced = std::mem::take(&mut default_table.refernced);
         branch_tables.push(default_table);
-
-        if assign_context.is_comb() && !has_cond_type(&self.token) {
-            let refs: Vec<&AssignTable> = branch_tables.iter().collect();
-            AssignTable::check_uncoverd_n_way(context, &refs, &base_tables);
-        }
 
         let mut acc = branch_tables.pop().expect("default_table");
         for mut t in branch_tables.into_iter().rev() {

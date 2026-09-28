@@ -532,6 +532,13 @@ pub(crate) struct BranchState<K> {
 }
 
 impl<K> BranchState<K> {
+    pub(crate) fn keys(&self) -> impl Iterator<Item = K> + '_
+    where
+        K: Copy,
+    {
+        self.bindings.keys().copied()
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.bindings.len()
     }
@@ -832,6 +839,7 @@ where
         states: [(&BranchState<K>, &PathCondition); 2],
         controls: &[VersionId],
         domain: impl Fn(K) -> Option<PositionDomain>,
+        value_key: impl Fn(K) -> bool,
     ) {
         let keys = states
             .iter()
@@ -847,7 +855,13 @@ where
                 .into_iter()
                 .map(|(state, condition)| {
                     let value = state.bindings.get(&key).copied().unwrap_or(fallback);
-                    let source = self.phi(vec![value, control]);
+                    // Assignment effects follow the selected path, but do
+                    // not read the condition's value as assignment state.
+                    let source = if value_key(key) {
+                        self.phi(vec![value, control])
+                    } else {
+                        value
+                    };
                     let version = self.versions.len();
                     // A guard is an alias, not a read. Bare entry versions
                     // retained on the skipped path must remain state retention

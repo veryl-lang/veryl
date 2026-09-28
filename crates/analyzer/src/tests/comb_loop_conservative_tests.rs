@@ -488,9 +488,7 @@ fn separate_complementary_conditionals_are_not_correlated() {
 
 #[test]
 fn complementary_short_circuit_predicates_are_not_correlated() {
-    assert_intentional_false_positive(
-        "predicates in separate short-circuit operands are not proven mutually exclusive",
-        r#"
+    let code = r#"
         module Top (
             sel: input  logic,
             o  : output logic,
@@ -511,8 +509,28 @@ fn complementary_short_circuit_predicates_are_not_correlated() {
                 o = a | b | dummy;
             }
         }
-        "#,
+        "#;
+    assert!(comb_loop_analysis_is_complete(code));
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
     );
+    let uncovered = errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::UncoveredBranch { identifier, .. } => Some(identifier.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    // Each captured variable is only written by one conditional call. Their
+    // coverage errors are real even though the structural cycle is conservative.
+    assert_eq!(uncovered, ["a", "b"]);
+    assert!(errors.iter().all(|error| matches!(
+        error,
+        AnalyzerError::CombinationalLoop { .. } | AnalyzerError::UncoveredBranch { .. }
+    )));
 }
 
 #[test]
