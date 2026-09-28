@@ -680,9 +680,6 @@ impl Type {
         Some(self.total_width()? * self.array.total()?)
     }
 
-    /// Elements in the leftmost dimension, which is what `$size` answers:
-    /// the outermost unpacked dimension, else the outermost packed one, else
-    /// the kind's own width (a struct or enum is one packed vector).
     /// Size of the `n`th dimension (1-based) as numbered by `$size(x, n)`:
     /// unpacked array dimensions first, then packed ones.
     pub fn dimension(&self, n: usize) -> Option<usize> {
@@ -699,6 +696,9 @@ impl Type {
         }
     }
 
+    /// Elements in the leftmost dimension, which is what `$size` answers:
+    /// the outermost unpacked dimension, else the outermost packed one, else
+    /// the kind's own width (a struct or enum is one packed vector).
     pub fn leading_dimension(&self) -> Option<usize> {
         self.dimension(1)
     }
