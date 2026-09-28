@@ -89,7 +89,8 @@ impl AssertKind {
 #[derive(Clone, Debug)]
 pub enum SystemFunctionKind {
     Bits(Input),
-    Size(Input),
+    /// `$size(x)` or `$size(x, dimension)`.
+    Size(Input, Option<Input>),
     Clog2(Input),
     Onehot(Input),
     Readmemh(Input, Output),
@@ -195,19 +196,21 @@ impl SystemFunctionCall {
                 })
             }
             "$size" => {
-                if args.len() != 1 {
+                if args.is_empty() || args.len() > 2 {
                     context.insert_error(AnalyzerError::mismatch_function_arity(
                         "$size",
-                        1,
+                        if args.is_empty() { 1 } else { 2 },
                         args.len(),
                         &token,
                     ));
                     return Err(ir_error!(token));
                 }
+                let arg1 =
+                    (args.len() == 2).then(|| create_input(context, name, None, args.remove(1)));
                 let arg0 = create_input(context, name, None, args.remove(0));
                 comptime.is_const = true;
                 Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Size(arg0),
+                    kind: SystemFunctionKind::Size(arg0, arg1),
                     comptime,
                 })
             }
@@ -405,12 +408,22 @@ impl SystemFunctionCall {
                 };
                 value.map(|x| Value::new(x as u64, 32, false))
             }
-            SystemFunctionKind::Size(x) => {
+            SystemFunctionKind::Size(x, dimension) => {
+                let dimension = match dimension {
+                    Some(dimension) => {
+                        let value = dimension.0.eval_value(context)?;
+                        if value.is_xz() {
+                            return None;
+                        }
+                        usize::try_from(value.payload().as_ref()).ok()?
+                    }
+                    None => 1,
+                };
                 let mut expr = x.0.clone();
                 let comptime = expr.eval_comptime(context, None);
                 let value = match &comptime.value {
-                    ValueVariant::Type(x) => x.leading_dimension(),
-                    _ => comptime.r#type.leading_dimension(),
+                    ValueVariant::Type(x) => x.dimension(dimension),
+                    _ => comptime.r#type.dimension(dimension),
                 };
                 value.map(|x| Value::new(x as u64, 32, false))
             }
@@ -450,7 +463,7 @@ impl SystemFunctionCall {
         let value = self.eval_value(context);
         match &self.kind {
             SystemFunctionKind::Bits(_)
-            | SystemFunctionKind::Size(_)
+            | SystemFunctionKind::Size(..)
             | SystemFunctionKind::Clog2(_)
             | SystemFunctionKind::Onehot(_) => {
                 let mut ret = self.comptime.clone();
@@ -492,7 +505,8 @@ impl fmt::Display for SystemFunctionCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             SystemFunctionKind::Bits(x) => format!("$bits({x})").fmt(f),
-            SystemFunctionKind::Size(x) => format!("$size({x})").fmt(f),
+            SystemFunctionKind::Size(x, None) => format!("$size({x})").fmt(f),
+            SystemFunctionKind::Size(x, Some(y)) => format!("$size({x}, {y})").fmt(f),
             SystemFunctionKind::Clog2(x) => format!("$clog2({x})").fmt(f),
             SystemFunctionKind::Onehot(x) => format!("$onehot({x})").fmt(f),
             SystemFunctionKind::Readmemh(x, y) => format!("$readmemh({x}, {y})").fmt(f),
@@ -533,7 +547,7 @@ impl SystemFunctionCall {
         };
         match &self.kind {
             SystemFunctionKind::Bits(x)
-            | SystemFunctionKind::Size(x)
+            | SystemFunctionKind::Size(x, _)
             | SystemFunctionKind::Clog2(x)
             | SystemFunctionKind::Onehot(x)
             | SystemFunctionKind::Signed(x)

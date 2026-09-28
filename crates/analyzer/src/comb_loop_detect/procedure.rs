@@ -812,7 +812,7 @@ fn collect_summary_system_call_variables(
 ) {
     match &call.kind {
         SystemFunctionKind::Bits(input)
-        | SystemFunctionKind::Size(input)
+        | SystemFunctionKind::Size(input, _)
         | SystemFunctionKind::Clog2(input)
         | SystemFunctionKind::Onehot(input)
         | SystemFunctionKind::Signed(input)
@@ -1854,7 +1854,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) {
         match &call.kind {
             SystemFunctionKind::Bits(input)
-            | SystemFunctionKind::Size(input)
+            | SystemFunctionKind::Size(input, _)
             | SystemFunctionKind::Clog2(input)
             | SystemFunctionKind::Onehot(input)
             | SystemFunctionKind::Signed(input)
@@ -4825,7 +4825,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if !matches!(
             call.kind,
             SystemFunctionKind::Bits(_)
-                | SystemFunctionKind::Size(_)
+                | SystemFunctionKind::Size(..)
                 | SystemFunctionKind::Clog2(_)
                 | SystemFunctionKind::Onehot(_)
                 | SystemFunctionKind::Signed(_)
@@ -4835,7 +4835,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         match &call.kind {
             SystemFunctionKind::Bits(_)
-            | SystemFunctionKind::Size(_)
+            | SystemFunctionKind::Size(..)
             | SystemFunctionKind::Clog2(_)
             | SystemFunctionKind::Finish => Vec::new(),
             SystemFunctionKind::Onehot(input)
