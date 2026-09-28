@@ -1061,16 +1061,14 @@ impl Factor {
                             );
                         }
                     } else if let Some(total_array) = variable.r#type.total_array() {
-                        for i in 0..total_array {
-                            table.insert_refered(
-                                *id,
-                                i,
-                                decl,
-                                assign_target.cloned(),
-                                src_read_mask.clone(),
-                                from_ff,
-                            );
-                        }
+                        table.insert_refered_whole(
+                            *id,
+                            total_array,
+                            decl,
+                            assign_target.cloned(),
+                            src_read_mask,
+                            from_ff,
+                        );
                     }
                 }
                 index.gather_ff(context, table, decl, assign_target, from_ff);

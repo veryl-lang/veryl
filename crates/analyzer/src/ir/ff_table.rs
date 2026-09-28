@@ -10,6 +10,14 @@ use crate::ir::write_count::{UnsafeSelfReads, unsafe_self_reads};
 /// fall back to per-decl aggregates).
 pub type AssignTarget = (VarId, Option<usize>, BigUint);
 
+/// `(decl_index, assign_target, src_read_mask, from_ff)`: see
+/// [`FfTableEntry::refered`].
+pub type Refered = (usize, Option<AssignTarget>, BigUint, bool);
+
+/// A reference through an index that does not evaluate, which reaches every
+/// element below `.0` of its variable.
+pub type WholeRefered = (usize, Refered);
+
 #[derive(Clone, Debug)]
 pub struct FfTableEntry {
     pub assigned: Option<usize>,
@@ -23,13 +31,20 @@ pub struct FfTableEntry {
     /// non-assign contexts. Empty `src_read_mask` = unavailable (fall back
     /// to per-decl aggregate). `from_ff` distinguishes always_ff (NBA-
     /// sensitive) from always_comb / continuous assign.
-    pub refered: Vec<(usize, Option<AssignTarget>, BigUint, bool)>,
+    /// References through an unevaluated index are kept apart, in
+    /// [`FfTable::whole_refered`]; [`FfTable::refered`] yields both.
+    pub refered: Vec<Refered>,
     pub is_ff: bool,
     pub assigned_comb: Option<usize>,
 }
 
 impl FfTableEntry {
-    fn update_is_ff(&mut self, self_key: (VarId, usize), unsafe_reads: &UnsafeSelfReads) {
+    fn update_is_ff(
+        &mut self,
+        self_key: (VarId, usize),
+        unsafe_reads: &UnsafeSelfReads,
+        whole: &[WholeRefered],
+    ) {
         if let Some(assigned_decl) = self.assigned {
             let readable = !unsafe_reads.contains(&(assigned_decl, self_key.0, self_key.1));
             let multi_assigned = self.multi_assigned;
@@ -44,6 +59,7 @@ impl FfTableEntry {
             self.is_ff = self
                 .refered
                 .iter()
+                .chain(whole_refs(whole, self_key.1))
                 .any(|(decl, assign_target, _src_mask, from_ff)| {
                     if !from_ff {
                         return false;
@@ -76,9 +92,20 @@ impl FfTableEntry {
     }
 }
 
+fn whole_refs(whole: &[WholeRefered], index: usize) -> impl Iterator<Item = &Refered> {
+    whole
+        .iter()
+        .filter(move |(len, _)| index < *len)
+        .map(|(_, r)| r)
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FfTable {
     pub table: HashMap<(VarId, usize), FfTableEntry>,
+    /// Stored once per variable rather than in every element's entry: a big
+    /// array read at several runtime indices would otherwise cost readers x
+    /// elements entries.
+    pub whole_refered: HashMap<VarId, Vec<WholeRefered>>,
 }
 
 impl FfTable {
@@ -87,13 +114,30 @@ impl FfTable {
     /// register.
     pub fn update_is_ff(&mut self, decls: &[Declaration], context: &mut Context) {
         let unsafe_reads = unsafe_self_reads(decls, context);
-        let keys: Vec<_> = self.table.keys().cloned().collect();
-        for key in keys {
-            self.table
-                .get_mut(&key)
-                .unwrap()
-                .update_is_ff(key, &unsafe_reads);
+        for (key, entry) in self.table.iter_mut() {
+            let whole = self
+                .whole_refered
+                .get(&key.0)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            entry.update_is_ff(*key, &unsafe_reads, whole);
         }
+    }
+
+    /// Every reference to element `index` of `id`, including the ones through
+    /// an unevaluated index.
+    pub fn refered(&self, id: VarId, index: usize) -> impl Iterator<Item = &Refered> {
+        let own = self
+            .table
+            .get(&(id, index))
+            .map(|x| x.refered.as_slice())
+            .unwrap_or_default();
+        let whole = self
+            .whole_refered
+            .get(&id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        own.iter().chain(whole_refs(whole, index))
     }
 
     /// Force all always_ff-assigned variables to FF, disabling the
@@ -136,6 +180,25 @@ impl FfTable {
                 is_ff: false,
                 assigned_comb: None,
             });
+    }
+
+    /// A reference to every element below `total_array` of `id`.
+    pub fn insert_refered_whole(
+        &mut self,
+        id: VarId,
+        total_array: usize,
+        decl: usize,
+        assign_target: Option<AssignTarget>,
+        src_read_mask: BigUint,
+        from_ff: bool,
+    ) {
+        if total_array == 0 {
+            return;
+        }
+        self.whole_refered
+            .entry(id)
+            .or_default()
+            .push((total_array, (decl, assign_target, src_read_mask, from_ff)));
     }
 
     pub fn insert_assigned(&mut self, id: VarId, index: usize, decl: usize) {

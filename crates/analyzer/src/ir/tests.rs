@@ -3430,6 +3430,11 @@ fn const_fold_switch_arm() {
 
 #[track_caller]
 fn ff_flags(code: &str) -> Vec<(String, bool)> {
+    ff_flags_and_table_len(code).0
+}
+
+#[track_caller]
+fn ff_flags_and_table_len(code: &str) -> (Vec<(String, bool)>, usize) {
     symbol_table::clear();
     attribute_table::clear();
 
@@ -3466,7 +3471,7 @@ fn ff_flags(code: &str) -> Vec<(String, bool)> {
         })
         .collect();
     ret.sort();
-    ret
+    (ret, module.ff_table.table.len())
 }
 
 #[test]
@@ -3519,6 +3524,38 @@ fn ff_opt_counts_branches_by_max() {
             ("twice".to_string(), true),
         ]
     );
+}
+
+#[test]
+fn ff_table_keeps_a_runtime_indexed_read_once_per_array() {
+    // `i_idx[1]` does not evaluate, so the read reaches every element of
+    // `mem`: it must still make the element written by the other block a
+    // register, without an entry per element per read.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock         ,
+        i_rst: input  reset         ,
+        i_idx: input  logic<12> [2] ,
+        i_d  : input  logic<8>      ,
+        o_q  : output logic<8>  [4] ,
+    ) {
+        var mem: logic<8> [4096];
+        var q  : logic<8> [4];
+        always_ff {
+            mem[3] = i_d;
+        }
+        always_ff {
+            for k in 0..4 {
+                q[k] = mem[i_idx[1] + k];
+            }
+        }
+        assign o_q = q;
+    }
+    "#;
+
+    let (flags, table_len) = ff_flags_and_table_len(code);
+    assert!(flags.contains(&("mem".to_string(), true)), "{flags:?}");
+    assert!(table_len < 64, "{table_len} entries");
 }
 
 #[test]

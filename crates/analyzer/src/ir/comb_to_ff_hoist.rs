@@ -50,17 +50,17 @@ pub fn plan_hoists(
         let Some(comb_decl_idx) = entry.assigned_comb else {
             continue;
         };
-        if entry.refered.is_empty() {
+        let refered: Vec<_> = ff_table.refered(*var_id, *var_index).collect();
+        if refered.is_empty() {
             continue;
         }
         // Direct hoist criteria: every reader is from an always_ff block
         // and they all share a single decl index.
-        let mut reader_decls: Vec<usize> = entry
-            .refered
+        let mut reader_decls: Vec<usize> = refered
             .iter()
             .filter_map(|(d, _, _, from_ff)| if *from_ff { Some(*d) } else { None })
             .collect();
-        if reader_decls.len() != entry.refered.len() {
+        if reader_decls.len() != refered.len() {
             continue;
         }
         reader_decls.sort_unstable();

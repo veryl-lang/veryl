@@ -86,9 +86,9 @@ fn walk_one(
             // statement's write can be observed.
             let reads = element_reads(&x.expr, decl, context);
             for (key, _) in &dsts {
-                if let Some(read) = reads.get(key)
+                if let Some(read) = read_mask(&reads, key)
                     && let Some(prior) = written.get(key)
-                    && overlaps(read, prior)
+                    && overlaps(&read, prior)
                 {
                     out.insert((decl, key.0, key.1));
                 }
@@ -225,29 +225,27 @@ fn collect_writes(
     }
 }
 
-/// Bits an expression reads per element, gathered the way the table gathers
-/// them so the keys and masks line up.
-fn element_reads(
-    expr: &crate::ir::Expression,
-    decl: usize,
-    context: &mut Context,
-) -> HashMap<(VarId, usize), Mask> {
+/// What an expression reads, gathered the way the table gathers it so the
+/// keys and masks line up.
+fn element_reads(expr: &crate::ir::Expression, decl: usize, context: &mut Context) -> FfTable {
     let mut table = FfTable::default();
     expr.gather_ff(context, &mut table, decl, None, true);
-    let mut out: HashMap<(VarId, usize), Mask> = HashMap::default();
-    for (key, entry) in table.table {
-        let mut mask: Mask = Some(BigUint::default());
-        for (_, _, src_read_mask, _) in entry.refered {
-            // The gather leaves an empty mask when the range is not const.
-            if src_read_mask == BigUint::ZERO {
-                mask = None;
-                break;
-            }
-            merge(&mut mask, Some(src_read_mask));
+    table
+}
+
+/// Bits read at one element, `None` when it is not read at all.
+fn read_mask(reads: &FfTable, key: &(VarId, usize)) -> Option<Mask> {
+    let mut refs = reads.refered(key.0, key.1).peekable();
+    refs.peek()?;
+    let mut mask: Mask = Some(BigUint::default());
+    for (_, _, src_read_mask, _) in refs {
+        // The gather leaves an empty mask when the range is not const.
+        if *src_read_mask == BigUint::ZERO {
+            return Some(None);
         }
-        out.insert(key, mask);
+        merge(&mut mask, Some(src_read_mask.clone()));
     }
-    out
+    Some(mask)
 }
 
 /// Mirrors `AssignDestination`'s gather so a write always has a matching
