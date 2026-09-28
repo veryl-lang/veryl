@@ -2059,12 +2059,36 @@ fn run_comb_pipeline(
     // relayout so the freed storage is already unreferenced when the
     // schedule is built (it parks as a cold unit; DCE cannot see it earlier
     // because the def only loses its reader here).
-    let (unified_sorted, fused_offsets) = if comb_fusion::enabled(context.config.use_4state) {
+    // The field-def inliner's list is judged against the baseline's by their
+    // cone plans (see `adopt_field_defs`); without a plan it is kept.
+    let mut fusion_alt: Option<(Vec<ProtoStatement>, Vec<isize>)> = None;
+    let (mut unified_sorted, mut fused_offsets) = if comb_fusion::enabled(context.config.use_4state)
+    {
         let mut externals: HashSet<VarOffset> = protect.clone();
         if let Some(extra) = fusion_extra {
             externals.extend(extra.iter().copied());
         }
-        comb_fusion::inline_single_readers(unified_sorted, all_event_statements, &externals)
+        if comb_fusion::sel_enabled() {
+            fusion_alt = Some(comb_fusion::inline_single_readers(
+                unified_sorted.clone(),
+                all_event_statements,
+                &externals,
+                false,
+            ));
+            comb_fusion::inline_single_readers(
+                unified_sorted,
+                all_event_statements,
+                &externals,
+                true,
+            )
+        } else {
+            comb_fusion::inline_single_readers(
+                unified_sorted,
+                all_event_statements,
+                &externals,
+                false,
+            )
+        }
     } else {
         (unified_sorted, Vec::new())
     };
@@ -2085,8 +2109,29 @@ fn run_comb_pipeline(
         ci
     });
     let cone_inputs = adopted_inputs.as_ref().or(cone_inputs);
+    // The outer `Option` is whether the rule ran at all; a decision whose plan
+    // is `None` is still a decision, and re-planning it would be a third plan.
+    let mut chosen_plan: Option<Option<cone_gate::ConePlan>> = None;
+    if let (Some(ci), Some((base_stmts, base_off))) = (cone_inputs, fusion_alt.take()) {
+        let segs = |p: &Option<cone_gate::ConePlan>| p.as_ref().map(|x| x.segments.len());
+        let p_sel = cone_gate::plan(&unified_sorted, ci);
+        let p_base = cone_gate::plan(&base_stmts, ci);
+        let retired = base_stmts.len().saturating_sub(unified_sorted.len());
+        let retired_frac = retired as f64 / base_stmts.len().max(1) as f64;
+        let keep_sel = comb_fusion::adopt_field_defs(segs(&p_sel), segs(&p_base), retired_frac);
+        if keep_sel {
+            chosen_plan = Some(p_sel);
+        } else {
+            unified_sorted = base_stmts;
+            fused_offsets = base_off;
+            chosen_plan = Some(p_base);
+        }
+    }
     let (unified_sorted, cone_plan) = match cone_inputs {
-        Some(ci) => match cone_gate::plan(&unified_sorted, ci) {
+        Some(ci) => match chosen_plan
+            .take()
+            .unwrap_or_else(|| cone_gate::plan(&unified_sorted, ci))
+        {
             Some(plan) => {
                 let mut new_of = vec![0usize; plan.order.len()];
                 for (new, &old) in plan.order.iter().enumerate() {
