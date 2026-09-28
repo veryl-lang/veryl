@@ -148,6 +148,56 @@ fn combinational_loop_closed_by_a_later_writer_of_the_bits_read() {
 }
 
 #[test]
+fn combinational_loop_through_one_element_of_a_concat() {
+    // The ring runs through the element `x` alone, and each spelling must
+    // keep it once the concatenation is scheduled per element, in either
+    // order and whether the read takes that element alone or others too.
+    let writes = [
+        "assign v[3:0] = {x, a};",
+        "assign v = {x, a};",
+        "assign v[3] = x; assign v[2:0] = a;",
+    ];
+    let reads = [
+        "assign x = v[3] ^ a[0];",
+        "assign x = v[3] ^ v[0];",
+        "assign x = ^v;",
+    ];
+    for (write, read) in writes
+        .iter()
+        .flat_map(|w| reads.iter().map(move |r| (*w, *r)))
+    {
+        for read_first in [true, false] {
+            let (first, second) = if read_first {
+                (read, write)
+            } else {
+                (write, read)
+            };
+            let code = format!(
+                r#"
+    module Top (
+        a: input  logic<3>,
+        o: output logic<4>,
+    ) {{
+        var v: logic<4>;
+        var x: logic;
+
+        {first}
+        {second}
+        assign o = v;
+    }}
+    "#
+            );
+
+            let result = analyze_top_allowing_comb_loop(&code, &Config::default(), "Top");
+            assert!(
+                matches!(result, Err(SimulatorError::CombinationalLoop { .. })),
+                "{first} {second}",
+            );
+        }
+    }
+}
+
+#[test]
 fn combinational_loop_closed_inside_one_arm_of_a_case() {
     // The ring runs through `2'd0` alone.  Per-arm keying makes `a` several
     // writers where it was one, so WHICH writer binds must stay the

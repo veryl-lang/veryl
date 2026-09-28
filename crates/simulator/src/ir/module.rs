@@ -3206,7 +3206,8 @@ fn split_body(body: Vec<ProtoStatement>, deep: bool) -> Vec<ProtoStatement> {
 }
 
 /// One statement of a body, split by write set when it is a conditional, or
-/// by concatenation element when it is a whole-variable assign.
+/// by concatenation element when it assigns a whole variable or a static
+/// select.
 fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
     match stmt {
         ProtoStatement::If(x) => split_if_by_write_set(x, out, deep),
@@ -3221,8 +3222,10 @@ fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool)
 /// producer its block reads.  The per-element values are identical by
 /// construction, so only the dependency model changes.
 ///
-/// Only exact covers: the elements must tile `dst_width` with no select in
-/// play, so no extension or truncation rule changes.
+/// Only exact covers: the elements must tile the written window, so no
+/// extension or truncation rule changes.  The window may be a static select:
+/// `v[W-1:0] = {a, b}` is how Verilog spells a whole-port assign, and keeping
+/// it whole welds a flop-driven element to a combinational one.
 fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>) {
     /// Bounded because every element becomes a statement that each settle
     /// evaluates.  Lifting it to 256 — enough for the 109..132-element
@@ -3238,10 +3241,15 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
         .iter()
         .map(|(_, repeat, width)| repeat * width)
         .sum();
-    if a.select.is_some()
-        || a.dynamic_select.is_some()
+    let (base, width) = match a.select {
+        None => (0, a.dst_width),
+        Some((hi, lo)) if hi >= lo && hi < a.dst_width => (lo, hi - lo + 1),
+        Some(_) => (0, 0),
+    };
+    if a.dynamic_select.is_some()
         || a.rhs_select.is_some()
-        || total != a.dst_width
+        || width == 0
+        || total != width
         || !(2..=MAX_ELEMENTS).contains(&parts)
         || elements.iter().any(|(_, _, width)| *width == 0)
     {
@@ -3257,7 +3265,7 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
     }
     // Elements are most-significant first (the evaluator concatenates left
     // to right), so walk `hi` downwards.
-    let mut hi = total;
+    let mut hi = base + total;
     for (expr, repeat, width) in elements {
         for _ in 0..*repeat {
             let lo = hi - width;
@@ -3341,6 +3349,38 @@ fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> Sort
             w.entry(key).or_default().push((i, wbr));
         }
     }
+    // Variables whose every bit has one writing statement, so no write can
+    // overwrite another.  One statement names a range once per branch that
+    // writes it, which is still one writer.
+    let split_driver: HashSet<VarOffset> = w
+        .iter()
+        .filter(|(_, wis)| {
+            let mut spans: Vec<(usize, usize, usize)> = Vec::with_capacity(wis.len());
+            for &(p, wbr) in wis.iter() {
+                let Some((hi, lo)) = wbr else { return false };
+                spans.push((lo, hi, piece_stmt[p]));
+            }
+            spans.sort_unstable();
+            // In `lo` order a span overlapping an earlier one also overlaps
+            // the earlier one reaching furthest, and if those two share a
+            // statement, that one overlapped the other and was caught then.
+            let mut reach: Option<(usize, usize)> = None;
+            for (lo, hi, st) in spans {
+                if let Some((rhi, rst)) = reach {
+                    if lo <= rhi && rst != st {
+                        return false;
+                    }
+                    if hi > rhi {
+                        reach = Some((hi, st));
+                    }
+                } else {
+                    reach = Some((hi, st));
+                }
+            }
+            true
+        })
+        .map(|(key, _)| *key)
+        .collect();
     let mut a: Vec<HashSet<usize>> = vec![HashSet::default(); n];
     let mut deg: Vec<usize> = vec![0; n];
     let mut bound: Vec<usize> = vec![];
@@ -3362,9 +3402,11 @@ fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> Sort
                         .map(|&(p, _)| p),
                 )
             };
-            if sole {
+            if sole || split_driver.contains(key) {
                 // A sole writer binds the read even when it sits later:
-                // that backward edge is what a loop looks like here.
+                // that backward edge is what a loop looks like here.  With
+                // one writer per bit nothing is overwritten either, so the
+                // bits read come from their writers whatever the order.
                 overlapping(None, &mut bound);
             } else if let Some(ws) = wis
                 .iter()
