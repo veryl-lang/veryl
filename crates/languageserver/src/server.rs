@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use futures::executor::block_on;
 use ropey::Rope;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tower_lsp_server::Client;
 use tower_lsp_server::ls_types::ClientCapabilities;
 use tower_lsp_server::ls_types::Uri as Url;
@@ -18,7 +18,7 @@ use veryl_analyzer::{
     Analyzer, AnalyzerError, Context, component_manifest_table, fragment_cache, scope, symbol_table,
 };
 use veryl_formatter::Formatter;
-use veryl_metadata::{ComponentManifest, Metadata};
+use veryl_metadata::{ComponentManifest, Metadata, MetadataError};
 use veryl_parser::resource_table;
 use veryl_parser::veryl_token::Token;
 use veryl_parser::veryl_walker::VerylWalker;
@@ -246,7 +246,7 @@ impl Server {
 
 impl Server {
     fn did_open(&mut self, url: &Url, text: &str, version: i32) {
-        if let Some(mut metadata) = self.get_metadata(url) {
+        if let Ok(mut metadata) = self.get_metadata(url) {
             self.background_done = false;
             self.on_change(&metadata.project.name, url, text, version);
 
@@ -276,7 +276,7 @@ impl Server {
     }
 
     fn did_change(&mut self, url: &Url, text: &str, version: i32) {
-        if let Some(metadata) = self.get_metadata(url) {
+        if let Ok(metadata) = self.get_metadata(url) {
             self.on_change(&metadata.project.name, url, text, version);
         } else {
             self.on_change("", url, text, version);
@@ -290,7 +290,7 @@ impl Server {
         }
 
         self.background_done = false;
-        if let Some(mut metadata) = self.get_metadata(&new_path) {
+        if let Ok(mut metadata) = self.get_metadata(&new_path) {
             if let Ok(paths) = metadata.paths::<&str>(&[], true, true) {
                 let total = paths.len();
                 let task = BackgroundTask {
@@ -345,7 +345,7 @@ impl Server {
                     }
                 }
                 CompletionTriggerKind::INVOKED => {
-                    let mut items = if let Some(metadata) = self.get_metadata(url) {
+                    let mut items = if let Ok(metadata) = self.get_metadata(url) {
                         completion_symbol(&metadata, url, line, column)
                     } else {
                         vec![]
@@ -606,7 +606,7 @@ impl Server {
 
     fn formatting(&mut self, url: &Url) {
         if let Some(path) = url.to_file_path()
-            && let Some(metadata) = self.get_metadata(url)
+            && let Ok(metadata) = self.get_metadata(url)
             && let Some(rope) = self.document_map.get(path.as_ref())
         {
             let line = rope.len_lines() as u32;
@@ -748,19 +748,18 @@ impl Server {
         }
     }
 
-    fn get_metadata(&mut self, url: &Url) -> Option<Metadata> {
-        if let Some(path) = url.to_file_path() {
-            if let Some(metadata) = self.metadata_map.get(path.as_ref()) {
-                return Some(metadata.to_owned());
-            } else if let Ok(metadata_path) = Metadata::search_from(path.as_ref())
-                && let Ok(metadata) = Metadata::load(metadata_path)
-            {
-                self.metadata_map
-                    .insert(path.to_path_buf(), metadata.clone());
-                return Some(metadata);
-            }
+    fn get_metadata(&mut self, url: &Url) -> Result<Metadata, MetadataError> {
+        let path = url
+            .to_file_path()
+            .ok_or_else(|| MetadataError::FileNotFound(PathBuf::from(url.as_str())))?;
+        if let Some(metadata) = self.metadata_map.get(path.as_ref()) {
+            return Ok(metadata.to_owned());
         }
-        None
+        let metadata_path = Metadata::search_from(path.as_ref())?;
+        let metadata = Metadata::load(metadata_path)?;
+        self.metadata_map
+            .insert(path.to_path_buf(), metadata.clone());
+        Ok(metadata)
     }
 
     fn on_change(&mut self, prj: &str, url: &Url, text: &str, version: i32) {
@@ -771,77 +770,76 @@ impl Server {
                 return;
             }
 
-            if let Some(metadata) = self.get_metadata(url) {
-                // Drop before parse: parse re-registers the text, so
-                // dropping after would erase the just-registered entry.
-                if let Some(path_id) = resource_table::get_path_id(path.to_path_buf()) {
-                    Analyzer::drop_file(path_id, Some(prj.into()));
+            match self.get_metadata(url) {
+                Ok(metadata) => {
+                    // Drop before parse: parse re-registers the text, so
+                    // dropping after would erase the just-registered entry.
+                    if let Some(path_id) = resource_table::get_path_id(path.to_path_buf()) {
+                        Analyzer::drop_file(path_id, Some(prj.into()));
+                    }
+                    let diag = match Parser::parse(text, &path) {
+                        Ok(x) => {
+                            let path_id = resource_table::get_path_id(path.to_path_buf());
+
+                            let analyzer = Analyzer::new(&metadata);
+                            let mut context = Context::default();
+                            let mut ir = veryl_analyzer::ir::Ir::default();
+                            let mut errors = analyzer.analyze_pass1(prj, &x.veryl);
+                            errors.append(&mut Analyzer::analyze_post_pass1());
+                            errors.append(&mut analyzer.analyze_pass2(
+                                &x.veryl,
+                                &mut context,
+                                Some(&mut ir),
+                            ));
+                            errors.append(&mut Analyzer::analyze_post_pass2(&ir));
+                            let ret: Vec<_> = errors
+                                .drain(0..)
+                                .filter(|x| {
+                                    // Filter errors caused by unresolve error until background completion
+                                    if self.background_done {
+                                        true
+                                    } else {
+                                        !matches!(
+                                            x,
+                                            AnalyzerError::UndefinedIdentifier { .. }
+                                                | AnalyzerError::UnknownMember { .. }
+                                                | AnalyzerError::UnassignVariable { .. }
+                                                | AnalyzerError::UnusedVariable { .. }
+                                                | AnalyzerError::AnonymousIdentifierUsage { .. }
+                                                | AnalyzerError::UnevaluableValue { .. }
+                                                | AnalyzerError::MismatchType { .. }
+                                                | AnalyzerError::ReferringBeforeDefinition { .. }
+                                                | AnalyzerError::ReferringInactiveDefinition { .. }
+                                        )
+                                    }
+                                })
+                                // Filter errors caused by background sources
+                                .filter(|x| x.token_source() == path_id)
+                                .map(|x| {
+                                    let x: miette::ErrReport = x.into();
+                                    to_diag(x, &rope)
+                                })
+                                .collect();
+                            self.parser_map.insert(path.to_path_buf(), x);
+                            ret
+                        }
+                        Err(x) => {
+                            self.parser_map.remove(path.as_ref());
+                            vec![to_diag(x.into(), &rope)]
+                        }
+                    };
+
+                    block_on(
+                        self.client
+                            .publish_diagnostics(url.clone(), diag, Some(version)),
+                    );
                 }
-                let diag = match Parser::parse(text, &path) {
-                    Ok(x) => {
-                        let path_id = resource_table::get_path_id(path.to_path_buf());
-
-                        let analyzer = Analyzer::new(&metadata);
-                        let mut context = Context::default();
-                        let mut ir = veryl_analyzer::ir::Ir::default();
-                        let mut errors = analyzer.analyze_pass1(prj, &x.veryl);
-                        errors.append(&mut Analyzer::analyze_post_pass1());
-                        errors.append(&mut analyzer.analyze_pass2(
-                            &x.veryl,
-                            &mut context,
-                            Some(&mut ir),
-                        ));
-                        errors.append(&mut Analyzer::analyze_post_pass2(&ir));
-                        let ret: Vec<_> = errors
-                            .drain(0..)
-                            .filter(|x| {
-                                // Filter errors caused by unresolve error until background completion
-                                if self.background_done {
-                                    true
-                                } else {
-                                    !matches!(
-                                        x,
-                                        AnalyzerError::UndefinedIdentifier { .. }
-                                            | AnalyzerError::UnknownMember { .. }
-                                            | AnalyzerError::UnassignVariable { .. }
-                                            | AnalyzerError::UnusedVariable { .. }
-                                            | AnalyzerError::AnonymousIdentifierUsage { .. }
-                                            | AnalyzerError::UnevaluableValue { .. }
-                                            | AnalyzerError::MismatchType { .. }
-                                            | AnalyzerError::ReferringBeforeDefinition { .. }
-                                            | AnalyzerError::ReferringInactiveDefinition { .. }
-                                    )
-                                }
-                            })
-                            // Filter errors caused by background sources
-                            .filter(|x| x.token_source() == path_id)
-                            .map(|x| {
-                                let x: miette::ErrReport = x.into();
-                                to_diag(x, &rope)
-                            })
-                            .collect();
-                        self.parser_map.insert(path.to_path_buf(), x);
-                        ret
-                    }
-                    Err(x) => {
-                        self.parser_map.remove(path.as_ref());
-                        vec![to_diag(x.into(), &rope)]
-                    }
-                };
-
-                block_on(
-                    self.client
-                        .publish_diagnostics(url.clone(), diag, Some(version)),
-                );
-            } else {
-                block_on(self.client.log_message(
-                    MessageType::ERROR,
-                    format!(
-                        "failed to load metadata: {}: {}",
-                        url.as_str(),
-                        metadata_error_message(&path)
-                    ),
-                ));
+                Err(err) => {
+                    block_on(self.client.log_message(
+                        MessageType::ERROR,
+                        format!("failed to load metadata: {}: {err:?}", url.as_str()),
+                    ));
+                }
             }
 
             self.document_map.insert(path.to_path_buf(), rope);
@@ -855,22 +853,6 @@ impl Server {
             Analyzer::drop_file(path_id, None);
         }
     }
-}
-
-/// Why `Veryl.toml` could not be loaded for `path`, including the underlying TOML error that
-/// names the offending key and its position.
-fn metadata_error_message(path: &Path) -> String {
-    let err = match Metadata::search_from(path).and_then(Metadata::load) {
-        Ok(_) => return "unknown error".to_string(),
-        Err(x) => x,
-    };
-    let mut message = err.to_string();
-    let mut source = std::error::Error::source(&err);
-    while let Some(x) = source {
-        message.push_str(&format!(": {x}"));
-        source = x.source();
-    }
-    message
 }
 
 fn to_diag(err: miette::ErrReport, rope: &Rope) -> Diagnostic {
@@ -1730,16 +1712,19 @@ no_such_option = true
 ",
         )
         .unwrap();
-        let message = metadata_error_message(&dir.path().join("src/top.veryl"));
-        assert!(message.starts_with("toml load failed: "), "{message}");
+        let err = Metadata::search_from(dir.path().join("src/top.veryl"))
+            .and_then(Metadata::load)
+            .unwrap_err();
+        let message = format!("{err:?}");
+        assert!(message.starts_with("Deserialize("), "{message}");
         assert!(message.contains("no_such_option"), "{message}");
     }
 
     #[test]
     fn metadata_error_without_veryl_toml() {
         let dir = tempfile::tempdir().unwrap();
-        let message = metadata_error_message(&dir.path().join("top.veryl"));
-        assert!(message.contains("Veryl.toml is not found"), "{message}");
+        let err = Metadata::search_from(dir.path().join("top.veryl")).unwrap_err();
+        assert!(matches!(err, MetadataError::FileNotFound(_)));
     }
 
     #[test]
