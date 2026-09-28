@@ -89,4 +89,19 @@ fn unsupported_span_points_into_the_input_after_preprocessing() {
     assert!(out.veryl.contains("var a: logic<8>;"), "{}", out.veryl);
 }
 
+#[test]
+fn nested_width_casts_translate_to_valid_veryl() {
+    let src = "module casts (input logic [15:0] a, output logic [7:0] y);\n  assign y = 8'(16'(a));\nendmodule\n";
+    let out = veryl_translator::translate_str(
+        src,
+        "nested_casts.sv",
+        false,
+        veryl_metadata::NewlineStyle::Auto,
+    )
+    .expect("translate");
+    assert!(out.unsupported.is_empty(), "{:?}", out.unsupported);
+    assert!(out.veryl.contains("((a) as 16) as 8"), "{}", out.veryl);
+    veryl_parser::Parser::parse(&out.veryl, &"nested_casts.veryl").expect("parse translated Veryl");
+}
+
 include!(concat!(env!("OUT_DIR"), "/translate_cases.rs"));
