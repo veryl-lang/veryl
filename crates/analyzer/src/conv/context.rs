@@ -171,6 +171,10 @@ pub struct Context {
     /// Sparse rollback state used by analyses that reuse this otherwise-large
     /// context across independent procedures. Empty during normal conversion.
     analysis_transactions: Vec<AnalysisTransaction>,
+    /// Value queries made while lowering a reusable procedural summary.
+    /// Missing values are reads too: changing an unknown input to a constant
+    /// can expose more queries through expression evaluation or control flow.
+    value_reads: Option<HashSet<VarId>>,
     hierarchy: Vec<StrId>,
     hierarchical_variables: Vec<Vec<VarPath>>,
     hierarchical_functions: Vec<Vec<FuncPath>>,
@@ -205,6 +209,23 @@ struct AnalysisTransaction {
 }
 
 impl Context {
+    pub(crate) fn begin_value_read_tracking(&mut self) {
+        debug_assert!(self.value_reads.is_none());
+        self.value_reads = Some(HashSet::default());
+    }
+
+    pub(crate) fn take_value_reads(&mut self) -> HashSet<VarId> {
+        self.value_reads
+            .take()
+            .expect("value read tracking is active")
+    }
+
+    pub(crate) fn record_value_read(&mut self, id: VarId) {
+        if let Some(reads) = &mut self.value_reads {
+            reads.insert(id);
+        }
+    }
+
     pub(crate) fn begin_analysis_transaction(&mut self) {
         self.analysis_transactions.push(AnalysisTransaction {
             variables: HashMap::default(),

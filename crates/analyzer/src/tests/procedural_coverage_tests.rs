@@ -402,3 +402,141 @@ fn runtime_loop_bound_feedback_crosses_a_module_boundary() {
         "{errors:#?}"
     );
 }
+
+#[test]
+fn arithmetic_constants_share_function_summaries() {
+    let code = r#"
+        module Top(x: input logic<32>, y: output logic<32>[4]) {
+            function mix(x: input logic<32>, gain: input u32, result: output logic<32>) {
+                if x[0] { result = x ^ gain; }
+                else { result = x + gain; }
+            }
+            always_comb {
+                mix(x, 1, y[0]);
+                mix(x, 2, y[1]);
+                mix(x, 3, y[2]);
+                mix(x, 4, y[3]);
+            }
+        }
+    "#;
+    crate::procedural::reset_function_evaluation_count();
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert_eq!(crate::procedural::function_summary_evaluation_count(), 1);
+}
+
+#[test]
+fn summary_keys_expand_when_constants_expose_another_value_query() {
+    let code = r#"
+        module Top(a: input u32, x: input logic,
+                   unknown: output logic, safe: output logic, feedback: output logic) {
+            function choose(a: input u32, b: input u32,
+                            x: input logic, result: output logic) {
+                if (a + b) == 0 { result = x; }
+                else { result = 0; }
+            }
+            always_comb {
+                // Evaluating the condition stops at the unknown a. Changing
+                // a to a constant must expose b before this summary is reused.
+                choose(a, 0, x, unknown);
+                choose(0, 1, safe, safe);
+                choose(0, 0, feedback, feedback);
+            }
+        }
+    "#;
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 1, "{errors:#?}");
+    assert!(
+        matches!(&errors[0], AnalyzerError::CombinationalLoop { .. }),
+        "{errors:#?}"
+    );
+}
+
+#[test]
+fn constant_case_targets_preserve_selected_dependencies() {
+    let code = r#"
+        module Top(safe: output logic, feedback: output logic) {
+            function pick(x: input logic<2>, index: input u32, result: output logic) {
+                case index {
+                    0: { result = x[0]; }
+                    default: { result = x[1]; }
+                }
+            }
+            always_comb {
+                pick({safe, 1'b0}, 0, safe);
+                pick({feedback, 1'b0}, 1, feedback);
+            }
+        }
+    "#;
+    crate::procedural::reset_function_evaluation_count();
+    let errors = analyze(code);
+    let loops = errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::CombinationalLoop { identifier, .. } => Some(identifier.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(loops, ["feedback"], "{errors:#?}");
+    // Each selected case and the generic output-formal check need a summary.
+    assert_eq!(crate::procedural::function_summary_evaluation_count(), 3);
+}
+
+#[test]
+fn summary_keys_include_constant_shift_amounts() {
+    let code = r#"
+        module Top(safe: output logic, feedback: output logic) {
+            function shift(x: input logic<2>, amount: input u32, result: output logic<2>) {
+                result = x >> amount;
+            }
+            var safe_word: logic<2>;
+            var feedback_word: logic<2>;
+            always_comb {
+                shift({1'b0, safe}, 1, safe_word);
+                shift({1'b0, feedback}, 0, feedback_word);
+                safe = safe_word[0];
+                feedback = feedback_word[0];
+            }
+        }
+    "#;
+    let errors = analyze(code);
+    let loops = errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::CombinationalLoop { identifier, .. } => Some(identifier.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(loops, ["feedback"], "{errors:#?}");
+}
+
+#[test]
+fn summary_keys_keep_zero_trip_feedback_distinct() {
+    for (bound, expect_loop) in [(0, true), (1, false)] {
+        let code = format!(
+            r#"
+            module Top(o: output logic) {{
+                var value: logic;
+                function update(n: input u32) {{
+                    for i in 0..n {{ value = i[0]; }}
+                }}
+                always_comb {{
+                    value = !o;
+                    update(1);
+                    value = !o;
+                    update({bound});
+                    o = value;
+                }}
+            }}
+        "#
+        );
+        let errors = analyze(&code);
+        assert_eq!(
+            errors
+                .iter()
+                .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            expect_loop,
+            "n={bound}: {errors:#?}"
+        );
+    }
+}

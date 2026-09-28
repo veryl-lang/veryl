@@ -933,6 +933,7 @@ impl Factor {
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
         match self {
             Factor::Variable(id, index, select, comptime) => {
+                context.record_value_read(*id);
                 let idx = index.eval_value(context)?;
                 let (value, r#type) = if let Some(variable) = context.variables.get(id) {
                     (variable.get_value(&idx)?.clone(), variable.r#type.clone())

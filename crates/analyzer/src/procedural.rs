@@ -440,6 +440,20 @@ struct FunctionSummaryKey {
     constants: Vec<(VarPath, Value)>,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct FunctionIdentity {
+    id: VarId,
+    index: Option<Vec<usize>>,
+}
+
+#[derive(Default)]
+struct FunctionSpecializations {
+    /// Only inputs whose values have been queried can affect lowering.
+    /// Other inputs still contribute ordinary SSA value dependencies.
+    inputs: HashSet<VarPath>,
+    summaries: HashMap<Vec<(VarPath, Value)>, Rc<FunctionSummary>>,
+}
+
 #[derive(Clone)]
 struct FunctionSummary {
     arg_map: HashMap<VarPath, VarId>,
@@ -540,8 +554,8 @@ pub(crate) struct FunctionSummaries<'a> {
     pub(crate) tracing: bool,
     module: &'a Module,
     bit_part: &'a BitPartition,
-    summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
-    active: HashSet<(VarId, Option<Vec<usize>>)>,
+    summaries: HashMap<FunctionIdentity, FunctionSpecializations>,
+    active: HashSet<FunctionIdentity>,
     contexts: Vec<ProcedureContext>,
     module_scope_ids: Rc<HashSet<VarId>>,
 }
@@ -625,9 +639,9 @@ impl ProcedureContext {
                 .or_else(|| module.variables.get(&id));
             if let Some(variable) = variable {
                 let mut variable = variable.clone();
-                // Value evaluation can leave a concrete value in a runtime
-                // formal, local or capture. A summary is shared across all
-                // actuals, so only language constants may prune its branches.
+                // Clear values left by prior execution. Call-specific
+                // constants are installed after this reset, using the
+                // summary's specialization key.
                 if !matches!(
                     variable.kind,
                     crate::ir::VarKind::Const | crate::ir::VarKind::Param
@@ -977,17 +991,24 @@ impl<'a> FunctionSummaries<'a> {
         key: FunctionSummaryKey,
         caller_ctx: &mut Context,
     ) -> FunctionSummaryLookup {
-        if let Some(summary) = self.summaries.get(&key).cloned() {
-            return summary.map_or(
-                FunctionSummaryLookup::Recursive,
-                FunctionSummaryLookup::Ready,
-            );
+        let identity = FunctionIdentity {
+            id: key.id,
+            index: key.index.clone(),
+        };
+        if let Some(specializations) = self.summaries.get(&identity) {
+            let constants = key
+                .constants
+                .iter()
+                .filter(|(path, _)| specializations.inputs.contains(path))
+                .cloned()
+                .collect::<Vec<_>>();
+            if let Some(summary) = specializations.summaries.get(&constants) {
+                return FunctionSummaryLookup::Ready(summary.clone());
+            }
         }
-        let identity = (key.id, key.index.clone());
         if !self.active.insert(identity.clone()) {
             return FunctionSummaryLookup::Recursive;
         }
-        self.summaries.insert(key.clone(), None);
         let mut context = self
             .contexts
             .pop()
@@ -1017,6 +1038,13 @@ impl<'a> FunctionSummaries<'a> {
         // into every recursive scratch context, then restore it before the
         // caller resumes.
         context.install_functions(std::mem::take(&mut caller_ctx.functions));
+        context
+            .ctx
+            .as_mut()
+            .expect("summary context is available")
+            .begin_value_read_tracking();
+        #[cfg(test)]
+        FUNCTION_SUMMARY_EVALUATIONS.set(FUNCTION_SUMMARY_EVALUATIONS.get() + 1);
         let summary = ProcedureAnalysis::summarize_function(
             self.module,
             self.bit_part,
@@ -1026,15 +1054,39 @@ impl<'a> FunctionSummaries<'a> {
             self,
         )
         .map(Rc::new);
+        let value_reads = context
+            .ctx
+            .as_mut()
+            .expect("summary context was restored")
+            .take_value_reads();
         caller_ctx.functions = context.take_functions();
         context.clear_summary();
         self.contexts.push(context);
         self.active.remove(&identity);
         if let Some(summary) = summary {
-            self.summaries.insert(key, Some(summary.clone()));
+            let specializations = self.summaries.entry(identity).or_default();
+            let mut expanded = false;
+            for (path, id) in &summary.arg_map {
+                // A stopped analysis has not observed all relevant queries.
+                // Keep its full input key rather than generalizing the result.
+                if value_reads.contains(id) || !summary.status.is_complete() {
+                    expanded |= specializations.inputs.insert(path.clone());
+                }
+            }
+            if expanded {
+                // A different constant can expose a previously unvisited
+                // branch or a later operand of a failed value evaluation.
+                // Older keys omitted those inputs, so they cannot be reused.
+                specializations.summaries.clear();
+            }
+            let constants = key
+                .constants
+                .into_iter()
+                .filter(|(path, _)| specializations.inputs.contains(path))
+                .collect();
+            specializations.summaries.insert(constants, summary.clone());
             FunctionSummaryLookup::Ready(summary)
         } else {
-            self.summaries.remove(&key);
             FunctionSummaryLookup::Missing
         }
     }
@@ -1115,6 +1167,7 @@ pub(crate) fn coverage_diagnostics(
 #[cfg(test)]
 thread_local! {
     static FUNCTION_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
+    static FUNCTION_SUMMARY_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_RESULT_VERSIONS: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_RESULT_REGION_PROBES: Cell<usize> = const { Cell::new(0) };
     static FUNCTION_BARRIER_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
@@ -1129,6 +1182,7 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn reset_function_evaluation_count() {
     FUNCTION_EVALUATIONS.set(0);
+    FUNCTION_SUMMARY_EVALUATIONS.set(0);
     FUNCTION_RESULT_VERSIONS.set(0);
     FUNCTION_RESULT_REGION_PROBES.set(0);
     FUNCTION_BARRIER_EVALUATIONS.set(0);
@@ -1141,6 +1195,11 @@ pub(crate) fn reset_function_evaluation_count() {
 #[cfg(test)]
 pub(crate) fn function_evaluation_count() -> usize {
     FUNCTION_EVALUATIONS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn function_summary_evaluation_count() -> usize {
+    FUNCTION_SUMMARY_EVALUATIONS.get()
 }
 
 #[cfg(test)]
