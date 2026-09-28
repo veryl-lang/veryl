@@ -51,10 +51,21 @@ pub(crate) mod comb_fusion {
         false
     }
     pub fn force_disable() {}
+    pub fn sel_enabled() -> bool {
+        false
+    }
+    pub(crate) fn adopt_field_defs(
+        _n_sel: Option<usize>,
+        _n_base: Option<usize>,
+        _retired_frac: f64,
+    ) -> bool {
+        false
+    }
     pub fn inline_single_readers(
         stmts: Vec<ProtoStatement>,
         _events: &HashMap<Event, Vec<ProtoStatement>>,
         _externals_extra: &HashSet<VarOffset>,
+        _sel: bool,
     ) -> (Vec<ProtoStatement>, Vec<isize>) {
         (stmts, Vec::new())
     }
