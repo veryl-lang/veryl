@@ -499,7 +499,7 @@ fn collect_factor_spans(
                 collect_expr_spans(&input.0, out, ctx);
             }
             SystemFunctionKind::Bits(_)
-            | SystemFunctionKind::Size(_)
+            | SystemFunctionKind::Size(..)
             | SystemFunctionKind::Clog2(_)
             | SystemFunctionKind::Display(_)
             | SystemFunctionKind::Write(_)
@@ -1833,7 +1833,7 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
                     | SystemFunctionKind::Unsigned(input)
                     | SystemFunctionKind::Readmemh(input, _) => self.eval(&input.0),
                     SystemFunctionKind::Bits(_)
-                    | SystemFunctionKind::Size(_)
+                    | SystemFunctionKind::Size(..)
                     | SystemFunctionKind::Clog2(_)
                     | SystemFunctionKind::Display(_)
                     | SystemFunctionKind::Write(_)

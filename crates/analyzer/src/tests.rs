@@ -17504,7 +17504,7 @@ fn mismatch_function_arity_system_function() {
 
     let code = r#"
     module ModuleA {
-        let _a: u32 = $size(1, 2);
+        let _a: u32 = $size(1, 2, 3);
     }
     "#;
 
@@ -17513,6 +17513,17 @@ fn mismatch_function_arity_system_function() {
         errors[0],
         AnalyzerError::MismatchFunctionArity { .. }
     ));
+
+    // `$size` takes an optional dimension, as in SystemVerilog.
+    let code = r#"
+    module ModuleA {
+        const A: bit<2, 3> = '0;
+        const B: u32       = $size(A, 1);
+    }
+    "#;
+
+    let errors = analyze_with_ir(code);
+    assert!(errors.is_empty());
 
     let code = r#"
     module ModuleA {
