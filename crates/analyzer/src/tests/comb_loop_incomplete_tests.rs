@@ -866,3 +866,42 @@ fn comb_loop_search_limit_propagates_incomplete_without_inventing_a_diagnostic()
             .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
     );
 }
+
+#[test]
+fn partition_sweep_keeps_fragmented_modules_complete_and_parent_cycles() {
+    for count in [8, 64] {
+        let assignments = (0..count)
+            .map(|index| {
+                format!("assign o[{index}] = mem[{index}][{index}] ^ mem[index][{index}];")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let code = format!(
+            "module Fragmented (index: input u32, mem: input logic<{count}>[{count}],
+                                o: output logic<{count}>) {{
+                {assignments}
+             }}
+             module Top (index: input u32, mem: input logic<{count}>[{count}],
+                         o: output logic<{count}>, independent: output logic) {{
+                inst child: Fragmented (index: index, mem: mem, o: o);
+                assign independent = independent;
+             }}"
+        );
+        assert!(comb_loop_analysis_is_complete(&code), "count={count}");
+        let errors = analyze(&code);
+        assert!(
+            errors.iter().all(|error| match error {
+                AnalyzerError::CombinationalLoop { identifier, .. }
+                | AnalyzerError::UnassignVariable { identifier, .. } => identifier == "independent",
+                _ => false,
+            }),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|error| matches!(error,
+                AnalyzerError::CombinationalLoop { identifier, .. } if identifier == "independent"
+            )),
+            "{errors:?}"
+        );
+    }
+}

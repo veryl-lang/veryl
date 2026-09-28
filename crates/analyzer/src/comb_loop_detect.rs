@@ -138,6 +138,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
 
 /// Split only at observed access endpoints. Runtime and storage depend on the
 /// number of accesses, never on the highest referenced bit position.
+#[cfg(test)]
 fn atomic_ranges(spans: &[PackedSpan], endpoints: Option<&HashSet<usize>>) -> Vec<PackedSpan> {
     let mut events = Vec::with_capacity(spans.len() * 2 + endpoints.map_or(0, HashSet::len));
     for span in spans {
@@ -356,6 +357,86 @@ fn summary_parent_access(
     .map(|(array, packed, _)| (binding.parent, array, packed))
 }
 
+#[derive(Default)]
+struct PackedBoundary {
+    starts: usize,
+    ends: usize,
+    fixed: bool,
+}
+
+/// The packed endpoints currently active in the array sweep. Reference counts
+/// retain coincident endpoints until their last access ends, including touching
+/// intervals whose net coverage change at the shared endpoint is zero.
+#[derive(Default)]
+struct PackedSweep {
+    boundaries: std::collections::BTreeMap<usize, PackedBoundary>,
+    spans: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    static PARTITION_BOUNDARY_UPDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static PARTITION_ENDPOINT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl PackedSweep {
+    fn new(endpoints: Option<&HashSet<usize>>) -> Self {
+        let mut sweep = Self::default();
+        if let Some(endpoints) = endpoints {
+            for endpoint in endpoints {
+                sweep.boundaries.entry(*endpoint).or_default().fixed = true;
+            }
+        }
+        sweep
+    }
+
+    fn change(&mut self, span: PackedSpan, add: bool) {
+        if add {
+            self.spans += 1;
+        } else {
+            self.spans -= 1;
+        }
+        for (position, start) in [(span.start, true), (span.end(), false)] {
+            #[cfg(test)]
+            PARTITION_BOUNDARY_UPDATES.set(PARTITION_BOUNDARY_UPDATES.get() + 1);
+            let boundary = self.boundaries.entry(position).or_default();
+            let count = if start {
+                &mut boundary.starts
+            } else {
+                &mut boundary.ends
+            };
+            if add {
+                *count += 1;
+            } else {
+                *count -= 1;
+            }
+            if boundary.starts == 0 && boundary.ends == 0 && !boundary.fixed {
+                self.boundaries.remove(&position);
+            }
+        }
+    }
+
+    fn ranges(&self) -> Vec<PackedSpan> {
+        let mut atoms = Vec::new();
+        let mut active = 0usize;
+        let mut previous = None;
+        for (&position, boundary) in &self.boundaries {
+            #[cfg(test)]
+            PARTITION_ENDPOINT_VISITS.set(PARTITION_ENDPOINT_VISITS.get() + 1);
+            if active != 0
+                && let Some(previous) = previous
+            {
+                atoms.push(PackedSpan::new(previous, position - previous).unwrap());
+            }
+            active += boundary.starts;
+            active -= boundary.ends;
+            previous = Some(position);
+        }
+        debug_assert_eq!(active, 0);
+        atoms
+    }
+}
+
 fn split_array_spans(
     accesses_by_index: HashMap<IdxKey, Vec<PackedSpan>>,
     endpoints: &HashMap<VarId, HashSet<usize>>,
@@ -384,37 +465,27 @@ fn split_array_spans(
             (*position, *starts, packed.start, packed.length)
         });
 
-        let mut active: HashMap<PackedSpan, usize> = HashMap::default();
+        let mut active = PackedSweep::new(endpoints.get(&id));
         let mut previous = events.first().map(|event| event.0);
         let mut cursor = 0;
         while cursor < events.len() {
             let position = events[cursor].0;
             if let Some(previous) = previous
                 && previous < position
-                && !active.is_empty()
+                && active.spans != 0
             {
                 let split = ArraySpan {
                     start: previous,
                     length: position - previous,
                 };
-                let split_spans = active.keys().copied().collect::<Vec<_>>();
-                let parts = atomic_ranges(&split_spans, endpoints.get(&id));
+                let parts = active.ranges();
                 if !parts.is_empty() {
                     ranges.insert((id, split), parts);
                 }
             }
             while cursor < events.len() && events[cursor].0 == position {
                 let (_, starts, packed) = events[cursor];
-                if starts {
-                    *active.entry(packed).or_default() += 1;
-                } else if let std::collections::hash_map::Entry::Occupied(mut entry) =
-                    active.entry(packed)
-                {
-                    *entry.get_mut() -= 1;
-                    if *entry.get() == 0 {
-                        entry.remove();
-                    }
-                }
+                active.change(packed, starts);
                 cursor += 1;
             }
             previous = Some(position);
@@ -2170,5 +2241,162 @@ mod partition_tests {
         );
 
         assert_eq!(BitPartition::new(ranges).position_overflow(), Some(id));
+    }
+
+    /// Independent reference: rescan all rectangles in each array slab and
+    /// sort their packed events from scratch. Deliberately not incremental.
+    fn reference_partition(
+        accesses: &HashMap<IdxKey, Vec<PackedSpan>>,
+        endpoints: &HashMap<VarId, HashSet<usize>>,
+    ) -> HashMap<IdxKey, Vec<PackedSpan>> {
+        let mut positions: HashMap<VarId, Vec<usize>> = HashMap::default();
+        for &(id, array) in accesses.keys() {
+            if array.length > 0
+                && let Some(end) = array.end()
+            {
+                positions.entry(id).or_default().extend([array.start, end]);
+            }
+        }
+        let mut result = HashMap::default();
+        for (id, mut positions) in positions {
+            positions.sort_unstable();
+            positions.dedup();
+            for pair in positions.windows(2) {
+                let array = ArraySpan {
+                    start: pair[0],
+                    length: pair[1] - pair[0],
+                };
+                let packed: Vec<_> = accesses
+                    .iter()
+                    .filter(|((owner, span), _)| {
+                        *owner == id && span.length > 0 && span.overlaps(array)
+                    })
+                    .flat_map(|(_, packed)| packed.iter().copied())
+                    .collect();
+                let atoms = atomic_ranges(&packed, endpoints.get(&id));
+                if !atoms.is_empty() {
+                    result.insert((id, array), atoms);
+                }
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn incremental_partition_matches_independent_rectangle_sweep() {
+        let mut seed = 17u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (seed >> 32) as usize
+        };
+        for count in 1..=128 {
+            let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+            let mut endpoints: HashMap<VarId, HashSet<usize>> = HashMap::default();
+            for _ in 0..count {
+                let id = VarId::from_raw((next() % 3) as u32);
+                let array = ArraySpan {
+                    start: next() % 8,
+                    length: next() % 5,
+                };
+                let packed = PackedSpan {
+                    start: next() % 8,
+                    length: next() % 5,
+                };
+                accesses.entry((id, array)).or_default().push(packed);
+                if count % 2 == 0 {
+                    endpoints.entry(id).or_default().insert(next() % 16);
+                }
+            }
+            let expected = reference_partition(&accesses, &endpoints);
+            assert_eq!(
+                split_array_spans(accesses, &endpoints),
+                expected,
+                "count={count}"
+            );
+        }
+    }
+
+    #[test]
+    fn partition_sweep_releases_ended_boundaries_without_rescanning_retained_capacity() {
+        const COUNT: usize = 4096;
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 1,
+        };
+        let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 0,
+                    length: COUNT + 1,
+                },
+            ),
+            vec![packed],
+        );
+        for index in 1..=COUNT {
+            accesses
+                .entry((
+                    id,
+                    ArraySpan {
+                        start: 0,
+                        length: 1,
+                    },
+                ))
+                .or_default()
+                .push(PackedSpan {
+                    start: index * 2,
+                    length: 1,
+                });
+            accesses.insert(
+                (
+                    id,
+                    ArraySpan {
+                        start: index,
+                        length: 1,
+                    },
+                ),
+                vec![packed],
+            );
+        }
+        PARTITION_ENDPOINT_VISITS.set(0);
+        PARTITION_BOUNDARY_UPDATES.set(0);
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        let atoms = ranges.values().map(Vec::len).sum::<usize>();
+        assert_eq!(atoms, 2 * COUNT + 1);
+        assert_eq!(ranges.len(), COUNT + 1);
+        assert_eq!(PARTITION_BOUNDARY_UPDATES.get(), 4 * (2 * COUNT + 1));
+        assert!(PARTITION_ENDPOINT_VISITS.get() <= 2 * atoms);
+    }
+
+    #[test]
+    fn partition_sweep_materializes_all_crossing_atoms_without_a_cutoff() {
+        const COUNT: usize = 512;
+        let id = VarId::from_raw(0);
+        let accesses = (0..COUNT)
+            .map(|start| {
+                (
+                    (
+                        id,
+                        ArraySpan {
+                            start,
+                            length: COUNT,
+                        },
+                    ),
+                    vec![PackedSpan {
+                        start,
+                        length: COUNT,
+                    }],
+                )
+            })
+            .collect();
+        PARTITION_ENDPOINT_VISITS.set(0);
+        PARTITION_BOUNDARY_UPDATES.set(0);
+        let ranges = split_array_spans(accesses, &HashMap::default());
+        let atoms = ranges.values().map(Vec::len).sum::<usize>();
+        assert_eq!(atoms, COUNT * COUNT + (COUNT - 1) * (COUNT - 1));
+        assert_eq!(PARTITION_BOUNDARY_UPDATES.get(), 4 * COUNT);
+        assert!(PARTITION_ENDPOINT_VISITS.get() <= 2 * atoms);
     }
 }
