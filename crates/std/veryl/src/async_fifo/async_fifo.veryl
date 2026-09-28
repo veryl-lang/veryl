@@ -208,10 +208,10 @@ pub module async_fifo::<S: synchronizer> #(
         WIDTH : POINTER_WIDTH,
         STAGES: STAGES       ,
     ) (
-        i_clk: is_clk      ,
-        i_rst: srst        ,
-        i_d  : rp_dclk_gray,
-        o_d  : rp_sclk_gray,
+        i_clk: is_clk         ,
+        i_rst: srst           ,
+        i_d  : rp_dclk_gray_ff,
+        o_d  : rp_sclk_gray   ,
     );
 
     var ram: 's logic<$bits(TYPE)> [DEPTH];

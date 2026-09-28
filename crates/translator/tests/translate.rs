@@ -66,4 +66,27 @@ fn unsupported_construct_has_span_reason_and_source() {
     );
 }
 
+#[test]
+fn unsupported_span_points_into_the_input_after_preprocessing() {
+    // The preprocessor drops the `define line and pads the string literal, so
+    // offsets into its output are behind or ahead of the input.
+    let src = "`define W 8\nmodule top;\n  logic [`W-1:0] a;\n  logic b;\n  assign b = \"ab\" == \"ab\";\n  initial begin\n    a = 0;\n  end\nendmodule\n";
+    let out = veryl_translator::translate_str(
+        src,
+        "inline.sv",
+        false,
+        veryl_metadata::NewlineStyle::Auto,
+    )
+    .expect("translate");
+
+    let c = out
+        .unsupported
+        .iter()
+        .find(|c| c.kind == "initial block")
+        .expect("initial block should be reported as unsupported");
+    assert_eq!(c.span.offset(), src.find("initial").unwrap());
+    assert_eq!(c.span.len(), "initial".len());
+    assert!(out.veryl.contains("var a: logic<8>;"), "{}", out.veryl);
+}
+
 include!(concat!(env!("OUT_DIR"), "/translate_cases.rs"));
