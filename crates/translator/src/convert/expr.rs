@@ -69,7 +69,7 @@ pub(crate) fn expr_text_to_veryl(s: &str) -> String {
                 continue;
             }
             let prefix = out[prefix_start..prefix_end].to_string();
-            let inner = &s[i + 2..j - 1];
+            let inner = expr_text_to_veryl(&s[i + 2..j - 1]);
             // A width (`8`) and a type name are both valid after Veryl's `as`.
             let target = prefix.trim_matches(|c| c == '(' || c == ')').trim();
             out.truncate(prefix_start);
@@ -114,6 +114,12 @@ mod tests {
     #[test]
     fn cast_inside_expression() {
         assert_eq!(expr_text_to_veryl("y + 8'(z)"), "y + (z) as 8");
+    }
+
+    #[test]
+    fn nested_casts() {
+        assert_eq!(expr_text_to_veryl("8'(16'(x))"), "((x) as 16) as 8");
+        assert_eq!(expr_text_to_veryl("8'(x + 4'(y))"), "(x + (y) as 4) as 8");
     }
 
     #[test]
