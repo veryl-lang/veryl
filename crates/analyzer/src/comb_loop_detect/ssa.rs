@@ -78,7 +78,7 @@ enum Version<K> {
     Replicated {
         source: VersionId,
         domain: PositionDomain,
-        stride: isize,
+        replication: Replication,
     },
 }
 
@@ -398,14 +398,49 @@ pub(super) struct PositionRelation {
     pub(super) packed: Option<isize>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum Replication {
+    Array(isize),
+    Packed(isize),
+}
+
+impl Replication {
+    fn stride(self) -> isize {
+        match self {
+            Self::Array(stride) | Self::Packed(stride) => stride,
+        }
+    }
+
+    pub(super) fn relation(self) -> PositionRelation {
+        match self {
+            Self::Array(stride) => PositionRelation {
+                array: Some(stride),
+                packed: Some(0),
+            },
+            Self::Packed(stride) => PositionRelation {
+                array: Some(0),
+                packed: Some(stride),
+            },
+        }
+    }
+
+    fn forget_position(self, mut relation: PositionRelation) -> PositionRelation {
+        match self {
+            Self::Array(_) => relation.array = None,
+            Self::Packed(_) => relation.packed = None,
+        }
+        relation
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum DependencyDagNode<K> {
     External(K),
     Internal,
-    /// Zero or more positive packed translations within this node's domain.
+    /// Zero or more positive translations along one axis within this node's domain.
     /// Kept as an operation in the DAG; only the circuit graph adds a self edge.
     Replicated {
-        stride: isize,
+        replication: Replication,
     },
 }
 
@@ -659,14 +694,17 @@ where
         &mut self,
         source: VersionId,
         domain: PositionDomain,
-        stride: isize,
+        replication: Replication,
     ) -> VersionId {
-        assert!(stride > 0, "replication must advance the packed position");
+        assert!(
+            replication.stride() > 0,
+            "replication must advance its axis"
+        );
         let version = self.versions.len();
         self.versions.push(Version::Replicated {
             source,
             domain,
-            stride,
+            replication,
         });
         version
     }
@@ -1133,7 +1171,7 @@ where
                 Version::Replicated {
                     source,
                     domain,
-                    stride,
+                    replication,
                 } => {
                     let inputs = mapped[&(*source, true)]
                         .map(|source| {
@@ -1145,7 +1183,7 @@ where
                         })
                         .into_iter()
                         .collect();
-                    Some(builder.replicated(inputs, vec![*domain], site, *stride))
+                    Some(builder.replicated(inputs, vec![*domain], site, *replication))
                 }
             };
             mapped.insert(state, node);
@@ -1303,18 +1341,15 @@ where
                 Version::Projected { source, .. } => {
                     enqueue((*source, true, relation), condition, work)?;
                 }
-                Version::Replicated { source, .. } => {
+                Version::Replicated {
+                    source,
+                    replication,
+                    ..
+                } => {
                     // Scalar source queries cannot represent periodic positions.
                     // Exact positional consumers retain the structural operation.
                     enqueue(
-                        (
-                            *source,
-                            true,
-                            PositionRelation {
-                                packed: None,
-                                ..relation
-                            },
-                        ),
+                        (*source, true, replication.forget_position(relation)),
                         condition,
                         work,
                     )?;
@@ -1358,11 +1393,8 @@ where
             merge_source(&mut sources, (key, relation), condition, work)?;
             continue;
         }
-        let relation = if matches!(graph.nodes[node], DependencyDagNode::Replicated { .. }) {
-            PositionRelation {
-                packed: None,
-                ..relation
-            }
+        let relation = if let DependencyDagNode::Replicated { replication } = graph.nodes[node] {
+            replication.forget_position(relation)
         } else {
             relation
         };
@@ -1606,6 +1638,59 @@ mod tests {
             ssa.root_source_relations(destination).get("source"),
             Some(&PositionRelation::default())
         );
+    }
+
+    #[test]
+    fn replicated_source_queries_forget_only_the_repeated_axis() {
+        for (replication, expected) in [
+            (
+                Replication::Array(2),
+                PositionRelation {
+                    array: None,
+                    packed: Some(3),
+                },
+            ),
+            (
+                Replication::Packed(2),
+                PositionRelation {
+                    array: Some(1),
+                    packed: None,
+                },
+            ),
+        ] {
+            let mut ssa = SsaStore::default();
+            let source = ssa.read("source");
+            let translated = ssa.related_definition(vec![(
+                source,
+                PositionRelation {
+                    array: Some(1),
+                    packed: Some(3),
+                },
+            )]);
+            let repeated = ssa.replicated(
+                translated,
+                PositionDomain {
+                    array_start: 0,
+                    array_length: 8,
+                    packed_start: 0,
+                    packed_length: 8,
+                },
+                replication,
+            );
+            assert_eq!(
+                ssa.root_source_relations(repeated).get("source"),
+                Some(&expected)
+            );
+            let dag = ssa.dependency_dag(&[repeated], |_| true);
+            let sources = dependency_dag_external_sources(
+                &dag,
+                dag.roots[0],
+                PositionRelation::default(),
+                &mut 0,
+            )
+            .unwrap();
+            assert_eq!(sources, [("source", expected, PathCondition::default())]);
+        }
     }
 
     #[test]

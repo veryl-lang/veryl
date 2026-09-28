@@ -129,14 +129,25 @@ fn million_bit_dangling_recurrences_do_not_enumerate_declared_bits() {
 }
 
 #[test]
-fn wide_dangling_rotate_preserves_incomplete_cycle_search_status() {
-    // This rotate exceeds the separate compatible-cycle search budget. A
-    // completed feedthrough summary must not turn that into a proof of safety.
-    let code = shift_code(257, 3, false, false, true);
-    reset_module_summary_work();
-    assert!(!comb_loop_analysis_is_complete(&code));
-    let (input_edges, walked_edges) = module_summary_work();
-    assert!(walked_edges <= input_edges);
+fn wide_dangling_rotate_is_detected() {
+    // This 257-bit rotation used to leave cycle analysis incomplete.
+    // The output bypasses the internal feedback entirely.
+    let code = r#"
+        module ShiftDangle (i: input logic<257>, o: output logic<257>) {
+            var s: logic<257>;
+            var t: logic<257>;
+            assign t[253:0] = s[256:3];
+            assign t[256:254] = s[2:0];
+            assign s = t;
+            assign o = i;
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        matches!(errors.as_slice(), [AnalyzerError::CombinationalLoop { .. }]),
+        "the internal rotation must be diagnosed despite the feedthrough output: {errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
 }
 
 #[test]

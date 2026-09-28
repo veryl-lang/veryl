@@ -37,10 +37,6 @@ impl BitDependency {
         self.array.zip(self.packed)
     }
 
-    pub(super) fn has_position(self) -> bool {
-        self.array.is_some() || self.packed.is_some()
-    }
-
     pub(super) fn compose(self, next: Self) -> Self {
         Self {
             array: compose_axis(self.array, next.array),

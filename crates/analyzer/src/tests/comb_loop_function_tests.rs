@@ -1384,7 +1384,7 @@ fn comb_loop_wide_function_output_retains_matching_endpoint_feedback() {
 }
 
 #[test]
-fn comb_loop_split_destination_reuses_one_function_evaluation() {
+fn comb_loop_split_observation_reuses_one_function_evaluation() {
     const WIDTH: usize = 256;
     let observed_bits = (0..WIDTH)
         .map(|bit| format!("assign observed[{bit}] = result[{bit}];"))
@@ -1419,8 +1419,8 @@ fn comb_loop_split_destination_reuses_one_function_evaluation() {
     );
     assert_eq!(
         crate::comb_loop_detect::function_result_version_count(),
-        WIDTH + 1,
-        "sample the RHS once, then request only each destination's matching return region"
+        2,
+        "sample the RHS once and request its whole destination once; observations do not split storage"
     );
     assert!(
         crate::comb_loop_detect::function_result_region_probe_count() <= WIDTH * 12,

@@ -837,32 +837,40 @@ fn comb_loop_unresolved_hierarchy_does_not_hide_independent_cycle() {
 }
 
 #[test]
-fn comb_loop_search_limit_propagates_incomplete_without_inventing_a_diagnostic() {
-    let code = r#"
-        module Child (o: output logic) { assign o = ~o; }
-        module Top (o: output logic) { inst child: Child(o); }
-    "#;
-    crate::comb_loop_detect::with_cycle_search_limit(0, || {
-        assert!(!comb_loop_analysis_is_complete(code));
+fn partition_sweep_keeps_fragmented_modules_complete_and_parent_cycles() {
+    for count in [8, 64] {
+        let assignments = (0..count)
+            .map(|index| {
+                format!("assign o[{index}] = mem[{index}][{index}] ^ mem[index][{index}];")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let code = format!(
+            "module Fragmented (index: input u32, mem: input logic<{count}>[{count}],
+                                o: output logic<{count}>) {{
+                {assignments}
+             }}
+             module Top (index: input u32, mem: input logic<{count}>[{count}],
+                         o: output logic<{count}>, independent: output logic) {{
+                inst child: Fragmented (index: index, mem: mem, o: o);
+                assign independent = independent;
+             }}"
+        );
+        assert!(comb_loop_analysis_is_complete(&code), "count={count}");
+        let errors = analyze(&code);
         assert!(
-            analyze(code)
-                .iter()
-                .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
-            "an exhausted search has no proven cycle"
+            errors.iter().all(|error| match error {
+                AnalyzerError::CombinationalLoop { identifier, .. }
+                | AnalyzerError::UnassignVariable { identifier, .. } => identifier == "independent",
+                _ => false,
+            }),
+            "{errors:?}"
         );
         assert!(
-            comb_loop_analysis_is_complete(
-                r#"
-            module Top(i: input logic, o: output logic) { assign o = i; }
-        "#
-            ),
-            "acyclic graphs require no search"
+            errors.iter().any(|error| matches!(error,
+                AnalyzerError::CombinationalLoop { identifier, .. } if identifier == "independent"
+            )),
+            "{errors:?}"
         );
-    });
-    assert!(comb_loop_analysis_is_complete(code));
-    assert!(
-        analyze(code)
-            .iter()
-            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
-    );
+    }
 }

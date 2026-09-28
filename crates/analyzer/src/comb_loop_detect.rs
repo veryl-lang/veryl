@@ -42,14 +42,16 @@ use graph::{
     ensure_node, node_regions_overlap_with_dependency,
 };
 #[cfg(test)]
-pub(crate) use graph::{cycle_search_work, reset_cycle_search_work, with_cycle_search_limit};
+pub(crate) use graph::{
+    cycle_decision_work, cycle_search_work, reset_cycle_decision_work, reset_cycle_search_work,
+};
 use hierarchy::{module_postorder, walk_insts};
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
 use region::{
     ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
 };
-use ssa::{BranchId, DependencyDagNode, PathCondition};
+use ssa::{BranchId, DependencyDagNode, PathCondition, PositionDomain};
 #[cfg(test)]
 pub(crate) use ssa::{
     import_binding_visits, reset_import_binding_visits, reset_source_walk_visits,
@@ -70,11 +72,27 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    AssignDestination, Component, Declaration, Expression, Factor, InstDeclaration, Ir, Module, Op,
-    Signature, Statement, SystemFunctionKind, VarSelect, Variable,
+    ArrayLiteralItem, AssignDestination, Component, Comptime, Declaration, Expression, Factor,
+    InstDeclaration, Ir, Module, Op, Shape, Signature, Statement, SystemFunctionKind, VarSelect,
+    Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
+
+#[cfg(test)]
+thread_local! {
+    static ANALYSIS_SIZE: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_analysis_size() {
+    ANALYSIS_SIZE.set((0, 0, 0));
+}
+
+#[cfg(test)]
+pub(crate) fn analysis_size() -> (usize, usize, usize) {
+    ANALYSIS_SIZE.get()
+}
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
     check_inner(ir).0
@@ -122,6 +140,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
 
 /// Split only at observed access endpoints. Runtime and storage depend on the
 /// number of accesses, never on the highest referenced bit position.
+#[cfg(test)]
 fn atomic_ranges(spans: &[PackedSpan], endpoints: Option<&HashSet<usize>>) -> Vec<PackedSpan> {
     let mut events = Vec::with_capacity(spans.len() * 2 + endpoints.map_or(0, HashSet::len));
     for span in spans {
@@ -156,7 +175,7 @@ fn build_bit_partition(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     ctx: &mut Context,
-) -> BitPartition {
+) -> Option<BitPartition> {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
 
     for declaration in &module.declarations {
@@ -233,9 +252,18 @@ fn build_bit_partition(
     // subset sums of independent shifts and silently devolve into bit-level
     // expansion.
     let endpoints = HashMap::default();
-    let ranges = split_array_spans(accesses, &endpoints);
+    let ranges = split_array_spans(accesses, &endpoints)?;
 
-    BitPartition::new(ranges)
+    #[cfg(test)]
+    {
+        let (atoms, nodes, edges) = ANALYSIS_SIZE.get();
+        ANALYSIS_SIZE.set((
+            atoms + ranges.values().map(Vec::len).sum::<usize>(),
+            nodes,
+            edges,
+        ));
+    }
+    Some(BitPartition::new(ranges))
 }
 
 fn add_whole_type_access(
@@ -289,7 +317,13 @@ fn collect_instance_summary_spans(
             if let Some((parent, array, packed)) =
                 summary_parent_access(inst, child, node.region, direction, ctx)
             {
-                accesses.entry((parent, array)).or_default().push(packed);
+                if node.kind == SummaryNodeKind::Input {
+                    if let Some(variable) = ctx.variables.get(&parent) {
+                        add_whole_type_access(accesses, parent, &variable.r#type);
+                    }
+                } else {
+                    accesses.entry((parent, array)).or_default().push(packed);
+                }
             }
         }
     }
@@ -325,10 +359,141 @@ fn summary_parent_access(
     .map(|(array, packed, _)| (binding.parent, array, packed))
 }
 
+#[derive(Default)]
+struct PackedBoundary {
+    starts: usize,
+    ends: usize,
+    fixed: bool,
+}
+
+// Temporary protection for the remaining write-driven Cartesian partition.
+// Ordinary reads are views and the incremental sweep already avoids repeated
+// sorting. Charge only emitted atoms, before allocating them. The linear
+// allowance keeps large, non-amplifying source inputs outside this limit.
+const PARTITION_EXTRA_ATOMS: usize = 1_000_000;
+const PARTITION_ATOMS_PER_ACCESS: usize = 8;
+
+struct PartitionExpansionBudget {
+    remaining: usize,
+}
+
+impl PartitionExpansionBudget {
+    fn new(accesses: usize) -> Self {
+        let extra = PARTITION_EXTRA_ATOMS;
+        #[cfg(test)]
+        let extra = PARTITION_EXTRA_ATOM_LIMIT.get().unwrap_or(extra);
+        let atoms = extra.saturating_add(accesses.saturating_mul(PARTITION_ATOMS_PER_ACCESS));
+        Self { remaining: atoms }
+    }
+
+    fn reserve_atom(&mut self) -> Option<()> {
+        self.remaining = self.remaining.checked_sub(1)?;
+        #[cfg(test)]
+        PARTITION_EMITTED_ATOMS.set(PARTITION_EMITTED_ATOMS.get() + 1);
+        Some(())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PARTITION_EXTRA_ATOM_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static PARTITION_EMITTED_ATOMS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_partition_extra_atom_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
+    struct Reset(Option<usize>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            PARTITION_EXTRA_ATOM_LIMIT.set(self.0);
+        }
+    }
+    let _reset = Reset(PARTITION_EXTRA_ATOM_LIMIT.replace(Some(limit)));
+    f()
+}
+
+/// The packed endpoints currently active in the array sweep. Reference counts
+/// retain coincident endpoints until their last access ends, including touching
+/// intervals whose net coverage change at the shared endpoint is zero.
+#[derive(Default)]
+struct PackedSweep {
+    boundaries: std::collections::BTreeMap<usize, PackedBoundary>,
+    spans: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    static PARTITION_BOUNDARY_UPDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static PARTITION_ENDPOINT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl PackedSweep {
+    fn new(endpoints: Option<&HashSet<usize>>) -> Self {
+        let mut sweep = Self::default();
+        if let Some(endpoints) = endpoints {
+            for endpoint in endpoints {
+                sweep.boundaries.entry(*endpoint).or_default().fixed = true;
+            }
+        }
+        sweep
+    }
+
+    fn change(&mut self, span: PackedSpan, add: bool) {
+        if add {
+            self.spans += 1;
+        } else {
+            self.spans -= 1;
+        }
+        for (position, start) in [(span.start, true), (span.end(), false)] {
+            #[cfg(test)]
+            PARTITION_BOUNDARY_UPDATES.set(PARTITION_BOUNDARY_UPDATES.get() + 1);
+            let boundary = self.boundaries.entry(position).or_default();
+            let count = if start {
+                &mut boundary.starts
+            } else {
+                &mut boundary.ends
+            };
+            if add {
+                *count += 1;
+            } else {
+                *count -= 1;
+            }
+            if boundary.starts == 0 && boundary.ends == 0 && !boundary.fixed {
+                self.boundaries.remove(&position);
+            }
+        }
+    }
+
+    fn ranges(&self, budget: &mut PartitionExpansionBudget) -> Option<Vec<PackedSpan>> {
+        let mut atoms = Vec::new();
+        let mut active = 0usize;
+        let mut previous = None;
+        for (&position, boundary) in &self.boundaries {
+            #[cfg(test)]
+            PARTITION_ENDPOINT_VISITS.set(PARTITION_ENDPOINT_VISITS.get() + 1);
+            if active != 0
+                && let Some(previous) = previous
+            {
+                budget.reserve_atom()?;
+                atoms.push(PackedSpan::new(previous, position - previous).unwrap());
+            }
+            active += boundary.starts;
+            active -= boundary.ends;
+            previous = Some(position);
+        }
+        debug_assert_eq!(active, 0);
+        Some(atoms)
+    }
+}
+
 fn split_array_spans(
     accesses_by_index: HashMap<IdxKey, Vec<PackedSpan>>,
     endpoints: &HashMap<VarId, HashSet<usize>>,
-) -> HashMap<IdxKey, Vec<PackedSpan>> {
+) -> Option<HashMap<IdxKey, Vec<PackedSpan>>> {
+    let access_count = accesses_by_index
+        .values()
+        .fold(0usize, |count, spans| count.saturating_add(spans.len()));
+    let mut budget = PartitionExpansionBudget::new(access_count);
     let mut accesses: HashMap<VarId, Vec<(ArraySpan, PackedSpan)>> = HashMap::default();
     for ((id, span), packed_spans) in accesses_by_index {
         for packed in packed_spans {
@@ -353,43 +518,33 @@ fn split_array_spans(
             (*position, *starts, packed.start, packed.length)
         });
 
-        let mut active: HashMap<PackedSpan, usize> = HashMap::default();
+        let mut active = PackedSweep::new(endpoints.get(&id));
         let mut previous = events.first().map(|event| event.0);
         let mut cursor = 0;
         while cursor < events.len() {
             let position = events[cursor].0;
             if let Some(previous) = previous
                 && previous < position
-                && !active.is_empty()
+                && active.spans != 0
             {
                 let split = ArraySpan {
                     start: previous,
                     length: position - previous,
                 };
-                let split_spans = active.keys().copied().collect::<Vec<_>>();
-                let parts = atomic_ranges(&split_spans, endpoints.get(&id));
+                let parts = active.ranges(&mut budget)?;
                 if !parts.is_empty() {
                     ranges.insert((id, split), parts);
                 }
             }
             while cursor < events.len() && events[cursor].0 == position {
                 let (_, starts, packed) = events[cursor];
-                if starts {
-                    *active.entry(packed).or_default() += 1;
-                } else if let std::collections::hash_map::Entry::Occupied(mut entry) =
-                    active.entry(packed)
-                {
-                    *entry.get_mut() -= 1;
-                    if *entry.get() == 0 {
-                        entry.remove();
-                    }
-                }
+                active.change(packed, starts);
                 cursor += 1;
             }
             previous = Some(position);
         }
     }
-    ranges
+    Some(ranges)
 }
 
 /// Field boundaries of a struct-literal write, as spans on the destination.
@@ -482,8 +637,17 @@ fn collect_factor_spans(
 ) {
     match factor {
         Factor::Variable(id, index, select, _) => {
-            for (idx, packed) in var_reads(*id, index, select, ctx) {
-                out.entry((*id, idx)).or_default().push(packed);
+            // Reads project their requested coordinates in SSA. Only writes
+            // need to split storage: crossing read views must not construct
+            // the Cartesian arrangement of all their endpoints.
+            if let Some(variable) = ctx.variables.get(id) {
+                add_whole_type_access(out, *id, &variable.r#type);
+            }
+            for expression in index.0.iter().chain(select.0.iter()) {
+                collect_expr_spans(expression, out, ctx);
+            }
+            if let Some((_, expression)) = &select.1 {
+                collect_expr_spans(expression, out, ctx);
             }
         }
         Factor::FunctionCall(call) => {
@@ -614,7 +778,6 @@ fn build_module_graph_with_trace(
     ctx.variables = module.variables.clone();
     ctx.variables.extend(module.interface_members.clone());
     ctx.functions = module.functions.clone();
-    let bit_part = build_bit_partition(module, summaries, &mut ctx);
     let limit = isize::MAX as usize;
     let oversized = module
         .variables
@@ -628,14 +791,23 @@ fn build_module_graph_with_trace(
                 || variable.total_width().is_some_and(|width| width > limit)
         })
         .map(|variable| variable.token);
-    if let Some(token) = oversized.or_else(|| {
-        bit_part.position_overflow().map(|id| {
-            module
-                .variables
-                .get(&id)
-                .or_else(|| module.interface_members.get(&id))
-                .map_or(module.token, |variable| variable.token)
-        })
+    if let Some(token) = oversized {
+        return Err(Box::new(
+            AnalyzerError::combinational_loop_position_overflow(&token),
+        ));
+    }
+    let Some(bit_part) = build_bit_partition(module, summaries, &mut ctx) else {
+        // A partial partition would lose overwrite boundaries and could invent
+        // feedback. Follow the existing incomplete-analysis contract: discard
+        // this module's graph, propagate incompleteness, and add no diagnostic.
+        return Ok((DependencyGraph::new(), BitPartition::default(), false));
+    };
+    if let Some(token) = bit_part.position_overflow().map(|id| {
+        module
+            .variables
+            .get(&id)
+            .or_else(|| module.interface_members.get(&id))
+            .map_or(module.token, |variable| variable.token)
     }) {
         return Err(Box::new(
             AnalyzerError::combinational_loop_position_overflow(&token),
@@ -687,6 +859,15 @@ fn build_module_graph_with_trace(
     }
 
     let (graph, complete) = builder.finish();
+    #[cfg(test)]
+    {
+        let (atoms, nodes, edges) = ANALYSIS_SIZE.get();
+        ANALYSIS_SIZE.set((
+            atoms,
+            nodes + graph.node_count(),
+            edges + graph.edge_count(),
+        ));
+    }
     Ok((graph, bit_part, complete))
 }
 
@@ -843,15 +1024,9 @@ impl<'a> ModuleGraphBuilder<'a> {
         }
 
         let summary_branches = remap_module_summary_branches(summary, inst);
-        let positioned_sources = summary
-            .edges
-            .iter()
-            .filter(|edge| edge.kind.has_position())
-            .map(|edge| edge.source)
-            .collect::<HashSet<_>>();
         let mut mapped_nodes = Vec::with_capacity(summary.nodes.len());
         let mut endpoint_mappings = Vec::with_capacity(summary.nodes.len());
-        for (index, node) in summary.nodes.iter().enumerate() {
+        for node in &summary.nodes {
             let (mapping, endpoint_mapping) = match node.kind {
                 SummaryNodeKind::Input => {
                     let mapping = map_instance_source_region(
@@ -860,7 +1035,6 @@ impl<'a> ModuleGraphBuilder<'a> {
                         inst,
                         child,
                         node.region,
-                        positioned_sources.contains(&index),
                         input_reads.get(&node.region.id).map(Vec::as_slice),
                         bit_part,
                         ctx,
@@ -947,7 +1121,6 @@ impl<'a> ModuleGraphBuilder<'a> {
                                 inst,
                                 child,
                                 source_region,
-                                true,
                                 input_reads
                                     .get(&summary.nodes[edge.source].region.id)
                                     .map(Vec::as_slice),
@@ -1056,18 +1229,19 @@ fn add_dependency_dag(
         .collect::<Vec<_>>();
 
     for (index, node) in dag.nodes.iter().enumerate() {
-        if let DependencyDagNode::Replicated { stride } = node
+        if let DependencyDagNode::Replicated { replication } = node
             && let Some(node) = mapped[index]
         {
             // A bounded positive translation represents every copy without
             // expanding bits, repetitions or paths through function imports.
+            let relation = replication.relation();
             add_dependency_edge(
                 graph,
                 node,
                 node,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(*stride),
+                    array: relation.array,
+                    packed: relation.packed,
                 }),
             );
         }
@@ -1165,7 +1339,6 @@ fn map_instance_source_region(
     inst: &InstDeclaration,
     child: &Module,
     region: SummaryRegion,
-    preserve_position: bool,
     allowed: Option<&[procedure::RegionSource]>,
     bit_part: &BitPartition,
     ctx: &mut Context,
@@ -1181,18 +1354,43 @@ fn map_instance_source_region(
         bit_part,
         ctx,
     );
-    if !preserve_position
-        || parent_sources
-            .nodes
-            .iter()
-            .any(|source| source.offset.is_some())
-    {
+    // Direct storage nodes are safe only when the requested child region
+    // contains the entire mapped parent atom. Otherwise a whole-value child
+    // dependency would erase the actual's slice bounds before applying them.
+    if parent_sources.nodes.iter().all(|source| {
+        let Some((array_offset, packed_offset)) = source.offset else {
+            return false;
+        };
+        let Some(array_start) = translate_position(region.array.start, array_offset) else {
+            return false;
+        };
+        let Some(packed_start) = translate_position(region.packed.start, packed_offset) else {
+            return false;
+        };
+        let array = ArraySpan {
+            start: array_start,
+            length: region.array.length,
+        };
+        let Some(packed) = PackedSpan::new(packed_start, region.packed.length) else {
+            return false;
+        };
+        let parent_packed = bit_part.ranges_of((source.key.0, source.key.1))[source.key.2];
+        array.intersection(source.key.1) == Some(source.key.1)
+            && packed.intersection(parent_packed) == Some(parent_packed)
+    }) {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     }
-    let Some(input) = inst.inputs.iter().find(|input| input.id == region.id) else {
-        return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
-    };
-    let Some(_) = input.single() else {
+    if parent_sources
+        .nodes
+        .iter()
+        .all(|source| source.offset.is_some())
+    {
+        // Preserve exact connection metadata rather than reinterpreting an IR
+        // expression that may not represent an unpacked range as one value.
+        let sources = resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
+        return actuals.project_mapping(graph, region, &sources, budget);
+    }
+    let Some(_) = inst.inputs.iter().find(|input| input.id == region.id) else {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
     let Some(variable) = child.variables.get(&region.id) else {
@@ -1207,10 +1405,47 @@ fn map_instance_source_region(
 #[derive(Default)]
 struct InstanceActuals {
     roots: HashMap<SummaryRegion, NodeIndex>,
+    projections: HashMap<SummaryRegion, NodeIndex>,
     exhausted: bool,
 }
 
 impl InstanceActuals {
+    fn project_mapping(
+        &mut self,
+        graph: &mut DependencyGraph,
+        region: SummaryRegion,
+        sources: &ResolvedInstanceRegionMapping,
+        budget: &mut ExpansionBudget,
+    ) -> ResolvedInstanceRegionMapping {
+        let root = if let Some(&root) = self.projections.get(&region) {
+            Some(root)
+        } else if budget.reserve_work(sources.nodes.len().saturating_add(1)) {
+            let root = graph.add_node(GraphNode {
+                region,
+                domains: vec![PositionDomain {
+                    array_start: region.array.start,
+                    array_length: region.array.length,
+                    packed_start: region.packed.start,
+                    packed_length: region.packed.length,
+                }],
+                diagnostic: None,
+            });
+            self.projections.insert(region, root);
+            add_resolved_dependency_edges(
+                graph,
+                sources,
+                &ResolvedInstanceRegionMapping::from_root(Some(root)),
+                BitDependency::identity(),
+                &PathCondition::default(),
+            );
+            Some(root)
+        } else {
+            self.exhausted = true;
+            None
+        };
+        ResolvedInstanceRegionMapping::from_root(root)
+    }
+
     fn defer(
         &mut self,
         graph: &mut DependencyGraph,
@@ -1234,16 +1469,7 @@ impl InstanceActuals {
             self.exhausted = true;
             None
         };
-        ResolvedInstanceRegionMapping {
-            nodes: root
-                .into_iter()
-                .map(|node| ResolvedMappedNode {
-                    node,
-                    offset: Some((0, 0)),
-                    condition: PathCondition::default(),
-                })
-                .collect(),
-        }
+        ResolvedInstanceRegionMapping::from_root(root)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1264,24 +1490,44 @@ impl InstanceActuals {
         regions.sort_unstable();
         for regions in regions.chunk_by(|left, right| left.id == right.id) {
             let first = regions[0];
-            let expression = inst
+            let input = inst
                 .inputs
                 .iter()
                 .find(|input| input.id == first.id)
-                .and_then(|input| input.single())
-                .expect("deferred inputs have one actual");
-            let width = child.variables[&first.id]
+                .expect("deferred regions have an input actual");
+            let variable = &child.variables[&first.id];
+            let width = variable
                 .total_width()
                 .expect("deferred inputs have known widths");
+            let literal;
+            let flat_type;
+            let (expression, context_type) = if let Some(expression) = input.single() {
+                (expression, &variable.r#type)
+            } else {
+                // IR expands an unpacked slice into one expression per scalar
+                // array element. Restore that positional view for projection;
+                // the flattened coordinates are also used by SummaryRegion.
+                let mut r#type = variable.r#type.clone();
+                r#type.array = Shape::new(vec![Some(input.exprs.len())]);
+                literal = Expression::ArrayLiteral(
+                    input
+                        .exprs
+                        .iter()
+                        .cloned()
+                        .map(|expression| ArrayLiteralItem::Value(Box::new(expression), None))
+                        .collect(),
+                    Box::new(Comptime {
+                        r#type: r#type.clone(),
+                        ..Default::default()
+                    }),
+                );
+                flat_type = r#type;
+                (&literal, &flat_type)
+            };
             let mut analysis =
                 procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
-            let dag = analysis.eval_regions(
-                expression,
-                regions,
-                width,
-                &child.variables[&first.id].r#type,
-                budget.remaining(),
-            );
+            let dag =
+                analysis.eval_regions(expression, regions, width, context_type, budget.remaining());
             complete &= analysis.is_complete();
             analysis.restore(procedure_context);
             if !budget.reserve_dag(&dag) {
@@ -1327,6 +1573,21 @@ struct MappedNode {
 
 struct ResolvedInstanceRegionMapping {
     nodes: Vec<ResolvedMappedNode>,
+}
+
+impl ResolvedInstanceRegionMapping {
+    fn from_root(root: Option<NodeIndex>) -> Self {
+        Self {
+            nodes: root
+                .into_iter()
+                .map(|node| ResolvedMappedNode {
+                    node,
+                    offset: Some((0, 0)),
+                    condition: PathCondition::default(),
+                })
+                .collect(),
+        }
+    }
 }
 
 struct ResolvedMappedNode {
@@ -1989,7 +2250,7 @@ mod partition_tests {
             vec![packed],
         );
 
-        let ranges = split_array_spans(accesses, &HashMap::default());
+        let ranges = split_array_spans(accesses, &HashMap::default()).unwrap();
         for start in 0..3 {
             assert_eq!(
                 ranges
@@ -2013,7 +2274,7 @@ mod partition_tests {
             accesses.insert((id, ArraySpan { start, length: 1 }), vec![packed]);
         }
 
-        let ranges = split_array_spans(accesses, &HashMap::default());
+        let ranges = split_array_spans(accesses, &HashMap::default()).unwrap();
         let partition = BitPartition::new(ranges);
         assert_eq!(partition.array_spans(id).len(), COUNT);
         for start in 0..COUNT {
@@ -2042,5 +2303,266 @@ mod partition_tests {
         );
 
         assert_eq!(BitPartition::new(ranges).position_overflow(), Some(id));
+    }
+
+    /// Independent reference: rescan all rectangles in each array slab and
+    /// sort their packed events from scratch. Deliberately not incremental.
+    fn reference_partition(
+        accesses: &HashMap<IdxKey, Vec<PackedSpan>>,
+        endpoints: &HashMap<VarId, HashSet<usize>>,
+    ) -> HashMap<IdxKey, Vec<PackedSpan>> {
+        let mut positions: HashMap<VarId, Vec<usize>> = HashMap::default();
+        for &(id, array) in accesses.keys() {
+            if array.length > 0
+                && let Some(end) = array.end()
+            {
+                positions.entry(id).or_default().extend([array.start, end]);
+            }
+        }
+        let mut result = HashMap::default();
+        for (id, mut positions) in positions {
+            positions.sort_unstable();
+            positions.dedup();
+            for pair in positions.windows(2) {
+                let array = ArraySpan {
+                    start: pair[0],
+                    length: pair[1] - pair[0],
+                };
+                let packed: Vec<_> = accesses
+                    .iter()
+                    .filter(|((owner, span), _)| {
+                        *owner == id && span.length > 0 && span.overlaps(array)
+                    })
+                    .flat_map(|(_, packed)| packed.iter().copied())
+                    .collect();
+                let atoms = atomic_ranges(&packed, endpoints.get(&id));
+                if !atoms.is_empty() {
+                    result.insert((id, array), atoms);
+                }
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn incremental_partition_matches_independent_rectangle_sweep() {
+        let mut seed = 17u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (seed >> 32) as usize
+        };
+        for count in 1..=128 {
+            let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+            let mut endpoints: HashMap<VarId, HashSet<usize>> = HashMap::default();
+            for _ in 0..count {
+                let id = VarId::from_raw((next() % 3) as u32);
+                let array = ArraySpan {
+                    start: next() % 8,
+                    length: next() % 5,
+                };
+                let packed = PackedSpan {
+                    start: next() % 8,
+                    length: next() % 5,
+                };
+                accesses.entry((id, array)).or_default().push(packed);
+                if count % 2 == 0 {
+                    endpoints.entry(id).or_default().insert(next() % 16);
+                }
+            }
+            let expected = reference_partition(&accesses, &endpoints);
+            assert_eq!(
+                split_array_spans(accesses, &endpoints).unwrap(),
+                expected,
+                "count={count}"
+            );
+        }
+    }
+
+    #[test]
+    fn partition_sweep_releases_ended_boundaries_without_rescanning_retained_capacity() {
+        const COUNT: usize = 4096;
+        let id = VarId::from_raw(0);
+        let packed = PackedSpan {
+            start: 0,
+            length: 1,
+        };
+        let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+        accesses.insert(
+            (
+                id,
+                ArraySpan {
+                    start: 0,
+                    length: COUNT + 1,
+                },
+            ),
+            vec![packed],
+        );
+        for index in 1..=COUNT {
+            accesses
+                .entry((
+                    id,
+                    ArraySpan {
+                        start: 0,
+                        length: 1,
+                    },
+                ))
+                .or_default()
+                .push(PackedSpan {
+                    start: index * 2,
+                    length: 1,
+                });
+            accesses.insert(
+                (
+                    id,
+                    ArraySpan {
+                        start: index,
+                        length: 1,
+                    },
+                ),
+                vec![packed],
+            );
+        }
+        PARTITION_ENDPOINT_VISITS.set(0);
+        PARTITION_BOUNDARY_UPDATES.set(0);
+        let ranges = split_array_spans(accesses, &HashMap::default()).unwrap();
+        let atoms = ranges.values().map(Vec::len).sum::<usize>();
+        assert_eq!(atoms, 2 * COUNT + 1);
+        assert_eq!(ranges.len(), COUNT + 1);
+        assert_eq!(PARTITION_BOUNDARY_UPDATES.get(), 4 * (2 * COUNT + 1));
+        assert!(PARTITION_ENDPOINT_VISITS.get() <= 2 * atoms);
+    }
+
+    #[test]
+    fn partition_sweep_materializes_all_crossing_atoms_below_the_limit() {
+        const COUNT: usize = 512;
+        let id = VarId::from_raw(0);
+        let accesses = (0..COUNT)
+            .map(|start| {
+                (
+                    (
+                        id,
+                        ArraySpan {
+                            start,
+                            length: COUNT,
+                        },
+                    ),
+                    vec![PackedSpan {
+                        start,
+                        length: COUNT,
+                    }],
+                )
+            })
+            .collect();
+        PARTITION_ENDPOINT_VISITS.set(0);
+        PARTITION_BOUNDARY_UPDATES.set(0);
+        let ranges = split_array_spans(accesses, &HashMap::default()).unwrap();
+        let atoms = ranges.values().map(Vec::len).sum::<usize>();
+        assert_eq!(atoms, COUNT * COUNT + (COUNT - 1) * (COUNT - 1));
+        assert_eq!(PARTITION_BOUNDARY_UPDATES.get(), 4 * COUNT);
+        assert!(PARTITION_ENDPOINT_VISITS.get() <= 2 * atoms);
+    }
+
+    fn crossing_partition_accesses(
+        count: usize,
+        variables: usize,
+    ) -> HashMap<IdxKey, Vec<PackedSpan>> {
+        (0..variables)
+            .flat_map(|variable| {
+                (0..count).map(move |start| {
+                    (
+                        (
+                            VarId::from_raw(variable.try_into().unwrap()),
+                            ArraySpan {
+                                start,
+                                length: count,
+                            },
+                        ),
+                        vec![PackedSpan {
+                            start,
+                            length: count,
+                        }],
+                    )
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn partition_limit_is_checked_before_each_extra_atom() {
+        const COUNT: usize = 16;
+        let expected = COUNT * COUNT + (COUNT - 1) * (COUNT - 1);
+        let linear = COUNT * PARTITION_ATOMS_PER_ACCESS;
+        for allowed in [expected - 1, expected] {
+            with_partition_extra_atom_limit(allowed - linear, || {
+                PARTITION_EMITTED_ATOMS.set(0);
+                let result =
+                    split_array_spans(crossing_partition_accesses(COUNT, 1), &HashMap::default());
+                assert_eq!(PARTITION_EMITTED_ATOMS.get(), allowed);
+                if allowed == expected {
+                    assert_eq!(
+                        result.unwrap().values().map(Vec::len).sum::<usize>(),
+                        expected
+                    );
+                } else {
+                    assert!(result.is_none());
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn partition_limit_is_shared_across_variables_and_resets_per_module() {
+        with_partition_extra_atom_limit(400, || {
+            assert!(
+                split_array_spans(crossing_partition_accesses(16, 1), &HashMap::default())
+                    .is_some()
+            );
+            PARTITION_EMITTED_ATOMS.set(0);
+            let result = split_array_spans(crossing_partition_accesses(16, 2), &HashMap::default());
+            let atoms = 400 + 32 * PARTITION_ATOMS_PER_ACCESS;
+            assert!(result.is_none());
+            assert_eq!(PARTITION_EMITTED_ATOMS.get(), atoms);
+            assert!(
+                split_array_spans(crossing_partition_accesses(16, 1), &HashMap::default())
+                    .is_some()
+            );
+        });
+    }
+
+    #[test]
+    fn partition_limit_allows_large_linear_inputs_with_no_extra_allowance() {
+        const COUNT: usize = 4096;
+        for packed_axis in [false, true] {
+            let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+            for index in 0..COUNT {
+                let array = ArraySpan {
+                    start: if packed_axis { 0 } else { index * 2 },
+                    length: 1,
+                };
+                let packed = PackedSpan {
+                    start: if packed_axis { index * 2 } else { 0 },
+                    length: 1,
+                };
+                accesses
+                    .entry((VarId::from_raw(0), array))
+                    .or_default()
+                    .push(packed);
+            }
+            with_partition_extra_atom_limit(0, || {
+                let result = split_array_spans(accesses, &HashMap::default()).unwrap();
+                assert_eq!(result.values().map(Vec::len).sum::<usize>(), COUNT);
+            });
+        }
+    }
+
+    #[test]
+    fn partition_limit_default_stops_large_cartesian_output() {
+        const COUNT: usize = 1024;
+        PARTITION_EMITTED_ATOMS.set(0);
+        let result = split_array_spans(crossing_partition_accesses(COUNT, 1), &HashMap::default());
+        let atoms = PARTITION_EXTRA_ATOMS + COUNT * PARTITION_ATOMS_PER_ACCESS;
+        assert!(result.is_none());
+        assert_eq!(PARTITION_EMITTED_ATOMS.get(), atoms);
+        assert!(atoms < COUNT * COUNT + (COUNT - 1) * (COUNT - 1));
     }
 }
