@@ -16,6 +16,7 @@ mod comb_loop_incomplete_tests;
 mod comb_loop_interface_function_tests;
 mod comb_loop_interface_tests;
 mod comb_loop_module_tests;
+mod comb_loop_partition_limit_tests;
 mod comb_loop_positional_tests;
 mod comb_loop_procedural_tests;
 mod comb_loop_read_region_tests;

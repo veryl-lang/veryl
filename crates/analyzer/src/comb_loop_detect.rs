@@ -173,7 +173,7 @@ fn build_bit_partition(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     ctx: &mut Context,
-) -> BitPartition {
+) -> Option<BitPartition> {
     let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
 
     for declaration in &module.declarations {
@@ -250,7 +250,7 @@ fn build_bit_partition(
     // subset sums of independent shifts and silently devolve into bit-level
     // expansion.
     let endpoints = HashMap::default();
-    let ranges = split_array_spans(accesses, &endpoints);
+    let ranges = split_array_spans(accesses, &endpoints)?;
 
     #[cfg(test)]
     {
@@ -261,7 +261,7 @@ fn build_bit_partition(
             edges,
         ));
     }
-    BitPartition::new(ranges)
+    Some(BitPartition::new(ranges))
 }
 
 fn add_whole_type_access(
@@ -364,6 +364,52 @@ struct PackedBoundary {
     fixed: bool,
 }
 
+// Temporary protection for the remaining write-driven Cartesian partition.
+// Ordinary reads are views and the incremental sweep already avoids repeated
+// sorting. Charge only emitted atoms, before allocating them. The linear
+// allowance keeps large, non-amplifying source inputs outside this limit.
+const PARTITION_EXTRA_ATOMS: usize = 1_000_000;
+const PARTITION_ATOMS_PER_ACCESS: usize = 8;
+
+struct PartitionExpansionBudget {
+    remaining: usize,
+}
+
+impl PartitionExpansionBudget {
+    fn new(accesses: usize) -> Self {
+        let extra = PARTITION_EXTRA_ATOMS;
+        #[cfg(test)]
+        let extra = PARTITION_EXTRA_ATOM_LIMIT.get().unwrap_or(extra);
+        let atoms = extra.saturating_add(accesses.saturating_mul(PARTITION_ATOMS_PER_ACCESS));
+        Self { remaining: atoms }
+    }
+
+    fn reserve_atom(&mut self) -> Option<()> {
+        self.remaining = self.remaining.checked_sub(1)?;
+        #[cfg(test)]
+        PARTITION_EMITTED_ATOMS.set(PARTITION_EMITTED_ATOMS.get() + 1);
+        Some(())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PARTITION_EXTRA_ATOM_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static PARTITION_EMITTED_ATOMS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_partition_extra_atom_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
+    struct Reset(Option<usize>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            PARTITION_EXTRA_ATOM_LIMIT.set(self.0);
+        }
+    }
+    let _reset = Reset(PARTITION_EXTRA_ATOM_LIMIT.replace(Some(limit)));
+    f()
+}
+
 /// The packed endpoints currently active in the array sweep. Reference counts
 /// retain coincident endpoints until their last access ends, including touching
 /// intervals whose net coverage change at the shared endpoint is zero.
@@ -416,7 +462,7 @@ impl PackedSweep {
         }
     }
 
-    fn ranges(&self) -> Vec<PackedSpan> {
+    fn ranges(&self, budget: &mut PartitionExpansionBudget) -> Option<Vec<PackedSpan>> {
         let mut atoms = Vec::new();
         let mut active = 0usize;
         let mut previous = None;
@@ -426,6 +472,7 @@ impl PackedSweep {
             if active != 0
                 && let Some(previous) = previous
             {
+                budget.reserve_atom()?;
                 atoms.push(PackedSpan::new(previous, position - previous).unwrap());
             }
             active += boundary.starts;
@@ -433,14 +480,18 @@ impl PackedSweep {
             previous = Some(position);
         }
         debug_assert_eq!(active, 0);
-        atoms
+        Some(atoms)
     }
 }
 
 fn split_array_spans(
     accesses_by_index: HashMap<IdxKey, Vec<PackedSpan>>,
     endpoints: &HashMap<VarId, HashSet<usize>>,
-) -> HashMap<IdxKey, Vec<PackedSpan>> {
+) -> Option<HashMap<IdxKey, Vec<PackedSpan>>> {
+    let access_count = accesses_by_index
+        .values()
+        .fold(0usize, |count, spans| count.saturating_add(spans.len()));
+    let mut budget = PartitionExpansionBudget::new(access_count);
     let mut accesses: HashMap<VarId, Vec<(ArraySpan, PackedSpan)>> = HashMap::default();
     for ((id, span), packed_spans) in accesses_by_index {
         for packed in packed_spans {
@@ -478,7 +529,7 @@ fn split_array_spans(
                     start: previous,
                     length: position - previous,
                 };
-                let parts = active.ranges();
+                let parts = active.ranges(&mut budget)?;
                 if !parts.is_empty() {
                     ranges.insert((id, split), parts);
                 }
@@ -491,7 +542,7 @@ fn split_array_spans(
             previous = Some(position);
         }
     }
-    ranges
+    Some(ranges)
 }
 
 /// Field boundaries of a struct-literal write, as spans on the destination.
@@ -725,7 +776,6 @@ fn build_module_graph_with_trace(
     ctx.variables = module.variables.clone();
     ctx.variables.extend(module.interface_members.clone());
     ctx.functions = module.functions.clone();
-    let bit_part = build_bit_partition(module, summaries, &mut ctx);
     let limit = isize::MAX as usize;
     let oversized = module
         .variables
@@ -739,14 +789,23 @@ fn build_module_graph_with_trace(
                 || variable.total_width().is_some_and(|width| width > limit)
         })
         .map(|variable| variable.token);
-    if let Some(token) = oversized.or_else(|| {
-        bit_part.position_overflow().map(|id| {
-            module
-                .variables
-                .get(&id)
-                .or_else(|| module.interface_members.get(&id))
-                .map_or(module.token, |variable| variable.token)
-        })
+    if let Some(token) = oversized {
+        return Err(Box::new(
+            AnalyzerError::combinational_loop_position_overflow(&token),
+        ));
+    }
+    let Some(bit_part) = build_bit_partition(module, summaries, &mut ctx) else {
+        // A partial partition would lose overwrite boundaries and could invent
+        // feedback. Follow the existing incomplete-analysis contract: discard
+        // this module's graph, propagate incompleteness, and add no diagnostic.
+        return Ok((DependencyGraph::new(), BitPartition::default(), false));
+    };
+    if let Some(token) = bit_part.position_overflow().map(|id| {
+        module
+            .variables
+            .get(&id)
+            .or_else(|| module.interface_members.get(&id))
+            .map_or(module.token, |variable| variable.token)
     }) {
         return Err(Box::new(
             AnalyzerError::combinational_loop_position_overflow(&token),
@@ -2188,7 +2247,7 @@ mod partition_tests {
             vec![packed],
         );
 
-        let ranges = split_array_spans(accesses, &HashMap::default());
+        let ranges = split_array_spans(accesses, &HashMap::default()).unwrap();
         for start in 0..3 {
             assert_eq!(
                 ranges
@@ -2212,7 +2271,7 @@ mod partition_tests {
             accesses.insert((id, ArraySpan { start, length: 1 }), vec![packed]);
         }
 
-        let ranges = split_array_spans(accesses, &HashMap::default());
+        let ranges = split_array_spans(accesses, &HashMap::default()).unwrap();
         let partition = BitPartition::new(ranges);
         assert_eq!(partition.array_spans(id).len(), COUNT);
         for start in 0..COUNT {
@@ -2309,7 +2368,7 @@ mod partition_tests {
             }
             let expected = reference_partition(&accesses, &endpoints);
             assert_eq!(
-                split_array_spans(accesses, &endpoints),
+                split_array_spans(accesses, &endpoints).unwrap(),
                 expected,
                 "count={count}"
             );
@@ -2362,7 +2421,7 @@ mod partition_tests {
         }
         PARTITION_ENDPOINT_VISITS.set(0);
         PARTITION_BOUNDARY_UPDATES.set(0);
-        let ranges = split_array_spans(accesses, &HashMap::default());
+        let ranges = split_array_spans(accesses, &HashMap::default()).unwrap();
         let atoms = ranges.values().map(Vec::len).sum::<usize>();
         assert_eq!(atoms, 2 * COUNT + 1);
         assert_eq!(ranges.len(), COUNT + 1);
@@ -2371,7 +2430,7 @@ mod partition_tests {
     }
 
     #[test]
-    fn partition_sweep_materializes_all_crossing_atoms_without_a_cutoff() {
+    fn partition_sweep_materializes_all_crossing_atoms_below_the_limit() {
         const COUNT: usize = 512;
         let id = VarId::from_raw(0);
         let accesses = (0..COUNT)
@@ -2393,10 +2452,114 @@ mod partition_tests {
             .collect();
         PARTITION_ENDPOINT_VISITS.set(0);
         PARTITION_BOUNDARY_UPDATES.set(0);
-        let ranges = split_array_spans(accesses, &HashMap::default());
+        let ranges = split_array_spans(accesses, &HashMap::default()).unwrap();
         let atoms = ranges.values().map(Vec::len).sum::<usize>();
         assert_eq!(atoms, COUNT * COUNT + (COUNT - 1) * (COUNT - 1));
         assert_eq!(PARTITION_BOUNDARY_UPDATES.get(), 4 * COUNT);
         assert!(PARTITION_ENDPOINT_VISITS.get() <= 2 * atoms);
+    }
+
+    fn crossing_partition_accesses(
+        count: usize,
+        variables: usize,
+    ) -> HashMap<IdxKey, Vec<PackedSpan>> {
+        (0..variables)
+            .flat_map(|variable| {
+                (0..count).map(move |start| {
+                    (
+                        (
+                            VarId::from_raw(variable.try_into().unwrap()),
+                            ArraySpan {
+                                start,
+                                length: count,
+                            },
+                        ),
+                        vec![PackedSpan {
+                            start,
+                            length: count,
+                        }],
+                    )
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn partition_limit_is_checked_before_each_extra_atom() {
+        const COUNT: usize = 16;
+        let expected = COUNT * COUNT + (COUNT - 1) * (COUNT - 1);
+        let linear = COUNT * PARTITION_ATOMS_PER_ACCESS;
+        for allowed in [expected - 1, expected] {
+            with_partition_extra_atom_limit(allowed - linear, || {
+                PARTITION_EMITTED_ATOMS.set(0);
+                let result =
+                    split_array_spans(crossing_partition_accesses(COUNT, 1), &HashMap::default());
+                assert_eq!(PARTITION_EMITTED_ATOMS.get(), allowed);
+                if allowed == expected {
+                    assert_eq!(
+                        result.unwrap().values().map(Vec::len).sum::<usize>(),
+                        expected
+                    );
+                } else {
+                    assert!(result.is_none());
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn partition_limit_is_shared_across_variables_and_resets_per_module() {
+        with_partition_extra_atom_limit(400, || {
+            assert!(
+                split_array_spans(crossing_partition_accesses(16, 1), &HashMap::default())
+                    .is_some()
+            );
+            PARTITION_EMITTED_ATOMS.set(0);
+            let result = split_array_spans(crossing_partition_accesses(16, 2), &HashMap::default());
+            let atoms = 400 + 32 * PARTITION_ATOMS_PER_ACCESS;
+            assert!(result.is_none());
+            assert_eq!(PARTITION_EMITTED_ATOMS.get(), atoms);
+            assert!(
+                split_array_spans(crossing_partition_accesses(16, 1), &HashMap::default())
+                    .is_some()
+            );
+        });
+    }
+
+    #[test]
+    fn partition_limit_allows_large_linear_inputs_with_no_extra_allowance() {
+        const COUNT: usize = 4096;
+        for packed_axis in [false, true] {
+            let mut accesses: HashMap<IdxKey, Vec<PackedSpan>> = HashMap::default();
+            for index in 0..COUNT {
+                let array = ArraySpan {
+                    start: if packed_axis { 0 } else { index * 2 },
+                    length: 1,
+                };
+                let packed = PackedSpan {
+                    start: if packed_axis { index * 2 } else { 0 },
+                    length: 1,
+                };
+                accesses
+                    .entry((VarId::from_raw(0), array))
+                    .or_default()
+                    .push(packed);
+            }
+            with_partition_extra_atom_limit(0, || {
+                let result = split_array_spans(accesses, &HashMap::default()).unwrap();
+                assert_eq!(result.values().map(Vec::len).sum::<usize>(), COUNT);
+            });
+        }
+    }
+
+    #[test]
+    fn partition_limit_default_stops_large_cartesian_output() {
+        const COUNT: usize = 1024;
+        PARTITION_EMITTED_ATOMS.set(0);
+        let result = split_array_spans(crossing_partition_accesses(COUNT, 1), &HashMap::default());
+        let atoms = PARTITION_EXTRA_ATOMS + COUNT * PARTITION_ATOMS_PER_ACCESS;
+        assert!(result.is_none());
+        assert_eq!(PARTITION_EMITTED_ATOMS.get(), atoms);
+        assert!(atoms < COUNT * COUNT + (COUNT - 1) * (COUNT - 1));
     }
 }
