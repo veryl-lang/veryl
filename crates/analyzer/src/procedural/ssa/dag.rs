@@ -2,23 +2,44 @@
 
 use super::*;
 
-type MappedBindings<K> = Rc<Vec<((K, bool), Vec<(usize, PositionRelation)>)>>;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct MappedSource {
+    node: usize,
+    relation: PositionRelation,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct MappedBinding<K> {
+    key: K,
+    /// Sources when the callee reads this entry value.
+    read_sources: Vec<MappedSource>,
+    /// Sources when the callee carries this entry value unchanged.
+    retained_sources: Vec<MappedSource>,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct ImportIdentity {
+    graph: usize,
+    bindings: usize,
+    branches: usize,
+    include_entry: bool,
+}
 
 #[derive(PartialEq, Eq, Hash)]
 struct InvocationKey<K> {
     graph: usize,
-    bindings: MappedBindings<K>,
+    bindings: Rc<Vec<MappedBinding<K>>>,
     branches: Vec<(BranchId, BranchId)>,
 }
 
 struct Invocation<K> {
-    bindings: MappedBindings<K>,
+    bindings: Rc<Vec<MappedBinding<K>>>,
     mapped: HashMap<usize, usize>,
 }
 
 pub(crate) struct Imports<K> {
     incoming: HashMap<usize, Vec<Vec<usize>>>,
-    identities: HashMap<(usize, usize, usize, bool), usize>,
+    identities: HashMap<ImportIdentity, usize>,
     equivalent: HashMap<InvocationKey<K>, usize>,
     invocations: Vec<Invocation<K>>,
 }
@@ -51,12 +72,12 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
             return Some(None);
         };
         let graph_id = Rc::as_ptr(graph) as usize;
-        let identity = (
-            graph_id,
-            Rc::as_ptr(bindings) as usize,
-            Rc::as_ptr(branches) as usize,
+        let identity = ImportIdentity {
+            graph: graph_id,
+            bindings: Rc::as_ptr(bindings) as usize,
+            branches: Rc::as_ptr(branches) as usize,
             include_entry,
-        );
+        };
         let invocation = if let Some(&invocation) = self.identities.get(&identity) {
             invocation
         } else {
@@ -66,20 +87,27 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
             let mut mapped_bindings = Vec::with_capacity(bindings.len());
             for (&key, sources) in bindings.iter() {
                 *work = work.checked_sub(sources.len())?;
-                for reads_entry in [false, true] {
-                    let mut sources = sources
+                let map_sources = |observe_entry| {
+                    let mut mapped = sources
                         .iter()
                         .filter_map(|(source, relation)| {
-                            parent[&(*source, include_entry || reads_entry)]
-                                .map(|source| (source, *relation))
+                            parent[&(*source, observe_entry)].map(|node| MappedSource {
+                                node,
+                                relation: *relation,
+                            })
                         })
                         .collect::<Vec<_>>();
-                    sources.sort_unstable();
-                    sources.dedup();
-                    mapped_bindings.push(((key, reads_entry), sources));
-                }
+                    mapped.sort_unstable();
+                    mapped.dedup();
+                    mapped
+                };
+                mapped_bindings.push(MappedBinding {
+                    key,
+                    read_sources: map_sources(true),
+                    retained_sources: map_sources(include_entry),
+                });
             }
-            mapped_bindings.sort_unstable_by_key(|(key, _)| *key);
+            mapped_bindings.sort_unstable_by_key(|binding| binding.key);
             let mut mapped_branches = branches
                 .iter()
                 .map(|(&source, &destination)| (source, destination))
@@ -151,20 +179,21 @@ impl<K: Copy + Eq + Hash + Ord> Imports<K> {
                 .collect::<Vec<_>>();
             if let DependencyDagNode::External(key) | DependencyDagNode::Retained(key) =
                 &graph.nodes[child]
-                && let Ok(index) = invocation.bindings.binary_search_by_key(
-                    &(
-                        *key,
-                        matches!(graph.nodes[child], DependencyDagNode::External(_)),
-                    ),
-                    |(key, _)| *key,
-                )
+                && let Ok(index) = invocation
+                    .bindings
+                    .binary_search_by_key(key, |binding| binding.key)
             {
-                let sources = &invocation.bindings[index].1;
+                let binding = &invocation.bindings[index];
+                let sources = if matches!(graph.nodes[child], DependencyDagNode::External(_)) {
+                    &binding.read_sources
+                } else {
+                    &binding.retained_sources
+                };
                 *work = work.checked_sub(sources.len())?;
                 inputs.extend(
                     sources
                         .iter()
-                        .map(|&(source, relation)| (source, relation, PathCondition::default())),
+                        .map(|source| (source.node, source.relation, PathCondition::default())),
                 );
             }
             let site = graph.sites.get(&child).map(|site| DefinitionSite {
