@@ -1,0 +1,20 @@
+module ternary (
+    clk: input logic,
+    sel: input logic,
+    en: input logic,
+    a: input logic<8>,
+    b: input logic<8>,
+    y: output logic<8>,
+    z: output logic<8>,
+    w: output logic<8>,
+    q: output logic<8>,
+) {
+    assign y = if sel ? a : b;
+    assign z = if sel ? a : if en ? b : 8'h00;
+    assign w = a + (if sel ? b : 8'h01);
+    always_ff (clk) {
+        q = if en ? a : q;
+    }
+
+}
+

@@ -144,6 +144,23 @@ fn build_did_open(text: &str) -> Request {
 }
 
 fn build_completion(id: i64, line: u32, character: u32) -> Request {
+    build_completion_with_context(
+        id,
+        line,
+        character,
+        CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        },
+    )
+}
+
+fn build_completion_with_context(
+    id: i64,
+    line: u32,
+    character: u32,
+    context: CompletionContext,
+) -> Request {
     let mut path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     path.pop();
     path.pop();
@@ -157,10 +174,7 @@ fn build_completion(id: i64, line: u32, character: u32) -> Request {
         },
         work_done_progress_params: Default::default(),
         partial_result_params: Default::default(),
-        context: Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-            trigger_character: Some(".".to_string()),
-        }),
+        context: Some(context),
     };
 
     Request::build("textDocument/completion")
@@ -200,6 +214,41 @@ async fn completion_tb_component_method() {
     assert!(
         items.iter().any(|x| x["label"] == "next"),
         "expected `next` in completion items, got: {items:?}",
+    );
+}
+
+#[tokio::test]
+#[ntest::timeout(60000)]
+async fn completion_in_unparsable_document() {
+    let mut server = TestServer::new(Backend::new);
+
+    let req = build_initialize(1);
+    server.send_request(req).await;
+    let res = server.recv_response().await;
+    assert!(res.is_ok());
+
+    let req = build_initialized();
+    server.send_request(req).await;
+    let res = server.recv_notification().await;
+    assert_eq!(res.method(), "window/logMessage");
+
+    // The only open source does not parse, so nothing of the project has been analyzed.
+    let code = "module t {\n    let a: logic = mo\n}\n";
+    let req = build_did_open(code);
+    server.send_request(req).await;
+
+    let context = CompletionContext {
+        trigger_kind: CompletionTriggerKind::INVOKED,
+        trigger_character: None,
+    };
+    let req = build_completion_with_context(2, 1, 21, context);
+    server.send_request(req).await;
+
+    let res = server.recv_response_skipping().await;
+    let items = res["result"].as_array().unwrap();
+    assert!(
+        items.iter().any(|x| x["label"] == "module"),
+        "expected keyword items, got: {items:?}",
     );
 }
 
