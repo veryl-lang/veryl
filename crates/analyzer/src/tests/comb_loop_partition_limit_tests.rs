@@ -114,3 +114,45 @@ fn partition_limit_default_skips_a_legal_generated_write_matrix_without_diagnost
         assert!(comb_loop_analysis_is_complete(whole));
     });
 }
+
+#[test]
+fn partition_limit_default_bounds_byte_enabled_memory_next_state() {
+    // 32,768 512-bit words are a 2 MiB memory. A common per-element default
+    // copy followed by byte-enabled writes still creates a word-by-byte
+    // partition. The equivalent whole-array copy avoids the array cuts.
+    for whole_copy in [false, true] {
+        let initialization = if whole_copy {
+            "next_data = data;"
+        } else {
+            "for row in 0..32768 { next_data[row] = data[row]; }"
+        };
+        let code = format!(
+            r#"module ByteWrite (
+    data: input logic<512>[32768],
+    address: input logic<15>,
+    write_data: input logic<512>,
+    byte_enable: input logic<64>,
+    next_data: output logic<512>[32768],
+) {{
+    always_comb {{
+        {initialization}
+        for lane in 0..64 {{
+            if byte_enable[lane] {{
+                next_data[address][lane * 8 +: 8] = write_data[lane * 8 +: 8];
+            }}
+        }}
+    }}
+}}
+"#
+        );
+        reset_analysis_size();
+        let errors = analyze(&code);
+        assert!(errors.is_empty(), "whole_copy={whole_copy}: {errors:#?}");
+        if whole_copy {
+            assert_eq!(analysis_size().0, 67);
+        } else {
+            assert_eq!(analysis_size(), (0, 0, 0));
+        }
+        assert_eq!(comb_loop_analysis_is_complete(&code), whole_copy);
+    }
+}

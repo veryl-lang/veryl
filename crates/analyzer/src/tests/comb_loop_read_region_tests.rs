@@ -239,3 +239,52 @@ fn demanded_read_regions_bound_expanded_unpacked_input_slices() {
         }
     }
 }
+
+#[test]
+fn demanded_read_regions_keep_byte_enabled_descriptor_lookup_compact() {
+    // A write-through descriptor table combines per-entry tag comparisons
+    // with byte-enabled updates and indexed payload reads. Read boundaries
+    // must not split its whole-array next-state copy into entry-by-byte atoms.
+    for entries in [64usize, 256, 1024] {
+        let address_width = usize::BITS - (entries - 1).leading_zeros();
+        let code = format!(
+            r#"module DescriptorLookup (
+    descriptors: input logic<128>[{entries}],
+    write_index: input logic<{address_width}>,
+    write_data: input logic<128>,
+    byte_enable: input logic<16>,
+    search_tag: input logic<32>,
+    selected_index: input logic<{address_width}>,
+    hit: output logic[{entries}],
+    selected_address: output logic<64>,
+    selected_length: output logic<16>,
+    selected_flags: output logic<16>,
+) {{
+    var updated: logic<128>[{entries}];
+    always_comb {{
+        updated = descriptors;
+        for lane in 0..16 {{
+            if byte_enable[lane] {{
+                updated[write_index][lane * 8 +: 8] = write_data[lane * 8 +: 8];
+            }}
+        }}
+    }}
+    for row in 0..{entries} :g_match {{
+        assign hit[row] = updated[row][31:0] == search_tag;
+    }}
+    assign selected_address = updated[selected_index][95:32];
+    assign selected_length = updated[selected_index][111:96];
+    assign selected_flags = updated[selected_index][127:112];
+}}
+"#
+        );
+        reset_analysis_size();
+        let errors = analyze(&code);
+        assert!(errors.is_empty(), "entries={entries}: {errors:#?}");
+        let (atoms, nodes, edges) = analysis_size();
+        assert_eq!(atoms, entries + 24);
+        assert!(nodes <= 9 * entries + 256, "{nodes} nodes");
+        assert!(edges <= 14 * entries + 256, "{edges} edges");
+        assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
