@@ -247,7 +247,7 @@ const CYCLE_SEARCH_WORK: usize = 1_000_000;
 #[cfg(test)]
 thread_local! {
     static SEARCH_WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static SEARCH_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(CYCLE_SEARCH_WORK) };
+    static DECISION_WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -259,15 +259,12 @@ pub(crate) fn cycle_search_work() -> usize {
     SEARCH_WORK.get()
 }
 #[cfg(test)]
-pub(crate) fn with_cycle_search_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
-    struct Reset(usize);
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            SEARCH_LIMIT.set(self.0);
-        }
-    }
-    let _reset = Reset(SEARCH_LIMIT.replace(limit));
-    f()
+pub(crate) fn reset_cycle_decision_work() {
+    DECISION_WORK.set(0);
+}
+#[cfg(test)]
+pub(crate) fn cycle_decision_work() -> usize {
+    DECISION_WORK.get()
 }
 
 struct SearchBudget {
@@ -277,12 +274,8 @@ struct SearchBudget {
 
 impl SearchBudget {
     fn new() -> Self {
-        #[cfg(test)]
-        let remaining = SEARCH_LIMIT.get();
-        #[cfg(not(test))]
-        let remaining = CYCLE_SEARCH_WORK;
         Self {
-            remaining,
+            remaining: CYCLE_SEARCH_WORK,
             exhausted: false,
         }
     }
@@ -421,6 +414,14 @@ fn try_cycle_witness(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) 
 pub(super) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Option<bool> {
     let mut budget = SearchBudget::new();
     let found = has_compatible_cycle_with_budget(graph, scc, &mut budget);
+    // Count the decision separately from optional diagnostic path recovery.
+    // Measurement must not change the budget or the production search path.
+    #[cfg(test)]
+    DECISION_WORK.set(
+        DECISION_WORK
+            .get()
+            .saturating_add(CYCLE_SEARCH_WORK - budget.remaining),
+    );
     (found || !budget.exhausted).then_some(found)
 }
 
@@ -2044,7 +2045,16 @@ mod tests {
                 }),
             );
         }
-        with_cycle_search_limit(100, || assert_eq!(compatible_cycle(&graph, &[node]), None));
+        let mut budget = SearchBudget {
+            remaining: 100,
+            exhausted: false,
+        };
+        assert!(!has_compatible_cycle_with_budget(
+            &graph,
+            &[node],
+            &mut budget
+        ));
+        assert!(budget.exhausted);
         assert_eq!(compatible_cycle(&graph, &[node]), Some(false));
         for shift in 1..=32 {
             add_dependency_edge(
@@ -2057,10 +2067,26 @@ mod tests {
                 }),
             );
         }
-        with_cycle_search_limit(1_000, || {
-            assert_eq!(compatible_cycle(&graph, &[node]), Some(true))
-        });
-        with_cycle_search_limit(100, || assert_eq!(compatible_cycle(&graph, &[node]), None));
+        let mut budget = SearchBudget {
+            remaining: 1_000,
+            exhausted: false,
+        };
+        assert!(has_compatible_cycle_with_budget(
+            &graph,
+            &[node],
+            &mut budget
+        ));
+        assert!(!budget.exhausted);
+        let mut budget = SearchBudget {
+            remaining: 100,
+            exhausted: false,
+        };
+        assert!(!has_compatible_cycle_with_budget(
+            &graph,
+            &[node],
+            &mut budget
+        ));
+        assert!(budget.exhausted);
         assert_eq!(compatible_cycle(&graph, &[node]), Some(true));
     }
 
@@ -2089,9 +2115,16 @@ mod tests {
             );
         }
         for limit in [1_000, 3_000] {
-            with_cycle_search_limit(limit, || {
-                assert_eq!(compatible_cycle(&graph, &[node]), None)
-            });
+            let mut budget = SearchBudget {
+                remaining: limit,
+                exhausted: false,
+            };
+            assert!(!has_compatible_cycle_with_budget(
+                &graph,
+                &[node],
+                &mut budget
+            ));
+            assert!(budget.exhausted);
         }
         assert_eq!(compatible_cycle(&graph, &[node]), Some(false));
     }

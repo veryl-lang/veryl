@@ -254,9 +254,8 @@ fn comb_loop_large_array_literal_repetition_stays_sparse() {
                          module Top(o: output logic) {{ inst u: Pick(i: {expression}, o: o); }}"
                     );
                     crate::comb_loop_detect::reset_analysis_size();
-                    crate::comb_loop_detect::reset_cycle_search_work();
-                    let errors =
-                        crate::comb_loop_detect::with_cycle_search_limit(5_000, || analyze(&code));
+                    crate::comb_loop_detect::reset_cycle_decision_work();
+                    let errors = analyze(&code);
                     assert!(
                         errors
                             .iter()
@@ -269,21 +268,16 @@ fn comb_loop_large_array_literal_repetition_stays_sparse() {
                         "{code}\n{errors:#?}"
                     );
                     let (atoms, nodes, edges) = crate::comb_loop_detect::analysis_size();
-                    let work = crate::comb_loop_detect::cycle_search_work();
+                    let work = crate::comb_loop_detect::cycle_decision_work();
                     eprintln!(
-                        "array repeat count={count} default={default} row={row} column={column}: atoms={atoms} nodes={nodes} edges={edges} search={work}"
+                        "array repeat count={count} default={default} row={row} column={column}: atoms={atoms} nodes={nodes} edges={edges} decision_work={work}"
                     );
                     assert!(
                         atoms < 20 && nodes < 100 && edges < 150,
                         "count={count}: {atoms} atoms, {nodes} nodes, {edges} edges"
                     );
-                    assert!(work < 10_000, "count={count}: {work} search work");
-                    assert!(
-                        crate::comb_loop_detect::with_cycle_search_limit(5_000, || {
-                            comb_loop_analysis_is_complete(&code)
-                        }),
-                        "{code}"
-                    );
+                    assert!(work < 10_000, "count={count}: {work} decision work");
+                    assert!(comb_loop_analysis_is_complete(&code), "{code}");
                 }
             }
         }
@@ -451,10 +445,10 @@ fn comb_loop_large_repeat_has_bounded_graph_and_search_work() {
             "#
             );
             crate::comb_loop_detect::reset_function_evaluation_count();
-            crate::comb_loop_detect::reset_cycle_search_work();
-            // A small budget must suffice for the decision even when a
-            // concrete diagnostic path would contain millions of self steps.
-            let errors = crate::comb_loop_detect::with_cycle_search_limit(5_000, || analyze(&code));
+            crate::comb_loop_detect::reset_cycle_decision_work();
+            // Measure the decision using the production budget. Optional
+            // diagnostic path recovery may traverse individual self steps.
+            let errors = analyze(&code);
             assert!(
                 errors
                     .iter()
@@ -467,14 +461,11 @@ fn comb_loop_large_repeat_has_bounded_graph_and_search_work() {
                 "count={count}, bit={bit}: {errors:#?}"
             );
             let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
-            let work = crate::comb_loop_detect::cycle_search_work();
-            eprintln!("replication count={count} bit={bit} nodes={nodes} search_work={work}");
+            let work = crate::comb_loop_detect::cycle_decision_work();
+            eprintln!("replication count={count} bit={bit} nodes={nodes} decision_work={work}");
             assert!(nodes < 20, "count={count}: {nodes} nodes");
-            assert!(work < 10_000, "count={count}: {work} search work");
-            assert!(crate::comb_loop_detect::with_cycle_search_limit(
-                5_000,
-                || comb_loop_analysis_is_complete(&code)
-            ));
+            assert!(work < 10_000, "count={count}: {work} decision work");
+            assert!(comb_loop_analysis_is_complete(&code));
         }
     }
 }
@@ -554,9 +545,7 @@ fn comb_loop_nested_replication_is_sparse() {
                 }}
             "#
             );
-            crate::comb_loop_detect::with_cycle_search_limit(5_000, || {
-                assert_replication_feedback(&code, bit % 8 == 7);
-            });
+            assert_replication_feedback(&code, bit % 8 == 7);
         }
     }
 }

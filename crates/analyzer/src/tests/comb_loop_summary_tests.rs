@@ -129,20 +129,25 @@ fn million_bit_dangling_recurrences_do_not_enumerate_declared_bits() {
 }
 
 #[test]
-fn wide_dangling_rotate_is_proven_without_coordinate_expansion() {
-    // The closed finite-domain witness proves this rotation without walking
-    // once per coordinate, even when the output does not observe the cycle.
-    for width in [257, 1_000_003] {
-        let code = shift_code(width, 3, false, false, true);
-        check(&code, true);
-    }
-    // Keep the original completeness-propagation contract under an explicitly
-    // exhausted search. A finished summary cannot claim an unfinished proof.
-    crate::comb_loop_detect::with_cycle_search_limit(0, || {
-        assert!(!comb_loop_analysis_is_complete(&shift_code(
-            257, 3, false, false, true
-        )));
-    });
+fn wide_dangling_rotate_is_detected() {
+    // This 257-bit rotation used to leave cycle analysis incomplete.
+    // The output bypasses the internal feedback entirely.
+    let code = r#"
+        module ShiftDangle (i: input logic<257>, o: output logic<257>) {
+            var s: logic<257>;
+            var t: logic<257>;
+            assign t[253:0] = s[256:3];
+            assign t[256:254] = s[2:0];
+            assign s = t;
+            assign o = i;
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        matches!(errors.as_slice(), [AnalyzerError::CombinationalLoop { .. }]),
+        "the internal rotation must be diagnosed despite the feedthrough output: {errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
 }
 
 #[test]

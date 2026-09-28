@@ -42,7 +42,9 @@ use graph::{
     ensure_node, node_regions_overlap_with_dependency,
 };
 #[cfg(test)]
-pub(crate) use graph::{cycle_search_work, reset_cycle_search_work, with_cycle_search_limit};
+pub(crate) use graph::{
+    cycle_decision_work, cycle_search_work, reset_cycle_decision_work, reset_cycle_search_work,
+};
 use hierarchy::{module_postorder, walk_insts};
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
 use region::{
