@@ -380,16 +380,19 @@ impl FunctionCall {
                     let Some(variable) = context.get_variable_info(dst.id) else {
                         continue;
                     };
-                    if let Some((beg, end)) =
-                        dst.select.eval_value(context, &variable.r#type, false)
-                    {
+                    if let Some((beg, end)) = dst.select.conservative_packed_range(
+                        context,
+                        &variable.r#type,
+                        dst.comptime.member_select_domain,
+                    ) {
                         let mask = ValueBigUint::gen_mask_range(beg, end);
+                        let dynamic = !dst.index.is_const() || !dst.select.is_const_with_range();
                         let (success, tokens) = assign_table.insert_assign(
                             &variable,
                             index,
                             mask,
-                            false,
-                            false,
+                            dynamic,
+                            dynamic,
                             self.comptime.token,
                         );
                         if !success
