@@ -1213,29 +1213,8 @@ impl ProtoExpression {
                 let (mut x_payload, mut x_mask_xz) = x.build_binary(context, builder)?;
                 let (mut y_payload, mut y_mask_xz) = y.build_binary(context, builder)?;
 
-                // Div/Rem and comparisons take signedness from their two
-                // operands alone; the outer expr_context may have dropped
-                // signed via merge() with an unsigned sibling.  Equality
-                // ops carry signed=false in their own context (1-bit
-                // result), but both-signed operands must sign-extend to
-                // the comparison width (LRM 11.4.5).
-                let signed = if matches!(
-                    op,
-                    Op::Div
-                        | Op::Rem
-                        | Op::Greater
-                        | Op::GreaterEq
-                        | Op::Less
-                        | Op::LessEq
-                        | Op::Eq
-                        | Op::Ne
-                        | Op::EqWildcard
-                        | Op::NeWildcard
-                ) {
-                    x.expr_context().signed & y.expr_context().signed
-                } else {
-                    expr_context.signed
-                };
+                let signed =
+                    expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
                 let wide = expr_context.width > 64;
                 let mut x_wide = x.width() > 64;
                 let mut y_wide = y.width() > 64;
@@ -2794,6 +2773,7 @@ impl ProtoExpression {
         };
 
         let width = expr_context.width;
+        let signed = expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
         // `materialized_width`, not `width()`: the unsized all-bit sentinel
         // (`'1`) reports width 0 and is filled from its context, and a 0 here
         // tells the marshaller there is nothing to resize -- which left the
@@ -2826,7 +2806,7 @@ impl ProtoExpression {
             x_payload,
             x_width,
             op_nb,
-            expr_context.signed,
+            signed,
         );
         let y_ptr = marshal_wide_operand(
             context,
@@ -2835,7 +2815,7 @@ impl ProtoExpression {
             y_payload,
             y_width,
             op_nb,
-            expr_context.signed && !y_is_count,
+            signed && !y_is_count,
         );
 
         // Result is comparison (1-bit I64)?
@@ -2873,7 +2853,7 @@ impl ProtoExpression {
                     &[x_ptr, y_ptr, nb_val],
                 ),
                 Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => {
-                    let cmp_result = if expr_context.signed {
+                    let cmp_result = if signed {
                         // Sign-extend each operand from its OWN value width: the
                         // result width here is 1 (useless for sign location) and
                         // a single common width mislocates a narrower operand's

@@ -20017,6 +20017,82 @@ fn system_function_expression_context() {
 }
 
 #[test]
+fn comparison_results_are_unsigned() {
+    for query in [
+        "$bits(logic<5>)",
+        "$size(logic<3, 5>, 2)",
+        "$clog2(17)",
+        "5",
+    ] {
+        for width in [8, 96, 192] {
+            let code = format!(
+                r#"
+    module Top (
+        a: input signed logic<{width}>,
+        b: input signed logic<{width}>,
+        lt: output logic,
+        le: output logic,
+        gt: output logic,
+        ge: output logic,
+        eq: output logic,
+        ne: output logic,
+        weq: output logic,
+        wne: output logic,
+        folded: output logic,
+    ) {{
+        assign lt = ({query} <: b) <: (b <: a);
+        assign le = ({query} <= b) <: (b <: a);
+        assign gt = ({query} >: b) <: (b <: a);
+        assign ge = ({query} >= b) <: (b <: a);
+        assign eq = ({query} == b) <: (b <: a);
+        assign ne = ({query} != b) <: (b <: a);
+        assign weq = ({query} ==? b) <: (b <: a);
+        assign wne = ({query} !=? b) <: (b <: a);
+        assign folded = ({query} >: 1) <: (b <: a);
+    }}
+    "#
+            );
+            for config in Config::all() {
+                let ir = analyze(&code, &config);
+                let mut sim = Simulator::new(ir, None);
+                let value = |x: i64| {
+                    Value::new(x as u64, 8, true)
+                        .expand(width, true)
+                        .into_owned()
+                };
+                for a in [-1, 0, 1, 5, 6] {
+                    for b in [-1, 0, 1, 5, 6] {
+                        sim.set("a", value(a));
+                        sim.set("b", value(b));
+                        sim.step(&Event::Clock(VarId::SYNTHETIC));
+                        for (name, left) in [
+                            ("lt", 5 < b),
+                            ("le", 5 <= b),
+                            ("gt", 5 > b),
+                            ("ge", 5 >= b),
+                            ("eq", 5 == b),
+                            ("ne", 5 != b),
+                            ("weq", 5 == b),
+                            ("wne", 5 != b),
+                            ("folded", true),
+                        ] {
+                            // IEEE 1800-2023 11.8.1: comparisons produce
+                            // unsigned booleans, even for signed operands.
+                            let expected = u64::from(u8::from(left) < u8::from(b < a));
+                            assert_eq!(
+                                sim.get(name).unwrap(),
+                                Value::new(expected, 1, false),
+                                "{query}: {name}, width={width}, a={a}, b={b}, {config:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ternary_sign_extends_narrow_signed_branch() {
     // Regression: the ternary result took the selected branch at its own
     // width zero-extended, so `cond ? (i8 -1) : (i32 5)` produced

@@ -1940,6 +1940,7 @@ fn emit_wide_cmp_binary(
     y: &ProtoExpression,
     expr_context: &ExpressionContext,
 ) -> Option<String> {
+    let signed = expr_context.binary_operand_signed(op, x.expr_context(), y.expr_context());
     let mut pre = String::new();
     let op_nb = native_bytes(expr_context.width.max(x.width()).max(y.width()));
     let x_ref = emit_wide_operand(x, op_nb, &mut pre)?;
@@ -1950,7 +1951,7 @@ fn emit_wide_cmp_binary(
         Op::Eq | Op::EqWildcard => format!("(uint64_t)vw_eq({a}, {b}, {op_nb}u)"),
         Op::Ne | Op::NeWildcard => format!("(uint64_t)vw_ne({a}, {b}, {op_nb}u)"),
         Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => {
-            let cmp = if expr_context.signed {
+            let cmp = if signed {
                 // Sign-extend each operand from its OWN width: the result width
                 // is 1 (useless for sign location) and a single common width
                 // mislocates a narrower operand's sign.
@@ -3764,7 +3765,10 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
                 Op::LogicShiftR => sub_clean(x),
                 Op::ArithShiftR => !expr_context.signed && sub_clean(x),
                 // Unsigned quotient/remainder never exceed the dividend.
-                Op::Div | Op::Rem => !expr_context.signed && sub_clean(x),
+                Op::Div | Op::Rem => {
+                    !expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context())
+                        && sub_clean(x)
+                }
                 // The cast op passes its operand through unchanged.
                 Op::As => sub_clean(x),
                 // Add/Sub/Mul (carry/borrow), Shl, xnor/nand/nor (~) are
@@ -9694,7 +9698,9 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // the right semantics.  Without this, a narrow signed
             // value loaded as uint64_t compares (or divides) as
             // unsigned and negative numbers look like very-large positives.
-            let is_signed_cmp = expr_context.signed
+            let signed =
+                expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
+            let is_signed_cmp = signed
                 && matches!(
                     op,
                     Op::Less
@@ -9706,14 +9712,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         | Op::EqWildcard
                         | Op::NeWildcard
                 );
-            // Op::Div / Op::Rem use the AND of operand signedness, as the
-            // Cranelift backend does.  expr_context.signed alone is not
-            // sufficient because merge() with an unsigned sibling can
-            // strip the bit even when both operands ARE signed.
-            // We approximate by trusting expr_context.signed for the
-            // outer expression — div/rem are expr_context.signed
-            // exactly when both operands are signed.
-            let is_signed_divrem = expr_context.signed && matches!(op, Op::Div | Op::Rem);
+            let is_signed_divrem = signed && matches!(op, Op::Div | Op::Rem);
             // Operands need pre-masking only where this op reads their high
             // bits. Add/Sub/Mul (low bits suffice; the result mask cleans the
             // rest) and signed compare/div/rem (operands sign-extended below)

@@ -50,6 +50,26 @@ pub struct ExpressionContext {
     pub signed: bool,
 }
 
+impl ExpressionContext {
+    /// Signedness used to evaluate a binary operation. Comparison results
+    /// remain unsigned, but their operands may need signed interpretation.
+    pub(crate) fn binary_operand_signed(&self, op: Op, x: &Self, y: &Self) -> bool {
+        match op {
+            Op::Div
+            | Op::Rem
+            | Op::Greater
+            | Op::GreaterEq
+            | Op::Less
+            | Op::LessEq
+            | Op::Eq
+            | Op::Ne
+            | Op::EqWildcard
+            | Op::NeWildcard => x.signed && y.signed,
+            _ => self.signed,
+        }
+    }
+}
+
 impl From<&air::ExpressionContext> for ExpressionContext {
     fn from(value: &air::ExpressionContext) -> Self {
         Self {
@@ -82,7 +102,7 @@ pub enum Expression {
         x: Box<Expression>,
         op: Op,
         y: Box<Expression>,
-        expr_context: ExpressionContext,
+        operand_context: ExpressionContext,
     },
     Concatenation {
         elements: Vec<(Box<Expression>, usize, usize)>, // (expr, repeat, elem_width)
@@ -168,11 +188,17 @@ impl Expression {
                 x,
                 op,
                 y,
-                expr_context,
+                operand_context,
             } => {
                 let x = x.eval(mask_cache);
                 let y = y.eval(mask_cache);
-                op.eval_value_binary(&x, &y, expr_context.width, expr_context.signed, mask_cache)
+                op.eval_value_binary(
+                    &x,
+                    &y,
+                    operand_context.width,
+                    operand_context.signed,
+                    mask_cache,
+                )
             }
             Expression::Concatenation { elements, signed } => {
                 let mut ret = Value::new(0, 0, false);
@@ -965,6 +991,8 @@ pub enum ProtoExpression {
         op: Op,
         y: Box<ProtoExpression>,
         width: usize,
+        // Result context exposed to parent expressions. Operand signedness
+        // is derived separately when evaluating the operation.
         expr_context: ExpressionContext,
     },
     Concatenation {
@@ -1318,8 +1346,14 @@ impl ProtoExpression {
                 // The signed forms sign-fill every bit above the operand
                 // width, so the bound only holds unsigned — the same reason
                 // `expr_emits_clean` excludes them.
-                Op::Div if !expr_context.signed => x.unmasked_bits(d),
-                Op::Rem if !expr_context.signed => y.unmasked_bits(d),
+                Op::Div | Op::Rem => {
+                    if expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context()) {
+                        None
+                    } else {
+                        let operand = if *op == Op::Div { x } else { y };
+                        operand.unmasked_bits(d)
+                    }
+                }
                 // `-` borrows into every bit above the operands, an arithmetic
                 // right shift copies the sign into them, and a left shift is
                 // bounded by a VALUE (the shift amount), not by a width.
@@ -1743,6 +1777,14 @@ impl ProtoExpression {
                     expr_context,
                     ..
                 } => {
+                    let operand_context = ExpressionContext {
+                        signed: expr_context.binary_operand_signed(
+                            *op,
+                            x.expr_context(),
+                            y.expr_context(),
+                        ),
+                        ..*expr_context
+                    };
                     let x = x.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -1761,7 +1803,7 @@ impl ProtoExpression {
                         x: Box::new(x),
                         op: *op,
                         y: Box::new(y),
-                        expr_context: *expr_context,
+                        operand_context,
                     }
                 }
                 ProtoExpression::Concatenation {
@@ -2761,25 +2803,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;
-                let mut expr_context: ExpressionContext = (&comptime.expr_context).into();
-                if matches!(
-                    op,
-                    Op::Div
-                        | Op::Rem
-                        | Op::Greater
-                        | Op::GreaterEq
-                        | Op::Less
-                        | Op::LessEq
-                        | Op::Eq
-                        | Op::Ne
-                        | Op::EqWildcard
-                        | Op::NeWildcard
-                ) {
-                    // See build_binary for the merge() rationale; equality ops
-                    // carry signed=false in their own context but both-signed
-                    // operands must sign-extend to the comparison width.
-                    expr_context.signed = x.expr_context().signed & y.expr_context().signed;
-                }
+                let expr_context: ExpressionContext = (&comptime.expr_context).into();
+                let operand_signed =
+                    expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
 
                 // Float constant folding
                 if (x_kind.is_float() || y_kind.is_float())
@@ -2826,7 +2852,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                 ) = (&x, &y)
                 {
                     let mut mc = MaskCache::default();
-                    let result = op.eval_value_binary(xv, yv, width, expr_context.signed, &mut mc);
+                    let result = op.eval_value_binary(xv, yv, width, operand_signed, &mut mc);
                     if matches!(&result, Value::U64(_)) {
                         return Ok(ProtoExpression::Value {
                             value: result,
