@@ -176,8 +176,22 @@ impl SystemFunctionCall {
         token: TokenRange,
     ) -> IrResult<Self> {
         let mut comptime = Comptime::create_unknown(token);
+        let function = name.to_string();
+        if matches!(function.as_str(), "$bits" | "$size") {
+            // IEEE 1800-2023 20.6.2/20.7 return a signed 32-bit integer.
+            // Known query results use Bit like integer literals, keeping
+            // assignments to u32/i32 compatible. Set the type before
+            // if-expression folding replaces an unselected query with a
+            // constant of its type.
+            comptime.r#type = Type::new(TypeKind::Bit);
+            comptime
+                .r#type
+                .set_concrete_width(Shape::new(vec![Some(32)]));
+            comptime.r#type.signed = true;
+            comptime.expr_context.signed = true;
+        }
 
-        match name.to_string().as_str() {
+        match function.as_str() {
             "$bits" => {
                 if args.len() != 1 {
                     context.insert_error(AnalyzerError::mismatch_function_arity(
@@ -406,7 +420,7 @@ impl SystemFunctionCall {
                     ValueVariant::Type(x) => x.total_bits(),
                     _ => comptime.r#type.total_bits(),
                 };
-                value.map(|x| Value::new(x as u64, 32, false))
+                value.map(|x| Value::new(x as u64, 32, true))
             }
             SystemFunctionKind::Size(x, dimension) => {
                 let dimension = match dimension {
@@ -425,7 +439,7 @@ impl SystemFunctionCall {
                     ValueVariant::Type(x) => x.dimension(dimension),
                     _ => comptime.r#type.dimension(dimension),
                 };
-                value.map(|x| Value::new(x as u64, 32, false))
+                value.map(|x| Value::new(x as u64, 32, true))
             }
             SystemFunctionKind::Clog2(x) => {
                 let value = x.0.eval_value(context)?;
