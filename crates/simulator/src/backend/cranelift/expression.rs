@@ -387,6 +387,7 @@ impl ProtoExpression {
                 }
                 None => true,
             },
+            ProtoExpression::Resize { x, .. } => x.can_build_binary(),
             ProtoExpression::Value { .. } => true,
             ProtoExpression::Unary { op, x, .. } => {
                 x.can_build_binary()
@@ -969,6 +970,72 @@ impl ProtoExpression {
                         Some((payload, mask_xz))
                     }
                 }
+            }
+            ProtoExpression::Resize {
+                x,
+                width,
+                sign_extend,
+                ..
+            } => {
+                let (payload, mask_xz) = x.build_binary(context, builder)?;
+                let src_width = x.materialized_width();
+                let is_pointer = returns_wide_pointer(x);
+                if is_pointer || is_wide_ptr(*width) {
+                    let src_nb = calc_native_bytes(src_width).max(8);
+                    let dst_nb = calc_native_bytes(*width).max(8);
+                    let resize =
+                        |builder: &mut FunctionBuilder, context: &mut CraneliftContext, value| {
+                            let src =
+                                wide_operand_as_ptr(builder, is_pointer, src_width, value, src_nb);
+                            let dst = alloc_wide_zero(builder, dst_nb);
+                            let info = wide_ops::pack_nb_width(src_nb, src_width) as u64
+                                | ((*sign_extend as u64) << 32);
+                            let info = builder.ins().iconst(I64, info as i64);
+                            let nb = builder.ins().iconst(I32, dst_nb as i64);
+                            call_helper_void(
+                                context,
+                                builder,
+                                HelperSig::BinaryOp,
+                                wide_fn_addrs::resize(),
+                                &[dst, src, info, nb],
+                            );
+                            emit_wide_apply_mask(context, builder, dst, dst_nb, *width);
+                            if is_wide_ptr(*width) {
+                                dst
+                            } else {
+                                let ty = if *width > 64 { I128 } else { I64 };
+                                builder.ins().load(ty, MemFlagsData::trusted(), dst, 0)
+                            }
+                        };
+                    let payload = resize(builder, context, payload);
+                    let mask_xz = mask_xz.map(|v| resize(builder, context, v));
+                    return Some((payload, mask_xz));
+                }
+                // Mask before extension: children may leave arithmetic carry
+                // bits outside their declared width. Preserve the same bits in
+                // payload and X/Z mask, including Z's set payload bit.
+                let source_wide = builder.func.dfg.value_type(payload) == I128;
+                let source_mask = gen_mask_for_width(src_width);
+                let mut payload = band_const(builder, payload, source_mask, source_wide);
+                let mut mask_xz = mask_xz.map(|v| band_const(builder, v, source_mask, source_wide));
+                if *sign_extend && src_width > 0 && src_width < *width {
+                    (payload, mask_xz) = expand_sign(*width, src_width, payload, mask_xz, builder);
+                }
+                let resize = |builder: &mut FunctionBuilder, value| {
+                    let ty = if *width > 64 { I128 } else { I64 };
+                    let actual = builder.func.dfg.value_type(value);
+                    let value = if actual.bits() > ty.bits() {
+                        builder.ins().ireduce(ty, value)
+                    } else if actual.bits() < ty.bits() {
+                        builder.ins().uextend(ty, value)
+                    } else {
+                        value
+                    };
+                    band_const(builder, value, gen_mask_for_width(*width), *width > 64)
+                };
+                let payload = resize(builder, payload);
+                let mask_xz = mask_xz.map(|v| resize(builder, v));
+                Some((payload, mask_xz))
             }
             ProtoExpression::Unary {
                 op,

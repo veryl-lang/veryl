@@ -20017,6 +20017,123 @@ fn system_function_expression_context() {
 }
 
 #[test]
+fn size_cast_preserves_xz() {
+    use num_bigint::BigUint;
+
+    for width in [32, 96, 128, 192] {
+        let code = format!(
+            r#"
+    module Top (
+        a: input signed logic<8>,
+        wide: input signed logic<192>,
+        c: input logic,
+        widened: output logic<{width}>,
+        narrowed: output logic<{width}>,
+        same_width: output logic<{width}>,
+        signed_widened: output logic<{width}>,
+        signed_narrowed: output logic<{width}>,
+        wide_narrowed: output logic<{width}>,
+        medium_widened: output logic<{width}>,
+        wide_widened: output logic<{width}>,
+        signed_wide: output logic<{width}>,
+        masked: output logic<32>,
+        concatenated: output logic<{width}>,
+    ) {{
+        assign widened = if c ? (a as 16) : 16'd0;
+        assign narrowed = if c ? (a as 4) : 4'd0;
+        assign same_width = if c ? (a as 8) : 8'd0;
+        assign signed_widened = a as 16;
+        assign signed_narrowed = a as 4;
+        assign wide_narrowed = wide as 16;
+        assign medium_widened = if c ? (a as 96) : 96'd0;
+        assign wide_widened = if c ? (a as 192) : 192'd0;
+        assign signed_wide = a as 192;
+        assign masked = (a as 16) | 32'd0;
+        assign concatenated = {{a as 16}};
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            for (payload, mask) in [
+                (0x00u64, 0x00u64), // Known values also exercise the 2-state backends
+                (0x01, 0x00),
+                (0x7f, 0x00),
+                (0x80, 0x00),
+                (0xff, 0x00),
+                (0x01, 0x02), // X in a low bit
+                (0x03, 0x02), // Z in a low bit
+                (0x81, 0x02), // Negative, with X
+                (0x83, 0x02), // Negative, with Z
+                (0x01, 0x80), // X in the sign bit
+                (0x81, 0x80), // Z in the sign bit
+                (0x01, 0x08), // X in the narrowed sign bit
+                (0x09, 0x08), // Z in the narrowed sign bit
+            ] {
+                if !config.use_4state && mask != 0 {
+                    continue;
+                }
+                let extend_bits = |bits: u64, cast_width: usize, width: usize, signed: bool| {
+                    let mut ret = BigUint::from(0u32);
+                    for i in 0..width {
+                        if i < cast_width || signed {
+                            let source_bit = i.min(cast_width - 1).min(7);
+                            ret.set_bit(i as u64, (bits >> source_bit) & 1 != 0);
+                        }
+                    }
+                    ret
+                };
+                sim.set(
+                    "a",
+                    Value::from_u128(payload as u128, mask as u128, 8, true),
+                );
+                let mut wide = Value::new_biguint(extend_bits(payload, 192, 192, true), 192, true);
+                if let Value::BigUint(v) = &mut wide {
+                    *v.mask_xz = extend_bits(mask, 192, 192, true);
+                }
+                sim.set("wide", wide);
+                sim.set("c", Value::new(1, 1, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                for (name, cast_width, signed, bitwise) in [
+                    ("widened", 16, false, false),
+                    ("narrowed", 4, false, false),
+                    ("same_width", 8, false, false),
+                    ("signed_widened", 16, true, false),
+                    ("signed_narrowed", 4, true, false),
+                    ("wide_narrowed", 16, true, false),
+                    ("medium_widened", 96, false, false),
+                    ("wide_widened", 192, false, false),
+                    ("signed_wide", 192, true, false),
+                    ("masked", 16, false, true),
+                    ("concatenated", 16, false, false),
+                ] {
+                    let width = if bitwise { 32 } else { width };
+                    let expected_mask = extend_bits(mask, cast_width, width, signed);
+                    let bits = if bitwise { payload & !mask } else { payload };
+                    let mut expected = Value::new_biguint(
+                        extend_bits(bits, cast_width, width, signed),
+                        width,
+                        false,
+                    );
+                    match &mut expected {
+                        Value::U64(v) => {
+                            v.mask_xz = expected_mask.to_u64_digits().first().copied().unwrap_or(0)
+                        }
+                        Value::BigUint(v) => *v.mask_xz = expected_mask,
+                    }
+                    assert_eq!(
+                        sim.get(name).unwrap(),
+                        expected,
+                        "{name}, payload={payload:#x}, mask={mask:#x}, width={width}, {config:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn size_cast_respects_outer_signedness() {
     for (query, query_value) in [
         ("$bits(logic<129>)", 129),

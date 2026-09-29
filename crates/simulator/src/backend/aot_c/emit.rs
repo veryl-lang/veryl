@@ -505,7 +505,9 @@ impl LocalAnalysis {
                 }
             }
             ProtoExpression::Value { .. } => {}
-            ProtoExpression::Unary { x, .. } => self.walk_reads(x, i),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                self.walk_reads(x, i)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 self.walk_reads(x, i);
                 self.walk_reads(y, i);
@@ -624,7 +626,9 @@ impl LocalAnalysis {
                 }
             }
             ProtoExpression::Value { .. } => {}
-            ProtoExpression::Unary { x, .. } => self.poison_expr(x),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                self.poison_expr(x)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 self.poison_expr(x);
                 self.poison_expr(y);
@@ -1007,6 +1011,12 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             expr_context,
             ..
         } => emit_wide_binary(x, *op, y, expr_context, pre),
+        ProtoExpression::Resize {
+            x,
+            width,
+            sign_extend,
+            ..
+        } => emit_wide_resize(x, *width, *sign_extend, pre),
         ProtoExpression::Unary {
             op,
             x,
@@ -1636,6 +1646,47 @@ fn emit_wide_binary(
         }
         _ => None,
     }
+}
+
+/// Copy a resized bit pattern into fresh storage; never mask an aliased input.
+fn emit_wide_resize(
+    x: &ProtoExpression,
+    width: usize,
+    sign_extend: bool,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let src_width = x.materialized_width();
+    let src_nb = native_bytes(src_width).max(8);
+    let nb = native_bytes(width).max(8);
+    let src = emit_wide_operand(x, src_nb, pre)?;
+    let t = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _w{t}[{nw}] = {{0}}; ",
+        nw = wide_words(nb)
+    ));
+    let extends = sign_extend && src_width > 0 && src_width < width;
+    if extends {
+        pre.push_str(&format!(
+            "vw_sext_copy((uint8_t*)_w{t}, {src}, {src_width}u, {nb}u); ",
+            src = src.addr,
+        ));
+    } else {
+        pre.push_str(&format!(
+            "vw_copy((uint8_t*)_w{t}, {src}, {copy_nb}u); ",
+            src = src.addr,
+            copy_nb = nb.min(src_nb),
+        ));
+    }
+    let mask_width = if extends { width } else { width.min(src_width) };
+    pre.push_str(&format!(
+        "vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {pack}u); ",
+        pack = wpack(nb, mask_width),
+    ));
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{t})"),
+        nb,
+        width,
+    })
 }
 
 /// Wide unary non-reduction (`Add` identity / `Sub` negate / `BitNot`).
@@ -2476,6 +2527,7 @@ fn diag_expr_kind(e: &ProtoExpression) -> &'static str {
         ProtoExpression::Variable { .. } => "Var",
         ProtoExpression::Value { .. } => "Val",
         ProtoExpression::Unary { .. } => "Un",
+        ProtoExpression::Resize { .. } => "Resize",
         ProtoExpression::Binary { .. } => "Bin",
         ProtoExpression::Ternary { .. } => "Tern",
         ProtoExpression::Concatenation { .. } => "Concat",
@@ -2504,6 +2556,9 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
             dynamic_select.is_some()
         ),
         ProtoExpression::Value { width, .. } => format!("Val(w={width})"),
+        ProtoExpression::Resize { x, width, .. } => {
+            format!("Resize(w={width})/{}", classify_uncovered_expr(x))
+        }
         ProtoExpression::Unary { op, x, width, .. } => {
             if !expr_covered(x) {
                 format!("Un({op:?})/{}", classify_uncovered_expr(x))
@@ -2803,7 +2858,7 @@ fn comb_touches(
                     .is_none_or(|ds| expr(&ds.index_expr, out))
             }
             ProtoExpression::Value { .. } => true,
-            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr(x, out),
             ProtoExpression::Binary { x, y, .. } => expr(x, out) && expr(y, out),
             ProtoExpression::Concatenation { elements, .. } => {
                 elements.iter().all(|(e, _, _)| expr(e, out))
@@ -3433,7 +3488,7 @@ fn const_cone_partition(
                     expr_io(&d.index_expr, io);
                 }
             }
-            ProtoExpression::Unary { x, .. } => expr_io(x, io),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr_io(x, io),
             ProtoExpression::Binary { x, y, .. } => {
                 expr_io(x, io);
                 expr_io(y, io);
@@ -3720,6 +3775,7 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
         }
         // Element loads read canonical storage; select forms mask.
         ProtoExpression::DynamicVariable { .. } => true,
+        ProtoExpression::Resize { .. } => true,
         ProtoExpression::Unary { op, .. } => match op {
             // Predicates and reductions produce 0/1.
             Op::LogicNot
@@ -6494,7 +6550,9 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     fn expr_nodes(e: &ProtoExpression) -> usize {
         match e {
             ProtoExpression::Variable { .. } | ProtoExpression::Value { .. } => 1,
-            ProtoExpression::Unary { x, .. } => 1 + expr_nodes(x),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                1 + expr_nodes(x)
+            }
             ProtoExpression::Binary { x, y, .. } => 1 + expr_nodes(x) + expr_nodes(y),
             ProtoExpression::Concatenation { elements, .. } => {
                 1 + elements
@@ -9522,6 +9580,53 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             } else {
                 Some(load)
             }
+        }
+        ProtoExpression::Resize {
+            x,
+            width,
+            sign_extend,
+            ..
+        } => {
+            if *width > 128 {
+                return None;
+            }
+            if x.builds_wide_pointer() {
+                let mut pre = String::new();
+                let r = emit_wide_resize(x, *width, *sign_extend, &mut pre)?;
+                let ty = if *width > 64 {
+                    "veryl_u128_ua"
+                } else {
+                    "veryl_u64_ua"
+                };
+                return Some(format!("({{ {pre}*(({ty}*)({addr})); }})", addr = r.addr));
+            }
+            let xs = emit_expr(x)?;
+            let src_width = x.materialized_width();
+            let (uty, ity, bits) = if *width > 64 {
+                ("__uint128_t", "__int128_t", 128)
+            } else {
+                ("uint64_t", "int64_t", 64)
+            };
+            let value = if *sign_extend && src_width > 0 && src_width < *width {
+                let shift = bits - src_width;
+                format!("(({uty})((({ity})((({uty})({xs})) << {shift})) >> {shift}))")
+            } else {
+                format!("(({uty})({xs}))")
+            };
+            let mask_width = if *sign_extend {
+                *width
+            } else {
+                (*width).min(src_width)
+            };
+            Some(if *width > 64 {
+                if mask_width == 128 {
+                    value
+                } else {
+                    mask_u128(&value, mask_width)
+                }
+            } else {
+                format!("(({value}) & {mask:#x}ULL)", mask = width_mask(mask_width))
+            })
         }
         ProtoExpression::Unary {
             op,

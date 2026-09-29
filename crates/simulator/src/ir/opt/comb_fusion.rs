@@ -131,7 +131,9 @@ fn collect_reads_expr(e: &ProtoExpression, out: &mut Vec<(isize, ReadSel)>) {
             }
         }
         ProtoExpression::Value { .. } => {}
-        ProtoExpression::Unary { x, .. } => collect_reads_expr(x, out),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            collect_reads_expr(x, out)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             collect_reads_expr(x, out);
             collect_reads_expr(y, out);
@@ -271,7 +273,7 @@ fn replace_sel_read(
                 replace_sel_read(&mut d.index_expr, off, sel, repl);
             }
         }
-        ProtoExpression::Unary { x, .. } => {
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
             replace_sel_read(x, off, sel, repl);
         }
         ProtoExpression::Binary { x, y, .. } => {
@@ -451,7 +453,9 @@ fn count_reads(e: &ProtoExpression, off: isize, full: &mut usize, other: &mut us
                 count_reads(&d.index_expr, off, full, other);
             }
         }
-        ProtoExpression::Unary { x, .. } => count_reads(x, off, full, other),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            count_reads(x, off, full, other)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             count_reads(x, off, full, other);
             count_reads(y, off, full, other);
@@ -553,7 +557,7 @@ fn replace_read(e: &mut ProtoExpression, off: isize, repl: &mut Option<ProtoExpr
                 replace_read(&mut d.index_expr, off, repl);
             }
         }
-        ProtoExpression::Unary { x, .. } => {
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
             replace_read(x, off, repl);
         }
         ProtoExpression::Binary { x, y, .. } => {
@@ -749,7 +753,9 @@ fn replace_all_reads(e: &mut ProtoExpression, off: isize, template: &ProtoExpres
                 nrep += replace_all_reads(&mut d.index_expr, off, template);
             }
         }
-        ProtoExpression::Unary { x, .. } => nrep += replace_all_reads(x, off, template),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            nrep += replace_all_reads(x, off, template)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             nrep += replace_all_reads(x, off, template);
             nrep += replace_all_reads(y, off, template);

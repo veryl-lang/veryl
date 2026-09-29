@@ -493,7 +493,7 @@ pub(crate) fn resolve_expr(
                 resolve_expr(&mut dyn_sel.index_expr, context, children)?;
             }
         }
-        ProtoExpression::Unary { x, .. } => {
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
             resolve_expr(x, context, children)?;
         }
         ProtoExpression::Binary { x, y, .. } => {
