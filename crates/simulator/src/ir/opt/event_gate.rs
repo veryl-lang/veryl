@@ -299,9 +299,14 @@ fn owner_span(owner: &[(usize, usize, u32)], x: usize) -> Option<(usize, usize, 
 /// Sorted ranges with overlaps joined.  Touching ranges stay apart: adjacent
 /// variables are the rule, and joining them would let one subtree's writes
 /// or products swallow its neighbour's.
-fn merge(mut v: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+fn merge<T: Copy + Ord>(mut v: Vec<(T, T)>) -> Vec<(T, T)> {
     v.sort_unstable();
-    let mut out: Vec<(usize, usize)> = Vec::with_capacity(v.len());
+    join_sorted(v)
+}
+
+fn join_sorted<T: Copy + Ord>(v: impl IntoIterator<Item = (T, T)>) -> Vec<(T, T)> {
+    let v = v.into_iter();
+    let mut out: Vec<(T, T)> = Vec::with_capacity(v.size_hint().0);
     for (s, e) in v {
         match out.last_mut() {
             Some(p) if s < p.1 => p.1 = p.1.max(e),
@@ -311,6 +316,40 @@ fn merge(mut v: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     out
 }
 
+/// `merge` of the union of three sorted lists.  A list may already be
+/// joined: no range is empty, so joining yields the union's overlap-connected
+/// pieces however the lists split them.
+fn join_union(
+    a: impl Iterator<Item = (u32, u32)>,
+    b: impl Iterator<Item = (u32, u32)>,
+    c: impl Iterator<Item = (u32, u32)>,
+) -> Vec<(u32, u32)> {
+    let (mut a, mut b, mut c) = (a.peekable(), b.peekable(), c.peekable());
+    join_sorted(std::iter::from_fn(move || {
+        let (x, y, z) = (a.peek().copied(), b.peek().copied(), c.peek().copied());
+        let min = [x, y, z].into_iter().flatten().min()?;
+        if x == Some(min) {
+            a.next()
+        } else if y == Some(min) {
+            b.next()
+        } else {
+            c.next()
+        }
+    }))
+}
+
+/// Is `[s, e)` inside one range of a subtree's products?
+fn produces(produced: &[(u32, u32)], s: usize, e: usize) -> bool {
+    let (s, e) = narrow((s, e));
+    inside(produced, s, e)
+}
+
+/// A byte range in the `u32` offsets the emitter's spans and gate state use.
+fn narrow((s, e): (usize, usize)) -> (u32, u32) {
+    let e = u32::try_from(e).expect("event gate ranges lie within u32 offsets");
+    (s as u32, e)
+}
+
 /// Does `[s, e)` overlap any range of the sorted, merged `ranges`?
 fn overlaps(ranges: &[(usize, usize)], s: usize, e: usize) -> bool {
     let i = ranges.partition_point(|&(rs, _)| rs < e);
@@ -318,7 +357,7 @@ fn overlaps(ranges: &[(usize, usize)], s: usize, e: usize) -> bool {
 }
 
 /// Is `[s, e)` inside one range of the sorted, merged `ranges`?
-fn inside(ranges: &[(usize, usize)], s: usize, e: usize) -> bool {
+fn inside<T: Copy + Ord>(ranges: &[(T, T)], s: T, e: T) -> bool {
     let i = ranges.partition_point(|&(rs, _)| rs <= s);
     i > 0 && ranges[i - 1].1 >= e
 }
@@ -347,9 +386,26 @@ pub struct CombContext<'a> {
     comb_touched_comb: Spans,
     closure_ff: Spans,
     closure_comb: Spans,
-    /// Kept across events: a subtree's products do not vary by event, and the
-    /// root, a candidate in every one, covers the whole comb list.
-    produced: HashMap<u32, Spans>,
+    /// Kept across events, as a subtree's products and reads do not vary by
+    /// event.  The reads are gathered only once a run of the subtree passes
+    /// the scratch check.
+    produced: HashMap<u32, Vec<(u32, u32)>>,
+    reads: HashMap<u32, SubtreeReads>,
+    /// Scratch for `plan`'s candidate walk, all false between calls.
+    candidate: Vec<bool>,
+}
+
+/// A subtree's comb reads, split by what decides whether a gate over the
+/// subtree compares them.  A read the derived-clock closure touches is
+/// always compared, so those are kept joined.  Any other comb read is
+/// compared unless the subtree produces it or the gated statements write
+/// it, and any other FF read unless the gated statements write it; a gate
+/// filters those one by one, so they are only deduplicated.
+struct SubtreeReads {
+    comb_always: Vec<(u32, u32)>,
+    comb_unless_written: Vec<(u32, u32)>,
+    ff_always: Vec<(u32, u32)>,
+    ff_unless_written: Vec<(u32, u32)>,
 }
 
 impl<'a> CombContext<'a> {
@@ -418,6 +474,8 @@ impl<'a> CombContext<'a> {
             closure_ff,
             closure_comb,
             produced: HashMap::default(),
+            reads: HashMap::default(),
+            candidate: vec![false; inputs.node_parent.len()],
         }
     }
 
@@ -435,7 +493,48 @@ impl<'a> CombContext<'a> {
     }
 }
 
+fn subtree_reads(
+    inside_comb: &[CombInfo],
+    produced: &[(u32, u32)],
+    closure_ff: &Spans,
+    closure_comb: &Spans,
+) -> SubtreeReads {
+    let dedup = |mut v: Vec<(u32, u32)>| {
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    let (mut comb_always, mut comb_unless_written) = (Vec::new(), Vec::new());
+    let (mut ff_always, mut ff_unless_written) = (Vec::new(), Vec::new());
+    for c in inside_comb {
+        for &(s, e) in &c.in_comb {
+            if overlaps(closure_comb, s, e) {
+                comb_always.push(narrow((s, e)));
+            } else if !produces(produced, s, e) {
+                comb_unless_written.push(narrow((s, e)));
+            }
+        }
+        for &(s, e) in &c.in_ff {
+            if overlaps(closure_ff, s, e) {
+                ff_always.push(narrow((s, e)));
+            } else {
+                ff_unless_written.push(narrow((s, e)));
+            }
+        }
+    }
+    SubtreeReads {
+        comb_always: join_sorted(dedup(comb_always)),
+        comb_unless_written: dedup(comb_unless_written),
+        ff_always: join_sorted(dedup(ff_always)),
+        ff_unless_written: dedup(ff_unless_written),
+    }
+}
+
 pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec<EventGate> {
+    debug_assert!(
+        ctx.candidate.iter().all(|&c| !c),
+        "the candidate scratch is left all false"
+    );
     let CombContext {
         inputs,
         combs,
@@ -443,9 +542,12 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
         closure_ff,
         closure_comb,
         produced: produced_by_node,
+        reads: reads_by_node,
+        candidate,
     } = ctx;
     let inputs: &ConeGateInputs = inputs;
     let tour = inputs.tour();
+    let diag_on = diag();
     // Event statements: owning node (by the FFs written), reads, writes, and
     // whether a skip could lose an effect.  A statement writing only
     // event-scoped scratch belongs to whatever subtree surrounds it.
@@ -480,22 +582,22 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
     // Candidate subtrees: every node owning event statements, outer nodes
     // first so the emitter nests the inner gates.  A node qualifies exactly
     // when it is an owner or an owner's ancestor.
-    let nnodes = inputs.node_parent.len();
-    let mut candidate = vec![false; nnodes];
+    let mut nodes: Vec<u32> = Vec::new();
     for &m in node.iter().flatten() {
         let mut x = m;
         while !candidate[x as usize] {
             candidate[x as usize] = true;
+            nodes.push(x);
             match inputs.parent(x) {
                 Some(p) => x = p,
                 None => break,
             }
         }
     }
-    let mut nodes: Vec<u32> = (0..nnodes as u32)
-        .filter(|&n| candidate[n as usize])
-        .collect();
-    nodes.sort_by_key(|&n| tour.depth(n));
+    for &n in &nodes {
+        candidate[n as usize] = false;
+    }
+    nodes.sort_unstable_by_key(|&n| (tour.depth(n), n));
 
     let mut gates: Vec<EventGate> = Vec::new();
     let mut counts = [0usize; 5];
@@ -541,10 +643,11 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
             merge(
                 inside_comb
                     .iter()
-                    .flat_map(|c| c.out_comb.iter().copied())
+                    .flat_map(|c| c.out_comb.iter().map(|&r| narrow(r)))
                     .collect(),
             )
         });
+        let mut gated: Vec<(usize, usize, usize, Spans, Spans)> = Vec::new();
         for (lo, hi, total_mass) in runs {
             let (written_ff, written_comb) = split(
                 &(lo..hi)
@@ -569,7 +672,7 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
                             overlaps(&scratch_written, s, e)
                         } else {
                             !inside(&written_comb, s, e)
-                                && !inside(produced, s, e)
+                                && !produces(produced, s, e)
                                 && !overlaps(comb_touched_comb, s, e)
                                 && owner_span(&inputs.comb_var, s).is_none()
                         }
@@ -577,53 +680,69 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
             });
             if scratch_flow {
                 counts[3] += 1;
-                if diag() {
+                if diag_on {
                     eprintln!("[event_gate] {label} skip {path} [{lo}..{hi}) scratch flow");
                 }
                 continue;
             }
-            let mut cmp_ff: Vec<(usize, usize)> = Vec::new();
-            let mut cmp_comb: Vec<(usize, usize)> = Vec::new();
-            // Diagnostics: `(bytes, source, is_ff, start)` of every range taken.
-            let mut taken: Vec<(usize, &str, bool, usize)> = Vec::new();
-            for c in inside_comb {
-                for &(s, e) in &c.in_comb {
-                    // A direct comb write of the gated statements is shadowed
-                    // and compared after each run, so an idle gate holds it.
-                    if (!inside(produced, s, e) && !inside(&written_comb, s, e))
-                        || overlaps(closure_comb, s, e)
-                    {
-                        cmp_comb.push((s, e));
-                        taken.push((e - s, "comb-boundary", false, s));
-                    }
-                }
-                for &(s, e) in &c.in_ff {
-                    // An FF the gated statements write is at its committed
-                    // value while the gate is idle.
-                    if !inside(&written_ff, s, e) || overlaps(closure_ff, s, e) {
-                        cmp_ff.push((s, e));
-                        taken.push((e - s, "comb-ff", true, s));
-                    }
-                }
-            }
+            gated.push((lo, hi, total_mass, written_ff, written_comb));
+        }
+        if gated.is_empty() {
+            continue;
+        }
+        let sub = reads_by_node
+            .entry(n)
+            .or_insert_with(|| subtree_reads(inside_comb, produced, closure_ff, closure_comb));
+        for (lo, hi, total_mass, written_ff, written_comb) in gated {
+            // A direct comb write of the gated statements is shadowed and
+            // compared after each run, so an idle gate holds it; an FF they
+            // write is at its committed value while the gate is idle.
+            let boundary = sub
+                .comb_unless_written
+                .iter()
+                .filter(|&&(s, e)| !inside(&written_comb, s as usize, e as usize));
+            let comb_ff = sub
+                .ff_unless_written
+                .iter()
+                .filter(|&&(s, e)| !inside(&written_ff, s as usize, e as usize));
             // The gated statements' own reads that neither they nor the
             // subtree's comb produce.
+            let (mut event_ff, mut event_comb) = (Vec::new(), Vec::new());
             for r in &reads[lo..hi] {
                 for &(is_ff, s, e) in r {
                     if is_ff {
                         if !inside(&written_ff, s, e) || overlaps(closure_ff, s, e) {
-                            cmp_ff.push((s, e));
-                            taken.push((e - s, "event-ff", true, s));
+                            event_ff.push(narrow((s, e)));
                         }
                     } else if !inside(&written_comb, s, e)
-                        && (!inside(produced, s, e) || overlaps(closure_comb, s, e))
+                        && (!produces(produced, s, e) || overlaps(closure_comb, s, e))
                     {
-                        cmp_comb.push((s, e));
-                        taken.push((e - s, "event-comb", false, s));
+                        event_comb.push(narrow((s, e)));
                     }
                 }
             }
-            if diag() {
+            event_ff.sort_unstable();
+            event_comb.sort_unstable();
+            if diag_on {
+                // `(bytes, source, is_ff, start)` of every range taken.
+                let mut taken: Vec<(usize, &str, bool, usize)> = Vec::new();
+                let mut take = |src, is_ff, v: &mut dyn Iterator<Item = &(u32, u32)>| {
+                    for &(s, e) in v {
+                        taken.push(((e - s) as usize, src, is_ff, s as usize));
+                    }
+                };
+                take(
+                    "comb-boundary",
+                    false,
+                    &mut sub.comb_always.iter().chain(boundary.clone()),
+                );
+                take(
+                    "comb-ff",
+                    true,
+                    &mut sub.ff_always.iter().chain(comb_ff.clone()),
+                );
+                take("event-ff", true, &mut event_ff.iter());
+                take("event-comb", false, &mut event_comb.iter());
                 taken.sort_unstable();
                 taken.dedup();
                 for src in ["comb-boundary", "comb-ff", "event-ff", "event-comb"] {
@@ -653,16 +772,26 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
                 }
             }
             let mut compare: Vec<(bool, u32, u32)> = Vec::new();
-            for (is_ff, v) in [(true, merge(cmp_ff)), (false, merge(cmp_comb))] {
+            let ff = join_union(
+                sub.ff_always.iter().copied(),
+                comb_ff.copied(),
+                event_ff.into_iter(),
+            );
+            let comb = join_union(
+                sub.comb_always.iter().copied(),
+                boundary.copied(),
+                event_comb.into_iter(),
+            );
+            for (is_ff, v) in [(true, ff), (false, comb)] {
                 for (s, e) in v {
-                    compare.push((is_ff, s as u32, e as u32));
+                    compare.push((is_ff, s, e));
                 }
             }
             // Direct comb writes the comb reads: shadowed, not logged.
             let out_comb: Vec<(u32, u32)> = written_comb
                 .iter()
                 .filter(|&&(s, e)| overlaps(comb_touched_comb, s, e))
-                .map(|&(s, e)| (s as u32, e as u32))
+                .map(|&r| narrow(r))
                 .collect();
             let gate = EventGate {
                 lo,
@@ -677,7 +806,7 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
             let cost = gate.cost();
             if cost > total_mass * STMT_NS / 2 {
                 counts[1] += 1;
-                if diag() {
+                if diag_on {
                     eprintln!(
                         "[event_gate] {label} skip {path} [{lo}..{hi}) mass={total_mass} check {cost} ns"
                     );
@@ -701,7 +830,7 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
                 counts[2] += 1;
                 continue;
             }
-            if diag() {
+            if diag_on {
                 eprintln!(
                     "[event_gate] {label} gate {path} [{lo}..{hi}) mass={total_mass} check {cost} ns, {} spans, {} ranges",
                     gate.compare_spans().len(),
@@ -714,7 +843,7 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
     }
     // Outer ranges first; the emitter nests inner ones inside them.
     gates.sort_by_key(|g| (g.lo, std::cmp::Reverse(g.hi)));
-    if diag() {
+    if diag_on {
         eprintln!(
             "[event_gate] {label}: stmts={} gates={} small={} wide={} merged={} scratch={} overlap={}",
             stmts.len(),
@@ -1209,5 +1338,166 @@ mod tests {
             ranges,
             vec![(0, 1, "top.a"), (0, 3, "top"), (2, 3, "top.b")]
         );
+    }
+
+    /// `dst = srcs[0] + srcs[1] + ...` over 4-byte variables.
+    fn sum(dst: VarOffset, srcs: &[VarOffset]) -> ProtoStatement {
+        let ctx = ExpressionContext {
+            width: 32,
+            signed: false,
+        };
+        let var = |o: VarOffset| ProtoExpression::Variable {
+            var_offset: o,
+            select: None,
+            dynamic_select: None,
+            width: 32,
+            var_full_width: 32,
+            expr_context: ctx,
+        };
+        let mut expr = var(srcs[0]);
+        for &o in &srcs[1..] {
+            expr = ProtoExpression::Binary {
+                x: Box::new(expr),
+                op: crate::ir::Op::Add,
+                y: Box::new(var(o)),
+                width: 32,
+                expr_context: ctx,
+            };
+        }
+        let ProtoStatement::Assign(mut a) = comb_write(0) else {
+            unreachable!()
+        };
+        a.dst = dst;
+        a.dst_ff_current_offset = if dst.is_ff() { dst.raw() } else { -1 };
+        a.expr = expr;
+        ProtoStatement::Assign(a)
+    }
+
+    fn bytes(o: VarOffset) -> impl Iterator<Item = VarOffset> {
+        (0..4).map(move |i| match o {
+            VarOffset::Ff(x) => VarOffset::Ff(x + i),
+            VarOffset::Comb(x) => VarOffset::Comb(x + i),
+        })
+    }
+
+    fn two_leaf_inputs() -> ConeGateInputs {
+        // top { a, b }: `a` owns comb 0x100.. and FF 0..0x40, `b` FF 0x40..0x80.
+        ConeGateInputs {
+            node_parent: vec![u32::MAX, 0, 0],
+            node_path: ["top", "top.a", "top.b"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            comb_owner: Vec::new(),
+            ff_owner: FfOwner::default(),
+            comb_var: vec![(0x100, 0x140, 1)],
+            ff_node: vec![(0, 0x40, 1), (0x40, 0x80, 2)],
+            event_written_comb: vec![],
+            trigger_events: Vec::new(),
+            event_writes: Vec::new(),
+            master_clocks: Vec::new(),
+            ff_next_alias: Vec::new(),
+            tour: Default::default(),
+        }
+    }
+
+    /// `a`'s comb reads, one of each kind a gate treats differently, and an
+    /// event whose run writes some of them.
+    fn a_comb_and_event() -> (Vec<ProtoStatement>, Vec<ProtoStatement>) {
+        use VarOffset::{Comb, Ff};
+        let comb = vec![
+            // 0x200 a boundary read, 0x300 closure-touched, FF 0x10 unwritten.
+            sum(Comb(0x100), &[Comb(0x200), Comb(0x300), Ff(0x10)]),
+            // 0x100 produced, 0x108 produced but closure-touched, 0x400
+            // written by the run.
+            sum(Comb(0x104), &[Comb(0x100), Comb(0x108), Comb(0x400)]),
+            // FF 0 written by the run, FF 0x20 closure-touched.
+            sum(Comb(0x108), &[Ff(0), Ff(0x20)]),
+        ];
+        let event = vec![
+            ff_block(0, MIN_MASS),
+            comb_write(0x400),
+            sum(Ff(0), &[Comb(0x500), Ff(0x30)]),
+        ];
+        (comb, event)
+    }
+
+    fn a_context<'a>(inputs: &'a ConeGateInputs, comb: &[ProtoStatement]) -> CombContext<'a> {
+        use VarOffset::{Comb, Ff};
+        let closure: HashSet<VarOffset> = [Comb(0x300), Comb(0x108), Ff(0x20)]
+            .into_iter()
+            .flat_map(bytes)
+            .collect();
+        let touched: HashSet<VarOffset> = [Comb(0x100), Comb(0x104), Comb(0x108), Comb(0x400)]
+            .into_iter()
+            .chain([Comb(0x500)])
+            .flat_map(bytes)
+            .collect();
+        CombContext::new(inputs, comb, &closure, &touched)
+    }
+
+    type GateKey = (usize, usize, Vec<(bool, u32, u32)>, Vec<(u32, u32)>, String);
+
+    fn key(gates: &[EventGate]) -> Vec<GateKey> {
+        gates
+            .iter()
+            .map(|g| {
+                (
+                    g.lo,
+                    g.hi,
+                    g.compare.clone(),
+                    g.out_comb.clone(),
+                    g.cone.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_gate_compares_what_its_run_cannot_hold() {
+        let inputs = two_leaf_inputs();
+        let (comb, event) = a_comb_and_event();
+        let mut ctx = a_context(&inputs, &comb);
+        let gates = plan(&event, &mut ctx, "t");
+        // `top` and `top.a` gate the same run at the same cost; the outer one
+        // is kept.
+        assert_eq!(gates.len(), 1);
+        let g = &gates[0];
+        assert_eq!((g.lo, g.hi, g.cone.as_str()), (0, 3, "top"));
+        assert_eq!(
+            g.compare,
+            vec![
+                (true, 0x10, 0x14),
+                (true, 0x20, 0x24),
+                (true, 0x30, 0x34),
+                (false, 0x108, 0x10c),
+                (false, 0x200, 0x204),
+                (false, 0x300, 0x304),
+                (false, 0x500, 0x504),
+            ]
+        );
+        assert_eq!(g.out_comb, vec![(0x400, 0x404)]);
+        assert_eq!(g.cost(), 102);
+    }
+
+    #[test]
+    fn events_planned_on_one_context_match_fresh_contexts() {
+        let inputs = two_leaf_inputs();
+        let (comb, a) = a_comb_and_event();
+        // `b`'s candidates include `a`'s: a mark left over from planning `a`
+        // would drop them.
+        let b = vec![ff_block(0x40, MIN_MASS), ff_block(0, MIN_MASS)];
+        let fresh =
+            |event: &[ProtoStatement]| key(&plan(event, &mut a_context(&inputs, &comb), "t"));
+        let (want_a, want_b) = (fresh(&a), fresh(&b));
+        assert!(
+            want_b
+                .iter()
+                .any(|g| (g.0, g.1, g.4.as_str()) == (0, 2, "top"))
+        );
+        let mut ctx = a_context(&inputs, &comb);
+        for (event, want) in [(&a, &want_a), (&b, &want_b), (&a, &want_a)] {
+            assert_eq!(&key(&plan(event, &mut ctx, "t")), want);
+        }
     }
 }
