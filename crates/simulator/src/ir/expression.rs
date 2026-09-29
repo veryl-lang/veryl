@@ -2593,16 +2593,12 @@ impl Conv<&air::Expression> for ProtoExpression {
                                 &call.comptime.token,
                             ));
                         };
-                        // Sized by the VALUE, not by `comptime`: these calls
-                        // are built on an unknown comptime (`is_const` is all
-                        // it carries), so its type has no width and its
-                        // context has width zero. A literal's own width is
-                        // what the surrounding context then extends.
+                        // Keep the value's own width and the analyzer's
+                        // propagated context, just as for a numeric literal.
+                        // Parent comparisons and conditionals use this
+                        // signedness when extending their operands.
                         let width = value.width();
-                        let expr_context = ExpressionContext {
-                            width,
-                            signed: false,
-                        };
+                        let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
                         Ok(ProtoExpression::Value {
                             value,
                             width,

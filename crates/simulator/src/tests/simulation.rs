@@ -19939,7 +19939,7 @@ fn wide_ternary_both_signed_sext_192() {
 }
 
 #[test]
-fn system_function_unsigned_expression_context() {
+fn system_function_expression_context() {
     for query in ["$bits(logic<5>)", "$size(logic<3, 5>, 2)", "$clog2(17)"] {
         let code = format!(
             r#"
@@ -19949,14 +19949,28 @@ fn system_function_unsigned_expression_context() {
         u: input logic<32>,
         outer: output logic<32>,
         casted: output logic<64>,
+        choice: output logic<32>,
+        called: output logic<32>,
+        less: output logic,
+        unsigned_less: output logic,
+        folded_choice: output logic<32>,
         folded_outer: output logic<32>,
         folded_cast: output logic<64>,
     ) {{
         const S: signed logic<8> = 8'hff;
         const OUTER: logic<32> = (if 1'b0 ? {query} : S) + 32'h0;
         const CAST: logic<64> = ({query} - 32'd6) as 32;
+        const CHOICE: logic<32> = if 1'b0 ? {query} : S;
+        function choose(c: input logic, s: input signed logic<8>) -> logic<32> {{
+            return if c ? {query} : s;
+        }}
         assign outer = (if c ? {query} : s) + 32'h0;
         assign casted = ({query} - u) as 32;
+        assign choice = if c ? {query} : s;
+        assign called = choose(c, s);
+        assign less = {query} <: s;
+        assign unsigned_less = {query} <: u;
+        assign folded_choice = CHOICE;
         assign folded_outer = OUTER;
         assign folded_cast = CAST;
     }}
@@ -19969,14 +19983,25 @@ fn system_function_unsigned_expression_context() {
                 (0, 0xff, 6, 0xff, 0xffff_ffff),
                 (1, 0x80, 5, 5, 0),
                 (0, 0x80, 0, 0x80, 5),
+                (0, 6, 5, 6, 0),
             ] {
                 sim.set("c", Value::new(c, 1, false));
                 sim.set("s", Value::new(s, 8, true));
                 sim.set("u", Value::new(u, 32, false));
                 sim.step(&Event::Clock(VarId::SYNTHETIC));
+                let choice = if c != 0 {
+                    5
+                } else {
+                    s as i8 as i32 as u32 as u64
+                };
                 for (name, expected, width) in [
                     ("outer", outer, 32),
                     ("casted", casted, 64),
+                    ("choice", choice, 32),
+                    ("called", choice, 32),
+                    ("less", u64::from(5 < s as i8), 1),
+                    ("unsigned_less", u64::from(5 < u), 1),
+                    ("folded_choice", 0xffff_ffff, 32),
                     ("folded_outer", 0xff, 32),
                     ("folded_cast", 0xffff_ffff, 64),
                 ] {

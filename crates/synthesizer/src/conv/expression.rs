@@ -691,6 +691,9 @@ fn synth_binary(
             Ok(resize(vec![ne], result_width, false))
         }
         Op::Less | Op::LessEq | Op::Greater | Op::GreaterEq => {
+            // The comparison result is unsigned; the operands determine
+            // whether the comparison itself is signed.
+            let signed = x.comptime().expr_context.signed && y.comptime().expr_context.signed;
             let w = x
                 .comptime()
                 .r#type
