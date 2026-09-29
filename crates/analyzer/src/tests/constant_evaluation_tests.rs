@@ -20,6 +20,15 @@ module Top {{
     const SIGNED_TRUE: logic<32> = if 1'b1 ? SIGNED_VALUE : {query};
     const UNSIGNED_FALSE: logic<32> = if 1'b0 ? {query} : UNSIGNED_VALUE;
     const UNSIGNED_TRUE: logic<32> = if 1'b1 ? UNSIGNED_VALUE : {query};
+    const UNSIGNED_OUTER_FALSE: logic<32> = (if 1'b0 ? {query} : SIGNED_VALUE) + 32'h0;
+    const UNSIGNED_OUTER_TRUE: logic<32> = (if 1'b1 ? SIGNED_VALUE : {query}) + 32'h0;
+    const UNSIGNED_SUB_CAST: logic<64> = ({query} - 32'd6) as 32;
+    const REVERSE_SUB_CAST: logic<64> = (32'd4 - {query}) as 32;
+    const SIGNED_SUB_CAST: logic<64> = ({query} - 6) as 32;
+    const COMPARE_CAST: logic<32> = ({query} <: 6) as 1;
+    const BITNOT_SUM_CAST: logic<64> = ({query} + ~32'sd5) as 32;
+    const TERNARY_CAST: logic<64> = (if 1'b0 ? {query} : SIGNED_VALUE) as 32;
+    const TERNARY_SHIFT: logic<32> = (if 1'b0 ? {query} : SIGNED_VALUE) >>> 1;
     const SUM: logic<32> = {query} + SIGNED_VALUE;
     const LESS_THAN_NEGATIVE: logic = {query} <: -1;
     const SHIFT: logic<32> = {query} >>> 1;
@@ -31,6 +40,16 @@ module Top {{
     }}
     const CHOOSE_FALSE: logic<32> = choose(1'b0);
     const CHOOSE_TRUE: logic<32> = choose(1'b1);
+    function choose_unsigned(c: input logic) -> logic<32> {{
+        return (if c ? {query} : SIGNED_VALUE) + 32'h0;
+    }}
+    const CHOOSE_UNSIGNED_FALSE: logic<32> = choose_unsigned(1'b0);
+    const CHOOSE_UNSIGNED_TRUE: logic<32> = choose_unsigned(1'b1);
+    function choose_comparison(c: input logic) -> logic<32> {{
+        return if c ? ({query} <: 6) : SIGNED_VALUE;
+    }}
+    const CHOOSE_COMPARE_FALSE: logic<32> = choose_comparison(1'b0);
+    const CHOOSE_COMPARE_TRUE: logic<32> = choose_comparison(1'b1);
 }}
 "#
         );
@@ -59,6 +78,15 @@ module Top {{
             ("SIGNED_TRUE", 0xffff_ffff),
             ("UNSIGNED_FALSE", 0xff),
             ("UNSIGNED_TRUE", 0xff),
+            ("UNSIGNED_OUTER_FALSE", 0xff),
+            ("UNSIGNED_OUTER_TRUE", 0xff),
+            ("UNSIGNED_SUB_CAST", 0xffff_ffff),
+            ("REVERSE_SUB_CAST", 0xffff_ffff),
+            ("SIGNED_SUB_CAST", u64::MAX),
+            ("COMPARE_CAST", 1),
+            ("BITNOT_SUM_CAST", u64::MAX),
+            ("TERNARY_CAST", u64::MAX),
+            ("TERNARY_SHIFT", 0xffff_ffff),
             ("SUM", 4),
             ("LESS_THAN_NEGATIVE", 0),
             ("SHIFT", 2),
@@ -67,6 +95,10 @@ module Top {{
             ("SIGNED_RESULT", 5),
             ("CHOOSE_FALSE", 0xffff_ffff),
             ("CHOOSE_TRUE", 5),
+            ("CHOOSE_UNSIGNED_FALSE", 0xff),
+            ("CHOOSE_UNSIGNED_TRUE", 5),
+            ("CHOOSE_COMPARE_FALSE", 0xff),
+            ("CHOOSE_COMPARE_TRUE", 1),
         ] {
             let variable = module
                 .variables

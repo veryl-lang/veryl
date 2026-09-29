@@ -19939,6 +19939,59 @@ fn wide_ternary_both_signed_sext_192() {
 }
 
 #[test]
+fn system_function_unsigned_expression_context() {
+    for query in ["$bits(logic<5>)", "$size(logic<3, 5>, 2)", "$clog2(17)"] {
+        let code = format!(
+            r#"
+    module Top (
+        c: input logic,
+        s: input signed logic<8>,
+        u: input logic<32>,
+        outer: output logic<32>,
+        casted: output logic<64>,
+        folded_outer: output logic<32>,
+        folded_cast: output logic<64>,
+    ) {{
+        const S: signed logic<8> = 8'hff;
+        const OUTER: logic<32> = (if 1'b0 ? {query} : S) + 32'h0;
+        const CAST: logic<64> = ({query} - 32'd6) as 32;
+        assign outer = (if c ? {query} : s) + 32'h0;
+        assign casted = ({query} - u) as 32;
+        assign folded_outer = OUTER;
+        assign folded_cast = CAST;
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            for (c, s, u, outer, casted) in [
+                (0, 0xff, 6, 0xff, 0xffff_ffff),
+                (1, 0x80, 5, 5, 0),
+                (0, 0x80, 0, 0x80, 5),
+            ] {
+                sim.set("c", Value::new(c, 1, false));
+                sim.set("s", Value::new(s, 8, true));
+                sim.set("u", Value::new(u, 32, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                for (name, expected, width) in [
+                    ("outer", outer, 32),
+                    ("casted", casted, 64),
+                    ("folded_outer", 0xff, 32),
+                    ("folded_cast", 0xffff_ffff, 64),
+                ] {
+                    assert_eq!(
+                        sim.get(name).unwrap(),
+                        Value::new(expected, width, false),
+                        "{query}: {name}, c={c}, s={s}, u={u}, {config:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ternary_sign_extends_narrow_signed_branch() {
     // Regression: the ternary result took the selected branch at its own
     // width zero-extended, so `cond ? (i8 -1) : (i32 5)` produced

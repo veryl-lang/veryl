@@ -162,17 +162,18 @@ impl Op {
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
             },
-            Op::Eq | Op::EqWildcard | Op::Ne | Op::NeWildcard | Op::LogicAnd | Op::LogicOr => {
-                ExpressionContext {
-                    width: 1,
-                    signed: false,
-                    is_const: x.is_const & y.is_const,
-                    is_global: x.is_global & y.is_global,
-                }
-            }
-            Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => ExpressionContext {
+            Op::Eq
+            | Op::EqWildcard
+            | Op::Ne
+            | Op::NeWildcard
+            | Op::LogicAnd
+            | Op::LogicOr
+            | Op::Greater
+            | Op::GreaterEq
+            | Op::Less
+            | Op::LessEq => ExpressionContext {
                 width: 1,
-                signed: x.signed & y.signed,
+                signed: false,
                 is_const: x.is_const & y.is_const,
                 is_global: x.is_global & y.is_global,
             },
@@ -244,10 +245,7 @@ impl Op {
                 dst.r#type.signed = false;
                 dst.r#type.set_concrete_width(Shape::new(vec![Some(1)]));
             }
-            Op::BitNot => {
-                dst.r#type.signed = false;
-            }
-            Op::Add | Op::Sub => (),
+            Op::Add | Op::Sub | Op::BitNot => (),
             _ => unreachable!(),
         }
 
@@ -326,6 +324,7 @@ impl Op {
 
         match self {
             Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                dst.r#type.signed = x.r#type.signed && y.r#type.signed;
                 if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
                     dst.r#type.kind = y.r#type.kind.clone();
                 } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
@@ -338,6 +337,11 @@ impl Op {
                 dst.r#type.strip_clock_reset();
             }
             Op::Pow | Op::Div | Op::Rem | Op::Mul | Op::Add | Op::Sub => {
+                // The exponent is self-determined; other arithmetic results
+                // are signed only when both operands are signed.
+                if *self != Op::Pow {
+                    dst.r#type.signed = x.r#type.signed && y.r#type.signed;
+                }
                 if x.r#type.is_unknown() | x.r#type.is_systemverilog() {
                     dst.r#type.kind = y.r#type.kind.clone();
                 } else if y.r#type.is_unknown() | y.r#type.is_systemverilog() {
@@ -365,6 +369,7 @@ impl Op {
             | Op::NeWildcard
             | Op::LogicAnd
             | Op::LogicOr => {
+                dst.r#type.signed = false;
                 // Inheriting an Enum/Struct kind here would make
                 // `total_width()` report the operand's width instead of 1.
                 dst.r#type.kind = if x.r#type.is_2state() && y.r#type.is_2state() {
@@ -446,6 +451,9 @@ impl Op {
         dst: &mut Comptime,
     ) {
         dst.r#type = x.r#type.clone();
+
+        // The result takes its signedness from the branches, not the condition.
+        dst.r#type.signed = y.r#type.signed && z.r#type.signed;
 
         // array / type can't be operated
         if x.r#type.is_array() | x.r#type.is_type() {
