@@ -3,12 +3,13 @@ use crate::ir::{Component, Declaration, Statement};
 use crate::value::Value;
 
 #[test]
-fn size_queries_return_signed_integers() {
+fn integer_system_functions_return_signed_integers() {
     for query in [
         "$bits(logic<5>)",
         "$size(logic<5>)",
         "$size(logic<5>, 1)",
         "$size(logic<3, 5>, 2)",
+        "$clog2(17)",
     ] {
         let code = format!(
             r#"
@@ -23,6 +24,8 @@ module Top {{
     const LESS_THAN_NEGATIVE: logic = {query} <: -1;
     const SHIFT: logic<32> = {query} >>> 1;
     const WIDTH: u32 = $bits({query});
+    const UNSIGNED_RESULT: u32 = {query};
+    const SIGNED_RESULT: i32 = {query};
     function choose(c: input logic) -> logic<32> {{
         return if c ? {query} : SIGNED_VALUE;
     }}
@@ -48,7 +51,7 @@ module Top {{
         let Component::Module(module) = &ir.components[0] else {
             panic!("expected module");
         };
-        // IEEE 1800-2023 20.6.2/20.7 return integer. Both signed arms must
+        // IEEE 1800-2023 20.6.2/20.7/20.8.1 return integer. Both signed arms must
         // sign-extend even when the query itself is in the unselected arm;
         // an unsigned arm must still zero-extend.
         for (name, expected) in [
@@ -60,8 +63,68 @@ module Top {{
             ("LESS_THAN_NEGATIVE", 0),
             ("SHIFT", 2),
             ("WIDTH", 32),
+            ("UNSIGNED_RESULT", 5),
+            ("SIGNED_RESULT", 5),
             ("CHOOSE_FALSE", 0xffff_ffff),
             ("CHOOSE_TRUE", 5),
+        ] {
+            let variable = module
+                .variables
+                .values()
+                .find(|x| x.path.to_string() == name)
+                .unwrap();
+            assert_eq!(
+                variable.get_value(&[]).unwrap().to_u64(),
+                Some(expected),
+                "{query}: {name}\n{ir}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bit_and_sign_cast_system_function_return_types() {
+    for (query, width, extended) in [
+        ("$onehot(4'b0100)", 1, 0xff),
+        ("$signed(16'h0005)", 16, 0xffff_ffff),
+        ("$unsigned(16'sh0005)", 16, 0xff),
+    ] {
+        let code = format!(
+            r#"
+module Top {{
+    const SIGNED_VALUE: signed logic<8> = 8'hff;
+    const WIDTH: u32 = $bits({query});
+    const FALSE_ARM: logic<32> = if 1'b0 ? {query} : SIGNED_VALUE;
+    const TRUE_ARM: logic<32> = if 1'b1 ? SIGNED_VALUE : {query};
+    function choose(c: input logic) -> logic<32> {{
+        return if c ? {query} : SIGNED_VALUE;
+    }}
+    const CHOOSE_FALSE: logic<32> = choose(1'b0);
+}}
+"#
+        );
+        symbol_table::clear();
+        attribute_table::clear();
+        doc_comment_table::clear();
+        let metadata = Metadata::create_default("prj").unwrap();
+        let parser = Parser::parse(&code, &"").unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        let mut context = Context::default();
+        let mut ir = Ir::default();
+        let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+        errors.extend(Analyzer::analyze_post_pass1());
+        errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+        errors.extend(Analyzer::analyze_post_pass2(&ir));
+        assert!(errors.is_empty(), "{query}: {errors:#?}");
+
+        let Component::Module(module) = &ir.components[0] else {
+            panic!("expected module");
+        };
+        for (name, expected) in [
+            ("WIDTH", width),
+            ("FALSE_ARM", extended),
+            ("TRUE_ARM", extended),
+            ("CHOOSE_FALSE", extended),
         ] {
             let variable = module
                 .variables
