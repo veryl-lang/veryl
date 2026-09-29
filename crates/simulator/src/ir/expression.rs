@@ -2718,13 +2718,10 @@ impl Conv<&air::Expression> for ProtoExpression {
                         return Ok(proto);
                     }
 
-                    // Int->int casts are otherwise transparent, but a NARROWING
-                    // cast must still truncate the operand value: mask to the
-                    // cast width, and re-extend by the cast signedness when the
-                    // outer context is wider.  A same-width cast that flips
-                    // signedness needs the same re-extension: a wider context
-                    // must extend by the cast signedness, not the operand's own
-                    // (SV `longint'(a)` sign-extends a 64-bit unsigned `a`).
+                    // A cast first resizes its operand to the cast width.
+                    // Extending that result follows the outer context: an
+                    // unsigned sibling suppresses sign extension even when
+                    // the cast itself has a signed type.
                     //
                     // `operand_width` alone does not decide it: it is the width
                     // `gather_context` settled on for the operand, which for
@@ -2737,15 +2734,14 @@ impl Conv<&air::Expression> for ProtoExpression {
                     let outer: ExpressionContext = (&comptime.expr_context).into();
                     let unmasked = proto.unmasked_bits(UNMASKED_BITS_DEPTH);
                     let carries_above = |cw: usize| unmasked.is_none_or(|w| w > cw);
-                    let needs_reinterpret = |cw: usize| {
-                        operand_width <= cw
-                            && proto.width() == cw
-                            && proto.expr_context().signed != comptime.r#type.signed
-                    };
+                    let changes_signedness = proto.expr_context().signed != outer.signed;
                     if let Some(cw) = cast_width
                         && cw > 0
-                        && (operand_width > cw || carries_above(cw) || needs_reinterpret(cw))
+                        && (operand_width > cw || carries_above(cw) || changes_signedness)
                     {
+                        // Preserve the operand's extension up to the cast
+                        // width before applying the outer signedness.
+                        let proto = extend_to_width(proto, cw);
                         let node_width = outer.width.max(cw);
                         let value_node = |payload: BigUint| ProtoExpression::Value {
                             value: Value::new_biguint(payload, node_width, false),
@@ -2759,14 +2755,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                             width: node_width,
                             signed: false,
                         };
-                        // A comparison, Div/Rem and a store take signedness
-                        // from their operands, not from their own context, so
-                        // the cast node has to carry it.
+                        // Parents must see the propagated result context,
+                        // without changing how the cast operand evaluates.
                         let result_ctx = ExpressionContext {
                             width: node_width,
-                            signed: comptime.r#type.signed,
+                            signed: outer.signed,
                         };
-                        let sign_extends = comptime.r#type.signed && outer.width > cw;
+                        let sign_extends = outer.signed && outer.width > cw;
                         let mask = (BigUint::one() << cw) - BigUint::one();
                         let mut ret = ProtoExpression::Binary {
                             x: Box::new(proto),

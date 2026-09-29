@@ -20017,6 +20017,85 @@ fn system_function_expression_context() {
 }
 
 #[test]
+fn size_cast_respects_outer_signedness() {
+    for (query, query_value) in [
+        ("$bits(logic<129>)", 129),
+        ("$size(logic<3, 129>, 2)", 129),
+        ("$clog2(17)", 5),
+    ] {
+        for result_width in [64, 96, 192] {
+            let code = format!(
+                r#"
+    module Top (
+        s: input signed logic<8>,
+        c: input logic,
+        unsigned_sum: output logic<{result_width}>,
+        signed_sum: output logic<{result_width}>,
+        unsigned_less: output logic,
+        signed_less: output logic,
+        branch: output logic<{result_width}>,
+        widened: output logic<{result_width}>,
+        signed_widened: output logic<{result_width}>,
+        reinterpreted: output logic<{result_width}>,
+        folded: output logic<{result_width}>,
+    ) {{
+        const S: signed logic<8> = 8'hff;
+        const FOLDED: logic<{result_width}> = (({query} + S) as 8) + 32'd0;
+        assign unsigned_sum = (({query} + s) as 8) + 32'd0;
+        assign signed_sum = (({query} + s) as 8) + 0;
+        assign unsigned_less = (({query} + s) as 8) <: 32'd256;
+        assign signed_less = (({query} + s) as 8) <: -1;
+        assign branch = (if c ? (s as 8) : (8'sd1 as 8)) + 32'd0;
+        assign widened = (s as 16) + 32'd0;
+        assign signed_widened = (s as 16) + 0;
+        assign reinterpreted = ((s as u8) as i16) + 32'd0;
+        assign folded = FOLDED;
+    }}
+    "#
+            );
+            for config in Config::all() {
+                let ir = analyze(&code, &config);
+                let mut sim = Simulator::new(ir, None);
+                for s in [-128i64, -1, 0, 126, 127] {
+                    for c in [0, 1] {
+                        sim.set("s", Value::new(s as u8 as u64, 8, true));
+                        sim.set("c", Value::new(c, 1, false));
+                        sim.step(&Event::Clock(VarId::SYNTHETIC));
+                        let truncated = (query_value + s) as i8;
+                        for (name, expected, width) in [
+                            ("unsigned_sum", truncated as u8 as i64, result_width),
+                            ("signed_sum", truncated as i64, result_width),
+                            ("unsigned_less", 1, 1),
+                            ("signed_less", i64::from(truncated < -1), 1),
+                            (
+                                "branch",
+                                if c == 1 { s as u8 as i64 } else { 1 },
+                                result_width,
+                            ),
+                            ("widened", s as i16 as u16 as i64, result_width),
+                            ("signed_widened", s, result_width),
+                            ("reinterpreted", s as u8 as i64, result_width),
+                            ("folded", (query_value - 1) as u8 as i64, result_width),
+                        ] {
+                            let mut expected = Value::new(expected as u64, 64, true)
+                                .expand(width, true)
+                                .into_owned();
+                            expected.trunc(width);
+                            expected.set_signed(false);
+                            assert_eq!(
+                                sim.get(name).unwrap(),
+                                expected,
+                                "{query}: {name}, s={s}, c={c}, width={result_width}, {config:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn comparison_results_are_unsigned() {
     for query in [
         "$bits(logic<5>)",
