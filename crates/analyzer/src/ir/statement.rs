@@ -105,6 +105,20 @@ pub enum ForRange {
 }
 
 impl ForRange {
+    pub fn bounds(&self) -> (&ForBound, &ForBound) {
+        let (ForRange::Forward { start, end, .. }
+        | ForRange::Reverse { start, end, .. }
+        | ForRange::Stepped { start, end, .. }) = self;
+        (start, end)
+    }
+
+    pub fn bounds_mut(&mut self) -> (&mut ForBound, &mut ForBound) {
+        let (ForRange::Forward { start, end, .. }
+        | ForRange::Reverse { start, end, .. }
+        | ForRange::Stepped { start, end, .. }) = self;
+        (start, end)
+    }
+
     /// A runtime bound is read outside the loop body, so a register used only
     /// as a bound looks unread and loses its register: the loop then runs
     /// against the post-edge count.

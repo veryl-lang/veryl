@@ -1402,35 +1402,19 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut child_analyzer_context = veryl_analyzer::conv::Context::default();
         child_analyzer_context.variables = child_module.variables.clone();
         child_analyzer_context.functions = child_module.functions.clone();
-        let mut child_ff_table = child_module.ff_table.clone();
-        if context.config.disable_ff_opt {
-            child_ff_table.force_all_ff();
-        }
-
-        // Comb-to-FF hoist: clone child declarations and mutate them —
-        // move comb-side `let` writes into the consuming FF block, then
-        // rebuild the FfTable on the hoisted form.
-        let mut hoisted_child_decls = child_module.declarations.clone();
-        {
-            let plans = veryl_analyzer::ir::comb_to_ff_hoist::plan_hoists(
-                &hoisted_child_decls,
-                &child_ff_table,
-                &child_module.variables,
-            );
-            veryl_analyzer::ir::comb_to_ff_hoist::apply_hoists(
-                &mut hoisted_child_decls,
-                &plans,
-                &child_module.variables,
-            );
-            child_ff_table = air::FfTable::default();
-            for (i, x) in hoisted_child_decls.iter().enumerate() {
-                x.gather_ff(&mut child_analyzer_context, &mut child_ff_table, i);
-            }
-            child_ff_table.update_is_ff(&hoisted_child_decls, &mut child_analyzer_context);
-            if context.config.disable_ff_opt {
-                child_ff_table.force_all_ff();
-            }
-        }
+        let peeled = context
+            .peel_cache
+            .entry(Arc::as_ptr(&src.component))
+            .or_insert_with(|| {
+                crate::ir::module::peeled_declarations(child_module, &mut child_analyzer_context)
+            })
+            .clone();
+        let (hoisted_child_decls, child_ff_table) = crate::ir::module::simulated_declarations(
+            child_module,
+            &mut child_analyzer_context,
+            context.config.disable_ff_opt,
+            peeled,
+        );
         let child_decls: &[air::Declaration] = &hoisted_child_decls;
 
         let mut ff_start = context.ff_total_bytes as isize;

@@ -1,7 +1,7 @@
 mod function_return;
 
 use crate::conv::Context;
-use crate::ir::Ir;
+use crate::ir::{Component, Ir};
 use crate::{Analyzer, attribute_table, symbol_table};
 use similar::{ChangeTag, TextDiff};
 use veryl_metadata::Metadata;
@@ -9,6 +9,33 @@ use veryl_parser::{Parser, resource_table};
 
 #[track_caller]
 fn check_ir(code: &str, exp: &str) {
+    check_ir_with(code, exp, false);
+}
+
+/// Checks the IR the native simulator builds from, with its decided loops
+/// peeled.
+#[track_caller]
+fn check_peeled_ir(code: &str, exp: &str) {
+    check_ir_with(code, exp, true);
+}
+
+#[track_caller]
+fn check_ir_with(code: &str, exp: &str, peel: bool) {
+    let ir = analyzed_ir(code, peel).to_string();
+    let diff = TextDiff::from_lines(ir.as_str(), exp);
+    for change in diff.iter_all_changes() {
+        if matches!(change.tag(), ChangeTag::Insert | ChangeTag::Delete) {
+            let text = &format!("{}{}", change.tag(), change);
+            dbg!(text);
+        }
+    }
+
+    println!("ir\n{}exp\n{}", ir, exp);
+
+    assert!(ir.as_str() == exp);
+}
+
+fn analyzed_ir(code: &str, peel: bool) -> Ir {
     symbol_table::clear();
     attribute_table::clear();
 
@@ -27,18 +54,19 @@ fn check_ir(code: &str, exp: &str) {
 
     dbg!(&errors);
 
-    let ir = ir.to_string();
-    let diff = TextDiff::from_lines(ir.as_str(), exp);
-    for change in diff.iter_all_changes() {
-        if matches!(change.tag(), ChangeTag::Insert | ChangeTag::Delete) {
-            let text = &format!("{}{}", change.tag(), change);
-            dbg!(text);
+    if peel {
+        for component in &mut ir.components {
+            if let Component::Module(module) = component {
+                let mut context = Context::default();
+                context.variables = module.variables.clone();
+                let mut declarations = module.declarations.clone();
+                crate::ir::peel::peel_decided_loops(&mut context, module, &mut declarations);
+                module.declarations = declarations;
+            }
         }
     }
 
-    println!("ir\n{}exp\n{}", ir, exp);
-
-    assert!(ir.as_str() == exp);
+    ir
 }
 
 #[test]
@@ -3884,4 +3912,730 @@ fn ff_opt_keeps_a_shift_that_reads_before_it_writes() {
         ff_flags(code),
         vec![("down".to_string(), false), ("up".to_string(), true)]
     );
+}
+
+/// A `break` decided by a local initialised before the loop: the loop peels
+/// into its three iterations in the simulator's IR only.
+#[test]
+fn comb_for_break_decided_by_local_peels() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        o: output logic<8>,
+        q: output logic<32>,
+    ) {
+        var n: u32;
+        always_comb {
+            n = 6;
+            o = 0;
+            for _s in 0..6 {
+                if n <= 2 {
+                    break;
+                }
+                n = n - n / 3;
+                o = o + d;
+            }
+            q = n;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(q): logic<32> = 32'hxxxxxxxx;
+  var var3(n): bit<32> = 32'hxxxxxxxx;
+  const var4(_s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var3 = 32'sh00000006;
+    var1 = 32'sh00000000;
+    var3 = (var3 - (var3 / 32'sh00000003));
+    var1 = (var1 + var0);
+    var3 = (var3 - (var3 / 32'sh00000003));
+    var1 = (var1 + var0);
+    var3 = (var3 - (var3 / 32'sh00000003));
+    var1 = (var1 + var0);
+    var2 = var3;
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+
+    // The analyzer's own IR, which its checks and the emitter read, keeps
+    // the runtime loop.
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(q): logic<32> = 32'hxxxxxxxx;
+  var var3(n): bit<32> = 32'hxxxxxxxx;
+  const var4(_s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var3 = 32'sh00000006;
+    var1 = 32'sh00000000;
+    for _s in 0..6 {
+      if (var3 <= 32'sh00000002) {
+      break;
+    }
+      var3 = (var3 - (var3 / 32'sh00000003));
+      var1 = (var1 + var0);
+    }
+    var2 = var3;
+  }
+}
+"#;
+    check_ir(code, exp);
+}
+
+/// Every read of the iterator becomes its value, as in an ordinary unrolled
+/// loop, and nothing else in the body changes.
+#[test]
+fn peeled_iterator_reads_are_its_value() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<32>,
+        o: output logic<8>,
+        p: output logic<32>,
+    ) {
+        var ia: logic<8> [4];
+        var ta: logic<8> [8];
+        var n : u32;
+        var st: u32;
+        always_comb {
+            for i in 0..4 {
+                ia[i] = d[i * 8+:8];
+            }
+            for i in 0..8 {
+                ta[i] = 0;
+            }
+            n  = 4;
+            st = 0;
+            o  = 0;
+            for s in 0..4 {
+                if n <= 1 {
+                    break;
+                }
+                ta[s] = ia[s];
+                o[s]  = ia[s][s];
+                n     = n - 1;
+                st    = st + s;
+            }
+            p = st;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<32> = 32'hxxxxxxxx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(p): logic<32> = 32'hxxxxxxxx;
+  var var3[0](ia): logic<8> = 8'hxx;
+  var var3[1](ia): logic<8> = 8'hxx;
+  var var3[2](ia): logic<8> = 8'hxx;
+  var var3[3](ia): logic<8> = 8'hxx;
+  var var4[0](ta): logic<8> = 8'hxx;
+  var var4[1](ta): logic<8> = 8'hxx;
+  var var4[2](ta): logic<8> = 8'hxx;
+  var var4[3](ta): logic<8> = 8'hxx;
+  var var4[4](ta): logic<8> = 8'hxx;
+  var var4[5](ta): logic<8> = 8'hxx;
+  var var4[6](ta): logic<8> = 8'hxx;
+  var var4[7](ta): logic<8> = 8'hxx;
+  var var5(n): bit<32> = 32'hxxxxxxxx;
+  var var6(st): bit<32> = 32'hxxxxxxxx;
+  const var7([0].i): signed bit<32> = 32'sh00000000;
+  const var8([1].i): signed bit<32> = 32'sh00000001;
+  const var9([2].i): signed bit<32> = 32'sh00000002;
+  const var10([3].i): signed bit<32> = 32'sh00000003;
+  const var11([0].i): signed bit<32> = 32'sh00000000;
+  const var12([1].i): signed bit<32> = 32'sh00000001;
+  const var13([2].i): signed bit<32> = 32'sh00000002;
+  const var14([3].i): signed bit<32> = 32'sh00000003;
+  const var15([4].i): signed bit<32> = 32'sh00000004;
+  const var16([5].i): signed bit<32> = 32'sh00000005;
+  const var17([6].i): signed bit<32> = 32'sh00000006;
+  const var18([7].i): signed bit<32> = 32'sh00000007;
+  const var19(s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var3[32'sh00000000] = var0[32'sh00000000+:32'sh00000008];
+    var3[32'sh00000001] = var0[32'sh00000008+:32'sh00000008];
+    var3[32'sh00000002] = var0[32'sh00000010+:32'sh00000008];
+    var3[32'sh00000003] = var0[32'sh00000018+:32'sh00000008];
+    var4[32'sh00000000] = 32'sh00000000;
+    var4[32'sh00000001] = 32'sh00000000;
+    var4[32'sh00000002] = 32'sh00000000;
+    var4[32'sh00000003] = 32'sh00000000;
+    var4[32'sh00000004] = 32'sh00000000;
+    var4[32'sh00000005] = 32'sh00000000;
+    var4[32'sh00000006] = 32'sh00000000;
+    var4[32'sh00000007] = 32'sh00000000;
+    var5 = 32'sh00000004;
+    var6 = 32'sh00000000;
+    var1 = 32'sh00000000;
+    var4[32'sh00000000] = var3[32'sh00000000];
+    var1[32'sh00000000] = var3[32'sh00000000][32'sh00000000];
+    var5 = (var5 - 32'sh00000001);
+    var6 = (var6 + 32'sh00000000);
+    var4[32'sh00000001] = var3[32'sh00000001];
+    var1[32'sh00000001] = var3[32'sh00000001][32'sh00000001];
+    var5 = (var5 - 32'sh00000001);
+    var6 = (var6 + 32'sh00000001);
+    var4[32'sh00000002] = var3[32'sh00000002];
+    var1[32'sh00000002] = var3[32'sh00000002][32'sh00000002];
+    var5 = (var5 - 32'sh00000001);
+    var6 = (var6 + 32'sh00000002);
+    var2 = var6;
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// A peeled copy is what an ordinary unrolled loop converts the same body
+/// to: the same statements, with indices and selects of the same constant
+/// values and types.
+#[test]
+fn peeled_copy_matches_the_ordinary_unroll() {
+    use crate::ir::{Declaration, Expression, Factor, Statement, VarIndex, VarSelect};
+
+    fn selector(index: &VarIndex, select: &VarSelect) -> String {
+        let mut ret: Vec<String> = index.0.iter().chain(&select.0).map(expr).collect();
+        if let Some((op, x)) = &select.1 {
+            ret.push(format!("{op:?} {}", expr(x)));
+        }
+        ret.join(", ")
+    }
+
+    fn expr(x: &Expression) -> String {
+        match x {
+            Expression::Term(x) => match x.as_ref() {
+                Factor::Variable(id, index, select, _) => {
+                    format!("{id}[{}]", selector(index, select))
+                }
+                Factor::Value(x) => {
+                    format!("{:?} {:?} {}", x.get_value(), x.r#type, x.is_const)
+                }
+                _ => unreachable!(),
+            },
+            Expression::Binary(x, op, y, _) => format!("({} {op} {})", expr(x), expr(y)),
+            _ => unreachable!(),
+        }
+    }
+
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        m: input  logic<8>,
+        x: output logic<8>,
+        y: output logic<8>,
+    ) {
+        var a: logic<8> [8];
+        var b: logic<8> [8];
+        var n: u32;
+        always_comb {
+            n = 0;
+            for i in 0..8 {
+                if n == 1 {
+                    break;
+                }
+                a[i] = d & m;
+                x[i] = d[i] ^ m[i];
+            }
+        }
+        always_comb {
+            for i in 0..8 {
+                b[i] = d & m;
+                y[i] = d[i] ^ m[i];
+            }
+        }
+    }
+    "#;
+
+    let ir = analyzed_ir(code, true);
+    let Some(Component::Module(module)) = ir.components.first() else {
+        unreachable!();
+    };
+    let combs: Vec<&[Statement]> = module
+        .declarations
+        .iter()
+        .filter_map(|x| match x {
+            Declaration::Comb(x) => Some(x.statements.as_slice()),
+            _ => None,
+        })
+        .collect();
+    let [peeled, unrolled] = combs.as_slice() else {
+        unreachable!();
+    };
+    let stmt = |x: &Statement| match x {
+        Statement::Assign(x) => {
+            let dst: Vec<String> = x
+                .dst
+                .iter()
+                .map(|x| selector(&x.index, &x.select))
+                .collect();
+            format!("[{}] = {}", dst.join(", "), expr(&x.expr))
+        }
+        _ => unreachable!(),
+    };
+    let peeled: Vec<String> = peeled[1..].iter().map(stmt).collect();
+    let unrolled: Vec<String> = unrolled.iter().map(stmt).collect();
+    assert_eq!(peeled.len(), 16);
+    assert_eq!(peeled, unrolled);
+}
+
+/// Each copy reads the iterator as its constant, in an `if` it decides and
+/// in an assignment alike.
+#[test]
+fn peeled_iterator_reads_are_constants() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        o: output logic<32>,
+    ) {
+        var n: u32;
+        always_comb {
+            n = 0;
+            o = 0;
+            for s in 0..4 {
+                if n == 2 {
+                    break;
+                }
+                if s == 0 {
+                    o = o + d;
+                }
+                o = o + s;
+                n = n + 1;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<32> = 32'hxxxxxxxx;
+  var var2(n): bit<32> = 32'hxxxxxxxx;
+  const var3(s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var2 = 32'sh00000000;
+    var1 = 32'sh00000000;
+    var1 = (var1 + var0);
+    var1 = (var1 + 32'sh00000000);
+    var2 = (var2 + 32'sh00000001);
+    var1 = (var1 + 32'sh00000001);
+    var2 = (var2 + 32'sh00000001);
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// A select of the iterator is read as the select of its constant.
+#[test]
+fn peeled_iterator_select_is_constant() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<32>,
+    ) {
+        var n: u32;
+        always_comb {
+            n = 0;
+            o = 0;
+            for s in 0..4 {
+                if n == 2 {
+                    break;
+                }
+                o = o + s[1:0];
+                n = n + 1;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  output var0(o): logic<32> = 32'hxxxxxxxx;
+  var var1(n): bit<32> = 32'hxxxxxxxx;
+  const var2(s): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var1 = 32'sh00000000;
+    var0 = 32'sh00000000;
+    var0 = (var0 + 2'h0);
+    var1 = (var1 + 32'sh00000001);
+    var0 = (var0 + 2'h1);
+    var1 = (var1 + 32'sh00000001);
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// The outer `break` sits in a `case` arm and the inner loop's in an
+/// `if` chain whose other arms read the outer local: every copy of both
+/// decides.
+#[test]
+fn comb_for_break_in_case_and_nested_for_peels() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        o: output logic<8>,
+        q: output logic<8>,
+    ) {
+        var k: logic<8>;
+        always_comb {
+            k = 0;
+            o = 0;
+            for _i in 0..3 {
+                case k {
+                    2      : break;
+                    default: o = o + d;
+                }
+                for j in 0..4 {
+                    if j == 2 {
+                        break;
+                    } else if k == 1 {
+                        o = o + 2;
+                    } else {
+                        o = o + 1;
+                    }
+                }
+                k = k + 1;
+            }
+            q = k;
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<8> = 8'hxx;
+  output var2(q): logic<8> = 8'hxx;
+  var var3(k): logic<8> = 8'hxx;
+  const var4(_i): signed bit<32> = 32'shxxxxxxxx;
+  const var5(j): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var3 = 32'sh00000000;
+    var1 = 32'sh00000000;
+    var1 = (var1 + var0);
+    var1 = (var1 + 32'sh00000001);
+    var1 = (var1 + 32'sh00000001);
+    var3 = (var3 + 32'sh00000001);
+    var1 = (var1 + var0);
+    var1 = (var1 + 32'sh00000002);
+    var1 = (var1 + 32'sh00000002);
+    var3 = (var3 + 32'sh00000001);
+    var2 = var3;
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// A runtime loop inside a peeled one is kept as converted: nothing its
+/// body writes folds its conditions, and after it that write is unknown.
+/// Its two copies are no more runtime loops than the two loops they replace.
+#[test]
+fn runtime_loop_inside_peeled_loop_is_kept() {
+    let code = r#"
+    module ModuleA (
+        m: input  logic<4>,
+        d: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var t: logic<8>;
+        var n: u32;
+        always_comb {
+            n = 2;
+            o = 0;
+            t = 0;
+            for _s in 0..4 {
+                if n == 0 {
+                    break;
+                }
+                for _j in 0..m {
+                    t = 1;
+                    if t == 1 {
+                        o = o + d;
+                    } else {
+                        o = o + 1;
+                    }
+                }
+                if t == 1 {
+                    o = o + 4;
+                }
+                n = n - 1;
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(m): logic<4> = 4'hx;
+  input var1(d): logic<8> = 8'hxx;
+  output var2(o): logic<8> = 8'hxx;
+  var var3(t): logic<8> = 8'hxx;
+  var var4(n): bit<32> = 32'hxxxxxxxx;
+  const var5(_s): signed bit<32> = 32'shxxxxxxxx;
+  const var6(_j): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var4 = 32'sh00000002;
+    var2 = 32'sh00000000;
+    var3 = 32'sh00000000;
+    for _j in 0..var0 {
+      var3 = 32'sh00000001;
+      if (var3 == 32'sh00000001) {
+      var2 = (var2 + var1);
+    } else {
+      var2 = (var2 + 32'sh00000001);
+    }
+    }
+    if (var3 == 32'sh00000001) {
+      var2 = (var2 + 32'sh00000004);
+    }
+    var4 = (var4 - 32'sh00000001);
+    for _j in 0..var0 {
+      var3 = 32'sh00000001;
+      if (var3 == 32'sh00000001) {
+      var2 = (var2 + var1);
+    } else {
+      var2 = (var2 + 32'sh00000001);
+    }
+    }
+    if (var3 == 32'sh00000001) {
+      var2 = (var2 + 32'sh00000004);
+    }
+    var4 = (var4 - 32'sh00000001);
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// Loops that stay exactly as converted: a `break` on data, on a local only
+/// conditionally written, on a local after a call that writes it, on a local
+/// holding X, and in an `always_ff`.
+#[test]
+fn undecided_break_loops_are_kept_as_converted() {
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock,
+        i_rst: input  reset,
+        a    : input  logic<8>,
+        o    : output logic<8>,
+        p    : output logic<8>,
+        q    : output logic<8>,
+        r    : output logic<8>,
+        f    : output logic<8>,
+    ) {
+        function bump (
+            x: input  logic<8>,
+            y: output logic<8>,
+        ) -> logic<8> {
+            y = x + 1;
+            return x + 2;
+        }
+        var k: logic<8>;
+        var c: logic<8>;
+        var m: logic<8>;
+        always_comb {
+            o = 4'hf;
+            for i in 0..8 {
+                if a[i] {
+                    o = i[7:0];
+                    break;
+                }
+            }
+        }
+        always_comb {
+            if a[0] {
+                c = 1;
+            } else {
+                c = 2;
+            }
+            p = 0;
+            for _i in 0..8 {
+                if c == 3 {
+                    break;
+                }
+                p = p + 1;
+                c = c + 1;
+            }
+        }
+        always_comb {
+            k = 0;
+            q = a;
+            for _i in 0..8 {
+                if k >= 3 {
+                    break;
+                }
+                q = bump(q, k);
+            }
+        }
+        always_comb {
+            m = 'x;
+            r = 0;
+            for _i in 0..8 {
+                if m == 0 {
+                    break;
+                }
+                r = r + 1;
+            }
+        }
+        always_ff {
+            if_reset {
+                f = 0;
+            } else {
+                for i in 0..8 {
+                    if i == 3 {
+                        break;
+                    }
+                    f = f + a;
+                }
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(i_clk): clock = 1'hx;
+  input var1(i_rst): reset = 1'hx;
+  input var2(a): logic<8> = 8'hxx;
+  output var3(o): logic<8> = 8'hxx;
+  output var4(p): logic<8> = 8'hxx;
+  output var5(q): logic<8> = 8'hxx;
+  output var6(r): logic<8> = 8'hxx;
+  output var7(f): logic<8> = 8'hxx;
+  var var9(bump.return): logic<8> = 8'hxx;
+  input var10(bump.x): logic<8> = 8'hxx;
+  output var11(bump.y): logic<8> = 8'hxx;
+  var var12(k): logic<8> = 8'hxx;
+  var var13(c): logic<8> = 8'hxx;
+  var var14(m): logic<8> = 8'hxx;
+  const var15(i): signed bit<32> = 32'shxxxxxxxx;
+  const var16(_i): signed bit<32> = 32'shxxxxxxxx;
+  const var17(_i): signed bit<32> = 32'shxxxxxxxx;
+  const var18(_i): signed bit<32> = 32'shxxxxxxxx;
+  const var19(i): signed bit<32> = 32'shxxxxxxxx;
+  func var8(bump) -> var9 {
+    var11 = (var10 + 32'sh00000001);
+    var9 = (var10 + 32'sh00000002);
+  }
+
+  comb {
+    var3 = 4'hf;
+    for i in 0..8 {
+      if var2[var15] {
+      var3 = var15[32'sh00000007:32'sh00000000];
+      break;
+    }
+    }
+  }
+  comb {
+    if var2[32'sh00000000] {
+      var13 = 32'sh00000001;
+    } else {
+      var13 = 32'sh00000002;
+    }
+    var4 = 32'sh00000000;
+    for _i in 0..8 {
+      if (var13 == 32'sh00000003) {
+      break;
+    }
+      var4 = (var4 + 32'sh00000001);
+      var13 = (var13 + 32'sh00000001);
+    }
+  }
+  comb {
+    var12 = 32'sh00000000;
+    var5 = var2;
+    for _i in 0..8 {
+      if (var12 >= 32'sh00000003) {
+      break;
+    }
+      var5 = var8(x: var5, y: var12);
+    }
+  }
+  comb {
+    var14 = 'x;
+    var6 = 32'sh00000000;
+    for _i in 0..8 {
+      if (var14 == 32'sh00000000) {
+      break;
+    }
+      var6 = (var6 + 32'sh00000001);
+    }
+  }
+  ff (var0, var1) {
+    if_reset {
+      var7 = 32'sh00000000;
+    } else {
+      for i in 0..8 {
+        if (var19 == 32'sh00000003) {
+        break;
+      }
+        var7 = (var7 + var2);
+      }
+    }
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
+}
+
+/// A loop that would flatten into more nodes than a peel may emit stays as
+/// converted, here 3000 copies of its body.
+#[test]
+fn break_loop_over_emit_limit_is_kept_as_converted() {
+    let code = r#"
+    module ModuleA (
+        d: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var n: u32;
+        always_comb {
+            n = 0;
+            o = 0;
+            for _i in 0..5000 {
+                if n == 3000 {
+                    break;
+                }
+                n = n + 1;
+                o = o + (d ^ 8'd1) + (d ^ 8'd2) + (d ^ 8'd3) + (d ^ 8'd4);
+            }
+        }
+    }
+    "#;
+
+    let exp = r#"module ModuleA {
+  input var0(d): logic<8> = 8'hxx;
+  output var1(o): logic<8> = 8'hxx;
+  var var2(n): bit<32> = 32'hxxxxxxxx;
+  const var3(_i): signed bit<32> = 32'shxxxxxxxx;
+
+  comb {
+    var2 = 32'sh00000000;
+    var1 = 32'sh00000000;
+    for _i in 0..5000 {
+      if (var2 == 32'sh00000bb8) {
+      break;
+    }
+      var2 = (var2 + 32'sh00000001);
+      var1 = ((((var1 + (var0 ^ 8'h01)) + (var0 ^ 8'h02)) + (var0 ^ 8'h03)) + (var0 ^ 8'h04));
+    }
+  }
+}
+"#;
+
+    check_peeled_ir(code, exp);
 }

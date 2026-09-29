@@ -22714,3 +22714,60 @@ fn invalid_select_scalar() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+/// A loop whose `break` is decided is analyzed in the form it is emitted in,
+/// a runtime loop writing whole `a[i]`: peeling it is left to the simulator,
+/// so an element no iteration reaches is neither unassigned nor free for
+/// another block to assign.
+#[test]
+fn decided_break_loop_is_analyzed_as_a_runtime_loop() {
+    let code = r#"
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        var a: logic<8> [4];
+        always_comb {
+            for i in 0..4 {
+                if i == 2 {
+                    break;
+                }
+                a[i] = i;
+            }
+        }
+        assign o = a[3];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        o: output logic<8>,
+    ) {
+        var b: logic<8> [4];
+        always_comb {
+            for i in 0..4 {
+                if i == 2 {
+                    break;
+                }
+                b[i] = i;
+            }
+        }
+        always_comb {
+            b[2] = 0;
+            b[3] = 0;
+        }
+        assign o = b[3];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [AnalyzerError::MultipleAssignment { .. }]
+        ),
+        "{errors:?}"
+    );
+}

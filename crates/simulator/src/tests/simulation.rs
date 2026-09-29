@@ -16908,6 +16908,1591 @@ fn for_break_in_dynamic_range_function() {
     }
 }
 
+/// The analyzer's IR of `code`, before the simulator converts it.
+fn analyzer_ir(code: &str) -> air::Ir {
+    symbol_table::clear();
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = air::Ir::default();
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    ir
+}
+
+fn find_module<'a>(ir: &'a air::Ir, name: &str) -> &'a air::Module {
+    ir.components
+        .iter()
+        .find_map(|c| match c {
+            air::Component::Module(m) if m.name.to_string() == name => Some(m),
+            _ => None,
+        })
+        .expect("module")
+}
+
+/// Runtime loops left in the declarations the simulator builds `module` from.
+fn runtime_loops(code: &str, module: &str) -> usize {
+    fn count(stmts: &[air::Statement]) -> usize {
+        stmts
+            .iter()
+            .map(|s| match s {
+                air::Statement::For(x) => 1 + count(&x.body),
+                air::Statement::If(x) => count(&x.true_side) + count(&x.false_side),
+                air::Statement::Case(x) => {
+                    x.arms.iter().map(|a| count(&a.body)).sum::<usize>() + count(&x.default)
+                }
+                _ => 0,
+            })
+            .sum()
+    }
+    let ir = analyzer_ir(code);
+    let module = find_module(&ir, module);
+    let mut context = Context::default();
+    context.variables = module.variables.clone();
+    context.functions = module.functions.clone();
+    let peeled = crate::ir::module::peeled_declarations(module, &mut context);
+    let (declarations, _) =
+        crate::ir::module::simulated_declarations(module, &mut context, false, peeled);
+    declarations
+        .iter()
+        .map(|d| match d {
+            air::Declaration::Comb(x) => count(&x.statements),
+            air::Declaration::Ff(x) => count(&x.statements),
+            _ => 0,
+        })
+        .sum()
+}
+
+/// A carry-save adder tree whose step loop breaks on a local initialised from
+/// a parameter: the `break` and every guard are decided once the procedure is
+/// converted. The local's final value and a select of the iterator are read
+/// after and inside the loop.
+#[test]
+fn const_decided_break_loop_is_peeled() {
+    let code = r#"
+    module Top #(
+        param N: u32 = 6,
+    ) (
+        d  : input  logic<N * 8>,
+        o_a: output logic<8>,
+        o_b: output logic<8>,
+        o_n: output logic<32>,
+        o_s: output logic<32>,
+    ) {
+        var ia: logic<8> [N];
+        var ta: logic<8> [N];
+        var n : u32;
+        var st: u32;
+        always_comb {
+            for i in 0..N {
+                ia[i] = d[i * 8+:8];
+                ta[i] = 0;
+            }
+            n  = N;
+            st = 0;
+            for s in 0..N {
+                if n <= 2 {
+                    break;
+                }
+                for i in 0..N / 3 {
+                    if i <: n / 3 {
+                        ta[i * 2]     = ia[i * 3] ^ ia[i * 3 + 1] ^ ia[i * 3 + 2];
+                        ta[i * 2 + 1] = ((ia[i * 3] & ia[i * 3 + 1]) | (ia[i * 3 + 1] & ia[i * 3 + 2]) | (ia[i * 3] & ia[i * 3 + 2])) << 1;
+                    }
+                }
+                for i in 0..2 {
+                    if i <: n % 3 {
+                        ta[2 * (n / 3) + i] = ia[3 * (n / 3) + i];
+                    }
+                }
+                for i in 0..N {
+                    if i <: n {
+                        ia[i] = ta[i];
+                    }
+                }
+                n  = n - n / 3;
+                st = st + s;
+            }
+        }
+        assign o_a = ia[0];
+        assign o_b = ia[1];
+        assign o_n = n;
+        assign o_s = st;
+    }
+    "#;
+
+    assert_eq!(runtime_loops(code, "Top"), 0);
+
+    let inputs: [u64; 4] = [
+        0x0102_0304_0506,
+        0xff80_7f3c_c300,
+        0xdead_beef_1240,
+        0xffff_ffff_ffff,
+    ];
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for d in inputs {
+            sim.set("d", Value::new(d, 48, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let sum = (0..6).map(|i| (d >> (8 * i)) & 0xff).sum::<u64>() & 0xff;
+            let a = sim.get("o_a").unwrap().to_usize().unwrap() as u64;
+            let b = sim.get("o_b").unwrap().to_usize().unwrap() as u64;
+            assert_eq!((a + b) & 0xff, sum, "d={d:x} {config:?}");
+            // Steps 6 -> 4 -> 3 -> 2; `st` adds the step indices 0 + 1 + 2.
+            assert_eq!(
+                sim.get("o_n").unwrap(),
+                Value::new(2, 32, false),
+                "{config:?}"
+            );
+            assert_eq!(
+                sim.get("o_s").unwrap(),
+                Value::new(3, 32, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+/// A `break` decided by data, inside a loop whose own `break` is decided by
+/// a local: peeling the outer loop would copy the inner one into each of its
+/// three iterations, more runtime loops than the two there are, so both stay.
+#[test]
+fn data_decided_inner_break_keeps_both_loops() {
+    let code = r#"
+    module Top (
+        d  : input  logic<4>,
+        sel: input  logic,
+        acc: output logic<8>,
+        m  : output logic<8>,
+        y  : output logic<8>,
+    ) {
+        var arr: logic<8> [8];
+        var k  : logic<8>;
+        always_comb {
+            for i in 0..8 {
+                arr[i] = i as 8 + 8'h10;
+            }
+            k   = 2;
+            acc = 0;
+            y   = 0;
+            for _i in 0..8 {
+                if k == 5 {
+                    break;
+                }
+                for j in 0..4 {
+                    if d[j] {
+                        break;
+                    }
+                    acc = acc + 1;
+                }
+                if sel {
+                    y = y | arr[k + 5];
+                }
+                k = k + 1;
+            }
+            m = k;
+        }
+    }
+    "#;
+
+    assert_eq!(runtime_loops(code, "Top"), 2);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for d in 0..16u64 {
+            sim.set("d", Value::new(d, 4, false));
+            sim.set("sel", Value::new(0, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let per_step = (0..4).take_while(|j| d >> j & 1 == 0).count() as u64;
+            assert_eq!(
+                sim.get("acc").unwrap(),
+                Value::new(3 * per_step, 8, false),
+                "d={d} {config:?}"
+            );
+            assert_eq!(sim.get("m").unwrap(), Value::new(5, 8, false), "{config:?}");
+            assert_eq!(sim.get("y").unwrap(), Value::new(0, 8, false), "{config:?}");
+        }
+        // k = 2, 3, 4 read arr[7], arr[8] (out of range), arr[9] (out of range).
+        if !config.use_4state {
+            sim.set("sel", Value::new(1, 1, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(0x17, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+/// A function call may write its output arguments, so after one the `break`
+/// condition is not known and the loop stays.
+#[test]
+fn call_in_loop_body_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        function bump (
+            x: input  logic<8>,
+            y: output logic<8>,
+        ) -> logic<8> {
+            y = x + 1;
+            return x + 2;
+        }
+        var k: logic<8>;
+        always_comb {
+            k = 0;
+            o = a;
+            for _i in 0..8 {
+                if k >= 3 BREAK {
+                    break;
+                }
+                o = bump(o, k);
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+    assert_matches_runtime_loop(&design, &control, &["o"], |_| true);
+
+    for config in Config::all() {
+        // With `disable_ff_opt` the `break` condition does not see the `k`
+        // that `bump` writes through its output argument, so all eight
+        // iterations run (o = 26); the comparison above covers it.
+        if config.disable_ff_opt {
+            continue;
+        }
+        let ir = analyze(&design, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(10, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // k = o + 1 after the first call, so the second iteration breaks.
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(12, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+/// Break conditions over a value wider than 64 bits and over a negative
+/// signed local are not decided, and both loops run as converted.
+#[test]
+fn wide_and_signed_break_conditions_keep_their_loops() {
+    let code = r#"
+    module Top (
+        d : input  logic<8>,
+        cw: output logic<8>,
+        cs: output logic<8>,
+        ow: output logic<80>,
+        os: output logic<8>,
+    ) {
+        var w: logic<80>;
+        var k: i8;
+        always_comb {
+            w  = 80'h1_0000_0000_0000_0000;
+            cw = 0;
+            for _i in 0..80 {
+                if w[0] {
+                    break;
+                }
+                w  = w >> 1;
+                cw = cw + 1;
+            }
+            ow = w | {72'h0, d};
+        }
+        always_comb {
+            k  = -3;
+            cs = 0;
+            os = d;
+            for _i in 0..8 {
+                if k >= 0 {
+                    break;
+                }
+                k  = k + 1;
+                cs = cs + 1;
+                os = os + d;
+            }
+        }
+    }
+    "#;
+
+    assert_eq!(runtime_loops(code, "Top"), 2);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("d", Value::new(0x12, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("cw").unwrap(),
+            Value::new(64, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("ow").unwrap(),
+            Value::new(0x13, 80, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("cs").unwrap(),
+            Value::new(3, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("os").unwrap(),
+            Value::new(0x48, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+/// The outer `break` sits in a `case` arm; an inner loop's own `break`, after
+/// an `else if` on the outer local, is decided by its iterator in each copy.
+#[test]
+fn break_in_case_and_inner_loop_is_decided() {
+    let code = r#"
+    module Top (
+        d: input  logic<8>,
+        o: output logic<8>,
+        q: output logic<8>,
+    ) {
+        var k: logic<8>;
+        always_comb {
+            k = 0;
+            o = 0;
+            for _i in 0..8 {
+                case k {
+                    3      : break;
+                    default: o = o + d;
+                }
+                for j in 0..4 {
+                    if j == 2 {
+                        break;
+                    } else if k == 1 {
+                        o = o + 2;
+                    } else {
+                        o = o + 1;
+                    }
+                }
+                k = k + 1;
+            }
+            q = k;
+        }
+    }
+    "#;
+
+    assert_eq!(runtime_loops(code, "Top"), 0);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for d in [0u64, 5, 0x40] {
+            sim.set("d", Value::new(d, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new((3 * d + 8) & 0xff, 8, false),
+                "d={d} {config:?}"
+            );
+            assert_eq!(sim.get("q").unwrap(), Value::new(3, 8, false), "{config:?}");
+        }
+    }
+}
+
+/// A peeled iteration would index out of range with a constant, which a
+/// runtime index does not, so the loop stays and keeps reading 0 in 2-state
+/// and X in 4-state.
+#[test]
+fn break_loop_reading_out_of_range_stays_a_loop() {
+    let code = r#"
+    module Top (
+        x : input  logic<8>,
+        oa: output logic<32>,
+        os: output logic<12>,
+    ) {
+        var a: logic<8> [4];
+        var t: logic<8>;
+        always_comb {
+            for k in 0..4 {
+                a[k] = k + 1;
+            }
+            oa = 0;
+            for i in 0..6 {
+                if x == 3 {
+                    oa = oa + a[i];
+                }
+                if i == 5 {
+                    break;
+                }
+            }
+        }
+        always_comb {
+            os = 0;
+            t  = 8'hff;
+            for i in 0..12 {
+                os[i] = t[i];
+                if i == 11 {
+                    break;
+                }
+            }
+        }
+    }
+    "#;
+
+    assert_eq!(runtime_loops(code, "Top"), 2);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("x", Value::new(3, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let (oa, os) = (sim.get("oa").unwrap(), sim.get("os").unwrap());
+        if config.use_4state {
+            assert!(oa.is_xz() && os.is_xz(), "oa={oa:?} os={os:?} {config:?}");
+        } else {
+            assert_eq!(oa, Value::new(10, 32, false), "{config:?}");
+            assert_eq!(os, Value::new(0xff, 12, false), "{config:?}");
+        }
+    }
+}
+
+/// Runs `code` and `control`, the same design with each `break` condition
+/// also reading the never-matching `a == 99 && a == 98`, which keeps its loop
+/// at runtime, and compares `outputs` for each value of the 8-bit input `a`.
+fn assert_matches_runtime_loop(
+    code: &str,
+    control: &str,
+    outputs: &[&str],
+    configs: impl Fn(&Config) -> bool,
+) {
+    assert_matches_runtime_loop_allowing(code, control, outputs, configs, Allowed::Nothing);
+}
+
+fn assert_matches_runtime_loop_allowing(
+    code: &str,
+    control: &str,
+    outputs: &[&str],
+    configs: impl Fn(&Config) -> bool,
+    allow: Allowed,
+) {
+    let analyze =
+        |code: &str, config: &Config| analyze_top_inner(code, config, "Top", allow).unwrap();
+    for config in Config::all().into_iter().filter(configs) {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let mut reference = Simulator::new(analyze(control, &config), None);
+        for a in [0u64, 5, 0x7f, 0xff] {
+            sim.set("a", Value::new(a, 8, false));
+            reference.set("a", Value::new(a, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            reference.step(&Event::Clock(VarId::SYNTHETIC));
+            for o in outputs {
+                assert_eq!(sim.get(o), reference.get(o), "{o} a={a} {config:?}");
+            }
+        }
+    }
+}
+
+const NEVER: &str = " || (a == 99 && a == 98)";
+
+/// `code` with every ` BREAK` marker dropped, and its runtime-loop control.
+fn peeled_and_control(code: &str) -> (String, String) {
+    (code.replace(" BREAK", ""), code.replace(" BREAK", NEVER))
+}
+
+/// A call writes its output argument inside a condition, ahead of the `if`
+/// on that argument nested under it.
+#[test]
+fn call_writing_an_output_in_a_condition_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        function bump (
+            x: input  logic<8>,
+            y: output logic<8>,
+        ) -> logic<8> {
+            y = x + 1;
+            return x + 2;
+        }
+        var k: logic<8>;
+        always_comb {
+            k = 0;
+            o = 0;
+            for i in 0..4 {
+                if i == 2 BREAK {
+                    break;
+                }
+                if bump(a, k) != 0 {
+                    if k == 0 {
+                        o = o + 1;
+                    } else {
+                        o = o + 16;
+                    }
+                }
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// A call in a destination index writes its output argument.
+#[test]
+fn call_in_a_destination_index_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        function bump (
+            x: input  logic<8>,
+            y: output logic<8>,
+        ) -> logic<2> {
+            y = x + 1;
+            return 1;
+        }
+        var k  : logic<8>;
+        var arr: logic<8> [4];
+        always_comb {
+            k = 0;
+            o = 0;
+            for j in 0..4 {
+                arr[j] = 0;
+            }
+            for i in 0..4 {
+                if i == 2 BREAK {
+                    break;
+                }
+                arr[bump(a, k)] = 1;
+                if k == 0 {
+                    o = o + 1;
+                } else {
+                    o = o + 16;
+                }
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// A loop holding a `case` on a signed target peels; one whose `break`
+/// tests an equality on a negative signed local is not decided and stays.
+#[test]
+fn signed_case_peels_and_negative_signed_condition_keeps_its_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+        p: output logic<8>,
+    ) {
+        var k: i8;
+        var m: i8;
+        always_comb {
+            k = 8'hFF;
+            o = 0;
+            for i in 0..4 {
+                if i == 2 BREAK {
+                    break;
+                }
+                case k {
+                    -1     : o = o + 1;
+                    default: o = o + 16;
+                }
+                k = 0;
+            }
+        }
+        always_comb {
+            m = 8'hFF;
+            p = 0;
+            for i in 0..4 {
+                if m == -1 && i == 1 BREAK {
+                    break;
+                }
+                p = p + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o", "p"], |_| true);
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(&design, &config), None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o"), Some(Value::new(0x11, 8, false)), "{config:?}");
+        assert_eq!(sim.get("p"), Some(Value::new(1, 8, false)), "{config:?}");
+    }
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// A condition true only above bit 63 is true.
+#[test]
+fn wide_condition_decides_as_the_loop_runs() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var w: logic<80>;
+        always_comb {
+            w = 80'h1_0000_0000_0000_0000;
+            o = 0;
+            for i in 0..4 {
+                if i == 2 BREAK {
+                    break;
+                }
+                switch {
+                    w      : o = o + 1;
+                    default: o = o + 16;
+                }
+                w = 0;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 0);
+}
+
+/// X and Z are never known: the native simulator runs 2-state, where `'x`
+/// reads as 0, so no condition over one is decided, even stored into a
+/// 2-state variable or under a wildcard equality.
+#[test]
+fn values_with_x_are_not_known() {
+    let loops = [
+        ("var x: bit<8>;", "x = 'x;", "~x == 8'hFF"),
+        ("var x: bit<8>;", "x = 'x;", "8'h05 ==? x"),
+        ("var x: logic<8>;", "x = 'x;", "8'h05 ==? x"),
+        ("var x: logic<8>;", "x = 'x;", "8'h05 !=? x"),
+        ("var x: logic<8>;", "x = 8'h01 / 0;", "x == 8'hFF"),
+    ];
+    for (decl, init, cond) in loops {
+        let code = format!(
+            r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {{
+        {decl}
+        always_comb {{
+            {init}
+            o = 0;
+            for i in 0..6 {{
+                if i >= 1 && ({cond}) BREAK {{
+                    break;
+                }}
+                if i >= 4 BREAK {{
+                    break;
+                }}
+                o = o + 1;
+            }}
+        }}
+    }}
+    "#
+        );
+        let (design, control) = peeled_and_control(&code);
+        let allow = Allowed::MismatchAssignment;
+        assert_matches_runtime_loop_allowing(&design, &control, &["o"], |_| true, allow);
+        assert_eq!(runtime_loops(&design, "Top"), 1, "{cond}");
+    }
+}
+
+/// Locals initialised before the loop, one of them to X, next to a `break`
+/// that reads only the others and the iterator. The others are negative and
+/// signed, wider than 64 bits, a struct member or a select, none of which a
+/// decision reads, so the loop stays.
+#[test]
+fn known_locals_beside_an_x_keep_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var n : signed logic<4>;
+        var m : signed logic<8>;
+        var u : logic<8>;
+        var k : logic<8>;
+        var w : logic<9>;
+        var s : logic<12>;
+        var b : logic<80>;
+        var x : logic<8>;
+        var q : logic<8>;
+        var r : logic<4>;
+        var st: Pt;
+        struct Pt {
+            hi: logic<4>,
+            lo: logic<4>,
+        }
+        always_comb {
+            n  = -1;
+            m  = -2;
+            u  = 8'hFF;
+            k  = 8'h80;
+            w  = 9'h1FF;
+            s  = n;
+            b  = 80'h1_0000_0000_0000_0001;
+            x  = 'x;
+            q  = u + 1;
+            r  = k[7:4];
+            st = 8'hA5;
+            o  = 0;
+            for i in 0..6 {
+                if i >= 1 && s == 12'hFFF && q == 0 && r == 8 && st.hi == 10 && b[79] == 0 && m <: n BREAK {
+                    break;
+                }
+                if i >= 4 BREAK {
+                    break;
+                }
+                o = o + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// A `case` with a signed range, around a `break`, is not decided.
+#[test]
+fn signed_range_case_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var n: signed logic<4>;
+        always_comb {
+            n = -1;
+            o = 0;
+            for i in 0..6 {
+                case n {
+                    -8..=-1: if i >= 1 BREAK {
+                        break;
+                    }
+                    default: {}
+                }
+                if i >= 4 BREAK {
+                    break;
+                }
+                o = o + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// Where the decided `break` falls: after the first statement of an
+/// iteration, never, and in the first iteration; and over an empty range.
+#[test]
+fn break_position_decides_as_the_loop_runs() {
+    let code = r#"
+    module Top #(
+        param E: u32 = 0,
+    ) (
+        a: input  logic<8>,
+        o: output logic<8>,
+        p: output logic<8>,
+        q: output logic<8>,
+        r: output logic<8>,
+    ) {
+        var k: logic<8>;
+        var j: logic<8>;
+        var h: logic<8>;
+        var e: logic<8>;
+        always_comb {
+            k = 0;
+            o = 0;
+            for _i in 0..8 {
+                o = o + a;
+                if k == 3 BREAK {
+                    break;
+                }
+                o = o ^ 8'h55;
+                k = k + 1;
+            }
+        }
+        always_comb {
+            j = 0;
+            p = 0;
+            for _i in 0..8 {
+                if j == 100 BREAK {
+                    break;
+                }
+                p = p + a;
+                j = j + 1;
+            }
+        }
+        always_comb {
+            h = 0;
+            q = a;
+            for _i in 0..8 {
+                if h == 0 BREAK {
+                    break;
+                }
+                q = q + 1;
+            }
+        }
+        always_comb {
+            e = 0;
+            r = a;
+            for _i in 0..E {
+                if e == 0 BREAK {
+                    break;
+                }
+                r = r + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o", "p", "q", "r"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 0);
+}
+
+/// Decided conditions wrap at the local's width. A negative signed local
+/// is not decided, so its loop stays.
+#[test]
+fn width_wrap_decides_and_negative_signed_compares_keep_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+        p: output logic<8>,
+    ) {
+        var k: logic<4>;
+        var m: i8;
+        always_comb {
+            k = 4'hE;
+            o = 0;
+            for _i in 0..8 {
+                if k == 4'h1 BREAK {
+                    break;
+                }
+                k = k + 1;
+                o = o + a;
+            }
+        }
+        always_comb {
+            m = -3;
+            p = 0;
+            for _i in 0..8 {
+                if m >= 2 BREAK {
+                    break;
+                }
+                if m <: 0 {
+                    p = p + 1;
+                } else {
+                    p = p + a;
+                }
+                m = m + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o", "p"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// A loop with `break` inside a peeled one, decided by the outer local and
+/// its own iterator, peels in each copy; its iterator also indexes an array.
+#[test]
+fn nested_break_loop_peels_inside_a_peeled_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+        p: output logic<8>,
+    ) {
+        var k  : logic<8>;
+        var arr: logic<8> [4];
+        always_comb {
+            k = 0;
+            o = 0;
+            for j in 0..4 {
+                arr[j] = a + j;
+            }
+            for i in 0..4 {
+                if k == 3 BREAK {
+                    break;
+                }
+                for j in 0..4 {
+                    if j == k BREAK {
+                        break;
+                    }
+                    o = o + arr[j] + i;
+                }
+                k = k + 1;
+            }
+            p = k;
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_eq!(runtime_loops(&control, "Top"), 2);
+    assert_matches_runtime_loop(&design, &control, &["o", "p"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 0);
+}
+
+/// Part selects and indices computed from the iterator fold to constants as
+/// the loop peels, except an index below 0, which keeps its loop.
+#[test]
+fn iterator_selects_and_indices_computed_from_it_fold() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+        p: output logic<8>,
+        q: output logic<8>,
+    ) {
+        var arr: logic<8> [4];
+        var k  : logic<8>;
+        var j  : logic<8>;
+        var h  : logic<8>;
+        always_comb {
+            k = 0;
+            o = 0;
+            for i in 0..8 {
+                if k == 3 BREAK {
+                    break;
+                }
+                o[i * 2+:2] = a[i+:2];
+                k           = k + 1;
+            }
+        }
+        always_comb {
+            j = 0;
+            p = 0;
+            for i in 1..8 {
+                if j == 3 BREAK {
+                    break;
+                }
+                p[i * 2-:2] = a[i-:2];
+                j           = j + 1;
+            }
+        }
+        always_comb {
+            for x in 0..4 {
+                arr[x] = a + x;
+            }
+            h = 0;
+            q = 0;
+            for i in 0..4 {
+                if h == 2 BREAK {
+                    break;
+                }
+                q = q + arr[i - 1];
+                h = h + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o", "p", "q"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// An inner loop reusing the outer loop's iterator name: a read of `i` after
+/// the inner loop resolves to the inner iterator, so it reads what the
+/// runtime inner loop left there and that loop is not peeled. The second
+/// block's outer loop unrolls at conversion, leaving the inner loops at the
+/// top level with the same read after each.
+#[test]
+fn iterator_read_after_its_loop_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        p0: output logic<8>,
+        p1: output logic<8>,
+    ) {
+        always_comb {
+            o0 = a;
+            o1 = 0;
+            for i in 0..4 {
+                if i == 3 BREAK {
+                    break;
+                }
+                for i in 0..8 {
+                    if i == 5 BREAK {
+                        break;
+                    }
+                    o0 = o0 + i;
+                }
+                o1 = o1 + i;
+            }
+        }
+        always_comb {
+            p0 = a;
+            p1 = 0;
+            for i in 0..2 {
+                for i in 0..8 {
+                    if i == 5 BREAK {
+                        break;
+                    }
+                    p0 = p0 + i;
+                }
+                p1 = p1 + i;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o0", "o1", "p0", "p1"], |_| true);
+    assert_eq!(
+        runtime_loops(&design, "Top"),
+        runtime_loops(&control, "Top")
+    );
+}
+
+/// A loop that would flatten into 100000 copies stays a runtime loop, and
+/// deciding so costs no more than looking at its range.
+#[test]
+fn long_break_loop_stays_a_runtime_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var k: logic<32>;
+        always_comb {
+            k = 100000;
+            o = a;
+            for i in 0..200000 {
+                if i == k BREAK {
+                    break;
+                }
+                o = o + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    let start = std::time::Instant::now();
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+    eprintln!("analysis and peel: {:?}", start.elapsed());
+    let config = Config::default();
+    let mut sim = Simulator::new(analyze(&design, &config), None);
+    let mut reference = Simulator::new(analyze(&control, &config), None);
+    for x in [0u64, 0x5a] {
+        sim.set("a", Value::new(x, 8, false));
+        reference.set("a", Value::new(x, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        reference.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o"), reference.get("o"));
+        assert_eq!(
+            sim.get("o"),
+            Some(Value::new((x + 100000) & 0xff, 8, false))
+        );
+    }
+}
+
+/// A runtime loop whose range reads the iterator of a peeled one unrolls in
+/// each copy, and is dropped where the range is empty: peeling leaves no
+/// runtime loop.
+#[test]
+fn inner_loop_with_a_range_known_after_substitution_unrolls() {
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        o0: output logic<8>,
+    ) {
+        always_comb {
+            o0 = 0;
+            for i in 0..6 {
+                if i == 4 BREAK {
+                    break;
+                }
+                for j in 0..i {
+                    o0 = o0 + j + a;
+                }
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_eq!(runtime_loops(&control, "Top"), 2);
+    assert_matches_runtime_loop(&design, &control, &["o0"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 0);
+}
+
+/// An index reading a known local, not the iterator, stays dynamic in the
+/// copies, so on the path a data condition guards it reads out of range as
+/// the runtime loop does.
+#[test]
+fn index_on_a_known_local_stays_dynamic() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        y: output logic<8>,
+    ) {
+        var arr: logic<8> [8];
+        var k  : logic<8>;
+        always_comb {
+            for i in 0..8 {
+                arr[i] = i as 8 + 8'h10;
+            }
+            k = 2;
+            y = 0;
+            for _i in 0..8 {
+                if k == 5 BREAK {
+                    break;
+                }
+                if a[0] {
+                    y = y | arr[k + 5];
+                }
+                k = k + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["y"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 0);
+}
+
+/// A subexpression of the iterator folds at the width and signedness it is
+/// evaluated at, here above 64 bits and wider than the iterator, so no bit
+/// of the folded value is lost.
+#[test]
+fn folded_iterator_subexpression_keeps_its_evaluated_width() {
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<64>,
+        y1: output logic<64>,
+        y2: output logic<64>,
+    ) {
+        var p: logic<128>;
+        var q: logic<128>;
+        var s: signed logic<72>;
+        var n: logic<8>;
+        always_comb {
+            p = 0;
+            q = 0;
+            s = 0;
+            n = 0;
+            for i in 0..4 {
+                if n == 3 BREAK {
+                    break;
+                }
+                p = p + (i << 100);
+                q = q + ((i - 3) << 70);
+                s = s + (i - 3);
+                n = n + 1;
+            }
+            y0 = p[127:64];
+            y1 = q[127:64];
+            y2 = s[71:8];
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["y0", "y1", "y2"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 0);
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(&design, &config), None);
+        sim.set("a", Value::new(0, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // p = 3 << 100, q = -6 << 70 and s = -6, each at its own width.
+        let expected = [
+            ("y0", 3u64 << 36),
+            ("y1", 0xFFFF_FFFF_FFFF_FE80),
+            ("y2", u64::MAX),
+        ];
+        for (o, v) in expected {
+            assert_eq!(sim.get(o), Some(Value::new(v, 64, false)), "{o} {config:?}");
+        }
+    }
+}
+
+/// An inner range bound that is negative once the iterator is substituted
+/// is not iterated as the emitted `int` loop is, so the loop around it is not
+/// peeled. Only the IR is checked, because the runtime loop over such a range
+/// does not terminate.
+#[test]
+fn negative_range_bound_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        y: output logic<64>,
+    ) {
+        var n: logic<8>;
+        always_comb {
+            n = 0;
+            y = 0;
+            for i in 0..4 {
+                if n == 3 BREAK {
+                    break;
+                }
+                for j in (i - 2)..2 {
+                    y = y + a + 1;
+                }
+                for j in 0..(i - 1) {
+                    y = y + 1000;
+                }
+                n = n + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_eq!(runtime_loops(&control, "Top"), 3);
+    assert_eq!(runtime_loops(&design, "Top"), 3);
+}
+
+/// `$signed` and `$unsigned` write nothing, so a body using them peels, and
+/// each cast of the iterator extends as it does in the runtime loop.
+#[test]
+fn signed_cast_in_the_body_peels() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<16>,
+        t: output logic<16>,
+    ) {
+        var n: logic<8>;
+        var s: signed logic<16>;
+        always_comb {
+            n = 0;
+            o = 0;
+            s = 0;
+            for i in 0..6 {
+                if n == 3 BREAK {
+                    break;
+                }
+                o = o + $signed(a) + $unsigned(i) + $signed(i);
+                s = s + $signed(i - 2);
+                n = n + 1;
+            }
+            t = s;
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o", "t"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 0);
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(&design, &config), None);
+        sim.set("a", Value::new(5, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o"), Some(Value::new(21, 16, false)), "{config:?}");
+        assert_eq!(
+            sim.get("t"),
+            Some(Value::new(0xFFFD, 16, false)),
+            "{config:?}"
+        );
+    }
+}
+
+/// A read in an `initial` block that resolves to a loop's iterator, here
+/// through a module variable of the same name, keeps the loop.
+#[test]
+fn iterator_read_in_an_initial_block_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var i: logic<32>;
+        assign i = 7;
+        always_comb {
+            o = a;
+            for i in 0..4 {
+                if i == 3 BREAK {
+                    break;
+                }
+                o = o + i;
+            }
+        }
+        initial {
+            $display("%d", i);
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// The same through a function body.
+#[test]
+fn iterator_read_in_a_function_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+        z: output logic<32>,
+    ) {
+        var i: logic<32>;
+        assign i = 7;
+        always_comb {
+            o = a;
+            for i in 0..4 {
+                if i == 3 BREAK {
+                    break;
+                }
+                o = o + i;
+            }
+        }
+        function f () -> logic<32> {
+            return i + 1;
+        }
+        assign z = f();
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o", "z"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// A body whose copies would hold too many expression nodes keeps its loop,
+/// however few statements it has.
+#[test]
+fn a_large_body_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var n  : logic<8>;
+        var acc: logic<8>;
+        always_comb {
+            n   = 0;
+            acc = 0;
+            for _i in 0..200 {
+                if n == 200 BREAK {
+                    break;
+                }
+                acc = acc + ((a ^ 8'd0) * (n + 8'd0)) + ((a ^ 8'd1) * (n + 8'd1)) + ((a ^ 8'd2) * (n + 8'd2)) + ((a ^ 8'd3) * (n + 8'd3)) + ((a ^ 8'd4) * (n + 8'd4)) + ((a ^ 8'd5) * (n + 8'd5)) + ((a ^ 8'd6) * (n + 8'd6)) + ((a ^ 8'd7) * (n + 8'd7)) + ((a ^ 8'd8) * (n + 8'd8)) + ((a ^ 8'd9) * (n + 8'd9)) + ((a ^ 8'd10) * (n + 8'd10)) + ((a ^ 8'd11) * (n + 8'd11)) + ((a ^ 8'd12) * (n + 8'd12)) + ((a ^ 8'd13) * (n + 8'd13)) + ((a ^ 8'd14) * (n + 8'd14)) + ((a ^ 8'd15) * (n + 8'd15)) + ((a ^ 8'd16) * (n + 8'd16)) + ((a ^ 8'd17) * (n + 8'd17)) + ((a ^ 8'd18) * (n + 8'd18)) + ((a ^ 8'd19) * (n + 8'd19)) + ((a ^ 8'd20) * (n + 8'd20)) + ((a ^ 8'd21) * (n + 8'd21)) + ((a ^ 8'd22) * (n + 8'd22)) + ((a ^ 8'd23) * (n + 8'd23)) + ((a ^ 8'd24) * (n + 8'd24)) + ((a ^ 8'd25) * (n + 8'd25)) + ((a ^ 8'd26) * (n + 8'd26)) + ((a ^ 8'd27) * (n + 8'd27)) + ((a ^ 8'd28) * (n + 8'd28)) + ((a ^ 8'd29) * (n + 8'd29)) + ((a ^ 8'd30) * (n + 8'd30)) + ((a ^ 8'd31) * (n + 8'd31)) + ((a ^ 8'd32) * (n + 8'd32)) + ((a ^ 8'd33) * (n + 8'd33)) + ((a ^ 8'd34) * (n + 8'd34)) + ((a ^ 8'd35) * (n + 8'd35)) + ((a ^ 8'd36) * (n + 8'd36)) + ((a ^ 8'd37) * (n + 8'd37)) + ((a ^ 8'd38) * (n + 8'd38)) + ((a ^ 8'd39) * (n + 8'd39));
+                n   = n + 1;
+            }
+            o = acc;
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 1);
+}
+
+/// Identical instances share one peel of their module.
+#[test]
+fn identical_instances_share_one_peel() {
+    let code = r#"
+    module Child (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var n: logic<8>;
+        always_comb {
+            n = 0;
+            o = a;
+            for i in 0..8 {
+                if n == 3 {
+                    break;
+                }
+                o = o + i;
+                n = n + 1;
+            }
+        }
+    }
+    module Top (
+        a : input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        inst u0: Child (a, o: o0);
+        inst u1: Child (a, o: o1);
+        inst u2: Child (a, o: o2);
+    }
+    "#;
+
+    let ir = analyzer_ir(code);
+    let mut context = crate::ir::Context::default();
+    let _: crate::ir::ProtoModule =
+        crate::ir::Conv::conv(&mut context, find_module(&ir, "Top")).unwrap();
+    assert_eq!(context.peel_cache.len(), 1);
+    assert!(context.peel_cache.values().all(Option::is_some));
+    assert_eq!(runtime_loops(code, "Child"), 0);
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("a", Value::new(5, 8, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for o in ["o0", "o1", "o2"] {
+            assert_eq!(sim.get(o), Some(Value::new(8, 8, false)), "{o} {config:?}");
+        }
+    }
+}
+
+/// Iterator reads whose constant must keep the read's type and context, and
+/// conditions the analyzer's evaluator and the native backends could decide
+/// differently: each matches the runtime loop for every input.
+#[test]
+fn rewritten_reads_and_conditions_match_the_runtime_loop() {
+    let code = r#"
+    module Top #(
+        param Q: signed logic<4> = -3,
+        param R: signed logic<16> = -300,
+    ) (
+        a : input  logic<8>,
+        y0: output logic<64>,
+        y1: output logic<64>,
+        y2: output logic<48>,
+        y3: output logic<64>,
+        y4: output logic<64>,
+        y5: output logic<64>,
+    ) {
+        var n0 : logic<8>;
+        var n1 : logic<8>;
+        var n2 : logic<8>;
+        var n3 : logic<8>;
+        var n4 : logic<8>;
+        var n5 : logic<8>;
+        var t0 : logic<8>;
+        var t1 : signed logic<8>;
+        var t4 : logic<4>;
+        var t5 : logic<4>;
+        var arr: logic<8> [2, 3];
+        always_comb {
+            n0 = 0;
+            y0 = 0;
+            for i in 0..8 {
+                if n0 == 6 BREAK {
+                    break;
+                }
+                t0 = $signed(a[3:0]) + i[1:0];
+                y0 = (y0 << 8) | {56'd0, t0 as 8};
+                n0 = n0 + 1;
+            }
+        }
+        always_comb {
+            n1 = 0;
+            y1 = 0;
+            for i in 0..8 {
+                if n1 == 6 BREAK {
+                    break;
+                }
+                t1 = $signed((i + 6'd8) as 4) + 0;
+                y1 = (y1 << 8) | {56'd0, t1 as 8};
+                n1 = n1 + 1;
+            }
+        }
+        always_comb {
+            n2 = 0;
+            for k in 0..2 {
+                for j in 0..3 {
+                    arr[k][j] = 8'h11;
+                }
+            }
+            for i in 0..3 {
+                if n2 == 3 BREAK {
+                    break;
+                }
+                arr[a[0]][i] = a + 1;
+                n2 = n2 + 1;
+            }
+            y2 = {arr[0][0], arr[0][1], arr[0][2], arr[1][0], arr[1][1], arr[1][2]};
+        }
+        always_comb {
+            n3 = 0;
+            y3 = 0;
+            for i in 0..8 {
+                if n3 == 4 BREAK {
+                    break;
+                }
+                y3 = y3 * 3 + (if (({i, 64'd0}) as 72) ? a : 8'd2);
+                y3 = y3 + ((if {i[1:0], 64'd0} ? 8'd1 : 8'd2) << 40);
+                n3 = n3 + 1;
+            }
+        }
+        always_comb {
+            n4 = 0;
+            y4 = 0;
+            t4 = 0;
+            for i in 0..8 {
+                if n4 == 6 BREAK {
+                    break;
+                }
+                t4 = (i as i16) >: (if Q ? $signed(a[3:0]) : i[0]);
+                y4 = y4 * 33 + {60'd0, t4};
+                n4 = n4 + 1;
+            }
+        }
+        always_comb {
+            n5 = 0;
+            y5 = 0;
+            t5 = 0;
+            for _i in 0..8 {
+                t5 = (if 16'sh8001 ? $signed((8'hf0 <= -2) as 4) : R);
+                if (t5 == 1) && n5 >= 2 BREAK {
+                    break;
+                }
+                y5 = y5 * 33 + a + {60'd0, t5};
+                n5 = n5 + 1;
+            }
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(&design, &config), None);
+        let mut reference = Simulator::new(analyze(&control, &config), None);
+        for a in 0..256u64 {
+            sim.set("a", Value::new(a, 8, false));
+            reference.set("a", Value::new(a, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            reference.step(&Event::Clock(VarId::SYNTHETIC));
+            for o in ["y0", "y1", "y2", "y3", "y4", "y5"] {
+                assert_eq!(sim.get(o), reference.get(o), "{o} a={a} {config:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn dynamic_for_range_in_function() {
     let code = r#"
@@ -31809,4 +33394,50 @@ fn signed_wide_constant_for_bound_keeps_its_sign() {
     }
     "#;
     check_all_configs(code, &[], &[("y", Value::new(4, 8, false))]);
+}
+
+/// A select of the iterator by a variable is not a constant of the copy, so
+/// the loop stays.
+#[test]
+fn iterator_select_by_a_variable_keeps_the_loop() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<64>,
+        p: output logic<64>,
+    ) {
+        var n  : logic<8>;
+        var m  : logic<8>;
+        var acc: logic<64>;
+        var bcc: logic<64>;
+        always_comb {
+            n   = 0;
+            acc = 0;
+            for i in 0..8 {
+                if n == 7 BREAK {
+                    break;
+                }
+                acc = (acc << 1) | i[a[1:0]];
+                n   = n + 1;
+            }
+            o = acc;
+        }
+        always_comb {
+            m   = 0;
+            bcc = {56'd0, a};
+            for i in 0..8 {
+                if m == 7 BREAK {
+                    break;
+                }
+                bcc = (bcc << 1) ^ i[m[1:0]];
+                m   = m + 1;
+            }
+            p = bcc;
+        }
+    }
+    "#;
+
+    let (design, control) = peeled_and_control(code);
+    assert_matches_runtime_loop(&design, &control, &["o", "p"], |_| true);
+    assert_eq!(runtime_loops(&design, "Top"), 2);
 }
