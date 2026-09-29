@@ -2676,7 +2676,7 @@ impl ProtoExpression {
         };
 
         let width = expr_context.width;
-        let x_width = x.width();
+        let x_width = x.materialized_width();
         let (x_payload, x_mask_xz) = x.build_binary(context, builder)?;
         let is_x_ptr = returns_wide_pointer(x);
 
@@ -2776,17 +2776,26 @@ impl ProtoExpression {
 
         // Non-reduction unary ops with wide result
         let nb = calc_native_bytes(width);
-        let x_nb = calc_native_bytes(x_width);
-        let x_ptr = wide_operand_as_ptr(builder, is_x_ptr, x_width, x_payload, nb);
+        // A cast materializes at its own width. Extend it to the unary
+        // expression's propagated type before applying the operator.
+        let x_ptr = marshal_wide_operand(
+            context,
+            builder,
+            is_x_ptr,
+            x_payload,
+            x_width,
+            nb,
+            expr_context.signed,
+        );
 
         let payload = match op {
             Op::Add => {
-                // Identity: just copy
-                if x_nb == nb {
-                    x_ptr
-                } else {
-                    emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_ptr, nb)
-                }
+                // Extension fills the native words, including padding above
+                // the expression width. Mask a fresh copy before consumers
+                // such as concatenations can observe those bits.
+                let dst = emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_ptr, nb);
+                emit_wide_apply_mask(context, builder, dst, nb, width);
+                dst
             }
             Op::Sub => {
                 // Negate: ~x + 1
@@ -2804,10 +2813,23 @@ impl ProtoExpression {
 
         // 4-state handling for non-reduction ops
         if let Some(x_mask_xz) = x_mask_xz {
-            let x_mask_ptr = wide_operand_as_ptr(builder, is_x_ptr, x_width, x_mask_xz, nb);
+            let x_mask_ptr = marshal_wide_operand(
+                context,
+                builder,
+                is_x_ptr,
+                x_mask_xz,
+                x_width,
+                nb,
+                expr_context.signed,
+            );
 
             let mask_xz = match op {
-                Op::Add => x_mask_ptr,
+                Op::Add => {
+                    let dst =
+                        emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_mask_ptr, nb);
+                    emit_wide_apply_mask(context, builder, dst, nb, width);
+                    dst
+                }
                 Op::Sub | Op::BitNot => {
                     // If any X/Z, set result mask to all-ones for the width
                     let is_xz = emit_wide_is_nonzero(context, builder, x_mask_ptr, nb);

@@ -1022,7 +1022,7 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             x,
             expr_context,
             ..
-        } => emit_wide_unary(*op, x, expr_context.width, pre),
+        } => emit_wide_unary(*op, x, expr_context, pre),
         ProtoExpression::Ternary {
             cond,
             true_expr,
@@ -1690,23 +1690,24 @@ fn emit_wide_resize(
 }
 
 /// Wide unary non-reduction (`Add` identity / `Sub` negate / `BitNot`).
-/// Mirrors `build_binary_wide_unary` (expression.rs 1925-1955): negate/bnot
-/// mask after the op; identity is unmasked.
-fn emit_wide_unary(op: Op, x: &ProtoExpression, width: usize, pre: &mut String) -> Option<WideRef> {
+/// Extend the operand before the operation and mask the result width.
+fn emit_wide_unary(
+    op: Op,
+    x: &ProtoExpression,
+    expr_context: &ExpressionContext,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let width = expr_context.width;
     let nb = native_bytes(width);
     let nw = wide_words(nb);
-    let x_ref = emit_wide_operand(x, nb, pre)?;
+    let x_ref = emit_wide_operand_signed(x, nb, expr_context.signed, pre)?;
     match op {
-        Op::Add => Some(WideRef {
-            addr: x_ref.addr,
-            nb,
-            width,
-        }),
-        Op::Sub | Op::BitNot => {
-            let fname = if matches!(op, Op::Sub) {
-                "negate"
-            } else {
-                "bnot"
+        Op::Add | Op::Sub | Op::BitNot => {
+            let fname = match op {
+                Op::Add => "copy",
+                Op::Sub => "negate",
+                Op::BitNot => "bnot",
+                _ => unreachable!(),
             };
             let t = next_wide_tmp();
             pre.push_str(&format!(
@@ -1994,8 +1995,10 @@ fn emit_wide_cmp_binary(
     let signed = expr_context.binary_operand_signed(op, x.expr_context(), y.expr_context());
     let mut pre = String::new();
     let op_nb = native_bytes(expr_context.width.max(x.width()).max(y.width()));
-    let x_ref = emit_wide_operand(x, op_nb, &mut pre)?;
-    let y_ref = emit_wide_operand(y, op_nb, &mut pre)?;
+    // Equality also compares operands after extension to a common width
+    // (IEEE 1800-2023 11.4.5), even though its result is unsigned.
+    let x_ref = emit_wide_operand_signed(x, op_nb, signed, &mut pre)?;
+    let y_ref = emit_wide_operand_signed(y, op_nb, signed, &mut pre)?;
     let a = x_ref.addr;
     let b = y_ref.addr;
     let result = match op {

@@ -20017,6 +20017,147 @@ fn system_function_expression_context() {
 }
 
 #[test]
+fn size_cast_wide_unary_sign_extension() {
+    use num_bigint::{BigInt, BigUint};
+
+    for cast_width in [64usize, 65, 128, 129] {
+        for width in [192, 193] {
+            let code = format!(
+                r#"
+    module Top (
+        a: input signed logic<128>,
+        positive: output logic<{width}>,
+        negative: output logic<{width}>,
+        inverted: output logic<{width}>,
+        unsigned_positive: output logic<{width}>,
+        unsigned_negative: output logic<{width}>,
+        unsigned_inverted: output logic<{width}>,
+        padded_positive: output logic<{width}>,
+    ) {{
+        assign positive = +(a as {cast_width});
+        assign negative = -(a as {cast_width});
+        assign inverted = ~(a as {cast_width});
+        assign unsigned_positive = +(a as {cast_width}) | {width}'d0;
+        assign unsigned_negative = -(a as {cast_width}) | {width}'d0;
+        assign unsigned_inverted = ~(a as {cast_width}) | {width}'d0;
+        assign padded_positive = {{1'b0, +(a as {cast_width})}};
+    }}
+    "#
+            );
+            let modulus = BigInt::from(1u32) << width;
+            let cast_modulus = BigInt::from(1u32) << cast_width;
+            for config in Config::all() {
+                let ir = analyze(&code, &config);
+                let mut sim = Simulator::new(ir, None);
+                for a in [-1i128, -128, 0, 1, 1 << 64, i128::MIN, i128::MAX] {
+                    sim.set("a", Value::from_u128(a as u128, 0, 128, true));
+                    sim.step(&Event::Clock(VarId::SYNTHETIC));
+                    let signed = if cast_width < 128 {
+                        (a << (128 - cast_width)) >> (128 - cast_width)
+                    } else {
+                        a
+                    };
+                    let signed = BigInt::from(signed);
+                    let unsigned = if signed < BigInt::from(0u32) {
+                        &cast_modulus + &signed
+                    } else {
+                        signed.clone()
+                    };
+                    for (name, expected) in [
+                        ("positive", signed.clone()),
+                        ("negative", -&signed),
+                        ("inverted", !&signed),
+                        ("unsigned_positive", unsigned.clone()),
+                        ("unsigned_negative", -&unsigned),
+                        ("unsigned_inverted", !&unsigned),
+                        ("padded_positive", unsigned.clone()),
+                    ] {
+                        let bits: BigInt = ((expected % &modulus) + &modulus) % &modulus;
+                        let bits: BigUint = bits.to_biguint().unwrap();
+                        assert_eq!(
+                            sim.get(name).unwrap(),
+                            Value::new_biguint(bits, width, false),
+                            "{name}, a={a}, cast_width={cast_width}, width={width}, {config:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn size_cast_wide_equality_sign_extension() {
+    use num_bigint::BigUint;
+
+    for cast_width in [64usize, 65, 128, 129] {
+        let code = format!(
+            r#"
+    module Top (
+        a: input signed logic<128>,
+        b: input signed logic<192>,
+        eq: output logic,
+        ne: output logic,
+        wildcard_eq: output logic,
+        wildcard_ne: output logic,
+        reversed_eq: output logic,
+        reversed_ne: output logic,
+        unsigned_eq: output logic,
+        unsigned_ne: output logic,
+    ) {{
+        assign eq = (a as {cast_width}) == b;
+        assign ne = (a as {cast_width}) != b;
+        assign wildcard_eq = (a as {cast_width}) ==? b;
+        assign wildcard_ne = (a as {cast_width}) !=? b;
+        assign reversed_eq = b == (a as {cast_width});
+        assign reversed_ne = b != (a as {cast_width});
+        assign unsigned_eq = $unsigned(a as {cast_width}) == b;
+        assign unsigned_ne = $unsigned(a as {cast_width}) != b;
+    }}
+    "#
+        );
+        let cast_ones = (BigUint::from(1u32) << cast_width) - BigUint::from(1u32);
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            for (a, b) in [(-1i128, -1i128), (-2, -1), (0, 0), (1, 1), (-128, -128)] {
+                let b_bits = if b < 0 {
+                    (BigUint::from(1u32) << 192) - BigUint::from(b.unsigned_abs())
+                } else {
+                    BigUint::from(b as u128)
+                };
+                sim.set("a", Value::from_u128(a as u128, 0, 128, true));
+                sim.set("b", Value::new_biguint(b_bits, 192, true));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                for (name, expected) in [
+                    ("eq", a == b),
+                    ("ne", a != b),
+                    ("wildcard_eq", a == b),
+                    ("wildcard_ne", a != b),
+                    ("reversed_eq", a == b),
+                    ("reversed_ne", a != b),
+                    ("unsigned_eq", a >= 0 && a == b),
+                    ("unsigned_ne", a < 0 || a != b),
+                ] {
+                    assert_eq!(
+                        sim.get(name).unwrap(),
+                        Value::new(u64::from(expected), 1, false),
+                        "{name}, a={a}, b={b}, cast_width={cast_width}, {config:?}"
+                    );
+                }
+            }
+            // Equal bit patterns at different widths compare equal only
+            // in the unsigned case: the signed cast is still -1.
+            sim.set("a", Value::from_u128(u128::MAX, 0, 128, true));
+            sim.set("b", Value::new_biguint(cast_ones.clone(), 192, true));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("eq").unwrap(), Value::new(0, 1, false));
+            assert_eq!(sim.get("unsigned_eq").unwrap(), Value::new(1, 1, false));
+        }
+    }
+}
+
+#[test]
 fn size_cast_preserves_xz() {
     use num_bigint::BigUint;
 
@@ -20036,6 +20177,7 @@ fn size_cast_preserves_xz() {
         medium_widened: output logic<{width}>,
         wide_widened: output logic<{width}>,
         signed_wide: output logic<{width}>,
+        unary_identity: output logic<{width}>,
         masked: output logic<32>,
         concatenated: output logic<{width}>,
     ) {{
@@ -20048,6 +20190,7 @@ fn size_cast_preserves_xz() {
         assign medium_widened = if c ? (a as 96) : 96'd0;
         assign wide_widened = if c ? (a as 192) : 192'd0;
         assign signed_wide = a as 192;
+        assign unary_identity = +(a as 16);
         assign masked = (a as 16) | 32'd0;
         assign concatenated = {{a as 16}};
     }}
@@ -20105,6 +20248,7 @@ fn size_cast_preserves_xz() {
                     ("medium_widened", 96, false, false),
                     ("wide_widened", 192, false, false),
                     ("signed_wide", 192, true, false),
+                    ("unary_identity", 16, true, false),
                     ("masked", 16, false, true),
                     ("concatenated", 16, false, false),
                 ] {
