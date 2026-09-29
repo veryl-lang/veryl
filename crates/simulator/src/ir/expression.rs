@@ -1464,6 +1464,16 @@ impl ProtoExpression {
     /// clean branches).  Add/Sub/Mul/Shl/negation/ArithShiftR fall to the
     /// false branch.
     pub fn is_clean_to_width(&self, target_width: usize) -> bool {
+        let operand_clean = |operand: &Self, width: usize, signed: bool| {
+            // Extension past the destination is clean only if the sign bit
+            // (including its X/Z mask) is known zero before the operation.
+            let limit = if signed && width > target_width {
+                target_width.min(operand.materialized_width().saturating_sub(1))
+            } else {
+                target_width
+            };
+            operand.is_clean_to_width(limit)
+        };
         match self {
             ProtoExpression::HierVariable(_) => false,
             ProtoExpression::Variable {
@@ -1509,7 +1519,12 @@ impl ProtoExpression {
                 };
                 result_width <= target_width
             }
-            ProtoExpression::Unary { op, x, width, .. } => match op {
+            ProtoExpression::Unary {
+                op,
+                x,
+                width,
+                expr_context,
+            } => match op {
                 Op::BitAnd
                 | Op::BitNand
                 | Op::BitOr
@@ -1518,10 +1533,16 @@ impl ProtoExpression {
                 | Op::BitXor
                 | Op::BitXnor => target_width >= 1,
                 Op::BitNot => *width <= target_width,
-                Op::Add => x.is_clean_to_width(target_width),
+                Op::Add => operand_clean(x, expr_context.width, expr_context.signed),
                 _ => false,
             },
-            ProtoExpression::Binary { op, x, y, .. } => match op {
+            ProtoExpression::Binary {
+                op,
+                x,
+                y,
+                expr_context,
+                ..
+            } => match op {
                 Op::Eq
                 | Op::Ne
                 | Op::EqWildcard
@@ -1533,23 +1554,30 @@ impl ProtoExpression {
                 | Op::LogicAnd
                 | Op::LogicOr => target_width >= 1,
                 Op::BitAnd => {
-                    x.is_clean_to_width(target_width) || y.is_clean_to_width(target_width)
+                    operand_clean(x, expr_context.width, expr_context.signed)
+                        || operand_clean(y, expr_context.width, expr_context.signed)
                 }
                 Op::BitOr | Op::BitXor => {
-                    x.is_clean_to_width(target_width) && y.is_clean_to_width(target_width)
+                    operand_clean(x, expr_context.width, expr_context.signed)
+                        && operand_clean(y, expr_context.width, expr_context.signed)
                 }
                 // ~(x^y) sets every bit above the width even for clean
                 // operands, so binary XNOR is never clean.
-                Op::LogicShiftR => x.is_clean_to_width(target_width),
+                Op::LogicShiftR => operand_clean(x, expr_context.width, expr_context.signed),
                 _ => false,
             },
             ProtoExpression::Ternary {
                 true_expr,
                 false_expr,
+                width,
                 ..
             } => {
-                true_expr.is_clean_to_width(target_width)
-                    && false_expr.is_clean_to_width(target_width)
+                let signed = true_expr.expr_context().signed
+                    && false_expr.expr_context().signed
+                    && true_expr.width() > 0
+                    && false_expr.width() > 0;
+                operand_clean(true_expr, *width, signed)
+                    && operand_clean(false_expr, *width, signed)
             }
         }
     }

@@ -2897,6 +2897,19 @@ impl ProtoExpression {
             op_nb,
             signed,
         );
+        let shift_width = width.max(x_width);
+        let x_ptr = if (matches!(op, Op::LogicShiftR) || matches!(op, Op::ArithShiftR) && !signed)
+            && shift_width < op_nb * 8
+        {
+            // Sign extension fills the native buffer, but logical right
+            // shifts must zero-fill from the expression's logical width.
+            // Copy before masking because x_ptr can alias variable storage.
+            let dst = emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_ptr, op_nb);
+            emit_wide_apply_mask(context, builder, dst, op_nb, shift_width);
+            dst
+        } else {
+            x_ptr
+        };
         let y_ptr = marshal_wide_operand(
             context,
             builder,
@@ -3192,6 +3205,7 @@ impl ProtoExpression {
                 y_is_ptr: returns_wide_pointer(y),
                 width,
                 op_nb,
+                signed,
             },
         );
 
@@ -3242,18 +3256,21 @@ impl ProtoExpression {
             y_is_ptr,
             width,
             op_nb,
+            signed,
         } = *operands;
         if !context.use_4state {
             return None;
         }
-        // The mask follows the payload's pointer-vs-scalar (see WideOperandPair).
-        let x_mask_ptr =
-            x_mask_xz.map(|m| wide_operand_as_ptr(builder, x_is_ptr, x_width, m, op_nb));
-        let y_mask_ptr =
-            y_mask_xz.map(|m| wide_operand_as_ptr(builder, y_is_ptr, y_width, m, op_nb));
-
         match op {
             Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                // X/Z sign bits extend exactly like payload sign bits. Use
+                // the same widths and propagated signedness for both.
+                let x_mask_ptr = x_mask_xz.map(|m| {
+                    marshal_wide_operand(context, builder, x_is_ptr, m, x_width, op_nb, signed)
+                });
+                let y_mask_ptr = y_mask_xz.map(|m| {
+                    marshal_wide_operand(context, builder, y_is_ptr, m, y_width, op_nb, signed)
+                });
                 // For bitwise ops with 4-state, compute mask using helper calls
                 let (x_m, y_m) = match (x_mask_ptr, y_mask_ptr) {
                     (Some(x), Some(y)) => (x, y),
@@ -3391,6 +3408,7 @@ impl ProtoExpression {
                     }
                     _ => unreachable!(),
                 };
+                emit_wide_apply_mask(context, builder, result_mask, op_nb, width);
                 Some(result_mask)
             }
             Op::Add

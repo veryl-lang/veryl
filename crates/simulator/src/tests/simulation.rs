@@ -20016,12 +20016,58 @@ fn system_function_expression_context() {
     }
 }
 
+fn assert_aot_comb_executed(sim: &Simulator, config: &Config) {
+    if config.aot_c {
+        use std::sync::atomic::Ordering::Relaxed;
+
+        // `cc --version` can succeed even when the runtime cannot prepare
+        // or load a shared library. Probe a fixed source independently of
+        // the emitter so an emission regression still fails the assertions.
+        static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !AVAILABLE.get_or_init(|| {
+            if !crate::component::loader::native_loading_supported() {
+                return false;
+            }
+            let source = r#"
+                #include <stdint.h>
+                __attribute__((visibility("default")))
+                void veryl_aot_eval(uint8_t *ff, uint8_t *comb, uint64_t *log, intptr_t delta) {
+                    (void)ff; (void)comb; (void)log; (void)delta;
+                }
+            "#;
+            match crate::backend::aot_c::emit::compile_source(source) {
+                Ok(_) => true,
+                Err(e)
+                    if e.starts_with("cache dir:")
+                        || e.starts_with("dlopen")
+                        || e.starts_with("dlsym") =>
+                {
+                    eprintln!("AOT-C execution unavailable; checking fallback results: {e}");
+                    false
+                }
+                Err(e) => panic!("AOT-C execution probe failed: {e}"),
+            }
+        }) {
+            return;
+        }
+        assert!(
+            sim.ir.whole_comb_dispatch[0].load(Relaxed) > 0,
+            "C did not execute"
+        );
+        assert_eq!(
+            sim.ir.whole_comb_dispatch[1].load(Relaxed),
+            0,
+            "C fell back"
+        );
+    }
+}
+
 #[test]
-fn size_cast_wide_unary_sign_extension() {
+fn size_cast_unary_sign_extension() {
     use num_bigint::{BigInt, BigUint};
 
     for cast_width in [64usize, 65, 128, 129] {
-        for width in [192, 193] {
+        for width in [32, 64, 65, 96, 128, 192, 193] {
             let code = format!(
                 r#"
     module Top (
@@ -20052,6 +20098,7 @@ fn size_cast_wide_unary_sign_extension() {
                 for a in [-1i128, -128, 0, 1, 1 << 64, i128::MIN, i128::MAX] {
                     sim.set("a", Value::from_u128(a as u128, 0, 128, true));
                     sim.step(&Event::Clock(VarId::SYNTHETIC));
+                    assert_aot_comb_executed(&sim, &config);
                     let signed = if cast_width < 128 {
                         (a << (128 - cast_width)) >> (128 - cast_width)
                     } else {
@@ -20078,6 +20125,195 @@ fn size_cast_wide_unary_sign_extension() {
                             sim.get(name).unwrap(),
                             Value::new_biguint(bits, width, false),
                             "{name}, a={a}, cast_width={cast_width}, width={width}, {config:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn size_cast_scalar_unary_sign_extension() {
+    let code = r#"
+    module Top (
+        a: input signed logic<128>,
+        negative: output logic<96>,
+        inverted: output logic<96>,
+    ) {
+        assign negative = -(a as 65);
+        assign inverted = ~(a as 65);
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::from_u128(u128::MAX, 0, 128, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_aot_comb_executed(&sim, &config);
+        assert_eq!(
+            sim.get("negative").unwrap(),
+            Value::from_u128(1, 0, 96, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("inverted").unwrap(),
+            Value::from_u128(0, 0, 96, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn size_cast_scalar_unary_without_unix_cache_env() {
+    // Windows runners have neither variable. Use a child process so other
+    // tests can keep compiling C modules concurrently with their own env.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::simulation::size_cast_scalar_unary_sign_extension",
+        ])
+        .env_remove("HOME")
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("VERYL_AOT_CACHE_DIR")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn size_cast_bitwise_sign_extension() {
+    use num_bigint::BigInt;
+
+    for cast_width in [32usize, 64, 65, 96] {
+        for width in [64usize, 96, 128, 192] {
+            if cast_width > width {
+                continue;
+            }
+            let code = format!(
+                r#"
+    module Top (
+        a: input signed logic<128>,
+        band: output logic<{width}>,
+        bor: output logic<{width}>,
+        bxor: output logic<{width}>,
+        bxnor: output logic<{width}>,
+        reversed: output logic<{width}>,
+        unsigned_or: output logic<{width}>,
+        unsigned_xnor: output logic<{width}>,
+    ) {{
+        assign band = (a as {cast_width}) & -{width}'sd1;
+        assign bor = (a as {cast_width}) | {width}'sd0;
+        assign bxor = (a as {cast_width}) ^ {width}'sd0;
+        assign bxnor = (a as {cast_width}) ~^ {width}'sd0;
+        assign reversed = {width}'sd0 | (a as {cast_width});
+        assign unsigned_or = (a as {cast_width}) | {width}'d0;
+        assign unsigned_xnor = (a as {cast_width}) ~^ {width}'d0;
+    }}
+    "#
+            );
+            let modulus = BigInt::from(1u32) << width;
+            let cast_modulus = BigInt::from(1u32) << cast_width;
+            for config in Config::all() {
+                let ir = analyze(&code, &config);
+                let mut sim = Simulator::new(ir, None);
+                for a in [-128i128, -1, 0, 1, 127] {
+                    sim.set("a", Value::from_u128(a as u128, 0, 128, true));
+                    sim.step(&Event::Clock(VarId::SYNTHETIC));
+                    assert_aot_comb_executed(&sim, &config);
+                    let signed = BigInt::from(a);
+                    let unsigned = if a < 0 {
+                        &cast_modulus + &signed
+                    } else {
+                        signed.clone()
+                    };
+                    for (name, expected) in [
+                        ("band", signed.clone()),
+                        ("bor", signed.clone()),
+                        ("bxor", signed.clone()),
+                        ("bxnor", !&signed),
+                        ("reversed", signed.clone()),
+                        ("unsigned_or", unsigned.clone()),
+                        ("unsigned_xnor", !&unsigned),
+                    ] {
+                        let bits: BigInt = ((expected % &modulus) + &modulus) % &modulus;
+                        assert_eq!(
+                            sim.get(name).unwrap(),
+                            Value::new_biguint(bits.to_biguint().unwrap(), width, false),
+                            "{name}, a={a}, cast_width={cast_width}, width={width}, {config:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn size_cast_shift_sign_extension() {
+    use num_bigint::{BigInt, BigUint};
+
+    for width in [192usize, 193, 256] {
+        let code = format!(
+            r#"
+    module Top (
+        a: input signed logic<128>,
+        n: input logic<32>,
+        shl: output logic<{width}>,
+        ashl: output logic<{width}>,
+        shr: output logic<{width}>,
+        shr_constant: output logic<{width}>,
+        ashr: output logic<{width}>,
+        unsigned_shl: output logic<{width}>,
+        unsigned_shr: output logic<{width}>,
+        unsigned_ashr: output logic<{width}>,
+    ) {{
+        assign shl = (a as 65) << n;
+        assign ashl = (a as 65) <<< n;
+        assign shr = (a as 65) >> n;
+        assign shr_constant = (a as 65) >> 1;
+        assign ashr = (a as 65) >>> n;
+        assign unsigned_shl = ((a as 65) << n) | {width}'d0;
+        assign unsigned_shr = ((a as 65) >> n) | {width}'d0;
+        assign unsigned_ashr = ((a as 65) >>> n) | {width}'d0;
+    }}
+    "#
+        );
+        let modulus = BigInt::from(1u32) << width;
+        let mask = (BigUint::from(1u32) << width) - BigUint::from(1u32);
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            let mut sim = Simulator::new(ir, None);
+            for a in [-128i128, -1, 0, 1] {
+                let signed = BigInt::from(a);
+                let bits: BigInt = (&signed + &modulus) % &modulus;
+                let bits = bits.to_biguint().unwrap();
+                let unsigned = BigUint::from(if a < 0 { (1i128 << 65) + a } else { a } as u128);
+                sim.set("a", Value::from_u128(a as u128, 0, 128, true));
+                for n in [0usize, 1, 64, 65, 95, 96, 127, 128, 191, 192, 193, 255, 256] {
+                    sim.set("n", Value::new(n as u64, 32, false));
+                    sim.step(&Event::Clock(VarId::SYNTHETIC));
+                    assert_aot_comb_executed(&sim, &config);
+                    let arith: BigInt = ((&signed >> n) + &modulus) % &modulus;
+                    for (name, expected) in [
+                        ("shl", (&bits << n) & &mask),
+                        ("ashl", (&bits << n) & &mask),
+                        ("shr", &bits >> n),
+                        ("shr_constant", &bits >> 1usize),
+                        ("ashr", arith.to_biguint().unwrap()),
+                        ("unsigned_shl", (&unsigned << n) & &mask),
+                        ("unsigned_shr", &unsigned >> n),
+                        ("unsigned_ashr", &unsigned >> n),
+                    ] {
+                        assert_eq!(
+                            sim.get(name).unwrap(),
+                            Value::new_biguint(expected, width, false),
+                            "{name}, a={a}, n={n}, width={width}, {config:?}"
                         );
                     }
                 }
@@ -20153,6 +20389,230 @@ fn size_cast_wide_equality_sign_extension() {
             sim.step(&Event::Clock(VarId::SYNTHETIC));
             assert_eq!(sim.get("eq").unwrap(), Value::new(0, 1, false));
             assert_eq!(sim.get("unsigned_eq").unwrap(), Value::new(1, 1, false));
+        }
+    }
+}
+
+#[test]
+fn size_cast_bitand_store_masks_sign_extension() {
+    for (cast_width, width) in [(64, 96), (8, 33), (32, 63), (64, 65), (65, 96), (96, 127)] {
+        let code = format!(
+            r#"
+    module Top (
+        a: input signed logic<128>,
+        b: input signed logic<128>,
+        eq: output logic,
+    ) {{
+        var tmp: logic<{width}>;
+        assign tmp = (a as {cast_width}) & b;
+        assign eq = tmp == '1;
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let ir = analyze(&code, &config);
+            if config.use_jit && !config.aot_c {
+                let (total, compiled, _) = ir.comb_stmt_count();
+                assert!(total > 0 && total == compiled, "JIT fallback: {config:?}");
+            }
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::from_u128(u128::MAX, 0, 128, true));
+            sim.set("b", Value::from_u128(u128::MAX, 0, 128, true));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_aot_comb_executed(&sim, &config);
+            assert_eq!(
+                sim.get("eq").unwrap(),
+                Value::new(1, 1, false),
+                "cast_width={cast_width}, width={width}, {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn size_cast_nested_operations_mask_sign_extension() {
+    for expr in [
+        "+(a as 64)",
+        "(a as 64) & (a as 64)",
+        "(a as 64) | 64'sd0",
+        "(a as 64) ^ 64'sd0",
+        "(a as 64) >> 1",
+        "if c ? (a as 64) : (a as 32)",
+    ] {
+        let code = format!(
+            r#"
+    module Top (
+        a: input signed logic<128>,
+        b: input signed logic<128>,
+        c: input logic,
+        eq: output logic,
+        reversed_eq: output logic,
+    ) {{
+        var tmp: logic<96>;
+        var reversed: logic<96>;
+        assign tmp = ({expr}) & b;
+        assign reversed = b & ({expr});
+        assign eq = tmp == '1;
+        assign reversed_eq = reversed == '1;
+    }}
+    "#
+        );
+        // This checks the Cranelift store's mask-elision predicate. Keep
+        // the C coverage separate: its signed 128-bit shifts fall back.
+        for config in Config::all().into_iter().filter(|c| !c.aot_c) {
+            let ir = analyze(&code, &config);
+            if config.use_jit {
+                let (total, compiled, _) = ir.comb_stmt_count();
+                assert!(total > 0 && total == compiled, "JIT fallback: {config:?}");
+            }
+            let mut sim = Simulator::new(ir, None);
+            sim.set("a", Value::from_u128(u128::MAX, 0, 128, true));
+            sim.set("b", Value::from_u128(u128::MAX, 0, 128, true));
+            for c in [0, 1] {
+                sim.set("c", Value::new(c, 1, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                for name in ["eq", "reversed_eq"] {
+                    assert_eq!(
+                        sim.get(name).unwrap(),
+                        Value::new(1, 1, false),
+                        "{expr}, {name}, c={c}, {config:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn size_cast_sign_extends_unknown_bits() {
+    let code = r#"
+    module Top (
+        a: input signed logic<16>,
+        o: output logic<192>,
+    ) {
+        assign o = (a as 8) | 192'sd0;
+    }
+    "#;
+    for config in Config::all().into_iter().filter(|c| c.use_4state) {
+        let ir = analyze(code, &config);
+        if config.use_jit {
+            let (total, compiled, _) = ir.comb_stmt_count();
+            assert!(total > 0 && total == compiled, "JIT fallback: {config:?}");
+        }
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new_x(16, true));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new_x(192, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn size_cast_wide_bitwise_extends_xz_mask() {
+    use num_bigint::BigUint;
+
+    for cast_width in [8usize, 64, 65, 128, 129] {
+        let source_width = cast_width + 8;
+        for width in [192, 193] {
+            let padded_width = width + 1;
+            let code = format!(
+                r#"
+    module Top (
+        a: input signed logic<{source_width}>,
+        b: input signed logic<{width}>,
+        band: output logic<{width}>,
+        bor: output logic<{width}>,
+        bxor: output logic<{width}>,
+        bxnor: output logic<{width}>,
+        reversed_and: output logic<{width}>,
+        reversed_or: output logic<{width}>,
+        reversed_xor: output logic<{width}>,
+        reversed_xnor: output logic<{width}>,
+        unsigned_or: output logic<{width}>,
+        unsigned_reversed: output logic<{width}>,
+        padded: output logic<{padded_width}>,
+    ) {{
+        assign band = (a as {cast_width}) & b;
+        assign bor = (a as {cast_width}) | b;
+        assign bxor = (a as {cast_width}) ^ b;
+        assign bxnor = (a as {cast_width}) ~^ b;
+        assign reversed_and = b & (a as {cast_width});
+        assign reversed_or = b | (a as {cast_width});
+        assign reversed_xor = b ^ (a as {cast_width});
+        assign reversed_xnor = b ~^ (a as {cast_width});
+        assign unsigned_or = (a as {cast_width}) | $unsigned(b);
+        assign unsigned_reversed = $unsigned(b) | (a as {cast_width});
+        assign padded = {{1'b0, (a as {cast_width}) | b}};
+    }}
+    "#
+            );
+            let zero = BigUint::from(0u32);
+            let one = BigUint::from(1u32);
+            let source_mask = (&one << source_width) - &one;
+            let cast_mask = (&one << cast_width) - &one;
+            let result_mask = (&one << width) - &one;
+            let sign_bit = &one << (cast_width - 1);
+            for config in Config::all().into_iter().filter(|c| c.use_4state) {
+                let ir = analyze(&code, &config);
+                if config.use_jit {
+                    let (total, compiled, _) = ir.comb_stmt_count();
+                    assert!(total > 0 && total == compiled, "JIT fallback: {config:?}");
+                }
+                let mut sim = Simulator::new(ir, None);
+                for (payload, mask) in [
+                    (zero.clone(), source_mask.clone()),        // All X
+                    (source_mask.clone(), source_mask.clone()), // All Z
+                    (zero.clone(), sign_bit.clone()),           // X sign bit
+                    (sign_bit.clone(), sign_bit.clone()),       // Z sign bit
+                    (sign_bit.clone(), one.clone()),            // Known negative, low X
+                    (zero.clone(), &one << cast_width),         // Discarded X
+                ] {
+                    let mut a = Value::new_biguint(payload, source_width, true);
+                    match &mut a {
+                        Value::U64(v) => {
+                            v.mask_xz = mask.to_u64_digits().first().copied().unwrap_or(0)
+                        }
+                        Value::BigUint(v) => *v.mask_xz = mask.clone(),
+                    }
+                    sim.set("a", a);
+                    let unsigned_mask = &mask & &cast_mask;
+                    let signed_mask = if mask.bit((cast_width - 1) as u64) {
+                        &unsigned_mask | (&result_mask ^ &cast_mask)
+                    } else {
+                        unsigned_mask.clone()
+                    };
+                    for b_ones in [false, true] {
+                        let b = if b_ones { &result_mask } else { &zero };
+                        sim.set("b", Value::new_biguint(b.clone(), width, true));
+                        sim.step(&Event::Clock(VarId::SYNTHETIC));
+                        for (name, expected) in [
+                            ("band", if b_ones { &signed_mask } else { &zero }),
+                            ("bor", if b_ones { &zero } else { &signed_mask }),
+                            ("bxor", &signed_mask),
+                            ("bxnor", &signed_mask),
+                            ("reversed_and", if b_ones { &signed_mask } else { &zero }),
+                            ("reversed_or", if b_ones { &zero } else { &signed_mask }),
+                            ("reversed_xor", &signed_mask),
+                            ("reversed_xnor", &signed_mask),
+                            ("padded", if b_ones { &zero } else { &signed_mask }),
+                            ("unsigned_or", if b_ones { &zero } else { &unsigned_mask }),
+                            (
+                                "unsigned_reversed",
+                                if b_ones { &zero } else { &unsigned_mask },
+                            ),
+                        ] {
+                            assert_eq!(
+                                sim.get(name).unwrap().mask_xz().as_ref(),
+                                expected,
+                                "{name}, mask={mask:x}, b_ones={b_ones}, cast_width={cast_width}, width={width}, {config:?}"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }
