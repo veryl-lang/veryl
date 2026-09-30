@@ -1,0 +1,6 @@
+module Child(o: output logic<2>) {
+    assign o = 2'b10;
+}
+module Top(index: input logic, bits: output logic<2>, tail: output logic) {
+    inst u: Child(o: {bits[index], tail});
+}
