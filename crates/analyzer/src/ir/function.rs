@@ -678,6 +678,12 @@ impl Arguments {
                                 &mut expr,
                             )?;
                         }
+                        // A function input is assignment-like. Propagate the
+                        // formal's packed width through the actual expression
+                        // before it can be folded, just as an assignment does.
+                        // Otherwise `f(2'b11 + 2'b01)` evaluates the addition
+                        // at 2 bits even when `f` takes a wider argument.
+                        expr.eval_comptime(context, arg_type.total_width());
                         if arg_type.is_clock() || arg_type.is_reset() {
                             let expr_comptime = expr.eval_comptime(context, None);
                             let expr_token = expr_comptime.token;
@@ -700,6 +706,7 @@ impl Arguments {
                     // `inout` is copy-in / copy-out: the actual is read on entry
                     // and written back on return.
                     Direction::Inout => {
+                        expr.eval_comptime(context, arg.comptime.r#type.total_width());
                         inputs.push((path.clone(), expr));
                         let dst = dst
                             .into_iter()
