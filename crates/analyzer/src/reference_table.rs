@@ -618,7 +618,9 @@ impl ReferenceTable {
             } else {
                 target_namespace
             };
-            path.append_namespace_path(ref_namespace, &target.namespace);
+            if !target.is_global_function() {
+                path.append_namespace_path(ref_namespace, &target.namespace);
+            }
 
             if let Ok(path_symbol) = symbol_table::resolve((&path.generic_path(), target_namespace))
             {
@@ -686,7 +688,9 @@ impl ReferenceTable {
             let mut maps = vec![map];
             path.apply_map(&maps);
             path.unalias(None);
-            path.append_namespace_path(&namespace, &symbol.namespace);
+            if !symbol.is_global_function() {
+                path.append_namespace_path(&namespace, &symbol.namespace);
+            }
 
             Self::insert_generic_instance(
                 &path,
