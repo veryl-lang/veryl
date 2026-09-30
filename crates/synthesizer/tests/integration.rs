@@ -4334,6 +4334,78 @@ fn eval_net(
     v
 }
 
+#[test]
+fn relational_comparison_uses_operand_signedness() {
+    for (a_signed, b_signed) in [(true, true), (true, false), (false, true), (false, false)] {
+        let a_type = if a_signed { "signed " } else { "" };
+        let b_type = if b_signed { "signed " } else { "" };
+        let code = format!(
+            r#"
+        module Top (
+            a: input {a_type}logic<4>,
+            b: input {b_type}logic<4>,
+            lt: output logic,
+            le: output logic,
+            gt: output logic,
+            ge: output logic,
+            widened: output logic<8>,
+        ) {{
+            assign lt = a <: b;
+            assign le = a <= b;
+            assign gt = a >: b;
+            assign ge = a >= b;
+            assign widened = (a <: b) as 1;
+        }}
+        "#
+        );
+        let (ir, top) = analyze(&code, "Top");
+        let gate = build_gate_ir(&ir, top).expect("gate ir").module;
+        let port = |name: &str| {
+            &gate
+                .ports
+                .iter()
+                .find(|p| p.name.to_string() == name)
+                .unwrap()
+                .nets
+        };
+        for a in 0..16u32 {
+            for b in 0..16u32 {
+                let mut inputs = std::collections::HashMap::new();
+                for (name, value) in [("a", a), ("b", b)] {
+                    for (i, &net) in port(name).iter().enumerate() {
+                        inputs.insert(net, (value >> i) & 1 != 0);
+                    }
+                }
+                let value = |bits: u32| {
+                    if a_signed && b_signed && bits >= 8 {
+                        bits as i32 - 16
+                    } else {
+                        bits as i32
+                    }
+                };
+                let (a_value, b_value) = (value(a), value(b));
+                let mut memo = std::collections::HashMap::new();
+                for (name, expected) in [
+                    ("lt", a_value < b_value),
+                    ("le", a_value <= b_value),
+                    ("gt", a_value > b_value),
+                    ("ge", a_value >= b_value),
+                    ("widened", a_value < b_value),
+                ] {
+                    let actual = port(name).iter().enumerate().fold(0u32, |acc, (i, &net)| {
+                        acc | ((eval_net(&gate, net, &inputs, &mut memo) as u32) << i)
+                    });
+                    assert_eq!(
+                        actual,
+                        u32::from(expected),
+                        "{name}: a={a}, b={b}, a_signed={a_signed}, b_signed={b_signed}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// The depth restructuring rewrites a priority encoder wholesale (ripple →
 /// Sklansky prefix network); verify the final netlist, through the full
 /// pipeline including fusion, against a golden model for every input.

@@ -186,7 +186,7 @@ fn expr_nodes_capped(root: &ProtoExpression, cap: usize) -> usize {
                 dynamic_select: Some(d),
                 ..
             } => stack.push(&d.index_expr),
-            ProtoExpression::Unary { x, .. } => stack.push(x),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => stack.push(x),
             ProtoExpression::Binary { x, y, .. } => {
                 stack.push(x);
                 stack.push(y);
@@ -1230,6 +1230,7 @@ fn sel_width(e: &ProtoExpression) -> Option<usize> {
         PE::Variable { width, .. }
         | PE::Value { width, .. }
         | PE::Unary { width, .. }
+        | PE::Resize { width, .. }
         | PE::Binary { width, .. }
         | PE::Concatenation { width, .. }
         | PE::Ternary { width, .. }
@@ -1560,7 +1561,7 @@ fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &IMap) -> Option<(
             Some(())
         }
         PE::Value { .. } | PE::HierVariable(_) => Some(()),
-        PE::Unary { x, .. } => replace_dst_reads(x, dst, base),
+        PE::Unary { x, .. } | PE::Resize { x, .. } => replace_dst_reads(x, dst, base),
         PE::Binary { x, y, .. } => {
             replace_dst_reads(x, dst, base)?;
             replace_dst_reads(y, dst, base)

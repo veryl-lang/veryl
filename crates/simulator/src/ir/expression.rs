@@ -6,17 +6,10 @@ use crate::ir::variable::{
 };
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
-use num_bigint::BigUint;
-use num_traits::One;
-use std::cmp::Ordering;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
-
-/// Recursion cap for `ProtoExpression::unmasked_bits`: running out costs a
-/// mask that may not have been needed, nothing more.
-const UNMASKED_BITS_DEPTH: usize = 16;
 
 /// Value an out-of-range dynamic index reads.
 ///
@@ -48,6 +41,26 @@ pub fn index_may_exceed(index_width: usize, num_elements: usize) -> bool {
 pub struct ExpressionContext {
     pub width: usize,
     pub signed: bool,
+}
+
+impl ExpressionContext {
+    /// Signedness used to evaluate a binary operation. Comparison results
+    /// remain unsigned, but their operands may need signed interpretation.
+    pub(crate) fn binary_operand_signed(&self, op: Op, x: &Self, y: &Self) -> bool {
+        match op {
+            Op::Div
+            | Op::Rem
+            | Op::Greater
+            | Op::GreaterEq
+            | Op::Less
+            | Op::LessEq
+            | Op::Eq
+            | Op::Ne
+            | Op::EqWildcard
+            | Op::NeWildcard => x.signed && y.signed,
+            _ => self.signed,
+        }
+    }
 }
 
 impl From<&air::ExpressionContext> for ExpressionContext {
@@ -82,7 +95,13 @@ pub enum Expression {
         x: Box<Expression>,
         op: Op,
         y: Box<Expression>,
-        expr_context: ExpressionContext,
+        operand_context: ExpressionContext,
+    },
+    Resize {
+        x: Box<Expression>,
+        width: usize,
+        sign_extend: bool,
+        signed: bool,
     },
     Concatenation {
         elements: Vec<(Box<Expression>, usize, usize)>, // (expr, repeat, elem_width)
@@ -168,11 +187,30 @@ impl Expression {
                 x,
                 op,
                 y,
-                expr_context,
+                operand_context,
             } => {
                 let x = x.eval(mask_cache);
                 let y = y.eval(mask_cache);
-                op.eval_value_binary(&x, &y, expr_context.width, expr_context.signed, mask_cache)
+                op.eval_value_binary(
+                    &x,
+                    &y,
+                    operand_context.width,
+                    operand_context.signed,
+                    mask_cache,
+                )
+            }
+            Expression::Resize {
+                x,
+                width,
+                sign_extend,
+                signed,
+            } => {
+                let mut value = x.eval(mask_cache);
+                value.set_signed(*sign_extend);
+                let mut value = value.expand(*width, *sign_extend).into_owned();
+                value.trunc(*width);
+                value.set_signed(*signed);
+                value
             }
             Expression::Concatenation { elements, signed } => {
                 let mut ret = Value::new(0, 0, false);
@@ -280,7 +318,7 @@ impl Expression {
                 }
             }
             Expression::Value { .. } => (),
-            Expression::Unary { x, .. } => {
+            Expression::Unary { x, .. } | Expression::Resize { x, .. } => {
                 x.gather_variable(inputs, outputs);
             }
             Expression::Binary { x, y, .. } => {
@@ -340,7 +378,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets(inputs),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_variable_offsets(inputs)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_variable_offsets(inputs);
                 y.gather_variable_offsets(inputs);
@@ -420,7 +460,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_reads_expanded_ranged(out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_reads_expanded_ranged(out)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_reads_expanded_ranged(out);
                 y.gather_reads_expanded_ranged(out);
@@ -641,7 +683,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_reads_with_ranges(out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_reads_with_ranges(out)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_reads_with_ranges(out);
                 y.gather_reads_with_ranges(out);
@@ -718,7 +762,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_variable_offsets_expanded(fold, inputs),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_variable_offsets_expanded(fold, inputs)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_variable_offsets_expanded(fold, inputs);
                 y.gather_variable_offsets_expanded(fold, inputs);
@@ -808,7 +854,9 @@ impl ProtoExpression {
                     dyn_sel.index_expr.collect_big_arrays(fold);
                 }
             }
-            ProtoExpression::Unary { x, .. } => x.collect_big_arrays(fold),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.collect_big_arrays(fold)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.collect_big_arrays(fold);
                 y.collect_big_arrays(fold);
@@ -863,7 +911,9 @@ impl ProtoExpression {
                 }
             }
             ProtoExpression::Value { .. } => (),
-            ProtoExpression::Unary { x, .. } => x.gather_dynamic_read_ranges(ranges),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.gather_dynamic_read_ranges(ranges)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.gather_dynamic_read_ranges(ranges);
                 y.gather_dynamic_read_ranges(ranges);
@@ -936,6 +986,14 @@ const READ_EXPAND_CAP_BYTES: usize = (1 << 20) * 8;
 
 #[derive(Clone, Debug, Hash)]
 pub enum ProtoExpression {
+    /// Resize the bit pattern without interpreting X/Z as arithmetic operands.
+    /// `sign_extend` controls extension from x; expr_context describes the result.
+    Resize {
+        x: Box<ProtoExpression>,
+        width: usize,
+        sign_extend: bool,
+        expr_context: ExpressionContext,
+    },
     Variable {
         var_offset: VarOffset,
         select: Option<(usize, usize)>,
@@ -965,6 +1023,8 @@ pub enum ProtoExpression {
         op: Op,
         y: Box<ProtoExpression>,
         width: usize,
+        // Result context exposed to parent expressions. Operand signedness
+        // is derived separately when evaluating the operation.
         expr_context: ExpressionContext,
     },
     Concatenation {
@@ -1068,7 +1128,7 @@ impl ProtoExpression {
                     dyn_sel.index_expr.adjust_offsets(ff_delta, comb_delta);
                 }
             }
-            ProtoExpression::Unary { x, .. } => {
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
                 x.adjust_offsets(ff_delta, comb_delta);
             }
             ProtoExpression::Binary { x, y, .. } => {
@@ -1127,7 +1187,9 @@ impl ProtoExpression {
                     dyn_sel.index_expr.remap_offsets_with(f);
                 }
             }
-            ProtoExpression::Unary { x, .. } => x.remap_offsets_with(f),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                x.remap_offsets_with(f)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 x.remap_offsets_with(f);
                 y.remap_offsets_with(f);
@@ -1158,7 +1220,8 @@ impl ProtoExpression {
             ProtoExpression::Value { width, .. } => *width,
             ProtoExpression::Unary { width, .. } => *width,
             ProtoExpression::Binary { width, .. } => *width,
-            ProtoExpression::Concatenation { width, .. } => *width,
+            ProtoExpression::Concatenation { width, .. }
+            | ProtoExpression::Resize { width, .. } => *width,
             ProtoExpression::Ternary { width, .. } => *width,
             ProtoExpression::DynamicVariable { width, .. } => *width,
         }
@@ -1233,7 +1296,8 @@ impl ProtoExpression {
                 Op::BitOr | Op::BitXor => x.effective_bits().max(y.effective_bits()),
                 _ => *width,
             },
-            ProtoExpression::Concatenation { width, .. } => *width,
+            ProtoExpression::Concatenation { width, .. }
+            | ProtoExpression::Resize { width, .. } => *width,
             ProtoExpression::Ternary {
                 true_expr,
                 false_expr,
@@ -1243,97 +1307,13 @@ impl ProtoExpression {
         }
     }
 
-    /// An upper bound on the significant bits of this expression's value when
-    /// NOTHING masks the intermediates — the shape a backend that evaluates a
-    /// whole expression in one wide register produces.  `None` means no cheap
-    /// bound exists and a caller that needs one must assume the worst.
-    ///
-    /// Deliberately not `effective_bits()`: that bounds the value
-    /// `build_binary` produces, which masks every node to its own width, so
-    /// for a `Binary` it may answer with the declared width even though the
-    /// unmasked value is wider.
-    ///
-    /// A `Some` drops the cast's mask, so every arm has to hold for the widest
-    /// value the backend can hand on.  `expr_emits_clean` cannot cover for a
-    /// wrong answer here: its re-mask lands on the consumer's result, not on
-    /// this operand.
-    pub fn unmasked_bits(&self, depth: usize) -> Option<usize> {
-        if depth == 0 {
-            return None;
-        }
-        let d = depth - 1;
-        match self {
-            ProtoExpression::HierVariable(x) => Some(x.width),
-            ProtoExpression::Variable { width, .. } => Some(*width),
-            ProtoExpression::DynamicVariable { width, .. } => Some(*width),
-            ProtoExpression::Concatenation { width, .. } => Some(*width),
-            ProtoExpression::Value { .. } => Some(self.effective_bits()),
-            ProtoExpression::Ternary {
-                true_expr,
-                false_expr,
-                ..
-            } => Some(
-                true_expr
-                    .unmasked_bits(d)?
-                    .max(false_expr.unmasked_bits(d)?),
-            ),
-            ProtoExpression::Unary { op, x, .. } => match op {
-                Op::BitAnd
-                | Op::BitNand
-                | Op::BitOr
-                | Op::BitNor
-                | Op::LogicNot
-                | Op::BitXor
-                | Op::BitXnor => Some(1),
-                Op::Add => x.unmasked_bits(d),
-                // `~` and unary `-` set every bit above the operand's width.
-                _ => None,
-            },
-            ProtoExpression::Binary {
-                op,
-                x,
-                y,
-                expr_context,
-                ..
-            } => match op {
-                Op::Eq
-                | Op::Ne
-                | Op::EqWildcard
-                | Op::NeWildcard
-                | Op::Greater
-                | Op::GreaterEq
-                | Op::Less
-                | Op::LessEq
-                | Op::LogicAnd
-                | Op::LogicOr => Some(1),
-                Op::BitAnd => Some(x.unmasked_bits(d)?.min(y.unmasked_bits(d)?)),
-                Op::BitOr | Op::BitXor => Some(x.unmasked_bits(d)?.max(y.unmasked_bits(d)?)),
-                Op::Add => Some(
-                    x.unmasked_bits(d)?
-                        .max(y.unmasked_bits(d)?)
-                        .saturating_add(1),
-                ),
-                Op::Mul => Some(x.unmasked_bits(d)?.saturating_add(y.unmasked_bits(d)?)),
-                Op::LogicShiftR => x.unmasked_bits(d),
-                // The signed forms sign-fill every bit above the operand
-                // width, so the bound only holds unsigned — the same reason
-                // `expr_emits_clean` excludes them.
-                Op::Div if !expr_context.signed => x.unmasked_bits(d),
-                Op::Rem if !expr_context.signed => y.unmasked_bits(d),
-                // `-` borrows into every bit above the operands, an arithmetic
-                // right shift copies the sign into them, and a left shift is
-                // bounded by a VALUE (the shift amount), not by a width.
-                _ => None,
-            },
-        }
-    }
-
     pub fn expr_context(&self) -> &ExpressionContext {
         match self {
             ProtoExpression::HierVariable(x) => &x.expr_context,
             ProtoExpression::Variable { expr_context, .. } => expr_context,
             ProtoExpression::Value { expr_context, .. } => expr_context,
-            ProtoExpression::Unary { expr_context, .. } => expr_context,
+            ProtoExpression::Unary { expr_context, .. }
+            | ProtoExpression::Resize { expr_context, .. } => expr_context,
             ProtoExpression::Binary { expr_context, .. } => expr_context,
             ProtoExpression::Concatenation { expr_context, .. } => expr_context,
             ProtoExpression::Ternary { expr_context, .. } => expr_context,
@@ -1385,7 +1365,8 @@ impl ProtoExpression {
             // The all-bit sentinel materializes wider than its 0 `width` field
             // (see `materialized_width`); key on that.
             ProtoExpression::Value { .. } => is_wide_ptr(self.materialized_width()),
-            ProtoExpression::Concatenation { width, .. } => is_wide_ptr(*width),
+            ProtoExpression::Concatenation { width, .. }
+            | ProtoExpression::Resize { width, .. } => is_wide_ptr(*width),
             ProtoExpression::Ternary {
                 width,
                 true_expr,
@@ -1483,6 +1464,16 @@ impl ProtoExpression {
     /// clean branches).  Add/Sub/Mul/Shl/negation/ArithShiftR fall to the
     /// false branch.
     pub fn is_clean_to_width(&self, target_width: usize) -> bool {
+        let operand_clean = |operand: &Self, width: usize, signed: bool| {
+            // Extension past the destination is clean only if the sign bit
+            // (including its X/Z mask) is known zero before the operation.
+            let limit = if signed && width > target_width {
+                target_width.min(operand.materialized_width().saturating_sub(1))
+            } else {
+                target_width
+            };
+            operand.is_clean_to_width(limit)
+        };
         match self {
             ProtoExpression::HierVariable(_) => false,
             ProtoExpression::Variable {
@@ -1511,7 +1502,8 @@ impl ProtoExpression {
                     *width <= target_width
                 }
             }
-            ProtoExpression::Concatenation { width, .. } => *width <= target_width,
+            ProtoExpression::Concatenation { width, .. }
+            | ProtoExpression::Resize { width, .. } => *width <= target_width,
             ProtoExpression::DynamicVariable {
                 width,
                 select,
@@ -1527,7 +1519,12 @@ impl ProtoExpression {
                 };
                 result_width <= target_width
             }
-            ProtoExpression::Unary { op, x, width, .. } => match op {
+            ProtoExpression::Unary {
+                op,
+                x,
+                width,
+                expr_context,
+            } => match op {
                 Op::BitAnd
                 | Op::BitNand
                 | Op::BitOr
@@ -1536,10 +1533,16 @@ impl ProtoExpression {
                 | Op::BitXor
                 | Op::BitXnor => target_width >= 1,
                 Op::BitNot => *width <= target_width,
-                Op::Add => x.is_clean_to_width(target_width),
+                Op::Add => operand_clean(x, expr_context.width, expr_context.signed),
                 _ => false,
             },
-            ProtoExpression::Binary { op, x, y, .. } => match op {
+            ProtoExpression::Binary {
+                op,
+                x,
+                y,
+                expr_context,
+                ..
+            } => match op {
                 Op::Eq
                 | Op::Ne
                 | Op::EqWildcard
@@ -1551,23 +1554,30 @@ impl ProtoExpression {
                 | Op::LogicAnd
                 | Op::LogicOr => target_width >= 1,
                 Op::BitAnd => {
-                    x.is_clean_to_width(target_width) || y.is_clean_to_width(target_width)
+                    operand_clean(x, expr_context.width, expr_context.signed)
+                        || operand_clean(y, expr_context.width, expr_context.signed)
                 }
                 Op::BitOr | Op::BitXor => {
-                    x.is_clean_to_width(target_width) && y.is_clean_to_width(target_width)
+                    operand_clean(x, expr_context.width, expr_context.signed)
+                        && operand_clean(y, expr_context.width, expr_context.signed)
                 }
                 // ~(x^y) sets every bit above the width even for clean
                 // operands, so binary XNOR is never clean.
-                Op::LogicShiftR => x.is_clean_to_width(target_width),
+                Op::LogicShiftR => operand_clean(x, expr_context.width, expr_context.signed),
                 _ => false,
             },
             ProtoExpression::Ternary {
                 true_expr,
                 false_expr,
+                width,
                 ..
             } => {
-                true_expr.is_clean_to_width(target_width)
-                    && false_expr.is_clean_to_width(target_width)
+                let signed = true_expr.expr_context().signed
+                    && false_expr.expr_context().signed
+                    && true_expr.width() > 0
+                    && false_expr.width() > 0;
+                operand_clean(true_expr, *width, signed)
+                    && operand_clean(false_expr, *width, signed)
             }
         }
     }
@@ -1593,9 +1603,14 @@ impl ProtoExpression {
                 ..
             } => Some((*width, expr_context.signed)),
             ProtoExpression::Value { value, width, .. } => Some((*width, value.signed())),
-            // A concatenation is unsigned per the LRM, but `$signed({..})` marks
-            // it signed and it reaches the store at its natural width too.
-            ProtoExpression::Concatenation {
+            // Casts and concatenations reach the store at their materialized
+            // width; `$signed` can also mark a concatenation signed.
+            ProtoExpression::Resize {
+                width,
+                expr_context,
+                ..
+            }
+            | ProtoExpression::Concatenation {
                 width,
                 expr_context,
                 ..
@@ -1743,6 +1758,14 @@ impl ProtoExpression {
                     expr_context,
                     ..
                 } => {
+                    let operand_context = ExpressionContext {
+                        signed: expr_context.binary_operand_signed(
+                            *op,
+                            x.expr_context(),
+                            y.expr_context(),
+                        ),
+                        ..*expr_context
+                    };
                     let x = x.apply_values_ptr(
                         ff_values_ptr,
                         ff_len,
@@ -1761,9 +1784,26 @@ impl ProtoExpression {
                         x: Box::new(x),
                         op: *op,
                         y: Box::new(y),
-                        expr_context: *expr_context,
+                        operand_context,
                     }
                 }
+                ProtoExpression::Resize {
+                    x,
+                    width,
+                    sign_extend,
+                    expr_context,
+                } => Expression::Resize {
+                    x: Box::new(x.apply_values_ptr(
+                        ff_values_ptr,
+                        ff_len,
+                        comb_values_ptr,
+                        comb_len,
+                        use_4state,
+                    )),
+                    width: *width,
+                    sign_extend: *sign_extend,
+                    signed: expr_context.signed,
+                },
                 ProtoExpression::Concatenation {
                     elements,
                     expr_context,
@@ -1898,76 +1938,44 @@ impl ProtoExpression {
     }
 }
 
-/// Resize a literal in place; a non-`Value` expression is left alone.
-fn fit_literal_width(expr: &mut ProtoExpression, width: usize) {
-    let ProtoExpression::Value {
-        value,
-        width: value_width,
-        expr_context,
-    } = expr
-    else {
-        return;
-    };
-    match value.width().cmp(&width) {
-        Ordering::Less => *value = value.expand(width, value.signed()).into_owned(),
-        Ordering::Greater => value.trunc(width),
-        Ordering::Equal => {}
-    }
-    *value_width = width;
-    expr_context.width = width;
-}
-
-/// Grow `expr` to `width` bits.  A widening `as` cast lowers to its operand,
-/// so a node can be narrower than its analyzer width; extend by the OPERAND's
-/// signedness, like `N'(x)`.
-fn extend_to_width(mut expr: ProtoExpression, width: usize) -> ProtoExpression {
-    if matches!(expr, ProtoExpression::Value { .. }) {
-        fit_literal_width(&mut expr, width);
-        return expr;
-    }
-    let src_width = expr.width();
-    if src_width == 0 || src_width >= width {
-        return expr;
-    }
-    let signed = expr.expr_context().signed;
-    let expr_context = ExpressionContext {
-        width,
-        signed: false,
-    };
-    let value_node = |payload: BigUint| ProtoExpression::Value {
-        value: Value::new_biguint(payload, width, false),
-        width,
-        expr_context,
-    };
-
-    // Mask to the operand width first: the bits above a narrow node are not
-    // guaranteed clean, and here they become the extension bits.
-    let mask = (BigUint::one() << src_width) - BigUint::one();
-    let ret = ProtoExpression::Binary {
-        x: Box::new(expr),
-        op: Op::BitAnd,
-        y: Box::new(value_node(mask)),
-        width,
-        expr_context,
-    };
-    if !signed {
-        return ret;
-    }
-    // Sign-extend the masked value: ((v ^ s) - s) mod 2^width.
-    let sign = BigUint::one() << (src_width - 1);
-    ProtoExpression::Binary {
-        x: Box::new(ProtoExpression::Binary {
-            x: Box::new(ret),
-            op: Op::BitXor,
-            y: Box::new(value_node(sign.clone())),
+/// Resize independently of the result's propagated signedness. In particular,
+/// an unsigned outer expression must not suppress extension inside a cast.
+fn resize_to_width(
+    expr: ProtoExpression,
+    width: usize,
+    expr_context: ExpressionContext,
+) -> ProtoExpression {
+    let sign_extend = expr.expr_context().signed;
+    if let ProtoExpression::Value { mut value, .. } = expr {
+        value.set_signed(sign_extend);
+        let mut value = value.expand(width, sign_extend).into_owned();
+        value.trunc(width);
+        value.set_signed(expr_context.signed);
+        return ProtoExpression::Value {
+            value,
             width,
             expr_context,
-        }),
-        op: Op::Sub,
-        y: Box::new(value_node(sign)),
+        };
+    }
+    ProtoExpression::Resize {
+        x: Box::new(expr),
         width,
+        sign_extend,
         expr_context,
     }
+}
+
+/// Materialize an element's full width before placing it in a concatenation.
+fn extend_to_width(expr: ProtoExpression, width: usize) -> ProtoExpression {
+    // Unsized literals also need truncation to a struct member's width.
+    if !matches!(expr, ProtoExpression::Value { .. }) && expr.width() >= width {
+        return expr;
+    }
+    let expr_context = ExpressionContext {
+        width,
+        ..*expr.expr_context()
+    };
+    resize_to_width(expr, width, expr_context)
 }
 
 /// Build a ProtoExpression computing the linear index from a multi-dimensional VarIndex.
@@ -2568,6 +2576,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                             ProtoExpression::Variable { expr_context, .. }
                             | ProtoExpression::Value { expr_context, .. }
                             | ProtoExpression::Unary { expr_context, .. }
+                            | ProtoExpression::Resize { expr_context, .. }
                             | ProtoExpression::Binary { expr_context, .. }
                             | ProtoExpression::Concatenation { expr_context, .. }
                             | ProtoExpression::Ternary { expr_context, .. }
@@ -2593,16 +2602,12 @@ impl Conv<&air::Expression> for ProtoExpression {
                                 &call.comptime.token,
                             ));
                         };
-                        // Sized by the VALUE, not by `comptime`: these calls
-                        // are built on an unknown comptime (`is_const` is all
-                        // it carries), so its type has no width and its
-                        // context has width zero. A literal's own width is
-                        // what the surrounding context then extends.
+                        // Keep the value's own width and the analyzer's
+                        // propagated context, just as for a numeric literal.
+                        // Parent comparisons and conditionals use this
+                        // signedness when extending their operands.
                         let width = value.width();
-                        let expr_context = ExpressionContext {
-                            width,
-                            signed: false,
-                        };
+                        let expr_context: ExpressionContext = (&call.comptime.expr_context).into();
                         Ok(ProtoExpression::Value {
                             value,
                             width,
@@ -2680,84 +2685,13 @@ impl Conv<&air::Expression> for ProtoExpression {
                         return Ok(proto);
                     }
 
-                    // Int->int casts are otherwise transparent, but a NARROWING
-                    // cast must still truncate the operand value: mask to the
-                    // cast width, and re-extend by the cast signedness when the
-                    // outer context is wider.  A same-width cast that flips
-                    // signedness needs the same re-extension: a wider context
-                    // must extend by the cast signedness, not the operand's own
-                    // (SV `longint'(a)` sign-extends a 64-bit unsigned `a`).
-                    //
-                    // `operand_width` alone does not decide it: it is the width
-                    // `gather_context` settled on for the operand, which for
-                    // `(b + c) as 2` on two 2-bit operands is 2 — equal to the
-                    // cast, so nothing looks narrowed — while the addition
-                    // still carries into a third bit.
-                    let cast_width = comptime.r#type.total_width();
-                    let operand_width = x.comptime().expr_context.width;
+                    let cast_width = comptime
+                        .r#type
+                        .total_width()
+                        .ok_or_else(|| SimulatorError::unresolved_expression(&comptime.token))?;
                     let proto: ProtoExpression = Conv::conv(context, x.as_ref())?;
                     let outer: ExpressionContext = (&comptime.expr_context).into();
-                    let unmasked = proto.unmasked_bits(UNMASKED_BITS_DEPTH);
-                    let carries_above = |cw: usize| unmasked.is_none_or(|w| w > cw);
-                    let needs_reinterpret = |cw: usize| {
-                        operand_width <= cw
-                            && proto.width() == cw
-                            && proto.expr_context().signed != comptime.r#type.signed
-                    };
-                    if let Some(cw) = cast_width
-                        && cw > 0
-                        && (operand_width > cw || carries_above(cw) || needs_reinterpret(cw))
-                    {
-                        let node_width = outer.width.max(cw);
-                        let value_node = |payload: BigUint| ProtoExpression::Value {
-                            value: Value::new_biguint(payload, node_width, false),
-                            width: node_width,
-                            expr_context: ExpressionContext {
-                                width: node_width,
-                                signed: false,
-                            },
-                        };
-                        let ctx = ExpressionContext {
-                            width: node_width,
-                            signed: false,
-                        };
-                        // A comparison, Div/Rem and a store take signedness
-                        // from their operands, not from their own context, so
-                        // the cast node has to carry it.
-                        let result_ctx = ExpressionContext {
-                            width: node_width,
-                            signed: comptime.r#type.signed,
-                        };
-                        let sign_extends = comptime.r#type.signed && outer.width > cw;
-                        let mask = (BigUint::one() << cw) - BigUint::one();
-                        let mut ret = ProtoExpression::Binary {
-                            x: Box::new(proto),
-                            op: Op::BitAnd,
-                            y: Box::new(value_node(mask)),
-                            width: node_width,
-                            expr_context: if sign_extends { ctx } else { result_ctx },
-                        };
-                        if sign_extends {
-                            // Sign-extend the truncated value to the outer
-                            // width: ((v ^ s) - s) mod 2^node_width.
-                            let sign = BigUint::one() << (cw - 1);
-                            ret = ProtoExpression::Binary {
-                                x: Box::new(ProtoExpression::Binary {
-                                    x: Box::new(ret),
-                                    op: Op::BitXor,
-                                    y: Box::new(value_node(sign.clone())),
-                                    width: node_width,
-                                    expr_context: ctx,
-                                }),
-                                op: Op::Sub,
-                                y: Box::new(value_node(sign)),
-                                width: node_width,
-                                expr_context: result_ctx,
-                            };
-                        }
-                        return Ok(ret);
-                    }
-                    return Ok(proto);
+                    return Ok(resize_to_width(proto, cast_width, outer));
                 }
 
                 let x_kind = x.comptime().r#type.kind.clone();
@@ -2765,25 +2699,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                 let x: ProtoExpression = Conv::conv(context, x.as_ref())?;
                 let y: ProtoExpression = Conv::conv(context, y.as_ref())?;
                 let width = comptime.expr_context.width;
-                let mut expr_context: ExpressionContext = (&comptime.expr_context).into();
-                if matches!(
-                    op,
-                    Op::Div
-                        | Op::Rem
-                        | Op::Greater
-                        | Op::GreaterEq
-                        | Op::Less
-                        | Op::LessEq
-                        | Op::Eq
-                        | Op::Ne
-                        | Op::EqWildcard
-                        | Op::NeWildcard
-                ) {
-                    // See build_binary for the merge() rationale; equality ops
-                    // carry signed=false in their own context but both-signed
-                    // operands must sign-extend to the comparison width.
-                    expr_context.signed = x.expr_context().signed & y.expr_context().signed;
-                }
+                let expr_context: ExpressionContext = (&comptime.expr_context).into();
+                let operand_signed =
+                    expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
 
                 // Float constant folding
                 if (x_kind.is_float() || y_kind.is_float())
@@ -2830,7 +2748,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                 ) = (&x, &y)
                 {
                     let mut mc = MaskCache::default();
-                    let result = op.eval_value_binary(xv, yv, width, expr_context.signed, &mut mc);
+                    let result = op.eval_value_binary(xv, yv, width, operand_signed, &mut mc);
                     if matches!(&result, Value::U64(_)) {
                         return Ok(ProtoExpression::Value {
                             value: result,

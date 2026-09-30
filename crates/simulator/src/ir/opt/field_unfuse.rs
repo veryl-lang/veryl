@@ -220,7 +220,9 @@ fn census_expr(e: &ProtoExpression, c: &mut Census, poison: bool) {
             }
         }
         ProtoExpression::Value { .. } => {}
-        ProtoExpression::Unary { x, .. } => census_expr(x, c, poison),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            census_expr(x, c, poison)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             census_expr(x, c, poison);
             census_expr(y, c, poison);
@@ -575,7 +577,7 @@ impl Rewriter<'_> {
                 self.stats.gathers += 1;
             }
             ProtoExpression::Value { .. } => {}
-            ProtoExpression::Unary { x, .. } => self.expr(x),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => self.expr(x),
             ProtoExpression::Binary { x, y, .. } => {
                 self.expr(x);
                 self.expr(y);

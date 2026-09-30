@@ -128,7 +128,9 @@ fn walk_expr_reads(expr: &ProtoExpression, c: &mut Census) {
             }
         }
         ProtoExpression::Value { .. } => {}
-        ProtoExpression::Unary { x, .. } => walk_expr_reads(x, c),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            walk_expr_reads(x, c)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             walk_expr_reads(x, c);
             walk_expr_reads(y, c);

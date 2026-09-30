@@ -483,14 +483,14 @@ impl Expression {
                 let y = y.eval_value(context)?;
                 let z = z.eval_value(context)?;
 
-                // The selected branch extends to the evaluation width by the
-                // result signedness: both-signed branches sign-extend
-                // (LRM 11.4.11), anything else zero-extends.
-                let signed = y.signed() && z.signed();
+                // The outer expression's signedness propagates into both
+                // branches (LRM 11.8.2), so an unsigned context must suppress
+                // sign extension even when both branches are signed.
                 let width = y.width().max(z.width()).max(context_width);
 
                 let ret = if x.to_usize().unwrap_or(0) == 0 { z } else { y };
-                let ret = ret.expand(width, signed).into_owned();
+                let mut ret = ret.expand(width, signed).into_owned();
+                ret.set_signed(signed);
                 Some(ret)
             }
             Expression::Concatenation(x, _) => {
