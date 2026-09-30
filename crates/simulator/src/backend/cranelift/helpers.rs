@@ -1188,6 +1188,7 @@ pub(crate) struct WideOperandPair {
     pub y_is_ptr: bool,
     pub width: usize,
     pub op_nb: usize,
+    pub signed: bool,
 }
 
 /// Either wide operand has nonzero mask_xz? Returns I8 truth value.

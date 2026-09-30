@@ -106,6 +106,34 @@ pub enum SystemFunctionKind {
     Unsigned(Input),
 }
 
+impl SystemFunctionKind {
+    fn return_type(&self) -> Type {
+        match self {
+            Self::Bits(_) | Self::Size(..) | Self::Clog2(_) => {
+                // IEEE 1800-2023 20.6.2/20.7/20.8.1 return signed integers.
+                // Use Bit like integer literals so known results remain
+                // compatible with Veryl's u32/i32 types.
+                let mut ret = Type::new(TypeKind::Bit);
+                ret.set_concrete_width(Shape::new(vec![Some(32)]));
+                ret.signed = true;
+                ret
+            }
+            Self::Onehot(_) => Type::new(TypeKind::Bit),
+            Self::Signed(x) | Self::Unsigned(x) => {
+                // Sign casts preserve the operand's width and state type.
+                let mut ret = x.0.comptime().r#type.clone();
+                ret.signed = matches!(self, Self::Signed(_));
+                ret
+            }
+            Self::Readmemh(..)
+            | Self::Display(_)
+            | Self::Write(_)
+            | Self::Assert { .. }
+            | Self::Finish => Type::new(TypeKind::Void),
+        }
+    }
+}
+
 fn create_input(
     context: &mut Context,
     name: StrId,
@@ -176,8 +204,9 @@ impl SystemFunctionCall {
         token: TokenRange,
     ) -> IrResult<Self> {
         let mut comptime = Comptime::create_unknown(token);
+        let function = name.to_string();
 
-        match name.to_string().as_str() {
+        let kind = match function.as_str() {
             "$bits" => {
                 if args.len() != 1 {
                     context.insert_error(AnalyzerError::mismatch_function_arity(
@@ -190,10 +219,7 @@ impl SystemFunctionCall {
                 }
                 let arg0 = create_input(context, name, None, args.remove(0));
                 comptime.is_const = true;
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Bits(arg0),
-                    comptime,
-                })
+                SystemFunctionKind::Bits(arg0)
             }
             "$size" => {
                 if args.is_empty() || args.len() > 2 {
@@ -209,10 +235,7 @@ impl SystemFunctionCall {
                     (args.len() == 2).then(|| create_input(context, name, None, args.remove(1)));
                 let arg0 = create_input(context, name, None, args.remove(0));
                 comptime.is_const = true;
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Size(arg0, arg1),
-                    comptime,
-                })
+                SystemFunctionKind::Size(arg0, arg1)
             }
             "$clog2" => {
                 if args.len() != 1 {
@@ -239,10 +262,7 @@ impl SystemFunctionCall {
                     return Err(ir_error!(token));
                 }
                 comptime.is_const = true;
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Clog2(arg0),
-                    comptime,
-                })
+                SystemFunctionKind::Clog2(arg0)
             }
             "$onehot" => {
                 if args.len() != 1 {
@@ -268,10 +288,7 @@ impl SystemFunctionCall {
                     return Err(ir_error!(token));
                 }
                 comptime.is_const = true;
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Onehot(arg0),
-                    comptime,
-                })
+                SystemFunctionKind::Onehot(arg0)
             }
             "$readmemh" => {
                 if args.len() != 2 {
@@ -285,30 +302,21 @@ impl SystemFunctionCall {
                 }
                 let arg0 = create_input(context, name, None, args.remove(0));
                 let arg1 = create_output(context, name, None, args.remove(0));
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Readmemh(arg0, arg1),
-                    comptime,
-                })
+                SystemFunctionKind::Readmemh(arg0, arg1)
             }
             "$display" => {
                 let inputs: Vec<Input> = args
                     .into_iter()
                     .map(|arg| create_input(context, name, None, arg))
                     .collect();
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Display(inputs),
-                    comptime,
-                })
+                SystemFunctionKind::Display(inputs)
             }
             "$write" => {
                 let inputs: Vec<Input> = args
                     .into_iter()
                     .map(|arg| create_input(context, name, None, arg))
                     .collect();
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Write(inputs),
-                    comptime,
-                })
+                SystemFunctionKind::Write(inputs)
             }
             "$assert" | "$assert_continue" => {
                 if args.is_empty() {
@@ -330,20 +338,14 @@ impl SystemFunctionCall {
                     .into_iter()
                     .map(|arg| create_input(context, name, None, arg))
                     .collect();
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Assert { kind, cond, args },
-                    comptime,
-                })
+                SystemFunctionKind::Assert { kind, cond, args }
             }
             "$finish" => {
                 if !args.is_empty() {
                     return Err(ir_error!(token));
                 }
                 comptime.is_const = true;
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Finish,
-                    comptime,
-                })
+                SystemFunctionKind::Finish
             }
             "$signed" => {
                 if args.len() != 1 {
@@ -356,17 +358,7 @@ impl SystemFunctionCall {
                 let arg0 = create_input(context, name, None, arg);
                 comptime.is_const = arg0.0.comptime().is_const;
                 comptime.clock_domain = arg0.0.comptime().clock_domain;
-                comptime.expr_context.signed = true;
-                // `$signed(x)` reinterprets `x` (same width) as signed; the
-                // Unknown default is width 1 / unsigned, which makes the
-                // synthesizer collapse an operand like `$signed(a)` to `a[0]`.
-                comptime.r#type = arg0.0.comptime().r#type.clone();
-                comptime.r#type.signed = true;
-
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Signed(arg0),
-                    comptime,
-                })
+                SystemFunctionKind::Signed(arg0)
             }
             "$unsigned" => {
                 if args.len() != 1 {
@@ -379,19 +371,16 @@ impl SystemFunctionCall {
                 let arg0 = create_input(context, name, None, arg);
                 comptime.is_const = arg0.0.comptime().is_const;
                 comptime.clock_domain = arg0.0.comptime().clock_domain;
-                comptime.expr_context.signed = false;
-                // Mirror of `$signed`: carry the operand's width but an unsigned
-                // type instead of the Unknown default (width 1).
-                comptime.r#type = arg0.0.comptime().r#type.clone();
-                comptime.r#type.signed = false;
-
-                Ok(SystemFunctionCall {
-                    kind: SystemFunctionKind::Unsigned(arg0),
-                    comptime,
-                })
+                SystemFunctionKind::Unsigned(arg0)
             }
-            _ => Err(ir_error!(token)),
-        }
+            _ => return Err(ir_error!(token)),
+        };
+
+        // Establish the return type before if-expression folding can replace
+        // an unselected call with a constant of its type.
+        comptime.r#type = kind.return_type();
+        comptime.expr_context.signed = comptime.r#type.signed;
+        Ok(SystemFunctionCall { kind, comptime })
     }
 
     pub fn eval_value(&self, context: &mut Context) -> Option<Value> {
@@ -406,7 +395,7 @@ impl SystemFunctionCall {
                     ValueVariant::Type(x) => x.total_bits(),
                     _ => comptime.r#type.total_bits(),
                 };
-                value.map(|x| Value::new(x as u64, 32, false))
+                value.map(|x| Value::new(x as u64, 32, true))
             }
             SystemFunctionKind::Size(x, dimension) => {
                 let dimension = match dimension {
@@ -425,12 +414,12 @@ impl SystemFunctionCall {
                     ValueVariant::Type(x) => x.dimension(dimension),
                     _ => comptime.r#type.dimension(dimension),
                 };
-                value.map(|x| Value::new(x as u64, 32, false))
+                value.map(|x| Value::new(x as u64, 32, true))
             }
             SystemFunctionKind::Clog2(x) => {
                 let value = x.0.eval_value(context)?;
                 if value.is_xz() {
-                    return Some(Value::new_x(32, false));
+                    return Some(Value::new_x(32, true));
                 }
                 let value = value.payload();
                 let ret = if value.as_ref() == &BigUint::from(0u32) {
@@ -438,7 +427,7 @@ impl SystemFunctionCall {
                 } else {
                     value.as_ref() - BigUint::from(1u32)
                 };
-                Some(Value::new(ret.bits(), 32, false))
+                Some(Value::new(ret.bits(), 32, true))
             }
             SystemFunctionKind::Onehot(x) => {
                 let value = x.0.eval_value(context)?;
@@ -454,7 +443,9 @@ impl SystemFunctionCall {
             SystemFunctionKind::Assert { .. } => None,
             SystemFunctionKind::Finish => None,
             SystemFunctionKind::Signed(x) | SystemFunctionKind::Unsigned(x) => {
-                x.0.eval_value(context)
+                let mut ret = x.0.eval_value(context)?;
+                ret.set_signed(self.comptime.r#type.signed);
+                Some(ret)
             }
         }
     }

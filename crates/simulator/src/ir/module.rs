@@ -4489,7 +4489,9 @@ fn gather_bit_aware_expr_reads(expr: &ProtoExpression, out: &mut Vec<(VarOffset,
                 gather_bit_aware_expr_reads(&d.index_expr, out);
             }
         }
-        ProtoExpression::Unary { x, .. } => gather_bit_aware_expr_reads(x, out),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            gather_bit_aware_expr_reads(x, out)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             gather_bit_aware_expr_reads(x, out);
             gather_bit_aware_expr_reads(y, out);
@@ -8007,7 +8009,7 @@ fn collect_dynamic_bases(stmt: &ProtoStatement, out: &mut HashSet<VarOffset>) {
                 expr(&d.index_expr, out);
             }
             ProtoExpression::Variable { .. } | ProtoExpression::HierVariable(_) => {}
-            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr(x, out),
             ProtoExpression::Binary { x, y, .. } => {
                 expr(x, out);
                 expr(y, out);

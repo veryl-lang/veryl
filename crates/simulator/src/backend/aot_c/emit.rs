@@ -505,7 +505,9 @@ impl LocalAnalysis {
                 }
             }
             ProtoExpression::Value { .. } => {}
-            ProtoExpression::Unary { x, .. } => self.walk_reads(x, i),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                self.walk_reads(x, i)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 self.walk_reads(x, i);
                 self.walk_reads(y, i);
@@ -624,7 +626,9 @@ impl LocalAnalysis {
                 }
             }
             ProtoExpression::Value { .. } => {}
-            ProtoExpression::Unary { x, .. } => self.poison_expr(x),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                self.poison_expr(x)
+            }
             ProtoExpression::Binary { x, y, .. } => {
                 self.poison_expr(x);
                 self.poison_expr(y);
@@ -1007,12 +1011,18 @@ fn emit_wide_expr(expr: &ProtoExpression, pre: &mut String) -> Option<WideRef> {
             expr_context,
             ..
         } => emit_wide_binary(x, *op, y, expr_context, pre),
+        ProtoExpression::Resize {
+            x,
+            width,
+            sign_extend,
+            ..
+        } => emit_wide_resize(x, *width, *sign_extend, pre),
         ProtoExpression::Unary {
             op,
             x,
             expr_context,
             ..
-        } => emit_wide_unary(*op, x, expr_context.width, pre),
+        } => emit_wide_unary(*op, x, expr_context, pre),
         ProtoExpression::Ternary {
             cond,
             true_expr,
@@ -1599,11 +1609,26 @@ fn emit_wide_binary(
             })
         }
         Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR | Op::ArithShiftR => {
-            // `>>>` in an unsigned context is a logical shift (mirrors Cranelift
-            // and the interpreter); signed, x is sign-extended to the full op_nb
-            // buffer so the fill comes from the buffer's top bit.
+            // All shifts extend the left operand according to expression
+            // signedness. Only signed >>> fills vacated bits with the sign.
             let is_ashr = matches!(op, Op::ArithShiftR) && expr_context.signed;
-            let x_ref = emit_wide_operand_signed(x, op_nb, is_ashr, pre)?;
+            let mut x_ref = emit_wide_operand_signed(x, op_nb, expr_context.signed, pre)?;
+            let shift_width = width.max(x.materialized_width());
+            if matches!(op, Op::LogicShiftR | Op::ArithShiftR)
+                && !is_ashr
+                && shift_width < op_nb * 8
+            {
+                // Logical right shifts must not pull native-buffer padding
+                // into the result. Copy first: the input may alias a variable.
+                let t = next_wide_tmp();
+                pre.push_str(&format!(
+                    "uint64_t _w{t}[{nw}]; vw_copy((uint8_t*)_w{t}, {x}, {op_nb}u); \
+                     vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {pack}u); ",
+                    x = x_ref.addr,
+                    pack = wpack(op_nb, shift_width),
+                ));
+                x_ref.addr = format!("((uint8_t*)_w{t})");
+            }
             let amount = wide_shift_amount(y, pre)?;
             let fname = match op {
                 Op::LogicShiftL | Op::ArithShiftL => "shl",
@@ -1638,24 +1663,66 @@ fn emit_wide_binary(
     }
 }
 
+/// Copy a resized bit pattern into fresh storage; never mask an aliased input.
+fn emit_wide_resize(
+    x: &ProtoExpression,
+    width: usize,
+    sign_extend: bool,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let src_width = x.materialized_width();
+    let src_nb = native_bytes(src_width).max(8);
+    let nb = native_bytes(width).max(8);
+    let src = emit_wide_operand(x, src_nb, pre)?;
+    let t = next_wide_tmp();
+    pre.push_str(&format!(
+        "uint64_t _w{t}[{nw}] = {{0}}; ",
+        nw = wide_words(nb)
+    ));
+    let extends = sign_extend && src_width > 0 && src_width < width;
+    if extends {
+        pre.push_str(&format!(
+            "vw_sext_copy((uint8_t*)_w{t}, {src}, {src_width}u, {nb}u); ",
+            src = src.addr,
+        ));
+    } else {
+        pre.push_str(&format!(
+            "vw_copy((uint8_t*)_w{t}, {src}, {copy_nb}u); ",
+            src = src.addr,
+            copy_nb = nb.min(src_nb),
+        ));
+    }
+    let mask_width = if extends { width } else { width.min(src_width) };
+    pre.push_str(&format!(
+        "vw_apply_mask((uint8_t*)_w{t}, (const uint8_t*)0, {pack}u); ",
+        pack = wpack(nb, mask_width),
+    ));
+    Some(WideRef {
+        addr: format!("((uint8_t*)_w{t})"),
+        nb,
+        width,
+    })
+}
+
 /// Wide unary non-reduction (`Add` identity / `Sub` negate / `BitNot`).
-/// Mirrors `build_binary_wide_unary` (expression.rs 1925-1955): negate/bnot
-/// mask after the op; identity is unmasked.
-fn emit_wide_unary(op: Op, x: &ProtoExpression, width: usize, pre: &mut String) -> Option<WideRef> {
+/// Extend the operand before the operation and mask the result width.
+fn emit_wide_unary(
+    op: Op,
+    x: &ProtoExpression,
+    expr_context: &ExpressionContext,
+    pre: &mut String,
+) -> Option<WideRef> {
+    let width = expr_context.width;
     let nb = native_bytes(width);
     let nw = wide_words(nb);
-    let x_ref = emit_wide_operand(x, nb, pre)?;
+    let x_ref = emit_wide_operand_signed(x, nb, expr_context.signed, pre)?;
     match op {
-        Op::Add => Some(WideRef {
-            addr: x_ref.addr,
-            nb,
-            width,
-        }),
-        Op::Sub | Op::BitNot => {
-            let fname = if matches!(op, Op::Sub) {
-                "negate"
-            } else {
-                "bnot"
+        Op::Add | Op::Sub | Op::BitNot => {
+            let fname = match op {
+                Op::Add => "copy",
+                Op::Sub => "negate",
+                Op::BitNot => "bnot",
+                _ => unreachable!(),
             };
             let t = next_wide_tmp();
             pre.push_str(&format!(
@@ -1940,17 +2007,20 @@ fn emit_wide_cmp_binary(
     y: &ProtoExpression,
     expr_context: &ExpressionContext,
 ) -> Option<String> {
+    let signed = expr_context.binary_operand_signed(op, x.expr_context(), y.expr_context());
     let mut pre = String::new();
     let op_nb = native_bytes(expr_context.width.max(x.width()).max(y.width()));
-    let x_ref = emit_wide_operand(x, op_nb, &mut pre)?;
-    let y_ref = emit_wide_operand(y, op_nb, &mut pre)?;
+    // Equality also compares operands after extension to a common width
+    // (IEEE 1800-2023 11.4.5), even though its result is unsigned.
+    let x_ref = emit_wide_operand_signed(x, op_nb, signed, &mut pre)?;
+    let y_ref = emit_wide_operand_signed(y, op_nb, signed, &mut pre)?;
     let a = x_ref.addr;
     let b = y_ref.addr;
     let result = match op {
         Op::Eq | Op::EqWildcard => format!("(uint64_t)vw_eq({a}, {b}, {op_nb}u)"),
         Op::Ne | Op::NeWildcard => format!("(uint64_t)vw_ne({a}, {b}, {op_nb}u)"),
         Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => {
-            let cmp = if expr_context.signed {
+            let cmp = if signed {
                 // Sign-extend each operand from its OWN width: the result width
                 // is 1 (useless for sign location) and a single common width
                 // mislocates a narrower operand's sign.
@@ -2091,6 +2161,27 @@ fn mask_u128(s: &str, width: usize) -> String {
     let hi = (m >> 64) as u64;
     let lo = m as u64;
     format!("(({s}) & (((__uint128_t)0x{hi:x}ULL << 64) | (__uint128_t)0x{lo:x}ULL))")
+}
+
+/// Extend an operand to the scalar operation's width before applying the
+/// operator (IEEE 1800-2023 11.8.2). Use an unsigned C type so arithmetic wraps.
+fn extend_scalar_operand(s: &str, src_width: usize, width: usize, signed: bool) -> String {
+    let (uty, ity, bits) = if width > 64 {
+        ("__uint128_t", "__int128_t", 128)
+    } else {
+        ("uint64_t", "int64_t", 64)
+    };
+    let value = format!("(({uty})({s}))");
+    if src_width == 0 || src_width >= width {
+        value
+    } else if signed {
+        let shift = bits - src_width;
+        format!("(({uty})((({ity})(({value}) << {shift})) >> {shift}))")
+    } else if width > 64 {
+        mask_u128(&value, src_width)
+    } else {
+        format!("(({value}) & {mask:#x}ULL)", mask = width_mask(src_width))
+    }
 }
 
 /// Emit one or more `WriteLogWideEntry` pushes covering `nb` payload bytes
@@ -2268,6 +2359,11 @@ fn is_cheap_boolfold_arm(e: &ProtoExpression, depth: u32) -> bool {
         ProtoExpression::Unary {
             x, expr_context, ..
         } => expr_context.width <= 64 && is_cheap_boolfold_arm(x, depth - 1),
+        ProtoExpression::Resize { x, width, .. } => {
+            // Scalar casts are shifts/masks, just like the bitwise trees
+            // used before casts had their own IR node.
+            *width <= 64 && x.materialized_width() <= 64 && is_cheap_boolfold_arm(x, depth - 1)
+        }
         ProtoExpression::Binary {
             op,
             x,
@@ -2475,6 +2571,7 @@ fn diag_expr_kind(e: &ProtoExpression) -> &'static str {
         ProtoExpression::Variable { .. } => "Var",
         ProtoExpression::Value { .. } => "Val",
         ProtoExpression::Unary { .. } => "Un",
+        ProtoExpression::Resize { .. } => "Resize",
         ProtoExpression::Binary { .. } => "Bin",
         ProtoExpression::Ternary { .. } => "Tern",
         ProtoExpression::Concatenation { .. } => "Concat",
@@ -2503,6 +2600,9 @@ fn classify_uncovered_expr(e: &ProtoExpression) -> String {
             dynamic_select.is_some()
         ),
         ProtoExpression::Value { width, .. } => format!("Val(w={width})"),
+        ProtoExpression::Resize { x, width, .. } => {
+            format!("Resize(w={width})/{}", classify_uncovered_expr(x))
+        }
         ProtoExpression::Unary { op, x, width, .. } => {
             if !expr_covered(x) {
                 format!("Un({op:?})/{}", classify_uncovered_expr(x))
@@ -2802,7 +2902,7 @@ fn comb_touches(
                     .is_none_or(|ds| expr(&ds.index_expr, out))
             }
             ProtoExpression::Value { .. } => true,
-            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr(x, out),
             ProtoExpression::Binary { x, y, .. } => expr(x, out) && expr(y, out),
             ProtoExpression::Concatenation { elements, .. } => {
                 elements.iter().all(|(e, _, _)| expr(e, out))
@@ -3432,7 +3532,7 @@ fn const_cone_partition(
                     expr_io(&d.index_expr, io);
                 }
             }
-            ProtoExpression::Unary { x, .. } => expr_io(x, io),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr_io(x, io),
             ProtoExpression::Binary { x, y, .. } => {
                 expr_io(x, io);
                 expr_io(y, io);
@@ -3719,6 +3819,7 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
         }
         // Element loads read canonical storage; select forms mask.
         ProtoExpression::DynamicVariable { .. } => true,
+        ProtoExpression::Resize { .. } => true,
         ProtoExpression::Unary { op, .. } => match op {
             // Predicates and reductions produce 0/1.
             Op::LogicNot
@@ -3764,7 +3865,10 @@ fn expr_emits_clean(e: &ProtoExpression) -> bool {
                 Op::LogicShiftR => sub_clean(x),
                 Op::ArithShiftR => !expr_context.signed && sub_clean(x),
                 // Unsigned quotient/remainder never exceed the dividend.
-                Op::Div | Op::Rem => !expr_context.signed && sub_clean(x),
+                Op::Div | Op::Rem => {
+                    !expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context())
+                        && sub_clean(x)
+                }
                 // The cast op passes its operand through unchanged.
                 Op::As => sub_clean(x),
                 // Add/Sub/Mul (carry/borrow), Shl, xnor/nand/nor (~) are
@@ -6490,7 +6594,9 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     fn expr_nodes(e: &ProtoExpression) -> usize {
         match e {
             ProtoExpression::Variable { .. } | ProtoExpression::Value { .. } => 1,
-            ProtoExpression::Unary { x, .. } => 1 + expr_nodes(x),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+                1 + expr_nodes(x)
+            }
             ProtoExpression::Binary { x, y, .. } => 1 + expr_nodes(x) + expr_nodes(y),
             ProtoExpression::Concatenation { elements, .. } => {
                 1 + elements
@@ -9519,6 +9625,53 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 Some(load)
             }
         }
+        ProtoExpression::Resize {
+            x,
+            width,
+            sign_extend,
+            ..
+        } => {
+            if *width > 128 {
+                return None;
+            }
+            if x.builds_wide_pointer() {
+                let mut pre = String::new();
+                let r = emit_wide_resize(x, *width, *sign_extend, &mut pre)?;
+                let ty = if *width > 64 {
+                    "veryl_u128_ua"
+                } else {
+                    "veryl_u64_ua"
+                };
+                return Some(format!("({{ {pre}*(({ty}*)({addr})); }})", addr = r.addr));
+            }
+            let xs = emit_expr(x)?;
+            let src_width = x.materialized_width();
+            let (uty, ity, bits) = if *width > 64 {
+                ("__uint128_t", "__int128_t", 128)
+            } else {
+                ("uint64_t", "int64_t", 64)
+            };
+            let value = if *sign_extend && src_width > 0 && src_width < *width {
+                let shift = bits - src_width;
+                format!("(({uty})((({ity})((({uty})({xs})) << {shift})) >> {shift}))")
+            } else {
+                format!("(({uty})({xs}))")
+            };
+            let mask_width = if *sign_extend {
+                *width
+            } else {
+                (*width).min(src_width)
+            };
+            Some(if *width > 64 {
+                if mask_width == 128 {
+                    value
+                } else {
+                    mask_u128(&value, mask_width)
+                }
+            } else {
+                format!("(({value}) & {mask:#x}ULL)", mask = width_mask(mask_width))
+            })
+        }
         ProtoExpression::Unary {
             op,
             x,
@@ -9527,65 +9680,35 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
         } => {
             // Wide (>128-bit) operand: the only scalar-producing wide unary is
             // a reduction (BitAnd/BitOr/BitXor/…/LogicNot → 1-bit).  A wide
-            // non-reduction (BitNot/Sub) yields a wide value that can't be a C
+            // non-reduction (Add/BitNot/Sub) yields a wide value that can't be a C
             // scalar here, so emit_wide_reduce_unary returns None → the module
             // bails to Cranelift (which handles it).
             if x.width() > 128 {
                 return emit_wide_reduce_unary(*op, x);
             }
             let xs = emit_expr(x)?;
-            // A narrow signed operand loaded as uint64_t is zero-extended, so
-            // `-`/`~` leave wrong high bits (e.g. `- 8'shf6` = -(-10) is
-            // 0x000a, not 0xff0a).  Sign-extend when signed (like the Binary
-            // arm); store-time masking trims to the declared width.
-            let xw = x.width();
-            let xv = if expr_context.signed && xw > 0 && xw < 64 {
-                let shift = 64 - xw;
-                format!(
-                    "(((int64_t)((uint64_t)({}) << {})) >> {})",
-                    xs, shift, shift
-                )
-            } else {
-                format!("((int64_t)((uint64_t)({})))", xs)
-            };
+            let xw = x.materialized_width();
             match op {
                 // LogicNot yields 0/1 regardless of signedness.
-                Op::LogicNot => Some(format!("(!({}))", xs)),
-                Op::BitNot | Op::Sub => {
-                    if xw > 64 {
-                        // 65..128-bit operand: compute in __uint128_t — the
-                        // (uint64_t) rebuild below would drop bits 64..127.
-                        let inner = if matches!(op, Op::BitNot) {
-                            format!("(~((__uint128_t)({xs})))")
-                        } else {
-                            format!("((__uint128_t)0 - ((__uint128_t)({xs})))")
-                        };
-                        let w = expr_context.width;
-                        if needs_clean && w > 0 && w < 128 {
-                            return Some(mask_u128(&inner, w));
-                        }
-                        return Some(inner);
+                Op::LogicNot => Some(format!("(!({xs}))")),
+                Op::Add | Op::BitNot | Op::Sub => {
+                    let w = expr_context.width;
+                    if w > 128 {
+                        return None;
                     }
-                    let inner = if matches!(op, Op::BitNot) {
-                        format!("(~({}))", xv)
-                    } else {
-                        format!("(-({}))", xv)
+                    let xv = extend_scalar_operand(&xs, xw, w, expr_context.signed);
+                    let inner = match op {
+                        Op::Add => xv,
+                        Op::BitNot => format!("(~({xv}))"),
+                        Op::Sub => format!("(0 - ({xv}))"),
+                        _ => unreachable!(),
                     };
-                    // `~x`/`-x` leave dirty bits at/above the width; Cranelift and
-                    // the interpreter mask to width, so an inlined consumer reading
-                    // the high bits (Eq/Ne, unsigned compare, shift) must too.
-                    if needs_clean && expr_context.width > 0 && expr_context.width < 64 {
-                        let mask = (1u64 << expr_context.width) - 1;
-                        Some(format!("(({}) & 0x{:x}ULL)", inner, mask))
-                    } else if needs_clean && expr_context.width > 64 && expr_context.width < 128 {
-                        // 65..128-bit context over a ≤64-bit operand: the int64
-                        // result sign-extends through the __uint128_t promotion
-                        // (the ones in [xw..width) for ~/-), then the mask trims
-                        // [width..128).
-                        Some(mask_u128(
-                            &format!("((__uint128_t)(__int128_t)({inner}))"),
-                            expr_context.width,
-                        ))
+                    // Inlined consumers must not observe padding above the
+                    // expression width, including sign bits added above it.
+                    if needs_clean && w > 0 && w < 64 {
+                        Some(format!("(({inner}) & {mask:#x}ULL)", mask = width_mask(w)))
+                    } else if needs_clean && w > 64 && w < 128 {
+                        Some(mask_u128(&inner, w))
                     } else {
                         Some(inner)
                     }
@@ -9694,7 +9817,9 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             // the right semantics.  Without this, a narrow signed
             // value loaded as uint64_t compares (or divides) as
             // unsigned and negative numbers look like very-large positives.
-            let is_signed_cmp = expr_context.signed
+            let signed =
+                expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
+            let is_signed_cmp = signed
                 && matches!(
                     op,
                     Op::Less
@@ -9706,14 +9831,7 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         | Op::EqWildcard
                         | Op::NeWildcard
                 );
-            // Op::Div / Op::Rem use the AND of operand signedness, as the
-            // Cranelift backend does.  expr_context.signed alone is not
-            // sufficient because merge() with an unsigned sibling can
-            // strip the bit even when both operands ARE signed.
-            // We approximate by trusting expr_context.signed for the
-            // outer expression — div/rem are expr_context.signed
-            // exactly when both operands are signed.
-            let is_signed_divrem = expr_context.signed && matches!(op, Op::Div | Op::Rem);
+            let is_signed_divrem = signed && matches!(op, Op::Div | Op::Rem);
             // Operands need pre-masking only where this op reads their high
             // bits. Add/Sub/Mul (low bits suffice; the result mask cleans the
             // rest) and signed compare/div/rem (operands sign-extended below)
@@ -9944,11 +10062,6 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 _ => None,
             };
             if let Some(c_op) = direct {
-                // A >64-bit result computed in 64-bit C truncates. C promotes a
-                // uint64_t Add/Sub/Mul operand to __uint128_t when the other is
-                // already 128-bit, so only both-narrow truncate; a left shift
-                // follows its left operand alone. Bail those (and signed wide,
-                // which the block below can't sign-extend to 128) to Cranelift.
                 // 65..128-bit unsigned shift-LEFT with a narrow (≤64-bit) left
                 // operand: `(uint64_t)xs << ys` truncates to 64 bits, so promote
                 // xs to __uint128_t first. Placed before the `wide_truncates`
@@ -9977,82 +10090,33 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                         shifted
                     });
                 }
-                // 65..128-bit Add/Sub/Mul with both operands ≤64 bits: C
-                // computes the both-narrow case in uint64_t and truncates, so
-                // promote both operands to __uint128_t first.  A 64x64
-                // product fits 128 bits exactly, and add/sub wrap in 128 then
-                // mask to w — the modulo-2^w SystemVerilog result.  Signed
-                // variants sign-extend each operand from its own width into
-                // __int128 (the low w bits of the infinite-precision result
-                // are identical), e.g. a 33x33→66 multiplier.
+                // Arithmetic and bitwise operators both require operand
+                // extension. Promote before operating so neither a narrow C
+                // type nor a cast's retained width truncates the result.
                 if expr_context.width > 64
                     && expr_context.width <= 128
-                    && matches!(op, Op::Add | Op::Sub | Op::Mul)
-                    && x.width() <= 64
-                    && y.width() <= 64
+                    && matches!(
+                        op,
+                        Op::Add | Op::Sub | Op::Mul | Op::BitAnd | Op::BitOr | Op::BitXor
+                    )
                 {
                     let w = expr_context.width;
-                    let promote = |s: &str, sw: usize| -> String {
-                        if expr_context.signed {
-                            if sw >= 64 {
-                                format!("((__int128_t)((int64_t)((uint64_t)({s}))))")
-                            } else {
-                                let sh = 64 - sw;
-                                format!(
-                                    "((__int128_t)(((int64_t)(((uint64_t)({s})) << {sh})) >> {sh}))"
-                                )
-                            }
-                        } else if sw >= 64 {
-                            format!("((__uint128_t)((uint64_t)({s})))")
-                        } else {
-                            format!(
-                                "((__uint128_t)(((uint64_t)({s})) & 0x{:x}ULL))",
-                                width_mask(sw)
-                            )
-                        }
-                    };
-                    let xm = promote(&xs, x.width());
-                    let ym = promote(&ys, y.width());
-                    let body = format!("((__uint128_t)(({xm}) {c_op} ({ym})))");
-                    return Some(if w < 128 { mask_u128(&body, w) } else { body });
-                }
-                // Add/Sub/Mul are modular, so signedness is invisible once
-                // both operands reach `width`.  Only an operand narrower than
-                // the result needs its sign bits filled in.
-                if expr_context.signed
-                    && expr_context.width > 64
-                    && expr_context.width <= 128
-                    && matches!(op, Op::Add | Op::Sub | Op::Mul)
-                {
-                    let w = expr_context.width;
-                    let sext = |s: &str, sw: usize| -> String {
-                        if sw == 0 || sw >= w {
-                            format!("((__uint128_t)({s}))")
-                        } else {
-                            let sh = 128 - sw;
-                            format!(
-                                "((__uint128_t)(((__int128_t)(((__uint128_t)({s})) << {sh})) >> {sh}))"
-                            )
-                        }
-                    };
-                    let body = format!(
-                        "((__uint128_t)(({xe}) {c_op} ({ye})))",
-                        xe = sext(&xs, x.width()),
-                        ye = sext(&ys, y.width()),
-                    );
-                    return Some(if w < 128 { mask_u128(&body, w) } else { body });
+                    let xm =
+                        extend_scalar_operand(&xs, x.materialized_width(), w, expr_context.signed);
+                    let ym =
+                        extend_scalar_operand(&ys, y.materialized_width(), w, expr_context.signed);
+                    let body = format!("(({xm}) {c_op} ({ym}))");
+                    return Some(if needs_clean && w < 128 {
+                        mask_u128(&body, w)
+                    } else {
+                        body
+                    });
                 }
                 let wide_truncates = match op {
                     Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
                     _ => false,
                 };
-                // Bitwise ops (And/Or/Xor) are sign-agnostic — the result bits
-                // don't depend on operand signedness — so a signed 65..128-bit
-                // result is fine in __uint128_t; only arithmetic/shift ops that
-                // would need a 128-bit sign-extension bail on signedness.
-                let signed_wide_bail =
-                    expr_context.signed && !matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor);
-                if expr_context.width > 64 && (wide_truncates || signed_wide_bail) {
+                if expr_context.width > 64 && (wide_truncates || expr_context.signed) {
                     return None;
                 }
                 // For 65..128-bit shifts the C operator uses a mod-128 count on
@@ -10314,13 +10378,20 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 // `~` sets every bit above the width; mask when a consumer
                 // reads the high bits (mirrors the unary BitNot emission).
                 Op::BitXnor | Op::BitNand | Op::BitNor => {
+                    let w = expr_context.width;
+                    if w > 128 {
+                        return None;
+                    }
+                    let xs =
+                        extend_scalar_operand(&xs, x.materialized_width(), w, expr_context.signed);
+                    let ys =
+                        extend_scalar_operand(&ys, y.materialized_width(), w, expr_context.signed);
                     let inner = match op {
                         Op::BitXnor => format!("(~(({xs}) ^ ({ys})))"),
                         Op::BitNand => format!("(~(({xs}) & ({ys})))"),
                         Op::BitNor => format!("(~(({xs}) | ({ys})))"),
                         _ => unreachable!(),
                     };
-                    let w = expr_context.width;
                     if needs_clean && w > 0 && w < 64 {
                         Some(format!("(({inner}) & 0x{:x}ULL)", (1u64 << w) - 1))
                     } else if needs_clean && w > 64 && w < 128 {
@@ -11250,6 +11321,50 @@ mod tests {
             width,
             var_full_width: width,
             expr_context: ctx(width, true),
+        }
+    }
+
+    #[test]
+    fn boolfold_preserves_scalar_cast_comparisons() {
+        if boolfold_mode() != 1 {
+            return;
+        }
+        for (src_width, width, folded) in [
+            (8, 3, true),
+            (8, 64, true),
+            (64, 8, true),
+            (65, 8, false),
+            (8, 65, false),
+        ] {
+            for op in [Op::LogicAnd, Op::LogicOr] {
+                let cast = ProtoExpression::Resize {
+                    x: Box::new(var_expr(VarOffset::Comb(8), src_width)),
+                    width,
+                    sign_extend: false,
+                    expr_context: ctx(width, false),
+                };
+                let cmp = ProtoExpression::Binary {
+                    x: Box::new(cast),
+                    op: Op::Eq,
+                    y: Box::new(const_expr(1, width)),
+                    width: 1,
+                    expr_context: ctx(1, false),
+                };
+                let expr = ProtoExpression::Binary {
+                    x: Box::new(var_expr(VarOffset::Comb(0), 1)),
+                    op,
+                    y: Box::new(cmp),
+                    width: 1,
+                    expr_context: ctx(1, false),
+                };
+                let emitted = emit_expr(&expr).unwrap();
+                let short_circuit = if op == Op::LogicAnd { "&&" } else { "||" };
+                assert_eq!(
+                    emitted.contains(short_circuit),
+                    !folded,
+                    "{src_width} as {width}, {op:?}: {emitted}"
+                );
+            }
         }
     }
 
