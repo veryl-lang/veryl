@@ -5,7 +5,9 @@ use crate::namespace::{DefineContext, Namespace};
 use crate::scope;
 use crate::symbol::{Direction, GenericMap, Symbol, SymbolId, SymbolKind, TbComponentKind};
 use crate::symbol_path::{GenericSymbol, GenericSymbolPath, SymbolPath, SymbolPathNamespace};
+use crate::symbol::TypeKind;
 use crate::symbol_table;
+use veryl_parser::token_range::TokenExt;
 use crate::symbol_table::{ResolveError, ResolveErrorCause};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -753,6 +755,7 @@ impl ReferenceTable {
         path: &GenericSymbolPath,
         token: &Token,
         selects_per_component: &[usize],
+        hierarchical_identifier: Option<&HierarchicalIdentifier>,
     ) {
         for i in 0..path.len().saturating_sub(1) {
             if let Ok(symbol) = symbol_table::resolve_base_path(path, i, token.id)
@@ -773,6 +776,27 @@ impl ReferenceTable {
                         &path.range,
                     ));
                     return;
+                }
+            }
+            // Check for interface instance array with non-constant select
+            if let Some(hier) = hierarchical_identifier {
+                if let Ok(symbol) = symbol_table::resolve_base_path(path, i, token.id)
+                    && let Some(r#type) = symbol.found.kind.get_type()
+                    && r#type.array.len() > i
+                {
+                    // Check if this is an interface instance array
+                    if let TypeKind::UserDefined(udt) = &r#type.kind
+                        && let Some(sym_id) = udt.symbol
+                        && let Some(sym) = symbol_table::get(sym_id)
+                        && matches!(sym.kind, SymbolKind::Interface(_))
+                    {
+                        // Get the select expression for this level
+                        if let Some(selects_per_level) = hier.hierarchical_identifier_list.get(i) {
+                            let select_expr = &*selects_per_level.select.expression;
+                            let select_range = select_expr.range();
+                            self.errors.push(AnalyzerError::non_constant_interface_instance_select(&select_range));
+                        }
+                    }
                 }
             }
         }
@@ -817,7 +841,7 @@ impl ReferenceTable {
                                 selects[1 + j] = member.hierarchical_identifier_list0_list.len();
                             }
                         }
-                        self.check_array_member_access(&path, &token, &selects);
+                        self.check_array_member_access(&path, &token, &selects, Some(arg));
                     }
                 }
                 ReferenceCandidate::ScopedIdentifier {
@@ -845,7 +869,7 @@ impl ReferenceTable {
                                     member.expression_identifier_list0_list.len();
                             }
                         }
-                        self.check_array_member_access(&path, &token, &selects);
+                        self.check_array_member_access(&path, &token, &selects, None);
                     }
                 }
                 ReferenceCandidate::GenericArgIdentifier { arg } => {

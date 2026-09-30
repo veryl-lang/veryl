@@ -1215,11 +1215,28 @@ pub enum AnalyzerError {
         token_source: TokenSource,
         #[related]
         instance: Option<InstanceNote>,
-    },
-
-    #[diagnostic(
-        severity(Warning),
-        code(mismatch_assignment),
+},
+ 
+     #[diagnostic(
+         severity(Error),
+         code(non_constant_interface_instance_select),
+         help("interface instance array selects must be constant; generate indices, elaboration constants, and unevaluable external SV constants are accepted"),
+         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+     )]
+     #[error("interface instance array select must be constant; found runtime index")]
+     NonConstantInterfaceInstanceSelect {
+         #[source_code]
+         input: MultiSources,
+         #[label("Error location")]
+         error_location: SourceSpan,
+         token_source: TokenSource,
+         #[related]
+         instance: Option<InstanceNote>,
+     },
+ 
+     #[diagnostic(
+         severity(Warning),
+         code(mismatch_assignment),
         help("{kind}"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
     )]
@@ -2711,6 +2728,7 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefine { input, .. } => input,
             AnalyzerError::LastItemWithDefineInModport { input, .. } => input,
             AnalyzerError::MemberAccessOnArray { input, .. } => input,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { input, .. } => input,
             AnalyzerError::MismatchAssignment { input, .. } => input,
             AnalyzerError::MismatchAttributeArgs { input, .. } => input,
             AnalyzerError::MismatchClockDomain { input, .. } => input,
@@ -2850,6 +2868,7 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefine { instance, .. } => instance,
             AnalyzerError::LastItemWithDefineInModport { instance, .. } => instance,
             AnalyzerError::MemberAccessOnArray { instance, .. } => instance,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { instance, .. } => instance,
             AnalyzerError::MismatchAssignment { instance, .. } => instance,
             AnalyzerError::ImplicitClockConversion { instance, .. } => instance,
             AnalyzerError::InvalidClockAssignment { instance, .. } => instance,
@@ -2978,6 +2997,7 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefine { instance, .. } => instance.as_ref(),
             AnalyzerError::LastItemWithDefineInModport { instance, .. } => instance.as_ref(),
             AnalyzerError::MemberAccessOnArray { instance, .. } => instance.as_ref(),
+            AnalyzerError::NonConstantInterfaceInstanceSelect { instance, .. } => instance.as_ref(),
             AnalyzerError::MismatchAssignment { instance, .. } => instance.as_ref(),
             AnalyzerError::ImplicitClockConversion { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidClockAssignment { instance, .. } => instance.as_ref(),
@@ -3106,6 +3126,7 @@ impl AnalyzerError {
             AnalyzerError::LastItemWithDefine { token_source, .. } => *token_source,
             AnalyzerError::LastItemWithDefineInModport { token_source, .. } => *token_source,
             AnalyzerError::MemberAccessOnArray { token_source, .. } => *token_source,
+            AnalyzerError::NonConstantInterfaceInstanceSelect { token_source, .. } => *token_source,
             AnalyzerError::MismatchAssignment { token_source, .. } => *token_source,
             AnalyzerError::ImplicitClockConversion { token_source, .. } => *token_source,
             AnalyzerError::InvalidClockAssignment { token_source, .. } => *token_source,
@@ -3851,6 +3872,14 @@ impl AnalyzerError {
             name: name.to_string(),
             member: member.to_string(),
             array_dims,
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn non_constant_interface_instance_select(token: &TokenRange) -> Self {
+        AnalyzerError::NonConstantInterfaceInstanceSelect {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),

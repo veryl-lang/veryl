@@ -1,0 +1,10 @@
+interface Bus {
+    var value: logic;
+    function get() -> logic { return value; }
+}
+module Top(i: input logic, o: output logic) {
+    inst bus: Bus[2];
+    assign bus[0].value = 0;
+    assign bus[1].value = 1;
+    assign o = bus[i].get();
+}
