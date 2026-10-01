@@ -30935,3 +30935,71 @@ fn folded_constant_wider_than_its_operand() {
         )],
     );
 }
+
+#[test]
+fn folded_const_select_keeps_its_sign() {
+    // A whole constant element or member keeps its type's sign when folded;
+    // a part-select of one is unsigned.
+    let code = r#"
+    package pkg {
+        struct S {
+            m: signed logic<4>,
+            k: logic<4>,
+        }
+        const CS: S = S'{ m: -3, k: 5 };
+        const PC: i32 = -4;
+        const PA: i8 [2] = '{-3, -5};
+    }
+    module Top #(
+        param P: i32 = -4,
+        param Q: i8 [2] = '{-3, -5},
+    ) (
+        a : input  logic<8>,
+        i : input  logic<1>,
+        y0: output logic<16>,
+        y1: output logic<16>,
+        y2: output logic<16>,
+        y3: output logic<16>,
+        y4: output logic<16>,
+        y5: output logic<16>,
+        y6: output logic<16>,
+        y7: output logic<16>,
+        y8: output logic<16>,
+        y9: output logic<16>,
+    ) {
+        const C : i32    = -4;
+        const LS: pkg::S = pkg::S'{ m: -3, k: 5 };
+        always_comb {
+            y0 = P[3:0] + 16'sd0;
+            y1 = C[3:0] + 16'sd0;
+            y2 = pkg::PC[3:0] + 16'sd0;
+            y3 = Q[0] + 16'sd0;
+            y4 = pkg::PA[1] + 16'sd0;
+            y5 = Q[i] + 16'sd0;
+            y6 = pkg::PA[i][3:0] + 16'sd0 + a[0];
+            y7 = pkg::CS.m + 16'sd0;
+            y8 = LS.m + 16'sd0;
+            y9 = LS.m[3:0] + 16'sd0 + a;
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[
+            ("a", Value::new(0, 8, false)),
+            ("i", Value::new(1, 1, false)),
+        ],
+        &[
+            ("y0", Value::new(0x000c, 16, false)),
+            ("y1", Value::new(0x000c, 16, false)),
+            ("y2", Value::new(0x000c, 16, false)),
+            ("y3", Value::new(0xfffd, 16, false)),
+            ("y4", Value::new(0xfffb, 16, false)),
+            ("y5", Value::new(0xfffb, 16, false)),
+            ("y6", Value::new(0x000b, 16, false)),
+            ("y7", Value::new(0xfffd, 16, false)),
+            ("y8", Value::new(0xfffd, 16, false)),
+            ("y9", Value::new(0x000d, 16, false)),
+        ],
+    );
+}

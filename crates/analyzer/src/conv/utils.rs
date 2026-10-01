@@ -1237,25 +1237,29 @@ pub fn eval_struct_member(
                             // all pos values gives the LSB (end), and the last entry's type
                             // width gives the field width (beg = end + width - 1).
                             let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
+                            let mut member_type = get_member_type(context, member_symbol)?;
+                            member_type.array = r#type.array.clone();
                             if let Some(width) =
                                 x.part_select.last().and_then(|ps| ps.r#type.total_width())
                             {
                                 let beg = end + width - 1;
+                                // `Value::select` drops the member's sign.
+                                let field = |v: &Value| {
+                                    let mut v = v.select(beg, end);
+                                    v.set_signed(member_type.signed);
+                                    v
+                                };
                                 comptime.value = match &comptime.value {
-                                    ValueVariant::Numeric(v) => {
-                                        ValueVariant::Numeric(v.select(beg, end))
-                                    }
+                                    ValueVariant::Numeric(v) => ValueVariant::Numeric(field(v)),
                                     // Every element holds a whole struct, so the
                                     // field is taken element by element and the
                                     // array dimension stays on the type.
-                                    ValueVariant::NumericArray(v) => ValueVariant::NumericArray(
-                                        v.iter().map(|v| v.select(beg, end)).collect(),
-                                    ),
+                                    ValueVariant::NumericArray(v) => {
+                                        ValueVariant::NumericArray(v.iter().map(field).collect())
+                                    }
                                     v => v.clone(),
                                 };
                             }
-                            let mut member_type = get_member_type(context, member_symbol)?;
-                            member_type.array = r#type.array.clone();
                             comptime.r#type = member_type;
                             return Ok(ir::Factor::Value(comptime));
                         }
@@ -2690,6 +2694,15 @@ fn eval_factor_path_inner(
 
         let (array_select, width_select) = select.split(comptime.r#type.array.dims());
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+        // A part-select is unsigned; a whole member keeps its sign.
+        let member_signed = match part_select.as_ref().and_then(|x| x.part_select.last()) {
+            Some(member) if width_select.is_empty() => {
+                let mut member = member.r#type.clone();
+                member.flatten_struct_union_enum();
+                member.signed
+            }
+            _ => false,
+        };
         let width_select = if let Some(part_select) = &part_select {
             part_select.to_base_select(context, &width_select)
         } else {
@@ -2708,6 +2721,7 @@ fn eval_factor_path_inner(
                 if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
                     comptime.r#type.set_concrete_width(width);
                 }
+                comptime.r#type.signed = member_signed;
             }
             comptime.token = token;
 
@@ -2882,6 +2896,7 @@ fn reduce_unevaluable_select(
         if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
             comptime.r#type.set_concrete_width(width);
         }
+        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
     }
     comptime.token = token;
 }
@@ -2920,7 +2935,7 @@ fn fold_symbol_select(
         if let Some(width) = select.eval_comptime(context, &element, false) {
             comptime.r#type.set_concrete_width(width);
         }
-        comptime.r#type.signed = false;
+        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
     }
 
     let flat = array.calc_index(&indices)?;
@@ -2931,7 +2946,9 @@ fn fold_symbol_select(
         ValueVariant::Numeric(value.clone())
     } else {
         let (beg, end) = select.eval_value(context, &element, false)?;
-        ValueVariant::Numeric(value.select(beg, end))
+        let mut value = value.select(beg, end);
+        value.set_signed(comptime.r#type.signed);
+        ValueVariant::Numeric(value)
     };
     Some(comptime)
 }

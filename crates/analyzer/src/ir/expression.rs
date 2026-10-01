@@ -960,7 +960,9 @@ impl Factor {
                     // `gather_context` has already replaced by the selected
                     // width (mirrors `eval_assign` / `gather_ff`).
                     let (beg, end) = select.eval_value(context, &r#type, false)?;
-                    Some(value.select(beg, end))
+                    let mut value = value.select(beg, end);
+                    value.set_signed(comptime.r#type.signed);
+                    Some(value)
                 } else {
                     Some(value)
                 }
