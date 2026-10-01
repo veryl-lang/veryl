@@ -2879,11 +2879,13 @@ alias module  C_MODULE = c_module::<B_PKG>;
     let expect = r#"
 
 package prj___a_pkg__lbool;
+    typedef logic a_type;
     localparam type A_TYPE = logic;
 endpackage
 
 
 package prj___b_pkg__lbool;
+    typedef logic a_type;
 
 
 endpackage
@@ -3521,38 +3523,48 @@ module ModuleC {
 module prj___ModuleB__i16 #(
     parameter int unsigned V = 1
 );
+    typedef shortint T;
     localparam bit A = __func_b__V__bbool();
     localparam shortint B = __func_b__V__i16();
 
     function automatic bit __func_a__V__bbool;
-        return bit'(V);
+        typedef bit T;
+        return T'(V);
     endfunction
     function automatic shortint __func_a__V__i16;
-        return shortint'(V);
+        typedef shortint T;
+        return T'(V);
     endfunction
     function automatic bit __func_b__V__bbool;
+        typedef bit T;
         return __func_a__V__bbool();
     endfunction
     function automatic shortint __func_b__V__i16;
+        typedef shortint T;
         return __func_a__V__i16();
     endfunction
 endmodule
 module prj___ModuleB__i32 #(
     parameter int unsigned V = 1
 );
+    typedef int T;
     localparam bit A = __func_b__V__bbool();
     localparam int B = __func_b__V__i32();
 
     function automatic bit __func_a__V__bbool;
-        return bit'(V);
+        typedef bit T;
+        return T'(V);
     endfunction
     function automatic int __func_a__V__i32;
-        return int'(V);
+        typedef int T;
+        return T'(V);
     endfunction
     function automatic bit __func_b__V__bbool;
+        typedef bit T;
         return __func_a__V__bbool();
     endfunction
     function automatic int __func_b__V__i32;
+        typedef int T;
         return __func_a__V__i32();
     endfunction
 endmodule
@@ -3667,11 +3679,13 @@ fn gen_declaration() {
     input var logic [2-1:0]        a,
     input var logic [3-1:0][4-1:0] b
 );
+    typedef logic [3-1:0][4-1:0] T;
 endmodule
 module prj___ModuleB__1__2__3__4;
 
 
 
+    typedef logic [3-1:0][4-1:0] TYPE_B;
 
     logic [2-1:0]        a; always_comb a = '0;
     logic [3-1:0][4-1:0] b; always_comb b = '0;
@@ -3745,9 +3759,8 @@ module ModuleA {
 "#;
 
     let expect = r#"module prj_ModuleA;
-
-
-
+    typedef logic [8-1:0] TA;
+    typedef logic [16-1:0][8-1:0] TB;
     logic [16-1:0][8-1:0]         _a; always_comb _a = 0;
     logic [32-1:0][16-1:0][8-1:0] _b; always_comb _b = 0;
 endmodule
@@ -5367,4 +5380,126 @@ fn generate_block_leading_comment_is_stripped() {
 
     assert!(!ret.contains("stripped with every other comment"));
     assert!(ret.contains("begin :label_a"));
+}
+
+/// A `gen` declaration bound with `type` has no name in the generated SV, so a
+/// cast through it used to expand into `logic [5-1:0]'(0)`, which is not a legal
+/// SystemVerilog cast. The declaration must produce a `typedef` instead, and the
+/// cast must name it. Every other position keeps the expanded type.
+/// (refs: veryl-lang/veryl#3479)
+#[test]
+fn gen_type_declaration_is_emitted_as_typedef() {
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module ModuleA {
+    gen T: type = logic<5>;
+    let _a: T = 0 as T;
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    typedef logic [5-1:0] T;
+    logic [5-1:0] _a; always_comb _a = T'(0);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    assert_eq!(emit(&metadata, code), expect);
+
+    // A `gen` declaration inside a generate block belongs to that block's scope,
+    // so its `typedef` is emitted there too.
+    let code = r#"module ModuleA {
+    for i in 0..2 :g {
+        gen T: type = logic<5>;
+        let _a: T = 0 as T;
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    for (genvar i = 0; i < 2; i++) begin :g
+        typedef logic [5-1:0] T;
+        logic [5-1:0] _a; always_comb _a = T'(0);
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    assert_eq!(emit(&metadata, code), expect);
+
+    // A `gen` declaration passed as a generic argument is resolved to the type
+    // itself at the instantiation, so the generic instance carries no name for
+    // it either. Each instance needs its own `typedef` at the head of its body.
+    let code = r#"module ModuleA {
+    gen T: type = logic<5>;
+
+    inst u: ModuleB::<T>;
+    let _a: logic = FuncA::<T>(0);
+}
+module ModuleB::<T: type> {
+    let _b: T = 0 as T;
+}
+function FuncA::<T: type> (a: input logic) -> logic {
+    let b: T = a as T;
+    return b[0];
+}
+"#;
+
+    let expect = r#"module prj_ModuleA;
+    typedef logic [5-1:0] T;
+
+    prj___ModuleB__logic_5 u  ();
+    logic                  _a; always_comb _a = __FuncA__logic_5(0);
+
+    function automatic logic __FuncA__logic_5(
+        input var logic a
+    ) ;
+        typedef logic [5-1:0] T;
+        logic [5-1:0] b;
+        b = T'(a);
+        return b[0];
+    endfunction
+endmodule
+module prj___ModuleB__logic_5;
+    typedef logic [5-1:0] T;
+    logic [5-1:0] _b; always_comb _b = T'(0);
+endmodule
+
+//# sourceMappingURL=test.sv.map
+"#;
+
+    assert_eq!(emit(&metadata, code), expect);
+
+    // A generic argument that is already a named type needs no `typedef`; the
+    // cast keeps naming the type directly.
+    let code = r#"package PkgA {
+    enum EnumA: logic<2> {
+        A,
+        B,
+    }
+}
+module ModuleA {
+    inst u: ModuleB::<PkgA::EnumA>;
+}
+module ModuleB::<T: type> {
+    let _a: T = 0 as T;
+}
+"#;
+
+    let expect = r#"package prj_PkgA;
+    typedef enum logic [2-1:0] {
+        EnumA_A,
+        EnumA_B
+    } EnumA;
+endpackage
+module prj_ModuleA;
+    prj___ModuleB__PkgA_EnumA u ();
+endmodule
+module prj___ModuleB__PkgA_EnumA;
+    prj_PkgA::EnumA _a; always_comb _a = prj_PkgA::EnumA'(0);
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    assert_eq!(emit(&metadata, code), expect);
 }
