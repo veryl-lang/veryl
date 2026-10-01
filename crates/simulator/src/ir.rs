@@ -512,8 +512,9 @@ impl Ir {
                     format!("Case{{ {} }}", kids.join("; "))
                 }
                 Statement::For(f) => {
-                    let const_range = matches!(f.range.start, statement::RuntimeForBound::Const(_))
-                        && matches!(f.range.end, statement::RuntimeForBound::Const(_));
+                    let const_range =
+                        matches!(f.range.start, statement::RuntimeForBound::Const(..))
+                            && matches!(f.range.end, statement::RuntimeForBound::Const(..));
                     let kids: Vec<String> = f.body.iter().map(classify).collect();
                     format!(
                         "For(const_range={}, body_len={}){{ {} }}",

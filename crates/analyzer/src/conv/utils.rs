@@ -246,8 +246,10 @@ fn eval_range_inner(
     range: &Range,
     require_const: bool,
 ) -> IrResult<(ir::ForBound, ir::ForBound, bool)> {
+    // The emitted SV compares an `int` iterator against the bound, so the
+    // bound is evaluated at no less than 32 bits.
     let mut beg: ir::Expression = Conv::conv(context, range.expression.as_ref())?;
-    let beg_comptime = beg.eval_comptime(context, None);
+    let beg_comptime = beg.eval_comptime(context, Some(32));
     if require_const && !beg_comptime.is_const {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::ForRange,
@@ -267,14 +269,14 @@ fn eval_range_inner(
             return Err(ir_error!(token));
         }
         let val = value.to_usize().unwrap_or(0);
-        ir::ForBound::Const(val)
+        ir::ForBound::Const(val, beg_comptime.r#type.signed)
     } else {
         ir::ForBound::Expression(Box::new(beg))
     };
 
     let (end, inclusive) = if let Some(x) = &range.range_opt {
         let mut end: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
-        let end_comptime = end.eval_comptime(context, None);
+        let end_comptime = end.eval_comptime(context, Some(32));
         if require_const && !end_comptime.is_const {
             context.insert_error(AnalyzerError::unevaluable_value(
                 UnevaluableValueKind::ForRange,
@@ -292,7 +294,7 @@ fn eval_range_inner(
                 return Err(ir_error!(token));
             }
             let val = value.to_usize().unwrap_or(0);
-            ir::ForBound::Const(val)
+            ir::ForBound::Const(val, end_comptime.r#type.signed)
         } else {
             ir::ForBound::Expression(Box::new(end))
         };

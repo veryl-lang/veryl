@@ -926,7 +926,7 @@ impl ProtoForStatement {
         // expression that is itself JIT-able and fits an i64 counter (≤64 bits,
         // so its payload materialises as a scalar we can compare against).
         let bound_ok = |b: &ProtoForBound| match b {
-            ProtoForBound::Const(_) => true,
+            ProtoForBound::Const(..) => true,
             ProtoForBound::Dynamic(e) => e.can_build_binary() && e.width() <= 64,
         };
         let bounds_jittable = match &self.range {
@@ -940,7 +940,7 @@ impl ProtoForStatement {
             // analysis, but runtime bounds have no such guard — so only JIT
             // const-bound Stepped loops (matching the pre-existing behaviour).
             ProtoForRange::Stepped { start, end, .. } => {
-                matches!(start, ProtoForBound::Const(_)) && matches!(end, ProtoForBound::Const(_))
+                matches!(start, ProtoForBound::Const(..)) && matches!(end, ProtoForBound::Const(..))
             }
         };
         bounds_jittable && self.body.iter().all(|s| s.can_build_binary())
@@ -1091,7 +1091,7 @@ impl ProtoForStatement {
         builder: &mut FunctionBuilder,
     ) -> Option<CraneliftValue> {
         Some(match bound {
-            ProtoForBound::Const(c) => builder.ins().iconst(I64, *c as i64),
+            ProtoForBound::Const(c, _) => builder.ins().iconst(I64, *c as i64),
             ProtoForBound::Dynamic(expr) => {
                 let (payload, _mask) = expr.build_binary(context, builder)?;
                 let ty = builder.func.dfg.value_type(payload);

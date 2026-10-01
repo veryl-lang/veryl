@@ -31003,3 +31003,72 @@ fn folded_const_select_keeps_its_sign() {
         ],
     );
 }
+
+#[test]
+fn runtime_for_bound_keeps_its_type() {
+    // `j < N` compares unsigned when `N` is unsigned, so a negative start
+    // runs no iteration; a bound is evaluated at the 32-bit `int` width, so
+    // `a + 8'd1` is 256, not 0.
+    let code = r#"
+    module Top #(
+        param N: u32 = 2,
+    ) (
+        a : input  logic<8>,
+        b : input  logic<8>,
+        y0: output logic<32>,
+        y1: output logic<32>,
+        y2: output logic<32>,
+        y3: output logic<32>,
+        y4: output logic<32>,
+    ) {
+        var lo: i32;
+        var hi: logic<8>;
+        always_comb {
+            lo = -2;
+            y0 = 0;
+            for j in lo..N {
+                y0 = y0 + 1 + (j - j) + a;
+            }
+        }
+        always_comb {
+            hi = a + 8'd2;
+            y1 = 0;
+            for j in rev lo..hi {
+                y1 = y1 + 1 + (j - j);
+            }
+        }
+        always_comb {
+            y2 = 0;
+            for j in 0..(b + 8'd1) {
+                y2 = y2 + 1 + (j - j);
+            }
+        }
+        always_comb {
+            y3 = 0;
+            for j in rev 0..(b + 8'd1) {
+                y3 = y3 + 1 + (j - j);
+            }
+        }
+        always_comb {
+            y4 = 0;
+            for j in 0..=(b + 8'd1) {
+                y4 = y4 + 1 + (j - j);
+            }
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[
+            ("a", Value::new(0, 8, false)),
+            ("b", Value::new(0xff, 8, false)),
+        ],
+        &[
+            ("y0", Value::new(0, 32, false)),
+            ("y1", Value::new(4, 32, false)),
+            ("y2", Value::new(0x100, 32, false)),
+            ("y3", Value::new(0x100, 32, false)),
+            ("y4", Value::new(0x101, 32, false)),
+        ],
+    );
+}

@@ -51,14 +51,15 @@ pub struct ForStatement {
 
 #[derive(Clone, Debug)]
 pub enum ForBound {
-    Const(usize),
+    /// The signedness decides how the emitted `int` loop compares with it.
+    Const(usize, bool),
     Expression(Box<Expression>),
 }
 
 impl ForBound {
     pub fn eval_value(&self, context: &mut Context) -> Option<usize> {
         match self {
-            Self::Const(x) => Some(*x),
+            Self::Const(x, _) => Some(*x),
             Self::Expression(exp) => {
                 let exp = exp.as_ref().clone();
                 exp.eval_value(context)?.to_usize()
@@ -70,7 +71,7 @@ impl ForBound {
 impl fmt::Display for ForBound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ForBound::Const(x) => x.fmt(f),
+            ForBound::Const(x, _) => x.fmt(f),
             ForBound::Expression(x) => write!(f, "{}", x.as_ref()),
         }
     }

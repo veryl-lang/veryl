@@ -8872,7 +8872,7 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     };
     let bound_c = |b: &ProtoForBound| -> Option<String> {
         match b {
-            ProtoForBound::Const(v) => Some(format!("((int64_t){v}LL)")),
+            ProtoForBound::Const(v, _) => Some(format!("((int64_t){v}LL)")),
             ProtoForBound::Dynamic(e) => {
                 if e.width() > 64 {
                     return None;
@@ -8902,11 +8902,11 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     let const_trips =
         |start: &ProtoForBound, end: &ProtoForBound, inclusive: bool, step: u64| -> Option<u64> {
             let s = match start {
-                ProtoForBound::Const(v) => *v,
+                ProtoForBound::Const(v, _) => *v,
                 _ => return None,
             };
             let e0 = match end {
-                ProtoForBound::Const(v) => *v,
+                ProtoForBound::Const(v, _) => *v,
                 _ => return None,
             };
             let e = if inclusive { e0.checked_add(1)? } else { e0 };
@@ -14859,8 +14859,8 @@ mod tests {
             var_signed: false,
             token: TokenRange::default(),
             range: ProtoForRange::Forward {
-                start: ProtoForBound::Const(0),
-                end: ProtoForBound::Const(8),
+                start: ProtoForBound::Const(0, true),
+                end: ProtoForBound::Const(8, true),
                 inclusive: false,
                 step: 1,
             },
@@ -14887,8 +14887,8 @@ mod tests {
             var_signed: false,
             token: TokenRange::default(),
             range: ProtoForRange::Forward {
-                start: ProtoForBound::Const(0),
-                end: ProtoForBound::Const(8),
+                start: ProtoForBound::Const(0, true),
+                end: ProtoForBound::Const(8, true),
                 inclusive: false,
                 step: 1,
             },
@@ -14918,8 +14918,8 @@ mod tests {
             var_signed: false,
             token: TokenRange::default(),
             range: ProtoForRange::Forward {
-                start: ProtoForBound::Const(0),
-                end: ProtoForBound::Const(8),
+                start: ProtoForBound::Const(0, true),
+                end: ProtoForBound::Const(8, true),
                 inclusive: false,
                 step: 1,
             },
@@ -14944,8 +14944,8 @@ mod tests {
             var_signed: false,
             token: TokenRange::default(),
             range: ProtoForRange::Forward {
-                start: ProtoForBound::Const(0),
-                end: ProtoForBound::Const(7),
+                start: ProtoForBound::Const(0, true),
+                end: ProtoForBound::Const(7, true),
                 inclusive: true, // 0..=7 → 8 iters
                 step: 1,
             },
@@ -14967,7 +14967,7 @@ mod tests {
             var_signed: false,
             token: TokenRange::default(),
             range: ProtoForRange::Forward {
-                start: ProtoForBound::Const(0),
+                start: ProtoForBound::Const(0, true),
                 end: ProtoForBound::Dynamic(const_expr(8, 32)),
                 inclusive: false,
                 step: 1,
@@ -14991,8 +14991,8 @@ mod tests {
             var_signed: false,
             token: TokenRange::default(),
             range: ProtoForRange::Reverse {
-                start: ProtoForBound::Const(0),
-                end: ProtoForBound::Const(8),
+                start: ProtoForBound::Const(0, true),
+                end: ProtoForBound::Const(8, true),
                 inclusive: false,
                 step: 1,
             },
@@ -15013,8 +15013,8 @@ mod tests {
             var_signed: false,
             token: TokenRange::default(),
             range: ProtoForRange::Stepped {
-                start: ProtoForBound::Const(1),
-                end: ProtoForBound::Const(64),
+                start: ProtoForBound::Const(1, true),
+                end: ProtoForBound::Const(64, true),
                 inclusive: false,
                 step: 2,
                 op: veryl_analyzer::ir::Op::Mul,

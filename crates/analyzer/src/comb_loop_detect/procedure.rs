@@ -195,7 +195,7 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
 
 fn affine_bound(bound: &ForBound, ctx: &mut Context) -> Option<AffineIndex> {
     match bound {
-        ForBound::Const(value) => Some(AffineIndex {
+        ForBound::Const(value, _) => Some(AffineIndex {
             terms: Vec::new(),
             constant: isize::try_from(*value).ok()?,
         }),

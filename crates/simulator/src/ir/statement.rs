@@ -375,7 +375,7 @@ pub enum ComponentArg {
 
 #[derive(Clone)]
 pub enum RuntimeForBound {
-    Const(u64),
+    Const(u64, bool),
     Dynamic(Box<Expression>, (usize, bool)),
 }
 
@@ -386,7 +386,7 @@ impl RuntimeForBound {
     /// The bound extended to 64 bits, and its `(width, signed)`.
     pub fn eval(&self, mask_cache: &mut MaskCache) -> (i64, (usize, bool)) {
         match self {
-            RuntimeForBound::Const(v) => (*v as i64, (64, true)),
+            RuntimeForBound::Const(v, signed) => (*v as i64, (64, *signed)),
             RuntimeForBound::Dynamic(expr, (width, signed)) => {
                 let val = expr.eval(mask_cache);
                 let raw = val.to_u64().unwrap_or(0);
@@ -1129,16 +1129,15 @@ impl std::hash::Hash for CompiledBlockStatement {
 
 #[derive(Clone, Debug, Hash)]
 pub enum ProtoForBound {
-    Const(u64),
+    Const(u64, bool),
     Dynamic(ProtoExpression),
 }
 
 impl ProtoForBound {
-    /// `(width, signed)` of the bound as the loop compares it. A constant
-    /// bound is a non-negative integer, signed like an integer literal.
+    /// `(width, signed)` of the bound as the loop compares it.
     pub(crate) fn shape(&self) -> (usize, bool) {
         match self {
-            ProtoForBound::Const(_) => (64, true),
+            ProtoForBound::Const(_, signed) => (64, *signed),
             ProtoForBound::Dynamic(e) => (e.width(), e.expr_context().signed),
         }
     }
@@ -1214,7 +1213,7 @@ impl ProtoForRange {
         };
         [s, e].into_iter().filter_map(|b| match b {
             ProtoForBound::Dynamic(e) => Some(e),
-            ProtoForBound::Const(_) => None,
+            ProtoForBound::Const(..) => None,
         })
     }
 }
@@ -1222,7 +1221,7 @@ impl ProtoForRange {
 impl ProtoForBound {
     pub fn as_const(&self) -> Option<u64> {
         match self {
-            ProtoForBound::Const(v) => Some(*v),
+            ProtoForBound::Const(v, _) => Some(*v),
             ProtoForBound::Dynamic(_) => None,
         }
     }
@@ -2652,7 +2651,7 @@ impl ProtoStatement {
                         .collect();
                     let convert_bound = |b: &ProtoForBound| -> RuntimeForBound {
                         match b {
-                            ProtoForBound::Const(v) => RuntimeForBound::Const(*v),
+                            ProtoForBound::Const(v, signed) => RuntimeForBound::Const(*v, *signed),
                             ProtoForBound::Dynamic(proto_expr) => RuntimeForBound::Dynamic(
                                 Box::new(proto_expr.apply_values_ptr(
                                     ff_values_ptr,
@@ -3955,7 +3954,9 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                                      ctx: &mut Context|
                  -> Result<ProtoForBound, SimulatorError> {
                     match b {
-                        air::ForBound::Const(v) => Ok(ProtoForBound::Const(*v as u64)),
+                        air::ForBound::Const(v, signed) => {
+                            Ok(ProtoForBound::Const(*v as u64, *signed))
+                        }
                         air::ForBound::Expression(expr) => {
                             // Must not fold via eval_value: the analyzer's
                             // Context holds the last-tracked value of any
