@@ -30755,3 +30755,81 @@ fn signed_cast_of_folded_constant_sign_extends() {
         ],
     );
 }
+
+#[test]
+fn case_on_signed_target_matches_negative_labels() {
+    // A label folds to a constant that must keep its signedness, or a signed
+    // target is compared zero-extended and misses `-1` and `-8..=-1`.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<8>,
+        y1: output logic<8>,
+        y2: output logic<8>,
+    ) {
+        var n: i8;
+        always_comb {
+            n = a as i8;
+            case n {
+                -1     : y0 = 1;
+                default: y0 = 2;
+            }
+            case n {
+                -8..=-1: y1 = 1;
+                0..=7  : y1 = 2;
+                default: y1 = 3;
+            }
+            y2 = case n {
+                -2..=-1: 8'd1,
+                default: 8'd2,
+            };
+        }
+    }
+    "#;
+    for (a, y0, y1, y2) in [(0xff, 1, 1, 1), (0xf9, 2, 1, 2), (0x03, 2, 2, 2)] {
+        check_all_configs(
+            code,
+            &[("a", Value::new(a, 8, false))],
+            &[
+                ("y0", Value::new(y0, 8, false)),
+                ("y1", Value::new(y1, 8, false)),
+                ("y2", Value::new(y2, 8, false)),
+            ],
+        );
+    }
+}
+
+#[test]
+fn constant_case_on_signed_target() {
+    // A case evaluated at elaboration compares like the runtime one.
+    let code = r#"
+    module Top (
+        y0: output logic<8>,
+        y1: output logic<8>,
+    ) {
+        function f (
+            n: input i8,
+        ) -> logic<8> {
+            var r: logic<8>;
+            case n {
+                -1     : r = 1;
+                -8..=-2: r = 3;
+                default: r = 2;
+            }
+            return r;
+        }
+        const C0: logic<8> = f(-1);
+        const C1: logic<8> = f(-5);
+        assign y0 = C0;
+        assign y1 = C1;
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[],
+        &[
+            ("y0", Value::new(1, 8, false)),
+            ("y1", Value::new(3, 8, false)),
+        ],
+    );
+}

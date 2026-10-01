@@ -1129,25 +1129,24 @@ pub enum CasePattern {
 }
 
 impl CasePattern {
-    /// `None` when either side is non-const.
+    /// `None` when either side is non-const. Compares as `lower_to_cond`
+    /// does, so a signed target meets a negative label sign-extended.
     pub(crate) fn matches(&self, target: &Value, context: &mut Context) -> Option<bool> {
-        let target_n = target.to_usize()?;
+        fn test(context: &mut Context, op: Op, x: &Value, y: &Value) -> Option<bool> {
+            let signed = x.signed() && y.signed();
+            let ret = op.eval_value_binary(x, y, 1, signed, &mut context.mask_cache);
+            ret.to_usize().map(|x| x != 0)
+        }
         match self {
             CasePattern::Eq(e) => {
-                let v = e.eval_value(context)?.to_usize()?;
-                Some(target_n == v)
+                let v = e.eval_value(context)?;
+                test(context, Op::EqWildcard, target, &v)
             }
             CasePattern::Range { lo, hi, inclusive } => {
-                let lo_n = lo.eval_value(context)?.to_usize()?;
-                let hi_n = hi.eval_value(context)?.to_usize()?;
-                Some(
-                    lo_n <= target_n
-                        && if *inclusive {
-                            target_n <= hi_n
-                        } else {
-                            target_n < hi_n
-                        },
-                )
+                let lo = lo.eval_value(context)?;
+                let hi = hi.eval_value(context)?;
+                let hi_op = if *inclusive { Op::LessEq } else { Op::Less };
+                Some(test(context, Op::LessEq, &lo, target)? && test(context, hi_op, target, &hi)?)
             }
         }
     }

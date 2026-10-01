@@ -559,11 +559,13 @@ impl Expression {
             {
                 let is_global = comptime.is_global;
                 let r#type = comptime.r#type.clone();
+                let expr_context = comptime.expr_context;
                 let mut expr = Expression::create_value(value.clone(), self.token_range());
 
                 let expr_comptime = expr.comptime_mut();
                 expr_comptime.is_global = is_global;
                 expr_comptime.r#type = r#type;
+                expr_comptime.expr_context = expr_context;
                 expr_comptime.evaluated = true;
 
                 *self = expr;
