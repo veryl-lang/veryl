@@ -197,7 +197,8 @@ fn comb_loop_dynamic_selector_mutation_during_rhs_keeps_feedback() {
 fn comb_loop_dynamic_selector_bound_equality_respects_expression_widths() {
     for (index_type, start, end, expected) in [
         ("bit<2>", "index as 1", "index", true),
-        ("bit", "index + 1'b1", "index + 2'b01", true),
+        ("bit", "(index + 1'b1) as 1", "index + 2'b01", true),
+        ("bit", "index + 1'b1", "index + 2'b01", false),
         ("bit<2>", "index as 4", "index", false),
         ("bit<2>", "index + 1", "1 + index", false),
     ] {

@@ -533,6 +533,19 @@ impl Expression {
         }
     }
 
+    /// Whether it has a value of its own width whatever the context.
+    pub fn is_self_determined(&self) -> bool {
+        match self {
+            Expression::Term(x) => !matches!(x.as_ref(), Factor::Unknown(_)),
+            Expression::Concatenation(..) => true,
+            Expression::Unary(op, ..) => op.unary_x_self_determined(),
+            Expression::Binary(_, op, ..) => {
+                *op == Op::As || op.binary_op_self_determined() || op.binary_x_self_determined()
+            }
+            _ => false,
+        }
+    }
+
     pub fn eval_comptime(
         &mut self,
         context: &mut Context,
@@ -559,11 +572,13 @@ impl Expression {
             {
                 let is_global = comptime.is_global;
                 let r#type = comptime.r#type.clone();
+                let expr_context = comptime.expr_context;
                 let mut expr = Expression::create_value(value.clone(), self.token_range());
 
                 let expr_comptime = expr.comptime_mut();
                 expr_comptime.is_global = is_global;
                 expr_comptime.r#type = r#type;
+                expr_comptime.expr_context = expr_context;
                 expr_comptime.evaluated = true;
 
                 *self = expr;
@@ -793,6 +808,12 @@ impl Factor {
                         comptime.r#type.set_concrete_width(width);
                     }
 
+                    // A part-select is unsigned (IEEE 1800-2023 11.8.1); a
+                    // member read rebased to a select keeps the member's sign.
+                    if !select.is_empty() {
+                        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
+                    }
+
                     // A select/index expression is a data-dependent read: an
                     // 'a-domain index into 'b-domain data is a real CDC, so
                     // check + merge each index/select domain into the factor.
@@ -952,7 +973,9 @@ impl Factor {
                     // `gather_context` has already replaced by the selected
                     // width (mirrors `eval_assign` / `gather_ff`).
                     let (beg, end) = select.eval_value(context, &r#type, false)?;
-                    Some(value.select(beg, end))
+                    let mut value = value.select(beg, end);
+                    value.set_signed(comptime.r#type.signed);
+                    Some(value)
                 } else {
                     Some(value)
                 }

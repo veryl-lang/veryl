@@ -51,14 +51,15 @@ pub struct ForStatement {
 
 #[derive(Clone, Debug)]
 pub enum ForBound {
-    Const(usize),
+    /// The signedness decides how the emitted `int` loop compares with it.
+    Const(usize, bool),
     Expression(Box<Expression>),
 }
 
 impl ForBound {
     pub fn eval_value(&self, context: &mut Context) -> Option<usize> {
         match self {
-            Self::Const(x) => Some(*x),
+            Self::Const(x, _) => Some(*x),
             Self::Expression(exp) => {
                 let exp = exp.as_ref().clone();
                 exp.eval_value(context)?.to_usize()
@@ -70,7 +71,7 @@ impl ForBound {
 impl fmt::Display for ForBound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ForBound::Const(x) => x.fmt(f),
+            ForBound::Const(x, _) => x.fmt(f),
             ForBound::Expression(x) => write!(f, "{}", x.as_ref()),
         }
     }
@@ -1129,24 +1130,49 @@ pub enum CasePattern {
 }
 
 impl CasePattern {
-    /// `None` when either side is non-const.
-    pub(crate) fn matches(&self, target: &Value, context: &mut Context) -> Option<bool> {
-        let target_n = target.to_usize()?;
+    /// `None` when either side is non-const. Compares as `lower_to_cond`
+    /// does.
+    /// `value` is `target` evaluated on its own.
+    pub(crate) fn matches(
+        &self,
+        target: &Expression,
+        value: &Value,
+        context: &mut Context,
+    ) -> Option<bool> {
+        fn test(
+            context: &mut Context,
+            op: Op,
+            target: &Expression,
+            value: &Value,
+            operand: &Expression,
+            target_first: bool,
+        ) -> Option<bool> {
+            let y = operand.eval_value(context)?;
+            // A target whose value depends on its context is evaluated again
+            // in the one the operand was given against it.
+            let pair = operand.comptime().expr_context;
+            let own = target.comptime().expr_context;
+            let x = if (pair.width != own.width || pair.signed != own.signed)
+                && !target.is_self_determined()
+            {
+                let mut target = target.clone();
+                target.apply_context(context, pair);
+                target.eval_value(context)?
+            } else {
+                value.clone()
+            };
+            let (x, y) = if target_first { (&x, &y) } else { (&y, &x) };
+            let signed = x.signed() && y.signed();
+            let ret = op.eval_value_binary(x, y, 1, signed, &mut context.mask_cache);
+            ret.to_usize().map(|x| x != 0)
+        }
         match self {
-            CasePattern::Eq(e) => {
-                let v = e.eval_value(context)?.to_usize()?;
-                Some(target_n == v)
-            }
+            CasePattern::Eq(e) => test(context, Op::EqWildcard, target, value, e, true),
             CasePattern::Range { lo, hi, inclusive } => {
-                let lo_n = lo.eval_value(context)?.to_usize()?;
-                let hi_n = hi.eval_value(context)?.to_usize()?;
+                let hi_op = if *inclusive { Op::LessEq } else { Op::Less };
                 Some(
-                    lo_n <= target_n
-                        && if *inclusive {
-                            target_n <= hi_n
-                        } else {
-                            target_n < hi_n
-                        },
+                    test(context, Op::LessEq, target, value, lo, false)?
+                        && test(context, hi_op, target, value, hi, true)?,
                 )
             }
         }
@@ -1217,7 +1243,7 @@ impl CaseStatement {
             let mut matched = false;
             let mut undecided = false;
             for pat in &arm.patterns {
-                match pat.matches(&tgt, context) {
+                match pat.matches(&self.case_target, &tgt, context) {
                     Some(true) => {
                         matched = true;
                         break;

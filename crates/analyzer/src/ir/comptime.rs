@@ -383,6 +383,9 @@ pub struct Comptime {
     /// Packed base-variable domain retained from the member path and the
     /// constant coordinates before this access's first dynamic coordinate.
     pub member_select_domain: Option<MemberSelectDomain>,
+    /// Signedness of the member that `rebase_part_select` replaced by the
+    /// base type.
+    pub member_signed: Option<bool>,
     pub clock_domain: ClockDomain,
     pub expr_context: ExpressionContext,
     pub evaluated: bool,
@@ -401,6 +404,9 @@ impl Comptime {
     /// interface array (`arr[2].s.f`, on the member).
     pub fn rebase_part_select(&mut self) -> usize {
         if let Some(part_select) = &self.part_select {
+            let mut member = self.r#type.clone();
+            member.flatten_struct_union_enum();
+            self.member_signed = Some(member.signed);
             let own = self.r#type.array.clone();
             let mut base = part_select.base.clone();
             if own.dims() > base.array.dims() {

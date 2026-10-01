@@ -30537,3 +30537,620 @@ fn runtime_function_return_preserves_external_writes_and_output_copyout() {
         }
     }
 }
+
+/// Run `code` under every configuration, driving `inputs` and checking
+/// `expected` outputs after one settle.
+fn check_all_configs(code: &str, inputs: &[(&str, Value)], expected: &[(&str, Value)]) {
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (name, value) in inputs {
+            sim.set(name, value.clone());
+        }
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (name, value) in expected {
+            assert_eq!(&sim.get(name).unwrap(), value, "{name} config={config:?}");
+        }
+    }
+}
+
+#[test]
+fn part_select_of_signed_is_unsigned() {
+    // `x[1:0]` is unsigned whatever `x` is, so the sum is unsigned and
+    // `$signed(a[3:0])` zero-extends: 4'he + 1 = 8'h0f, not 8'hff.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<8>,
+        y1: output logic<8>,
+    ) {
+        var x: i32;
+        always_comb {
+            x  = 1;
+            y0 = $signed(a[3:0]) + x[1:0];
+        }
+        always_comb {
+            y1 = 0;
+            for i in 0..2 {
+                if i == 1 {
+                    y1 = $signed(a[3:0]) + i[1:0];
+                }
+            }
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0x0e, 8, false))],
+        &[
+            ("y0", Value::new(0x0f, 8, false)),
+            ("y1", Value::new(0x0f, 8, false)),
+        ],
+    );
+}
+
+#[test]
+fn signed_part_select_sign_extends() {
+    // `$signed` of a part-select is signed, so it sign-extends both in a
+    // signed operation and stored bare to a wider variable.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        s0: output signed logic<16>,
+        s1: output logic<16>,
+    ) {
+        always_comb {
+            s0 = 0;
+            for i in 0..2 {
+                if a == 99 {
+                    break;
+                }
+                if i == 0 {
+                    s0 = s0 + $signed(a[3:0]);
+                }
+            }
+            s1 = $signed(a[3:0]);
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0x08, 8, false))],
+        &[
+            ("s0", Value::new(0xfff8, 16, false)),
+            ("s1", Value::new(0xfff8, 16, false)),
+        ],
+    );
+}
+
+#[test]
+fn signed_struct_member_sign_extends() {
+    // A member read keeps the member's signedness; a select of it does not.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<16>,
+        y1: output logic<16>,
+        y2: output logic<16>,
+    ) {
+        struct S {
+            m: signed logic<8>,
+            n: logic<8>,
+        }
+        var s: S;
+        always_comb {
+            s.m = a;
+            s.n = a;
+            y0  = s.m;
+            y1  = s.m + 16'sd0;
+            y2  = $signed(s.m[3:0]) + s.m[7:4];
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0xfe, 8, false))],
+        &[
+            ("y0", Value::new(0xfffe, 16, false)),
+            ("y1", Value::new(0xfffe, 16, false)),
+            ("y2", Value::new(0x001d, 16, false)),
+        ],
+    );
+}
+
+#[test]
+fn wide_logical_operand_keeps_result_type() {
+    // A condition wider than one bit only warns; the ternary still has its
+    // arms' type, here inside a concatenation that sizes by it.
+    let code = r#"
+    module Top #(
+        param R: signed logic<16> = -300,
+    ) (
+        a: input  logic<8>,
+        b: input  logic<4>,
+        y: output logic<16>,
+        z: output logic<16>,
+        t: output logic<4>,
+    ) {
+        always_comb {
+            y = {(if 1 ? a : b), 4'h5};
+            z = {!a, (a && b), 4'h5};
+            t = (if 16'sh8001 ? $signed((8'hf0 <= -2) as 4) : R);
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[
+            ("a", Value::new(0xfe, 8, false)),
+            ("b", Value::new(0x3, 4, false)),
+        ],
+        &[
+            ("y", Value::new(0x0fe5, 16, false)),
+            ("z", Value::new(0x0015, 16, false)),
+            ("t", Value::new(0x1, 4, false)),
+        ],
+    );
+}
+
+#[test]
+fn constant_ternary_keeps_both_arm_types() {
+    // A constant condition must not fold the ternary to an arm whose type
+    // differs from the other's: `X[0]` is a 1-bit unsigned select, and an
+    // unsigned arm makes the whole ternary unsigned.
+    let code = r#"
+    module Top #(
+        param Q: signed logic<4> = -3,
+        param X: i32             = 0,
+    ) (
+        a : input  logic<8>,
+        t : output logic<4>,
+        y0: output logic<16>,
+        y1: output logic<16>,
+    ) {
+        var sa: signed logic<8>;
+        always_comb {
+            sa = a;
+            t  = (if Q ? $signed(a[3:0]) : X[0]) >> 1;
+            y0 = (if 1 ? sa + 8'sd0 : a - 8'd0);
+            y1 = {(if 1 ? a[3:0] : a[7:0]), 4'h5};
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0xf8, 8, false))],
+        &[
+            ("t", Value::new(0x4, 4, false)),
+            ("y0", Value::new(0x00f8, 16, false)),
+            ("y1", Value::new(0x0085, 16, false)),
+        ],
+    );
+}
+
+#[test]
+fn signed_cast_of_folded_constant_sign_extends() {
+    // `$signed((P + 6'd8) as 4)` is 4'sb1011, so adding a signed zero
+    // sign-extends it whether or not the whole source folds.
+    let code = r#"
+    module Top #(
+        param P: u32 = 3,
+    ) (
+        a : input  logic<8>,
+        y0: output signed logic<8>,
+        y1: output signed logic<8>,
+    ) {
+        always_comb {
+            y0 = ($signed((P + 6'd8) as 4) + 0) | ($signed(a[3:0]) * 0);
+            y1 = $signed((P + 6'd8) as 4) + 0;
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0, 8, false))],
+        &[
+            ("y0", Value::new(0xfb, 8, false)),
+            ("y1", Value::new(0xfb, 8, false)),
+        ],
+    );
+}
+
+#[test]
+fn case_on_signed_target_matches_negative_labels() {
+    // A label folds to a constant that must keep its signedness, or a signed
+    // target is compared zero-extended and misses `-1` and `-8..=-1`.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<8>,
+        y1: output logic<8>,
+        y2: output logic<8>,
+    ) {
+        var n: i8;
+        always_comb {
+            n = a as i8;
+            case n {
+                -1     : y0 = 1;
+                default: y0 = 2;
+            }
+            case n {
+                -8..=-1: y1 = 1;
+                0..=7  : y1 = 2;
+                default: y1 = 3;
+            }
+            y2 = case n {
+                -2..=-1: 8'd1,
+                default: 8'd2,
+            };
+        }
+    }
+    "#;
+    for (a, y0, y1, y2) in [(0xff, 1, 1, 1), (0xf9, 2, 1, 2), (0x03, 2, 2, 2)] {
+        check_all_configs(
+            code,
+            &[("a", Value::new(a, 8, false))],
+            &[
+                ("y0", Value::new(y0, 8, false)),
+                ("y1", Value::new(y1, 8, false)),
+                ("y2", Value::new(y2, 8, false)),
+            ],
+        );
+    }
+}
+
+#[test]
+fn constant_case_on_signed_target() {
+    // A case evaluated at elaboration compares like the runtime one.
+    let code = r#"
+    module Top (
+        y0: output logic<8>,
+        y1: output logic<8>,
+    ) {
+        function f (
+            n: input i8,
+        ) -> logic<8> {
+            var r: logic<8>;
+            case n {
+                -1     : r = 1;
+                -8..=-2: r = 3;
+                default: r = 2;
+            }
+            return r;
+        }
+        const C0: logic<8> = f(-1);
+        const C1: logic<8> = f(-5);
+        assign y0 = C0;
+        assign y1 = C1;
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[],
+        &[
+            ("y0", Value::new(1, 8, false)),
+            ("y1", Value::new(3, 8, false)),
+        ],
+    );
+}
+
+#[test]
+fn dynamic_index_store_is_cut_to_element_width() {
+    // An 8-bit element has 4-byte storage; a wider source must not leave
+    // bits above the element there for a reader of the whole word.
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        y: output logic<64>,
+    ) {
+        var arr: logic<8> [3, 2];
+        always_comb {
+            for k in 0..3 {
+                arr[k][0] = 8'h11;
+                arr[k][1] = 8'h22;
+            }
+            arr[1][a[0]] = a + 32'd2;
+            y = {16'd0, arr[0][0], arr[0][1], arr[1][0], arr[1][1], arr[2][0], arr[2][1]};
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0xfe, 8, false))],
+        &[("y", Value::new(0x0000_1122_0022_1122, 64, false))],
+    );
+    check_all_configs(
+        code,
+        &[("a", Value::new(0xff, 8, false))],
+        &[("y", Value::new(0x0000_1122_1101_1122, 64, false))],
+    );
+}
+
+#[test]
+fn runtime_for_with_negative_bound() {
+    // The emitted SV iterates `int j`: a bound of -2 runs from -2, and one
+    // derived from an enclosing loop's iterator may be negative too.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<32>,
+        y1: output logic<32>,
+    ) {
+        var lo: i32;
+        var n : logic<8>;
+        always_comb {
+            lo = -2;
+            y0 = 0;
+            for j in lo..2 {
+                y0 = y0 + a + 1 + (j - j);
+            }
+        }
+        always_comb {
+            n  = 0;
+            y1 = 0;
+            for i in 0..4 {
+                if n == 3 {
+                    break;
+                }
+                for j in (i - 2)..2 {
+                    y1 = y1 + a + 1 + (j - j);
+                }
+                for k in 0..(i - 1) {
+                    y1 = y1 + 1000 + (k - k);
+                }
+                n = n + 1;
+            }
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(1, 8, false))],
+        &[
+            ("y0", Value::new(8, 32, false)),
+            ("y1", Value::new(0x3fa, 32, false)),
+        ],
+    );
+}
+
+#[test]
+fn folded_constant_wider_than_its_operand() {
+    // `1 << 70` folds to a value computed at the 128-bit context width.
+    let code = r#"
+    module Top (
+        y: output logic<128>,
+    ) {
+        always_comb {
+            y = 1 << 70;
+        }
+    }
+    "#;
+    use num_bigint::BigUint;
+    check_all_configs(
+        code,
+        &[],
+        &[(
+            "y",
+            Value::new_biguint(BigUint::from(1u32) << 70u32, 128, false),
+        )],
+    );
+}
+
+#[test]
+fn folded_const_select_keeps_its_sign() {
+    // A whole constant element or member keeps its type's sign when folded;
+    // a part-select of one is unsigned.
+    let code = r#"
+    package pkg {
+        struct S {
+            m: signed logic<4>,
+            k: logic<4>,
+        }
+        const CS: S = S'{ m: -3, k: 5 };
+        const PC: i32 = -4;
+        const PA: i8 [2] = '{-3, -5};
+    }
+    module Top #(
+        param P: i32 = -4,
+        param Q: i8 [2] = '{-3, -5},
+    ) (
+        a : input  logic<8>,
+        i : input  logic<1>,
+        y0: output logic<16>,
+        y1: output logic<16>,
+        y2: output logic<16>,
+        y3: output logic<16>,
+        y4: output logic<16>,
+        y5: output logic<16>,
+        y6: output logic<16>,
+        y7: output logic<16>,
+        y8: output logic<16>,
+        y9: output logic<16>,
+    ) {
+        const C : i32    = -4;
+        const LS: pkg::S = pkg::S'{ m: -3, k: 5 };
+        always_comb {
+            y0 = P[3:0] + 16'sd0;
+            y1 = C[3:0] + 16'sd0;
+            y2 = pkg::PC[3:0] + 16'sd0;
+            y3 = Q[0] + 16'sd0;
+            y4 = pkg::PA[1] + 16'sd0;
+            y5 = Q[i] + 16'sd0;
+            y6 = pkg::PA[i][3:0] + 16'sd0 + a[0];
+            y7 = pkg::CS.m + 16'sd0;
+            y8 = LS.m + 16'sd0;
+            y9 = LS.m[3:0] + 16'sd0 + a;
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[
+            ("a", Value::new(0, 8, false)),
+            ("i", Value::new(1, 1, false)),
+        ],
+        &[
+            ("y0", Value::new(0x000c, 16, false)),
+            ("y1", Value::new(0x000c, 16, false)),
+            ("y2", Value::new(0x000c, 16, false)),
+            ("y3", Value::new(0xfffd, 16, false)),
+            ("y4", Value::new(0xfffb, 16, false)),
+            ("y5", Value::new(0xfffb, 16, false)),
+            ("y6", Value::new(0x000b, 16, false)),
+            ("y7", Value::new(0xfffd, 16, false)),
+            ("y8", Value::new(0xfffd, 16, false)),
+            ("y9", Value::new(0x000d, 16, false)),
+        ],
+    );
+}
+
+#[test]
+fn runtime_for_bound_keeps_its_type() {
+    // `j < N` compares unsigned when `N` is unsigned, so a negative start
+    // runs no iteration; a bound is evaluated at the 32-bit `int` width, so
+    // `a + 8'd1` is 256, not 0.
+    let code = r#"
+    module Top #(
+        param N: u32 = 2,
+    ) (
+        a : input  logic<8>,
+        b : input  logic<8>,
+        y0: output logic<32>,
+        y1: output logic<32>,
+        y2: output logic<32>,
+        y3: output logic<32>,
+        y4: output logic<32>,
+    ) {
+        var lo: i32;
+        var hi: logic<8>;
+        always_comb {
+            lo = -2;
+            y0 = 0;
+            for j in lo..N {
+                y0 = y0 + 1 + (j - j) + a;
+            }
+        }
+        always_comb {
+            hi = a + 8'd2;
+            y1 = 0;
+            for j in rev lo..hi {
+                y1 = y1 + 1 + (j - j);
+            }
+        }
+        always_comb {
+            y2 = 0;
+            for j in 0..(b + 8'd1) {
+                y2 = y2 + 1 + (j - j);
+            }
+        }
+        always_comb {
+            y3 = 0;
+            for j in rev 0..(b + 8'd1) {
+                y3 = y3 + 1 + (j - j);
+            }
+        }
+        always_comb {
+            y4 = 0;
+            for j in 0..=(b + 8'd1) {
+                y4 = y4 + 1 + (j - j);
+            }
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[
+            ("a", Value::new(0, 8, false)),
+            ("b", Value::new(0xff, 8, false)),
+        ],
+        &[
+            ("y0", Value::new(0, 32, false)),
+            ("y1", Value::new(4, 32, false)),
+            ("y2", Value::new(0x100, 32, false)),
+            ("y3", Value::new(0x100, 32, false)),
+            ("y4", Value::new(0x101, 32, false)),
+        ],
+    );
+}
+
+#[test]
+fn case_compares_each_label_as_an_if_does() {
+    // `case t { L: .. }` is `if t ==? L`: the target and a label are sized
+    // and signed by their pair, and a constant label folds within it.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        t : input  logic<32>,
+        y1: output logic<8>,
+        y2: output logic<8>,
+        y3: output logic<8>,
+        y4: output logic<8>,
+        y5: output logic<8>,
+        y6: output logic<8>,
+        y7: output logic<8>,
+        y8: output logic<8>,
+    ) {
+        const K: i16 = -1;
+        const J: u8 = 8'hFF;
+        function f (
+            n: input logic<8>,
+        ) -> logic<8> {
+            var r: logic<8>;
+            case n + 8'h10 {
+                9'h105 : r = 2;
+                default: r = 0;
+            }
+            return r;
+        }
+        const C: logic<8> = f(8'hF5);
+        always_comb {
+            case a + 8'h10 {
+                9'h105 : y1 = 2;
+                default: y1 = 0;
+            }
+            case t {
+                K - 2  : y2 = 1;
+                default: y2 = 0;
+            }
+            case t {
+                K - 3..=K - 1: y3 = 1;
+                default      : y3 = 0;
+            }
+            y4 = case t {
+                K - 3..=K - 1: 8'd1,
+                default      : 8'd0,
+            };
+            y5 = case a + 8'h10 {
+                9'h105 : 8'd2,
+                default: 8'd0,
+            };
+            y6 = C;
+            case J + 8'h01 {
+                16'h0100: y7 = 2;
+                default : y7 = 0;
+            }
+            y8 = case J + 8'h01 {
+                16'h0100: 8'd2,
+                default : 8'd0,
+            };
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[
+            ("a", Value::new(0xf5, 8, false)),
+            ("t", Value::new(0xfffd, 32, false)),
+        ],
+        &[
+            ("y1", Value::new(2, 8, false)),
+            ("y2", Value::new(1, 8, false)),
+            ("y3", Value::new(1, 8, false)),
+            ("y4", Value::new(1, 8, false)),
+            ("y5", Value::new(2, 8, false)),
+            ("y6", Value::new(2, 8, false)),
+            ("y7", Value::new(2, 8, false)),
+            ("y8", Value::new(2, 8, false)),
+        ],
+    );
+}

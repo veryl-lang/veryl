@@ -160,7 +160,7 @@ impl Expression {
                 let val = unsafe {
                     read_native_value(*value, *native_bytes, *use_4state, read_width, *signed)
                 };
-                if let Some(dyn_sel) = dynamic_select {
+                let mut val = if let Some(dyn_sel) = dynamic_select {
                     let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
                     if idx >= dyn_sel.num_elements {
                         return out_of_range_read(*width, *signed, *use_4state);
@@ -172,7 +172,10 @@ impl Expression {
                     val.select(*beg, *end)
                 } else {
                     val
-                }
+                };
+                // `Value::select` drops the sign.
+                val.set_signed(*signed);
+                val
             }
             Expression::Value { value } => value.clone(),
             Expression::Unary {
@@ -281,7 +284,7 @@ impl Expression {
                 let value = unsafe {
                     read_native_value(ptr, *native_bytes, *use_4state, read_width, *signed)
                 };
-                if let Some(dyn_sel) = dynamic_select {
+                let mut value = if let Some(dyn_sel) = dynamic_select {
                     let idx = dyn_sel.index_expr.eval(mask_cache).to_usize().unwrap_or(0);
                     if idx >= dyn_sel.num_elements {
                         return out_of_range_read(*width, *signed, *use_4state);
@@ -293,7 +296,10 @@ impl Expression {
                     value.select(*beg, *end)
                 } else {
                     value
-                }
+                };
+                // `Value::select` drops the sign.
+                value.set_signed(*signed);
+                value
             }
         }
     }
@@ -1584,21 +1590,16 @@ impl ProtoExpression {
 
     /// The leaf a store sees, as `(width, signed)`.  Operators already extend
     /// to the context width, so only leaf reads/literals reach a store at
-    /// their natural width; bit/part-selects are unsigned per the LRM, so
-    /// selected leaves are exempt.
+    /// their natural width.
     fn store_leaf(&self) -> Option<(usize, bool)> {
         match self {
             ProtoExpression::Variable {
                 width,
-                select: None,
-                dynamic_select: None,
                 expr_context,
                 ..
             }
             | ProtoExpression::DynamicVariable {
                 width,
-                select: None,
-                dynamic_select: None,
                 expr_context,
                 ..
             } => Some((*width, expr_context.signed)),
@@ -2540,6 +2541,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                         .r#type
                         .total_width()
                         .ok_or_else(|| SimulatorError::unresolved_expression(&comptime.token))?;
+                    // A folded operator keeps its operand's type, but its value
+                    // has the context width (`1 << 70` stored to 128 bits).
+                    let width = width.max(value.width());
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
                     Ok(ProtoExpression::Value {
@@ -2583,6 +2587,10 @@ impl Conv<&air::Expression> for ProtoExpression {
                             | ProtoExpression::DynamicVariable { expr_context, .. } => expr_context,
                         };
                         ctx.signed = signed;
+                        // Constant folding extends by the value's own flag.
+                        if let ProtoExpression::Value { value, .. } = &mut inner {
+                            value.set_signed(signed);
+                        }
                         Ok(inner)
                     }
                     // `$bits`/`$size`/`$clog2`/`$onehot` are elaboration-time

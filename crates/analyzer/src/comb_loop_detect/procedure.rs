@@ -195,7 +195,7 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
 
 fn affine_bound(bound: &ForBound, ctx: &mut Context) -> Option<AffineIndex> {
     match bound {
-        ForBound::Const(value) => Some(AffineIndex {
+        ForBound::Const(value, _) => Some(AffineIndex {
             terms: Vec::new(),
             constant: isize::try_from(*value).ok()?,
         }),
@@ -2652,7 +2652,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let mut uncertain = false;
                 let mut matched = false;
                 for pattern in &arm.patterns {
-                    match pattern.matches(&target, &mut self.ctx) {
+                    match pattern.matches(&statement.case_target, &target, &mut self.ctx) {
                         Some(true) => {
                             matched = true;
                             break;
