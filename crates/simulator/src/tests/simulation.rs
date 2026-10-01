@@ -30833,3 +30833,35 @@ fn constant_case_on_signed_target() {
         ],
     );
 }
+
+#[test]
+fn dynamic_index_store_is_cut_to_element_width() {
+    // An 8-bit element has 4-byte storage; a wider source must not leave
+    // bits above the element there for a reader of the whole word.
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        y: output logic<64>,
+    ) {
+        var arr: logic<8> [3, 2];
+        always_comb {
+            for k in 0..3 {
+                arr[k][0] = 8'h11;
+                arr[k][1] = 8'h22;
+            }
+            arr[1][a[0]] = a + 32'd2;
+            y = {16'd0, arr[0][0], arr[0][1], arr[1][0], arr[1][1], arr[2][0], arr[2][1]};
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0xfe, 8, false))],
+        &[("y", Value::new(0x0000_1122_0022_1122, 64, false))],
+    );
+    check_all_configs(
+        code,
+        &[("a", Value::new(0xff, 8, false))],
+        &[("y", Value::new(0x0000_1122_1101_1122, 64, false))],
+    );
+}

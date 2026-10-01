@@ -496,22 +496,21 @@ impl ProtoAssignDynamicStatement {
             };
             emit_log_push(context, builder, result, mask_result);
         } else {
-            // Mask payload to dst_width when not a clean native width;
-            // matches the loaded-width semantics that ff_commit_from_log
-            // expects from the log payload.
-            let (payload_to_store, payload_for_log) = match self.dst_width {
-                8 | 16 | 32 | 64 => (payload, payload),
-                _ => {
-                    if self.dst_width >= 64 {
-                        return None;
-                    }
-                    let mask = (1u64 << self.dst_width) - 1;
-                    let masked = builder.ins().band_imm_u(payload, mask as i64);
-                    (masked, masked)
+            // An 8-bit element has 4-byte storage, and its readers load all
+            // of it trusting the bits above the width to be zero.
+            let fills_storage = self.dst_width == nb * 8;
+            let (payload_to_store, payload_for_log) = if fills_storage {
+                (payload, payload)
+            } else {
+                if self.dst_width >= 64 {
+                    return None;
                 }
+                let mask = (1u64 << self.dst_width) - 1;
+                let masked = builder.ins().band_imm_u(payload, mask as i64);
+                (masked, masked)
             };
             let mask_xz_for_log = if let Some(mask_xz_v) = mask_xz {
-                let m = if !matches!(self.dst_width, 8 | 16 | 32 | 64) {
+                let m = if !fills_storage {
                     let mask = (1u64 << self.dst_width) - 1;
                     builder.ins().band_imm_u(mask_xz_v, mask as i64)
                 } else {
