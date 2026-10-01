@@ -2584,6 +2584,10 @@ impl Conv<&air::Expression> for ProtoExpression {
                             | ProtoExpression::DynamicVariable { expr_context, .. } => expr_context,
                         };
                         ctx.signed = signed;
+                        // Constant folding extends by the value's own flag.
+                        if let ProtoExpression::Value { value, .. } = &mut inner {
+                            value.set_signed(signed);
+                        }
                         Ok(inner)
                     }
                     // `$bits`/`$size`/`$clog2`/`$onehot` are elaboration-time

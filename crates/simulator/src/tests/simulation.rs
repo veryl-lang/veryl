@@ -30727,3 +30727,31 @@ fn constant_ternary_keeps_both_arm_types() {
         ],
     );
 }
+
+#[test]
+fn signed_cast_of_folded_constant_sign_extends() {
+    // `$signed((P + 6'd8) as 4)` is 4'sb1011, so adding a signed zero
+    // sign-extends it whether or not the whole source folds.
+    let code = r#"
+    module Top #(
+        param P: u32 = 3,
+    ) (
+        a : input  logic<8>,
+        y0: output signed logic<8>,
+        y1: output signed logic<8>,
+    ) {
+        always_comb {
+            y0 = ($signed((P + 6'd8) as 4) + 0) | ($signed(a[3:0]) * 0);
+            y1 = $signed((P + 6'd8) as 4) + 0;
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0, 8, false))],
+        &[
+            ("y0", Value::new(0xfb, 8, false)),
+            ("y1", Value::new(0xfb, 8, false)),
+        ],
+    );
+}
