@@ -13,97 +13,7 @@ pub struct Git {
 #[derive(Error, Debug)]
 pub enum GitoxideError {
     #[error("gitoxide error: {0}")]
-    Open(#[from] gix::open::Error),
-
-    #[error("gitoxide error: {0}")]
-    Discover(#[from] gix::discover::Error),
-
-    #[error("gitoxide error: {0}")]
-    Init(#[from] gix::init::Error),
-
-    #[error("gitoxide error: {0}")]
-    Clone(#[from] gix::clone::Error),
-
-    #[error("gitoxide error: {0}")]
-    CloneFetch(#[from] gix::clone::fetch::Error),
-
-    #[error("gitoxide error: {0}")]
-    CloneCheckoutMainWorktree(#[from] gix::clone::checkout::main_worktree::Error),
-
-    #[error("gitoxide error: {0}")]
-    RemoteFindExisting(#[from] gix::remote::find::existing::Error),
-
-    #[error("gitoxide error: {0}")]
-    RemoteConnect(#[from] gix::remote::connect::Error),
-
-    #[error("gitoxide error: {0}")]
-    RemoteFetchPrepare(#[from] gix::remote::fetch::prepare::Error),
-
-    #[error("gitoxide error: {0}")]
-    RemoteFetch(#[from] gix::remote::fetch::Error),
-
-    #[error("gitoxide error: {0}")]
-    RevisionSpecParseSingle(#[from] gix::revision::spec::parse::single::Error),
-
-    #[error("gitoxide error: {0}")]
-    HeadId(#[from] gix::reference::head_id::Error),
-
-    #[error("gitoxide error: {0}")]
-    HeadTreeId(#[from] gix::reference::head_tree_id::Error),
-
-    #[error("gitoxide error: {0}")]
-    OpenIndex(#[from] gix::worktree::open_index::Error),
-
-    #[error("gitoxide error: {0}")]
-    IndexFromTree(#[from] gix::repository::index_from_tree::Error),
-
-    #[error("gitoxide error: {0}")]
-    IndexWrite(#[from] gix::index::file::write::Error),
-
-    #[error("gitoxide error: {0}")]
-    WorktreeCheckout(#[from] gix::worktree::state::checkout::Error),
-
-    #[error("gitoxide error: {0}")]
-    ObjectFind(#[from] gix::object::find::existing::Error),
-
-    #[error("gitoxide error: {0}")]
-    Commit(#[from] gix::commit::Error),
-
-    #[error("gitoxide error: {0}")]
-    IsDirty(#[from] gix::status::is_dirty::Error),
-
-    #[error("gitoxide error: {0}")]
-    CheckoutOptions(#[from] gix::config::checkout_options::Error),
-
-    #[error("gitoxide error: {0}")]
-    PeelToCommit(#[from] gix::object::peel::to_kind::Error),
-
-    #[error("gitoxide error: {0}")]
-    ObjectDecode(#[from] gix::objs::decode::Error),
-
-    #[error("gitoxide error: {0}")]
-    TreeEditor(#[from] gix::object::tree::editor::write::Error),
-
-    #[error("gitoxide error: {0}")]
-    TreeEditorInit(#[from] gix::object::tree::editor::init::Error),
-
-    #[error("gitoxide error: {0}")]
-    TreeEditorEdit(#[from] gix::objs::tree::editor::Error),
-
-    #[error("gitoxide error: {0}")]
-    EditTree(#[from] gix::repository::edit_tree::Error),
-
-    #[error("gitoxide error: {0}")]
-    ObjectWrite(#[from] gix::object::write::Error),
-
-    #[error("gitoxide error: {0}")]
-    ReferenceEdit(#[from] gix::reference::edit::Error),
-
-    #[error("gitoxide error: {0}")]
-    FindReference(#[from] gix::reference::find::existing::Error),
-
-    #[error("gitoxide error: {0}")]
-    CommitSignature(#[from] gix::config::commit_signature::Error),
+    Gix(#[from] gix::Error),
 
     #[error("gitoxide error: {0}")]
     RefNameValidation(#[from] gix::validate::reference::name::Error),
@@ -113,6 +23,15 @@ pub enum GitoxideError {
 
     #[error("gitoxide error: {msg}")]
     Generic { msg: String },
+}
+
+impl<E> From<gix::Exn<E>> for GitoxideError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn from(x: gix::Exn<E>) -> GitoxideError {
+        GitoxideError::Gix(x.into_error())
+    }
 }
 
 impl From<GitoxideError> for MetadataError {

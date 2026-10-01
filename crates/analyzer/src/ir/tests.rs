@@ -529,22 +529,22 @@ fn system_function() {
   const var11(b5): bit<32> = 32'h00000003;
 
   comb {
-    var0 = 32'h00000000;
+    var0 = 32'sh00000000;
   }
   comb {
-    var1 = 32'h00000000;
+    var1 = 32'sh00000000;
   }
   comb {
-    var2 = 32'h00000001;
+    var2 = 32'sh00000001;
   }
   comb {
-    var3 = 32'h00000002;
+    var3 = 32'sh00000002;
   }
   comb {
-    var4 = 32'h00000002;
+    var4 = 32'sh00000002;
   }
   comb {
-    var5 = 32'h00000003;
+    var5 = 32'sh00000003;
   }
 }
 "#;

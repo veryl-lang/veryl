@@ -1,0 +1,10 @@
+module Module68L (
+    i_sel: input  logic<N>   ,
+    i_d  : input  logic<N, 8>,
+    o_d  : output logic<8>   ,
+) {
+    import Package68K::*;
+    gen T: type = logic<8>;
+
+    assign o_d = $std::select_onehot::<N, T>(i_sel, i_d);
+}

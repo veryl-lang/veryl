@@ -3,6 +3,176 @@ use crate::ir::{Component, Declaration, Statement};
 use crate::value::Value;
 
 #[test]
+fn integer_system_functions_return_signed_integers() {
+    for query in [
+        "$bits(logic<5>)",
+        "$size(logic<5>)",
+        "$size(logic<5>, 1)",
+        "$size(logic<3, 5>, 2)",
+        "$clog2(17)",
+    ] {
+        let code = format!(
+            r#"
+module Top {{
+    const SIGNED_VALUE: signed logic<8> = 8'hff;
+    const UNSIGNED_VALUE: logic<8> = 8'hff;
+    const SIGNED_FALSE: logic<32> = if 1'b0 ? {query} : SIGNED_VALUE;
+    const SIGNED_TRUE: logic<32> = if 1'b1 ? SIGNED_VALUE : {query};
+    const UNSIGNED_FALSE: logic<32> = if 1'b0 ? {query} : UNSIGNED_VALUE;
+    const UNSIGNED_TRUE: logic<32> = if 1'b1 ? UNSIGNED_VALUE : {query};
+    const UNSIGNED_OUTER_FALSE: logic<32> = (if 1'b0 ? {query} : SIGNED_VALUE) + 32'h0;
+    const UNSIGNED_OUTER_TRUE: logic<32> = (if 1'b1 ? SIGNED_VALUE : {query}) + 32'h0;
+    const UNSIGNED_SUB_CAST: logic<64> = ({query} - 32'd6) as 32;
+    const REVERSE_SUB_CAST: logic<64> = (32'd4 - {query}) as 32;
+    const SIGNED_SUB_CAST: logic<64> = ({query} - 6) as 32;
+    const COMPARE_CAST: logic<32> = ({query} <: 6) as 1;
+    const BITNOT_SUM_CAST: logic<64> = ({query} + ~32'sd5) as 32;
+    const TERNARY_CAST: logic<64> = (if 1'b0 ? {query} : SIGNED_VALUE) as 32;
+    const TERNARY_SHIFT: logic<32> = (if 1'b0 ? {query} : SIGNED_VALUE) >>> 1;
+    const SUM: logic<32> = {query} + SIGNED_VALUE;
+    const LESS_THAN_NEGATIVE: logic = {query} <: -1;
+    const SHIFT: logic<32> = {query} >>> 1;
+    const WIDTH: u32 = $bits({query});
+    const UNSIGNED_RESULT: u32 = {query};
+    const SIGNED_RESULT: i32 = {query};
+    function choose(c: input logic) -> logic<32> {{
+        return if c ? {query} : SIGNED_VALUE;
+    }}
+    const CHOOSE_FALSE: logic<32> = choose(1'b0);
+    const CHOOSE_TRUE: logic<32> = choose(1'b1);
+    function choose_unsigned(c: input logic) -> logic<32> {{
+        return (if c ? {query} : SIGNED_VALUE) + 32'h0;
+    }}
+    const CHOOSE_UNSIGNED_FALSE: logic<32> = choose_unsigned(1'b0);
+    const CHOOSE_UNSIGNED_TRUE: logic<32> = choose_unsigned(1'b1);
+    function choose_comparison(c: input logic) -> logic<32> {{
+        return if c ? ({query} <: 6) : SIGNED_VALUE;
+    }}
+    const CHOOSE_COMPARE_FALSE: logic<32> = choose_comparison(1'b0);
+    const CHOOSE_COMPARE_TRUE: logic<32> = choose_comparison(1'b1);
+}}
+"#
+        );
+        symbol_table::clear();
+        attribute_table::clear();
+        doc_comment_table::clear();
+        let metadata = Metadata::create_default("prj").unwrap();
+        let parser = Parser::parse(&code, &"").unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        let mut context = Context::default();
+        let mut ir = Ir::default();
+        let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+        errors.extend(Analyzer::analyze_post_pass1());
+        errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+        errors.extend(Analyzer::analyze_post_pass2(&ir));
+        assert!(errors.is_empty(), "{query}: {errors:#?}");
+
+        let Component::Module(module) = &ir.components[0] else {
+            panic!("expected module");
+        };
+        // IEEE 1800-2023 20.6.2/20.7/20.8.1 return integer. Both signed arms must
+        // sign-extend even when the query itself is in the unselected arm;
+        // an unsigned arm must still zero-extend.
+        for (name, expected) in [
+            ("SIGNED_FALSE", 0xffff_ffff),
+            ("SIGNED_TRUE", 0xffff_ffff),
+            ("UNSIGNED_FALSE", 0xff),
+            ("UNSIGNED_TRUE", 0xff),
+            ("UNSIGNED_OUTER_FALSE", 0xff),
+            ("UNSIGNED_OUTER_TRUE", 0xff),
+            ("UNSIGNED_SUB_CAST", 0xffff_ffff),
+            ("REVERSE_SUB_CAST", 0xffff_ffff),
+            ("SIGNED_SUB_CAST", u64::MAX),
+            ("COMPARE_CAST", 1),
+            ("BITNOT_SUM_CAST", u64::MAX),
+            ("TERNARY_CAST", u64::MAX),
+            ("TERNARY_SHIFT", 0xffff_ffff),
+            ("SUM", 4),
+            ("LESS_THAN_NEGATIVE", 0),
+            ("SHIFT", 2),
+            ("WIDTH", 32),
+            ("UNSIGNED_RESULT", 5),
+            ("SIGNED_RESULT", 5),
+            ("CHOOSE_FALSE", 0xffff_ffff),
+            ("CHOOSE_TRUE", 5),
+            ("CHOOSE_UNSIGNED_FALSE", 0xff),
+            ("CHOOSE_UNSIGNED_TRUE", 5),
+            ("CHOOSE_COMPARE_FALSE", 0xff),
+            ("CHOOSE_COMPARE_TRUE", 1),
+        ] {
+            let variable = module
+                .variables
+                .values()
+                .find(|x| x.path.to_string() == name)
+                .unwrap();
+            assert_eq!(
+                variable.get_value(&[]).unwrap().to_u64(),
+                Some(expected),
+                "{query}: {name}\n{ir}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bit_and_sign_cast_system_function_return_types() {
+    for (query, width, extended) in [
+        ("$onehot(4'b0100)", 1, 0xff),
+        ("$signed(16'h0005)", 16, 0xffff_ffff),
+        ("$unsigned(16'sh0005)", 16, 0xff),
+    ] {
+        let code = format!(
+            r#"
+module Top {{
+    const SIGNED_VALUE: signed logic<8> = 8'hff;
+    const WIDTH: u32 = $bits({query});
+    const FALSE_ARM: logic<32> = if 1'b0 ? {query} : SIGNED_VALUE;
+    const TRUE_ARM: logic<32> = if 1'b1 ? SIGNED_VALUE : {query};
+    function choose(c: input logic) -> logic<32> {{
+        return if c ? {query} : SIGNED_VALUE;
+    }}
+    const CHOOSE_FALSE: logic<32> = choose(1'b0);
+}}
+"#
+        );
+        symbol_table::clear();
+        attribute_table::clear();
+        doc_comment_table::clear();
+        let metadata = Metadata::create_default("prj").unwrap();
+        let parser = Parser::parse(&code, &"").unwrap();
+        let analyzer = Analyzer::new(&metadata);
+        let mut context = Context::default();
+        let mut ir = Ir::default();
+        let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+        errors.extend(Analyzer::analyze_post_pass1());
+        errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+        errors.extend(Analyzer::analyze_post_pass2(&ir));
+        assert!(errors.is_empty(), "{query}: {errors:#?}");
+
+        let Component::Module(module) = &ir.components[0] else {
+            panic!("expected module");
+        };
+        for (name, expected) in [
+            ("WIDTH", width),
+            ("FALSE_ARM", extended),
+            ("TRUE_ARM", extended),
+            ("CHOOSE_FALSE", extended),
+        ] {
+            let variable = module
+                .variables
+                .values()
+                .find(|x| x.path.to_string() == name)
+                .unwrap();
+            assert_eq!(
+                variable.get_value(&[]).unwrap().to_u64(),
+                Some(expected),
+                "{query}: {name}\n{ir}"
+            );
+        }
+    }
+}
+
+#[test]
 fn constant_function_memoization_matches_uncached_evaluation() {
     type EvaluationCase = (&'static str, fn(u64) -> u64);
     let cases: [EvaluationCase; 8] = [

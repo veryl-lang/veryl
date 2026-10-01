@@ -797,7 +797,9 @@ fn node_count(expr: &ProtoExpression) -> usize {
 
 fn children(expr: &ProtoExpression) -> Box<dyn Iterator<Item = &ProtoExpression> + '_> {
     match expr {
-        ProtoExpression::Unary { x, .. } => Box::new(std::iter::once(x.as_ref())),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            Box::new(std::iter::once(x.as_ref()))
+        }
         ProtoExpression::Binary { x, y, .. } => Box::new([x.as_ref(), y.as_ref()].into_iter()),
         ProtoExpression::Ternary {
             cond,
@@ -814,7 +816,7 @@ fn children(expr: &ProtoExpression) -> Box<dyn Iterator<Item = &ProtoExpression>
 
 fn children_mut(expr: &mut ProtoExpression) -> Vec<&mut ProtoExpression> {
     match expr {
-        ProtoExpression::Unary { x, .. } => vec![x.as_mut()],
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => vec![x.as_mut()],
         ProtoExpression::Binary { x, y, .. } => vec![x.as_mut(), y.as_mut()],
         ProtoExpression::Ternary {
             cond,

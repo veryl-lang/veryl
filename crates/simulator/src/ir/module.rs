@@ -2138,12 +2138,9 @@ fn run_comb_pipeline(
                     new_of[old as usize] = new;
                 }
                 cone_kept_edge_directions = preserves_edge_directions(&unified_sorted, &new_of);
-                let mut reordered = Vec::with_capacity(unified_sorted.len());
-                let mut src: Vec<Option<ProtoStatement>> =
-                    unified_sorted.into_iter().map(Some).collect();
-                for &oi in &plan.order {
-                    reordered.push(src[oi as usize].take().expect("permutation is a bijection"));
-                }
+                let order: Vec<usize> = plan.order.iter().map(|&oi| oi as usize).collect();
+                let mut reordered = unified_sorted;
+                permute_in_place(&mut reordered, &order);
                 (reordered, Some(plan))
             }
             None => (unified_sorted, None),
@@ -2430,6 +2427,45 @@ fn run_comb_pipeline(
     })
 }
 
+/// Rearrange `v` in place so position `k` holds what was at `order[k]`.
+/// Panics unless `order` is a permutation of `0..v.len()`.
+pub(crate) fn permute_in_place<T>(v: &mut [T], order: &[usize]) {
+    assert_eq!(v.len(), order.len(), "permutation length");
+    let mut pending = vec![false; v.len()];
+    for &from in order {
+        assert!(!pending[from], "index {from} repeated in permutation");
+        pending[from] = true;
+    }
+    for start in 0..v.len() {
+        let mut at = start;
+        while pending[at] {
+            pending[at] = false;
+            let from = order[at];
+            if from == start {
+                break;
+            }
+            v.swap(at, from);
+            at = from;
+        }
+    }
+}
+
+/// Replace each element of `v`, in order, by what `f` pushes for it.  The
+/// output fills the slots the input vacates in `v`'s buffer, which is
+/// reallocated only when unconsumed input and output together outgrow it; the
+/// final conversion back to a `Vec` may move elements to make them contiguous.
+fn expand_in_place<T>(v: &mut Vec<T>, mut f: impl FnMut(T, &mut Vec<T>)) {
+    let n = v.len();
+    let mut ring = VecDeque::from(std::mem::take(v));
+    let mut piece = Vec::new();
+    for _ in 0..n {
+        let x = ring.pop_front().unwrap();
+        f(x, &mut piece);
+        ring.extend(piece.drain(..));
+    }
+    *v = Vec::from(ring);
+}
+
 /// Returns the scheduled statements plus an exact required-pass hint when the
 /// block-aware sort could derive one (see `stable_topo_sort_with_blocks`);
 /// `None` means the caller must fall back to `compute_required_passes`.
@@ -2447,190 +2483,176 @@ pub(crate) fn analyze_dependency(
         Statement(usize),
     }
 
-    let mut table = HashMap::default();
-    for (i, x) in statements.into_iter().enumerate() {
-        table.insert(i, x);
-    }
-
     // Helper: build DAG and attempt stable topological sort (Kahn's algorithm).
-    // Returns Ok(sorted) on success, Err(failed_id) on cycle.
+    // Returns the order as indices into `table`, or `None` on a cycle.  It
+    // only reads the statements, so a caller can sort borrowed ones and
+    // materialize the order only when it is kept.
     // Uses FIFO queue initialized in source order to preserve source ordering
     // for statements that have no explicit dependency between them.
-    let try_topo_sort =
-        |table: &HashMap<usize, ProtoStatement>| -> Result<Vec<ProtoStatement>, usize> {
-            // A statement writing some bits of a variable and reading others
-            // has that read dropped as a self-reference below. At variable
-            // granularity there is no alternative — the edge would be a self
-            // loop — but dropping it breaks the very invariant this phase
-            // reports by returning `Some(1)`: nothing orders the reader after
-            // its writer any more, and the schedule silently needs a second
-            // pass. Split exactly those variables at their writers' bit
-            // boundaries, so the dependency survives as an edge between
-            // distinct atoms.
-            let atoms = self_referenced_bit_atoms(table);
-            // A runtime-indexed write names its first and last element only,
-            // so nothing here would order a reader of a MIDDLE element after
-            // the loop that fills it. See `ReadOffsets`.
-            let read_offsets = ReadOffsets::collect(table.values());
+    let try_topo_sort = |table: &[&ProtoStatement]| -> Option<Vec<usize>> {
+        // A statement writing some bits of a variable and reading others
+        // has that read dropped as a self-reference below. At variable
+        // granularity there is no alternative — the edge would be a self
+        // loop — but dropping it breaks the very invariant this phase
+        // reports by returning `Some(1)`: nothing orders the reader after
+        // its writer any more, and the schedule silently needs a second
+        // pass. Split exactly those variables at their writers' bit
+        // boundaries, so the dependency survives as an edge between
+        // distinct atoms.
+        let atoms = self_referenced_bit_atoms(table);
+        // A runtime-indexed write names its first and last element only,
+        // so nothing here would order a reader of a MIDDLE element after
+        // the loop that fills it. See `ReadOffsets`.
+        let read_offsets = ReadOffsets::collect(table.iter().copied());
 
-            let mut dag = Dag::<Node, ()>::new();
-            let mut dag_nodes: HashMap<Node, _> = HashMap::default();
+        let mut dag = Dag::<Node, ()>::new();
+        let mut dag_nodes: HashMap<Node, _> = HashMap::default();
 
-            let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-            sorted_keys.sort();
+        let mut node_to_stmt: HashMap<daggy::NodeIndex, usize> = HashMap::default();
 
-            let mut node_to_stmt: HashMap<daggy::NodeIndex, usize> = HashMap::default();
+        let mut bit_reads = vec![];
+        let mut bit_writes = vec![];
+        // Insertion-ordered so the emitted DAG stays deterministic; the
+        // set only suppresses the duplicates bit splitting introduces.
+        let mut edges: Vec<(Node, Node)> = vec![];
+        let mut edge_seen: HashSet<(Node, Node)> = HashSet::default();
+        for (id, x) in table.iter().copied().enumerate() {
+            let mut inputs = vec![];
+            let mut outputs = vec![];
+            x.gather_variable_offsets(&mut inputs, &mut outputs);
+            let interior_from = outputs.len();
+            read_offsets.interior_writes(x, &mut outputs);
+            let stmt_node = Node::Statement(id);
+            let stmt = dag.add_node(stmt_node);
+            dag_nodes.insert(stmt_node, stmt);
+            node_to_stmt.insert(stmt, id);
 
-            let mut bit_reads = vec![];
-            let mut bit_writes = vec![];
-            // Insertion-ordered so the emitted DAG stays deterministic; the
-            // set only suppresses the duplicates bit splitting introduces.
-            let mut edges: Vec<(Node, Node)> = vec![];
-            let mut edge_seen: HashSet<(Node, Node)> = HashSet::default();
-            for id in &sorted_keys {
-                let x = &table[id];
-                let mut inputs = vec![];
-                let mut outputs = vec![];
-                x.gather_variable_offsets(&mut inputs, &mut outputs);
-                let interior_from = outputs.len();
-                read_offsets.interior_writes(x, &mut outputs);
-                let stmt_node = Node::Statement(*id);
-                let stmt = dag.add_node(stmt_node);
-                dag_nodes.insert(stmt_node, stmt);
-                node_to_stmt.insert(stmt, *id);
+            let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
+            let split_here = !atoms.is_empty()
+                && (inputs.iter().any(|key| atoms.contains_key(key))
+                    || output_set.iter().any(|key| atoms.contains_key(key)));
+            bit_reads.clear();
+            bit_writes.clear();
+            if split_here {
+                x.gather_reads_with_ranges(&mut bit_reads);
+                gather_bit_aware_outputs(x, &mut bit_writes);
+                // An interior element is written whole; `gather_bit_aware_outputs`
+                // keeps the base+last encoding and would leave it out.
+                bit_writes.extend(outputs[interior_from..].iter().map(|off| (*off, None)));
+            }
 
-                let output_set: HashSet<VarOffset> = outputs.iter().cloned().collect();
-                let split_here = !atoms.is_empty()
-                    && (inputs.iter().any(|key| atoms.contains_key(key))
-                        || output_set.iter().any(|key| atoms.contains_key(key)));
-                bit_reads.clear();
-                bit_writes.clear();
-                if split_here {
-                    x.gather_reads_with_ranges(&mut bit_reads);
-                    gather_bit_aware_outputs(x, &mut bit_writes);
-                    // An interior element is written whole; `gather_bit_aware_outputs`
-                    // keeps the base+last encoding and would leave it out.
-                    bit_writes.extend(outputs[interior_from..].iter().map(|off| (*off, None)));
+            edges.clear();
+            edge_seen.clear();
+            let mut push = |edges: &mut Vec<(Node, Node)>, edge: (Node, Node)| {
+                if edge_seen.insert(edge) {
+                    edges.push(edge);
                 }
-
-                edges.clear();
-                edge_seen.clear();
-                let mut push = |edges: &mut Vec<(Node, Node)>, edge: (Node, Node)| {
-                    if edge_seen.insert(edge) {
-                        edges.push(edge);
+            };
+            for var_key in &inputs {
+                let Some(starts) = atoms.get(var_key) else {
+                    if !output_set.contains(var_key) {
+                        push(&mut edges, (Node::Var(*var_key, 0), stmt_node));
                     }
+                    continue;
                 };
-                for var_key in &inputs {
-                    let Some(starts) = atoms.get(var_key) else {
-                        if !output_set.contains(var_key) {
-                            push(&mut edges, (Node::Var(*var_key, 0), stmt_node));
-                        }
-                        continue;
-                    };
-                    for (read_key, read) in bit_reads.iter().filter(|(k, _)| k == var_key) {
-                        for atom in atom_indices(starts, *read) {
-                            let written = bit_writes
-                                .iter()
-                                .filter(|(k, _)| k == read_key)
-                                .any(|(_, write)| atom_indices(starts, *write).contains(&atom));
-                            if !written {
-                                push(&mut edges, (Node::Var(*read_key, atom), stmt_node));
-                            }
+                for (read_key, read) in bit_reads.iter().filter(|(k, _)| k == var_key) {
+                    for atom in atom_indices(starts, *read) {
+                        let written = bit_writes
+                            .iter()
+                            .filter(|(k, _)| k == read_key)
+                            .any(|(_, write)| atom_indices(starts, *write).contains(&atom));
+                        if !written {
+                            push(&mut edges, (Node::Var(*read_key, atom), stmt_node));
                         }
                     }
                 }
-                for var_key in &outputs {
-                    let Some(starts) = atoms.get(var_key) else {
-                        push(&mut edges, (stmt_node, Node::Var(*var_key, 0)));
-                        continue;
-                    };
-                    for (write_key, write) in bit_writes.iter().filter(|(k, _)| k == var_key) {
-                        for atom in atom_indices(starts, *write) {
-                            push(&mut edges, (stmt_node, Node::Var(*write_key, atom)));
-                        }
-                    }
-                }
-
-                let mut ok = true;
-                for (source, destination) in edges.iter().copied() {
-                    let source = *dag_nodes
-                        .entry(source)
-                        .or_insert_with(|| dag.add_node(source));
-                    let destination = *dag_nodes
-                        .entry(destination)
-                        .or_insert_with(|| dag.add_node(destination));
-                    if dag.add_edge(source, destination, ()).is_err() {
-                        ok = false;
-                        break;
-                    }
-                }
-                if !ok {
-                    return Err(*id);
-                }
             }
-
-            let graph = dag.graph();
-            let node_count = graph.node_count();
-            let mut in_degree: HashMap<daggy::NodeIndex, usize> = HashMap::default();
-            for idx in graph.node_indices() {
-                in_degree.insert(idx, 0);
-            }
-            for edge in graph.edge_indices() {
-                if let Some((_src, tgt)) = graph.edge_endpoints(edge) {
-                    *in_degree.entry(tgt).or_insert(0) += 1;
-                }
-            }
-
-            let mut queue: VecDeque<daggy::NodeIndex> = VecDeque::new();
-            let mut zero_nodes: Vec<daggy::NodeIndex> = in_degree
-                .iter()
-                .filter(|&(_, &deg)| deg == 0)
-                .map(|(&idx, _)| idx)
-                .collect();
-            zero_nodes.sort_by_key(|&idx| node_to_stmt.get(&idx).copied().unwrap_or(usize::MAX));
-            for idx in zero_nodes {
-                queue.push_back(idx);
-            }
-
-            let mut ret = vec![];
-            let mut t = table.clone();
-            let mut visited = 0;
-            while let Some(idx) = queue.pop_front() {
-                visited += 1;
-                if let Node::Statement(x) = graph[idx]
-                    && let Some(s) = t.remove(&x)
-                {
-                    ret.push(s);
-                }
-                let mut successors: Vec<daggy::NodeIndex> =
-                    graph.neighbors_directed(idx, Outgoing).collect();
-                successors.sort_by_key(|&s| node_to_stmt.get(&s).copied().unwrap_or(usize::MAX));
-                for succ in successors {
-                    let deg = in_degree.get_mut(&succ).unwrap();
-                    *deg -= 1;
-                    if *deg == 0 {
-                        queue.push_back(succ);
+            for var_key in &outputs {
+                let Some(starts) = atoms.get(var_key) else {
+                    push(&mut edges, (stmt_node, Node::Var(*var_key, 0)));
+                    continue;
+                };
+                for (write_key, write) in bit_writes.iter().filter(|(k, _)| k == var_key) {
+                    for atom in atom_indices(starts, *write) {
+                        push(&mut edges, (stmt_node, Node::Var(*write_key, atom)));
                     }
                 }
             }
 
-            if visited != node_count {
-                return Err(sorted_keys[0]);
+            for (source, destination) in edges.iter().copied() {
+                let source = *dag_nodes
+                    .entry(source)
+                    .or_insert_with(|| dag.add_node(source));
+                let destination = *dag_nodes
+                    .entry(destination)
+                    .or_insert_with(|| dag.add_node(destination));
+                dag.add_edge(source, destination, ()).ok()?;
             }
+        }
 
-            Ok(ret)
-        };
+        let graph = dag.graph();
+        let node_count = graph.node_count();
+        let mut in_degree: HashMap<daggy::NodeIndex, usize> = HashMap::default();
+        for idx in graph.node_indices() {
+            in_degree.insert(idx, 0);
+        }
+        for edge in graph.edge_indices() {
+            if let Some((_src, tgt)) = graph.edge_endpoints(edge) {
+                *in_degree.entry(tgt).or_insert(0) += 1;
+            }
+        }
+
+        let mut queue: VecDeque<daggy::NodeIndex> = VecDeque::new();
+        let mut zero_nodes: Vec<daggy::NodeIndex> = in_degree
+            .iter()
+            .filter(|&(_, &deg)| deg == 0)
+            .map(|(&idx, _)| idx)
+            .collect();
+        zero_nodes.sort_by_key(|&idx| node_to_stmt.get(&idx).copied().unwrap_or(usize::MAX));
+        for idx in zero_nodes {
+            queue.push_back(idx);
+        }
+
+        let mut ret = Vec::with_capacity(table.len());
+        let mut visited = 0;
+        while let Some(idx) = queue.pop_front() {
+            visited += 1;
+            if let Node::Statement(x) = graph[idx] {
+                ret.push(x);
+            }
+            let mut successors: Vec<daggy::NodeIndex> =
+                graph.neighbors_directed(idx, Outgoing).collect();
+            successors.sort_by_key(|&s| node_to_stmt.get(&s).copied().unwrap_or(usize::MAX));
+            for succ in successors {
+                let deg = in_degree.get_mut(&succ).unwrap();
+                *deg -= 1;
+                if *deg == 0 {
+                    queue.push_back(succ);
+                }
+            }
+        }
+
+        if visited != node_count {
+            return None;
+        }
+
+        Some(ret)
+    };
 
     let mut stage = StageTimer::new("analyze_dependency");
 
     // Phase 1: Try with CompiledBlocks as atomic nodes. The bipartite model
     // orders every reader after ALL writers of its inputs, so the schedule
     // settles in exactly one pass.
-    let phase1 = try_topo_sort(&table);
+    let refs: Vec<&ProtoStatement> = statements.iter().collect();
+    let phase1 = try_topo_sort(&refs);
+    drop(refs);
     stage.mark("phase1");
-    if let Ok(sorted) = phase1 {
+    if let Some(order) = phase1 {
         pass_diag_phase("phase1: bipartite, CBs atomic");
-        return Ok((sorted, Some(1)));
+        let mut statements = statements;
+        permute_in_place(&mut statements, &order);
+        return Ok((statements, Some(1)));
     }
 
     // Phase 1 has already failed, so its cycle is either real or an artefact
@@ -2642,59 +2664,72 @@ pub(crate) fn analyze_dependency(
     // below does not reach for cross-block no-prior-writer reads.  On failure
     // fall through: an atomic block's conflated I/O can form a phantom cycle
     // that the per-statement flatten resolves.
-    fn hazard_flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+    fn hazard_flatten<'a>(stmt: &'a ProtoStatement, out: &mut Vec<&'a ProtoStatement>) {
         match stmt {
             ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
                 if block_has_reorder_hazard(&cb.original_stmts) {
-                    out.push(ProtoStatement::CompiledBlock(cb));
+                    out.push(stmt);
                 } else {
-                    for sub in std::sync::Arc::try_unwrap(cb.original_stmts)
-                        .unwrap_or_else(|a| (*a).clone())
-                    {
+                    for sub in cb.original_stmts.iter() {
                         hazard_flatten(sub, out);
                     }
                 }
             }
             ProtoStatement::SequentialBlock(body) => {
-                if block_has_reorder_hazard(&body) {
-                    out.push(ProtoStatement::SequentialBlock(body));
+                if block_has_reorder_hazard(body) {
+                    out.push(stmt);
                 } else {
                     for sub in body {
                         hazard_flatten(sub, out);
                     }
                 }
             }
-            other => out.push(other),
+            _ => out.push(stmt),
         }
     }
-    let mut keys: Vec<usize> = table.keys().cloned().collect();
-    keys.sort();
-    let mut fast: HashMap<usize, ProtoStatement> = HashMap::default();
-    let mut id = 0usize;
-    for key in &keys {
-        let mut flat = Vec::new();
-        hazard_flatten(table[key].clone(), &mut flat);
-        for sub in flat {
-            fast.insert(id, sub);
-            id += 1;
-        }
+    let mut fast: Vec<&ProtoStatement> = Vec::new();
+    // An entry kept whole at top level is moved out of `statements` on
+    // success; only the nested ones are cloned.
+    let mut top_of: Vec<Option<usize>> = Vec::new();
+    for (i, stmt) in statements.iter().enumerate() {
+        let from = fast.len();
+        hazard_flatten(stmt, &mut fast);
+        let whole = fast.len() == from + 1 && std::ptr::eq(fast[from], stmt);
+        top_of.resize(fast.len(), whole.then_some(i));
     }
     let phase2_fast = try_topo_sort(&fast);
     stage.mark("phase2-fast");
-    if let Ok(sorted) = phase2_fast {
+    if let Some(order) = phase2_fast {
         pass_diag_phase("phase2-fast: hazard-flatten + bipartite");
+        let nested: Vec<Option<ProtoStatement>> = order
+            .iter()
+            .map(|&i| top_of[i].is_none().then(|| fast[i].clone()))
+            .collect();
+        drop(fast);
+        let mut statements: Vec<Option<ProtoStatement>> =
+            statements.into_iter().map(Some).collect();
+        let sorted = order
+            .iter()
+            .zip(nested)
+            .map(|(&i, nested)| {
+                nested.unwrap_or_else(|| statements[top_of[i].unwrap()].take().unwrap())
+            })
+            .collect();
         return Ok((sorted, Some(1)));
     }
+    drop(fast);
 
     // Recursive: SequentialBlock's gather conflates per-stmt I/O, so
     // nested SeqBlocks (e.g. inside a CompiledBlock's original_stmts)
     // must be unwrapped too or they manufacture phantom edges.
-    fn flatten(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) {
+    //
+    // The per-branch phase below re-splits from the unsplit blocks, so this
+    // copies the leaves rather than taking them; only this already-failing
+    // path pays for it.
+    fn flatten(stmt: &ProtoStatement, out: &mut Vec<ProtoStatement>) {
         match stmt {
             ProtoStatement::CompiledBlock(cb) if !cb.original_stmts.is_empty() => {
-                for sub in
-                    std::sync::Arc::try_unwrap(cb.original_stmts).unwrap_or_else(|a| (*a).clone())
-                {
+                for sub in cb.original_stmts.iter() {
                     flatten(sub, out);
                 }
             }
@@ -2703,30 +2738,18 @@ pub(crate) fn analyze_dependency(
                     flatten(sub, out);
                 }
             }
-            other => split_nested(other, out, false),
+            other => split_nested(other.clone(), out, false),
         }
     }
 
-    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-    sorted_keys.sort();
-
-    let mut new_table: HashMap<usize, ProtoStatement> = HashMap::default();
-    // Flattened stmt id → source block (original table key).
+    let mut flat: Vec<ProtoStatement> = Vec::new();
+    // Flattened stmt id → source block (index into `unsplit`).
     let mut block_of: Vec<usize> = Vec::new();
-    let mut new_id = 0usize;
-    for key in sorted_keys {
-        // The per-branch phase below re-splits from the unsplit blocks, so
-        // copy rather than take; only this already-failing path pays for it.
-        let stmt = table[&key].clone();
-        let mut flat = Vec::new();
+    for (key, stmt) in statements.iter().enumerate() {
         flatten(stmt, &mut flat);
-        for sub in flat {
-            new_table.insert(new_id, sub);
-            block_of.push(key);
-            new_id += 1;
-        }
+        block_of.resize(flat.len(), key);
     }
-    let unsplit = std::mem::replace(&mut table, new_table);
+    let unsplit = statements;
 
     // Sort the flattened (program-order) statements with the block-aware
     // `stable_topo_sort`, NOT the bipartite `try_topo_sort`: the bipartite
@@ -2735,16 +2758,14 @@ pub(crate) fn analyze_dependency(
     // `x=a; x=b; y=x`, so `y` wrongly reads `b`. `stable_topo_sort` links
     // `y` to its most recent PRIOR writer only. (reorder_by_level applies
     // the matching WAR/WAW leveling downstream.)
-    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-    sorted_keys.sort();
-    let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-    let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
-    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(flat, &block_of);
     stage.mark("phase2-full");
     if !fell_back {
         pass_diag_phase("phase2-full: flatten + stable_topo_sort");
         return Ok((sorted, passes_hint));
     }
+    // A reported cycle hands the statements back in program order.
+    let flat = sorted;
     // The sort reports a cycle rather than answering with a degraded order:
     // a synthesisable design has a one-pass order, so the cycle is in the
     // SCHEDULE, not in the circuit.  The usual source is a `Case`/`If` kept
@@ -2756,18 +2777,13 @@ pub(crate) fn analyze_dependency(
     // down, which the flat split cannot reach.  Splitting in place keeps the
     // flattened program order, and only a design that would otherwise fail to
     // schedule pays for the re-evaluated guards.
-    let mut keys: Vec<usize> = table.keys().cloned().collect();
-    keys.sort();
-    let mut deep_stmts: Vec<ProtoStatement> = Vec::new();
-    let mut deep_block_of: Vec<usize> = Vec::new();
-    for key in keys {
-        let mut deep = Vec::new();
-        split_nested(table.remove(&key).unwrap(), &mut deep, true);
-        for sub in deep {
-            deep_stmts.push(sub);
-            deep_block_of.push(block_of[key]);
-        }
-    }
+    let mut deep_stmts = flat;
+    let mut deep_block_of: Vec<usize> = Vec::with_capacity(deep_stmts.len());
+    let mut blocks = block_of.into_iter();
+    expand_in_place(&mut deep_stmts, |stmt, out| {
+        split_nested(stmt, out, true);
+        deep_block_of.resize(deep_block_of.len() + out.len(), blocks.next().unwrap());
+    });
     let mut deep_group_of = vec![0usize; deep_stmts.len()];
     split_copies_by_source_writes(
         &mut deep_stmts,
@@ -2775,42 +2791,29 @@ pub(crate) fn analyze_dependency(
         &mut deep_group_of,
         SPECULATIVE_MAX_PARTS,
     );
-    table = deep_stmts.into_iter().enumerate().collect();
     // Versions before scheduling: each write is its own statement now, so
     // a reader between two of them can be given the earlier version's
     // storage and stop forcing a WAR edge to the later write.
-    {
-        let mut keys: Vec<usize> = table.keys().cloned().collect();
-        keys.sort();
-        let mut flat: Vec<ProtoStatement> = keys.iter().map(|k| table.remove(k).unwrap()).collect();
-        let mut blocks = deep_block_of;
-        let mut groups = vec![0usize; flat.len()];
-        let renamed = rename_versions(&mut flat, &mut blocks, &mut groups, alloc);
-        if renamed > 0 {
-            pass_diag_phase(&format!("phase2-deep: {renamed} version(s) renamed"));
-        }
-        table = flat.into_iter().enumerate().collect();
-        block_of = blocks;
+    let mut groups = vec![0usize; deep_stmts.len()];
+    let renamed = rename_versions(&mut deep_stmts, &mut deep_block_of, &mut groups, alloc);
+    if renamed > 0 {
+        pass_diag_phase(&format!("phase2-deep: {renamed} version(s) renamed"));
     }
+    let block_of = deep_block_of;
 
     stage.mark("phase2-deep split");
-    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-    sorted_keys.sort();
-    let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-    let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
-    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, &blocks);
+    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(deep_stmts, &block_of);
     stage.mark("phase2-deep sort");
     if !fell_back {
         pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
         return Ok((sorted, passes_hint));
     }
+    let deep_stmts = sorted;
 
     // Phase 2-branch: a group's reads are the UNION over its branches, which
     // pairs one arm's read with another arm's write.  Split from the UNSPLIT
     // blocks so one branch's pieces stay adjacent.
     {
-        let mut keys: Vec<usize> = unsplit.keys().cloned().collect();
-        keys.sort();
         let mut branch_stmts: Vec<ProtoStatement> = Vec::new();
         let mut branch_block_of: Vec<usize> = Vec::new();
         let mut split_any = false;
@@ -2819,13 +2822,13 @@ pub(crate) fn analyze_dependency(
         // block's, not the scope's.
         let mut branch_group_of: Vec<usize> = Vec::new();
         let mut group_seq = 0usize;
-        if let Some(whole) = blocks_to_keep_in_source_order(&unsplit, &keys) {
-            for key in keys {
+        if let Some(whole) = blocks_to_keep_in_source_order(&unsplit) {
+            for (key, stmt) in unsplit.into_iter().enumerate() {
                 if whole.contains(&key) {
-                    branch_stmts.push(unsplit[&key].clone());
+                    branch_stmts.push(stmt);
                 } else {
                     let mut flat = Vec::new();
-                    flatten_blocks(unsplit[&key].clone(), &mut flat);
+                    flatten_blocks(stmt, &mut flat);
                     for stmt in flat {
                         let split = split_by_branch(stmt, &mut branch_stmts);
                         split_any |= split;
@@ -2878,29 +2881,26 @@ pub(crate) fn analyze_dependency(
 
     // Phase 3: Check for genuine combinational loop vs false positive
     // from non-expandable CompiledBlocks (shared JIT cache).
+    let table = deep_stmts;
     let has_non_expandable_cb = table
-        .values()
+        .iter()
         .any(|x| matches!(x, ProtoStatement::CompiledBlock(cb) if cb.original_stmts.is_empty()));
     let has_any_cb = table
-        .values()
+        .iter()
         .any(|x| matches!(x, ProtoStatement::CompiledBlock(_)));
 
     if !has_any_cb || !has_non_expandable_cb {
         // DAG-based sort failed (false cycle from inlined function bodies).
         // Fall back to the block-aware statement-level sort over what Phase 2
         // flattened.
-        let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-        sorted_keys.sort();
-        let stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
-        if let Ok((sorted, passes_hint)) = sort_and_verify_acyclic(stmts, &blocks) {
+        if let Ok((sorted, passes_hint)) = sort_and_verify_acyclic(table.clone(), &block_of) {
             pass_diag_phase("phase3: stable_topo_sort (no non-expandable CB)");
             return Ok((sorted, passes_hint));
         }
         // Each part is one more statement every settle evaluates, so a copy
         // no ring runs through would be cut for nothing.
-        let mut stmts: Vec<ProtoStatement> = sorted_keys.iter().map(|k| table[k].clone()).collect();
-        let mut blocks: Vec<usize> = sorted_keys.iter().map(|k| block_of[*k]).collect();
+        let mut stmts = table;
+        let mut blocks = block_of;
         // `groups` tags branches for `stable_topo_sort_with_pieces`; this
         // phase sorts by block and never reads them.
         let mut groups = vec![0usize; stmts.len()];
@@ -2941,23 +2941,21 @@ pub(crate) fn analyze_dependency(
     let mut dag_nodes_relaxed: HashMap<Node, _> = HashMap::default();
     let cb_ids: HashSet<usize> = table
         .iter()
+        .enumerate()
         .filter_map(|(id, x)| {
             if matches!(x, ProtoStatement::CompiledBlock(_)) {
-                Some(*id)
+                Some(id)
             } else {
                 None
             }
         })
         .collect();
 
-    let mut sorted_keys: Vec<usize> = table.keys().cloned().collect();
-    sorted_keys.sort();
-    for id in &sorted_keys {
-        let x = &table[id];
+    for (id, x) in table.iter().enumerate() {
         let mut inputs = vec![];
         let mut outputs = vec![];
         x.gather_variable_offsets(&mut inputs, &mut outputs);
-        let stmt_node = Node::Statement(*id);
+        let stmt_node = Node::Statement(id);
         let stmt = dag_relaxed.add_node(stmt_node);
         dag_nodes_relaxed.insert(stmt_node, stmt);
 
@@ -2971,11 +2969,11 @@ pub(crate) fn analyze_dependency(
                 .entry(var_node)
                 .or_insert_with(|| dag_relaxed.add_node(var_node));
             if dag_relaxed.add_edge(var, stmt, ()).is_err() {
-                if cb_ids.contains(id) {
+                if cb_ids.contains(&id) {
                     continue;
                 }
-                let written_by_cb = table.iter().any(|(oid, ox)| {
-                    cb_ids.contains(oid) && {
+                let written_by_cb = table.iter().enumerate().any(|(oid, ox)| {
+                    cb_ids.contains(&oid) && {
                         let mut o_outs = vec![];
                         let mut o_ins = vec![];
                         ox.gather_variable_offsets(&mut o_ins, &mut o_outs);
@@ -2993,11 +2991,11 @@ pub(crate) fn analyze_dependency(
                 .entry(var_node)
                 .or_insert_with(|| dag_relaxed.add_node(var_node));
             if dag_relaxed.add_edge(stmt, var, ()).is_err() {
-                if cb_ids.contains(id) {
+                if cb_ids.contains(&id) {
                     continue;
                 }
-                let read_by_cb = table.iter().any(|(oid, ox)| {
-                    cb_ids.contains(oid) && {
+                let read_by_cb = table.iter().enumerate().any(|(oid, ox)| {
+                    cb_ids.contains(&oid) && {
                         let mut o_outs = vec![];
                         let mut o_ins = vec![];
                         ox.gather_variable_offsets(&mut o_ins, &mut o_outs);
@@ -3011,15 +3009,16 @@ pub(crate) fn analyze_dependency(
         }
     }
 
-    let nodes = algo::toposort(dag_relaxed.graph(), None).unwrap();
-    let mut ret = vec![];
-    for i in nodes {
-        if let Node::Statement(x) = dag_relaxed[i]
-            && let Some(stmt) = table.remove(&x)
-        {
-            ret.push(stmt);
-        }
-    }
+    let order: Vec<usize> = algo::toposort(dag_relaxed.graph(), None)
+        .unwrap()
+        .into_iter()
+        .filter_map(|i| match dag_relaxed[i] {
+            Node::Statement(x) => Some(x),
+            Node::Var(..) => None,
+        })
+        .collect();
+    let mut ret = table;
+    permute_in_place(&mut ret, &order);
     Ok((ret, None))
 }
 
@@ -3488,27 +3487,33 @@ fn split_copies_by_source_writes(
             }
         }
 
-        let mut out_stmts: Vec<ProtoStatement> = Vec::with_capacity(stmts.len());
-        let mut out_blocks: Vec<usize> = Vec::with_capacity(blocks.len());
-        let mut out_groups: Vec<usize> = Vec::with_capacity(groups.len());
-        for ((stmt, block), group) in std::mem::take(stmts)
-            .into_iter()
-            .zip(blocks.iter().copied())
-            .zip(groups.iter().copied())
-        {
-            let before = out_stmts.len();
-            split_one_copy(stmt, &bounds, max_parts, &mut out_stmts);
-            out_blocks.resize(out_blocks.len() + out_stmts.len() - before, block);
-            // A part of a split piece is still that piece's branch.
-            out_groups.resize(out_stmts.len(), group);
-        }
-        let split_any = out_stmts.len() != blocks.len();
-        *stmts = out_stmts;
-        *blocks = out_blocks;
-        *groups = out_groups;
-        if !split_any {
+        // Decided on borrowed statements: a round that splits nothing ends the
+        // loop without moving a statement, and the rebuild is sized exactly.
+        let splits: Vec<(usize, Vec<ProtoStatement>)> = stmts
+            .iter()
+            .enumerate()
+            .filter_map(|(i, stmt)| Some((i, split_one_copy(stmt, &bounds, max_parts)?)))
+            .collect();
+        if splits.is_empty() {
             break;
         }
+        let len = stmts.len() + splits.iter().map(|(_, p)| p.len() - 1).sum::<usize>();
+        let mut out_blocks: Vec<usize> = Vec::with_capacity(len);
+        let mut out_groups: Vec<usize> = Vec::with_capacity(len);
+        let mut splits = splits.into_iter().peekable();
+        let mut i = 0;
+        expand_in_place(stmts, |stmt, out| {
+            match splits.next_if(|(at, _)| *at == i) {
+                Some((_, parts)) => out.extend(parts),
+                None => out.push(stmt),
+            }
+            out_blocks.resize(out_blocks.len() + out.len(), blocks[i]);
+            // A part of a split piece is still that piece's branch.
+            out_groups.resize(out_groups.len() + out.len(), groups[i]);
+            i += 1;
+        });
+        *blocks = out_blocks;
+        *groups = out_groups;
     }
 }
 
@@ -3566,9 +3571,10 @@ fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<(VarOffset, usize)
     }
 }
 
-/// One statement, split per source write when it copies bit-parallel data:
-/// the parts tile the destination window and each names the matching window of
-/// every operand, so the value is identical.
+/// The parts one statement splits into per source write when it copies
+/// bit-parallel data, or `None` to keep it whole: the parts tile the
+/// destination window and each names the matching window of every operand, so
+/// the value is identical.
 ///
 /// The window need not be the whole variable on either side.  An instance in a
 /// generate loop drives one ELEMENT of a bundle array, so its boundary copy is
@@ -3576,32 +3582,25 @@ fn bit_parallel_sources(expr: &ProtoExpression, out: &mut Vec<(VarOffset, usize)
 /// depended on every bit of the other, which closes a ring through a
 /// request/response pair no wire connects.
 fn split_one_copy(
-    stmt: ProtoStatement,
+    stmt: &ProtoStatement,
     bounds: &HashMap<VarOffset, Option<Vec<usize>>>,
     max_parts: usize,
-    out: &mut Vec<ProtoStatement>,
-) {
+) -> Option<Vec<ProtoStatement>> {
     let ProtoStatement::Assign(a) = stmt else {
-        out.push(stmt);
-        return;
+        return None;
     };
     // Where bit 0 of the value sits in the destination, and how wide it is.
     let (dst_base, width) = match a.select {
         None => (0, a.dst_width),
         Some((hi, lo)) if hi >= lo => (lo, hi - lo + 1),
-        Some(_) => {
-            out.push(ProtoStatement::Assign(a));
-            return;
-        }
+        Some(_) => return None,
     };
     if a.dynamic_select.is_some() || a.rhs_select.is_some() || a.expr.width() != width {
-        out.push(ProtoStatement::Assign(a));
-        return;
+        return None;
     }
     let mut sources: Vec<(VarOffset, usize)> = Vec::new();
     if !bit_parallel_sources(&a.expr, &mut sources) {
-        out.push(ProtoStatement::Assign(a));
-        return;
+        return None;
     }
     // A copy that reads its own destination carries no bits between two
     // variables, so there is no weld to break.  Splitting one buys nothing and
@@ -3609,8 +3608,7 @@ fn split_one_copy(
     // covers a whole bundle, and cutting it per field turns one writer of that
     // variable into dozens.
     if sources.iter().any(|(src, _)| *src == a.dst) {
-        out.push(ProtoStatement::Assign(a));
-        return;
+        return None;
     }
     // A source written with unknown bits contributes no cut, but it does not
     // stop the others from cutting: each part still reads it whole, so the
@@ -3633,8 +3631,7 @@ fn split_one_copy(
     cuts.sort_unstable();
     cuts.dedup();
     if !any_known || !(3..=max_parts.saturating_add(1)).contains(&cuts.len()) {
-        out.push(ProtoStatement::Assign(a));
-        return;
+        return None;
     }
     let mut parts: Vec<ProtoStatement> = Vec::with_capacity(cuts.len() - 1);
     for w in cuts.windows(2) {
@@ -3642,8 +3639,7 @@ fn split_one_copy(
         let Some(expr) = a.expr.bit_parallel_window(hi, lo) else {
             // `bit_parallel_sources` accepted it, so this cannot happen; keep
             // the statement whole rather than emit a partial tiling.
-            out.push(ProtoStatement::Assign(a));
-            return;
+            return None;
         };
         parts.push(ProtoStatement::Assign(ProtoAssignStatement {
             dst: a.dst,
@@ -3657,7 +3653,7 @@ fn split_one_copy(
             token: a.token,
         }));
     }
-    out.extend(parts);
+    Some(parts)
 }
 
 /// Split one `if` into an `if` per independently-written variable set.
@@ -3868,18 +3864,15 @@ fn unmodelled_spans(stmt: &ProtoStatement, out: &mut Vec<UnmodelledSpan>) {
 /// The blocks the per-branch phase must emit whole, or `None` when no set of
 /// blocks covers the hazard.  A write from another block has nothing to bind
 /// to -- hence `None`.
-fn blocks_to_keep_in_source_order(
-    unsplit: &HashMap<usize, ProtoStatement>,
-    keys: &[usize],
-) -> Option<HashSet<usize>> {
+fn blocks_to_keep_in_source_order(unsplit: &[ProtoStatement]) -> Option<HashSet<usize>> {
     // Sorted by `lo` with the running maximum of `hi`, so an offset visits
     // only the spans that can still reach it: one array with a dynamic write
     // must not make every offset in the scope walk the whole list.
     let mut spans: Vec<(usize, UnmodelledSpan)> = Vec::new();
-    for key in keys {
+    for (key, stmt) in unsplit.iter().enumerate() {
         let mut found = Vec::new();
-        unmodelled_spans(&unsplit[key], &mut found);
-        spans.extend(found.into_iter().map(|span| (*key, span)));
+        unmodelled_spans(stmt, &mut found);
+        spans.extend(found.into_iter().map(|span| (key, span)));
     }
     if spans.is_empty() {
         return Some(HashSet::default());
@@ -3908,14 +3901,14 @@ fn blocks_to_keep_in_source_order(
     let mut inputs = vec![];
     let mut outputs = vec![];
     let mut hits = vec![];
-    for key in keys {
+    for (key, stmt) in unsplit.iter().enumerate() {
         inputs.clear();
         outputs.clear();
-        unsplit[key].gather_variable_offsets(&mut inputs, &mut outputs);
+        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
         for off in &outputs {
             covering(off, &mut hits);
             for &i in &hits {
-                if spans[i].0 != *key {
+                if spans[i].0 != key {
                     pass_diag_unmodelled_decline(off, "written outside the covering block");
                     return None;
                 }
@@ -3924,14 +3917,14 @@ fn blocks_to_keep_in_source_order(
             }
         }
     }
-    for key in keys {
+    for (key, stmt) in unsplit.iter().enumerate() {
         inputs.clear();
         outputs.clear();
-        unsplit[key].gather_variable_offsets(&mut inputs, &mut outputs);
+        stmt.gather_variable_offsets(&mut inputs, &mut outputs);
         for off in &inputs {
             covering(off, &mut hits);
             for &i in &hits {
-                if spans[i].0 != *key && !covered_writes.contains(off) {
+                if spans[i].0 != key && !covered_writes.contains(off) {
                     pass_diag_unmodelled_decline(off, "read with no writer to bind to");
                     return None;
                 }
@@ -4180,13 +4173,11 @@ fn split_tagged_by_branch(
 /// Only those variables are split: everywhere else the variable-granular
 /// bipartite model is already exact, and splitting would cost nodes and edges
 /// for nothing.
-fn self_referenced_bit_atoms(
-    table: &HashMap<usize, ProtoStatement>,
-) -> HashMap<VarOffset, Vec<usize>> {
+fn self_referenced_bit_atoms(table: &[&ProtoStatement]) -> HashMap<VarOffset, Vec<usize>> {
     let mut candidates: HashSet<VarOffset> = HashSet::default();
     let mut inputs = vec![];
     let mut outputs = vec![];
-    for x in table.values() {
+    for &x in table {
         inputs.clear();
         outputs.clear();
         x.gather_variable_offsets(&mut inputs, &mut outputs);
@@ -4206,7 +4197,7 @@ fn self_referenced_bit_atoms(
     let mut opaque: HashSet<VarOffset> = HashSet::default();
     let mut bit_reads = vec![];
     let mut bit_writes = vec![];
-    for x in table.values() {
+    for &x in table {
         inputs.clear();
         outputs.clear();
         x.gather_variable_offsets(&mut inputs, &mut outputs);
@@ -4235,7 +4226,7 @@ fn self_referenced_bit_atoms(
     }
 
     let mut bounds: HashMap<VarOffset, HashSet<usize>> = HashMap::default();
-    for x in table.values() {
+    for &x in table {
         bit_writes.clear();
         gather_bit_aware_outputs(x, &mut bit_writes);
         for (key, write) in bit_writes.iter() {
@@ -4498,7 +4489,9 @@ fn gather_bit_aware_expr_reads(expr: &ProtoExpression, out: &mut Vec<(VarOffset,
                 gather_bit_aware_expr_reads(&d.index_expr, out);
             }
         }
-        ProtoExpression::Unary { x, .. } => gather_bit_aware_expr_reads(x, out),
+        ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => {
+            gather_bit_aware_expr_reads(x, out)
+        }
         ProtoExpression::Binary { x, y, .. } => {
             gather_bit_aware_expr_reads(x, out);
             gather_bit_aware_expr_reads(y, out);
@@ -5781,11 +5774,9 @@ fn topo_sort_within_level(stmts: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
         return result;
     }
 
-    let mut indexed: Vec<Option<ProtoStatement>> = stmts.into_iter().map(Some).collect();
-    order
-        .into_iter()
-        .map(|i| indexed[i].take().unwrap())
-        .collect()
+    let mut sorted = stmts;
+    permute_in_place(&mut sorted, &order);
+    sorted
 }
 
 /// Cond-hoist transform.  See call site for rationale.  Walks `stmts`, and for
@@ -8018,7 +8009,7 @@ fn collect_dynamic_bases(stmt: &ProtoStatement, out: &mut HashSet<VarOffset>) {
                 expr(&d.index_expr, out);
             }
             ProtoExpression::Variable { .. } | ProtoExpression::HierVariable(_) => {}
-            ProtoExpression::Unary { x, .. } => expr(x, out),
+            ProtoExpression::Unary { x, .. } | ProtoExpression::Resize { x, .. } => expr(x, out),
             ProtoExpression::Binary { x, y, .. } => {
                 expr(x, out);
                 expr(y, out);
@@ -8357,5 +8348,35 @@ mod event_written_comb_tests {
             )))]))
             .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod reorder_in_place_tests {
+    use super::{expand_in_place, permute_in_place};
+
+    #[test]
+    fn permute_matches_gather() {
+        // Fixed points, a 2-cycle and a 3-cycle.
+        let order = [3, 1, 6, 5, 4, 0, 2, 7];
+        let mut v: Vec<String> = (0..order.len()).map(|i| i.to_string()).collect();
+        let want: Vec<String> = order.iter().map(|&i| v[i].clone()).collect();
+        permute_in_place(&mut v, &order);
+        assert_eq!(v, want);
+    }
+
+    #[test]
+    #[should_panic(expected = "repeated in permutation")]
+    fn permute_rejects_a_repeated_index() {
+        let mut v = [0, 1, 2];
+        permute_in_place(&mut v, &[1, 1, 2]);
+    }
+
+    #[test]
+    fn expand_keeps_order_past_capacity() {
+        let mut v: Vec<usize> = Vec::with_capacity(4);
+        v.extend([1, 0, 3, 2]);
+        expand_in_place(&mut v, |x, out| out.extend(std::iter::repeat_n(x, x)));
+        assert_eq!(v, [1, 3, 3, 3, 2, 2]);
     }
 }

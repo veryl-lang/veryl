@@ -387,6 +387,7 @@ impl ProtoExpression {
                 }
                 None => true,
             },
+            ProtoExpression::Resize { x, .. } => x.can_build_binary(),
             ProtoExpression::Value { .. } => true,
             ProtoExpression::Unary { op, x, .. } => {
                 x.can_build_binary()
@@ -970,6 +971,72 @@ impl ProtoExpression {
                     }
                 }
             }
+            ProtoExpression::Resize {
+                x,
+                width,
+                sign_extend,
+                ..
+            } => {
+                let (payload, mask_xz) = x.build_binary(context, builder)?;
+                let src_width = x.materialized_width();
+                let is_pointer = returns_wide_pointer(x);
+                if is_pointer || is_wide_ptr(*width) {
+                    let src_nb = calc_native_bytes(src_width).max(8);
+                    let dst_nb = calc_native_bytes(*width).max(8);
+                    let resize =
+                        |builder: &mut FunctionBuilder, context: &mut CraneliftContext, value| {
+                            let src =
+                                wide_operand_as_ptr(builder, is_pointer, src_width, value, src_nb);
+                            let dst = alloc_wide_zero(builder, dst_nb);
+                            let info = wide_ops::pack_nb_width(src_nb, src_width) as u64
+                                | ((*sign_extend as u64) << 32);
+                            let info = builder.ins().iconst(I64, info as i64);
+                            let nb = builder.ins().iconst(I32, dst_nb as i64);
+                            call_helper_void(
+                                context,
+                                builder,
+                                HelperSig::BinaryOp,
+                                wide_fn_addrs::resize(),
+                                &[dst, src, info, nb],
+                            );
+                            emit_wide_apply_mask(context, builder, dst, dst_nb, *width);
+                            if is_wide_ptr(*width) {
+                                dst
+                            } else {
+                                let ty = if *width > 64 { I128 } else { I64 };
+                                builder.ins().load(ty, MemFlagsData::trusted(), dst, 0)
+                            }
+                        };
+                    let payload = resize(builder, context, payload);
+                    let mask_xz = mask_xz.map(|v| resize(builder, context, v));
+                    return Some((payload, mask_xz));
+                }
+                // Mask before extension: children may leave arithmetic carry
+                // bits outside their declared width. Preserve the same bits in
+                // payload and X/Z mask, including Z's set payload bit.
+                let source_wide = builder.func.dfg.value_type(payload) == I128;
+                let source_mask = gen_mask_for_width(src_width);
+                let mut payload = band_const(builder, payload, source_mask, source_wide);
+                let mut mask_xz = mask_xz.map(|v| band_const(builder, v, source_mask, source_wide));
+                if *sign_extend && src_width > 0 && src_width < *width {
+                    (payload, mask_xz) = expand_sign(*width, src_width, payload, mask_xz, builder);
+                }
+                let resize = |builder: &mut FunctionBuilder, value| {
+                    let ty = if *width > 64 { I128 } else { I64 };
+                    let actual = builder.func.dfg.value_type(value);
+                    let value = if actual.bits() > ty.bits() {
+                        builder.ins().ireduce(ty, value)
+                    } else if actual.bits() < ty.bits() {
+                        builder.ins().uextend(ty, value)
+                    } else {
+                        value
+                    };
+                    band_const(builder, value, gen_mask_for_width(*width), *width > 64)
+                };
+                let payload = resize(builder, payload);
+                let mask_xz = mask_xz.map(|v| resize(builder, v));
+                Some((payload, mask_xz))
+            }
             ProtoExpression::Unary {
                 op,
                 x,
@@ -1213,29 +1280,8 @@ impl ProtoExpression {
                 let (mut x_payload, mut x_mask_xz) = x.build_binary(context, builder)?;
                 let (mut y_payload, mut y_mask_xz) = y.build_binary(context, builder)?;
 
-                // Div/Rem and comparisons take signedness from their two
-                // operands alone; the outer expr_context may have dropped
-                // signed via merge() with an unsigned sibling.  Equality
-                // ops carry signed=false in their own context (1-bit
-                // result), but both-signed operands must sign-extend to
-                // the comparison width (LRM 11.4.5).
-                let signed = if matches!(
-                    op,
-                    Op::Div
-                        | Op::Rem
-                        | Op::Greater
-                        | Op::GreaterEq
-                        | Op::Less
-                        | Op::LessEq
-                        | Op::Eq
-                        | Op::Ne
-                        | Op::EqWildcard
-                        | Op::NeWildcard
-                ) {
-                    x.expr_context().signed & y.expr_context().signed
-                } else {
-                    expr_context.signed
-                };
+                let signed =
+                    expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
                 let wide = expr_context.width > 64;
                 let mut x_wide = x.width() > 64;
                 let mut y_wide = y.width() > 64;
@@ -2630,7 +2676,7 @@ impl ProtoExpression {
         };
 
         let width = expr_context.width;
-        let x_width = x.width();
+        let x_width = x.materialized_width();
         let (x_payload, x_mask_xz) = x.build_binary(context, builder)?;
         let is_x_ptr = returns_wide_pointer(x);
 
@@ -2730,17 +2776,26 @@ impl ProtoExpression {
 
         // Non-reduction unary ops with wide result
         let nb = calc_native_bytes(width);
-        let x_nb = calc_native_bytes(x_width);
-        let x_ptr = wide_operand_as_ptr(builder, is_x_ptr, x_width, x_payload, nb);
+        // A cast materializes at its own width. Extend it to the unary
+        // expression's propagated type before applying the operator.
+        let x_ptr = marshal_wide_operand(
+            context,
+            builder,
+            is_x_ptr,
+            x_payload,
+            x_width,
+            nb,
+            expr_context.signed,
+        );
 
         let payload = match op {
             Op::Add => {
-                // Identity: just copy
-                if x_nb == nb {
-                    x_ptr
-                } else {
-                    emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_ptr, nb)
-                }
+                // Extension fills the native words, including padding above
+                // the expression width. Mask a fresh copy before consumers
+                // such as concatenations can observe those bits.
+                let dst = emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_ptr, nb);
+                emit_wide_apply_mask(context, builder, dst, nb, width);
+                dst
             }
             Op::Sub => {
                 // Negate: ~x + 1
@@ -2758,10 +2813,23 @@ impl ProtoExpression {
 
         // 4-state handling for non-reduction ops
         if let Some(x_mask_xz) = x_mask_xz {
-            let x_mask_ptr = wide_operand_as_ptr(builder, is_x_ptr, x_width, x_mask_xz, nb);
+            let x_mask_ptr = marshal_wide_operand(
+                context,
+                builder,
+                is_x_ptr,
+                x_mask_xz,
+                x_width,
+                nb,
+                expr_context.signed,
+            );
 
             let mask_xz = match op {
-                Op::Add => x_mask_ptr,
+                Op::Add => {
+                    let dst =
+                        emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_mask_ptr, nb);
+                    emit_wide_apply_mask(context, builder, dst, nb, width);
+                    dst
+                }
                 Op::Sub | Op::BitNot => {
                     // If any X/Z, set result mask to all-ones for the width
                     let is_xz = emit_wide_is_nonzero(context, builder, x_mask_ptr, nb);
@@ -2794,6 +2862,7 @@ impl ProtoExpression {
         };
 
         let width = expr_context.width;
+        let signed = expr_context.binary_operand_signed(*op, x.expr_context(), y.expr_context());
         // `materialized_width`, not `width()`: the unsized all-bit sentinel
         // (`'1`) reports width 0 and is filled from its context, and a 0 here
         // tells the marshaller there is nothing to resize -- which left the
@@ -2826,8 +2895,21 @@ impl ProtoExpression {
             x_payload,
             x_width,
             op_nb,
-            expr_context.signed,
+            signed,
         );
+        let shift_width = width.max(x_width);
+        let x_ptr = if (matches!(op, Op::LogicShiftR) || matches!(op, Op::ArithShiftR) && !signed)
+            && shift_width < op_nb * 8
+        {
+            // Sign extension fills the native buffer, but logical right
+            // shifts must zero-fill from the expression's logical width.
+            // Copy before masking because x_ptr can alias variable storage.
+            let dst = emit_wide_unary_op(context, builder, wide_fn_addrs::copy(), x_ptr, op_nb);
+            emit_wide_apply_mask(context, builder, dst, op_nb, shift_width);
+            dst
+        } else {
+            x_ptr
+        };
         let y_ptr = marshal_wide_operand(
             context,
             builder,
@@ -2835,7 +2917,7 @@ impl ProtoExpression {
             y_payload,
             y_width,
             op_nb,
-            expr_context.signed && !y_is_count,
+            signed && !y_is_count,
         );
 
         // Result is comparison (1-bit I64)?
@@ -2873,7 +2955,7 @@ impl ProtoExpression {
                     &[x_ptr, y_ptr, nb_val],
                 ),
                 Op::Greater | Op::GreaterEq | Op::Less | Op::LessEq => {
-                    let cmp_result = if expr_context.signed {
+                    let cmp_result = if signed {
                         // Sign-extend each operand from its OWN value width: the
                         // result width here is 1 (useless for sign location) and
                         // a single common width mislocates a narrower operand's
@@ -3123,6 +3205,7 @@ impl ProtoExpression {
                 y_is_ptr: returns_wide_pointer(y),
                 width,
                 op_nb,
+                signed,
             },
         );
 
@@ -3173,18 +3256,21 @@ impl ProtoExpression {
             y_is_ptr,
             width,
             op_nb,
+            signed,
         } = *operands;
         if !context.use_4state {
             return None;
         }
-        // The mask follows the payload's pointer-vs-scalar (see WideOperandPair).
-        let x_mask_ptr =
-            x_mask_xz.map(|m| wide_operand_as_ptr(builder, x_is_ptr, x_width, m, op_nb));
-        let y_mask_ptr =
-            y_mask_xz.map(|m| wide_operand_as_ptr(builder, y_is_ptr, y_width, m, op_nb));
-
         match op {
             Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                // X/Z sign bits extend exactly like payload sign bits. Use
+                // the same widths and propagated signedness for both.
+                let x_mask_ptr = x_mask_xz.map(|m| {
+                    marshal_wide_operand(context, builder, x_is_ptr, m, x_width, op_nb, signed)
+                });
+                let y_mask_ptr = y_mask_xz.map(|m| {
+                    marshal_wide_operand(context, builder, y_is_ptr, m, y_width, op_nb, signed)
+                });
                 // For bitwise ops with 4-state, compute mask using helper calls
                 let (x_m, y_m) = match (x_mask_ptr, y_mask_ptr) {
                     (Some(x), Some(y)) => (x, y),
@@ -3322,6 +3408,7 @@ impl ProtoExpression {
                     }
                     _ => unreachable!(),
                 };
+                emit_wide_apply_mask(context, builder, result_mask, op_nb, width);
                 Some(result_mask)
             }
             Op::Add

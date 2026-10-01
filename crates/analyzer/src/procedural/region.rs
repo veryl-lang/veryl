@@ -1,6 +1,6 @@
 use crate::HashMap;
 use crate::conv::Context;
-use crate::ir::{AssignDestination, Type, VarId, VarIndex, VarSelect};
+use crate::ir::{AssignDestination, MemberSelectDomain, Type, VarId, VarIndex, VarSelect};
 
 pub(crate) fn signed_difference(destination: usize, source: usize) -> Option<isize> {
     isize::try_from(destination)
@@ -101,7 +101,7 @@ pub(crate) type IdxKey = (VarId, ArraySpan);
 /// `BitPartition`, so bit-disjoint reads/writes form disjoint nodes.
 pub(crate) type NodeKey = (VarId, ArraySpan, usize);
 
-/// Per `IdxKey`, atomic packed-bit intervals.
+/// Per `IdxKey`, sorted, non-overlapping atomic packed-bit intervals.
 #[derive(Default)]
 pub(crate) struct BitPartition {
     ranges: HashMap<IdxKey, Vec<PackedSpan>>,
@@ -110,6 +110,11 @@ pub(crate) struct BitPartition {
 
 impl BitPartition {
     pub(crate) fn new(ranges: HashMap<IdxKey, Vec<PackedSpan>>) -> Self {
+        debug_assert!(
+            ranges
+                .values()
+                .all(|spans| { spans.windows(2).all(|pair| pair[0].end() <= pair[1].start) })
+        );
         let mut array_spans: HashMap<VarId, Vec<ArraySpan>> = HashMap::default();
         for &(id, span) in ranges.keys() {
             array_spans.entry(id).or_default().push(span);
@@ -154,11 +159,13 @@ impl BitPartition {
         key: IdxKey,
         span: PackedSpan,
     ) -> impl Iterator<Item = usize> + '_ {
-        self.ranges_of(key)
+        let ranges = self.ranges_of(key);
+        let first = ranges.partition_point(|range| range.end() <= span.start);
+        ranges[first..]
             .iter()
             .enumerate()
-            .filter(move |(_, range)| range.overlaps(span))
-            .map(|(i, _)| i)
+            .take_while(move |(_, range)| range.start < span.end())
+            .map(move |(i, _)| first + i)
     }
 
     pub(crate) fn overlapping_access(
@@ -177,12 +184,8 @@ impl BitPartition {
             .take_while(|split| split.start < access_end)
             .filter(|split| split.overlaps(access))
             .flat_map(|split| {
-                let ranges = self.ranges_of((id, *split));
-                ranges
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, range)| range.overlaps(span))
-                    .map(|(range, _)| (id, *split, range))
+                self.overlapping((id, *split), span)
+                    .map(move |range| (id, *split, range))
             })
             .collect::<Vec<_>>();
         keys.sort_unstable();
@@ -199,21 +202,15 @@ pub(crate) fn dst_writes(
     let Some(variable) = ctx.get_variable_info(dst.id) else {
         return Vec::new();
     };
-    let is_select_const = dst.select.is_const();
-
-    let packed = if !is_select_const {
-        let Some(packed) = conservative_select_span(&dst.select, &variable.r#type, ctx) else {
-            return Vec::new();
-        };
-        packed
-    } else {
-        let Some((high, low)) = dst.select.eval_value(ctx, &variable.r#type, false) else {
-            return Vec::new();
-        };
-        let Some(packed) = PackedSpan::from_select(high, low) else {
-            return Vec::new();
-        };
-        packed
+    let Some((high, low)) = dst.select.conservative_packed_range(
+        ctx,
+        &variable.r#type,
+        dst.comptime.member_select_domain,
+    ) else {
+        return Vec::new();
+    };
+    let Some(packed) = PackedSpan::from_select(high, low) else {
+        return Vec::new();
     };
 
     array_access_span(&dst.index, &variable.r#type, ctx)
@@ -225,23 +222,19 @@ pub(crate) fn var_reads(
     id: VarId,
     index: &VarIndex,
     select: &VarSelect,
+    member_select_domain: Option<MemberSelectDomain>,
     ctx: &mut Context,
 ) -> Vec<(ArraySpan, PackedSpan)> {
     let Some(variable) = ctx.variables.get(&id).cloned() else {
         return Vec::new();
     };
-    let packed = if select.is_const_with_range()
-        && let Some((high, low)) = select.eval_value(ctx, &variable.r#type, false)
-    {
-        let Some(packed) = PackedSpan::from_select(high, low) else {
-            return Vec::new();
-        };
-        packed
-    } else {
-        let Some(packed) = conservative_select_span(select, &variable.r#type, ctx) else {
-            return Vec::new();
-        };
-        packed
+    let Some((high, low)) =
+        select.conservative_packed_range(ctx, &variable.r#type, member_select_domain)
+    else {
+        return Vec::new();
+    };
+    let Some(packed) = PackedSpan::from_select(high, low) else {
+        return Vec::new();
     };
     array_access_span(index, &variable.r#type, ctx)
         .map(|span| vec![(span, packed)])
@@ -263,24 +256,104 @@ fn array_access_span(index: &VarIndex, r#type: &Type, ctx: &mut Context) -> Opti
     })
 }
 
-fn conservative_select_span(
-    select: &VarSelect,
-    r#type: &Type,
-    ctx: &mut Context,
-) -> Option<PackedSpan> {
-    let prefix = VarSelect(
-        select
-            .0
-            .iter()
-            .take_while(|expression| expression.comptime().is_const)
-            .cloned()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_queries_preserve_interval_indices() {
+        let id = VarId::from_raw(0);
+        let array = ArraySpan {
+            start: 0,
+            length: 1,
+        };
+        for offset in [0, 1_000_000_000] {
+            let ranges = [(2, 3), (5, 1), (8, 2)]
+                .map(|(start, length)| PackedSpan::new(offset + start, length).unwrap());
+            let partition =
+                BitPartition::new([((id, array), ranges.to_vec())].into_iter().collect());
+            let queries: &[(usize, usize, &[usize])] = &[
+                (0, 2, &[]),
+                (0, 3, &[0]),
+                (2, 3, &[0]),
+                (3, 3, &[0, 1]),
+                (5, 1, &[1]),
+                (6, 2, &[]),
+                (7, 2, &[2]),
+                (9, 4, &[2]),
+                (10, 1, &[]),
+                (0, 13, &[0, 1, 2]),
+            ];
+            for &(start, length, expected) in queries {
+                let span = PackedSpan::new(offset + start, length).unwrap();
+                assert_eq!(
+                    partition.overlapping((id, array), span).collect::<Vec<_>>(),
+                    expected,
+                    "offset={offset}, span={span:?}"
+                );
+                assert_eq!(
+                    partition.overlapping_access(id, array, span),
+                    expected.iter().map(|&i| (id, array, i)).collect::<Vec<_>>()
+                );
+                let missing = VarId::from_raw(1);
+                assert_eq!(partition.overlapping((missing, array), span).next(), None);
+                assert!(
+                    partition
+                        .overlapping_access(missing, array, span)
+                        .is_empty()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn packed_queries_use_each_array_partitions_indices() {
+        let id = VarId::from_raw(0);
+        let first = ArraySpan {
+            start: 0,
+            length: 2,
+        };
+        let second = ArraySpan {
+            start: 3,
+            length: 2,
+        };
+        let partition = BitPartition::new(
+            [
+                (
+                    (id, first),
+                    vec![
+                        PackedSpan::new(0, 2).unwrap(),
+                        PackedSpan::new(4, 2).unwrap(),
+                    ],
+                ),
+                (
+                    (id, second),
+                    vec![
+                        PackedSpan::new(1, 2).unwrap(),
+                        PackedSpan::new(3, 1).unwrap(),
+                        PackedSpan::new(7, 2).unwrap(),
+                    ],
+                ),
+            ]
+            .into_iter()
             .collect(),
-        None,
-    );
-    if let Some((high, low)) = prefix.eval_value(ctx, r#type, false) {
-        PackedSpan::from_select(high, low)
-    } else {
-        r#type.total_width().and_then(PackedSpan::whole)
+        );
+        assert_eq!(
+            partition.overlapping_access(
+                id,
+                ArraySpan {
+                    start: 1,
+                    length: 3
+                },
+                PackedSpan::new(2, 6).unwrap()
+            ),
+            vec![
+                (id, first, 1),
+                (id, second, 0),
+                (id, second, 1),
+                (id, second, 2)
+            ]
+        );
     }
 }
 

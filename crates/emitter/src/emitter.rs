@@ -1488,11 +1488,23 @@ impl Emitter {
         self.in_generate_block.pop();
     }
 
-    fn emit_statement_block(&mut self, arg: &StatementBlock, begin_kw: &str, end_kw: &str) {
+    fn emit_statement_block(
+        &mut self,
+        arg: &StatementBlock,
+        begin_kw: &str,
+        end_kw: &str,
+        symbol: Option<&Symbol>,
+    ) {
         self.token_will_push(&arg.l_brace.l_brace_token.replace(begin_kw));
 
-        let mut base = 0;
-        let mut n_newlines = 0;
+        let n_typedefs = if let Some(symbol) = symbol {
+            self.emit_generic_type_typedefs(symbol)
+        } else {
+            0
+        };
+
+        let mut base = n_typedefs;
+        let mut n_newlines = n_typedefs;
         let mut suppress_newline = false;
         for x in &arg.statement_block_list {
             (base, n_newlines) = self.hoist_declarations_in_group(
@@ -1513,7 +1525,7 @@ impl Emitter {
                 &mut suppress_newline,
             );
         }
-        self.newline_list_post(arg.statement_block_list.is_empty());
+        self.newline_list_post(arg.statement_block_list.is_empty() && n_typedefs == 0);
         self.token(&arg.r_brace.r_brace_token.replace(end_kw));
     }
 
@@ -1698,6 +1710,9 @@ impl Emitter {
             }
             StatementBlockItem::ConstDeclaration(x) => {
                 self.const_declaration(&x.const_declaration);
+            }
+            StatementBlockItem::GenDeclaration(x) => {
+                self.gen_declaration(&x.gen_declaration);
             }
             _ => {}
         }
@@ -2733,10 +2748,21 @@ impl Emitter {
     ) {
         let emit_bodies = !arg.interface_declaration_list.is_empty();
         let emit_imports = !import_declarations.is_empty() && !symbol.kind.has_parameters();
-        let push_indent = !in_mixin && (emit_bodies || emit_imports);
 
-        if push_indent {
+        // The typedefs come first, and `newline_list(0)` opens the indented body
+        // just as `newline_push` does, so they open it themselves when present.
+        let n_typedefs = if in_mixin {
+            0
+        } else {
+            self.emit_generic_type_typedefs(symbol)
+        };
+        let push_indent = !in_mixin && (emit_bodies || emit_imports || n_typedefs != 0);
+
+        if push_indent && n_typedefs == 0 {
             self.newline_push();
+        }
+        if n_typedefs != 0 && (emit_imports || emit_bodies) {
+            self.newline();
         }
 
         if emit_imports {
@@ -2878,6 +2904,84 @@ impl Emitter {
                 unreachable!();
             }
         }
+    }
+
+    /// SystemVerilog has no cast to an unnamed type, so a cast through a `type`
+    /// bound generic parameter or `gen` declaration names the `typedef` emitted
+    /// for it instead of expanding into the type itself.
+    /// (refs: veryl-lang/veryl#3479)
+    fn casting_user_defined_type(&mut self, arg: &UserDefinedType) {
+        let (result, path) = self.resolve_scoped_idnetifier(&arg.scoped_identifier);
+        if result.is_err() && is_anonymous_type(&path) {
+            let identifier_token = arg.scoped_identifier.identifier().clone();
+            self.identifier(&Identifier { identifier_token });
+        } else {
+            self.user_defined_type(arg);
+        }
+    }
+
+    /// The SystemVerilog spelling of the anonymous type bound to `name` in the
+    /// generic map of the scope being emitted, for the `typedef` naming it, or
+    /// `None` if nothing is bound to it, or what is bound already has a name.
+    fn anonymous_type_string(&self, name: StrId) -> Option<String> {
+        let map = self.generic_map.last().and_then(|x| x.last())?;
+        let path = map.map.get(&name)?;
+        if !is_anonymous_type(path) {
+            return None;
+        }
+
+        let Literal::Type(x) = path.to_literal().unwrap() else {
+            unreachable!("`is_anonymous_type` has already matched the type literal");
+        };
+
+        let mut ret = x.to_sv_string();
+        if let GenericSymbolPathKind::VariableType(width) = &path.kind
+            && !width.is_empty()
+        {
+            ret.push(' ');
+            for w in width {
+                ret.push_str(&format!("[{w}-1:0]"));
+            }
+        }
+
+        Some(ret)
+    }
+
+    /// The type a `gen` declaration names with a `typedef`, or `None` when it
+    /// declares a value, or a type which already has a name of its own.
+    fn gen_declaration_type(&self, arg: &GenDeclaration) -> Option<String> {
+        if !matches!(
+            arg.gen_declaration_group.as_ref(),
+            GenDeclarationGroup::Type(_)
+        ) {
+            return None;
+        }
+
+        // A `gen` declaration takes part in the generic map of its scope, under
+        // the name it declares, just as a generic parameter does.
+        self.anonymous_type_string(arg.identifier.identifier_token.token.text)
+    }
+
+    /// Emits one `typedef` per `type` bound generic parameter of the generic
+    /// instance being emitted, in declaration order, at the head of its body,
+    /// and answers how many it wrote. A parameter bound to a type which already
+    /// has a name needs none.
+    fn emit_generic_type_typedefs(&mut self, symbol: &Symbol) -> usize {
+        let typedefs: Vec<_> = symbol
+            .generic_parameters()
+            .iter()
+            .filter_map(|(name, _)| {
+                let r#type = self.anonymous_type_string(*name)?;
+                Some(format!("typedef {type} {name};"))
+            })
+            .collect();
+
+        for (i, x) in typedefs.iter().enumerate() {
+            self.newline_list(i);
+            self.str(x);
+        }
+
+        typedefs.len()
     }
 
     fn resolve_scoped_idnetifier(
@@ -3620,7 +3724,7 @@ impl VerylWalker for Emitter {
                 }
                 CastingType::BBool(_) | CastingType::LBool(_) => self.str("(("),
                 CastingType::UserDefinedType(x) => {
-                    self.user_defined_type(&x.user_defined_type);
+                    self.casting_user_defined_type(&x.user_defined_type);
                     self.str("'(");
                 }
                 CastingType::Based(x) => {
@@ -4230,7 +4334,7 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'StatementBlock'
     fn statement_block(&mut self, arg: &StatementBlock) {
-        self.emit_statement_block(arg, "begin", "end");
+        self.emit_statement_block(arg, "begin", "end", None);
     }
 
     /// Semantic action for non-terminal 'LetStatement'
@@ -4887,8 +4991,17 @@ impl VerylWalker for Emitter {
         self.semicolon(&arg.semicolon);
     }
 
-    fn gen_declaration(&mut self, _arg: &GenDeclaration) {
-        // nothing to do
+    fn gen_declaration(&mut self, arg: &GenDeclaration) {
+        let Some(r#type) = self.gen_declaration_type(arg) else {
+            return;
+        };
+
+        self.token(&arg.r#gen.gen_token.replace("typedef"));
+        self.space(1);
+        self.str(&r#type);
+        self.space(1);
+        self.identifier(&arg.identifier);
+        self.semicolon(&arg.semicolon);
     }
 
     /// Semantic action for non-terminal 'TypeDefDeclaration'
@@ -6045,7 +6158,7 @@ impl VerylWalker for Emitter {
                 self.token(&x.minus_g_t.minus_g_t_token.replace(""));
             }
             self.str(";");
-            self.emit_statement_block(&arg.statement_block, "", "endfunction");
+            self.emit_statement_block(&arg.statement_block, "", "endfunction", Some(&symbol.found));
 
             self.pop_generic_map();
             self.align_reset();
@@ -6169,8 +6282,9 @@ impl VerylWalker for Emitter {
                 self.port_declaration(&x.port_declaration);
             }
             self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
+            let n_typedefs = self.emit_generic_type_typedefs(&symbol.found);
             for (i, x) in arg.module_declaration_list.iter().enumerate() {
-                self.newline_list(i);
+                self.newline_list(n_typedefs + i);
                 if i == 0 && !import_declarations.is_empty() && empty_header {
                     for x in &import_declarations {
                         self.emit_import_declaration(x, true);
@@ -6184,7 +6298,7 @@ impl VerylWalker for Emitter {
                 self.module_group(&x.module_group);
             }
             self.emit_global_functions(&symbol.found);
-            self.newline_list_post(arg.module_declaration_list.is_empty());
+            self.newline_list_post(arg.module_declaration_list.is_empty() && n_typedefs == 0);
             self.token(&arg.r_brace.r_brace_token.replace("endmodule"));
 
             self.pop_generic_map();
@@ -6481,8 +6595,9 @@ impl VerylWalker for Emitter {
                 self.veryl_token(&arg.identifier.identifier_token.replace(&text));
             }
             self.token_will_push(&arg.l_brace.l_brace_token.replace(";"));
+            let n_typedefs = self.emit_generic_type_typedefs(&symbol.found);
             for (i, x) in arg.package_declaration_list.iter().enumerate() {
-                self.newline_list(i);
+                self.newline_list(n_typedefs + i);
                 if i == 0 {
                     let mut import_declarations = self.file_scope_import.clone();
                     import_declarations.append(&mut arg.collect_import_declarations());
@@ -6494,7 +6609,7 @@ impl VerylWalker for Emitter {
                 self.package_group(&x.package_group);
             }
             self.emit_global_functions(&symbol.found);
-            self.newline_list_post(arg.package_declaration_list.is_empty());
+            self.newline_list_post(arg.package_declaration_list.is_empty() && n_typedefs == 0);
             self.token(&arg.r_brace.r_brace_token.replace("endpackage"));
 
             self.pop_generic_map();
@@ -6843,6 +6958,14 @@ fn get_generic_instance(symbol: &Symbol, generic_tables: &GenericTables) -> Opti
 
     let resolved = symbol_table::resolve_generic_structural(&path, &symbol.namespace);
     resolved.ok().map(|x| (*x.found).clone())
+}
+
+/// Whether a path is a bare type, such as the argument given for a `type` bound
+/// generic parameter. SystemVerilog has no name for such a type until a
+/// `typedef` gives it one, so a cast through it cannot be emitted as it stands.
+/// A path which names a type is not one of these.
+fn is_anonymous_type(path: &GenericSymbolPath) -> bool {
+    !path.is_resolvable() && matches!(path.to_literal(), Some(Literal::Type(_)))
 }
 
 pub fn symbol_string(

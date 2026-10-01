@@ -6,7 +6,8 @@ use crate::conv::checker::portability::check_initial_assign;
 use crate::conv::utils::eval_width_select;
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
-    AssignDestination, Comptime, Expression, Factor, FfTable, Op, Shape, ShapeRef, Type, TypeKind,
+    AssignDestination, Comptime, Expression, Factor, FfTable, MemberSelectDomain, Op, Shape,
+    ShapeRef, Type, TypeKind,
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
@@ -96,7 +97,10 @@ impl VarPathSelect {
             }
 
             let width_select = if let Some(part_select) = &comptime.part_select {
-                part_select.to_base_select(context, &width_select)?
+                let (select, domain) =
+                    part_select.to_base_select_with_domain(context, &width_select)?;
+                comptime.member_select_domain = domain;
+                select
             } else {
                 eval_width_select(context, &path, &comptime.r#type, width_select)?
             };
@@ -306,7 +310,10 @@ impl VarPathSelect {
             let array_dims = comptime.rebase_part_select();
             let (array_select, width_select) = select.split(array_dims);
             let width_select = if let Some(part_select) = &comptime.part_select {
-                part_select.to_base_select(context, &width_select)?
+                let (select, domain) =
+                    part_select.to_base_select_with_domain(context, &width_select)?;
+                comptime.member_select_domain = domain;
+                select
             } else {
                 width_select
             };
@@ -665,6 +672,48 @@ impl VarSelect {
     /// to be constant — a dynamic bound can't expand to fixed element indices.
     pub fn is_const_with_range(&self) -> bool {
         self.is_const() && self.1.as_ref().is_none_or(|(_, e)| e.comptime().is_const)
+    }
+
+    /// Return the packed base-variable range which this access may touch.
+    ///
+    /// Constant accesses retain their exact range. A dynamic coordinate keeps
+    /// only the constant outer-coordinate prefix, and a rebased member access
+    /// is additionally confined to the domain retained by `PartSelectPath`.
+    pub(crate) fn conservative_packed_range(
+        &self,
+        context: &mut Context,
+        r#type: &Type,
+        member_domain: Option<MemberSelectDomain>,
+    ) -> Option<(usize, usize)> {
+        let coordinate_range = if self.is_const_with_range() {
+            self.eval_value(context, r#type, false)
+        } else {
+            // The final expression of a range is its starting position, not
+            // an outer packed coordinate. It cannot narrow a dynamic range.
+            let coordinate_len = self.0.len().saturating_sub(usize::from(self.1.is_some()));
+            let coordinates = &self.0[..coordinate_len];
+            let prefix_len = coordinates
+                .iter()
+                .take_while(|expression| expression.comptime().is_const)
+                .count();
+            let prefix = VarSelect(coordinates[..prefix_len].to_vec(), None);
+            prefix.eval_value(context, r#type, false).or_else(|| {
+                r#type
+                    .total_width()
+                    .and_then(|width| width.checked_sub(1).map(|high| (high, 0)))
+            })
+        };
+        let member_range = member_domain.map(|domain| (domain.high, domain.low));
+
+        match (coordinate_range, member_range) {
+            (Some((coordinate_high, coordinate_low)), Some((member_high, member_low))) => {
+                let high = coordinate_high.min(member_high);
+                let low = coordinate_low.max(member_low);
+                (high >= low).then_some((high, low))
+            }
+            (Some(range), None) | (None, Some(range)) => Some(range),
+            (None, None) => None,
+        }
     }
 
     pub fn to_index(self) -> VarIndex {
