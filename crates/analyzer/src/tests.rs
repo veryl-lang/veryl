@@ -22629,6 +22629,75 @@ fn testbench_features_need_the_attribute() {
 }
 
 #[test]
+fn testbench_module_instantiated_outside_test_is_rejected() {
+    // https://github.com/veryl-lang/veryl/issues/3272
+    // A #[testbench] module can never be emitted as SystemVerilog (it may use
+    // $tb/$comp internally), so instantiating it from ordinary RTL has to be
+    // rejected here rather than left to produce a dangling module reference.
+    let code = r#"
+    #[testbench]
+    module ModuleA {
+        var inner: logic;
+        assign inner = 1;
+    }
+
+    module ModuleB {
+        inst dut: ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::InvalidTestbenchModuleUsage { .. }
+    ));
+}
+
+#[test]
+fn testbench_module_instantiated_from_test_is_allowed() {
+    // https://github.com/veryl-lang/veryl/issues/3272
+    let code = r#"
+    #[testbench]
+    module ModuleA {
+        var inner: logic;
+        assign inner = 1;
+    }
+
+    #[test(t)]
+    module ModuleB {
+        inst dut: ModuleA;
+        initial {
+            $finish();
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn testbench_module_instantiated_from_testbench_is_allowed() {
+    // https://github.com/veryl-lang/veryl/issues/3272
+    // A #[testbench] module may itself contain another: it is still only
+    // ever reachable from test code, never a build target.
+    let code = r#"
+    #[testbench]
+    module ModuleA {
+        var inner: logic;
+        assign inner = 1;
+    }
+
+    #[testbench]
+    module ModuleB {
+        inst dut: ModuleA;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+#[test]
 fn testbench_attribute_takes_no_argument() {
     // https://github.com/veryl-lang/veryl/issues/3272
     let code = r#"

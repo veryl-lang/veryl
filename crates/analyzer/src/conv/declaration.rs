@@ -1466,6 +1466,26 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             .scoped_identifier
             .as_ref()
             .into();
+
+        // A #[testbench] module uses $tb/$comp internally and can never be
+        // emitted as SystemVerilog (see InstDeclaration emission skip in the
+        // emitter). Reached from ordinary RTL it would leave a dangling
+        // reference to a module body the emitter silently omits, so the
+        // instantiation itself is rejected here rather than only inside it.
+        if let Ok(symbol) = symbol_table::resolve(&path)
+            && let SymbolKind::Module(target) = &symbol.found.kind
+            && target.testbench
+            && !context.in_test_module
+        {
+            let token: TokenRange = value
+                .component_instantiation
+                .scoped_identifier
+                .as_ref()
+                .into();
+            context.insert_error(AnalyzerError::invalid_testbench_module_usage(&token));
+            return Ok(ir::Declaration::Null);
+        }
+
         if let Ok(symbol) = symbol_table::resolve(&path)
             && let SymbolKind::TbComponent(ref tb_prop) = symbol.found.kind
         {

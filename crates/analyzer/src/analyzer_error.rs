@@ -1062,6 +1062,23 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(invalid_testbench_module_usage),
+        help("a #[testbench] module cannot be emitted as SystemVerilog; instantiate it only from a #[test] or #[testbench] module"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("a #[testbench] module can only be instantiated from a test or testbench module")]
+    InvalidTestbenchModuleUsage {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(missing_tb_port),
         help("add \"{port}\" port connection"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2707,6 +2724,7 @@ impl AnalyzerError {
             AnalyzerError::InvalidTypeDeclaration { input, .. } => input,
             AnalyzerError::InvalidUnsizedLiteral { input, .. } => input,
             AnalyzerError::InvalidWavedrom { input, .. } => input,
+            AnalyzerError::InvalidTestbenchModuleUsage { input, .. } => input,
             AnalyzerError::InvisibleIndentifier { input, .. } => input,
             AnalyzerError::LastItemWithDefine { input, .. } => input,
             AnalyzerError::LastItemWithDefineInModport { input, .. } => input,
@@ -2911,6 +2929,7 @@ impl AnalyzerError {
             AnalyzerError::UnusedVariable { instance, .. } => instance,
             AnalyzerError::WrongSeparator { instance, .. } => instance,
             AnalyzerError::InvalidWavedrom { instance, .. } => instance,
+            AnalyzerError::InvalidTestbenchModuleUsage { instance, .. } => instance,
         }
     }
 
@@ -3039,6 +3058,7 @@ impl AnalyzerError {
             AnalyzerError::UnusedVariable { instance, .. } => instance.as_ref(),
             AnalyzerError::WrongSeparator { instance, .. } => instance.as_ref(),
             AnalyzerError::InvalidWavedrom { instance, .. } => instance.as_ref(),
+            AnalyzerError::InvalidTestbenchModuleUsage { instance, .. } => instance.as_ref(),
         }
     }
 
@@ -3167,6 +3187,7 @@ impl AnalyzerError {
             AnalyzerError::UnusedVariable { token_source, .. } => *token_source,
             AnalyzerError::WrongSeparator { token_source, .. } => *token_source,
             AnalyzerError::InvalidWavedrom { token_source, .. } => *token_source,
+            AnalyzerError::InvalidTestbenchModuleUsage { token_source, .. } => *token_source,
         }
     }
 
@@ -3750,6 +3771,15 @@ impl AnalyzerError {
     }
     pub fn invalid_tb_usage(token: &TokenRange) -> Self {
         AnalyzerError::InvalidTbUsage {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+
+    pub fn invalid_testbench_module_usage(token: &TokenRange) -> Self {
+        AnalyzerError::InvalidTestbenchModuleUsage {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
