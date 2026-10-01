@@ -206,9 +206,10 @@ impl Op {
         Type::new(TypeKind::Unknown)
     }
 
-    fn invalid_logical_operand(&self, context: &mut Context, x: &Comptime) -> Type {
+    /// Only a warning: the operand still has a truth value, so the result
+    /// keeps its type.
+    fn invalid_logical_operand(&self, context: &mut Context, x: &Comptime) {
         context.insert_error(AnalyzerError::invalid_logical_operand(true, &x.token));
-        Type::new(TypeKind::Unknown)
     }
 
     pub fn eval_type_unary(&self, context: &mut Context, x: &Comptime, dst: &mut Comptime) {
@@ -230,8 +231,7 @@ impl Op {
 
         // logical operand should be 1-bit
         if (self == &Op::LogicNot) && !x.r#type.is_binary() {
-            dst.r#type = self.invalid_logical_operand(context, x);
-            return;
+            self.invalid_logical_operand(context, x);
         }
 
         match self {
@@ -293,12 +293,10 @@ impl Op {
         // logical operand should be 1-bit
         if matches!(self, Op::LogicAnd | Op::LogicOr) {
             if !x.r#type.is_binary() {
-                dst.r#type = self.invalid_logical_operand(context, x);
-                return;
+                self.invalid_logical_operand(context, x);
             }
             if !y.r#type.is_binary() {
-                dst.r#type = self.invalid_logical_operand(context, y);
-                return;
+                self.invalid_logical_operand(context, y);
             }
         }
 
@@ -471,8 +469,7 @@ impl Op {
 
         // condition should be 1-bit
         if !x.r#type.is_binary() {
-            dst.r#type = self.invalid_logical_operand(context, x);
-            return;
+            self.invalid_logical_operand(context, x);
         }
 
         check_clock_domain(context, x, y, &dst.token.beg);

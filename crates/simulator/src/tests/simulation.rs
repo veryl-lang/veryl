@@ -30657,3 +30657,38 @@ fn signed_struct_member_sign_extends() {
         ],
     );
 }
+
+#[test]
+fn wide_logical_operand_keeps_result_type() {
+    // A condition wider than one bit only warns; the ternary still has its
+    // arms' type, here inside a concatenation that sizes by it.
+    let code = r#"
+    module Top #(
+        param R: signed logic<16> = -300,
+    ) (
+        a: input  logic<8>,
+        b: input  logic<4>,
+        y: output logic<16>,
+        z: output logic<16>,
+        t: output logic<4>,
+    ) {
+        always_comb {
+            y = {(if 1 ? a : b), 4'h5};
+            z = {!a, (a && b), 4'h5};
+            t = (if 16'sh8001 ? $signed((8'hf0 <= -2) as 4) : R);
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[
+            ("a", Value::new(0xfe, 8, false)),
+            ("b", Value::new(0x3, 4, false)),
+        ],
+        &[
+            ("y", Value::new(0x0fe5, 16, false)),
+            ("z", Value::new(0x0015, 16, false)),
+            ("t", Value::new(0x1, 4, false)),
+        ],
+    );
+}
