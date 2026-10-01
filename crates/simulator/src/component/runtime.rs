@@ -429,7 +429,7 @@ pub fn build_components(
             inst: inst_name.clone(),
             source: Box::new(e),
         };
-        let backend = lookup_component_backend(library, &type_name).map_err(&in_instance)?;
+        let backend = lookup_component_backend(library, &type_name).map_err(in_instance)?;
         let kind = backend.kind();
 
         // Optional declared interface from `#[component]`: connections and
@@ -438,7 +438,7 @@ pub fn build_components(
         // its absence skips the checks.
         let manifest = match library {
             Some(path) => {
-                match crate::component::loader::library_manifest(path).map_err(&in_instance)? {
+                match crate::component::loader::library_manifest(path).map_err(in_instance)? {
                     Some(json) => {
                         crate::component::loader::parse_library_manifest_json(&json, &type_name)
                             .map_err(|reason| ComponentError::ManifestInvalid {
@@ -577,7 +577,7 @@ pub fn build_components(
             host.add_param(&str_of(*name), host_value);
         }
 
-        let instance = ExternalInstance::create(backend, &mut host).map_err(&in_instance)?;
+        let instance = ExternalInstance::create(backend, &mut host).map_err(in_instance)?;
 
         // Hooks fire only on ports the component resolved as clock/reset
         // (`BuildCtx::clock`/`reset`); a clock connection read as plain
