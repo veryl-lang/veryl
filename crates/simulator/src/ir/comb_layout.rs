@@ -1023,8 +1023,8 @@ mod tests {
             var_signed: false,
             token: veryl_parser::token_range::TokenRange::default(),
             range: crate::ir::statement::ProtoForRange::Forward {
-                start: crate::ir::statement::ProtoForBound::Const(0),
-                end: crate::ir::statement::ProtoForBound::Const(4),
+                start: crate::ir::statement::ProtoForBound::Const(0, true),
+                end: crate::ir::statement::ProtoForBound::Const(4, true),
                 inclusive: false,
                 step: 1,
             },

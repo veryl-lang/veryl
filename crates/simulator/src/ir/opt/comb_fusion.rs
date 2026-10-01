@@ -2246,8 +2246,8 @@ mod tests {
                 var_signed: false,
                 token: veryl_parser::token_range::TokenRange::default(),
                 range: ProtoForRange::Forward {
-                    start: ProtoForBound::Const(0),
-                    end: ProtoForBound::Const(4),
+                    start: ProtoForBound::Const(0, true),
+                    end: ProtoForBound::Const(4, true),
                     inclusive: false,
                     step: 1,
                 },

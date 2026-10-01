@@ -1,7 +1,7 @@
 use crate::analyzer_error::{
-    AnalyzerError, ComponentInterfaceMismatchKind, ExceedLimitKind, InvalidForRangeKind,
-    InvalidForStepKind, MismatchAssignmentKind, MismatchTypeKind, MultipleDefaultKind,
-    UnevaluableValueKind,
+    AnalyzerError, CaseLabelMismatch, ComponentInterfaceMismatchKind, ExceedLimitKind,
+    InvalidForRangeKind, InvalidForStepKind, MismatchAssignmentKind, MismatchTypeKind,
+    MultipleDefaultKind, UnevaluableValueKind,
 };
 use crate::conv::checker::anonymous::check_anonymous;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -246,8 +246,10 @@ fn eval_range_inner(
     range: &Range,
     require_const: bool,
 ) -> IrResult<(ir::ForBound, ir::ForBound, bool)> {
+    // The emitted SV compares an `int` iterator against the bound, so the
+    // bound is evaluated at no less than 32 bits.
     let mut beg: ir::Expression = Conv::conv(context, range.expression.as_ref())?;
-    let beg_comptime = beg.eval_comptime(context, None);
+    let beg_comptime = beg.eval_comptime(context, Some(32));
     if require_const && !beg_comptime.is_const {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::ForRange,
@@ -267,14 +269,14 @@ fn eval_range_inner(
             return Err(ir_error!(token));
         }
         let val = value.to_usize().unwrap_or(0);
-        ir::ForBound::Const(val)
+        ir::ForBound::Const(val, beg_comptime.r#type.signed)
     } else {
         ir::ForBound::Expression(Box::new(beg))
     };
 
     let (end, inclusive) = if let Some(x) = &range.range_opt {
         let mut end: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
-        let end_comptime = end.eval_comptime(context, None);
+        let end_comptime = end.eval_comptime(context, Some(32));
         if require_const && !end_comptime.is_const {
             context.insert_error(AnalyzerError::unevaluable_value(
                 UnevaluableValueKind::ForRange,
@@ -292,7 +294,7 @@ fn eval_range_inner(
                 return Err(ir_error!(token));
             }
             let val = value.to_usize().unwrap_or(0);
-            ir::ForBound::Const(val)
+            ir::ForBound::Const(val, end_comptime.r#type.signed)
         } else {
             ir::ForBound::Expression(Box::new(end))
         };
@@ -1237,25 +1239,29 @@ pub fn eval_struct_member(
                             // all pos values gives the LSB (end), and the last entry's type
                             // width gives the field width (beg = end + width - 1).
                             let end: usize = x.part_select.iter().map(|ps| ps.pos).sum();
+                            let mut member_type = get_member_type(context, member_symbol)?;
+                            member_type.array = r#type.array.clone();
                             if let Some(width) =
                                 x.part_select.last().and_then(|ps| ps.r#type.total_width())
                             {
                                 let beg = end + width - 1;
+                                // `Value::select` drops the member's sign.
+                                let field = |v: &Value| {
+                                    let mut v = v.select(beg, end);
+                                    v.set_signed(member_type.signed);
+                                    v
+                                };
                                 comptime.value = match &comptime.value {
-                                    ValueVariant::Numeric(v) => {
-                                        ValueVariant::Numeric(v.select(beg, end))
-                                    }
+                                    ValueVariant::Numeric(v) => ValueVariant::Numeric(field(v)),
                                     // Every element holds a whole struct, so the
                                     // field is taken element by element and the
                                     // array dimension stays on the type.
-                                    ValueVariant::NumericArray(v) => ValueVariant::NumericArray(
-                                        v.iter().map(|v| v.select(beg, end)).collect(),
-                                    ),
+                                    ValueVariant::NumericArray(v) => {
+                                        ValueVariant::NumericArray(v.iter().map(field).collect())
+                                    }
                                     v => v.clone(),
                                 };
                             }
-                            let mut member_type = get_member_type(context, member_symbol)?;
-                            member_type.array = r#type.array.clone();
                             comptime.r#type = member_type;
                             return Ok(ir::Factor::Value(comptime));
                         }
@@ -2603,6 +2609,9 @@ fn eval_factor_path_inner(
         // Array select type check
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
 
+        if !width_select.is_empty() {
+            comptime.member_signed = None;
+        }
         let width_select = if let Some(part_select) = &comptime.part_select {
             let (select, domain) = part_select
                 .to_base_select_with_domain(context, &width_select)
@@ -2687,6 +2696,15 @@ fn eval_factor_path_inner(
 
         let (array_select, width_select) = select.split(comptime.r#type.array.dims());
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
+        // A part-select is unsigned; a whole member keeps its sign.
+        let member_signed = match part_select.as_ref().and_then(|x| x.part_select.last()) {
+            Some(member) if width_select.is_empty() => {
+                let mut member = member.r#type.clone();
+                member.flatten_struct_union_enum();
+                member.signed
+            }
+            _ => false,
+        };
         let width_select = if let Some(part_select) = &part_select {
             part_select.to_base_select(context, &width_select)
         } else {
@@ -2705,6 +2723,7 @@ fn eval_factor_path_inner(
                 if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
                     comptime.r#type.set_concrete_width(width);
                 }
+                comptime.r#type.signed = member_signed;
             }
             comptime.token = token;
 
@@ -2879,6 +2898,7 @@ fn reduce_unevaluable_select(
         if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
             comptime.r#type.set_concrete_width(width);
         }
+        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
     }
     comptime.token = token;
 }
@@ -2917,6 +2937,7 @@ fn fold_symbol_select(
         if let Some(width) = select.eval_comptime(context, &element, false) {
             comptime.r#type.set_concrete_width(width);
         }
+        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
     }
 
     let flat = array.calc_index(&indices)?;
@@ -2927,7 +2948,9 @@ fn fold_symbol_select(
         ValueVariant::Numeric(value.clone())
     } else {
         let (beg, end) = select.eval_value(context, &element, false)?;
-        ValueVariant::Numeric(value.select(beg, end))
+        let mut value = value.select(beg, end);
+        value.set_signed(comptime.r#type.signed);
+        ValueVariant::Numeric(value)
     };
     Some(comptime)
 }
@@ -3417,38 +3440,226 @@ pub fn eval_factor_symbol(
     Err(ir_error!(token))
 }
 
-/// Extract source-level `CasePattern`s from a `CaseCondition` (one per
-/// `RangeItem`).
+/// A target that is not self-determined stays unfolded, so that each
+/// comparison can size it again.
+pub fn eval_case_target(context: &mut Context, tgt: &mut ir::Expression) -> Comptime {
+    let prev = context.disalbe_const_opt;
+    context.disalbe_const_opt |= !tgt.is_self_determined();
+    let ret = tgt.eval_comptime(context, None).clone();
+    context.disalbe_const_opt = prev;
+    ret
+}
+
+/// The sign and width a `case` target or pattern value has on its own.
+#[derive(Clone, Copy)]
+pub struct CaseOperand {
+    signed: bool,
+    width: usize,
+    /// The width it adds to the one SystemVerilog sizes the whole `case` at.
+    sv_width: usize,
+    /// Its value can change with the width it is evaluated at.
+    widens: bool,
+    /// Its value can change with the sign it is evaluated with.
+    sign_sensitive: bool,
+    /// The bit length of a non-negative constant.
+    magnitude: Option<usize>,
+    /// It is a range bound, compared by order rather than equality.
+    bound: bool,
+    /// An exclusive upper bound, emitted as `(hi)-1`.
+    exclusive: bool,
+    is_const: bool,
+    is_zero: bool,
+    is_min: bool,
+    known: bool,
+    token: TokenRange,
+}
+
+impl CaseOperand {
+    /// `expr` is not yet evaluated, or was evaluated by `eval_case_target`.
+    pub fn new(context: &mut Context, expr: &ir::Expression) -> Self {
+        let mut probe = expr.clone();
+        let comptime = probe.eval_comptime(context, None);
+        let r#type = &comptime.r#type;
+        let known = !(r#type.is_unknown() || r#type.is_systemverilog() || r#type.is_type());
+        let self_determined = expr.is_self_determined();
+        let width = comptime.expr_context.width;
+        let signed = comptime.expr_context.signed;
+        let value = comptime
+            .get_value()
+            .ok()
+            .filter(|x| comptime.is_const && width > 0 && !x.is_xz());
+        let msb_set = value.is_some_and(|x| !x.select(width - 1, width - 1).is_zero());
+        let non_negative = value.is_some() && !(signed && msb_set);
+        let is_zero = value.is_some_and(|x| x.is_zero());
+        let is_min = signed
+            && msb_set
+            && value.is_some_and(|x| width == 1 || x.select(width - 2, 0).is_zero());
+        let magnitude = value
+            .filter(|_| non_negative)
+            .and_then(|x| x.to_u64())
+            .map(|x| (u64::BITS - x.leading_zeros()) as usize);
+        Self {
+            signed,
+            width,
+            sv_width: width,
+            // An unsized fill takes the context's width; only `'0` is the
+            // same at every width.
+            widens: !self_determined
+                || (width == 0 && !comptime.get_value().is_ok_and(|x| x.is_zero())),
+            sign_sensitive: !(non_negative && self_determined),
+            magnitude,
+            bound: false,
+            exclusive: false,
+            is_const: value.is_some(),
+            is_zero,
+            is_min,
+            known,
+            token: expr.token_range(),
+        }
+    }
+
+    fn bound(self) -> Self {
+        Self {
+            bound: true,
+            ..self
+        }
+    }
+
+    /// `(hi)-1` has at least the 32 bits of `1`.
+    fn exclusive_bound(self) -> Self {
+        Self {
+            sv_width: self.width.max(32),
+            exclusive: true,
+            ..self.bound()
+        }
+    }
+
+    /// The `values` SystemVerilog, sizing and signing `target` and all of
+    /// them together, may compare differently from Veryl, which compares each
+    /// with the target alone.
+    fn mismatches<'a>(target: &Self, values: &'a [Self]) -> Vec<(&'a Self, CaseLabelMismatch)> {
+        if !target.known || values.iter().any(|x| !x.known) {
+            return Vec::new();
+        }
+        let width = values
+            .iter()
+            .map(|x| x.sv_width)
+            .fold(target.width, usize::max);
+        let signed = target.signed && values.iter().all(|x| x.signed);
+        values
+            .iter()
+            .filter_map(|x| {
+                // `(hi)-1` wraps at the minimum of the type it is evaluated
+                // in, which a signed bound reaches only if nothing widens it.
+                let wraps = !x.is_const
+                    || (!signed && x.is_zero)
+                    || (signed && x.is_min && x.width >= width);
+                if x.exclusive && wraps {
+                    return Some((x, CaseLabelMismatch::ExclusiveBound));
+                }
+                let widens = x.widens || target.widens;
+                let width_kept = x.width.max(target.width) == width || !widens;
+                // A negative target extended either way differs from a
+                // non-negative constant narrower than its sign bit.
+                let below_target_sign = x.magnitude.is_some_and(|m| m < target.width);
+                let sign_kept = (target.signed && x.signed) == signed
+                    || !(target.sign_sensitive || x.sign_sensitive)
+                    || (!x.bound && !widens && target.width == width && x.width == width)
+                    || (!x.bound && !widens && !x.sign_sensitive && below_target_sign);
+                (!(width_kept && sign_kept)).then_some((x, CaseLabelMismatch::Joint))
+            })
+            .collect()
+    }
+
+    pub fn check(context: &mut Context, target: &Self, values: &[Self]) {
+        // A generic definition's widths are known only per instance.
+        if context.in_generic {
+            return;
+        }
+        for (x, kind) in Self::mismatches(target, values) {
+            context.insert_error(AnalyzerError::mismatch_case_label(kind, &x.token));
+        }
+    }
+}
+
+/// Each value is evaluated within its comparison with `tgt`, as in an `if`,
+/// and its own shape appended to `operands`.
 pub fn case_patterns(
     context: &mut Context,
     cond: &CaseCondition,
+    tgt: &ir::Expression,
+    operands: &mut Vec<CaseOperand>,
 ) -> IrResult<Vec<ir::CasePattern>> {
     let mut ret = Vec::with_capacity(1 + cond.case_condition_list.len());
-    ret.push(range_item_pattern(context, &cond.range_item)?);
+    ret.push(range_item_pattern(
+        context,
+        &cond.range_item,
+        tgt,
+        operands,
+    )?);
     for x in &cond.case_condition_list {
-        ret.push(range_item_pattern(context, &x.range_item)?);
+        ret.push(range_item_pattern(context, &x.range_item, tgt, operands)?);
     }
     Ok(ret)
 }
 
-fn range_item_pattern(context: &mut Context, range_item: &RangeItem) -> IrResult<ir::CasePattern> {
-    let mut lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+/// Gives `value` the context of its comparison with `tgt`.
+fn eval_against_target(
+    context: &mut Context,
+    tgt: &ir::Expression,
+    op: Op,
+    value: ir::Expression,
+    value_first: bool,
+) -> ir::Expression {
+    let comptime = Box::new(Comptime::create_unknown(value.token_range()));
+    let (x, y) = if value_first {
+        (Box::new(value), Box::new(tgt.clone()))
+    } else {
+        (Box::new(tgt.clone()), Box::new(value))
+    };
+    let mut cond = ir::Expression::Binary(x, op, y, comptime);
+    let expr_context = cond.gather_context(context);
+    cond.apply_context(context, expr_context);
+    let ir::Expression::Binary(x, _, y, _) = cond else {
+        unreachable!()
+    };
+    if value_first { *x } else { *y }
+}
 
-    let comptime = lo.eval_comptime(context, None);
-    if !comptime.is_const && range_item.range.range_opt.is_none() {
-        context.insert_error(AnalyzerError::unevaluable_value(
-            UnevaluableValueKind::CaseCondition,
-            &range_item.into(),
-        ));
-    }
+fn range_item_pattern(
+    context: &mut Context,
+    range_item: &RangeItem,
+    tgt: &ir::Expression,
+    operands: &mut Vec<CaseOperand>,
+) -> IrResult<ir::CasePattern> {
+    let lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+    operands.push(CaseOperand::new(context, &lo));
 
     let Some(opt) = &range_item.range.range_opt else {
+        let lo = eval_against_target(context, tgt, Op::EqWildcard, lo, false);
+        if !lo.comptime().is_const {
+            context.insert_error(AnalyzerError::unevaluable_value(
+                UnevaluableValueKind::CaseCondition,
+                &range_item.into(),
+            ));
+        }
         return Ok(ir::CasePattern::Eq(Box::new(lo)));
     };
-    let mut hi: ir::Expression = Conv::conv(context, opt.expression.as_ref())?;
-    hi.eval_comptime(context, None);
-
+    let lo = eval_against_target(context, tgt, Op::LessEq, lo, true);
+    let hi: ir::Expression = Conv::conv(context, opt.expression.as_ref())?;
     let inclusive = matches!(opt.range_operator.as_ref(), RangeOperator::DotDotEqu(_));
+    if let Some(lo) = operands.last_mut() {
+        *lo = lo.bound();
+    }
+    let hi_operand = CaseOperand::new(context, &hi);
+    operands.push(if inclusive {
+        hi_operand.bound()
+    } else {
+        hi_operand.exclusive_bound()
+    });
+
+    let op = if inclusive { Op::LessEq } else { Op::Less };
+    let hi = eval_against_target(context, tgt, op, hi, false);
     Ok(ir::CasePattern::Range {
         lo: Box::new(lo),
         hi: Box::new(hi),
@@ -3461,9 +3672,10 @@ pub fn case_condition(
     tgt: &ir::Expression,
     cond: &CaseCondition,
 ) -> IrResult<ir::Expression> {
-    let mut ret = range_item(context, tgt, &cond.range_item)?;
+    let target = Some(CaseOperand::new(context, tgt));
+    let mut ret = range_item(context, tgt, &cond.range_item, target)?;
     for x in &cond.case_condition_list {
-        let item = range_item(context, tgt, &x.range_item)?;
+        let item = range_item(context, tgt, &x.range_item, target)?;
         let comptime = Box::new(Comptime::create_unknown(item.token_range()));
         ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(item), comptime);
     }
@@ -3475,23 +3687,35 @@ pub fn range_list(
     tgt: &ir::Expression,
     list: &RangeList,
 ) -> IrResult<ir::Expression> {
-    let mut ret = range_item(context, tgt, &list.range_item)?;
+    let mut ret = range_item(context, tgt, &list.range_item, None)?;
     for x in &list.range_list_list {
-        let item = range_item(context, tgt, &x.range_item)?;
+        let item = range_item(context, tgt, &x.range_item, None)?;
         let comptime = Box::new(Comptime::create_unknown(item.token_range()));
         ret = ir::Expression::Binary(Box::new(ret), Op::LogicOr, Box::new(item), comptime);
     }
     Ok(ret)
 }
 
+/// A `case` item's values (`target` set) are left for their comparisons
+/// with the target to evaluate, as in an `if`.
 fn range_item(
     context: &mut Context,
     tgt: &ir::Expression,
     range_item: &RangeItem,
+    target: Option<CaseOperand>,
 ) -> IrResult<ir::Expression> {
-    let mut exp: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+    fn eval(context: &mut Context, exp: &mut ir::Expression, in_case: bool) -> Comptime {
+        if in_case {
+            exp.clone().eval_comptime(context, None).clone()
+        } else {
+            exp.eval_comptime(context, None).clone()
+        }
+    }
 
-    let comptime = exp.eval_comptime(context, None);
+    let mut exp: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
+    let lo_operand = target.map(|_| CaseOperand::new(context, &exp));
+
+    let comptime = eval(context, &mut exp, target.is_some());
     let lo_value = comptime.get_value().ok().and_then(|v| v.to_usize());
     if !comptime.is_const && range_item.range.range_opt.is_none() {
         context.insert_error(AnalyzerError::unevaluable_value(
@@ -3504,7 +3728,15 @@ fn range_item(
         let mut exp0: ir::Expression = Conv::conv(context, x.expression.as_ref())?;
 
         let token: TokenRange = range_item.into();
-        let comptime = exp0.eval_comptime(context, None);
+        if let (Some(target), Some(lo)) = (target, lo_operand) {
+            let hi = CaseOperand::new(context, &exp0);
+            let hi = match x.range_operator.as_ref() {
+                RangeOperator::DotDot(_) => hi.exclusive_bound(),
+                RangeOperator::DotDotEqu(_) => hi.bound(),
+            };
+            CaseOperand::check(context, &target, &[lo.bound(), hi]);
+        }
+        let comptime = eval(context, &mut exp0, target.is_some());
 
         // An empty exclusive range (constant `lo >= hi`) miscompiles: the emitter's
         // `(hi)-1` underflows an unsigned `hi == 0` to a near-universal range.

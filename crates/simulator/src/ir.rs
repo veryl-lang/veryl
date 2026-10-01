@@ -45,6 +45,7 @@ pub use statement::{
     format_assert_message, format_output, parse_hex_content, patch_stmt_log_buf,
     veryl_aot_sysfn_print,
 };
+pub(crate) use statement::{extend_to_i64, for_bound_reached};
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
     create_variable_meta, native_bytes, read_native_value, read_payload, value_size,
@@ -511,8 +512,9 @@ impl Ir {
                     format!("Case{{ {} }}", kids.join("; "))
                 }
                 Statement::For(f) => {
-                    let const_range = matches!(f.range.start, statement::RuntimeForBound::Const(_))
-                        && matches!(f.range.end, statement::RuntimeForBound::Const(_));
+                    let const_range =
+                        matches!(f.range.start, statement::RuntimeForBound::Const(..))
+                            && matches!(f.range.end, statement::RuntimeForBound::Const(..));
                     let kids: Vec<String> = f.body.iter().map(classify).collect();
                     format!(
                         "For(const_range={}, body_len={}){{ {} }}",

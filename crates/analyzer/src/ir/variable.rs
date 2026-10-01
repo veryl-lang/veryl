@@ -309,6 +309,9 @@ impl VarPathSelect {
             // base's low bits, not the member.
             let array_dims = comptime.rebase_part_select();
             let (array_select, width_select) = select.split(array_dims);
+            if !width_select.is_empty() {
+                comptime.member_signed = None;
+            }
             let width_select = if let Some(part_select) = &comptime.part_select {
                 let (select, domain) =
                     part_select.to_base_select_with_domain(context, &width_select)?;

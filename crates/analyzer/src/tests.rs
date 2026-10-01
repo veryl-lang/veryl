@@ -12172,6 +12172,138 @@ fn unevaluable_value_const_value() {
 }
 
 #[test]
+fn mismatch_case_label() {
+    // SystemVerilog sizes and signs a case target and all its labels
+    // together: a label whose comparison changes with that is rejected, as
+    // is an exclusive bound whose `hi - 1` can wrap.
+    let code = r#"
+    module ModuleA (
+        a: input  logic<8>,
+        b: input  logic<8>,
+        s: input  i8,
+        y: output logic<8>,
+        z: output logic<8>,
+    ) {
+        const P: i8 = 2;
+        const S: i8 = -6;
+        const T: i8 = -3;
+        const U: u8 = 7;
+        always_comb {
+            y = 0;
+            case s {
+                -2     : y = 1;
+                8'h80  : y = 2;
+                default: {}
+            }
+            case a + 8'h10 {
+                9'h105 : y = 1;
+                8'h05  : y = 2;
+                default: {}
+            }
+            case a {
+                '1      : y = 1;
+                16'h1234: y = 2;
+                default : {}
+            }
+            case a {
+                0..b   : y = 1;
+                default: {}
+            }
+            case P {
+                S / T  : y = 1;
+                U      : y = 2;
+                default: {}
+            }
+            case a + b {
+                0..8'h7F: y = 1;
+                default : {}
+            }
+        }
+        assign z = case s {
+            -16..=8'h10: 8'd1,
+            default    : 8'd0,
+        };
+    }"#;
+
+    let errors = analyze(code);
+    let mismatches = errors
+        .iter()
+        .filter(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. }))
+        .count();
+    assert_eq!(mismatches, 7, "{errors:#?}");
+
+    // Labels SystemVerilog compares as Veryl does are accepted.
+    let code = r#"
+    module ModuleA (
+        a: input  logic<8>,
+        s: input  i8,
+        y: output logic<8>,
+        z: output logic<8>,
+    ) {
+        enum E: logic<2> {
+            X,
+            Y,
+        }
+        var e: E;
+        always_comb {
+            e = E::X;
+            y = 0;
+            case a {
+                0      : y = 1;
+                1..=3  : y = 2;
+                8'hFF  : y = 3;
+                '0     : y = 4;
+                0..8   : y = 5;
+                default: {}
+            }
+            case s {
+                -1     : y = 1;
+                -8..=-2: y = 2;
+                0..=7  : y = 3;
+                default: {}
+            }
+            case e {
+                E::X   : y = 1;
+                E::Y   : y = 2;
+                default: {}
+            }
+            case a[7:4] {
+                4'h0..4'h8: y = 1;
+                4'h8..4'hF: y = 2;
+                default   : {}
+            }
+            case s {
+                -8..(-2): y = 1;
+                default : {}
+            }
+            case s {
+                0      : y = 2;
+                1      : y = 3;
+                8'h02  : y = 4;
+                default: {}
+            }
+            case a as 16 {
+                16'hFFFF: y = 1;
+                -1      : y = 2;
+                default : {}
+            }
+        }
+        assign z = case a {
+            1..=3  : 8'd0,
+            default: 8'd1,
+        };
+    }"#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::MismatchCaseLabel { .. })),
+        "{errors:#?}"
+    );
+}
+
+#[test]
 fn invalid_operand() {
     let code = r#"
     module ModuleA {
