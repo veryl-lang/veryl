@@ -424,7 +424,11 @@ impl FunctionCall {
         }
         for dsts in self.outputs.values() {
             for dst in dsts {
-                dst.gather_ff(context, table, decl);
+                if from_ff {
+                    dst.gather_ff(context, table, decl);
+                } else {
+                    dst.gather_ff_comb_assign(context, table, decl);
+                }
             }
         }
     }
