@@ -30,10 +30,10 @@ impl CmdMetadata {
                 serde_json::to_string(&output).into_diagnostic()
             }
             (Format::Pretty, Some(_)) => {
-                bail!("--format-version is only supported with --format json")
+                bail!("--format-version is only supported with --format json");
             }
             (Format::Json, Some(version)) => {
-                bail!("unsupported --format-version {version}; supported versions: 1, 2")
+                bail!("unsupported --format-version {version}; supported versions: 1, 2");
             }
         }
     }
