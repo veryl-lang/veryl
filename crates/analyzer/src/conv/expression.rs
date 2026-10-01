@@ -1,8 +1,9 @@
 use crate::analyzer_error::AnalyzerError;
 use crate::conv::statement::check_true_false;
 use crate::conv::utils::{
-    TypePosition, case_condition, eval_expr, eval_factor_path, eval_function_call, eval_size,
-    eval_struct_constructor, eval_type, range_list, switch_condition,
+    TypePosition, case_condition, eval_case_target, eval_expr, eval_factor_path,
+    eval_function_call, eval_size, eval_struct_constructor, eval_type, range_list,
+    switch_condition,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -627,7 +628,7 @@ impl Conv<&Factor> for ir::Expression {
             Factor::CaseExpression(x) => {
                 let mut tgt: ir::Expression =
                     Conv::conv(context, x.case_expression.expression.as_ref())?;
-                tgt.eval_comptime(context, None);
+                eval_case_target(context, &mut tgt);
                 let exp: ir::Expression =
                     Conv::conv(context, x.case_expression.expression0.as_ref())?;
                 let defaul: ir::Expression =

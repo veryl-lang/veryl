@@ -1322,6 +1322,25 @@ pub enum AnalyzerError {
 
     #[diagnostic(
         severity(Error),
+        code(mismatch_case_label),
+        help("{hint}"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("case label is compared with the target differently in SystemVerilog: {reason}")]
+    MismatchCaseLabel {
+        reason: String,
+        hint: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(mismatch_clock_domain),
         help("synchronize the crossing and mark it 'unsafe (cdc) {{ ... }}', or correct the domain annotations if the crossing is not real"),
         url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
@@ -2713,6 +2732,7 @@ impl AnalyzerError {
             AnalyzerError::MemberAccessOnArray { input, .. } => input,
             AnalyzerError::MismatchAssignment { input, .. } => input,
             AnalyzerError::MismatchAttributeArgs { input, .. } => input,
+            AnalyzerError::MismatchCaseLabel { input, .. } => input,
             AnalyzerError::MismatchClockDomain { input, .. } => input,
             AnalyzerError::MismatchFunctionArg { input, .. } => input,
             AnalyzerError::MismatchFunctionArity { input, .. } => input,
@@ -2857,6 +2877,7 @@ impl AnalyzerError {
             AnalyzerError::ZeroSize { instance, .. } => instance,
             AnalyzerError::NonPortableDependency { instance, .. } => instance,
             AnalyzerError::MismatchAttributeArgs { instance, .. } => instance,
+            AnalyzerError::MismatchCaseLabel { instance, .. } => instance,
             AnalyzerError::MismatchClockDomain { instance, .. } => instance,
             AnalyzerError::MismatchFunctionArg { instance, .. } => instance,
             AnalyzerError::MismatchFunctionArity { instance, .. } => instance,
@@ -2985,6 +3006,7 @@ impl AnalyzerError {
             AnalyzerError::ZeroSize { instance, .. } => instance.as_ref(),
             AnalyzerError::NonPortableDependency { instance, .. } => instance.as_ref(),
             AnalyzerError::MismatchAttributeArgs { instance, .. } => instance.as_ref(),
+            AnalyzerError::MismatchCaseLabel { instance, .. } => instance.as_ref(),
             AnalyzerError::MismatchClockDomain { instance, .. } => instance.as_ref(),
             AnalyzerError::MismatchFunctionArg { instance, .. } => instance.as_ref(),
             AnalyzerError::MismatchFunctionArity { instance, .. } => instance.as_ref(),
@@ -3113,6 +3135,7 @@ impl AnalyzerError {
             AnalyzerError::ZeroSize { token_source, .. } => *token_source,
             AnalyzerError::NonPortableDependency { token_source, .. } => *token_source,
             AnalyzerError::MismatchAttributeArgs { token_source, .. } => *token_source,
+            AnalyzerError::MismatchCaseLabel { token_source, .. } => *token_source,
             AnalyzerError::MismatchClockDomain { token_source, .. } => *token_source,
             AnalyzerError::MismatchFunctionArg { token_source, .. } => *token_source,
             AnalyzerError::MismatchFunctionArity { token_source, .. } => *token_source,
@@ -3930,6 +3953,26 @@ impl AnalyzerError {
             instance: None,
         }
     }
+    pub fn mismatch_case_label(kind: CaseLabelMismatch, token: &TokenRange) -> Self {
+        let (reason, hint) = match kind {
+            CaseLabelMismatch::Joint => (
+                "it sizes and signs the target and all labels together",
+                "give the target and labels a common width and signedness, or compare with `if`",
+            ),
+            CaseLabelMismatch::ExclusiveBound => (
+                "an exclusive upper bound is written as `hi - 1`, which can wrap",
+                "use an inclusive range, or compare with `if`",
+            ),
+        };
+        AnalyzerError::MismatchCaseLabel {
+            reason: reason.to_string(),
+            hint: hint.to_string(),
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
     pub fn mismatch_clock_domain(
         clock_domain: &str,
         other_domain: &str,
@@ -4561,6 +4604,12 @@ pub enum ComponentInterfaceMismatchKind {
         expected: String,
         connected: String,
     },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CaseLabelMismatch {
+    Joint,
+    ExclusiveBound,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

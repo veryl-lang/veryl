@@ -1,0 +1,15 @@
+---
+source: crates/tests/src/lib.rs
+expression: out
+---
+mismatch_case_label (https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#mismatch_case_label)
+
+  × case label is compared with the target differently in SystemVerilog: it sizes and signs the target and all labels together
+   ╭─[../../testcases/error/mismatch_case_label.veryl:7:13]
+ 6 │         case i_a {
+ 7 │             -1     : o_y = 1;
+   ·             ─┬
+   ·              ╰── Error location
+ 8 │             8'h80  : o_y = 2;
+   ╰────
+  help: give the target and labels a common width and signedness, or compare with `if`

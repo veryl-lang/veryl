@@ -1131,23 +1131,49 @@ pub enum CasePattern {
 
 impl CasePattern {
     /// `None` when either side is non-const. Compares as `lower_to_cond`
-    /// does, so a signed target meets a negative label sign-extended.
-    pub(crate) fn matches(&self, target: &Value, context: &mut Context) -> Option<bool> {
-        fn test(context: &mut Context, op: Op, x: &Value, y: &Value) -> Option<bool> {
+    /// does.
+    /// `value` is `target` evaluated on its own.
+    pub(crate) fn matches(
+        &self,
+        target: &Expression,
+        value: &Value,
+        context: &mut Context,
+    ) -> Option<bool> {
+        fn test(
+            context: &mut Context,
+            op: Op,
+            target: &Expression,
+            value: &Value,
+            operand: &Expression,
+            target_first: bool,
+        ) -> Option<bool> {
+            let y = operand.eval_value(context)?;
+            // A target whose value depends on its context is evaluated again
+            // in the one the operand was given against it.
+            let pair = operand.comptime().expr_context;
+            let own = target.comptime().expr_context;
+            let x = if (pair.width != own.width || pair.signed != own.signed)
+                && !target.is_self_determined()
+            {
+                let mut target = target.clone();
+                target.apply_context(context, pair);
+                target.eval_value(context)?
+            } else {
+                value.clone()
+            };
+            let (x, y) = if target_first { (&x, &y) } else { (&y, &x) };
             let signed = x.signed() && y.signed();
             let ret = op.eval_value_binary(x, y, 1, signed, &mut context.mask_cache);
             ret.to_usize().map(|x| x != 0)
         }
         match self {
-            CasePattern::Eq(e) => {
-                let v = e.eval_value(context)?;
-                test(context, Op::EqWildcard, target, &v)
-            }
+            CasePattern::Eq(e) => test(context, Op::EqWildcard, target, value, e, true),
             CasePattern::Range { lo, hi, inclusive } => {
-                let lo = lo.eval_value(context)?;
-                let hi = hi.eval_value(context)?;
                 let hi_op = if *inclusive { Op::LessEq } else { Op::Less };
-                Some(test(context, Op::LessEq, &lo, target)? && test(context, hi_op, target, &hi)?)
+                Some(
+                    test(context, Op::LessEq, target, value, lo, false)?
+                        && test(context, hi_op, target, value, hi, true)?,
+                )
             }
         }
     }
@@ -1217,7 +1243,7 @@ impl CaseStatement {
             let mut matched = false;
             let mut undecided = false;
             for pat in &arm.patterns {
-                match pat.matches(&tgt, context) {
+                match pat.matches(&self.case_target, &tgt, context) {
                     Some(true) => {
                         matched = true;
                         break;

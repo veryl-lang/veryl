@@ -533,6 +533,19 @@ impl Expression {
         }
     }
 
+    /// Whether it has a value of its own width whatever the context.
+    pub fn is_self_determined(&self) -> bool {
+        match self {
+            Expression::Term(x) => !matches!(x.as_ref(), Factor::Unknown(_)),
+            Expression::Concatenation(..) => true,
+            Expression::Unary(op, ..) => op.unary_x_self_determined(),
+            Expression::Binary(_, op, ..) => {
+                *op == Op::As || op.binary_op_self_determined() || op.binary_x_self_determined()
+            }
+            _ => false,
+        }
+    }
+
     pub fn eval_comptime(
         &mut self,
         context: &mut Context,

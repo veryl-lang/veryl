@@ -1,12 +1,12 @@
 use crate::analyzer_error::{ComponentInterfaceMismatchKind, MismatchTypeKind};
 use crate::conv::checker::portability::check_initial_assign_system_function_args;
 use crate::conv::utils::{
-    TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type, build_for_range,
-    build_for_statement, case_patterns, check_assign_before_definition, check_assign_clock_domain,
-    eval_array_range_assign, eval_assign_statement, eval_expr, eval_variable, expand_connect,
-    expand_connect_const, function_call, get_return_str, hoist_component_method_call,
-    single_function_call_factor, switch_condition, tb_method_call, to_hier_assign_destination,
-    try_infer_decl_type, try_infer_var_assign,
+    CaseOperand, TbMethodCallPosition, TypePosition, argument_list, assign_rhs_context_type,
+    build_for_range, build_for_statement, case_patterns, check_assign_before_definition,
+    check_assign_clock_domain, eval_array_range_assign, eval_assign_statement, eval_case_target,
+    eval_expr, eval_variable, expand_connect, expand_connect_const, function_call, get_return_str,
+    hoist_component_method_call, single_function_call_factor, switch_condition, tb_method_call,
+    to_hier_assign_destination, try_infer_decl_type, try_infer_var_assign,
 };
 use crate::conv::{Context, Conv};
 use crate::ir::{
@@ -1024,8 +1024,10 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
         }
 
         let mut tgt: ir::Expression = Conv::conv(context, value.expression.as_ref())?;
-        let tgt_comptime = tgt.eval_comptime(context, None).clone();
+        let tgt_comptime = eval_case_target(context, &mut tgt);
 
+        let target = CaseOperand::new(context, &tgt);
+        let mut operands = Vec::new();
         let mut arms: Vec<ir::CaseArm> = Vec::new();
         let mut default: Vec<ir::Statement> = Vec::new();
 
@@ -1046,7 +1048,8 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
             let body = body?;
             match item.case_item.case_item_group.as_ref() {
                 CaseItemGroup::CaseCondition(x) => {
-                    let patterns = case_patterns(context, x.case_condition.as_ref())?;
+                    let patterns =
+                        case_patterns(context, x.case_condition.as_ref(), &tgt, &mut operands)?;
                     arms.push(ir::CaseArm {
                         patterns,
                         body: body.0,
@@ -1062,6 +1065,8 @@ impl Conv<&CaseStatement> for ir::StatementBlock {
                 }
             }
         }
+
+        CaseOperand::check(context, &target, &operands);
 
         if arms.is_empty() && default.is_empty() {
             return Ok(ir::StatementBlock::default());

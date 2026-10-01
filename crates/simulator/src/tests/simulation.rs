@@ -31072,3 +31072,85 @@ fn runtime_for_bound_keeps_its_type() {
         ],
     );
 }
+
+#[test]
+fn case_compares_each_label_as_an_if_does() {
+    // `case t { L: .. }` is `if t ==? L`: the target and a label are sized
+    // and signed by their pair, and a constant label folds within it.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        t : input  logic<32>,
+        y1: output logic<8>,
+        y2: output logic<8>,
+        y3: output logic<8>,
+        y4: output logic<8>,
+        y5: output logic<8>,
+        y6: output logic<8>,
+        y7: output logic<8>,
+        y8: output logic<8>,
+    ) {
+        const K: i16 = -1;
+        const J: u8 = 8'hFF;
+        function f (
+            n: input logic<8>,
+        ) -> logic<8> {
+            var r: logic<8>;
+            case n + 8'h10 {
+                9'h105 : r = 2;
+                default: r = 0;
+            }
+            return r;
+        }
+        const C: logic<8> = f(8'hF5);
+        always_comb {
+            case a + 8'h10 {
+                9'h105 : y1 = 2;
+                default: y1 = 0;
+            }
+            case t {
+                K - 2  : y2 = 1;
+                default: y2 = 0;
+            }
+            case t {
+                K - 3..=K - 1: y3 = 1;
+                default      : y3 = 0;
+            }
+            y4 = case t {
+                K - 3..=K - 1: 8'd1,
+                default      : 8'd0,
+            };
+            y5 = case a + 8'h10 {
+                9'h105 : 8'd2,
+                default: 8'd0,
+            };
+            y6 = C;
+            case J + 8'h01 {
+                16'h0100: y7 = 2;
+                default : y7 = 0;
+            }
+            y8 = case J + 8'h01 {
+                16'h0100: 8'd2,
+                default : 8'd0,
+            };
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[
+            ("a", Value::new(0xf5, 8, false)),
+            ("t", Value::new(0xfffd, 32, false)),
+        ],
+        &[
+            ("y1", Value::new(2, 8, false)),
+            ("y2", Value::new(1, 8, false)),
+            ("y3", Value::new(1, 8, false)),
+            ("y4", Value::new(1, 8, false)),
+            ("y5", Value::new(2, 8, false)),
+            ("y6", Value::new(2, 8, false)),
+            ("y7", Value::new(2, 8, false)),
+            ("y8", Value::new(2, 8, false)),
+        ],
+    );
+}

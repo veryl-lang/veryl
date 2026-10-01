@@ -1,0 +1,12 @@
+module mismatch_case_label_exclusive_bound (
+    i_a: input  logic<8>,
+    i_b: input  logic<8>,
+    o_y: output logic<8>,
+) {
+    always_comb {
+        case i_a {
+            0..i_b : o_y = 1;
+            default: o_y = 0;
+        }
+    }
+}

@@ -2652,7 +2652,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let mut uncertain = false;
                 let mut matched = false;
                 for pattern in &arm.patterns {
-                    match pattern.matches(&target, &mut self.ctx) {
+                    match pattern.matches(&statement.case_target, &target, &mut self.ctx) {
                         Some(true) => {
                             matched = true;
                             break;

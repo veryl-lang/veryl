@@ -3675,7 +3675,10 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     Vec<ProtoStatement>,
                 )> = Vec::new();
                 let mut any_cond_pending = false;
-                for (arm, cond_expr) in c.arms.iter().zip(c.arm_conditions()) {
+                for (arm, mut cond_expr) in c.arms.iter().zip(c.arm_conditions()) {
+                    // An arm condition is built unevaluated, and evaluating
+                    // it sizes each comparison as in an `if`.
+                    cond_expr.eval_comptime(&mut context.scope().analyzer_context, None);
                     let cond: ProtoExpression = Conv::conv(context, &cond_expr)?;
                     let cond_pending = std::mem::take(&mut context.pending_statements);
                     any_cond_pending |= !cond_pending.is_empty();
