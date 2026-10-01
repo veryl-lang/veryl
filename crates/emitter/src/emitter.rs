@@ -6209,8 +6209,13 @@ impl VerylWalker for Emitter {
     fn module_declaration(&mut self, arg: &ModuleDeclaration) {
         let symbol = symbol_table::resolve(arg.identifier.as_ref()).unwrap();
         let ports = if let SymbolKind::Module(ref x) = symbol.found.kind {
-            // Native test modules don't need SV output (simulator runs them directly via IR)
-            if matches!(&x.test, Some(test) if matches!(test.r#type, TestType::Native)) {
+            // Native test modules don't need SV output (simulator runs them directly via IR).
+            // A #[testbench] module is the same: it may use $tb/$comp internally, which has
+            // no SV translation, and the analyzer already restricts it to being instantiated
+            // only from other test/testbench modules, which are skipped the same way.
+            if matches!(&x.test, Some(test) if matches!(test.r#type, TestType::Native))
+                || x.testbench
+            {
                 return;
             }
             self.default_clock = x.default_clock;

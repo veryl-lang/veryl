@@ -5503,3 +5503,41 @@ endmodule
 
     assert_eq!(emit(&metadata, code), expect);
 }
+
+#[test]
+fn testbench_module_is_not_emitted() {
+    // https://github.com/veryl-lang/veryl/issues/3272
+    // A #[testbench] module may use $tb/$comp, which have no SV translation.
+    // The emitter has to skip the module entirely rather than reach one and
+    // panic in the `unreachable!()` arm meant for RTL-only constructs.
+    let metadata = Metadata::create_default("prj").unwrap();
+
+    let code = r#"module ModuleTop (
+    o_cnt: output logic<8>,
+) {
+    inst dut: ModuleTb (o_cnt);
+}
+
+#[testbench]
+module ModuleTb (
+    o_cnt: output logic<8>,
+) {
+    inst clk: $tb::clock_gen;
+    var cnt: logic<8>;
+    always_ff (clk) {
+        cnt = cnt + 1;
+    }
+    assign o_cnt = cnt;
+    initial {
+        clk.next(5);
+    }
+}
+"#;
+
+    // Reaching here at all (rather than panicking) is the point of the test.
+    let ret = emit(&metadata, code);
+
+    assert!(ret.contains("module prj_ModuleTop"));
+    assert!(!ret.contains("module prj_ModuleTb"));
+    assert!(!ret.contains("clock_gen"));
+}
