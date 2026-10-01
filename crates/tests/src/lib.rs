@@ -2,7 +2,9 @@
 const DEPENDENCY_TESTS: [&str; 2] = ["25_dependency_1", "25_dependency_2"];
 
 #[cfg(test)]
-const STD_TESTS: [&str; 4] = ["68_std_1", "68_std_2", "68_std_3", "68_std_4"];
+const STD_TESTS: [&str; 6] = [
+    "68_std_1", "68_std_2", "68_std_3", "68_std_4", "68_std_5", "68_std_6",
+];
 
 #[cfg(test)]
 const PACKAGE_SELF_REF_TESTS: [&str; 2] = ["84_package_self_ref_1", "84_package_self_ref_2"];
