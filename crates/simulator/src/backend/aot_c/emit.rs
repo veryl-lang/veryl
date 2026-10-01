@@ -8857,28 +8857,47 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     if for_stmt.var_width == 0 || for_stmt.var_width > 64 {
         return None;
     }
-    // A loop bound as a C expression.  Const folds to a literal; Dynamic
-    // (≤64-bit) emits its scalar expression.  `add_one` applies the inclusive
-    // end bump (mirrors the interpreter / const path's `e += 1`).
-    let bound_c = |b: &ProtoForBound, add_one: bool| -> Option<String> {
+    let ext = |c: String, width: usize, signed: bool| -> String {
+        if width == 0 || width >= 64 {
+            format!("((int64_t)({c}))")
+        } else if signed {
+            let sh = 64 - width;
+            format!("(((int64_t)(((uint64_t)({c})) << {sh})) >> {sh})")
+        } else {
+            format!(
+                "((int64_t)(((uint64_t)({c})) & {:#x}ULL))",
+                (1u64 << width) - 1
+            )
+        }
+    };
+    let bound_c = |b: &ProtoForBound| -> Option<String> {
         match b {
-            ProtoForBound::Const(v) => {
-                let v = if add_one { v.checked_add(1)? } else { *v };
-                Some(format!("{v}ULL"))
-            }
+            ProtoForBound::Const(v) => Some(format!("((int64_t){v}LL)")),
             ProtoForBound::Dynamic(e) => {
                 if e.width() > 64 {
                     return None;
                 }
-                let c = emit_expr(e)?;
-                if add_one {
-                    Some(format!("(({c}) + 1ULL)"))
-                } else {
-                    Some(format!("({c})"))
-                }
+                let (width, signed) = b.shape();
+                Some(ext(emit_expr(e)?, width, signed))
             }
         }
     };
+    // The continue condition, the negation of `for_bound_reached`.
+    let var_width = for_stmt.var_width;
+    let var_signed = for_stmt.var_signed;
+    let in_range = |bound: &str, b: &ProtoForBound, op: &str| -> String {
+        let (bound_width, bound_signed) = b.shape();
+        if var_signed && bound_signed {
+            format!("_it {op} {bound}")
+        } else {
+            format!(
+                "((uint64_t){}) {op} ((uint64_t){})",
+                ext("_it".to_string(), var_width, false),
+                ext(bound.to_string(), bound_width, false)
+            )
+        }
+    };
+    let wrap = |c: &str| ext(c.to_string(), var_width, var_signed);
     // Const trip count (loop iterations), or None when a bound is dynamic.
     let const_trips =
         |start: &ProtoForBound, end: &ProtoForBound, inclusive: bool, step: u64| -> Option<u64> {
@@ -8896,10 +8915,9 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
 
     // Loop-control fragments referencing hoisted bound temps `_lo`/`_hi`,
     // evaluated once (as the interpreter/Cranelift read the bounds a single
-    // time before looping).  `int64_t` for Reverse so the signed `>= _lo`
-    // guard terminates on underflow past `_lo`, matching the emitted SV
-    // `for (int i = hi - 1; i >= lo; i -= step)`.
-    let (var_ty, lo, hi, init, cond, incr, trips) = match &for_stmt.range {
+    // time before looping), mirroring the emitted SV `for (int i = lo; i <
+    // hi; i++)` and `for (int i = hi - 1; i >= lo; i -= step)`.
+    let (lo, hi, init, cond, incr, trips) = match &for_stmt.range {
         ProtoForRange::Forward {
             start,
             end,
@@ -8910,12 +8928,11 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
                 return None;
             }
             (
-                "uint64_t",
-                bound_c(start, false)?,
-                bound_c(end, *inclusive)?,
-                "uint64_t _it = _lo".to_string(),
-                "_it < _hi".to_string(),
-                format!("_it += {step}ULL"),
+                bound_c(start)?,
+                bound_c(end)?,
+                format!("int64_t _it = {}", wrap("_lo")),
+                in_range("_hi", end, if *inclusive { "<=" } else { "<" }),
+                format!("_it = {}", wrap(&format!("_it + {step}LL"))),
                 const_trips(start, end, *inclusive, *step),
             )
         }
@@ -8928,13 +8945,13 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
             if *step == 0 {
                 return None;
             }
+            let first = if *inclusive { "_hi" } else { "_hi - 1" };
             (
-                "int64_t",
-                bound_c(start, false)?,
-                bound_c(end, *inclusive)?,
-                "int64_t _it = _hi - 1".to_string(),
-                "_it >= _lo".to_string(),
-                format!("_it -= {step}ULL"),
+                bound_c(start)?,
+                bound_c(end)?,
+                format!("int64_t _it = {}", wrap(first)),
+                in_range("_lo", start, ">="),
+                format!("_it = {}", wrap(&format!("_it - {step}LL"))),
                 const_trips(start, end, *inclusive, *step),
             )
         }
@@ -9002,7 +9019,7 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
     }
 
     Some(format!(
-        "{{ {var_ty} _lo = {lo}, _hi = {hi}; \
+        "{{ int64_t _lo = {lo}, _hi = {hi}; \
          for ({init}; {cond}; {incr}) {{ \
             *(({cty}*)({buf} + {off:#x})) = ({cty}){itv}; \
             {body} \
@@ -14850,10 +14867,10 @@ mod tests {
             body: vec![body_assign],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("_lo = 0ULL, _hi = 8ULL"));
-        assert!(s.contains("uint64_t _it0 = _lo"));
-        assert!(s.contains("_it0 < _hi"));
-        assert!(s.contains("_it0 += 1ULL"));
+        assert!(s.contains("_lo = ((int64_t)0LL), _hi = ((int64_t)8LL)"));
+        assert!(s.contains("int64_t _it0 = ((int64_t)(((uint64_t)(_lo)) & 0xffffffffULL))"));
+        assert!(s.contains(") < ((uint64_t)((int64_t)(_hi)))"));
+        assert!(s.contains("(_it0 + 1LL)"));
         assert!(s.contains("comb_values + 0x0"));
         assert!(s.contains("0xaULL"));
     }
@@ -14935,7 +14952,8 @@ mod tests {
             body: vec![],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("_hi = 8ULL"));
+        assert!(s.contains("_hi = ((int64_t)7LL)"));
+        assert!(s.contains(") <= ((uint64_t)((int64_t)(_hi)))"));
     }
 
     #[test]
@@ -14957,10 +14975,10 @@ mod tests {
             body: vec![],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("_lo = 0ULL"));
-        assert!(s.contains("uint64_t _it0 = _lo"));
-        assert!(s.contains("_it0 < _hi"));
-        assert!(s.contains("_it0 += 1ULL"));
+        assert!(s.contains("_lo = ((int64_t)0LL)"));
+        assert!(s.contains("int64_t _it0 = "));
+        assert!(s.contains(") < ((uint64_t)((int64_t)(((uint64_t)(_hi)) & 0xffffffffULL)))"));
+        assert!(s.contains("(_it0 + 1LL)"));
     }
 
     #[test]
@@ -14981,9 +14999,9 @@ mod tests {
             body: vec![],
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
-        assert!(s.contains("int64_t _it0 = _hi - 1"));
-        assert!(s.contains("_it0 >= _lo"));
-        assert!(s.contains("_it0 -= 1ULL"));
+        assert!(s.contains("int64_t _it0 = ((int64_t)(((uint64_t)(_hi - 1)) & 0xffffffffULL))"));
+        assert!(s.contains(") >= ((uint64_t)((int64_t)(_lo)))"));
+        assert!(s.contains("(_it0 - 1LL)"));
     }
 
     #[test]

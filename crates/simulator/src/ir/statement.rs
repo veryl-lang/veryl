@@ -376,19 +376,21 @@ pub enum ComponentArg {
 #[derive(Clone)]
 pub enum RuntimeForBound {
     Const(u64),
-    Dynamic(Box<Expression>),
+    Dynamic(Box<Expression>, (usize, bool)),
 }
 
 // SAFETY: Same as Expression — raw pointers are used for memory access.
 unsafe impl Send for RuntimeForBound {}
 
 impl RuntimeForBound {
-    pub fn eval(&self, mask_cache: &mut MaskCache) -> u64 {
+    /// The bound extended to 64 bits, and its `(width, signed)`.
+    pub fn eval(&self, mask_cache: &mut MaskCache) -> (i64, (usize, bool)) {
         match self {
-            RuntimeForBound::Const(v) => *v,
-            RuntimeForBound::Dynamic(expr) => {
+            RuntimeForBound::Const(v) => (*v as i64, (64, true)),
+            RuntimeForBound::Dynamic(expr, (width, signed)) => {
                 let val = expr.eval(mask_cache);
-                val.to_usize().unwrap_or(0) as u64
+                let raw = val.to_u64().unwrap_or(0);
+                (extend_to_i64(raw, *width, *signed), (*width, *signed))
             }
         }
     }
@@ -535,13 +537,15 @@ impl Statement {
             Statement::Case(x) => x.eval_step(mask_cache),
             Statement::For(x) => {
                 let r = &x.range;
-                let start = r.start.eval(mask_cache);
-                let mut end = r.end.eval(mask_cache);
-                if r.inclusive {
-                    end = end.saturating_add(1);
-                }
-                let mut step_body = |i: u64| -> ControlFlow {
-                    let val = Value::new(i, x.var_width, x.var_signed);
+                let (start, start_shape) = r.start.eval(mask_cache);
+                let (end, end_shape) = r.end.eval(mask_cache);
+                // The counter wraps as the emitted `int` does.
+                let wrap = |v: i64| extend_to_i64(v as u64, x.var_width, x.var_signed);
+                let reached = |i: i64, bound: i64, shape, ge: bool, inclusive: bool| {
+                    for_bound_reached(i, x.var_width, x.var_signed, bound, shape, ge, inclusive)
+                };
+                let mut step_body = |i: i64| -> ControlFlow {
+                    let val = Value::new(i as u64, x.var_width, x.var_signed);
                     unsafe {
                         write_native_value(x.var_ptr, x.var_native_bytes, x.var_use_4state, &val);
                     }
@@ -554,27 +558,37 @@ impl Statement {
                 };
                 if r.reverse {
                     // Mirror the emitted SV `for (int i = hi - 1; i >= lo;
-                    // i -= step)`; i64 makes underflow past lo terminate.
-                    let mut i = end as i64 - 1;
-                    let lo = start as i64;
+                    // i -= step)` (`hi` itself when inclusive).
+                    let mut i = wrap(if r.inclusive {
+                        end
+                    } else {
+                        end.wrapping_sub(1)
+                    });
                     let step = r.step as i64;
-                    while i >= lo {
-                        if step_body(i as u64) == ControlFlow::Break {
+                    while !reached(i, start, start_shape, true, false) {
+                        if step_body(i) == ControlFlow::Break {
                             break;
                         }
-                        i -= step;
+                        i = wrap(i.wrapping_sub(step));
                     }
                 } else if let Some(op) = &r.op {
-                    let mut i = start;
-                    while i < end {
+                    let mut i = wrap(start);
+                    while !reached(i, end, end_shape, false, r.inclusive) {
                         if step_body(i) == ControlFlow::Break {
                             break;
                         }
                         // Break out rather than hang, but report it: the emitted
                         // SystemVerilog loops here, so exiting quietly would let
                         // a broken design pass. Const bounds are caught earlier.
-                        match op.eval(i as usize, r.step as usize) {
-                            Some(n) if n as u64 > i => i = n as u64,
+                        let next = op
+                            .eval(i as u64 as usize, r.step as usize)
+                            .map(|n| wrap(n as i64));
+                        match next {
+                            Some(n)
+                                if !reached(i, n, (x.var_width, x.var_signed), false, false) =>
+                            {
+                                i = n
+                            }
                             _ => {
                                 assert_buffer::record_fatal(format!(
                                     "for-loop step does not advance the loop variable (stuck at {i}) at {}:{}:{}",
@@ -585,12 +599,12 @@ impl Statement {
                         }
                     }
                 } else {
-                    let mut i = start;
-                    while i < end {
+                    let mut i = wrap(start);
+                    while !reached(i, end, end_shape, false, r.inclusive) {
                         if step_body(i) == ControlFlow::Break {
                             break;
                         }
-                        i += r.step;
+                        i = wrap(i.wrapping_add(r.step as i64));
                     }
                 }
                 ControlFlow::Continue
@@ -1117,6 +1131,53 @@ impl std::hash::Hash for CompiledBlockStatement {
 pub enum ProtoForBound {
     Const(u64),
     Dynamic(ProtoExpression),
+}
+
+impl ProtoForBound {
+    /// `(width, signed)` of the bound as the loop compares it. A constant
+    /// bound is a non-negative integer, signed like an integer literal.
+    pub(crate) fn shape(&self) -> (usize, bool) {
+        match self {
+            ProtoForBound::Const(_) => (64, true),
+            ProtoForBound::Dynamic(e) => (e.width(), e.expr_context().signed),
+        }
+    }
+}
+
+/// The emitted SV compares `int i` with a bound of the bound's own type:
+/// signed only when both are, otherwise as unsigned values of their widths.
+pub(crate) fn for_bound_reached(
+    i: i64,
+    var_width: usize,
+    var_signed: bool,
+    bound: i64,
+    (bound_width, bound_signed): (usize, bool),
+    ge: bool,
+    inclusive: bool,
+) -> bool {
+    use std::cmp::Ordering;
+    let ord = if var_signed && bound_signed {
+        i.cmp(&bound)
+    } else {
+        let mask = |w: usize| if w >= 64 { u64::MAX } else { (1u64 << w) - 1 };
+        (i as u64 & mask(var_width)).cmp(&(bound as u64 & mask(bound_width)))
+    };
+    match (ge, inclusive) {
+        (false, false) => ord != Ordering::Less,
+        (false, true) => ord == Ordering::Greater,
+        (true, _) => ord == Ordering::Less,
+    }
+}
+
+pub(crate) fn extend_to_i64(v: u64, width: usize, signed: bool) -> i64 {
+    if width == 0 || width >= 64 {
+        v as i64
+    } else if signed {
+        let sh = 64 - width;
+        ((v << sh) as i64) >> sh
+    } else {
+        (v & ((1u64 << width) - 1)) as i64
+    }
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -2592,15 +2653,16 @@ impl ProtoStatement {
                     let convert_bound = |b: &ProtoForBound| -> RuntimeForBound {
                         match b {
                             ProtoForBound::Const(v) => RuntimeForBound::Const(*v),
-                            ProtoForBound::Dynamic(proto_expr) => {
-                                RuntimeForBound::Dynamic(Box::new(proto_expr.apply_values_ptr(
+                            ProtoForBound::Dynamic(proto_expr) => RuntimeForBound::Dynamic(
+                                Box::new(proto_expr.apply_values_ptr(
                                     ff_values_ptr,
                                     ff_len,
                                     comb_values_ptr,
                                     comb_len,
                                     use_4state,
-                                )))
-                            }
+                                )),
+                                b.shape(),
+                            ),
                         }
                     };
                     let range = match &x.range {

@@ -903,6 +903,23 @@ impl ProtoAssignDynamicStatement {
         Some(())
     }
 }
+fn extend_i64(
+    builder: &mut FunctionBuilder,
+    v: CraneliftValue,
+    width: usize,
+    signed: bool,
+) -> CraneliftValue {
+    if width == 0 || width >= 64 {
+        v
+    } else if signed {
+        let sh = (64 - width) as i64;
+        let v = builder.ins().ishl_imm_u(v, sh);
+        builder.ins().sshr_imm_u(v, sh)
+    } else {
+        band_const(builder, v, (1u128 << width) - 1, false)
+    }
+}
+
 impl ProtoForStatement {
     pub fn can_build_binary(&self) -> bool {
         // A bound is JIT-able when it is a compile-time constant, or a runtime
@@ -971,20 +988,21 @@ impl ProtoForStatement {
 
         // Evaluate the loop bounds once, here in the entry block, matching the
         // interpreter which reads `r.start`/`r.end` a single time before
-        // looping (`Statement::For` in `ir::statement`).  Const bounds fold to
-        // `iconst`; dynamic bounds evaluate their expression to an i64.
-        // `inclusive` bumps the end by one, as the const path did with `e += 1`.
-        let start_v = Self::bound_value(start_bound, false, context, builder)?;
-        let end_v = Self::bound_value(end_bound, inclusive, context, builder)?;
+        // looping (`Statement::For` in `ir::statement`), whose
+        // `for_bound_reached` is the comparison this mirrors.
+        let start_v = Self::bound_value(start_bound, context, builder)?;
+        let end_v = Self::bound_value(end_bound, context, builder)?;
 
         // Reverse mirrors the emitted SV `for (int i = hi - 1; i >= lo;
-        // i -= step)`. The signed `>= lo` guard makes underflow past `lo`
-        // terminate, matching the signed `int i`.
-        let init_i = if is_reverse {
+        // i -= step)`, `hi` itself when inclusive.
+        let init_i = if is_reverse && !inclusive {
             builder.ins().iadd_imm_s(end_v, -1)
+        } else if is_reverse {
+            end_v
         } else {
             start_v
         };
+        let init_i = self.wrap_counter(builder, init_i);
 
         // Carry the counter in a block param (a register), mirroring the
         // interpreter's local `i`: `var_mem` is written only at the top of the
@@ -1002,19 +1020,9 @@ impl ProtoForStatement {
         let i_val = builder.block_params(header_block)[0];
 
         let cond = if is_reverse {
-            // Sign-extend the counter from its native width so an underflow
-            // below `lo` compares as negative, matching the signed `int i`.
-            let i_signed = if nb <= 4 {
-                let r = builder.ins().ireduce(I32, i_val);
-                builder.ins().sextend(I64, r)
-            } else {
-                i_val
-            };
-            builder
-                .ins()
-                .icmp(IntCC::SignedGreaterThanOrEqual, i_signed, start_v)
+            self.in_range(builder, i_val, start_v, start_bound, true, false)
         } else {
-            builder.ins().icmp(IntCC::UnsignedLessThan, i_val, end_v)
+            self.in_range(builder, i_val, end_v, end_bound, false, inclusive)
         };
         builder
             .ins()
@@ -1063,6 +1071,7 @@ impl ProtoForStatement {
                 _ => builder.ins().iadd(i_cur, step_c),
             }
         };
+        let new_i = self.wrap_counter(builder, new_i);
 
         builder.ins().jump(header_block, &[BlockArg::Value(new_i)]);
 
@@ -1073,24 +1082,20 @@ impl ProtoForStatement {
         Some(())
     }
 
-    /// Materialise a loop bound as an i64 cranelift value.  Const bounds fold
-    /// to `iconst`; dynamic bounds evaluate their (JIT-able, ≤64-bit) expression
-    /// and normalise its payload to I64.  `add_one` applies the `inclusive`
-    /// end-bound bump.  Callers gate on `can_build_binary`, so the payload is a
-    /// scalar; the `None` arms are defensive (a type mismatch bails to the
-    /// interpreter instead of panicking cranelift).
+    /// Callers gate on `can_build_binary`, so the payload is a scalar; the
+    /// `None` arms are defensive (a type mismatch bails to the interpreter
+    /// instead of panicking cranelift).
     fn bound_value(
         bound: &ProtoForBound,
-        add_one: bool,
         context: &mut CraneliftContext,
         builder: &mut FunctionBuilder,
     ) -> Option<CraneliftValue> {
-        let raw = match bound {
+        Some(match bound {
             ProtoForBound::Const(c) => builder.ins().iconst(I64, *c as i64),
             ProtoForBound::Dynamic(expr) => {
                 let (payload, _mask) = expr.build_binary(context, builder)?;
                 let ty = builder.func.dfg.value_type(payload);
-                if ty == I64 {
+                let raw = if ty == I64 {
                     payload
                 } else if ty == I128 {
                     builder.ins().ireduce(I64, payload)
@@ -1098,14 +1103,46 @@ impl ProtoForStatement {
                     builder.ins().uextend(I64, payload)
                 } else {
                     return None;
-                }
+                };
+                let (width, signed) = bound.shape();
+                extend_i64(builder, raw, width, signed)
             }
-        };
-        Some(if add_one {
-            builder.ins().iadd_imm_s(raw, 1)
-        } else {
-            raw
         })
+    }
+
+    fn wrap_counter(&self, builder: &mut FunctionBuilder, v: CraneliftValue) -> CraneliftValue {
+        extend_i64(builder, v, self.var_width, self.var_signed)
+    }
+
+    /// The loop's continue condition: the negation of `for_bound_reached`.
+    fn in_range(
+        &self,
+        builder: &mut FunctionBuilder,
+        i: CraneliftValue,
+        bound: CraneliftValue,
+        shape: &ProtoForBound,
+        ge: bool,
+        inclusive: bool,
+    ) -> CraneliftValue {
+        let (bound_width, bound_signed) = shape.shape();
+        let (i, bound, cc) = if self.var_signed && bound_signed {
+            let cc = match (ge, inclusive) {
+                (true, _) => IntCC::SignedGreaterThanOrEqual,
+                (false, true) => IntCC::SignedLessThanOrEqual,
+                (false, false) => IntCC::SignedLessThan,
+            };
+            (i, bound, cc)
+        } else {
+            let i = extend_i64(builder, i, self.var_width, false);
+            let bound = extend_i64(builder, bound, bound_width, false);
+            let cc = match (ge, inclusive) {
+                (true, _) => IntCC::UnsignedGreaterThanOrEqual,
+                (false, true) => IntCC::UnsignedLessThanOrEqual,
+                (false, false) => IntCC::UnsignedLessThan,
+            };
+            (i, bound, cc)
+        };
+        builder.ins().icmp(cc, i, bound)
     }
 
     fn store_counter(

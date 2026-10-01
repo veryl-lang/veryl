@@ -30865,3 +30865,50 @@ fn dynamic_index_store_is_cut_to_element_width() {
         &[("y", Value::new(0x0000_1122_1101_1122, 64, false))],
     );
 }
+
+#[test]
+fn runtime_for_with_negative_bound() {
+    // The emitted SV iterates `int j`: a bound of -2 runs from -2, and one
+    // derived from an enclosing loop's iterator may be negative too.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<32>,
+        y1: output logic<32>,
+    ) {
+        var lo: i32;
+        var n : logic<8>;
+        always_comb {
+            lo = -2;
+            y0 = 0;
+            for j in lo..2 {
+                y0 = y0 + a + 1 + (j - j);
+            }
+        }
+        always_comb {
+            n  = 0;
+            y1 = 0;
+            for i in 0..4 {
+                if n == 3 {
+                    break;
+                }
+                for j in (i - 2)..2 {
+                    y1 = y1 + a + 1 + (j - j);
+                }
+                for k in 0..(i - 1) {
+                    y1 = y1 + 1000 + (k - k);
+                }
+                n = n + 1;
+            }
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(1, 8, false))],
+        &[
+            ("y0", Value::new(8, 32, false)),
+            ("y1", Value::new(0x3fa, 32, false)),
+        ],
+    );
+}

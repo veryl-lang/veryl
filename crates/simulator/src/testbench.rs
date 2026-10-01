@@ -2,8 +2,8 @@ use crate::HashMap;
 use crate::assert_buffer;
 use crate::ir::{
     ComponentArg, Event, Expression, Ir, ModuleVariables, RuntimeForRange, Statement,
-    SystemFunctionCall, TbMethodKind, Value, VarId, VarPath, format_assert_message, format_output,
-    write_native_value,
+    SystemFunctionCall, TbMethodKind, Value, VarId, VarPath, extend_to_i64, for_bound_reached,
+    format_assert_message, format_output, write_native_value,
 };
 use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
@@ -698,6 +698,7 @@ enum Repeat<'a> {
         lv: &'a LoopVariable,
         i: i64,
         bound: i64,
+        shape: (usize, bool),
     },
 }
 
@@ -726,6 +727,21 @@ enum Wait<'a> {
         high_time: u64,
         low_time: u64,
     },
+}
+
+impl LoopVariable {
+    fn reached(&self, i: i64, bound: i64, shape: (usize, bool)) -> bool {
+        let r = &self.range;
+        for_bound_reached(
+            i,
+            self.width,
+            self.signed,
+            bound,
+            shape,
+            r.reverse,
+            r.inclusive && !r.reverse,
+        )
+    }
 }
 
 fn write_loop_var(lv: &LoopVariable, i: u64) {
@@ -759,30 +775,38 @@ impl<'a> Process<'a> {
         let repeat = match loop_var {
             Some(lv) => {
                 let r = &lv.range;
-                let start = r.start.eval(&mut sim.mask_cache);
-                let mut end = r.end.eval(&mut sim.mask_cache);
-                if r.inclusive {
-                    end = end.saturating_add(1);
-                }
+                let (start, start_shape) = r.start.eval(&mut sim.mask_cache);
+                let (end, end_shape) = r.end.eval(&mut sim.mask_cache);
+                let wrap = |v: i64| extend_to_i64(v as u64, lv.width, lv.signed);
                 if r.reverse {
                     // Mirror the emitted SV `for (int i = hi - 1; i >= lo;
-                    // i -= step)`; i64 makes underflow past lo terminate.
-                    let i = end as i64 - 1;
-                    let lo = start as i64;
-                    if i < lo {
+                    // i -= step)` (`hi` itself when inclusive).
+                    let i = wrap(if r.inclusive {
+                        end
+                    } else {
+                        end.wrapping_sub(1)
+                    });
+                    if lv.reached(i, start, start_shape) {
                         return;
                     }
                     write_loop_var(lv, i as u64);
-                    Repeat::Var { lv, i, bound: lo }
-                } else {
-                    if start >= end {
-                        return;
-                    }
-                    write_loop_var(lv, start);
                     Repeat::Var {
                         lv,
-                        i: start as i64,
-                        bound: end as i64,
+                        i,
+                        bound: start,
+                        shape: start_shape,
+                    }
+                } else {
+                    let i = wrap(start);
+                    if lv.reached(i, end, end_shape) {
+                        return;
+                    }
+                    write_loop_var(lv, i as u64);
+                    Repeat::Var {
+                        lv,
+                        i,
+                        bound: end,
+                        shape: end_shape,
                     }
                 }
             }
@@ -811,29 +835,42 @@ impl<'a> Process<'a> {
                 *remaining -= 1;
                 true
             }
-            Repeat::Var { lv, i, bound } => {
+            Repeat::Var {
+                lv,
+                i,
+                bound,
+                shape,
+            } => {
                 let r = &lv.range;
+                let wrap = |v: i64| extend_to_i64(v as u64, lv.width, lv.signed);
                 if r.reverse {
-                    *i -= r.step as i64;
-                    if *i < *bound {
-                        return false;
-                    }
+                    *i = wrap(i.wrapping_sub(r.step as i64));
                 } else if let Some(op) = r.op {
                     // Progress guard: a stalled or faulting step would spin
                     // forever (const-bound cases are rejected at analysis;
                     // runtime bounds reach here).
-                    match op.eval(*i as usize, r.step as usize) {
-                        Some(n) if n as i64 > *i => *i = n as i64,
+                    let next = op.eval(*i as u64 as usize, r.step as usize);
+                    match next.map(|n| wrap(n as i64)) {
+                        Some(n)
+                            if !for_bound_reached(
+                                *i,
+                                lv.width,
+                                lv.signed,
+                                n,
+                                (lv.width, lv.signed),
+                                false,
+                                false,
+                            ) =>
+                        {
+                            *i = n
+                        }
                         _ => return false,
                     }
-                    if *i >= *bound {
-                        return false;
-                    }
                 } else {
-                    *i += r.step as i64;
-                    if *i >= *bound {
-                        return false;
-                    }
+                    *i = wrap(i.wrapping_add(r.step as i64));
+                }
+                if lv.reached(*i, *bound, *shape) {
+                    return false;
                 }
                 write_loop_var(lv, *i as u64);
                 true
