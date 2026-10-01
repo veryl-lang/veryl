@@ -793,6 +793,12 @@ impl Factor {
                         comptime.r#type.set_concrete_width(width);
                     }
 
+                    // A part-select is unsigned (IEEE 1800-2023 11.8.1); a
+                    // member read rebased to a select keeps the member's sign.
+                    if !select.is_empty() {
+                        comptime.r#type.signed = comptime.member_signed.unwrap_or(false);
+                    }
+
                     // A select/index expression is a data-dependent read: an
                     // 'a-domain index into 'b-domain data is a real CDC, so
                     // check + merge each index/select domain into the factor.

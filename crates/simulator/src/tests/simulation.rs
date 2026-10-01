@@ -30537,3 +30537,123 @@ fn runtime_function_return_preserves_external_writes_and_output_copyout() {
         }
     }
 }
+
+/// Run `code` under every configuration, driving `inputs` and checking
+/// `expected` outputs after one settle.
+fn check_all_configs(code: &str, inputs: &[(&str, Value)], expected: &[(&str, Value)]) {
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (name, value) in inputs {
+            sim.set(name, value.clone());
+        }
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (name, value) in expected {
+            assert_eq!(&sim.get(name).unwrap(), value, "{name} config={config:?}");
+        }
+    }
+}
+
+#[test]
+fn part_select_of_signed_is_unsigned() {
+    // `x[1:0]` is unsigned whatever `x` is, so the sum is unsigned and
+    // `$signed(a[3:0])` zero-extends: 4'he + 1 = 8'h0f, not 8'hff.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<8>,
+        y1: output logic<8>,
+    ) {
+        var x: i32;
+        always_comb {
+            x  = 1;
+            y0 = $signed(a[3:0]) + x[1:0];
+        }
+        always_comb {
+            y1 = 0;
+            for i in 0..2 {
+                if i == 1 {
+                    y1 = $signed(a[3:0]) + i[1:0];
+                }
+            }
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0x0e, 8, false))],
+        &[
+            ("y0", Value::new(0x0f, 8, false)),
+            ("y1", Value::new(0x0f, 8, false)),
+        ],
+    );
+}
+
+#[test]
+fn signed_part_select_sign_extends() {
+    // `$signed` of a part-select is signed, so it sign-extends both in a
+    // signed operation and stored bare to a wider variable.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        s0: output signed logic<16>,
+        s1: output logic<16>,
+    ) {
+        always_comb {
+            s0 = 0;
+            for i in 0..2 {
+                if a == 99 {
+                    break;
+                }
+                if i == 0 {
+                    s0 = s0 + $signed(a[3:0]);
+                }
+            }
+            s1 = $signed(a[3:0]);
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0x08, 8, false))],
+        &[
+            ("s0", Value::new(0xfff8, 16, false)),
+            ("s1", Value::new(0xfff8, 16, false)),
+        ],
+    );
+}
+
+#[test]
+fn signed_struct_member_sign_extends() {
+    // A member read keeps the member's signedness; a select of it does not.
+    let code = r#"
+    module Top (
+        a : input  logic<8>,
+        y0: output logic<16>,
+        y1: output logic<16>,
+        y2: output logic<16>,
+    ) {
+        struct S {
+            m: signed logic<8>,
+            n: logic<8>,
+        }
+        var s: S;
+        always_comb {
+            s.m = a;
+            s.n = a;
+            y0  = s.m;
+            y1  = s.m + 16'sd0;
+            y2  = $signed(s.m[3:0]) + s.m[7:4];
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0xfe, 8, false))],
+        &[
+            ("y0", Value::new(0xfffe, 16, false)),
+            ("y1", Value::new(0xfffe, 16, false)),
+            ("y2", Value::new(0x001d, 16, false)),
+        ],
+    );
+}

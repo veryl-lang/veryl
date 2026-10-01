@@ -2603,6 +2603,9 @@ fn eval_factor_path_inner(
         // Array select type check
         let _ = array_select.eval_comptime(context, &comptime.r#type, true);
 
+        if !width_select.is_empty() {
+            comptime.member_signed = None;
+        }
         let width_select = if let Some(part_select) = &comptime.part_select {
             let (select, domain) = part_select
                 .to_base_select_with_domain(context, &width_select)
@@ -2917,6 +2920,7 @@ fn fold_symbol_select(
         if let Some(width) = select.eval_comptime(context, &element, false) {
             comptime.r#type.set_concrete_width(width);
         }
+        comptime.r#type.signed = false;
     }
 
     let flat = array.calc_index(&indices)?;
