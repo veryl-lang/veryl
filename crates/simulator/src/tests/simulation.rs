@@ -30359,6 +30359,36 @@ fn const_from_a_function_call_with_an_unpacked_array_argument() {
 }
 
 #[test]
+fn constant_function_argument_uses_formal_width_context() {
+    // IEEE 1800-2023 10.8 and 11.8.2: passing an expression to a wider
+    // formal is assignment-like, so the formal width propagates through the
+    // expression before the arithmetic is evaluated.
+    let code = r#"
+    module Top (
+        o_result: output logic,
+    ) {
+        function f (
+            x: input logic<4>,
+        ) -> logic {
+            return x[2];
+        }
+
+        const RESULT: logic = f(2'b11 + 2'b01);
+        assign o_result = RESULT;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+        assert_eq!(sim.get("o_result").unwrap(), Value::new(1, 1, false));
+    }
+}
+
+#[test]
 fn named_type_cast_in_display_argument() {
     // https://github.com/veryl-lang/veryl/issues/3404
     // A named-type cast (`as u32`) in a self-determined position was sized
