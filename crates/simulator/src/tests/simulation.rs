@@ -30692,3 +30692,38 @@ fn wide_logical_operand_keeps_result_type() {
         ],
     );
 }
+
+#[test]
+fn constant_ternary_keeps_both_arm_types() {
+    // A constant condition must not fold the ternary to an arm whose type
+    // differs from the other's: `X[0]` is a 1-bit unsigned select, and an
+    // unsigned arm makes the whole ternary unsigned.
+    let code = r#"
+    module Top #(
+        param Q: signed logic<4> = -3,
+        param X: i32             = 0,
+    ) (
+        a : input  logic<8>,
+        t : output logic<4>,
+        y0: output logic<16>,
+        y1: output logic<16>,
+    ) {
+        var sa: signed logic<8>;
+        always_comb {
+            sa = a;
+            t  = (if Q ? $signed(a[3:0]) : X[0]) >> 1;
+            y0 = (if 1 ? sa + 8'sd0 : a - 8'd0);
+            y1 = {(if 1 ? a[3:0] : a[7:0]), 4'h5};
+        }
+    }
+    "#;
+    check_all_configs(
+        code,
+        &[("a", Value::new(0xf8, 8, false))],
+        &[
+            ("t", Value::new(0x4, 4, false)),
+            ("y0", Value::new(0x00f8, 16, false)),
+            ("y1", Value::new(0x0085, 16, false)),
+        ],
+    );
+}

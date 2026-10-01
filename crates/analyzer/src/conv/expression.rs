@@ -69,7 +69,10 @@ impl Conv<&IfExpression> for ir::Expression {
             // folding a constant `if` STATEMENT already gets.  Only with
             // SAME-TYPE arms, so the result's width and sign cannot move.
             let (true_only, false_only) = check_true_false(&y_comptime);
-            let same_type = z.comptime().r#type == ret.comptime().r#type;
+            let same_type = matches!(
+                (arm_type(context, &z), arm_type(context, &ret)),
+                (Some(z), Some(r)) if z == r
+            );
             ret = if same_type && true_only {
                 z
             } else if same_type && false_only {
@@ -80,10 +83,10 @@ impl Conv<&IfExpression> for ir::Expression {
                 // arm with a constant of its own type instead, which keeps
                 // both while dropping reads that never happen.
                 let (z, r) = if true_only {
-                    let blank = blank_arm(&ret);
+                    let blank = blank_arm(context, &ret);
                     (z, blank.unwrap_or(ret))
                 } else {
-                    let blank = blank_arm(&z);
+                    let blank = blank_arm(context, &z);
                     (blank.unwrap_or(z), ret)
                 };
                 ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(r), comptime)
@@ -98,14 +101,37 @@ impl Conv<&IfExpression> for ir::Expression {
 /// A constant standing in for an arm a constant condition rules out: same
 /// type, so the ternary's width and sign do not move, and no reads at all.
 /// `None` when the arm has no single width to build one from.
-fn blank_arm(arm: &ir::Expression) -> Option<ir::Expression> {
+fn blank_arm(context: &mut Context, arm: &ir::Expression) -> Option<ir::Expression> {
     let comptime = arm.comptime();
-    let width = comptime.r#type.total_width()?;
-    let signed = comptime.r#type.signed;
-    let mut blank = Comptime::create_value(Value::new(0, width, signed), comptime.token);
-    blank.r#type = comptime.r#type.clone();
+    let r#type = arm_type(context, arm)?;
+    let width = r#type.total_width()?;
+    let mut blank = Comptime::create_value(Value::new(0, width, r#type.signed), comptime.token);
+    blank.r#type = r#type;
     blank.expr_context = comptime.expr_context;
     Some(ir::Expression::Term(Box::new(ir::Factor::Value(blank))))
+}
+
+/// An arm's type when it is known before evaluation, with a select applied
+/// as `eval_comptime` applies it.
+fn arm_type(context: &mut Context, arm: &ir::Expression) -> Option<ir::Type> {
+    let ir::Expression::Term(factor) = arm else {
+        return None;
+    };
+    match factor.as_ref() {
+        ir::Factor::Value(comptime) => Some(comptime.r#type.clone()),
+        ir::Factor::Variable(_, _, select, comptime) => {
+            if select.is_empty() || comptime.evaluated {
+                return Some(comptime.r#type.clone());
+            }
+            let (beg, end) = select.eval_value(context, &comptime.r#type, false)?;
+            let mut r#type = comptime.r#type.clone();
+            r#type.flatten_struct_union_enum();
+            r#type.set_concrete_width(Shape::new(vec![Some(beg - end + 1)]));
+            r#type.signed = comptime.member_signed.unwrap_or(false);
+            Some(r#type)
+        }
+        _ => None,
+    }
 }
 
 fn resolve_op(op: &Expression01Op) -> (Op, u32) {
