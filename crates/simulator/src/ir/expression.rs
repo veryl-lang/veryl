@@ -2541,6 +2541,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                         .r#type
                         .total_width()
                         .ok_or_else(|| SimulatorError::unresolved_expression(&comptime.token))?;
+                    // A folded operator keeps its operand's type, but its value
+                    // has the context width (`1 << 70` stored to 128 bits).
+                    let width = width.max(value.width());
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 
                     Ok(ProtoExpression::Value {

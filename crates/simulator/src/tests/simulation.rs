@@ -30912,3 +30912,26 @@ fn runtime_for_with_negative_bound() {
         ],
     );
 }
+
+#[test]
+fn folded_constant_wider_than_its_operand() {
+    // `1 << 70` folds to a value computed at the 128-bit context width.
+    let code = r#"
+    module Top (
+        y: output logic<128>,
+    ) {
+        always_comb {
+            y = 1 << 70;
+        }
+    }
+    "#;
+    use num_bigint::BigUint;
+    check_all_configs(
+        code,
+        &[],
+        &[(
+            "y",
+            Value::new_biguint(BigUint::from(1u32) << 70u32, 128, false),
+        )],
+    );
+}
