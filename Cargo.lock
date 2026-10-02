@@ -6234,7 +6234,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-component"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "smallvec",
@@ -6244,7 +6244,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-component-macros"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6253,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "veryl-component-sys"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "veryl-cosim"
