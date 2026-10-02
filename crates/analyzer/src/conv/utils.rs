@@ -2601,6 +2601,14 @@ fn eval_factor_path_inner(
     generic_path.unalias(None);
     check_generic_refereence(context, &generic_path);
 
+    // An anonymous loop variable is also registered as `_`.
+    if generic_path.is_anonymous() {
+        let mut comptime = Comptime::create_unknown(token);
+        comptime.is_const = true;
+        comptime.is_global = true;
+        return Ok(ir::Factor::Anonymous(comptime));
+    }
+
     let found = if let Some(path) = generic_path.to_var_path()
         && let Some((var_id, comptime)) = context.find_path(&path)
     {
@@ -2788,11 +2796,6 @@ fn eval_factor_path_inner(
     } else if let Some(x) = generic_path.to_literal() {
         let x = x.eval_comptime(token);
         Ok(ir::Factor::Value(x))
-    } else if generic_path.is_anonymous() {
-        let mut comptime = Comptime::create_unknown(token);
-        comptime.is_const = true;
-        comptime.is_global = true;
-        Ok(ir::Factor::Anonymous(comptime))
     } else if let Ok(symbol) = symbol_table::resolve(&generic_path) {
         let is_inernal = context
             .current_namespace()
@@ -3488,6 +3491,7 @@ pub struct CaseOperand {
     is_zero: bool,
     is_min: bool,
     known: bool,
+    is_string: bool,
     token: TokenRange,
 }
 
@@ -3531,6 +3535,7 @@ impl CaseOperand {
             is_zero,
             is_min,
             known,
+            is_string: r#type.is_string(),
             token: expr.token_range(),
         }
     }
@@ -3650,10 +3655,17 @@ fn range_item_pattern(
     operands: &mut Vec<CaseOperand>,
 ) -> IrResult<ir::CasePattern> {
     let lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
-    operands.push(CaseOperand::new(context, &lo));
+    let lo_operand = CaseOperand::new(context, &lo);
+    operands.push(lo_operand);
 
     let Some(opt) = &range_item.range.range_opt else {
-        let lo = eval_against_target(context, tgt, Op::EqWildcard, lo, false);
+        // A string has no wildcard digits, and `==?` does not take one.
+        let op = if lo_operand.is_string {
+            Op::Eq
+        } else {
+            Op::EqWildcard
+        };
+        let lo = eval_against_target(context, tgt, op, lo, false);
         if !lo.comptime().is_const {
             context.insert_error(AnalyzerError::unevaluable_value(
                 UnevaluableValueKind::CaseCondition,
@@ -3734,6 +3746,7 @@ fn range_item(
 
     let comptime = eval(context, &mut exp, target.is_some());
     let lo_value = comptime.get_value().ok().and_then(|v| v.to_usize());
+    let lo_is_string = comptime.r#type.is_string();
     if !comptime.is_const && range_item.range.range_opt.is_none() {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
@@ -3807,12 +3820,9 @@ fn range_item(
     } else {
         let token: TokenRange = range_item.into();
         let comptime = Box::new(Comptime::create_unknown(token));
-        ir::Expression::Binary(
-            Box::new(tgt.clone()),
-            Op::EqWildcard,
-            Box::new(exp),
-            comptime,
-        )
+        // A string has no wildcard digits, and `==?` does not take one.
+        let op = if lo_is_string { Op::Eq } else { Op::EqWildcard };
+        ir::Expression::Binary(Box::new(tgt.clone()), op, Box::new(exp), comptime)
     };
     Ok(ret)
 }
