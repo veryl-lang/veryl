@@ -3491,6 +3491,7 @@ pub struct CaseOperand {
     is_zero: bool,
     is_min: bool,
     known: bool,
+    is_string: bool,
     token: TokenRange,
 }
 
@@ -3534,6 +3535,7 @@ impl CaseOperand {
             is_zero,
             is_min,
             known,
+            is_string: r#type.is_string(),
             token: expr.token_range(),
         }
     }
@@ -3653,10 +3655,17 @@ fn range_item_pattern(
     operands: &mut Vec<CaseOperand>,
 ) -> IrResult<ir::CasePattern> {
     let lo: ir::Expression = Conv::conv(context, range_item.range.expression.as_ref())?;
-    operands.push(CaseOperand::new(context, &lo));
+    let lo_operand = CaseOperand::new(context, &lo);
+    operands.push(lo_operand);
 
     let Some(opt) = &range_item.range.range_opt else {
-        let lo = eval_against_target(context, tgt, Op::EqWildcard, lo, false);
+        // A string has no wildcard digits, and `==?` does not take one.
+        let op = if lo_operand.is_string {
+            Op::Eq
+        } else {
+            Op::EqWildcard
+        };
+        let lo = eval_against_target(context, tgt, op, lo, false);
         if !lo.comptime().is_const {
             context.insert_error(AnalyzerError::unevaluable_value(
                 UnevaluableValueKind::CaseCondition,
@@ -3737,6 +3746,7 @@ fn range_item(
 
     let comptime = eval(context, &mut exp, target.is_some());
     let lo_value = comptime.get_value().ok().and_then(|v| v.to_usize());
+    let lo_is_string = comptime.r#type.is_string();
     if !comptime.is_const && range_item.range.range_opt.is_none() {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::CaseCondition,
@@ -3810,12 +3820,9 @@ fn range_item(
     } else {
         let token: TokenRange = range_item.into();
         let comptime = Box::new(Comptime::create_unknown(token));
-        ir::Expression::Binary(
-            Box::new(tgt.clone()),
-            Op::EqWildcard,
-            Box::new(exp),
-            comptime,
-        )
+        // A string has no wildcard digits, and `==?` does not take one.
+        let op = if lo_is_string { Op::Eq } else { Op::EqWildcard };
+        ir::Expression::Binary(Box::new(tgt.clone()), op, Box::new(exp), comptime)
     };
     Ok(ret)
 }

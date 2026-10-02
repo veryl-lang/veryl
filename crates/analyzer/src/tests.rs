@@ -12290,6 +12290,42 @@ fn mismatch_case_label() {
     );
 }
 
+#[test]
+fn string_case_label() {
+    let code = r#"
+    module ModuleA (
+        i_a: input  bit<8>,
+        o_x: output logic  ,
+    ) {
+        always_comb {
+            case i_a {
+                ":"    : o_x = 1;
+                default: o_x = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        i_a: input  bit<8>,
+        o_x: output logic ,
+        o_y: output logic ,
+    ) {
+        assign o_x = case i_a {
+            ":"    : 1,
+            default: 0,
+        };
+        assign o_y = inside i_a {":"};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
 
 #[test]
 fn invalid_operand() {
