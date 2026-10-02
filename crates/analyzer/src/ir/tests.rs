@@ -3430,6 +3430,11 @@ fn const_fold_switch_arm() {
 
 #[track_caller]
 fn ff_flags(code: &str) -> Vec<(String, bool)> {
+    ff_flags_and_table_len(code).0
+}
+
+#[track_caller]
+fn analyzed_module(code: &str) -> (crate::ir::Module, Context) {
     symbol_table::clear();
     attribute_table::clear();
 
@@ -3447,26 +3452,124 @@ fn ff_flags(code: &str) -> Vec<(String, bool)> {
         .components
         .iter()
         .find_map(|x| match x {
-            crate::ir::Component::Module(m) => Some(m),
+            crate::ir::Component::Module(m) => Some(m.clone()),
             _ => None,
         })
         .expect("module");
-    let mut ret: Vec<(String, bool)> = module
-        .ff_table
-        .table
-        .iter()
-        .filter(|(_, entry)| entry.assigned.is_some())
-        .map(|((id, _), entry)| {
+    (module, context)
+}
+
+/// Every element the table records, with those only a write through an
+/// unevaluated index reaches listed one by one.
+fn ff_table_elements(table: &crate::ir::FfTable) -> Vec<(crate::ir::VarId, usize)> {
+    let mut keys: Vec<_> = table.table.keys().copied().collect();
+    for (id, w) in &table.whole_assigned {
+        keys.extend(
+            (0..w.len)
+                .filter(|i| !table.table.contains_key(&(*id, *i)))
+                .map(|i| (*id, i)),
+        );
+    }
+    keys
+}
+
+#[track_caller]
+fn ff_flags_and_table_len(code: &str) -> (Vec<(String, bool)>, usize) {
+    let (module, _) = analyzed_module(code);
+    let table = &module.ff_table;
+    let mut ret: Vec<(String, bool)> = ff_table_elements(table)
+        .into_iter()
+        .filter(|(id, i)| table.writers(*id, *i).0.is_some())
+        .map(|(id, i)| {
             let name = module
                 .variables
-                .get(id)
+                .get(&id)
                 .map(|v| v.path.to_string())
                 .unwrap_or_default();
-            (name, entry.is_ff)
+            (name, table.is_ff(id, i))
         })
         .collect();
     ret.sort();
-    ret
+    (ret, table.table.len())
+}
+
+/// The compact FF table answers every per-element query the way the table
+/// with one entry per element written does.
+#[track_caller]
+fn assert_ff_table_matches_per_element(code: &str) {
+    use crate::ir::FfTable;
+
+    let (module, mut context) = analyzed_module(code);
+    let compact = module.build_ff_table(&mut context, FfTable::default());
+    let reference = module.build_ff_table(&mut context, FfTable::per_element());
+    assert!(!compact.whole_assigned.is_empty(), "nothing to compare");
+
+    let saved_vars = std::mem::replace(&mut context.variables, module.variables.clone());
+    let saved_funcs = std::mem::replace(&mut context.functions, module.functions.clone());
+    let unsafe_compact =
+        crate::ir::write_count::unsafe_self_reads(&module.declarations, &mut context, false);
+    let unsafe_reference =
+        crate::ir::write_count::unsafe_self_reads(&module.declarations, &mut context, true);
+    context.variables = saved_vars;
+    context.functions = saved_funcs;
+
+    let mut forced_compact = compact.clone();
+    forced_compact.force_all_ff();
+    let mut forced_reference = reference.clone();
+    forced_reference.force_all_ff();
+
+    let mut checked = 0;
+    for (id, variable) in &module.variables {
+        let name = variable.path.to_string();
+        assert_eq!(
+            compact.has_ff_writer(*id),
+            reference.has_ff_writer(*id),
+            "{name}"
+        );
+        let Some(total) = variable.r#type.total_array() else {
+            continue;
+        };
+        for i in 0..total {
+            let at = format!("{name}[{i}]");
+            assert_eq!(compact.writers(*id, i), reference.writers(*id, i), "{at}");
+            assert_eq!(compact.is_ff(*id, i), reference.is_ff(*id, i), "{at}");
+            assert_eq!(
+                forced_compact.is_ff(*id, i),
+                forced_reference.is_ff(*id, i),
+                "{at}"
+            );
+            let refered = |table: &FfTable| {
+                let mut x: Vec<_> = table.refered(*id, i).map(|r| format!("{r:?}")).collect();
+                x.sort();
+                x
+            };
+            assert_eq!(refered(&compact), refered(&reference), "{at}");
+            for decl in 0..module.declarations.len() {
+                assert_eq!(
+                    unsafe_compact.contains(decl, *id, i),
+                    unsafe_reference.contains(decl, *id, i),
+                    "{at} in declaration {decl}"
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+    assert!(compact.table.len() < reference.table.len());
+
+    let plans = |table: &FfTable| {
+        let mut x: Vec<_> = crate::ir::comb_to_ff_hoist::plan_hoists(
+            &module.declarations,
+            table,
+            &module.variables,
+        )
+        .into_iter()
+        .map(|p| (p.var_id, p.var_index, p.comb_decl_idx, p.ff_decl_idx))
+        .collect();
+        x.sort();
+        x
+    };
+    assert_eq!(plans(&compact), plans(&reference));
 }
 
 #[test]
@@ -3519,6 +3622,192 @@ fn ff_opt_counts_branches_by_max() {
             ("twice".to_string(), true),
         ]
     );
+}
+
+#[test]
+fn ff_table_keeps_a_runtime_indexed_read_once_per_array() {
+    // `i_idx[1]` does not evaluate, so the read reaches every element of
+    // `mem`: it must still make the element written by the other block a
+    // register, without an entry per element per read.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock         ,
+        i_rst: input  reset         ,
+        i_idx: input  logic<12> [2] ,
+        i_d  : input  logic<8>      ,
+        o_q  : output logic<8>  [4] ,
+    ) {
+        var mem: logic<8> [4096];
+        var q  : logic<8> [4];
+        always_ff {
+            mem[3] = i_d;
+        }
+        always_ff {
+            for k in 0..4 {
+                q[k] = mem[i_idx[1] + k];
+            }
+        }
+        assign o_q = q;
+    }
+    "#;
+
+    let (flags, table_len) = ff_flags_and_table_len(code);
+    assert!(flags.contains(&("mem".to_string(), true)), "{flags:?}");
+    assert!(table_len < 64, "{table_len} entries");
+}
+
+#[test]
+fn ff_table_keeps_a_runtime_indexed_write_once_per_array() {
+    // Each write and the self-read reach every element of `mem` through an
+    // index that does not evaluate: none of them may cost an entry per
+    // element, in the table or in the self-read analysis.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock         ,
+        i_rst: input  reset         ,
+        i_idx: input  logic<12> [4] ,
+        i_d  : input  logic<8>      ,
+        o_q  : output logic<8>      ,
+    ) {
+        var mem: logic<8> [4096];
+        always_ff {
+            mem[i_idx[0]] = i_d;
+            mem[i_idx[1]] = i_d + 1;
+            mem[i_idx[2]] = mem[i_idx[3]] + 1;
+        }
+        assign o_q = mem[i_idx[0]];
+    }
+    "#;
+
+    let (module, mut context) = analyzed_module(code);
+    let table = &module.ff_table;
+    assert!(table.table.len() < 64, "{} entries", table.table.len());
+    let id = *table.whole_assigned.keys().next().expect("a whole write");
+    assert!((0..4096).all(|i| table.is_ff(id, i)));
+
+    let saved_vars = std::mem::replace(&mut context.variables, module.variables.clone());
+    let unsafe_reads =
+        crate::ir::write_count::unsafe_self_reads(&module.declarations, &mut context, false);
+    context.variables = saved_vars;
+    assert!(unsafe_reads.contains(0, id, 4095));
+    assert!(
+        unsafe_reads.stored() < 64,
+        "{} stored",
+        unsafe_reads.stored()
+    );
+}
+
+#[test]
+fn ff_table_compact_writes_keep_the_order_of_writes() {
+    // `assigned` is the last writer in gather order: interleave writes
+    // through an unevaluated index with per-element ones and references in
+    // every order, including elements first seen after a whole write.
+    use crate::ir::{FfTable, VarId};
+
+    let id = VarId::from_raw(1);
+    let len = 6;
+    let mut seed: u64 = 1;
+    let mut next = |n: u64| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((seed >> 33) % n) as usize
+    };
+    for _ in 0..500 {
+        let mut compact = FfTable::default();
+        let mut reference = FfTable::per_element();
+        for _ in 0..next(12) {
+            let (op, index, decl) = (next(5), next(len as u64), next(3));
+            for table in [&mut compact, &mut reference] {
+                match op {
+                    0 => table.insert_assigned(id, index, decl),
+                    1 => table.insert_assigned_whole(id, len, decl),
+                    2 => table.insert_assigned_comb(id, index, decl),
+                    3 => table.insert_assigned_comb_whole(id, len, decl),
+                    _ => table.insert_refered(id, index, decl, None, 1u32.into(), true),
+                }
+            }
+        }
+        assert_eq!(compact.has_ff_writer(id), reference.has_ff_writer(id));
+        for i in 0..len {
+            assert_eq!(compact.writers(id, i), reference.writers(id, i));
+            assert_eq!(
+                compact.refered(id, i).count(),
+                reference.refered(id, i).count()
+            );
+        }
+    }
+}
+
+#[test]
+fn ff_table_compact_form_matches_per_element() {
+    // Runtime-indexed writes mixed with const-indexed ones, self-reads that
+    // name one element or all of them, bit selects, branches, reads from
+    // a second block, a runtime loop bound, and comb writes, one through a
+    // function output: every per-element answer must equal the per-element
+    // table's.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock        ,
+        i_rst: input  reset        ,
+        i_i  : input  logic<4> [3] ,
+        i_c  : input  logic        ,
+        i_d  : input  logic<8>     ,
+        o_q  : output logic<8>     ,
+        o_r  : output logic<8>     ,
+        o_s  : output logic<8>     ,
+    ) {
+        var mem : logic<8> [16];
+        var cnt : logic<8> [16];
+        var pair: logic<8> [16];
+        var lut : logic<8> [16];
+        var q   : logic<8>;
+        var r   : logic<8>;
+
+        function put (
+            v: input  logic<8>,
+            o: output logic<8>,
+        ) {
+            o = v;
+        }
+
+        always_ff {
+            if_reset {
+                mem[0] = 0;
+            } else {
+                if i_c {
+                    mem[i_i[0]] = i_d;
+                } else {
+                    mem[3] = mem[i_i[1]] + 1;
+                }
+                mem[5]           = mem[5] + mem[i_i[0]];
+                mem[i_i[1]][3:0] = mem[i_i[1]][7:4];
+                cnt[i_i[0]]      = cnt[i_i[0]] + 1;
+                cnt[2]           = cnt[2] + 1;
+                pair[i_i[1]]     = i_d;
+                for k in 0..i_i[2] {
+                    cnt[i_i[1]] = cnt[i_i[1]] + 1;
+                }
+            }
+        }
+        always_ff {
+            q = mem[i_i[1]] ^ cnt[i_i[1]];
+            r = cnt[4] ^ pair[7];
+        }
+        always_comb {
+            for k in 0..16 {
+                lut[k] = 0;
+            }
+            lut[i_i[0]] = i_d;
+            put(i_d, lut[i_i[1]]);
+        }
+        assign o_q = q;
+        assign o_r = r ^ pair[i_i[1]];
+        assign o_s = lut[i_i[1]];
+    }
+    "#;
+
+    assert_ff_table_matches_per_element(code);
 }
 
 #[test]

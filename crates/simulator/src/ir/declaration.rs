@@ -1490,11 +1490,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 // race the parent's own NBA commit; reject when the
                 // parent has any always_ff writer.
                 let parent_scope = context.scope();
-                let parent_has_ff_writer = parent_scope
-                    .ff_table
-                    .table
-                    .iter()
-                    .any(|((vid, _), entry)| *vid == *parent_id && entry.assigned.is_some());
+                let parent_has_ff_writer = parent_scope.ff_table.has_ff_writer(*parent_id);
                 if parent_has_ff_writer {
                     continue;
                 }
@@ -1539,19 +1535,12 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if !parent_dst.index.0.is_empty() || !parent_dst.select.is_empty() {
                     continue;
                 }
-                let child_output_is_ff = child_ff_table
-                    .table
-                    .iter()
-                    .any(|((vid, _), entry)| *vid == output.id && entry.assigned.is_some());
+                let child_output_is_ff = child_ff_table.has_ff_writer(output.id);
                 if child_output_is_ff {
                     continue;
                 }
                 let parent_scope = context.scope();
-                let parent_has_ff_writer = parent_scope
-                    .ff_table
-                    .table
-                    .iter()
-                    .any(|((vid, _), entry)| *vid == parent_dst.id && entry.assigned.is_some());
+                let parent_has_ff_writer = parent_scope.ff_table.has_ff_writer(parent_dst.id);
                 if parent_has_ff_writer {
                     continue;
                 }

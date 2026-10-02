@@ -174,18 +174,21 @@ impl Module {
     /// Runs `gather_ff` over every declaration and applies
     /// `update_is_ff` so the resulting table is ready for consumers.
     pub fn rebuild_ff_table(&mut self, context: &mut Context) {
+        self.ff_table = self.build_ff_table(context, FfTable::default());
+    }
+
+    pub fn build_ff_table(&self, context: &mut Context, mut table: FfTable) -> FfTable {
         let saved_vars = std::mem::take(&mut context.variables);
         let saved_funcs = std::mem::take(&mut context.functions);
         context.variables = self.variables.clone();
         context.functions = self.functions.clone();
 
-        let mut table = FfTable::default();
         self.gather_ff(context, &mut table);
         table.update_is_ff(&self.declarations, context);
-        self.ff_table = table;
 
         context.variables = saved_vars;
         context.functions = saved_funcs;
+        table
     }
 }
 
