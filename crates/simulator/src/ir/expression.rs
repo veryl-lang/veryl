@@ -265,10 +265,12 @@ impl Expression {
                 signed,
             } => {
                 let idx_val = index_expr.eval(mask_cache);
-                let idx = idx_val.to_usize().unwrap_or(0);
-                if idx >= *num_elements {
+                let Some(idx) = idx_val
+                    .to_usize_saturating()
+                    .filter(|idx| *idx < *num_elements)
+                else {
                     return out_of_range_read(*width, *signed, *use_4state);
-                }
+                };
                 #[cfg(debug_assertions)]
                 debug_assert!(
                     stride.checked_mul(idx as isize).is_some(),
@@ -2051,13 +2053,19 @@ pub fn build_linear_index_expr(
     array: &veryl_analyzer::ir::ShapeRef,
     index: &air::VarIndex,
 ) -> Result<ProtoExpression, SimulatorError> {
-    let index_width = 32;
+    let index_width = index
+        .indices
+        .iter()
+        .map(|x| x.comptime().expr_context.width)
+        .max()
+        .unwrap_or(32)
+        .max(64);
     let index_expr_context = ExpressionContext {
         width: index_width,
         signed: false,
     };
 
-    if array.is_empty() || (array.dims() == 1 && array[0] == Some(1) && index.0.is_empty()) {
+    if array.is_empty() || (array.dims() == 1 && array[0] == Some(1) && index.indices.is_empty()) {
         return Ok(ProtoExpression::Value {
             value: Value::new(0, index_width, false),
             width: index_width,
@@ -2067,17 +2075,60 @@ pub fn build_linear_index_expr(
 
     // A partial index (`s[i]` against `logic<8> [2, 3]`) leaves a sub-array,
     // which has no single element to offset to.
-    if index.0.len() != array.dims() {
-        let token = index.0.first().map(|x| x.token_range()).unwrap_or_default();
+    if index.is_range() || index.indices.len() != array.dims() {
+        let token = index
+            .indices
+            .first()
+            .map(|x| x.token_range())
+            .unwrap_or_default();
         return Err(SimulatorError::unsupported_description(&token));
     }
 
     let mut ret: Option<ProtoExpression> = None;
     let mut base: usize = 1;
+    let mut valid: Option<ProtoExpression> = None;
 
     for (i, dim_size) in array.iter().enumerate().rev() {
         let dim_size = dim_size.expect("array dimension size must be known");
-        let idx_proto: ProtoExpression = Conv::conv(context, &index.0[i])?;
+        let idx_proto: ProtoExpression = Conv::conv(context, &index.indices[i])?;
+        // Dynamic reads and writes already bounds-check a flat index. Keep a
+        // native unsigned one-dimensional index as-is: its original width may
+        // prove that check unnecessary as well. Per-coordinate checks remain
+        // necessary before flattening dimensions or narrowing a wide index.
+        if array.dims() == 1
+            && !idx_proto.expr_context().signed
+            && (1..=64).contains(&idx_proto.width())
+        {
+            return Ok(idx_proto);
+        }
+        // Extend each coordinate before comparing or flattening. Invalid inner
+        // coordinates must not alias the next row, and negative signed indices
+        // must not become small positive offsets.
+        let idx_proto = resize_to_width(idx_proto, index_width, index_expr_context);
+        let check = ProtoExpression::Binary {
+            x: Box::new(idx_proto.clone()),
+            op: Op::Less,
+            y: Box::new(ProtoExpression::Value {
+                value: Value::new(dim_size as u64, index_width, false),
+                width: index_width,
+                expr_context: index_expr_context,
+            }),
+            width: 1,
+            expr_context: index_expr_context,
+        };
+        valid = Some(match valid {
+            Some(previous) => ProtoExpression::Binary {
+                x: Box::new(previous),
+                op: Op::LogicAnd,
+                y: Box::new(check),
+                width: 1,
+                expr_context: ExpressionContext {
+                    width: 1,
+                    signed: false,
+                },
+            },
+            None => check,
+        });
 
         let mul_expr = if base == 1 {
             idx_proto
@@ -2111,7 +2162,24 @@ pub fn build_linear_index_expr(
         base *= dim_size;
     }
 
-    Ok(ret.expect("non-empty array must produce index expression"))
+    let ret = ret.expect("non-empty array must produce index expression");
+    let native = ExpressionContext {
+        width: 64,
+        signed: false,
+    };
+    // Invalid coordinates produce the one-past-end sentinel understood by both
+    // dynamic reads and writes. Narrow only after checking all dimensions.
+    Ok(ProtoExpression::Ternary {
+        cond: Box::new(valid.unwrap()),
+        true_expr: Box::new(resize_to_width(ret, 64, native)),
+        false_expr: Box::new(ProtoExpression::Value {
+            value: Value::new(base as u64, 64, false),
+            width: 64,
+            expr_context: native,
+        }),
+        width: 64,
+        expr_context: native,
+    })
 }
 
 /// Build a `ProtoDynamicBitSelect` from a `VarSelect` containing variable
@@ -2437,6 +2505,143 @@ pub(crate) fn inline_function_call(
     Ok(ret_offsets)
 }
 
+/// Sample before any of an array assignment's destination elements change.
+/// Function calls in selectors also pass through here, so each is evaluated once.
+pub(crate) fn snapshot_expression(context: &mut Context, expr: ProtoExpression) -> ProtoExpression {
+    let width = expr.width();
+    let expr_context = *expr.expr_context();
+    let bytes = value_size(calc_native_bytes(width), context.config.use_4state);
+    let offset = super::variable::align_up_64(context.comb_total_bytes as isize);
+    context.comb_total_bytes = offset as usize + bytes;
+    let var_offset = VarOffset::Comb(offset);
+    context.pending_statements.push(ProtoStatement::Assign(
+        super::statement::ProtoAssignStatement {
+            dst: var_offset,
+            dst_width: width,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: TokenRange::default(),
+        },
+    ));
+    ProtoExpression::Variable {
+        var_offset,
+        select: None,
+        dynamic_select: None,
+        width,
+        var_full_width: width,
+        expr_context,
+    }
+}
+
+/// Evaluate address expressions once before lowering an aggregate access.
+pub(crate) fn snapshot_selectors(
+    context: &mut Context,
+    indices: &mut [air::Expression],
+) -> Result<(), SimulatorError> {
+    for index in indices {
+        if index.comptime().is_const {
+            continue;
+        }
+        let expr: ProtoExpression = Conv::conv(context, &*index)?;
+        let captured = snapshot_expression(context, expr);
+        let ProtoExpression::Variable {
+            var_offset, width, ..
+        } = captured
+        else {
+            unreachable!()
+        };
+        let mut comptime = index.comptime().clone();
+        comptime.is_const = false;
+        comptime.value = air::ValueVariant::Unknown;
+        let scope = context.scope();
+        while scope
+            .variable_meta
+            .contains_key(&scope.analyzer_context.var_id)
+            || scope
+                .analyzer_context
+                .variables
+                .contains_key(&scope.analyzer_context.var_id)
+        {
+            scope.analyzer_context.var_id.inc();
+        }
+        let id = scope.analyzer_context.var_id;
+        scope.analyzer_context.var_id.inc();
+        let native_bytes = calc_native_bytes(width);
+        // Hierarchical references lower their AIR indices after elaboration,
+        // so their sampled selector metadata must remain in this scope.
+        scope.variable_meta.insert(
+            id,
+            super::variable::VariableMeta {
+                path: air::VarPath::new(veryl_parser::resource_table::insert_str(&format!(
+                    "slice.index.{id}"
+                ))),
+                r#type: comptime.r#type.clone(),
+                width,
+                native_bytes,
+                elements: vec![super::variable::VariableElement {
+                    native_bytes,
+                    current: var_offset,
+                    next_offset: 0,
+                }],
+                initial_values: vec![],
+                uniform_buffer: true,
+            },
+        );
+        *index = air::Expression::Term(Box::new(air::Factor::Variable(
+            id,
+            air::VarIndex::default(),
+            air::VarSelect::default(),
+            comptime,
+        )));
+    }
+    Ok(())
+}
+
+/// Lower a slice at the boundary where concrete destination elements are laid
+/// out. Selectors are sampled once, before reading any of the elements.
+pub(crate) fn array_slice_elements(
+    context: &mut Context,
+    expression: &air::Expression,
+) -> Result<Option<Vec<ProtoExpression>>, SimulatorError> {
+    let air::Expression::Term(factor) = expression else {
+        return Ok(None);
+    };
+    if !factor.array_index().is_some_and(air::VarIndex::is_range) {
+        return Ok(None);
+    }
+    let shape = match factor.as_ref() {
+        air::Factor::Variable(id, _, _, _) => context
+            .scope()
+            .variable_meta
+            .get(id)
+            .unwrap()
+            .r#type
+            .array
+            .clone(),
+        air::Factor::HierVariable(reference) => reference.array.clone(),
+        _ => unreachable!("only variable references have array indices"),
+    };
+    let mut reference = factor.as_ref().clone();
+    let count = reference
+        .comptime()
+        .r#type
+        .total_array()
+        .ok_or_else(|| SimulatorError::unsupported_description(&reference.token_range()))?;
+    snapshot_selectors(context, &mut reference.array_index_mut().unwrap().indices)?;
+    let mut elements = Vec::with_capacity(count);
+    for i in 0..count {
+        let element = reference
+            .array_element(&mut context.scope().analyzer_context, &shape, i)
+            .ok_or_else(|| SimulatorError::unsupported_description(&reference.token_range()))?;
+        elements.push(Conv::conv(context, &element)?);
+    }
+    Ok(Some(elements))
+}
+
 impl Conv<&air::Expression> for ProtoExpression {
     fn conv(context: &mut Context, src: &air::Expression) -> Result<Self, SimulatorError> {
         match src {
@@ -2456,6 +2661,9 @@ impl Conv<&air::Expression> for ProtoExpression {
                     })))
                 }
                 air::Factor::Variable(id, index, select, comptime) => {
+                    if index.is_range() {
+                        return Err(SimulatorError::unsupported_description(&comptime.token));
+                    }
                     let width = comptime.r#type.total_width().unwrap();
                     let expr_context: ExpressionContext = (&comptime.expr_context).into();
 

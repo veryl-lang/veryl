@@ -7536,11 +7536,7 @@ pub(crate) fn collect_inst_reset_kinds(
         let air::Component::Module(child) = inst.component.as_ref() else {
             continue;
         };
-        for (port_id, expr) in inst
-            .inputs
-            .iter()
-            .filter_map(|x| x.single().map(|e| (x.id, e)))
-        {
+        for (port_id, expr) in inst.inputs.iter().map(|x| (x.id, &x.expr)) {
             let Some(kind) = child
                 .variables
                 .get(&port_id)
@@ -7554,7 +7550,7 @@ pub(crate) fn collect_inst_reset_kinds(
             let air::Factor::Variable(net, idx, sel, _) = factor.as_ref() else {
                 continue;
             };
-            if !idx.0.is_empty() || !sel.is_empty() {
+            if !idx.indices.is_empty() || !sel.is_empty() {
                 continue;
             }
             record(&mut out, *net, kind);
@@ -7569,7 +7565,7 @@ pub(crate) fn collect_inst_reset_kinds(
                 continue;
             };
             for dst in &output.dst {
-                if dst.index.0.is_empty() && dst.select.is_empty() {
+                if dst.index.indices.is_empty() && dst.select.is_empty() {
                     record(&mut out, dst.id, kind);
                 }
             }

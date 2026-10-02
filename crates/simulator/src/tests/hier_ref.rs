@@ -1147,3 +1147,32 @@ fn hier_assign_reaches_both_slots_of_a_dual_slot_ff() {
         assert_eq!(result, TestResult::Pass, "config: {config:?}");
     }
 }
+
+#[test]
+fn hier_ref_array_slice_in_testbench_assignment() {
+    let code = format!(
+        r#"
+    {DYN_IDX_DUT}
+    #[test(hier_test)]
+    module hier_test {{
+        inst clk: $tb::clock_gen;
+        inst dut: DTop(clk);
+        initial {{
+            clk.next();
+            var selected: logic<32>[2];
+            for k in 0..3 {{
+                selected = dut.u_plain.u_leaf.mem[k+:2];
+                $assert(selected[0] == 32'hcafe_0000 + k, "first element");
+                $assert(selected[1] == 32'hcafe_0001 + k, "second element");
+            }}
+            $finish();
+        }}
+    }}
+    "#
+    );
+    let results = run_hier_test(&code);
+    assert!(!results.is_empty());
+    for (config, result, _) in results {
+        assert_eq!(result, TestResult::Pass, "{config:?}");
+    }
+}

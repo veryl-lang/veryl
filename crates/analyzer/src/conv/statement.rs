@@ -286,7 +286,7 @@ fn conv_tb_method_call_assignment(
     // full declared width. Indexed/selected destinations go through the
     // expression-position hoist (a temporary plus an ordinary assignment,
     // which handles selects).
-    if dst.index.0.is_empty() && dst.select.0.is_empty() && dst.select.1.is_none() {
+    if dst.index.indices.is_empty() && dst.select.0.is_empty() && dst.select.1.is_none() {
         method_call.ret = Some(Box::new(dst));
         return Ok(Some(ir::StatementBlock(vec![ir::Statement::TbMethodCall(
             method_call,

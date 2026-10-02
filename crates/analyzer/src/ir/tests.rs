@@ -4103,7 +4103,7 @@ fn peeled_copy_matches_the_ordinary_unroll() {
     use crate::ir::{Declaration, Expression, Factor, Statement, VarIndex, VarSelect};
 
     fn selector(index: &VarIndex, select: &VarSelect) -> String {
-        let mut ret: Vec<String> = index.0.iter().chain(&select.0).map(expr).collect();
+        let mut ret: Vec<String> = index.indices.iter().chain(&select.0).map(expr).collect();
         if let Some((op, x)) = &select.1 {
             ret.push(format!("{op:?} {}", expr(x)));
         }
@@ -4638,4 +4638,33 @@ fn break_loop_over_emit_limit_is_kept_as_converted() {
 "#;
 
     check_peeled_ir(code, exp);
+}
+
+#[test]
+fn ff_table_array_slice_reads_match_per_element() {
+    assert_ff_table_matches_per_element(
+        r#"
+    module ModuleA(clk: input clock, idx: input logic<3>[1], d: input logic<8>, o: output logic<16>) {
+        var mem: logic<8>[8];
+        var selected: logic<8>[2];
+        always_ff { mem[idx[0]] = d; }
+        always_ff { selected = mem[2+:2]; }
+        assign o = {selected[1], selected[0]};
+    }
+    "#,
+    );
+    assert_ff_table_matches_per_element(
+        r#"
+    module ModuleA(clk: input clock, idx: input logic<3>[1], d: input logic<8>, o: output logic<8>) {
+        var mem: logic<8>[8];
+        function first(pair: input logic<8>[2]) -> logic<8> { return pair[0]; }
+        always_ff {
+            mem[idx[0]] = d;
+            mem[idx[0]] = first(mem[2+:2]);
+            mem[0] = mem[0] + 1;
+        }
+        assign o = mem[0];
+    }
+    "#,
+    );
 }
