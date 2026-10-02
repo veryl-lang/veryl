@@ -3,6 +3,68 @@ use crate::ir::{Component, Declaration, Statement};
 use crate::value::Value;
 
 #[test]
+fn array_slice_narrow_constant_index_preserves_valid_elements() {
+    for kind in ["logic", "bit"] {
+        for (select, valid) in [
+            ("1'b0-:2", [false, true]),
+            ("4'b0-:2", [false, true]),
+            ("32'b0-:2", [false, true]),
+            ("64'b0-:2", [false, true]),
+            ("65'b0-:2", [false, true]),
+            ("1'sb1+:2", [false, true]),
+            ("1'sb1 step 2", [false, false]),
+            ("1'b1-:2", [true, true]),
+        ] {
+            let code = format!(
+                r#"
+module Top(o: output {kind}<8>) {{
+    const TABLE: {kind}<8>[64] = '{{42 repeat 64}};
+    const PAIR: {kind}<8>[2] = TABLE[{select}];
+    assign o = PAIR[1];
+}}
+"#
+            );
+            symbol_table::clear();
+            attribute_table::clear();
+            doc_comment_table::clear();
+            let metadata = Metadata::create_default("prj").unwrap();
+            let parser = Parser::parse(&code, &"").unwrap();
+            let analyzer = Analyzer::new(&metadata);
+            let mut context = Context::default();
+            let mut ir = Ir::default();
+            let mut errors = analyzer.analyze_pass1("prj", &parser.veryl);
+            errors.extend(Analyzer::analyze_post_pass1());
+            errors.extend(analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir)));
+            errors.extend(Analyzer::analyze_post_pass2(&ir));
+            assert!(errors.is_empty(), "{kind}, {select}: {errors:#?}");
+
+            let Component::Module(module) = &ir.components[0] else {
+                panic!("expected module");
+            };
+            let pair = module
+                .variables
+                .values()
+                .find(|x| x.path.to_string() == "PAIR")
+                .unwrap();
+            for (i, valid) in valid.into_iter().enumerate() {
+                let expected = if valid {
+                    Value::new(42, 8, false)
+                } else if kind == "bit" {
+                    Value::new(0, 8, false)
+                } else {
+                    Value::new_x(8, false)
+                };
+                assert_eq!(
+                    pair.get_value(&[i]),
+                    Some(&expected),
+                    "{kind}, {select}, element={i}\n{ir}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn integer_system_functions_return_signed_integers() {
     for query in [
         "$bits(logic<5>)",

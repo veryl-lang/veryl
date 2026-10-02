@@ -1191,7 +1191,7 @@ impl Factor {
         for (position, size) in index.indices.iter().zip(shape.iter()) {
             let Some(size) = size else { continue };
             let width = position.comptime().expr_context.width.max(64);
-            let check = Expression::Binary(
+            let mut check = Expression::Binary(
                 Box::new(position.clone()),
                 Op::Less,
                 Box::new(Expression::create_value(
@@ -1200,6 +1200,28 @@ impl Factor {
                 )),
                 Box::new(Comptime::create_unknown(self.comptime().token)),
             );
+            if position.comptime().r#type.signed {
+                // The unsigned upper bound zero-extends a narrow negative
+                // coordinate (e.g. 4'shF becomes 15). Check its sign in a
+                // separate signed comparison before accepting that bound.
+                let mut zero = Expression::create_value(
+                    Value::new(0, position.comptime().expr_context.width, true),
+                    self.comptime().token,
+                );
+                zero.comptime_mut().r#type.signed = true;
+                let nonnegative = Expression::Binary(
+                    Box::new(position.clone()),
+                    Op::GreaterEq,
+                    Box::new(zero),
+                    Box::new(Comptime::create_unknown(self.comptime().token)),
+                );
+                check = Expression::Binary(
+                    Box::new(nonnegative),
+                    Op::LogicAnd,
+                    Box::new(check),
+                    Box::new(Comptime::create_unknown(self.comptime().token)),
+                );
+            }
             valid = Some(match valid {
                 Some(previous) => Expression::Binary(
                     Box::new(previous),

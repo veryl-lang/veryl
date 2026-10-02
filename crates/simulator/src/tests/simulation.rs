@@ -3911,6 +3911,65 @@ fn array_slice_assignment_checks_each_destination_dimension() {
 }
 
 #[test]
+fn array_slice_narrow_index_agrees_in_constants_and_at_runtime() {
+    for kind in ["logic", "bit"] {
+        let code = format!(
+            r#"
+    module Top(index: input logic, seed: input {kind}<8>,
+               constant: output {kind}<16>, called: output {kind}<16>,
+               runtime: output {kind}<16>) {{
+        const TABLE: {kind}<8>[64] = '{{42 repeat 64}};
+        const PAIR: {kind}<8>[2] = TABLE[1'b0-:2];
+        function pair(x: input {kind}<8>[2]) -> {kind}<16> {{
+            return {{x[1], x[0]}};
+        }}
+        const CALLED: {kind}<16> = pair(TABLE[1'b0-:2]);
+        assign constant = {{PAIR[1], PAIR[0]}};
+        assign called = CALLED;
+        var data: {kind}<8>[64];
+        var selected: {kind}<8>[2];
+        assign data = '{{seed repeat 64}};
+        assign selected = data[index-:2];
+        assign runtime = {{selected[1], selected[0]}};
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            let invalid_mask = if kind == "logic" && config.use_4state {
+                0xff
+            } else {
+                0
+            };
+            for seed in [42, 173] {
+                for index in [0, 1] {
+                    sim.set("seed", Value::new(seed, 8, false));
+                    sim.set("index", Value::new(index, 1, false));
+                    sim.step(&Event::Clock(VarId::SYNTHETIC));
+                    for port in ["constant", "called"] {
+                        assert_eq!(
+                            sim.get(port).unwrap(),
+                            Value::from_u128(42 << 8, invalid_mask, 16, false),
+                            "{kind}, {config:?}, port={port}"
+                        );
+                    }
+                    let (payload, mask) = if index == 0 {
+                        ((seed as u128) << 8, invalid_mask)
+                    } else {
+                        ((seed as u128) * 0x101, 0)
+                    };
+                    assert_eq!(
+                        sim.get("runtime").unwrap(),
+                        Value::from_u128(payload, mask, 16, false),
+                        "{kind}, {config:?}, seed={seed}, index={index}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn array_slice_constant_function_and_singleton() {
     let code = r#"
     module Top(o: output logic<16>) {
