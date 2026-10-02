@@ -6,6 +6,8 @@ use crate::ir::variable::{
 };
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
+use num_bigint::BigUint;
+use num_traits::One;
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::{MaskCache, ValueU64};
 use veryl_parser::resource_table::StrId;
@@ -1966,6 +1968,69 @@ fn resize_to_width(
     }
 }
 
+/// `x ==? k` (or `!=?`) against a constant with x/z digits, as a plain
+/// equality over the digits `k` does specify: `(x & care) == (k & care)`.
+///
+/// The 2-state backends compare payloads only, so a wildcard digit would
+/// otherwise be compared as whatever payload bit encodes it, and a `case`
+/// label such as `2'bz1` would match `3` instead of both `1` and `3`.  Only
+/// for 2-state: the 4-state `==?` keeps an x of the target in the result,
+/// which `==` over the masked operands would turn into a known value.
+fn lower_wildcard_const_compare(
+    x: ProtoExpression,
+    op: Op,
+    k: &Value,
+    k_width: usize,
+    width: usize,
+    expr_context: ExpressionContext,
+) -> ProtoExpression {
+    // The operands carry the signedness of their comparison; the result's own
+    // context is the 1-bit outcome.
+    let signed = x.expr_context().signed;
+    let cmp_width = x.width().max(k_width).max(k.width()).max(1);
+    let k = k.expand(cmp_width, signed);
+    let full = (BigUint::one() << cmp_width) - BigUint::one();
+    let mut care = &full ^ (k.mask_xz().as_ref() & &full);
+    let known = k.payload().as_ref() & &care;
+    let x_width = x.width();
+    let x = if signed {
+        extend_to_width(x, cmp_width)
+    } else {
+        // Zero-extension folded into the mask: bits above the operand are
+        // not guaranteed clean, and here they would be compared.
+        if x_width > 0 && x_width < cmp_width {
+            care &= (BigUint::one() << x_width) - BigUint::one();
+        }
+        x
+    };
+    let ctx = ExpressionContext {
+        width: cmp_width,
+        signed: false,
+    };
+    let value_node = |payload: BigUint| ProtoExpression::Value {
+        value: Value::new_biguint(payload, cmp_width, false),
+        width: cmp_width,
+        expr_context: ctx,
+    };
+    let masked = ProtoExpression::Binary {
+        x: Box::new(x),
+        op: Op::BitAnd,
+        y: Box::new(value_node(care)),
+        width: cmp_width,
+        expr_context: ctx,
+    };
+    ProtoExpression::Binary {
+        x: Box::new(masked),
+        op: if op == Op::EqWildcard { Op::Eq } else { Op::Ne },
+        y: Box::new(value_node(known)),
+        width,
+        expr_context: ExpressionContext {
+            signed: false,
+            ..expr_context
+        },
+    }
+}
+
 /// Materialize an element's full width before placing it in a concatenation.
 fn extend_to_width(expr: ProtoExpression, width: usize) -> ProtoExpression {
     // Unsized literals also need truncation to a struct member's width.
@@ -2764,6 +2829,25 @@ impl Conv<&air::Expression> for ProtoExpression {
                             expr_context,
                         });
                     }
+                }
+
+                if matches!(op, Op::EqWildcard | Op::NeWildcard)
+                    && !context.config.use_4state
+                    && let ProtoExpression::Value {
+                        value: yv,
+                        width: y_width,
+                        ..
+                    } = &y
+                    && yv.is_xz()
+                {
+                    return Ok(lower_wildcard_const_compare(
+                        x,
+                        *op,
+                        yv,
+                        *y_width,
+                        width,
+                        expr_context,
+                    ));
                 }
 
                 // Algebraic identity folding: 0 && X = 0, 1 || X = 1, etc.

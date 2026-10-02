@@ -18223,6 +18223,183 @@ fn case_duplicate_value_first_match() {
 }
 
 #[test]
+fn wildcard_compare_keeps_an_unknown_target_bit_in_4state() {
+    // An x in a digit the label does specify leaves `==?` unknown, which a
+    // condition takes as false.
+    let code = r#"
+    module Top (
+        o_eq: output logic,
+        o_ne: output logic<2>,
+    ) {
+        var b: logic<3>;
+        assign b    = 3'bxx1;
+        assign o_eq = b ==? 3'b1z1;
+        assign o_ne = if b !=? 3'b1z1 ? 2'd1 : 2'd2;
+    }
+    "#;
+
+    for config in Config::all().into_iter().filter(|x| x.use_4state) {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert!(sim.get("o_eq").unwrap().is_xz(), "{config:?}");
+        assert_eq!(
+            sim.get("o_ne").unwrap(),
+            Value::new(2, 2, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn case_label_xz_digits_are_wildcards() {
+    // Veryl `case` is SystemVerilog `case inside` (plain `case` is emitted only
+    // when every label is 2-state), so an x/z digit in a label, or in the
+    // right operand of `==?` / `inside`, matches either bit value.
+    let code = r#"
+    module Top (
+        a     : input  logic<3>,
+        c     : input  signed logic<4>,
+        w     : input  logic<70>,
+        o_case: output logic<4>,
+        o_expr: output logic<4>,
+        o_sw  : output logic<4>,
+        o_ne  : output logic,
+        o_sgn : output logic,
+        o_wide: output logic,
+    ) {
+        always_comb {
+            case a {
+                3'b1z0        : o_case = 1;
+                3'b0x1, 3'b010: o_case = 2;
+                3'b11Z        : o_case = 3;
+                3'b000        : o_case = 5;
+                default       : o_case = 4;
+            }
+        }
+        assign o_expr = case a {
+            3'bxx1 : 1,
+            3'b1z0 : 2,
+            default: 3,
+        };
+        always_comb {
+            switch {
+                a ==? 3'b1zz        : o_sw = 1;
+                inside a {3'b0z1}   : o_sw = 2;
+                default             : o_sw = 3;
+            }
+        }
+        assign o_ne   = a !=? 3'b0z1;
+        assign o_sgn  = c ==? 6'sb0zz111;
+        assign o_wide = case w {
+            70'h3f_ffff_ffff_ffff_fffz: 1,
+            default                   : 0,
+        };
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let wide_hit = BigUint::parse_bytes(b"3ffffffffffffffff5", 16).unwrap();
+    let wide_miss = BigUint::parse_bytes(b"1ffffffffffffffff5", 16).unwrap();
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for a in 0..8u64 {
+            sim.set("a", Value::new(a, 3, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let case_exp = [5, 2, 2, 2, 1, 4, 1, 3][a as usize];
+            let expr_exp = if a & 1 == 1 {
+                1
+            } else if a & 5 == 4 {
+                2
+            } else {
+                3
+            };
+            let sw_exp = if a >= 4 {
+                1
+            } else if a & 1 == 1 {
+                2
+            } else {
+                3
+            };
+            let get = |sim: &mut Simulator, n: &str| sim.get(n).unwrap().payload_u64();
+            assert_eq!(get(&mut sim, "o_case"), case_exp, "o_case a={a} {config:?}");
+            assert_eq!(get(&mut sim, "o_expr"), expr_exp, "o_expr a={a} {config:?}");
+            assert_eq!(get(&mut sim, "o_sw"), sw_exp, "o_sw a={a} {config:?}");
+            let ne_exp = u64::from(a != 1 && a != 3);
+            assert_eq!(get(&mut sim, "o_ne"), ne_exp, "o_ne a={a} {config:?}");
+        }
+        // Sign-extended, 4'b1111 is 6'b111111 and misses on bit 5; zero-
+        // extended it would match.
+        for (c, exp) in [(0x7u64, 1u64), (0xf, 0), (0x6, 0)] {
+            sim.set("c", Value::new(c, 4, true));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o_sgn").unwrap().payload_u64(),
+                exp,
+                "o_sgn c={c:#x} {config:?}"
+            );
+        }
+        for (w, exp) in [(&wide_hit, 1u64), (&wide_miss, 0)] {
+            sim.set("w", Value::new_biguint(w.clone(), 70, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("o_wide").unwrap().payload_u64(),
+                exp,
+                "o_wide w={w:#x} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn case_table_with_xz_label_keeps_wildcard() {
+    // A case large enough for the table lowerings, with one wildcard label in
+    // front of the dense arms it shadows.
+    let mut arms = String::from("6'b1zzz00: o = 8'd200;\n");
+    for n in 0..48 {
+        arms.push_str(&format!("6'd{n}: o = 8'd{};\n", n + 1));
+    }
+    let code = format!(
+        r#"
+    module Top (
+        sel: input  logic<6>,
+        o  : output logic<8>,
+    ) {{
+        always_comb {{
+            case sel {{
+                {arms}
+                default: o = 8'd0;
+            }}
+        }}
+    }}
+    "#
+    );
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for sel in 0..64u64 {
+            sim.set("sel", Value::new(sel, 6, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let exp = if sel >= 32 && sel & 3 == 0 {
+                200
+            } else if sel < 48 {
+                sel + 1
+            } else {
+                0
+            };
+            assert_eq!(
+                sim.get("o").unwrap().payload_u64(),
+                exp,
+                "sel={sel} {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn signed_cast_constfold_div_and_compare() {
     // Regression: an `as <signed>` cast lost its signedness in the const-eval
     // ExpressionContext, so Div/Rem and signed comparisons of cast operands
