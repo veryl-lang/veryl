@@ -1,6 +1,6 @@
 {
   "name": "highlightjs-veryl",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "Veryl syntax highlighting plugin for highlight.js",
   "type": "module",
   "main": "dist/veryl.cjs",
