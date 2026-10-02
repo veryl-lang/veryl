@@ -5942,42 +5942,78 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
     result
 }
 
+/// `src`'s declarations with the loops whose `break`s are decided peeled,
+/// or `None` when none is; `analyzer_context` holds `src`'s variables.
+pub(crate) fn peeled_declarations(
+    src: &air::Module,
+    analyzer_context: &mut veryl_analyzer::conv::Context,
+) -> Option<Vec<air::Declaration>> {
+    if !veryl_analyzer::ir::peel::has_break_loop(&src.declarations) {
+        return None;
+    }
+    let mut declarations = src.declarations.clone();
+    veryl_analyzer::ir::peel::peel_decided_loops(analyzer_context, src, &mut declarations)
+        .then_some(declarations)
+}
+
+/// The declarations of `src` the simulator builds from, and the `FfTable`
+/// gathered on them; `analyzer_context` holds `src`'s variables and `peeled`
+/// is what `peeled_declarations` returns for `src`. Comb-side `let` writes
+/// are moved into the FF block consuming them, so everything downstream
+/// classifies and runs this form, while the analyzer's own checks and the
+/// emitted SystemVerilog keep the declarations as converted.
+pub(crate) fn simulated_declarations(
+    src: &air::Module,
+    analyzer_context: &mut veryl_analyzer::conv::Context,
+    disable_ff_opt: bool,
+    peeled: Option<Vec<air::Declaration>>,
+) -> (Vec<air::Declaration>, air::FfTable) {
+    let gather = |decls: &[air::Declaration], context: &mut veryl_analyzer::conv::Context| {
+        let mut table = air::FfTable::default();
+        for (i, x) in decls.iter().enumerate() {
+            x.gather_ff(context, &mut table, i);
+        }
+        table.update_is_ff(decls, context);
+        if disable_ff_opt {
+            table.force_all_ff();
+        }
+        table
+    };
+
+    let (mut declarations, ff_table) = match peeled {
+        Some(declarations) => {
+            let table = gather(&declarations, analyzer_context);
+            (declarations, table)
+        }
+        None => {
+            let mut table = src.ff_table.clone();
+            if disable_ff_opt {
+                table.force_all_ff();
+            }
+            (src.declarations.clone(), table)
+        }
+    };
+
+    let plans =
+        veryl_analyzer::ir::comb_to_ff_hoist::plan_hoists(&declarations, &ff_table, &src.variables);
+    veryl_analyzer::ir::comb_to_ff_hoist::apply_hoists(&mut declarations, &plans, &src.variables);
+    let ff_table = gather(&declarations, analyzer_context);
+    (declarations, ff_table)
+}
+
 impl Conv<&air::Module> for ProtoModule {
     fn conv(context: &mut Context, src: &air::Module) -> Result<Self, SimulatorError> {
         let mut analyzer_context = veryl_analyzer::conv::Context::default();
         analyzer_context.variables = src.variables.clone();
         analyzer_context.functions = src.functions.clone();
 
-        let mut ff_table = src.ff_table.clone();
-        if context.config.disable_ff_opt {
-            ff_table.force_all_ff();
-        }
-
-        // Comb-to-FF hoist: clone declarations and mutate them — move
-        // comb-side `let` writes into the consuming FF block, rebuild
-        // the FfTable on the hoisted form so all downstream simulator
-        // processing runs against the hoisted IR.
-        let mut hoisted_declarations = src.declarations.clone();
-        {
-            let plans = veryl_analyzer::ir::comb_to_ff_hoist::plan_hoists(
-                &hoisted_declarations,
-                &ff_table,
-                &src.variables,
-            );
-            veryl_analyzer::ir::comb_to_ff_hoist::apply_hoists(
-                &mut hoisted_declarations,
-                &plans,
-                &src.variables,
-            );
-            ff_table = air::FfTable::default();
-            for (i, x) in hoisted_declarations.iter().enumerate() {
-                x.gather_ff(&mut analyzer_context, &mut ff_table, i);
-            }
-            ff_table.update_is_ff(&hoisted_declarations, &mut analyzer_context);
-            if context.config.disable_ff_opt {
-                ff_table.force_all_ff();
-            }
-        }
+        let peeled = peeled_declarations(src, &mut analyzer_context);
+        let (hoisted_declarations, ff_table) = simulated_declarations(
+            src,
+            &mut analyzer_context,
+            context.config.disable_ff_opt,
+            peeled,
+        );
         let declarations: &[air::Declaration] = &hoisted_declarations;
 
         if ff_cacheline_pad_enabled() {

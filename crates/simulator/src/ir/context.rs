@@ -89,6 +89,9 @@ pub struct Context {
     /// Keyed by `Arc<Component>` pointer so that distinct parameter
     /// specializations (distinct `Arc`s from the analyzer) do not collide.
     pub chunk_cache: HashMap<*const air::Component, ChunkCacheEntry>,
+    /// `peeled_declarations` of each instantiated component, keyed as
+    /// `chunk_cache` is, so identical instances peel once.
+    pub peel_cache: HashMap<*const air::Component, Option<Vec<air::Declaration>>>,
     pub expanding_functions: HashSet<VarId>,
     pub in_initial: bool,
     /// True while converting an `always_comb` / `assign` body.
