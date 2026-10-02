@@ -3573,6 +3573,44 @@ fn assert_ff_table_matches_per_element(code: &str) {
 }
 
 #[test]
+fn comb_function_output_is_a_comb_write() {
+    // A call in an always_comb expression writes its output there, not in
+    // the always_ff that reads it.
+    let code = r#"
+    module ModuleA (
+        i_clk: input  clock   ,
+        i_rst: input  reset   ,
+        a    : input  logic<4>,
+        o    : output logic<4>,
+    ) {
+        function bump (
+            x: input  logic<4>,
+            y: output logic<4>,
+        ) -> logic<4> {
+            y = x + 1;
+            return x;
+        }
+        var c: logic<4>;
+        var r: logic<4>;
+        var q: logic<4>;
+        always_comb {
+            r = bump(a, c);
+        }
+        always_ff {
+            if_reset {
+                q = 0;
+            } else {
+                q = c;
+            }
+        }
+        assign o = q;
+    }
+    "#;
+
+    assert_eq!(ff_flags(code), vec![("q".to_string(), false)]);
+}
+
+#[test]
 fn ff_opt_counts_branches_by_max() {
     // Mutually exclusive arms and a reset arm each write the element once, so
     // the comb form survives; a sequential second write or an unrolled loop
