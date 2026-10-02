@@ -568,7 +568,7 @@ pub(crate) fn check_true_false(comptime: &Comptime) -> (bool, bool) {
     if comptime.is_const
         && let Ok(value) = comptime.get_value()
     {
-        if value.to_usize().unwrap_or(0) != 0 {
+        if value.is_true() {
             (true, false)
         } else {
             (false, true)
@@ -604,7 +604,7 @@ fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, 
     if cond.comptime().is_const
         && let Some(value) = cond.eval_value(context)
     {
-        if value.to_usize().unwrap_or(0) != 0 {
+        if value.is_true() {
             (true, false)
         } else {
             (false, true)

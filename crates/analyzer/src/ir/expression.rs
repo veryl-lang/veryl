@@ -166,7 +166,7 @@ impl Expression {
                             .comptime()
                             .get_value()
                             .ok()
-                            .and_then(|v| v.to_usize())
+                            .and_then(|v| v.to_usize_saturating())
                             .unwrap_or(0),
                     };
                     let inner = ExpressionContext {
@@ -488,7 +488,10 @@ impl Expression {
                 // sign extension even when both branches are signed.
                 let width = y.width().max(z.width()).max(context_width);
 
-                let ret = if x.to_usize().unwrap_or(0) == 0 { z } else { y };
+                // An ambiguous condition takes the false arm, as the constant
+                // fold in conv and the 2-state simulator do, rather than the
+                // bitwise merge of LRM 11.4.11.
+                let ret = if x.is_true() { y } else { z };
                 let mut ret = ret.expand(width, signed).into_owned();
                 ret.set_signed(signed);
                 Some(ret)
@@ -501,7 +504,7 @@ impl Expression {
                     let rep = if let Some(rep) = rep {
                         let token = rep.token_range();
                         let rep = rep.eval_value(context)?;
-                        let rep = rep.to_usize()?;
+                        let rep = rep.to_usize_saturating()?;
                         context.check_size(rep, token)?
                     } else {
                         1

@@ -115,7 +115,7 @@ impl PartSelectPath {
             } else {
                 end.clone()
                     .eval_value(context)
-                    .and_then(|v| v.to_usize())
+                    .and_then(|v| v.to_usize_saturating())
                     .map(|w| w.max(1))
             };
             let (beg, end) = op.eval_expr(select.0.last().unwrap(), end);
@@ -163,7 +163,7 @@ impl PartSelectPath {
                         && let Some(value) = coord.eval_value(context)
                         && !value.is_xz()
                     {
-                        let idx = value.to_usize().unwrap_or(0);
+                        let idx = value.to_usize_saturating().unwrap_or(0);
                         if idx >= size {
                             context.insert_error(AnalyzerError::invalid_select(
                                 &InvalidSelectKind::OutOfRange {
@@ -206,7 +206,7 @@ impl PartSelectPath {
                     if let Some(value) = coord.eval_value(context)
                         && !value.is_xz()
                     {
-                        let idx = value.to_usize().unwrap_or(0);
+                        let idx = value.to_usize_saturating().unwrap_or(0);
                         if idx >= size {
                             context.insert_error(AnalyzerError::invalid_select(
                                 &InvalidSelectKind::OutOfRange {

@@ -129,6 +129,11 @@ pub fn byte_value_to_string_lossy(value: &Value) -> String {
     String::from_utf8_lossy(&byte_value_bytes(value, num_bytes)).into_owned()
 }
 
+/// The low 64 bits of a BigUint; `to_u64` is `None` once a higher bit is set.
+fn biguint_low_u64(v: &BigUint) -> u64 {
+    v.iter_u64_digits().next().unwrap_or(0)
+}
+
 /// Convert a BigUint to u128. Returns the low 128 bits.
 pub fn biguint_to_u128(v: &BigUint) -> u128 {
     let digits = v.to_u64_digits();
@@ -1281,8 +1286,8 @@ impl Value {
                 let value = match value {
                     Value::U64(v) => v,
                     Value::BigUint(v) => ValueU64 {
-                        payload: v.payload.to_u64().unwrap_or(0),
-                        mask_xz: v.mask_xz.to_u64().unwrap_or(0),
+                        payload: biguint_low_u64(&v.payload),
+                        mask_xz: biguint_low_u64(&v.mask_xz),
                         width: v.width,
                         signed: v.signed,
                     },
@@ -1371,17 +1376,43 @@ impl Value {
         }
     }
 
-    /// Shift-amount conversion for `>>`/`<<`/`>>>`/`<<<`: a defined amount past
-    /// usize saturates to usize::MAX so the arms clamp it to the width (a full
-    /// shift), where to_usize() would return None and the arms read it as x/0,
-    /// dropping even an in-range amount on a >64-bit operand. x/z keeps None.
+    /// The value as a count, index or bound, whatever its storage width:
+    /// `to_usize` is `None` for every value wider than 64 bits, even a small
+    /// one. A value past usize saturates to usize::MAX, so a bounds check or
+    /// a shift clamp still sees it as too large. x/z is `None`.
     #[inline(always)]
-    pub fn to_shift_amount(&self) -> Option<usize> {
+    pub fn to_usize_saturating(&self) -> Option<usize> {
         match self {
-            Self::U64(x) => x.to_usize(),
+            Self::U64(x) if x.is_xz() => None,
+            Self::U64(x) => Some(x.payload.to_usize().unwrap_or(usize::MAX)),
             Self::BigUint(x) if x.is_xz() => None,
-            Self::BigUint(x) => Some(x.to_usize().unwrap_or(usize::MAX)),
+            Self::BigUint(x) => Some(x.payload.to_usize().unwrap_or(usize::MAX)),
         }
+    }
+
+    /// Logical value (IEEE 1800 11.4.7 and 12.4): `Some(true)` when any bit
+    /// is a known 1, `Some(false)` when every bit is a known 0, and `None`
+    /// when it is ambiguous (no known 1, some x/z).
+    pub fn truth(&self) -> Option<bool> {
+        let (known_one, xz) = match self {
+            Self::U64(x) => (x.payload & !x.mask_xz != 0, x.mask_xz != 0),
+            Self::BigUint(x) => {
+                let known = x.payload.as_ref() ^ (x.payload.as_ref() & x.mask_xz.as_ref());
+                (!known.is_zero(), !x.mask_xz.is_zero())
+            }
+        };
+        if known_one {
+            Some(true)
+        } else if xz {
+            None
+        } else {
+            Some(false)
+        }
+    }
+
+    /// Whether an `if` takes its true branch: x/z alone reads as false.
+    pub fn is_true(&self) -> bool {
+        self.truth() == Some(true)
     }
 
     #[inline(always)]
@@ -1441,7 +1472,7 @@ impl Value {
     pub fn payload_u64(&self) -> u64 {
         match self {
             Self::U64(x) => x.payload,
-            Self::BigUint(x) => x.payload.to_u64().unwrap_or(0),
+            Self::BigUint(x) => biguint_low_u64(&x.payload),
         }
     }
 
@@ -1477,8 +1508,8 @@ impl Value {
         let m = biguint_from_le_bytes(mask_xz);
         if width <= 64 {
             Value::U64(ValueU64 {
-                payload: p.to_u64().unwrap_or(0),
-                mask_xz: m.to_u64().unwrap_or(0),
+                payload: biguint_low_u64(&p),
+                mask_xz: biguint_low_u64(&m),
                 width: width as u32,
                 signed,
             })
@@ -2206,8 +2237,8 @@ mod tests {
     #[test]
     fn shift_wide_amount() {
         // A shift amount whose operand type is wider than 64 bits is stored as a
-        // BigUint; to_usize() returns None for it, so before to_shift_amount the
-        // shift arms produced x (0 in 2-state) even for an in-range amount.
+        // BigUint, which to_usize() cannot read; an in-range amount must still
+        // shift rather than give x (0 in 2-state).
         let mut mc = MaskCache::default();
         let x = Value::from_str("8'h80").unwrap();
 
@@ -2220,6 +2251,31 @@ mod tests {
         let amt256 = Value::from_str("70'd256").unwrap();
         let r = Op::LogicShiftR.eval_value_binary(&x, &amt256, 8, false, &mut mc);
         assert_eq!(format!("{:x}", r), "8'h00");
+    }
+
+    #[test]
+    fn wide_value_truth_and_count() {
+        let v = |s: &str| Value::from_str(s).unwrap();
+        assert_eq!(v("128'h1_0000_0000_0000_0000").truth(), Some(true));
+        assert_eq!(v("128'd1").truth(), Some(true));
+        assert_eq!(v("128'd0").truth(), Some(false));
+        assert_eq!(v("70'bx1").truth(), Some(true));
+        assert_eq!(v("70'bx0").truth(), None);
+        assert_eq!(v("4'b1x").truth(), Some(true));
+        assert_eq!(v("4'b0z").truth(), None);
+
+        assert_eq!(v("128'd2").to_usize_saturating(), Some(2));
+        assert_eq!(
+            v("128'h1_0000_0000_0000_0000").to_usize_saturating(),
+            Some(usize::MAX)
+        );
+        assert_eq!(v("128'bx").to_usize_saturating(), None);
+
+        // Writing a wider value into a narrow one keeps its low bits.
+        let mut n = Value::new(0, 8, false);
+        n.assign(v("128'h1_0000_0000_0000_00a5"), 7, 0);
+        assert_eq!(n.to_u64(), Some(0xa5));
+        assert_eq!(v("128'h1_0000_0000_0000_00a5").payload_u64(), 0xa5);
     }
 
     #[test]

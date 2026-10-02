@@ -31719,3 +31719,94 @@ fn function_output_from_comb_into_ff_storage_is_immediate() {
         );
     }
 }
+
+#[test]
+fn wide_constant_as_truth_value_index_and_bound() {
+    // HI is nonzero only above bit 63; ONE and TWO are small values in a wide
+    // type, which `to_usize` cannot convert either.
+    let code = r#"
+    module Top (
+        o_tern: output logic<32>, o_width: output logic<32>, o_gen: output logic<32>,
+        o_fif: output logic<32>, o_fcase: output logic<32>, o_idx: output logic<32>,
+        o_loop: output logic<32>, o_small: output logic<32>,
+    ) {
+        const HI : bit<128> = 128'h1_0000_0000_0000_0000;
+        const ONE: bit<128> = 128'd1;
+        const TWO: bit<128> = 128'd2;
+        const VEC: bit<8>   = 8'b0000_0100;
+        function f_if (x: input bit<128>) -> bit<32> {
+            if x { return 1; }
+            return 0;
+        }
+        function f_case (x: input bit<128>) -> bit<32> {
+            case x {
+                128'h1_0000_0000_0000_0000: return 5;
+                default                   : return 9;
+            }
+        }
+        function f_loop (n: input bit<128>) -> bit<32> {
+            var acc: bit<32>;
+            acc = 0;
+            for _i in 0..n { acc += 1; }
+            return acc;
+        }
+        const K_WIDTH: u32 = if HI ? 8 : 4;
+        var w: logic<K_WIDTH>;
+        assign w       = '1;
+        assign o_width = {1'b0 repeat 32 - K_WIDTH, w};
+        assign o_tern  = if HI ? 7 : 3;
+        assign o_fif   = f_if(HI);
+        assign o_fcase = f_case(HI);
+        assign o_idx   = {31'b0, VEC[TWO]};
+        assign o_loop  = f_loop(TWO);
+        assign o_small = if ONE ? 7 : 3;
+        if HI :g {
+            assign o_gen = 1;
+        } else {
+            assign o_gen = 0;
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        for (output, expected) in [
+            ("o_tern", 7),
+            ("o_width", 0xff),
+            ("o_gen", 1),
+            ("o_fif", 1),
+            ("o_fcase", 5),
+            ("o_idx", 1),
+            ("o_loop", 2),
+            ("o_small", 7),
+        ] {
+            assert_eq!(
+                sim.get(output).unwrap(),
+                Value::new(expected, 32, false),
+                "{output}, {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn signed_wide_constant_for_bound_keeps_its_sign() {
+    // A signed bound above `i64::MAX` is still positive.
+    let code = r#"
+    module Top (
+        y: output logic<8>,
+    ) {
+        const SHI: signed bit<128> = 128'sh1_0000_0000_0000_0000;
+        always_comb {
+            y = 0;
+            for i in 0..SHI {
+                y += 1;
+                if i == 3 {
+                    break;
+                }
+            }
+        }
+    }
+    "#;
+    check_all_configs(code, &[], &[("y", Value::new(4, 8, false))]);
+}
