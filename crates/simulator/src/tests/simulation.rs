@@ -14322,6 +14322,128 @@ fn lhs_concatenation_in_always_ff() {
     }
 }
 
+/// Windows inside a plain variable, an expression, a select with a nonzero lsb
+/// and a repeat, and windows straddling parts, one wider than 64 bits.
+#[test]
+fn lhs_concatenation_of_concatenation_rhs() {
+    use num_bigint::BigUint;
+    let code = r#"
+    module Top (
+        a : input  logic<100>,
+        b : input  logic<20> ,
+        c : input  logic<40> ,
+        d : input  logic<30> ,
+        o0: output logic<20> ,
+        o1: output logic<16> ,
+        o2: output logic<14> ,
+        o3: output logic<26> ,
+        o4: output logic<20> ,
+        o5: output logic<25> ,
+        o6: output logic<75> ,
+        o7: output logic<30> ,
+    ) {
+        always_comb {
+            {o7, o6, o5, o4, o3, o2, o1, o0} = {a, {b repeat 2}, c[37:2], b ^ c[19:0], d};
+        }
+    }
+    "#;
+
+    let widths = [
+        ("o7", 30),
+        ("o6", 75),
+        ("o5", 25),
+        ("o4", 20),
+        ("o3", 26),
+        ("o2", 14),
+        ("o1", 16),
+        ("o0", 20),
+    ];
+    let mask = |w: u32| (BigUint::from(1u32) << w) - 1u32;
+    let a = (BigUint::from(0x9e37_79b9_7f4a_7c15u64) << 36u32) ^ BigUint::from(0xf_1234_5678u64);
+    let b = BigUint::from(0xa_bcdeu32);
+    let c = BigUint::from(0xc3_5a69_96a5u64);
+    let d = BigUint::from(0x2bad_beefu32 & 0x3fff_ffff);
+
+    let mut rhs = a.clone();
+    rhs = (rhs << 20u32) | &b;
+    rhs = (rhs << 20u32) | &b;
+    rhs = (rhs << 36u32) | ((&c >> 2u32) & mask(36));
+    rhs = (rhs << 20u32) | ((&b ^ &c) & mask(20));
+    rhs = (rhs << 30u32) | &d;
+    let total: u32 = widths.iter().map(|(_, w)| w).sum();
+    assert_eq!(total, 226);
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new_biguint(a.clone(), 100, false));
+        sim.set("b", Value::new_biguint(b.clone(), 20, false));
+        sim.set("c", Value::new_biguint(c.clone(), 40, false));
+        sim.set("d", Value::new_biguint(d.clone(), 30, false));
+
+        let mut remaining = total;
+        for (name, w) in widths {
+            remaining -= w;
+            let expected = (&rhs >> remaining) & mask(w);
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new_biguint(expected, w as usize, false),
+                "config={config:?}: {name} mismatch",
+            );
+        }
+    }
+}
+
+/// The destination above the source reads zeros, not the bits beyond the
+/// variable or its select.
+#[test]
+fn lhs_concatenation_wider_than_concatenation_rhs() {
+    let code = r#"
+    module Top (
+        n : input  logic<64>,
+        a : input  logic<16>,
+        b : input  logic<8> ,
+        m : input  logic<64>,
+        o1: output logic<40>,
+        o0: output logic<8> ,
+        s1: output logic<40>,
+        s0: output logic<8> ,
+        p : output logic<64>,
+        q : output logic<64>,
+    ) {
+        assign p = n;
+        assign q = m;
+        always_comb {
+            {o1, o0} = {a[3:0], b};
+        }
+        always_comb {
+            {s1, s0} = {a[7:4], b};
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("n", Value::new(u64::MAX, 64, false));
+        sim.set("m", Value::new(u64::MAX, 64, false));
+        sim.set("a", Value::new(0xfff5, 16, false));
+        sim.set("b", Value::new(0xa5, 8, false));
+        for (name, w, expected) in [
+            ("o1", 40, 0x5),
+            ("o0", 8, 0xa5),
+            ("s1", 40, 0xf),
+            ("s0", 8, 0xa5),
+        ] {
+            assert_eq!(
+                sim.get(name).unwrap(),
+                Value::new(expected, w, false),
+                "config={config:?}: {name} mismatch",
+            );
+        }
+    }
+}
+
 /// LHS concatenation inside an initial block, written to comb-storage
 /// variables.  The split-Assign path must produce a separate
 /// `ProtoStatement::Assign` per destination, each carrying its own
