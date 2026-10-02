@@ -2091,6 +2091,16 @@ pub fn build_linear_index_expr(
     for (i, dim_size) in array.iter().enumerate().rev() {
         let dim_size = dim_size.expect("array dimension size must be known");
         let idx_proto: ProtoExpression = Conv::conv(context, &index.indices[i])?;
+        // Dynamic reads and writes already bounds-check a flat index. Keep a
+        // native unsigned one-dimensional index as-is: its original width may
+        // prove that check unnecessary as well. Per-coordinate checks remain
+        // necessary before flattening dimensions or narrowing a wide index.
+        if array.dims() == 1
+            && !idx_proto.expr_context().signed
+            && (1..=64).contains(&idx_proto.width())
+        {
+            return Ok(idx_proto);
+        }
         // Extend each coordinate before comparing or flattening. Invalid inner
         // coordinates must not alias the next row, and negative signed indices
         // must not become small positive offsets.
