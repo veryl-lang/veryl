@@ -599,7 +599,7 @@ impl<'a> Subst<'a> {
             return None;
         };
         let mut value = self.value_of(*id)?.clone();
-        if !index.0.is_empty() || comptime.part_select.is_some() {
+        if !index.indices.is_empty() || comptime.part_select.is_some() {
             return None;
         }
         if !select.is_empty() {
@@ -653,8 +653,7 @@ impl<'a> Subst<'a> {
     ) -> Option<()> {
         let mut changed = false;
         for x in index
-            .0
-            .iter_mut()
+            .expressions_mut()
             .chain(select.0.iter_mut())
             .chain(select.1.as_mut().map(|x| &mut x.1))
         {
@@ -770,10 +769,10 @@ impl<'a> Subst<'a> {
     ) -> Option<()> {
         let r#type = self.context.variables.get(&id)?.r#type.clone();
         if index.is_const() {
-            if index.0.len() > r#type.array.dims() {
+            if index.indices.len() > r#type.array.dims() {
                 return None;
             }
-            for (x, dim) in index.0.iter().zip(r#type.array.iter()) {
+            for (x, dim) in index.indices.iter().zip(r#type.array.iter()) {
                 if self.usize_of(x)? >= (*dim)? {
                     return None;
                 }
@@ -968,7 +967,7 @@ fn leaf(context: &Context, env: &KnownValues, factor: &Factor) -> Option<(u64, u
     let (comptime, value) = match factor {
         Factor::Value(x) => (x, x.get_value().ok()?.clone()),
         Factor::Variable(id, index, select, x)
-            if index.0.is_empty() && select.is_empty() && x.part_select.is_none() =>
+            if index.indices.is_empty() && select.is_empty() && x.part_select.is_none() =>
         {
             if let Some(value) = env.vars.get(id) {
                 let width = x.r#type.total_width()?;
@@ -1073,7 +1072,8 @@ fn assigned_value(
     let [dst] = x.dst.as_slice() else {
         return None;
     };
-    if !dst.index.0.is_empty() || !dst.select.is_empty() || dst.comptime.part_select.is_some() {
+    if !dst.index.indices.is_empty() || !dst.select.is_empty() || dst.comptime.part_select.is_some()
+    {
         return None;
     }
     let var = context.variables.get(&dst.id)?;
@@ -1204,11 +1204,18 @@ fn expr_has_call(expr: &Expression) -> bool {
 fn factor_has_call(factor: &Factor) -> bool {
     match factor {
         Factor::Variable(_, index, select, _) => {
-            index.0.iter().chain(select.0.iter()).any(expr_has_call)
+            index
+                .expressions()
+                .chain(select.0.iter())
+                .any(expr_has_call)
                 || select.1.as_ref().is_some_and(|(_, x)| expr_has_call(x))
         }
         Factor::HierVariable(x) => {
-            x.index.0.iter().chain(x.select.0.iter()).any(expr_has_call)
+            x.index
+                .indices
+                .iter()
+                .chain(x.select.0.iter())
+                .any(expr_has_call)
                 || x.select.1.as_ref().is_some_and(|(_, x)| expr_has_call(x))
         }
         Factor::FunctionCall(_) => true,
@@ -1226,7 +1233,7 @@ fn factor_has_call(factor: &Factor) -> bool {
 
 fn dst_has_call(dst: &AssignDestination) -> bool {
     dst.index
-        .0
+        .indices
         .iter()
         .chain(dst.select.0.iter())
         .any(expr_has_call)
@@ -1384,7 +1391,7 @@ fn declaration_reads(decl: &Declaration, f: &mut impl FnMut(VarId)) -> bool {
             visit_reads(&x.statements, f)
         }
         Declaration::Inst(x) => {
-            for x in x.inputs.iter().flat_map(|x| &x.exprs) {
+            for x in x.inputs.iter().map(|x| &x.expr) {
                 expr_reads(x, f);
             }
             for dst in x.outputs.iter().flat_map(|x| &x.dst) {
@@ -1421,7 +1428,7 @@ fn range_reads(range: &ForRange, f: &mut impl FnMut(VarId)) {
 }
 
 fn selector_reads(index: &VarIndex, select: &VarSelect, f: &mut impl FnMut(VarId)) {
-    for x in index.0.iter().chain(&select.0) {
+    for x in index.expressions().chain(&select.0) {
         expr_reads(x, f);
     }
     if let Some((_, x)) = &select.1 {

@@ -178,9 +178,9 @@ fn assert_member_connection(
     // An interface element, rather than the whole instance array, is connected.
     assert!(comptime.r#type.array.is_empty(), "{member}");
     assert_eq!(comptime.r#type.total_width(), Some(width), "{member}");
-    assert_eq!(index.0.len(), case.indices.len(), "{member}");
+    assert_eq!(index.indices.len(), case.indices.len(), "{member}");
     let mut context = Context::default();
-    for (expr, expected) in index.0.iter().zip(case.indices) {
+    for (expr, expected) in index.indices.iter().zip(case.indices) {
         let actual = expr.eval_value(&mut context).and_then(|v| v.to_usize());
         assert_eq!(actual, *expected, "{member}: {index}");
     }
@@ -284,7 +284,7 @@ fn check_modport_connection(case: &ArrayCase<'_>) {
             .iter()
             .find(|input| input.id == *port_id)
             .expect("missing input connection");
-        let expr = input.single().expect("input must be one interface element");
+        let expr = &input.expr;
         let Expression::Term(factor) = expr else {
             panic!("input must retain a variable reference: {expr:?}");
         };

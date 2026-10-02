@@ -3657,6 +3657,350 @@ fn inst_unpacked_array_slice_input_port() {
 }
 
 #[test]
+fn inst_multidimensional_array_slice_input_port() {
+    let code = r#"
+    module Top (
+        seed: input logic<8>,
+        outer: output logic<96>,
+        inner: output logic<32>,
+        row: output logic<16>,
+        one: output logic<8>,
+        constant: output logic<32>,
+    ) {
+        var data: logic<8>[4, 3, 2];
+        for p in 0..4 :g_plane {
+            for r in 0..3 :g_row {
+                for c in 0..2 :g_column {
+                    assign data[p][r][c] = seed + (p * 3 + r) * 2 + c;
+                }
+            }
+        }
+        inst u_outer: Cube(i: data[1+:2], o: outer);
+        inst u_inner: Matrix(i: data[2][1:2], o: inner);
+        inst u_row: Row(i: data[3][1+:1], o: row);
+
+        var singletons: logic<8>[3, 1, 1];
+        assign singletons[0][0][0] = seed;
+        assign singletons[1][0][0] = seed + 1;
+        assign singletons[2][0][0] = seed + 2;
+        inst u_one: One(i: singletons[2+:1], o: one);
+
+        const TABLE: logic<8>[3, 2] = '{'{1, 2}, '{3, 4}, '{5, 6}};
+        inst u_constant: Matrix(i: TABLE[1+:2], o: constant);
+    }
+    module Cube(i: input logic<8>[2, 3, 2], o: output logic<96>) {
+        assign o = {
+            i[1][2][1], i[1][2][0], i[1][1][1], i[1][1][0], i[1][0][1], i[1][0][0],
+            i[0][2][1], i[0][2][0], i[0][1][1], i[0][1][0], i[0][0][1], i[0][0][0],
+        };
+    }
+    module Matrix(i: input logic<8>[2, 2], o: output logic<32>) {
+        assign o = {i[1][1], i[1][0], i[0][1], i[0][0]};
+    }
+    module Row(i: input logic<8>[1, 2], o: output logic<16>) {
+        assign o = {i[0][1], i[0][0]};
+    }
+    module One(i: input logic<8>[1, 1, 1], o: output logic<8>) {
+        assign o = i[0][0][0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for seed in [0, 32, 240] {
+            sim.set("seed", Value::new(seed, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+
+            // The outer slice covers flat elements 6..18; the inner slice 14..18.
+            for (port, start, count) in [("outer", 6, 12), ("inner", 14, 4), ("row", 20, 2)] {
+                let expected = (0..count).fold(0, |value, i| {
+                    value | ((((seed + start + i) & 0xff) as u128) << (i * 8))
+                });
+                assert_eq!(
+                    sim.get(port).unwrap(),
+                    Value::from_u128(expected, 0, (count * 8) as usize, false),
+                    "{config:?}, seed={seed}, port={port}"
+                );
+            }
+            assert_eq!(sim.get("one").unwrap(), Value::new(seed + 2, 8, false));
+            assert_eq!(
+                sim.get("constant").unwrap(),
+                Value::new(0x0605_0403, 32, false)
+            );
+        }
+    }
+}
+
+#[test]
+fn dynamic_array_slice_preserves_bounds_in_assignments_ports_and_calls() {
+    let code = r#"
+    module Pair(i: input logic<8>[2], o: output logic<16>) {
+        assign o = {i[1], i[0]};
+    }
+    module Top(
+        seed: input logic<8>, index: input signed logic<4>,
+        plus: output logic<16>, minus: output logic<16>,
+        stepped: output logic<16>, called: output logic<16>,
+    ) {
+        var data: logic<8>[2, 4];
+        for r in 0..2 :g_row {
+            for c in 0..4 :g_column {
+                assign data[r][c] = seed + r * 16 + c;
+            }
+        }
+        var selected: logic<8>[2];
+        assign selected = data[1][index+:2];
+        assign plus = {selected[1], selected[0]};
+        inst u_minus: Pair(i: data[1][index-:2], o: minus);
+        inst u_step: Pair(i: data[1][index step 2], o: stepped);
+        function pair(i: input logic<8>[2]) -> logic<16> {
+            return {i[1], i[0]};
+        }
+        assign called = pair(data[1][index+:2]);
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("seed", Value::new(32, 8, false));
+        for index in -2i64..6 {
+            sim.set("index", Value::new((index as u64) & 15, 4, true));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (port, start) in [
+                ("plus", index),
+                ("minus", index - 1),
+                ("stepped", index * 2),
+                ("called", index),
+            ] {
+                let mut payload = 0;
+                let mut mask = 0;
+                for offset in 0..2 {
+                    let position = start + offset;
+                    if (0..4).contains(&position) {
+                        payload |= ((48 + position) as u128) << (offset * 8);
+                    } else if config.use_4state {
+                        mask |= 0xff << (offset * 8);
+                    }
+                }
+                assert_eq!(
+                    sim.get(port).unwrap(),
+                    Value::from_u128(payload, mask, 16, false),
+                    "{config:?}, index={index}, port={port}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn array_slice_constant_function_and_singleton() {
+    let code = r#"
+    module Top(o: output logic<16>) {
+        function last(x: input logic<8>[2]) -> logic<8> {
+            var selected: logic<8>[1];
+            selected = x[1+:1];
+            return selected[0];
+        }
+        function one(x: input logic<8>[1]) -> logic<8> {
+            return x[0];
+        }
+        const TABLE: logic<8>[4] = '{10, 20, 30, 40};
+        const A: logic<8> = last(TABLE[1+:2]);
+        const B: logic<8> = one(TABLE[2+:1]);
+        assign o = {A, B};
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x1e1e, 16, false),
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn array_slice_selector_runs_once_and_copies_before_writing() {
+    let code = r#"
+    module Top(seed: input logic<8>, o: output logic<32>, count: output logic<8>) {
+        var data: logic<8>[2, 2];
+        function next(n: inout logic<8>) -> signed logic<8> {
+            n += 1;
+            return -1;
+        }
+        always_comb {
+            data = '{'{seed, seed + 1}, '{seed + 2, seed + 3}};
+            count = 0;
+            data = data[next(count)+:2];
+            o = {data[1][1], data[1][0], data[0][1], data[0][0]};
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for seed in [0, 32, 128] {
+            sim.set("seed", Value::new(seed, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("count").unwrap(),
+                Value::new(1, 8, false),
+                "{config:?}"
+            );
+            // Both source elements must be captured before row 0 is overwritten.
+            let expected = ((seed + 1) << 24) | (seed << 16);
+            let mask = if config.use_4state { 0xffff } else { 0 };
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::from_u128(expected as u128, mask, 32, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn array_slice_assignment_samples_the_destination_index_once() {
+    let code = r#"
+    module Top(seed: input logic<8>, o: output logic<32>, count: output logic<8>) {
+        var data: logic<8>[2, 2];
+        function next(n: inout logic<8>) -> logic<8> {
+            n += 1;
+            return n - 1;
+        }
+        always_comb {
+            data = '{'{seed, seed + 1}, '{seed + 2, seed + 3}};
+            count = 0;
+            data[next(count)] = data[1][0+:2];
+            o = {data[1][1], data[1][0], data[0][1], data[0][0]};
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for seed in [0, 32, 128] {
+            sim.set("seed", Value::new(seed, 8, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("count").unwrap(),
+                Value::new(1, 8, false),
+                "{config:?}"
+            );
+            let pair = ((seed + 3) << 8) | (seed + 2);
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new((pair << 16) | pair, 32, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn array_slice_wide_dynamic_index_does_not_wrap() {
+    let code = r#"
+    module Top(index: input signed logic<64>, o: output logic<16>) {
+        const TABLE: logic<8>[4] = '{10, 20, 30, 40};
+        var selected: logic<8>[2];
+        assign selected = TABLE[index+:2];
+        assign o = {selected[1], selected[0]};
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (index, expected, invalid) in [
+            (u64::MAX, 0x0a00, 0x00ff),
+            (0, 0x140a, 0),
+            (2, 0x281e, 0),
+            (3, 0x0028, 0xff00),
+            (1 << 32, 0, 0xffff),
+            (i64::MAX as u64, 0, 0xffff),
+        ] {
+            sim.set("index", Value::new(index, 64, true));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let mask = if config.use_4state { invalid } else { 0 };
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::from_u128(expected, mask, 16, false),
+                "{config:?}, index={index}"
+            );
+        }
+    }
+}
+
+#[test]
+fn array_slice_ff_assignment_reads_the_previous_cycle() {
+    let code = r#"
+    module Top(clk: input clock, rst: input reset, seed: input logic<8>, o: output logic<16>) {
+        var data: logic<8>[4];
+        var selected: logic<8>[2];
+        always_ff {
+            if_reset {
+                data = '{0, 0, 0, 0};
+                selected = '{0, 0};
+            } else {
+                data = '{seed, seed + 1, seed + 2, seed + 3};
+                selected = data[1+:2];
+            }
+        }
+        assign o = {selected[1], selected[0]};
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        let mut expected = 0;
+        for seed in [10, 50, 100] {
+            sim.set("seed", Value::new(seed, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(expected, 16, false),
+                "{config:?}, seed={seed}"
+            );
+            expected = ((seed + 2) << 8) | (seed + 1);
+        }
+    }
+}
+
+#[test]
+fn array_slice_inside_array_literal_input() {
+    let code = r#"
+    module Matrix(i: input logic<8>[2, 2], o: output logic<32>) {
+        assign o = {i[1][1], i[1][0], i[0][1], i[0][0]};
+    }
+    module Top(index: input logic<2>, o: output logic<32>, c: output logic<32>) {
+        const TABLE: logic<8>[4] = '{10, 20, 30, 40};
+        const PAIRS: logic<8>[2, 2] = '{TABLE[0+:2], TABLE[2+:2]};
+        inst u: Matrix(i: '{TABLE[index+:2], TABLE[1+:2]}, o: o);
+        inst v: Matrix(i: PAIRS, o: c);
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for index in 0..3 {
+            sim.set("index", Value::new(index, 2, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let expected = (30 << 24) | (20 << 16) | (((index + 2) * 10) << 8) | ((index + 1) * 10);
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(expected, 32, false),
+                "{config:?}"
+            );
+            assert_eq!(
+                sim.get("c").unwrap(),
+                Value::new(0x281e140a, 32, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn inst_ff() {
     let code = r#"
     module Top (
@@ -23305,30 +23649,27 @@ fn enum_member_concat_width_not_squared() {
 }
 
 #[test]
-fn array_range_read_declines_gracefully() {
-    // Regression: an RHS array range read lowers to Factor::Unknown, and the
-    // assign conv unwrapped calc_index on it and panicked.  The native sim must
-    // return an Unsupported error instead.  `veryl build`/`check` still accept
-    // it (a valid SV unpacked-array slice); only native simulation declines.
-    for select in ["arr[0:1]", "arr[1+:2]"] {
+fn array_slice_read_assigns_every_element() {
+    // This used to check for UnsupportedDescription: the analyzer emitted
+    // Unknown for a valid unpacked-array slice. Verify its values instead.
+    for (select, expected) in [("arr[0:1]", 0x2211), ("arr[1+:2]", 0x3322)] {
         let code = format!(
             r#"
-            module Top (
-                o: output logic<8> [2],
-            ) {{
-                var arr: logic<8> [4];
+            module Top (o: output logic<8>[2], y: output logic<16>) {{
+                var arr: logic<8>[4];
                 assign arr = '{{8'h11, 8'h22, 8'h33, 8'h44}};
                 assign o = {select};
+                assign y = {{o[1], o[0]}};
             }}
-            "#
+        "#
         );
         for config in Config::all() {
-            assert!(
-                matches!(
-                    analyze_top(&code, &config, "Top"),
-                    Err(SimulatorError::UnsupportedDescription { .. })
-                ),
-                "{select} {config:?}"
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(expected, 16, false),
+                "{select}, {config:?}"
             );
         }
     }

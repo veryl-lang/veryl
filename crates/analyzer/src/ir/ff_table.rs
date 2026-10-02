@@ -13,9 +13,8 @@ pub type AssignTarget = (VarId, Option<usize>, BigUint);
 /// One entry of [`FfTableEntry::refered`].
 pub type Refered = (usize, Option<AssignTarget>, BigUint, bool);
 
-/// A reference through an index that does not evaluate, which reaches every
-/// element below `.0` of its variable.
-pub type WholeRefered = (usize, Refered);
+/// A reference to a contiguous interval, including whole-array dynamic reads.
+pub type RangeRefered = (std::ops::Range<usize>, Refered);
 
 #[derive(Clone, Debug)]
 pub struct FfTableEntry {
@@ -31,7 +30,7 @@ pub struct FfTableEntry {
     /// to per-decl aggregate). `from_ff` distinguishes always_ff (NBA-
     /// sensitive) from always_comb / continuous assign.
     /// References through an unevaluated index are kept apart, in
-    /// [`FfTable::whole_refered`]; [`FfTable::refered`] yields both.
+    /// [`FfTable::range_refered`]; [`FfTable::refered`] yields both.
     pub refered: Vec<Refered>,
     pub is_ff: bool,
     pub assigned_comb: Option<usize>,
@@ -46,7 +45,7 @@ pub struct WholeAssigned {
     pub assigned: Option<usize>,
     pub multi_assigned: bool,
     pub assigned_comb: Option<usize>,
-    is_ff: bool,
+    force_ff: bool,
 }
 
 fn record_assign(assigned: &mut Option<usize>, multi_assigned: &mut bool, decl: usize) {
@@ -108,7 +107,7 @@ impl FfTableEntry {
         &mut self,
         self_key: (VarId, usize),
         unsafe_reads: &UnsafeSelfReads,
-        whole: &[WholeRefered],
+        whole: &[RangeRefered],
     ) {
         if let Some(assigned_decl) = self.assigned {
             let readable = !unsafe_reads.contains(assigned_decl, self_key.0, self_key.1);
@@ -118,16 +117,16 @@ impl FfTableEntry {
                 self_key.0,
                 Some(self_key.1),
                 readable,
-                self.refered.iter().chain(whole_refs(whole, self_key.1)),
+                self.refered.iter().chain(range_refs(whole, self_key.1)),
             );
         }
     }
 }
 
-fn whole_refs(whole: &[WholeRefered], index: usize) -> impl Iterator<Item = &Refered> {
+fn range_refs(whole: &[RangeRefered], index: usize) -> impl Iterator<Item = &Refered> {
     whole
         .iter()
-        .filter(move |(len, _)| index < *len)
+        .filter(move |(range, _)| range.contains(&index))
         .map(|(_, r)| r)
 }
 
@@ -137,8 +136,8 @@ pub struct FfTable {
     /// Stored once per variable rather than in every element's entry: a big
     /// array read at several runtime indices would otherwise cost readers x
     /// elements entries.
-    pub whole_refered: HashMap<VarId, Vec<WholeRefered>>,
-    /// The write side of `whole_refered`.
+    pub range_refered: HashMap<VarId, Vec<RangeRefered>>,
+    /// The write side of `range_refered`.
     pub whole_assigned: HashMap<VarId, WholeAssigned>,
     /// The indices in `table` per variable, which a later write through an
     /// unevaluated index has to reach.
@@ -163,32 +162,11 @@ impl FfTable {
         let unsafe_reads = unsafe_self_reads(decls, context, self.per_element);
         for (key, entry) in self.table.iter_mut() {
             let whole = self
-                .whole_refered
+                .range_refered
                 .get(&key.0)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             entry.update_is_ff(*key, &unsafe_reads, whole);
-        }
-        for (id, w) in self.whole_assigned.iter_mut() {
-            w.is_ff = false;
-            let Some(assigned_decl) = w.assigned else {
-                continue;
-            };
-            let whole = self
-                .whole_refered
-                .get(id)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            // An element an assign target names has an entry of its own, so
-            // the rest are never the target of a self-reference.
-            w.is_ff = classify(
-                assigned_decl,
-                w.multi_assigned,
-                *id,
-                None,
-                true,
-                whole.iter().map(|(_, r)| r),
-            );
         }
     }
 
@@ -201,11 +179,11 @@ impl FfTable {
             .map(|x| x.refered.as_slice())
             .unwrap_or_default();
         let whole = self
-            .whole_refered
+            .range_refered
             .get(&id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        own.iter().chain(whole_refs(whole, index))
+        own.iter().chain(range_refs(whole, index))
     }
 
     /// `(assigned, multi_assigned, assigned_comb)` of element `index` of `id`.
@@ -244,7 +222,7 @@ impl FfTable {
         }
         for w in self.whole_assigned.values_mut() {
             if w.assigned.is_some() {
-                w.is_ff = true;
+                w.force_ff = true;
             }
         }
     }
@@ -253,7 +231,22 @@ impl FfTable {
         if let Some(x) = self.table.get(&(id, index)) {
             x.is_ff
         } else if let Some(w) = self.whole(id, index) {
-            w.is_ff
+            w.force_ff
+                || w.assigned.is_some_and(|decl| {
+                    classify(
+                        decl,
+                        w.multi_assigned,
+                        id,
+                        None,
+                        true,
+                        self.range_refered
+                            .get(&id)
+                            .into_iter()
+                            .flatten()
+                            .filter(|(range, _)| range.contains(&index))
+                            .map(|(_, r)| r),
+                    )
+                })
         } else {
             false
         }
@@ -305,8 +298,27 @@ impl FfTable {
         src_read_mask: BigUint,
         from_ff: bool,
     ) {
+        self.insert_refered_range(
+            id,
+            0..total_array,
+            decl,
+            assign_target,
+            src_read_mask,
+            from_ff,
+        );
+    }
+
+    pub fn insert_refered_range(
+        &mut self,
+        id: VarId,
+        range: std::ops::Range<usize>,
+        decl: usize,
+        assign_target: Option<AssignTarget>,
+        src_read_mask: BigUint,
+        from_ff: bool,
+    ) {
         if self.per_element {
-            for i in 0..total_array {
+            for i in range {
                 self.insert_refered(
                     id,
                     i,
@@ -318,13 +330,13 @@ impl FfTable {
             }
             return;
         }
-        if total_array == 0 {
+        if range.is_empty() {
             return;
         }
-        self.whole_refered
+        self.range_refered
             .entry(id)
             .or_default()
-            .push((total_array, (decl, assign_target, src_read_mask, from_ff)));
+            .push((range, (decl, assign_target, src_read_mask, from_ff)));
     }
 
     pub fn insert_assigned(&mut self, id: VarId, index: usize, decl: usize) {

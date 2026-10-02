@@ -857,23 +857,7 @@ impl ConvContext {
                     port_path
                 )));
             }
-            // Element-wise wiring: one expression per port element.
-            let expr_nets = if let Some(expr) = input.single() {
-                synthesize_expr(self, expr, current, child_nets.len())?
-            } else {
-                if input.exprs.is_empty() || child_nets.len() % input.exprs.len() != 0 {
-                    return Err(SynthesizerError::internal(format!(
-                        "port {:?} element count does not divide its net count",
-                        port_path
-                    )));
-                }
-                let per_element = child_nets.len() / input.exprs.len();
-                let mut nets = Vec::with_capacity(child_nets.len());
-                for expr in &input.exprs {
-                    nets.extend(synthesize_expr(self, expr, current, per_element)?);
-                }
-                nets
-            };
+            let expr_nets = synthesize_expr(self, &input.expr, current, child_nets.len())?;
             for (cn, en) in child_nets.iter().zip(expr_nets.iter()) {
                 net_map[*cn as usize] = *en;
             }
@@ -1427,7 +1411,7 @@ fn extract_constant_assigns(
                 }
                 let value = eval_constant_bits(&a.expr, width).ok_or(())?;
                 for d in &a.dst {
-                    if !d.select.is_empty() || !d.index.0.is_empty() {
+                    if !d.select.is_empty() || !d.index.indices.is_empty() {
                         return Err(());
                     }
                     map.insert(d.id, value.clone());

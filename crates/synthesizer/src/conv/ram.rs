@@ -160,7 +160,7 @@ pub(crate) fn oversized_ff_array(
 
 /// Does `vid` have any dynamic (non-constant) array-index access?
 fn is_dynamically_indexed(module: &air::Module, vid: air::VarId) -> bool {
-    let is_dyn = |index: &air::VarIndex| !index.0.is_empty() && !index.is_const();
+    let is_dyn = |index: &air::VarIndex| !index.indices.is_empty() && !index.is_const();
 
     for decl in &module.declarations {
         let mut dynamic = false;
@@ -271,7 +271,7 @@ fn write_pattern_ok(module: &air::Module, vid: air::VarId, ram: &RamConfig) -> b
                         } else if is_dynamic_whole_word(dst) {
                             whole_word_ports += 1;
                         } else if is_dynamic_const_subword(dst) {
-                            let sig = addr_signature(&dst.index.0[0]);
+                            let sig = addr_signature(&dst.index.indices[0]);
                             if !subword_addrs.contains(&sig) {
                                 subword_addrs.push(sig);
                             }
@@ -324,9 +324,9 @@ fn read_pattern_ok(module: &air::Module, vid: air::VarId, ram: &RamConfig) -> bo
     let mut reads: Vec<(bool, String)> = Vec::new();
     for decl in &module.declarations {
         for_each_read_in_decl(decl, vid, &mut |index, _select| {
-            let ok = index.0.len() == 1 && !index.is_const();
+            let ok = !index.is_range() && index.indices.len() == 1 && !index.is_const();
             let key = if ok {
-                addr_signature(&index.0[0])
+                addr_signature(&index.indices[0])
             } else {
                 String::new()
             };
@@ -427,10 +427,14 @@ fn write_factor_sig(s: &mut String, factor: &Factor) {
     match factor {
         Factor::Variable(id, index, select, _) => {
             let _ = write!(s, "V{id:?}");
-            for e in &index.0 {
+            for e in &index.indices {
                 s.push('[');
                 write_expr_sig(s, e);
                 s.push(']');
+            }
+            if let Some((op, bound)) = index.range.as_deref() {
+                let _ = write!(s, "{op:?}");
+                write_expr_sig(s, bound);
             }
             for e in &select.0 {
                 s.push('{');
@@ -518,14 +522,14 @@ fn is_self_read(vid: air::VarId, wr_index: &air::VarIndex, expr: &Expression) ->
     };
     *id == vid
         && select.is_empty()
-        && index.0.len() == 1
-        && wr_index.0.len() == 1
-        && addr_signature(&index.0[0]) == addr_signature(&wr_index.0[0])
+        && index.indices.len() == 1
+        && wr_index.indices.len() == 1
+        && addr_signature(&index.indices[0]) == addr_signature(&wr_index.indices[0])
 }
 
 /// `mem[addr]` with a single dynamic index dimension and no bit/part select.
 fn is_dynamic_whole_word(dst: &AssignDestination) -> bool {
-    dst.index.0.len() == 1
+    dst.index.indices.len() == 1
         && !dst.index.is_const()
         && dst.select.is_empty()
         && dst.comptime.part_select.is_none()
@@ -536,7 +540,7 @@ fn is_dynamic_whole_word(dst: &AssignDestination) -> bool {
 /// address become one masked write port (byte/bit write-enable). A *dynamic*
 /// sub-word select isn't a static lane and keeps the array as flip-flops.
 fn is_dynamic_const_subword(dst: &AssignDestination) -> bool {
-    if dst.index.0.len() != 1 || dst.index.is_const() {
+    if dst.index.indices.len() != 1 || dst.index.is_const() {
         return false;
     }
     // Must select a sub-word; a whole-word write is is_dynamic_whole_word's job.
@@ -626,9 +630,7 @@ fn for_each_read_in_decl(decl: &Declaration, vid: air::VarId, f: &mut ReadVisito
         }
         Declaration::Inst(inst) => {
             for input in &inst.inputs {
-                for expr in &input.exprs {
-                    for_each_read_in_expr(expr, vid, f);
-                }
+                for_each_read_in_expr(&input.expr, vid, f);
             }
         }
         _ => {}
@@ -638,7 +640,7 @@ fn for_each_read_in_decl(decl: &Declaration, vid: air::VarId, f: &mut ReadVisito
 fn for_each_read_in_dsts(dsts: &[AssignDestination], vid: air::VarId, f: &mut ReadVisitor) {
     // Destination address/select expressions are themselves read expressions.
     for d in dsts {
-        for e in &d.index.0 {
+        for e in &d.index.indices {
             for_each_read_in_expr(e, vid, f);
         }
         for e in &d.select.0 {
@@ -775,7 +777,7 @@ fn for_each_read_in_factor(factor: &Factor, vid: air::VarId, f: &mut ReadVisitor
                 f(index, select);
             }
             // Index/select sub-expressions can read `vid` too (e.g. mem[mem[k]]).
-            for e in &index.0 {
+            for e in index.expressions() {
                 for_each_read_in_expr(e, vid, f);
             }
             for e in &select.0 {

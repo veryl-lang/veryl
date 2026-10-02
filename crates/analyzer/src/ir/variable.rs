@@ -233,60 +233,6 @@ impl VarPathSelect {
             .collect()
     }
 
-    /// Read-side counterpart of [`Self::to_assign_destinations`]: an array
-    /// *range* select (`arr[0+:2]`) has no single-value form, so it expands to
-    /// one expression per element. Any other path yields one expression.
-    pub fn to_expressions(self, context: &mut Context) -> Vec<Expression> {
-        let (path, select, token) = self.clone().into();
-
-        let Some((id, base_comptime)) = context.find_path(&path) else {
-            return self.to_expression(context).into_iter().collect();
-        };
-
-        // The expansion below does not model a part_select's width remap
-        // (`to_base_select`), so member paths stay on the single-expression path.
-        let (array_select, width_select) = select.split(base_comptime.r#type.array.dims());
-        if base_comptime.part_select.is_some()
-            || !array_select.is_range()
-            || !array_select.is_const_with_range()
-        {
-            return self.to_expression(context).into_iter().collect();
-        }
-
-        let Some((beg, end)) = array_select.eval_value(context, &base_comptime.r#type, true) else {
-            return self.to_expression(context).into_iter().collect();
-        };
-
-        let mut comptime = base_comptime.clone();
-        comptime.r#type.array.drain(0..array_select.dimension());
-        comptime.is_const &= width_select.is_const();
-        comptime.token = token;
-
-        // `beg..=end` are flat element indices; collapse to outer indices.
-        let d = array_select.dimension();
-        let full_shape = base_comptime.r#type.array.clone();
-        let outer_dims: Vec<Option<usize>> = full_shape.iter().take(d).copied().collect();
-        let outer_shape = ShapeRef::new(&outer_dims);
-        let inner_total = full_shape
-            .iter()
-            .skip(d)
-            .map(|x| x.unwrap_or(1))
-            .product::<usize>()
-            .max(1);
-
-        (beg / inner_total..=end / inner_total)
-            .map(|i| {
-                let src = Factor::Variable(
-                    id,
-                    VarIndex::from_index(i, outer_shape),
-                    width_select.clone(),
-                    comptime.clone(),
-                );
-                Expression::Term(Box::new(src))
-            })
-            .collect()
-    }
-
     /// Whether this path is an array *range* select (e.g. `o[0+:2]`). As an LHS
     /// only a plain `=` expands such a slice; other contexts (op-assign) must
     /// reject it.
@@ -403,9 +349,37 @@ impl std::str::FromStr for VarPath {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct VarIndex(pub Vec<Expression>);
+pub struct VarIndex {
+    pub indices: Vec<Expression>,
+    /// A range on the final selected unpacked dimension. Earlier dimensions
+    /// remain point indices; trailing dimensions remain part of the value.
+    pub range: Option<Box<(VarSelectOp, Expression)>>,
+}
 
 impl VarIndex {
+    pub fn new(indices: Vec<Expression>) -> Self {
+        Self {
+            indices,
+            range: None,
+        }
+    }
+
+    pub fn is_range(&self) -> bool {
+        self.range.is_some()
+    }
+
+    pub fn expressions(&self) -> impl Iterator<Item = &Expression> {
+        self.indices
+            .iter()
+            .chain(self.range.as_deref().map(|(_, bound)| bound))
+    }
+
+    pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut Expression> {
+        self.indices
+            .iter_mut()
+            .chain(self.range.as_deref_mut().map(|(_, bound)| bound))
+    }
+
     pub fn from_index(index: usize, array: &ShapeRef) -> Self {
         let mut remaining = index;
         let mut ret = vec![];
@@ -421,11 +395,11 @@ impl VarIndex {
             .rev()
             .map(|x| Expression::create_value(Value::new(x as u64, 32, false), token))
             .collect();
-        Self(ret)
+        Self::new(ret)
     }
 
     pub fn push(&mut self, x: Expression) {
-        self.0.push(x)
+        self.indices.push(x)
     }
 
     /// An index is read outside the value expression it sits on, so a register
@@ -439,33 +413,33 @@ impl VarIndex {
         assign_target: Option<&AssignTarget>,
         from_ff: bool,
     ) {
-        for expression in &self.0 {
+        for expression in self.expressions() {
             expression.gather_ff(context, table, decl, assign_target, from_ff);
         }
     }
 
     pub fn dimension(&self) -> usize {
-        self.0.len()
+        self.indices.len()
     }
 
     pub fn add_prelude(&mut self, x: &VarIndex) {
-        let mut x = x.clone();
-        for e in self.0.drain(..) {
-            x.push(e);
-        }
-        self.0 = x.0;
+        debug_assert!(!x.is_range());
+        let mut indices = x.indices.clone();
+        indices.append(&mut self.indices);
+        self.indices = indices;
     }
 
     pub fn append(&mut self, x: &VarIndex) {
-        for x in &x.0 {
-            self.0.push(x.clone());
+        debug_assert!(!self.is_range() && !x.is_range());
+        for x in &x.indices {
+            self.indices.push(x.clone());
         }
     }
 
     pub fn is_const(&self) -> bool {
         let mut ret = true;
 
-        for x in &self.0 {
+        for x in self.expressions() {
             ret &= x.comptime().is_const;
         }
 
@@ -473,26 +447,223 @@ impl VarIndex {
     }
 
     pub fn eval_value(&self, context: &mut Context) -> Option<Vec<usize>> {
+        if self.is_range() {
+            return None;
+        }
         let mut ret = vec![];
-        for x in &self.0 {
+        for x in &self.indices {
             let x = x.eval_value(context)?;
-            ret.push(x.to_usize_saturating().unwrap_or(0));
+            ret.push(x.to_usize_saturating()?);
         }
         Some(ret)
     }
 
     pub fn to_select(self) -> VarSelect {
-        VarSelect(self.0, None)
+        VarSelect(self.indices, self.range.map(|range| *range))
+    }
+
+    /// Shape of an unpacked selection, retaining a range's dimension even
+    /// when it has just one element.
+    pub fn selected_shape(
+        &self,
+        context: &mut Context,
+        shape: &ShapeRef,
+        token: TokenRange,
+    ) -> crate::ir::IrResult<Shape> {
+        let dim = self.dimension();
+        if dim > shape.dims() || (dim == 0 && self.is_range()) {
+            return Err(crate::ir_error!(token));
+        }
+        if !self.is_range() {
+            return Ok(Shape::new(shape.iter().skip(dim).copied().collect()));
+        }
+        let (op, bound) = self
+            .range
+            .as_deref()
+            .ok_or_else(|| crate::ir_error!(token))?;
+        let first = &self.indices[dim - 1];
+        let count = if bound.comptime().is_const {
+            let value = bound.eval_value(context);
+            if !matches!(op, VarSelectOp::Colon)
+                && let Some(value) = &value
+                && value.is_semantically_not_positive()
+                && value.to_usize_saturating() != Some(0)
+            {
+                context.insert_error(AnalyzerError::non_positive_value(
+                    "non-positive",
+                    "array slice width",
+                    &bound.token_range(),
+                ));
+                return Err(crate::ir_error!(token));
+            }
+            value.and_then(|x| x.to_usize_saturating())
+        } else {
+            None
+        };
+        let count = match op {
+            VarSelectOp::Colon if first.comptime().is_const => first
+                .eval_value(context)
+                .and_then(|x| x.to_usize_saturating())
+                .zip(count)
+                .and_then(|(first, last)| last.checked_sub(first)?.checked_add(1)),
+            VarSelectOp::Colon => None,
+            _ => count,
+        };
+        let Some(count) = count else {
+            if !bound.comptime().is_const
+                || (matches!(op, VarSelectOp::Colon) && !first.comptime().is_const)
+            {
+                context.insert_error(AnalyzerError::non_constant_select_width(&token));
+            }
+            return Err(crate::ir_error!(token));
+        };
+        if count == 0 {
+            context.insert_error(AnalyzerError::zero_size(&token));
+            return Err(crate::ir_error!(token));
+        }
+
+        let mut dims = vec![Some(count)];
+        dims.extend(shape.iter().skip(dim).copied());
+        Ok(Shape::new(dims))
+    }
+
+    /// Resolve a selected value's flat element position into source coordinates.
+    pub fn element_index(
+        &self,
+        context: &mut Context,
+        shape: &ShapeRef,
+        element: usize,
+        token: TokenRange,
+    ) -> Self {
+        let dim = self.dimension();
+        let inner = Shape::new(shape.iter().skip(dim).copied().collect());
+        if !self.is_range() {
+            let mut index = self.clone();
+            index.append(&Self::from_index(element, &inner));
+            return index;
+        }
+        let stride = inner.total().unwrap_or(1);
+        let mut indices = self.indices.clone();
+        let base = indices.pop().unwrap();
+        let (op, bound) = self.range.as_deref().unwrap();
+        // Widen before adding/subtracting a position so an index just outside
+        // the array cannot wrap back into it.
+        let size = bound
+            .eval_value(context)
+            .and_then(|v| v.to_usize_saturating())
+            .unwrap_or(1);
+        let size_bits = (usize::BITS - size.leading_zeros()) as usize;
+        let width = base.comptime().expr_context.width.max(size_bits)
+            + if matches!(op, VarSelectOp::Step) {
+                size_bits + 1
+            } else {
+                1
+            };
+        let mut first = Expression::Binary(
+            Box::new(base),
+            Op::As,
+            Box::new(Expression::create_value(
+                Value::new(width as u64, 32, false),
+                token,
+            )),
+            Box::new(Comptime::create_unknown(token)),
+        );
+        first.eval_comptime(context, None);
+        let binary = |left, op, right| {
+            Expression::Binary(
+                Box::new(left),
+                op,
+                Box::new(right),
+                Box::new(Comptime::create_unknown(token)),
+            )
+        };
+        first = match op {
+            VarSelectOp::Colon | VarSelectOp::PlusColon => first,
+            VarSelectOp::MinusColon => binary(
+                first,
+                Op::Sub,
+                Expression::create_value(
+                    Value::new(size.saturating_sub(1) as u64, width, false),
+                    token,
+                ),
+            ),
+            VarSelectOp::Step => binary(first, Op::Mul, bound.clone()),
+        };
+        if element / stride != 0 {
+            first = binary(
+                first,
+                Op::Add,
+                Expression::create_value(
+                    Value::new((element / stride) as u64, width, false),
+                    token,
+                ),
+            );
+        }
+        // A second cast seals the coordinate arithmetic from the unsigned
+        // comparison's context. In particular, -1 + 1 must reach element 0.
+        first = binary(
+            first,
+            Op::As,
+            Expression::create_value(Value::new(width as u64, 32, false), token),
+        );
+        first.eval_comptime(context, None);
+        indices.push(first);
+        indices.extend(VarIndex::from_index(element % stride, &inner).indices);
+        Self::new(indices)
+    }
+
+    /// Exact flat interval, inclusive, for the currently evaluable selection.
+    pub fn eval_range(&self, context: &mut Context, shape: &ShapeRef) -> Option<(usize, usize)> {
+        if !self.is_range() {
+            return shape.calc_range(&self.eval_value(context)?);
+        }
+        let token = self.indices.last()?.token_range();
+        let count = self.selected_shape(context, shape, token).ok()?.total()?;
+        let index = self
+            .element_index(context, shape, 0, token)
+            .eval_value(context)?;
+        if index
+            .iter()
+            .zip(shape.iter())
+            .any(|(i, n)| n.is_some_and(|n| *i >= n))
+        {
+            return None;
+        }
+        let start = shape.calc_index(&index)?;
+        Some((start, start.checked_add(count)?.checked_sub(1)?))
+    }
+
+    /// Possible reads stay within any statically known outer-coordinate prefix.
+    pub fn read_range(&self, context: &mut Context, shape: &ShapeRef) -> Option<(usize, usize)> {
+        if self.is_const() {
+            return self.eval_range(context, shape);
+        }
+        let points = self
+            .indices
+            .len()
+            .saturating_sub(usize::from(self.is_range()));
+        let prefix = self.indices[..points]
+            .iter()
+            .take_while(|x| x.comptime().is_const)
+            .cloned()
+            .collect();
+        let prefix = Self::new(prefix).eval_value(context)?;
+        shape.calc_range(&prefix)
     }
 }
 
 impl fmt::Display for VarIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ret = String::new();
-        for i in &self.0 {
-            ret.push_str(&format!("[{i}]"));
+        for (i, index) in self.indices.iter().enumerate() {
+            if i + 1 == self.indices.len()
+                && let Some((op, bound)) = self.range.as_deref()
+            {
+                write!(f, "[{index}{op}{bound}]")?;
+            } else {
+                write!(f, "[{index}]")?;
+            }
         }
-        ret.fmt(f)
+        Ok(())
     }
 }
 
@@ -723,7 +894,10 @@ impl VarSelect {
     }
 
     pub fn to_index(self) -> VarIndex {
-        VarIndex(self.0)
+        VarIndex {
+            indices: self.0,
+            range: self.1.map(Box::new),
+        }
     }
 
     pub fn token_range(&self) -> TokenRange {
@@ -763,6 +937,12 @@ impl VarSelect {
                 Some(r#type.to_owned())
             } else {
                 let dim = self.dimension();
+                // A currently evaluable runtime selector is not a constant
+                // bound (a call can also have side effects). The array reference keeps
+                // its fixed width and checks each coordinate at runtime.
+                if is_array && self.is_range() && !self.is_const_with_range() {
+                    return None;
+                }
                 let beg = self.0.last().unwrap();
                 let mut range = beg.token_range();
                 let beg = beg.eval_value(context);
@@ -863,7 +1043,7 @@ impl VarSelect {
 
                 let mut ret = r#type.to_owned();
 
-                if width == 1 {
+                if width == 1 && (!is_array || self.1.is_none()) {
                     ret.drain(0..dim);
                 } else {
                     ret.drain(0..(dim - 1));

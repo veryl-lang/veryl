@@ -755,6 +755,7 @@ pub struct HierVarRef {
     pub var_path: VarPath,
     pub index: VarIndex,
     pub select: VarSelect,
+    pub array: crate::ir::Shape,
     pub comptime: Comptime,
 }
 
@@ -795,8 +796,8 @@ impl Factor {
     pub fn gather_context(&mut self, context: &mut Context) -> ExpressionContext {
         match self {
             Factor::Variable(_, index, select, comptime) => {
-                // Array dimensions are already drained at Factor construction time
-                // (in VarPathSelect::to_expression and eval_factor).
+                // The result shape of the array selection is computed when
+                // constructing the reference.
 
                 if !comptime.evaluated {
                     // Struct/Union/Enum should be treated as flatten bit/logic when it is bit-selected
@@ -824,7 +825,7 @@ impl Factor {
                         .0
                         .iter_mut()
                         .chain(select.1.as_mut().map(|(_, expr)| expr));
-                    for expr in index.0.iter_mut().chain(select_exprs) {
+                    for expr in index.expressions_mut().chain(select_exprs) {
                         let x = expr.eval_comptime(context, None);
                         check_clock_domain(context, comptime, x, &comptime.token.beg);
                         comptime.clock_domain = comptime.clock_domain.merge(&x.clock_domain);
@@ -960,7 +961,7 @@ impl Factor {
                 let idx = index.eval_value(context)?;
                 let (value, r#type) = if let Some(variable) = context.variables.get(id) {
                     (variable.get_value(&idx)?.clone(), variable.r#type.clone())
-                } else if index.0.is_empty() && select.is_empty() && comptime.is_const {
+                } else if index.indices.is_empty() && select.is_empty() && comptime.is_const {
                     // Const/param scalar refs keep their folded value in comptime;
                     // use it when the Context has no variable table — synth's
                     // `try_constant` runs tableless, so `2 ** (AW - 2)` folds here
@@ -1011,8 +1012,7 @@ impl Factor {
                 if total_array > assign_table.array_limit {
                     return;
                 }
-                if let Some(index) = index.eval_value(context)
-                    && let Some(variable) = context.variables.get(id).cloned()
+                if let Some(variable) = context.variables.get(id).cloned()
                     && let Some((beg, end)) = select.conservative_packed_range(
                         context,
                         &variable.r#type,
@@ -1020,7 +1020,22 @@ impl Factor {
                     )
                 {
                     let mask = ValueBigUint::gen_mask_range(beg, end);
-                    assign_table.insert_reference(&variable, index, mask);
+                    if let Some(coordinates) = index.eval_value(context) {
+                        assign_table.insert_reference(&variable, coordinates, mask);
+                    } else if index.is_range()
+                        && let Some((start, end)) =
+                            index.read_range(context, &variable.r#type.array)
+                    {
+                        for i in start..=end {
+                            let coordinates = VarIndex::from_index(i, &variable.r#type.array)
+                                .eval_value(context)
+                                .unwrap();
+                            assign_table.insert_reference(&variable, coordinates, mask.clone());
+                        }
+                    }
+                }
+                for expression in index.expressions() {
+                    expression.eval_assign(context, assign_table, assign_context);
                 }
             }
             Factor::FunctionCall(x) => {
@@ -1052,26 +1067,32 @@ impl Factor {
                         )
                         .map(|(beg, end)| ValueBigUint::gen_mask_range(beg, end))
                         .unwrap_or_default();
-                    if let Some(index) = index.eval_value(context) {
-                        if let Some(index) = variable.r#type.array.calc_index(&index) {
+                    let range = if !index.is_range() {
+                        index.eval_range(context, &variable.r#type.array)
+                    } else {
+                        None
+                    }
+                    .or_else(|| index.read_range(context, &variable.r#type.array));
+                    if let Some((start, end)) = range {
+                        if start == end {
                             table.insert_refered(
                                 *id,
-                                index,
+                                start,
+                                decl,
+                                assign_target.cloned(),
+                                src_read_mask,
+                                from_ff,
+                            );
+                        } else {
+                            table.insert_refered_range(
+                                *id,
+                                start..end + 1,
                                 decl,
                                 assign_target.cloned(),
                                 src_read_mask,
                                 from_ff,
                             );
                         }
-                    } else if let Some(total_array) = variable.r#type.total_array() {
-                        table.insert_refered_whole(
-                            *id,
-                            total_array,
-                            decl,
-                            assign_target.cloned(),
-                            src_read_mask,
-                            from_ff,
-                        );
                     }
                 }
                 index.gather_ff(context, table, decl, assign_target, from_ff);
@@ -1089,8 +1110,12 @@ impl Factor {
 
     pub fn set_index(&mut self, index: &VarIndex) {
         match self {
-            Factor::Variable(_, i, _, _) => {
-                *i = index.clone();
+            Factor::Variable(_, i, select, _) => {
+                for expression in i.expressions_mut() {
+                    expression.set_index(index);
+                }
+                select.set_index(index);
+                i.add_prelude(index);
             }
             Factor::FunctionCall(x) => {
                 x.set_index(index);
@@ -1133,6 +1158,118 @@ impl Factor {
             Factor::Anonymous(x) => x.token,
             Factor::Unknown(x) => x.token,
         }
+    }
+
+    pub fn array_index(&self) -> Option<&VarIndex> {
+        match self {
+            Self::Variable(_, index, _, _) => Some(index),
+            Self::HierVariable(reference) => Some(&reference.index),
+            _ => None,
+        }
+    }
+
+    pub fn array_index_mut(&mut self) -> Option<&mut VarIndex> {
+        match self {
+            Self::Variable(_, index, _, _) => Some(index),
+            Self::HierVariable(reference) => Some(&mut reference.index),
+            _ => None,
+        }
+    }
+
+    /// Project an aggregate reference only when a consumer needs an element.
+    /// Source coordinates remain separate until each dimension is bounds-checked.
+    pub fn array_element(
+        &self,
+        context: &mut Context,
+        shape: &crate::ir::ShapeRef,
+        element: usize,
+    ) -> Option<Expression> {
+        let index =
+            self.array_index()?
+                .element_index(context, shape, element, self.comptime().token);
+        let mut valid = None;
+        for (position, size) in index.indices.iter().zip(shape.iter()) {
+            let Some(size) = size else { continue };
+            let width = position.comptime().expr_context.width.max(64);
+            let check = Expression::Binary(
+                Box::new(position.clone()),
+                Op::Less,
+                Box::new(Expression::create_value(
+                    Value::new(*size as u64, width, false),
+                    self.comptime().token,
+                )),
+                Box::new(Comptime::create_unknown(self.comptime().token)),
+            );
+            valid = Some(match valid {
+                Some(previous) => Expression::Binary(
+                    Box::new(previous),
+                    Op::LogicAnd,
+                    Box::new(check),
+                    Box::new(Comptime::create_unknown(self.comptime().token)),
+                ),
+                None => check,
+            });
+        }
+        let width = self.comptime().r#type.total_width().unwrap_or(1);
+        let invalid = if self.comptime().r#type.is_2state() {
+            Value::new(0, width, self.comptime().r#type.signed)
+        } else {
+            Value::new_x(width, self.comptime().r#type.signed)
+        };
+        if let Some(valid) = &mut valid {
+            valid.eval_comptime(context, None);
+            // Do not flatten invalid coordinates: a negative outer index could
+            // overflow while computing its byte/element offset.
+            if valid.comptime().is_const
+                && valid
+                    .eval_value(context)
+                    .is_none_or(|v| v.to_usize_saturating() != Some(1))
+            {
+                return Some(Expression::create_value(invalid, self.comptime().token));
+            }
+        }
+        let mut source = self.clone();
+        *source.array_index_mut()? = index;
+        let comptime = source.comptime_mut();
+        comptime.r#type.array.clear();
+        comptime.is_const = self.comptime().is_const;
+        comptime.expr_context.is_const = comptime.is_const;
+        comptime.token = self.comptime().token;
+        let mut expression = Expression::Term(Box::new(source));
+        expression.eval_comptime(context, None);
+        if let Some(mut valid) = valid {
+            valid.eval_comptime(context, None);
+            if valid.comptime().is_const
+                && valid
+                    .eval_value(context)
+                    .is_some_and(|x| x.to_usize_saturating() == Some(1))
+            {
+                return Some(expression);
+            }
+            let mut comptime = expression.comptime().clone();
+            comptime.evaluated = false;
+            let mut ret = Expression::Ternary(
+                Box::new(valid),
+                Box::new(expression),
+                Box::new(Expression::create_value(invalid, self.comptime().token)),
+                Box::new(comptime),
+            );
+            ret.eval_comptime(context, None);
+            Some(ret)
+        } else {
+            Some(expression)
+        }
+    }
+
+    pub fn array_values(&self, context: &mut Context) -> Option<Vec<Value>> {
+        let shape = match self {
+            Self::Variable(id, _, _, _) => context.variables.get(id)?.r#type.array.clone(),
+            Self::HierVariable(reference) => reference.array.clone(),
+            _ => return None,
+        };
+        (0..self.comptime().r#type.total_array()?)
+            .map(|i| self.array_element(context, &shape, i)?.eval_value(context))
+            .collect()
     }
 }
 

@@ -241,6 +241,90 @@ fn demanded_read_regions_bound_expanded_unpacked_input_slices() {
 }
 
 #[test]
+fn demanded_read_regions_bound_multidimensional_input_slices() {
+    for row in 0..4 {
+        for column in 0..2 {
+            for bit in 0..4 {
+                let assignments = (0..4)
+                    .flat_map(|i| {
+                        (0..2).map(move |j| {
+                            let value = if (i, j) == (row, column) {
+                                format!("(o as 4) << {bit}")
+                            } else {
+                                "4'b0".to_owned()
+                            };
+                            format!("assign data[{i}][{j}] = {value};")
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let code = format!(
+                    "module Reduce(i: input logic<4>[2, 2], o: output logic) {{
+                        assign o = |i[0][1][1:0];
+                    }}
+                    module Top(o: output logic) {{
+                        var data: logic<4>[4, 2];
+                        {assignments}
+                        inst reduce: Reduce(i: data[1+:2], o: o);
+                    }}"
+                );
+                assert_exact_diagnostic(&code, row == 1 && column == 1 && bit < 2);
+            }
+        }
+    }
+}
+
+#[test]
+fn array_slice_reads_preserve_element_dependencies_in_assignments_and_calls() {
+    for connection in [
+        "assign selected = data[1+:2];",
+        "assign selected = pass(data[1+:2]);",
+    ] {
+        for position in 0..4 {
+            let code = format!(
+                "module Top(o: output logic) {{
+                    type Pair = logic[2];
+                    function pass(i: input logic[2]) -> Pair {{ return i; }}
+                    var data: logic[4];
+                    var selected: logic[2];
+                    assign data = '{{{values}}};
+                    {connection}
+                    assign o = selected[1];
+                }}",
+                values = (0..4)
+                    .map(|i| if i == position { "o" } else { "1'b0" })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            assert_exact_diagnostic(&code, position == 2);
+        }
+    }
+}
+
+#[test]
+fn large_array_slice_reads_stay_compact() {
+    for feedback in [0, 1_000_000] {
+        let code = format!(
+            "module Pick(i: input logic[1000000], o: output logic) {{
+                assign o = i[999999];
+            }}
+            module Top(o: output logic) {{
+                var data: logic[1000002];
+                assign data[{feedback}] = o;
+                inst pick: Pick(i: data[1+:1000000], o: o);
+            }}"
+        );
+        reset_analysis_size();
+        assert_exact_diagnostic(&code, feedback == 1_000_000);
+        let (atoms, nodes, edges) = analysis_size();
+        assert!(
+            atoms < 32 && nodes < 64 && edges < 64,
+            "{atoms} atoms, {nodes} nodes, {edges} edges"
+        );
+    }
+}
+
+#[test]
 fn demanded_read_regions_keep_byte_enabled_descriptor_lookup_compact() {
     // A write-through descriptor table combines per-entry tag comparisons
     // with byte-enabled updates and indexed payload reads. Read boundaries
@@ -286,5 +370,43 @@ fn demanded_read_regions_keep_byte_enabled_descriptor_lookup_compact() {
         assert!(nodes <= 9 * entries + 256, "{nodes} nodes");
         assert!(edges <= 14 * entries + 256, "{edges} edges");
         assert!(comb_loop_analysis_is_complete(&code));
+    }
+}
+
+#[test]
+fn array_slice_in_interface_function_keeps_the_receiver() {
+    for position in ["1", "start"] {
+        let member = if position == "start" {
+            "var start: logic;"
+        } else {
+            ""
+        };
+        let starts = if position == "start" {
+            "assign bus[0].start = o; assign bus[1].start = 0;"
+        } else {
+            ""
+        };
+        for source in 0..2 {
+            let code = format!(
+                r#"
+        interface Bus {{
+            var data: logic[3];
+            {member}
+            function pair(x: input logic[2]) -> logic {{ return x[1]; }}
+            function get() -> logic {{ return pair(data[{position}+:2]); }}
+        }}
+        module Top(o: output logic) {{
+            inst bus: Bus[2];
+            {starts}
+            assign bus[0].data[0] = 0;
+            assign bus[0].data[1] = 0;
+            assign bus[0].data[2] = o;
+            assign bus[1].data = '{{0, 0, 0}};
+            assign o = bus[{source}].get();
+        }}
+        "#
+            );
+            assert_exact_diagnostic(&code, source == 0);
+        }
     }
 }

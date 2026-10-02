@@ -1327,7 +1327,7 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // Only a plain (unindexed, unselected) variable
                     // connection can serve as a component output.
                     let output = c.output.as_ref().and_then(|dst| {
-                        (dst.index.0.is_empty()
+                        (dst.index.indices.is_empty()
                             && dst.select.0.is_empty()
                             && dst.select.1.is_none())
                         .then_some(dst.id)
@@ -1461,13 +1461,13 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for input in &src.inputs {
-                let Some(air::Expression::Term(factor)) = input.single() else {
+                let air::Expression::Term(factor) = &input.expr else {
                     continue;
                 };
                 let air::Factor::Variable(parent_id, idx, sel, _) = factor.as_ref() else {
                     continue;
                 };
-                if !idx.0.is_empty() || !sel.is_empty() {
+                if !idx.indices.is_empty() || !sel.is_empty() {
                     continue;
                 }
                 // Reading parent storage directly during an event would
@@ -1516,7 +1516,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 let [parent_dst] = output.dst.as_slice() else {
                     continue;
                 };
-                if !parent_dst.index.0.is_empty() || !parent_dst.select.is_empty() {
+                if !parent_dst.index.indices.is_empty() || !parent_dst.select.is_empty() {
                     continue;
                 }
                 let child_output_is_ff = child_ff_table.has_ff_writer(output.id);
@@ -1717,30 +1717,28 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
 
-            // One expression per port element: an unpacked-array slice, wired
-            // element-wise.
-            if input.exprs.len() != 1 {
-                if input.exprs.len() != child_meta.elements.len() {
+            let input_expr = &input.expr;
+            if let Some(exprs) = super::expression::array_slice_elements(context, input_expr)? {
+                if exprs.len() != child_meta.elements.len() {
                     return Err(SimulatorError::unsupported_description(&src.token));
                 }
-                for (child_element, expr) in child_meta.elements.iter().zip(&input.exprs) {
-                    let mut proto_expr: ProtoExpression = Conv::conv(context, expr)?;
-                    size_literal_rhs(&mut proto_expr, None, None, child_meta.width);
+                all_comb_statements.append(&mut context.pending_statements);
+                for (child_element, mut expr) in child_meta.elements.iter().zip(exprs) {
+                    size_literal_rhs(&mut expr, None, None, child_meta.width);
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
                         dst: child_element.current,
                         dst_width: child_meta.width,
                         select: None,
                         dynamic_select: None,
                         rhs_select: None,
-                        expr: proto_expr,
-                        dst_ff_current_offset: 0, // not FF
+                        expr,
+                        dst_ff_current_offset: 0,
                         comb_direct: false,
-                        token: TokenRange::default(),
+                        token: src.token,
                     }));
                 }
                 continue;
             }
-            let input_expr = &input.exprs[0];
 
             // Array port fed by a const array (`inst u: Sub (i: pk::TBL)`).
             if let Some(exprs) = const_array_element_exprs(input_expr, child_meta.elements.len()) {
@@ -1767,6 +1765,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 &child_meta.r#type,
                 child_meta.elements.len(),
             ) {
+                all_comb_statements.append(&mut context.pending_statements);
                 for (child_element, mut expr) in child_meta.elements.iter().zip(exprs) {
                     size_literal_rhs(&mut expr, None, None, child_meta.width);
                     all_comb_statements.push(ProtoStatement::Assign(ProtoAssignStatement {
@@ -1797,7 +1796,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             {
                 let parent_scope = context.scope();
                 if let Some(parent_meta) = parent_scope.variable_meta.get(parent_id).cloned() {
-                    let base_index = if index.0.is_empty() {
+                    let base_index = if index.indices.is_empty() {
                         Some(0)
                     } else if let Some(idx_vals) =
                         index.eval_value(&mut parent_scope.analyzer_context)
@@ -2083,7 +2082,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // Remap child event keys (clock/reset) to parent VarIds via input port connections
         let mut child_to_parent_var: HashMap<air::VarId, air::VarId> = HashMap::default();
         for input in &src.inputs {
-            if let Some(air::Expression::Term(factor)) = input.single()
+            if let air::Expression::Term(factor) = &input.expr
                 && let air::Factor::Variable(parent_var_id, _, _, _) = factor.as_ref()
             {
                 child_to_parent_var.insert(input.id, *parent_var_id);
