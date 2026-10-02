@@ -31154,3 +31154,82 @@ fn case_compares_each_label_as_an_if_does() {
         ],
     );
 }
+
+#[test]
+fn a_concat_written_through_a_static_select_is_scheduled_per_element() {
+    // `pd[9:0] = {m, data}` is how Verilog spells a whole-port assign.  The
+    // consumer reads only the flop-driven `pd[9:8]` and drives `rdy`, which
+    // feeds `data`: acyclic per element, a ring if the assign stays one node.
+    // The second shape writes a window that is not the whole variable.
+    let code = |lhs: &str, rest: &str| {
+        format!(
+            r#"
+    module Prod (
+        clk: input  clock    ,
+        rdy: input  logic    ,
+        d  : input  logic<8> ,
+        pd : output logic<10>,
+    ) {{
+        var m   : logic<2>;
+        var data: logic<{dw}>;
+        always_ff (clk) {{
+            m = d[1:0];
+        }}
+        assign data  = if rdy ? d[{dhi}:0] : 0;
+        assign {lhs} = {{m, data}};
+        {rest}
+    }}
+    module Cons (
+        pd : input  logic<10>,
+        rdy: output logic    ,
+    ) {{
+        var msk: logic<2>;
+        assign msk[1:0] = pd[9:8];
+        assign rdy      = msk[1] | msk[0];
+    }}
+    module Top (
+        clk: input  clock    ,
+        d  : input  logic<8> ,
+        y  : output logic<10>,
+    ) {{
+        var pd : logic<10>;
+        var rdy: logic    ;
+        inst p: Prod (clk, rdy, d, pd);
+        inst c: Cons (pd, rdy);
+        assign y = pd;
+    }}
+    "#,
+            dw = if rest.is_empty() { 8 } else { 6 },
+            dhi = if rest.is_empty() { 7 } else { 5 },
+        )
+    };
+    let shapes = [
+        (code("pd[9:0]", ""), 0x303u64),
+        (code("pd[9:2]", "assign pd[1:0] = 2'b10;"), 0x30eu64),
+    ];
+
+    for (code, want) in &shapes {
+        for config in Config::all() {
+            dbg!(&config);
+
+            let ir = analyze(code, &config);
+            assert_eq!(
+                ir.required_comb_passes, 1,
+                "JIT={} 4st={}",
+                config.use_jit, config.use_4state,
+            );
+
+            let mut sim = Simulator::new(ir, None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("d", Value::new(0x03, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new(*want, 10, false),
+                "JIT={} 4st={}",
+                config.use_jit,
+                config.use_4state,
+            );
+        }
+    }
+}
