@@ -667,16 +667,12 @@ fn comb_for() {
 
     let exp = r#"module ModuleA {
   var var0(a): logic<4> = 4'hx;
-  const var1([0].i): signed bit<32> = 32'sh00000000;
-  const var2([1].i): signed bit<32> = 32'sh00000001;
-  const var3([2].i): signed bit<32> = 32'sh00000002;
-  const var4([3].i): signed bit<32> = 32'sh00000003;
+  const var1(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    var0[32'sh00000000] = 32'sh00000001;
-    var0[32'sh00000001] = 32'sh00000002;
-    var0[32'sh00000002] = 32'sh00000003;
-    var0[32'sh00000003] = 32'sh00000004;
+    for i in 0..4 {
+      var0[var1] = (var1 + 32'sh00000001);
+    }
   }
 }
 "#;
@@ -921,8 +917,12 @@ fn interface() {
   param var0(WIDTH): bit<32> = 32'h00000008;
   input var1(a.a): logic<8> = 8'hxx;
   output var6(b.a): logic<8> = 8'hxx;
+  const var11(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
+    for i in 0..0 {
+      var6[var11 step 32'sh00000020] = var1[var11 step 32'sh00000020];
+    }
   }
 }
 module ModuleB {
@@ -942,16 +942,12 @@ module ModuleB {
       param var0(WIDTH): bit<32> = 32'h00000080;
       input var1(a.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
       output var6(b.a): logic<128> = 128'hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
-      const var11([0].i): signed bit<32> = 32'sh00000000;
-      const var12([1].i): signed bit<32> = 32'sh00000001;
-      const var13([2].i): signed bit<32> = 32'sh00000002;
-      const var14([3].i): signed bit<32> = 32'sh00000003;
+      const var11(i): signed bit<32> = 32'shxxxxxxxx;
 
       comb {
-        var6[32'sh00000000 step 32'sh00000020] = var1[32'sh00000000 step 32'sh00000020];
-        var6[32'sh00000001 step 32'sh00000020] = var1[32'sh00000001 step 32'sh00000020];
-        var6[32'sh00000002 step 32'sh00000020] = var1[32'sh00000002 step 32'sh00000020];
-        var6[32'sh00000003 step 32'sh00000020] = var1[32'sh00000003 step 32'sh00000020];
+        for i in 0..4 {
+          var6[var11 step 32'sh00000020] = var1[var11 step 32'sh00000020];
+        }
       }
     }
   }
@@ -2685,56 +2681,20 @@ fn assignment_operator_with_array_index() {
   var var3[1](score): logic<32> = 32'hxxxxxxxx;
   var var3[2](score): logic<32> = 32'hxxxxxxxx;
   var var3[3](score): logic<32> = 32'hxxxxxxxx;
-  const var4([0].i): signed bit<32> = 32'sh00000000;
-  const var5([0].[0].j): signed bit<32> = 32'sh00000000;
-  const var6([0].[1].j): signed bit<32> = 32'sh00000001;
-  const var7([0].[2].j): signed bit<32> = 32'sh00000002;
-  const var8([0].[3].j): signed bit<32> = 32'sh00000003;
-  const var9([1].i): signed bit<32> = 32'sh00000001;
-  const var10([1].[0].j): signed bit<32> = 32'sh00000000;
-  const var11([1].[1].j): signed bit<32> = 32'sh00000001;
-  const var12([1].[2].j): signed bit<32> = 32'sh00000002;
-  const var13([1].[3].j): signed bit<32> = 32'sh00000003;
-  const var14([2].i): signed bit<32> = 32'sh00000002;
-  const var15([2].[0].j): signed bit<32> = 32'sh00000000;
-  const var16([2].[1].j): signed bit<32> = 32'sh00000001;
-  const var17([2].[2].j): signed bit<32> = 32'sh00000002;
-  const var18([2].[3].j): signed bit<32> = 32'sh00000003;
-  const var19([3].i): signed bit<32> = 32'sh00000003;
-  const var20([3].[0].j): signed bit<32> = 32'sh00000000;
-  const var21([3].[1].j): signed bit<32> = 32'sh00000001;
-  const var22([3].[2].j): signed bit<32> = 32'sh00000002;
-  const var23([3].[3].j): signed bit<32> = 32'sh00000003;
-  const var24([0].i): signed bit<32> = 32'sh00000000;
-  const var25([1].i): signed bit<32> = 32'sh00000001;
-  const var26([2].i): signed bit<32> = 32'sh00000002;
-  const var27([3].i): signed bit<32> = 32'sh00000003;
+  const var4(i): signed bit<32> = 32'shxxxxxxxx;
+  const var5(j): signed bit<32> = 32'shxxxxxxxx;
+  const var6(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    var3[32'sh00000000] = 32'sh00000000;
-    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000000]);
-    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000001]);
-    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000002]);
-    var3[32'sh00000000] = (var3[32'sh00000000] + var1[32'sh00000003]);
-    var3[32'sh00000001] = 32'sh00000000;
-    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000000]);
-    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000001]);
-    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000002]);
-    var3[32'sh00000001] = (var3[32'sh00000001] + var1[32'sh00000003]);
-    var3[32'sh00000002] = 32'sh00000000;
-    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000000]);
-    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000001]);
-    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000002]);
-    var3[32'sh00000002] = (var3[32'sh00000002] + var1[32'sh00000003]);
-    var3[32'sh00000003] = 32'sh00000000;
-    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000000]);
-    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000001]);
-    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000002]);
-    var3[32'sh00000003] = (var3[32'sh00000003] + var1[32'sh00000003]);
-    var2[32'sh00000000] = var3[32'sh00000000];
-    var2[32'sh00000001] = var3[32'sh00000001];
-    var2[32'sh00000002] = var3[32'sh00000002];
-    var2[32'sh00000003] = var3[32'sh00000003];
+    for i in 0..4 {
+      var3[var4] = 32'sh00000000;
+      for j in 0..4 {
+      var3[var4] = (var3[var4] + var1[var5]);
+    }
+    }
+    for i in 0..4 {
+      var2[var6] = var3[var6];
+    }
   }
 }
 "#;
@@ -2808,24 +2768,12 @@ fn assignment_operator_with_array_index() {
     let exp = r#"module ModuleA {
   var var0[0](a): logic<8> = 8'hxx;
   var var0[1](a): logic<8> = 8'hxx;
-  const var1([0].i): signed bit<32> = 32'sh00000000;
-  const var2([1].i): signed bit<32> = 32'sh00000001;
-  const var3([2].i): signed bit<32> = 32'sh00000002;
-  const var4([3].i): signed bit<32> = 32'sh00000003;
-  const var5([4].i): signed bit<32> = 32'sh00000004;
-  const var6([5].i): signed bit<32> = 32'sh00000005;
-  const var7([6].i): signed bit<32> = 32'sh00000006;
-  const var8([7].i): signed bit<32> = 32'sh00000007;
+  const var1(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    var0[1'h0][32'h00000000+:32'sh00000002] = '0;
-    var0[1'h0][32'h00000002+:32'sh00000002] = '0;
-    var0[1'h0][32'h00000004+:32'sh00000002] = '0;
-    var0[1'h0][32'h00000006+:32'sh00000002] = '0;
-    var0[1'h1][32'h00000000+:32'sh00000002] = '0;
-    var0[1'h1][32'h00000002+:32'sh00000002] = '0;
-    var0[1'h1][32'h00000004+:32'sh00000002] = '0;
-    var0[1'h1][32'h00000006+:32'sh00000002] = '0;
+    for i in 0..8 {
+      var0[var1[32'sh00000002]][(32'sh00000002 * var1[32'sh00000001:32'sh00000000])+:32'sh00000002] = '0;
+    }
   }
 }
 "#;
@@ -3423,31 +3371,15 @@ fn const_fold_switch_arm() {
     let exp = r#"module ModuleA {
   input var0(a): logic = 1'hx;
   output var1(o): logic<4> = 4'hx;
-  const var2([0].i): signed bit<32> = 32'sh00000000;
-  const var3([1].i): signed bit<32> = 32'sh00000001;
-  const var4([2].i): signed bit<32> = 32'sh00000002;
-  const var5([3].i): signed bit<32> = 32'sh00000003;
+  const var2(i): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    if var0 {
-      var1[32'sh00000000] = 32'sh00000001;
+    for i in 0..4 {
+      if var0 {
+      var1[var2] = 32'sh00000001;
     } else {
-      var1[32'sh00000000] = 32'sh00000000;
+      var1[var2] = 32'sh00000000;
     }
-    if var0 {
-      var1[32'sh00000001] = 32'sh00000001;
-    } else {
-      var1[32'sh00000001] = 32'sh00000000;
-    }
-    if var0 {
-      var1[32'sh00000002] = 32'sh00000001;
-    } else {
-      var1[32'sh00000002] = 32'sh00000000;
-    }
-    if var0 {
-      var1[32'sh00000003] = 32'sh00000001;
-    } else {
-      var1[32'sh00000003] = 32'sh00000000;
     }
   }
 }
@@ -4045,33 +3977,17 @@ fn peeled_iterator_reads_are_its_value() {
   var var4[7](ta): logic<8> = 8'hxx;
   var var5(n): bit<32> = 32'hxxxxxxxx;
   var var6(st): bit<32> = 32'hxxxxxxxx;
-  const var7([0].i): signed bit<32> = 32'sh00000000;
-  const var8([1].i): signed bit<32> = 32'sh00000001;
-  const var9([2].i): signed bit<32> = 32'sh00000002;
-  const var10([3].i): signed bit<32> = 32'sh00000003;
-  const var11([0].i): signed bit<32> = 32'sh00000000;
-  const var12([1].i): signed bit<32> = 32'sh00000001;
-  const var13([2].i): signed bit<32> = 32'sh00000002;
-  const var14([3].i): signed bit<32> = 32'sh00000003;
-  const var15([4].i): signed bit<32> = 32'sh00000004;
-  const var16([5].i): signed bit<32> = 32'sh00000005;
-  const var17([6].i): signed bit<32> = 32'sh00000006;
-  const var18([7].i): signed bit<32> = 32'sh00000007;
-  const var19(s): signed bit<32> = 32'shxxxxxxxx;
+  const var7(i): signed bit<32> = 32'shxxxxxxxx;
+  const var8(i): signed bit<32> = 32'shxxxxxxxx;
+  const var9(s): signed bit<32> = 32'shxxxxxxxx;
 
   comb {
-    var3[32'sh00000000] = var0[32'sh00000000+:32'sh00000008];
-    var3[32'sh00000001] = var0[32'sh00000008+:32'sh00000008];
-    var3[32'sh00000002] = var0[32'sh00000010+:32'sh00000008];
-    var3[32'sh00000003] = var0[32'sh00000018+:32'sh00000008];
-    var4[32'sh00000000] = 32'sh00000000;
-    var4[32'sh00000001] = 32'sh00000000;
-    var4[32'sh00000002] = 32'sh00000000;
-    var4[32'sh00000003] = 32'sh00000000;
-    var4[32'sh00000004] = 32'sh00000000;
-    var4[32'sh00000005] = 32'sh00000000;
-    var4[32'sh00000006] = 32'sh00000000;
-    var4[32'sh00000007] = 32'sh00000000;
+    for i in 0..4 {
+      var3[var7] = var0[(var7 * 32'sh00000008)+:32'sh00000008];
+    }
+    for i in 0..8 {
+      var4[var8] = 32'sh00000000;
+    }
     var5 = 32'sh00000004;
     var6 = 32'sh00000000;
     var1 = 32'sh00000000;
@@ -4095,11 +4011,10 @@ fn peeled_iterator_reads_are_its_value() {
     check_peeled_ir(code, exp);
 }
 
-/// A peeled copy is what an ordinary unrolled loop converts the same body
-/// to: the same statements, with indices and selects of the same constant
-/// values and types.
+/// Native peeling agrees with per-iteration analysis specialization on
+/// the values and types of iterator reads, indices and selects.
 #[test]
-fn peeled_copy_matches_the_ordinary_unroll() {
+fn peeled_copy_matches_iteration_specialization() {
     use crate::ir::{Declaration, Expression, Factor, Statement, VarIndex, VarSelect};
 
     fn selector(index: &VarIndex, select: &VarSelect) -> String {
@@ -4182,7 +4097,17 @@ fn peeled_copy_matches_the_ordinary_unroll() {
         _ => unreachable!(),
     };
     let peeled: Vec<String> = peeled[1..].iter().map(stmt).collect();
-    let unrolled: Vec<String> = unrolled.iter().map(stmt).collect();
+    let [Statement::For(looped)] = *unrolled else {
+        unreachable!();
+    };
+    let mut context = crate::conv::Context::default();
+    context.variables = module.variables.clone();
+    let unrolled: Vec<String> = (0..8)
+        .flat_map(|iteration| {
+            crate::ir::peel::specialize_iteration(&mut context, looped, iteration).unwrap()
+        })
+        .map(|statement| stmt(&statement))
+        .collect();
     assert_eq!(peeled.len(), 16);
     assert_eq!(peeled, unrolled);
 }
@@ -4667,4 +4592,26 @@ fn ff_table_array_slice_reads_match_per_element() {
     }
     "#,
     );
+}
+
+#[test]
+fn constant_procedural_loops_keep_one_body_and_one_iterator() {
+    for count in [4, 16_384] {
+        let code = format!(
+            "module Top(o: output logic<32>) {{ always_comb {{ for i in 0..{count} {{ o = i; }} }} }}"
+        );
+        let ir = analyzed_ir(&code, false);
+        let [Component::Module(module)] = ir.components.as_slice() else {
+            panic!("expected one module");
+        };
+        assert_eq!(module.variables.len(), 2, "count={count}");
+        let [crate::ir::Declaration::Comb(comb)] = module.declarations.as_slice() else {
+            panic!("expected one process");
+        };
+        let [crate::ir::Statement::For(statement)] = comb.statements.as_slice() else {
+            panic!("expected a retained loop");
+        };
+        assert_eq!(statement.body.len(), 1, "count={count}");
+        assert!(matches!(statement.body[0], crate::ir::Statement::Assign(_)));
+    }
 }

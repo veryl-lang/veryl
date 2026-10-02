@@ -2821,7 +2821,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut iteration_controls = range_controls.to_vec();
         for value in iterations {
             self.set_known_iterator_value(statement, value);
-            let result = self.eval_block(&statement.body, &iteration_controls);
+            let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
+            let result = self.eval_block(
+                body.as_deref().unwrap_or(&statement.body),
+                &iteration_controls,
+            );
             flow = result.flow;
             if flow != ProcedureFlow::Continue || self.guard_work.is_none() {
                 break;
