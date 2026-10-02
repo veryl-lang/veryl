@@ -5443,6 +5443,61 @@ fn inst_unpacked_array_slice_output_port_keeps_element_order() {
 }
 
 #[test]
+fn array_slice_negative_index_does_not_alias_a_large_array() {
+    let code = r#"
+        module Top(d: input logic[64], idx: input signed logic<4>,
+                   plus: output logic<2>, minus: output logic<2>, stepped: output logic<2>) {
+            inst p: Pair(i: d[idx+:2], o: plus);
+            inst m: Pair(i: d[idx-:2], o: minus);
+            inst s: Pair(i: d[idx step 2], o: stepped);
+        }
+        module Pair(i: input logic[2], o: output logic<2>) {
+            assign o = {i[1], i[0]};
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        &gate
+            .ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap()
+            .nets
+    };
+    for position in -8i32..8 {
+        for active in 0..64 {
+            let inputs = port("d")
+                .iter()
+                .enumerate()
+                .map(|(i, &n)| (n, i == active))
+                .chain(
+                    port("idx")
+                        .iter()
+                        .enumerate()
+                        .map(|(bit, &n)| (n, (position >> bit) & 1 != 0)),
+                )
+                .collect();
+            let mut memo = std::collections::HashMap::new();
+            for (name, start) in [
+                ("plus", position),
+                ("minus", position - 1),
+                ("stepped", position * 2),
+            ] {
+                for (offset, &net) in port(name).iter().enumerate() {
+                    let coordinate = start + offset as i32;
+                    assert_eq!(
+                        eval_net(&gate, net, &inputs, &mut memo),
+                        coordinate == active as i32,
+                        "position={position}, active={active}, port={name}, offset={offset}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn dynamic_array_slice_keeps_inner_indices_in_their_row() {
     let code = r#"
         module Top(d: input logic<4>[2, 4], idx: input signed logic<4>, o: output logic<8>) {

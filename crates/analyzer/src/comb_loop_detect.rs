@@ -342,7 +342,7 @@ fn summary_parent_access(
         .or_else(|| child.interface_members.get(&region.id))?;
     if let Some(actual) = instance_port_region_actual(inst, region.id, direction) {
         return translated_summary_access(region, variable, actual, ctx)
-            .map(|(array, packed, _)| (actual.parent, array, packed));
+            .and_then(|access| Some((actual.parent, access.array?, access.packed)));
     }
     let binding = inst
         .interface_bindings
@@ -359,7 +359,7 @@ fn summary_parent_access(
         },
         ctx,
     )
-    .map(|(array, packed, _)| (binding.parent, array, packed))
+    .and_then(|access| Some((binding.parent, access.array?, access.packed)))
 }
 
 #[derive(Default)]
@@ -1959,24 +1959,30 @@ fn map_summary_region(
     bit_part: &BitPartition,
     ctx: &mut Context,
 ) -> InstanceRegionMapping {
+    if let Some(access) = translated_summary_access(region, child, actual, ctx) {
+        return InstanceRegionMapping {
+            nodes: access
+                .array
+                .into_iter()
+                .flat_map(|array| bit_part.overlapping_access(actual.parent, array, access.packed))
+                .map(|key| MappedNode {
+                    key,
+                    offset: Some(access.offset),
+                    condition: PathCondition::default(),
+                })
+                .collect(),
+        };
+    }
     let mut keys = Vec::new();
-    let offset = if let Some((array, packed, offset)) =
-        translated_summary_access(region, child, actual, ctx)
-    {
+    for (array, packed) in var_reads(
+        actual.parent,
+        actual.index,
+        actual.select,
+        actual.member_select_domain,
+        ctx,
+    ) {
         keys.extend(bit_part.overlapping_access(actual.parent, array, packed));
-        Some(offset)
-    } else {
-        for (array, packed) in var_reads(
-            actual.parent,
-            actual.index,
-            actual.select,
-            actual.member_select_domain,
-            ctx,
-        ) {
-            keys.extend(bit_part.overlapping_access(actual.parent, array, packed));
-        }
-        None
-    };
+    }
     keys.sort_unstable();
     keys.dedup();
     InstanceRegionMapping {
@@ -1984,11 +1990,17 @@ fn map_summary_region(
             .into_iter()
             .map(|key| MappedNode {
                 key,
-                offset,
+                offset: None,
                 condition: PathCondition::default(),
             })
             .collect(),
     }
+}
+
+struct TranslatedSummaryAccess {
+    array: Option<ArraySpan>,
+    packed: PackedSpan,
+    offset: (isize, isize),
 }
 
 fn translated_summary_access(
@@ -1996,7 +2008,27 @@ fn translated_summary_access(
     child: &Variable,
     actual: ParentAccess<'_>,
     ctx: &mut Context,
-) -> Option<(ArraySpan, PackedSpan, (isize, isize))> {
+) -> Option<TranslatedSummaryAccess> {
+    if !actual.index.is_const() || !actual.select.is_const_with_range() {
+        return None;
+    }
+    let parent = ctx.variables.get(&actual.parent)?.clone();
+    let selected_shape = actual
+        .index
+        .selected_shape(
+            ctx,
+            &parent.r#type.array,
+            actual
+                .index
+                .indices
+                .last()
+                .map(|x| x.token_range())
+                .unwrap_or_default(),
+        )
+        .ok()?;
+    if child.r#type.array.total() != selected_shape.total() {
+        return None;
+    }
     let accesses = var_reads(
         actual.parent,
         actual.index,
@@ -2007,31 +2039,30 @@ fn translated_summary_access(
     let [(parent_array, parent_packed)] = accesses.as_slice() else {
         return None;
     };
-    if !actual
-        .index
-        .indices
-        .iter()
-        .all(|expression| expression.comptime().is_const)
-        || !actual.select.is_const_with_range()
-        || child.r#type.array.total() != Some(parent_array.length)
-        || child.total_width() != Some(parent_packed.length)
-    {
+    if child.total_width() != Some(parent_packed.length) {
         return None;
     }
-    let start = region.array.start.checked_add(parent_array.start)?;
-    let array = (region.array.end()? <= parent_array.length).then_some(ArraySpan {
-        start,
-        length: region.array.length,
-    })?;
+    let selection = actual.index.eval_selection(ctx, &parent.r#type.array)?;
+    let array = region
+        .array
+        .intersection(ArraySpan {
+            start: selection.result_start,
+            length: selection.length,
+        })
+        .and_then(|array| array.translated(selection.result_start, selection.source_start));
     let packed = region
         .packed
         .translated(0, parent_packed.start)?
         .intersection(*parent_packed)?;
     let offset = (
-        signed_difference(parent_array.start, 0)?,
+        signed_difference(selection.source_start, selection.result_start)?,
         signed_difference(parent_packed.start, 0)?,
     );
-    Some((array, packed, offset))
+    Some(TranslatedSummaryAccess {
+        array: array.and_then(|array| array.intersection(*parent_array)),
+        packed,
+        offset,
+    })
 }
 
 fn resolve_instance_mapping(

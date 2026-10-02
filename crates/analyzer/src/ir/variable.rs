@@ -1,4 +1,3 @@
-use crate::BigUint;
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
@@ -7,10 +6,12 @@ use crate::conv::utils::eval_width_select;
 use crate::ir::ff_table::AssignTarget;
 use crate::ir::{
     AssignDestination, Comptime, Expression, Factor, FfTable, MemberSelectDomain, Op, Shape,
-    ShapeRef, Type, TypeKind,
+    ShapeRef, Type, TypeKind, ValueVariant,
 };
 use crate::symbol::Affiliation;
 use crate::value::{Value, ValueBigUint};
+use crate::{BigInt, BigUint};
+use num_traits::ToPrimitive;
 use std::fmt;
 use veryl_parser::resource_table::{self, StrId};
 use veryl_parser::token_range::TokenRange;
@@ -356,6 +357,14 @@ pub struct VarIndex {
     pub range: Option<Box<(VarSelectOp, Expression)>>,
 }
 
+/// Valid part of an unpacked selection in storage and in the selected value.
+#[derive(Clone, Copy, Debug)]
+pub struct ArraySelectionRange {
+    pub source_start: usize,
+    pub result_start: usize,
+    pub length: usize,
+}
+
 impl VarIndex {
     pub fn new(indices: Vec<Expression>) -> Self {
         Self {
@@ -453,6 +462,10 @@ impl VarIndex {
         let mut ret = vec![];
         for x in &self.indices {
             let x = x.eval_value(context)?;
+            if x.signed() && x.is_semantically_not_positive() && x.to_usize_saturating() != Some(0)
+            {
+                return None;
+            }
             ret.push(x.to_usize_saturating()?);
         }
         Some(ret)
@@ -555,9 +568,9 @@ impl VarIndex {
         let size_bits = (usize::BITS - size.leading_zeros()) as usize;
         let width = base.comptime().expr_context.width.max(size_bits)
             + if matches!(op, VarSelectOp::Step) {
-                size_bits + 1
+                size_bits + 2
             } else {
-                1
+                2
             };
         let mut first = Expression::Binary(
             Box::new(base),
@@ -577,34 +590,46 @@ impl VarIndex {
                 Box::new(Comptime::create_unknown(token)),
             )
         };
+        let coordinate_constant = |value| {
+            let mut expression = Expression::create_value(Value::new(value, width, true), token);
+            expression.comptime_mut().r#type.signed = true;
+            expression
+        };
         first = match op {
             VarSelectOp::Colon | VarSelectOp::PlusColon => first,
             VarSelectOp::MinusColon => binary(
                 first,
                 Op::Sub,
-                Expression::create_value(
-                    Value::new(size.saturating_sub(1) as u64, width, false),
-                    token,
-                ),
+                coordinate_constant(size.saturating_sub(1) as u64),
             ),
-            VarSelectOp::Step => binary(first, Op::Mul, bound.clone()),
+            VarSelectOp::Step => binary(first, Op::Mul, coordinate_constant(size as u64)),
         };
         if element / stride != 0 {
             first = binary(
                 first,
                 Op::Add,
-                Expression::create_value(
-                    Value::new((element / stride) as u64, width, false),
-                    token,
-                ),
+                coordinate_constant((element / stride) as u64),
             );
         }
-        // A second cast seals the coordinate arithmetic from the unsigned
-        // comparison's context. In particular, -1 + 1 must reach element 0.
+        // Keep coordinate arithmetic signed, including subtraction from an
+        // unsigned base. The extra bits above preserve both its magnitude and
+        // its sign; the cast seals it from unsigned bounds comparisons.
+        let mut coordinate_type = Type::new(TypeKind::Logic);
+        coordinate_type.set_concrete_width(Shape::new(vec![Some(width)]));
+        coordinate_type.signed = true;
+        let mut target_type = Type::new(TypeKind::Type);
+        target_type.signed = true;
         first = binary(
             first,
             Op::As,
-            Expression::create_value(Value::new(width as u64, 32, false), token),
+            Expression::Term(Box::new(Factor::Value(Comptime {
+                value: ValueVariant::Type(coordinate_type),
+                r#type: target_type,
+                is_const: true,
+                is_global: true,
+                token,
+                ..Default::default()
+            }))),
         );
         first.eval_comptime(context, None);
         indices.push(first);
@@ -614,23 +639,76 @@ impl VarIndex {
 
     /// Exact flat interval, inclusive, for the currently evaluable selection.
     pub fn eval_range(&self, context: &mut Context, shape: &ShapeRef) -> Option<(usize, usize)> {
+        let range = self.eval_selection(context, shape)?;
+        Some((
+            range.source_start,
+            range
+                .source_start
+                .checked_add(range.length)?
+                .checked_sub(1)?,
+        ))
+    }
+
+    /// Clip in the selected dimension before flattening. An invalid prefix
+    /// selects no storage; an invalid slice element must not discard its valid
+    /// neighbors or shift their positions in the result.
+    pub fn eval_selection(
+        &self,
+        context: &mut Context,
+        shape: &ShapeRef,
+    ) -> Option<ArraySelectionRange> {
         if !self.is_range() {
-            return shape.calc_range(&self.eval_value(context)?);
+            let indices = self.eval_value(context)?;
+            if indices
+                .iter()
+                .zip(shape.iter())
+                .any(|(i, n)| n.is_some_and(|n| *i >= n))
+            {
+                return None;
+            }
+            let (start, end) = shape.calc_range(&indices)?;
+            return Some(ArraySelectionRange {
+                source_start: start,
+                result_start: 0,
+                length: end.checked_sub(start)?.checked_add(1)?,
+            });
         }
         let token = self.indices.last()?.token_range();
-        let count = self.selected_shape(context, shape, token).ok()?.total()?;
-        let index = self
-            .element_index(context, shape, 0, token)
-            .eval_value(context)?;
-        if index
+        let selected = self.selected_shape(context, shape, token).ok()?;
+        let dim = self.dimension() - 1;
+        let mut prefix = Self::new(self.indices[..dim].to_vec()).eval_value(context)?;
+        if prefix
             .iter()
             .zip(shape.iter())
             .any(|(i, n)| n.is_some_and(|n| *i >= n))
         {
             return None;
         }
-        let start = shape.calc_index(&index)?;
-        Some((start, start.checked_add(count)?.checked_sub(1)?))
+        let first =
+            self.element_index(context, shape, 0, token).indices[dim].eval_value(context)?;
+        if first.is_xz() {
+            return None;
+        }
+        let mut start = BigInt::from(first.payload().into_owned());
+        if first.signed() && first.payload().bit((first.width() - 1) as u64) {
+            start -= BigInt::from(1) << first.width();
+        }
+        let end = &start + BigInt::from(selected[0]?);
+        let valid_start = start.clone().max(BigInt::from(0));
+        let valid_end = end.min(BigInt::from(shape[dim]?));
+        if valid_start >= valid_end {
+            return None;
+        }
+        let stride = Shape::new(shape.iter().skip(dim + 1).copied().collect()).total()?;
+        let result_start = (&valid_start - start).to_usize()?.checked_mul(stride)?;
+        let length = (valid_end - &valid_start).to_usize()?.checked_mul(stride)?;
+        prefix.push(valid_start.to_usize()?);
+        let (source_start, _) = shape.calc_range(&prefix)?;
+        Some(ArraySelectionRange {
+            source_start,
+            result_start,
+            length,
+        })
     }
 
     /// Possible reads stay within any statically known outer-coordinate prefix.
@@ -1485,6 +1563,33 @@ mod tests {
         }
 
         ret
+    }
+
+    #[test]
+    fn array_slice_clips_in_its_dimension_and_retains_result_positions() {
+        let mut context = Context::default();
+        let shape = Shape::new(vec![Some(2), Some(2), Some(2)]);
+        for (row, first, op, expected) in [
+            (0, 0, VarSelectOp::MinusColon, Some((0, 2, 2))),
+            (1, 0, VarSelectOp::MinusColon, Some((4, 2, 2))),
+            (0, 1, VarSelectOp::PlusColon, Some((2, 0, 2))),
+            (1, 1, VarSelectOp::PlusColon, Some((6, 0, 2))),
+            (0, 2, VarSelectOp::PlusColon, None),
+            (2, 0, VarSelectOp::PlusColon, None),
+        ] {
+            let mut select = gen_var_select(&[row, first], Some(2));
+            select.1.as_mut().unwrap().0 = op;
+            let mut index = select.to_index();
+            for expression in index.expressions_mut() {
+                expression.eval_comptime(&mut context, None);
+            }
+            let range = index.eval_selection(&mut context, &shape);
+            assert_eq!(
+                range.map(|r| (r.source_start, r.result_start, r.length)),
+                expected,
+                "{index}"
+            );
+        }
     }
 
     #[test]

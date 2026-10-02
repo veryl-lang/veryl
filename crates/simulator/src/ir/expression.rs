@@ -2059,7 +2059,7 @@ pub fn build_linear_index_expr(
         .map(|x| x.comptime().expr_context.width)
         .max()
         .unwrap_or(32)
-        .max(32);
+        .max(64);
     let index_expr_context = ExpressionContext {
         width: index_width,
         signed: false,
@@ -2086,10 +2086,39 @@ pub fn build_linear_index_expr(
 
     let mut ret: Option<ProtoExpression> = None;
     let mut base: usize = 1;
+    let mut valid: Option<ProtoExpression> = None;
 
     for (i, dim_size) in array.iter().enumerate().rev() {
         let dim_size = dim_size.expect("array dimension size must be known");
         let idx_proto: ProtoExpression = Conv::conv(context, &index.indices[i])?;
+        // Extend each coordinate before comparing or flattening. Invalid inner
+        // coordinates must not alias the next row, and negative signed indices
+        // must not become small positive offsets.
+        let idx_proto = resize_to_width(idx_proto, index_width, index_expr_context);
+        let check = ProtoExpression::Binary {
+            x: Box::new(idx_proto.clone()),
+            op: Op::Less,
+            y: Box::new(ProtoExpression::Value {
+                value: Value::new(dim_size as u64, index_width, false),
+                width: index_width,
+                expr_context: index_expr_context,
+            }),
+            width: 1,
+            expr_context: index_expr_context,
+        };
+        valid = Some(match valid {
+            Some(previous) => ProtoExpression::Binary {
+                x: Box::new(previous),
+                op: Op::LogicAnd,
+                y: Box::new(check),
+                width: 1,
+                expr_context: ExpressionContext {
+                    width: 1,
+                    signed: false,
+                },
+            },
+            None => check,
+        });
 
         let mul_expr = if base == 1 {
             idx_proto
@@ -2124,38 +2153,20 @@ pub fn build_linear_index_expr(
     }
 
     let ret = ret.expect("non-empty array must produce index expression");
-    if ret.width() <= 64 {
-        return Ok(ret);
-    }
-    // Buffer addresses use a native-sized index. Check before narrowing so
-    // high bits cannot alias an in-bounds element (and JIT address arithmetic
-    // never receives an I128 operand).
     let native = ExpressionContext {
         width: 64,
         signed: false,
     };
-    let limit = |width| ProtoExpression::Value {
-        value: Value::new(base as u64, width, false),
-        width,
-        expr_context: ExpressionContext {
-            width,
-            signed: false,
-        },
-    };
-    let cond = ProtoExpression::Binary {
-        x: Box::new(ret.clone()),
-        op: Op::Less,
-        y: Box::new(limit(ret.width())),
-        width: 1,
-        expr_context: ExpressionContext {
-            width: ret.width(),
-            signed: false,
-        },
-    };
+    // Invalid coordinates produce the one-past-end sentinel understood by both
+    // dynamic reads and writes. Narrow only after checking all dimensions.
     Ok(ProtoExpression::Ternary {
-        cond: Box::new(cond),
+        cond: Box::new(valid.unwrap()),
         true_expr: Box::new(resize_to_width(ret, 64, native)),
-        false_expr: Box::new(limit(64)),
+        false_expr: Box::new(ProtoExpression::Value {
+            value: Value::new(base as u64, 64, false),
+            width: 64,
+            expr_context: native,
+        }),
         width: 64,
         expr_context: native,
     })

@@ -3794,6 +3794,123 @@ fn dynamic_array_slice_preserves_bounds_in_assignments_ports_and_calls() {
 }
 
 #[test]
+fn array_slice_negative_index_does_not_alias_a_large_array() {
+    let code = r#"
+    module Top(index: input signed logic<4>, plus: output logic<16>,
+               minus: output logic<16>, stepped: output logic<16>) {
+        var data: logic<8>[64];
+        for i in 0..64 :g { assign data[i] = 42; }
+        var p: logic<8>[2];
+        var m: logic<8>[2];
+        var s: logic<8>[2];
+        assign p = data[index+:2];
+        assign m = data[index-:2];
+        assign s = data[index step 2];
+        assign plus = {p[1], p[0]};
+        assign minus = {m[1], m[0]};
+        assign stepped = {s[1], s[0]};
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for index in -8i64..8 {
+            sim.set("index", Value::new((index as u64) & 15, 4, true));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            for (port, start) in [
+                ("plus", index),
+                ("minus", index - 1),
+                ("stepped", index * 2),
+            ] {
+                let mut payload = 0;
+                let mut mask = 0;
+                for offset in 0..2 {
+                    if (0..64).contains(&(start + offset)) {
+                        payload |= 42 << (offset * 8);
+                    } else if config.use_4state {
+                        mask |= 0xff << (offset * 8);
+                    }
+                }
+                assert_eq!(
+                    sim.get(port).unwrap(),
+                    Value::from_u128(payload, mask, 16, false),
+                    "{config:?}, index={index}, port={port}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn array_slice_partial_out_of_bounds_keeps_ff_reads() {
+    let code = r#"
+    module Top(clk: input clock, rst: input reset, seed: input logic<8>, o: output logic<8>) {
+        var data: logic<8>[2];
+        var selected: logic<8>[2];
+        always_ff {
+            if_reset {
+                data = '{0, 0};
+                selected = '{0, 0};
+            } else {
+                data = '{seed, seed + 1};
+                selected = data[0-:2];
+            }
+        }
+        assign o = selected[1];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        let mut expected = 0;
+        for seed in [10, 50, 100] {
+            sim.set("seed", Value::new(seed, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(expected, 8, false),
+                "{config:?}"
+            );
+            expected = seed;
+        }
+    }
+}
+
+#[test]
+fn array_slice_assignment_checks_each_destination_dimension() {
+    let code = r#"
+    module Top(index: input signed logic<4>, o: output logic<64>) {
+        var data: logic<8>[2, 2, 2];
+        let src: logic<8>[2] = '{9, 10};
+        always_comb {
+            data = '{'{'{1, 2}, '{3, 4}}, '{'{5, 6}, '{7, 8}}};
+            data[0][index] = src[0+:2];
+            o = {data[1][1][1], data[1][1][0], data[1][0][1], data[1][0][0],
+                 data[0][1][1], data[0][1][0], data[0][0][1], data[0][0][0]};
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for index in -8i64..8 {
+            sim.set("index", Value::new((index as u64) & 15, 4, true));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let expected = match index {
+                0 => 0x0807060504030a09,
+                1 => 0x080706050a090201,
+                _ => 0x0807060504030201,
+            };
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(expected, 64, false),
+                "{config:?}, index={index}"
+            );
+        }
+    }
+}
+
+#[test]
 fn array_slice_constant_function_and_singleton() {
     let code = r#"
     module Top(o: output logic<16>) {

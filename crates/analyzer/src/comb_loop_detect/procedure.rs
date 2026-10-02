@@ -2070,7 +2070,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         let index = self.receiver_index(id, index);
         let accesses = var_reads(id, &index, select, member_select_domain, &mut self.ctx);
-        if accesses.is_empty() {
+        if accesses.is_empty() && !(index.is_const() && select.is_const_with_range()) {
             self.status = self.status.max(AnalysisStatus::Partial);
         }
         let mut values = Vec::new();
@@ -3121,7 +3121,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 }?;
                                 destination.destination_offset_from(&source)
                             });
-                        let position_preserving = receiver.is_const() && accesses.len() == 1;
+                        let selected_array = if receiver.is_const() && accesses.len() == 1 {
+                            variable.as_ref().and_then(|variable| {
+                                receiver.eval_selection(&mut self.ctx, &variable.r#type.array)
+                            })
+                        } else {
+                            None
+                        };
                         if let Some(source_span) = requested.translated(0, low) {
                             for (idx, access) in &accesses {
                                 let source_array = if let Some(offset) = dynamic_array_offset {
@@ -3136,9 +3142,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                             )
                                         })
                                         .and_then(|requested| requested.intersection(*idx))
-                                } else if position_preserving {
+                                } else if let Some(selection) = selected_array {
                                     requested_array
-                                        .translated(0, idx.start)
+                                        .intersection(ArraySpan {
+                                            start: selection.result_start,
+                                            length: selection.length,
+                                        })
+                                        .and_then(|requested| {
+                                            requested.translated(
+                                                selection.result_start,
+                                                selection.source_start,
+                                            )
+                                        })
                                         .and_then(|requested| requested.intersection(*idx))
                                 } else {
                                     Some(*idx)
@@ -3172,11 +3187,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         // correspondence, not the selected packed positions.
                         let offset = PositionRelation {
                             array: dynamic_array_offset.or_else(|| {
-                                position_preserving
-                                    .then(|| {
-                                        isize::try_from(accesses[0].0.start).ok()?.checked_neg()
-                                    })
-                                    .flatten()
+                                selected_array.and_then(|selection| {
+                                    signed_difference(
+                                        selection.result_start,
+                                        selection.source_start,
+                                    )
+                                })
                             }),
                             packed: isize::try_from(low).ok().and_then(isize::checked_neg),
                         };

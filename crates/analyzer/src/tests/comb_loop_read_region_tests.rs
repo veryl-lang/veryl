@@ -302,6 +302,37 @@ fn array_slice_reads_preserve_element_dependencies_in_assignments_and_calls() {
 }
 
 #[test]
+fn array_slice_partial_out_of_bounds_preserves_dependency_positions() {
+    for selected in 0..2 {
+        for feedback in 0..2 {
+            for connection in [
+                format!(
+                    "var selected: logic[2]; assign selected = data[0-:2]; assign o = selected[{selected}];"
+                ),
+                format!(
+                    "var selected: logic[2]; assign selected = pass(data[0-:2]); assign o = selected[{selected}];"
+                ),
+                "inst u: Pick(i: data[0-:2], o: o);".to_owned(),
+            ] {
+                let code = format!(
+                        "module Pick(i: input logic[2], o: output logic) {{ assign o = i[{selected}]; }}
+                        module Top(o: output logic) {{
+                            type Pair = logic[2];
+                            function pass(i: input logic[2]) -> Pair {{ return i; }}
+                            var data: logic[2];
+                            assign data = '{{{a}, {b}}};
+                            {connection}
+                        }}",
+                        a = if feedback == 0 { "o" } else { "1'b0" },
+                        b = if feedback == 1 { "o" } else { "1'b0" },
+                    );
+                assert_exact_diagnostic(&code, selected == 1 && feedback == 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn large_array_slice_reads_stay_compact() {
     for feedback in [0, 1_000_000] {
         let code = format!(
