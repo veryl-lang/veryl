@@ -2601,6 +2601,14 @@ fn eval_factor_path_inner(
     generic_path.unalias(None);
     check_generic_refereence(context, &generic_path);
 
+    // An anonymous loop variable is also registered as `_`.
+    if generic_path.is_anonymous() {
+        let mut comptime = Comptime::create_unknown(token);
+        comptime.is_const = true;
+        comptime.is_global = true;
+        return Ok(ir::Factor::Anonymous(comptime));
+    }
+
     let found = if let Some(path) = generic_path.to_var_path()
         && let Some((var_id, comptime)) = context.find_path(&path)
     {
@@ -2788,11 +2796,6 @@ fn eval_factor_path_inner(
     } else if let Some(x) = generic_path.to_literal() {
         let x = x.eval_comptime(token);
         Ok(ir::Factor::Value(x))
-    } else if generic_path.is_anonymous() {
-        let mut comptime = Comptime::create_unknown(token);
-        comptime.is_const = true;
-        comptime.is_global = true;
-        Ok(ir::Factor::Anonymous(comptime))
     } else if let Ok(symbol) = symbol_table::resolve(&generic_path) {
         let is_inernal = context
             .current_namespace()

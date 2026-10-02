@@ -12290,6 +12290,7 @@ fn mismatch_case_label() {
     );
 }
 
+
 #[test]
 fn invalid_operand() {
     let code = r#"
@@ -22398,6 +22399,76 @@ fn sv_keyword_usage_loop_var_and_label() {
 
     let errors = analyze(code);
     assert!(matches!(errors[0], AnalyzerError::SvKeywordUsage { .. }));
+}
+
+#[test]
+fn anonymous_loop_var() {
+    let code = r#"
+    module ModuleA (
+        i_a: input  logic<8>,
+        o_x: output logic<8>,
+    ) {
+        always_comb {
+            o_x = 0;
+            for _ in 0..4 {
+                o_x += i_a;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic,
+    ) {
+        for _ in 0..1 :g {
+            assign o_x = 0;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let code = r#"
+    module ModuleA (
+        o_x: output logic<32>,
+    ) {
+        always_comb {
+            o_x = 0;
+            for _ in 0..2 {
+                o_x += _;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        matches!(errors[0], AnalyzerError::AnonymousIdentifierUsage { .. }),
+        "{errors:?}"
+    );
+
+    let code = r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        assign o_a = 0;
+    }
+    module ModuleB {
+        for _ in 0..2 :g {
+            inst u: ModuleA (
+                o_a: _,
+            );
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]

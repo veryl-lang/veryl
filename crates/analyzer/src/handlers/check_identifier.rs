@@ -67,7 +67,7 @@ impl CheckIdentifier {
     fn check(&mut self, token: &Token, kind: Kind) {
         let identifier = token.to_string();
 
-        if !matches!(kind, Kind::ClockDomain) && is_anonymous_token(token) {
+        if !matches!(kind, Kind::ClockDomain | Kind::LoopVar) && is_anonymous_token(token) {
             self.errors
                 .push(AnalyzerError::anonymous_identifier_usage(&token.into()));
         }

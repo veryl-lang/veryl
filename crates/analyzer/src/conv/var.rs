@@ -508,6 +508,11 @@ impl Conv<&Expression> for Vec<VarPathSelect> {
     fn conv(context: &mut Context, value: &Expression) -> IrResult<Self> {
         let mut ret = vec![];
 
+        // An anonymous loop variable is also registered as `_`.
+        if value.is_anonymous_expression() {
+            return Ok(ret);
+        }
+
         if let Some(x) = value.unwrap_factor() {
             match x {
                 Factor::IdentifierFactor(x) => {
