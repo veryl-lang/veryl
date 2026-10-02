@@ -427,8 +427,19 @@ impl Statement {
             }
             Statement::FunctionCall(x) => x.eval_assign(context, assign_table, assign_context),
             Statement::For(x) => {
-                for s in &x.body {
-                    s.eval_assign(context, assign_table, assign_context, base_tables);
+                if !super::peel::has_own_break(&x.body)
+                    && let Some(iterations) = x.range.eval_iter(context)
+                {
+                    for iteration in iterations {
+                        let body = super::peel::specialize_iteration(context, x, iteration);
+                        for s in body.as_deref().unwrap_or(&x.body) {
+                            s.eval_assign(context, assign_table, assign_context, base_tables);
+                        }
+                    }
+                } else {
+                    for s in &x.body {
+                        s.eval_assign(context, assign_table, assign_context, base_tables);
+                    }
                 }
             }
             Statement::TbMethodCall(x) => {
@@ -455,8 +466,19 @@ impl Statement {
             Statement::SystemFunctionCall(x) => x.gather_ff(context, table, decl, true),
             Statement::For(x) => {
                 x.range.gather_ff(context, table, decl, true);
-                for s in &x.body {
-                    s.gather_ff(context, table, decl);
+                if !super::peel::has_own_break(&x.body)
+                    && let Some(iterations) = x.range.eval_iter(context)
+                {
+                    for iteration in iterations {
+                        let body = super::peel::specialize_iteration(context, x, iteration);
+                        for s in body.as_deref().unwrap_or(&x.body) {
+                            s.gather_ff(context, table, decl);
+                        }
+                    }
+                } else {
+                    for s in &x.body {
+                        s.gather_ff(context, table, decl);
+                    }
                 }
             }
             Statement::TbMethodCall(_)
@@ -958,6 +980,19 @@ impl IfStatement {
         assign_context: AssignContext,
         base_tables: &[&AssignTable],
     ) {
+        if self.cond.comptime().is_const
+            && let Some(value) = self.cond.eval_value(context)
+        {
+            let side = if value.is_true() {
+                &self.true_side
+            } else {
+                &self.false_side
+            };
+            for statement in side {
+                statement.eval_assign(context, assign_table, assign_context, base_tables);
+            }
+            return;
+        }
         let mut true_table = AssignTable::new(context);
         let mut false_table = AssignTable::new(context);
 
