@@ -1982,6 +1982,23 @@ pub enum AnalyzerError {
     },
 
     #[diagnostic(
+        severity(Error),
+        code(non_constant_output_select),
+        help("use a constant index for the output connection"),
+        url("https://doc.veryl-lang.org/book/07_appendix/02_semantic_error.html#{}", self.code().unwrap())
+    )]
+    #[error("a select of an output port connection must be a constant")]
+    NonConstantOutputSelect {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+        #[related]
+        instance: Option<InstanceNote>,
+    },
+
+    #[diagnostic(
         severity(Warning),
         code(uncovered_branch),
         help(""),
@@ -2769,6 +2786,7 @@ impl AnalyzerError {
             AnalyzerError::TypeInferenceConflict { input, .. } => input,
             AnalyzerError::TypeInferenceNotSupported { input, .. } => input,
             AnalyzerError::UnassignableOutput { input, .. } => input,
+            AnalyzerError::NonConstantOutputSelect { input, .. } => input,
             AnalyzerError::UnassignVariable { input, .. } => input,
             AnalyzerError::UncoveredBranch { input, .. } => input,
             AnalyzerError::UndefinedIdentifier { input, .. } => input,
@@ -2912,6 +2930,7 @@ impl AnalyzerError {
             AnalyzerError::TooMuchEnumVariant { instance, .. } => instance,
             AnalyzerError::UnassignVariable { instance, .. } => instance,
             AnalyzerError::UnassignableOutput { instance, .. } => instance,
+            AnalyzerError::NonConstantOutputSelect { instance, .. } => instance,
             AnalyzerError::UncoveredBranch { instance, .. } => instance,
             AnalyzerError::UndefinedIdentifier { instance, .. } => instance,
             AnalyzerError::UnenclosedInnerIfExpression { instance, .. } => instance,
@@ -3041,6 +3060,7 @@ impl AnalyzerError {
             AnalyzerError::TooMuchEnumVariant { instance, .. } => instance.as_ref(),
             AnalyzerError::UnassignVariable { instance, .. } => instance.as_ref(),
             AnalyzerError::UnassignableOutput { instance, .. } => instance.as_ref(),
+            AnalyzerError::NonConstantOutputSelect { instance, .. } => instance.as_ref(),
             AnalyzerError::UncoveredBranch { instance, .. } => instance.as_ref(),
             AnalyzerError::UndefinedIdentifier { instance, .. } => instance.as_ref(),
             AnalyzerError::UnenclosedInnerIfExpression { instance, .. } => instance.as_ref(),
@@ -3170,6 +3190,7 @@ impl AnalyzerError {
             AnalyzerError::TooMuchEnumVariant { token_source, .. } => *token_source,
             AnalyzerError::UnassignVariable { token_source, .. } => *token_source,
             AnalyzerError::UnassignableOutput { token_source, .. } => *token_source,
+            AnalyzerError::NonConstantOutputSelect { token_source, .. } => *token_source,
             AnalyzerError::UncoveredBranch { token_source, .. } => *token_source,
             AnalyzerError::UndefinedIdentifier { token_source, .. } => *token_source,
             AnalyzerError::UnenclosedInnerIfExpression { token_source, .. } => *token_source,
@@ -4316,6 +4337,14 @@ impl AnalyzerError {
     }
     pub fn unassignable_output(token: &TokenRange) -> Self {
         AnalyzerError::UnassignableOutput {
+            input: source(token),
+            error_location: token.into(),
+            token_source: token.source(),
+            instance: None,
+        }
+    }
+    pub fn non_constant_output_select(token: &TokenRange) -> Self {
+        AnalyzerError::NonConstantOutputSelect {
             input: source(token),
             error_location: token.into(),
             token_source: token.source(),
