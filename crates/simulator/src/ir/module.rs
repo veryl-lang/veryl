@@ -5949,6 +5949,9 @@ pub(crate) fn peeled_declarations(
     src: &air::Module,
     analyzer_context: &mut veryl_analyzer::conv::Context,
 ) -> Option<Vec<air::Declaration>> {
+    if !veryl_analyzer::ir::peel::has_for_loop(&src.declarations) {
+        return None;
+    }
     let mut declarations = src.declarations.clone();
     let lowered = veryl_analyzer::ir::peel::lower_constant_loops(
         analyzer_context,

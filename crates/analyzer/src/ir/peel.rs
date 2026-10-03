@@ -64,6 +64,28 @@ pub fn has_break_loop(decls: &[Declaration]) -> bool {
         .any(|decl| matches!(decl, Declaration::Comb(x) if x.statements.iter().any(is_break_loop)))
 }
 
+fn contains_for(stmts: &[Statement]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Statement::For(_) => true,
+        Statement::If(x) => contains_for(&x.true_side) || contains_for(&x.false_side),
+        Statement::IfReset(x) => contains_for(&x.true_side) || contains_for(&x.false_side),
+        Statement::Case(x) => {
+            contains_for(&x.default) || x.arms.iter().any(|arm| contains_for(&arm.body))
+        }
+        _ => false,
+    })
+}
+
+/// Whether a combinational or sequential procedure contains a loop.
+/// Backends can skip copying declarations when no loop needs lowering.
+pub fn has_for_loop(decls: &[Declaration]) -> bool {
+    decls.iter().any(|decl| match decl {
+        Declaration::Comb(x) => contains_for(&x.statements),
+        Declaration::Ff(x) => contains_for(&x.statements),
+        _ => false,
+    })
+}
+
 /// Lower bounded constant loops for a backend that requires concrete write
 /// lanes. The caller owns a private copy; shared analysis IR stays compact.
 /// Loops containing a break remain available to the decided-loop peeler.
@@ -95,18 +117,6 @@ pub fn lower_constant_loop_body(
     stmts: &mut Vec<Statement>,
     statement_limit: usize,
 ) -> bool {
-    fn contains_for(stmts: &[Statement]) -> bool {
-        stmts.iter().any(|stmt| match stmt {
-            Statement::For(_) => true,
-            Statement::If(x) => contains_for(&x.true_side) || contains_for(&x.false_side),
-            Statement::IfReset(x) => contains_for(&x.true_side) || contains_for(&x.false_side),
-            Statement::Case(x) => {
-                contains_for(&x.default) || x.arms.iter().any(|arm| contains_for(&arm.body))
-            }
-            _ => false,
-        })
-    }
-
     fn lower(
         context: &mut Context,
         stmts: &[Statement],

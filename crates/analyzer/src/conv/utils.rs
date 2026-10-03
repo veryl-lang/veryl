@@ -1211,11 +1211,17 @@ pub fn eval_variable(
 }
 
 fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression) {
-    let comptime = expr.eval_comptime(context, None).clone();
+    let comptime = expr.eval_comptime(context, None);
+    if !context.in_if_reset || comptime.is_const {
+        return;
+    }
+    let token = comptime.token;
     // A constant-range iterator is elaborative for reset-value checks, but
     // remains a variable in the shared IR. Check a temporary expression so
     // each iteration still computes its own value at runtime.
-    let elaborative = if context.in_if_reset && !comptime.is_const {
+    let elaborative = if context.for_ranges.is_empty() {
+        false
+    } else {
         let mut specialized = Some(expr.clone());
         for (id, range) in context.for_ranges.clone() {
             let Some(iterations) = range.eval_iter(context) else {
@@ -1233,13 +1239,11 @@ fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression)
                 .and_then(|expr| ir::peel::specialize_expression(context, &expr, id, value));
         }
         specialized.is_some_and(|mut expr| expr.gather_context(context).is_const)
-    } else {
-        comptime.is_const
     };
-    if context.in_if_reset && !elaborative {
+    if !elaborative {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::ResetValue,
-            &comptime.token,
+            &token,
         ));
     }
 }
