@@ -10412,6 +10412,99 @@ fn unassign_variable() {
 }
 
 #[test]
+fn non_constant_output_select() {
+    // Icarus Verilog rejects a variable select on the destination of an output connection.
+    let code = r#"
+    module ModuleA (
+        index: input  logic,
+        bits : output logic<2>,
+        tail : output logic,
+    ) {
+        inst u: ModuleB (
+            o: {bits[index], tail},
+        );
+    }
+
+    module ModuleB (
+        o: output logic<2>,
+    ) {
+        assign o = 2'b10;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantOutputSelect { .. }))
+    );
+
+    let code = r#"
+    module ModuleA (
+        index: input  logic,
+        bits : output logic<4>,
+    ) {
+        inst u: ModuleB (
+            o: bits[index+:2],
+        );
+    }
+
+    module ModuleB (
+        o: output logic<2>,
+    ) {
+        assign o = 2'b10;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantOutputSelect { .. }))
+    );
+
+    // Constant selects, parameters and genvars stay valid, as do dynamic inputs.
+    let code = r#"
+    module ModuleA #(
+        param P: u32 = 1,
+    ) (
+        index: input  logic,
+        bits : output logic<4>,
+        tail : output logic<4>,
+    ) {
+        inst u0: ModuleB (
+            i: bits[index],
+            o: bits[1:0],
+        );
+        inst u1: ModuleB (
+            i: tail[index],
+            o: tail[P+:2],
+        );
+        for j in 0..2 :g {
+            inst u2: ModuleB (
+                i: 0,
+                o: tail[j][0],
+            );
+        }
+    }
+
+    module ModuleB (
+        i: input  logic,
+        o: output logic<2>,
+    ) {
+        assign o = {i, i};
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::NonConstantOutputSelect { .. }))
+    );
+}
+
+#[test]
 fn unassignable_output() {
     let code = r#"
     module ModuleA {
