@@ -16965,6 +16965,23 @@ fn runtime_loops(code: &str, module: &str) -> usize {
         .sum()
 }
 
+/// Native scheduling may lower small constant loops, but its private copy
+/// must stay bounded even when the shared IR has a large constant range.
+#[test]
+fn constant_loop_lowering_keeps_an_over_budget_loop() {
+    let code = r#"
+    module Top (a: input logic<32>, y: output logic<32>) {
+        always_comb {
+            y = 0;
+            for i in 0..40000 {
+                y = y + a;
+            }
+        }
+    }
+    "#;
+    assert_eq!(runtime_loops(code, "Top"), 1);
+}
+
 /// A carry-save adder tree whose step loop breaks on a local initialised from
 /// a parameter: the `break` and every guard are decided once the procedure is
 /// converted. The local's final value and a select of the iterator are read
@@ -18668,12 +18685,18 @@ fn for_static_in_always_ff_reset() {
         o2: output logic<8>,
         o3: output logic<8>,
     ) {
+        function reset_value(index: input i32) -> logic<8> {
+            return (index + 10) as 8;
+        }
         var data: logic<8> [4];
 
         always_ff (clk, rst) {
             if_reset {
-                for i in 0..4 {
+                for i in 0..2 {
                     data[i] = (i + 10) as 8;
+                }
+                for i in 2..4 {
+                    data[i] = reset_value(i);
                 }
             }
         }

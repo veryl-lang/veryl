@@ -96,8 +96,7 @@ fn count_writes_seq(
     result
 }
 
-/// Branches take per-key max; a loop counts one iteration, save for the
-/// partial writes `add_dst_write` raises.
+/// Branches take per-key max; repeated loop writes require dual-slot storage.
 fn count_writes_one(
     stmt: &air::Statement,
     ctx: &mut AnalyzerContext,
@@ -126,7 +125,12 @@ fn count_writes_one(
             merge_branches_max(&t, &f, &mut result);
         }
         Statement::For(f) => {
-            return count_writes_seq(&f.body, ctx, true);
+            let iterations = f.range.eval_iter(ctx);
+            if iterations.as_ref().is_some_and(Vec::is_empty) {
+                return result;
+            }
+            let repeated = iterations.as_ref().is_none_or(|values| values.len() > 1);
+            return count_writes_seq(&f.body, ctx, in_for || repeated);
         }
         Statement::FunctionCall(call) => {
             for outputs in call.outputs.values() {
@@ -248,16 +252,11 @@ fn add_dst_write(
         return;
     }
 
-    // A `for` still standing here has a runtime bound (a constant one is
-    // unrolled first), so one write site lands on the same slot repeatedly.  A
+    // A retained loop can write the same slot on successive iterations. A
     // packed FF merges a PARTIAL write against the slot's pre-edge value, which
     // keeps only the last repeat to land in a word; two writes earn the dual
     // slot the merges forward.  A whole element per iteration needs no merge.
-    let n = if in_for && (!dst.select.0.is_empty() || dst.select.1.is_some()) {
-        2
-    } else {
-        1
-    };
+    let n = if in_for { 2 } else { 1 };
 
     if let Some(idx_vec) = dst.index.eval_value(ctx)
         && let Some(flat) = variable.r#type.array.calc_index(&idx_vec)

@@ -226,7 +226,12 @@ impl Walk<'_> {
                             let val = Value::new(i as u64, total_width, x.var_type.signed);
                             var.set_value(&[], val, None);
                         }
-                        self.seq(&x.body, written);
+                        let body = if super::peel::has_own_break(&x.body) {
+                            None
+                        } else {
+                            super::peel::specialize_iteration(self.context, x, i)
+                        };
+                        self.seq(body.as_deref().unwrap_or(&x.body), written);
                     }
                 } else {
                     // Without concrete iterations there is no order to walk,

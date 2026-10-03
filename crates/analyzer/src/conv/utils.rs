@@ -1190,10 +1190,38 @@ pub fn eval_variable(
 
 fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression) {
     let comptime = expr.eval_comptime(context, None);
-    if context.in_if_reset && !comptime.is_const {
+    if !context.in_if_reset || comptime.is_const {
+        return;
+    }
+    let token = comptime.token;
+    // A constant-range iterator is elaborative for reset-value checks, but
+    // remains a variable in the shared IR. Check a temporary expression so
+    // each iteration still computes its own value at runtime.
+    let elaborative = if context.for_ranges.is_empty() {
+        false
+    } else {
+        let mut specialized = Some(expr.clone());
+        for (id, range) in context.for_ranges.clone() {
+            let Some(iterations) = range.eval_iter(context) else {
+                continue;
+            };
+            let Some(iteration) = iterations.first() else {
+                continue;
+            };
+            let variable = &context.variables[&id];
+            let Some(width) = variable.r#type.total_width() else {
+                continue;
+            };
+            let value = Value::new(*iteration as u64, width, variable.r#type.signed);
+            specialized = specialized
+                .and_then(|expr| ir::peel::specialize_expression(context, &expr, id, value));
+        }
+        specialized.is_some_and(|mut expr| expr.gather_context(context).is_const)
+    };
+    if !elaborative {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::ResetValue,
-            &comptime.token,
+            &token,
         ));
     }
 }
@@ -2118,8 +2146,7 @@ fn build_for_range_inner(
     }
 }
 
-/// Convert a `ForStatement` AST node into a runtime `ir::Statement::For`.
-/// Used for dynamic-range for-loops that cannot be unrolled at compile time.
+/// Preserve a procedural loop, including constant ranges, in the shared IR.
 pub fn build_for_statement(
     context: &mut Context,
     value: &ForStatement,
@@ -2154,7 +2181,10 @@ pub fn build_for_statement(
     );
     context.insert_variable(loop_var_id, variable);
 
-    let body: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
+    context.for_ranges.push((loop_var_id, for_range.clone()));
+    let body: IrResult<ir::StatementBlock> = Conv::conv(context, value.statement_block.as_ref());
+    context.for_ranges.pop();
+    let body = body?;
 
     Ok(ir::StatementBlock(vec![ir::Statement::For(Box::new(
         ir::ForStatement {

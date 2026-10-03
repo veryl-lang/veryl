@@ -735,7 +735,23 @@ fn collect_statement_spans(
                 collect_statement_spans(&statement.default, out, ctx);
             }
             Statement::For(statement) => {
-                collect_statement_spans(&statement.body, out, ctx);
+                // Storage boundaries still belong to this consumer. Keeping
+                // the common IR compact must not turn distinct constant
+                // iterations into one strong-write alias region.
+                if !crate::ir::peel::has_own_break(&statement.body)
+                    && let Some(iterations) = statement.range.eval_iter(ctx)
+                {
+                    for iteration in iterations {
+                        let body = crate::ir::peel::specialize_iteration(ctx, statement, iteration);
+                        collect_statement_spans(
+                            body.as_deref().unwrap_or(&statement.body),
+                            out,
+                            ctx,
+                        );
+                    }
+                } else {
+                    collect_statement_spans(&statement.body, out, ctx);
+                }
             }
             Statement::FunctionCall(call) => {
                 for input in call.inputs.values() {
