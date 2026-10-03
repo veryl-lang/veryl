@@ -71,7 +71,7 @@ __attribute__((visibility(\"default\"))) void veryl_set_wideops(const void* t) {
 const WIDEOPS_C_INLINE: &str = r##"
 #define VW_RD(p,i) (((const veryl_u64_ua*)(p))[(i)])
 #define VW_WR(p,i,v) (((veryl_u64_ua*)(p))[(i)] = (v))
-/* `native_bytes` returns 4 for widths <= 32, so a truncating `/ 8` would
+/* `native_bytes` is below 8 for widths <= 32, so a truncating `/ 8` would
    make every helper below a silent no-op.  Mirrors Rust-side `wide_words`. */
 #define VW_NW(nb) (((nb) + 7) / 8)
 static inline void vw_band(uint8_t* d,const uint8_t* a,const uint8_t* b,uint32_t nb){
@@ -269,7 +269,7 @@ fn wideops_table() -> WideOpsTable {
 // the whole block — unlike nested statement-expressions, whose locals would
 // dangle once each inner `({...})` closes.  The 64-bit chunks are accessed
 // through `veryl_u64_ua` (1-byte-aligned alias) on the buffer side, since wide
-// values can land at 4-byte-aligned offsets; the helpers themselves access
+// values can land at unaligned offsets; the helpers themselves access
 // memory unaligned.  2-state only; 4-state wide bails to None.
 
 thread_local! {
@@ -277,7 +277,7 @@ thread_local! {
 }
 /// 64-bit word count for a `native_bytes` size class — the length of the
 /// `uint64_t _wN[]` scratch that holds a value of that size.  Must round UP:
-/// `native_bytes` returns 4 for widths <= 32, and a truncating `/ 8` would
+/// `native_bytes` is below 8 for widths <= 32, and a truncating `/ 8` would
 /// declare a zero-length array whose word-0 store is out of bounds.
 fn wide_words(nb: usize) -> usize {
     nb.div_ceil(8)
@@ -2080,8 +2080,8 @@ fn emit_wide_reduce_unary(op: Op, x: &ProtoExpression) -> Option<String> {
 /// variable: funnel-shift + mask the `[lo .. lo+nbits)` range out of the
 /// little-endian u64 words at `buf + off`, producing a `uint64_t` C
 /// expression.  Mirrors Cranelift `emit_wide_bit_select_read_narrow`.
-/// Reads through `veryl_u64_ua` (the value can sit at a 4-byte-aligned
-/// offset).  `nbits` must be in 1..=64.
+/// Reads through `veryl_u64_ua`, since the value can sit at an unaligned
+/// offset. `nbits` must be in 1..=64.
 fn emit_wide_var_select_read(buf: &str, off: isize, lo: usize, nbits: usize) -> String {
     emit_wide_select_read_at(&format!("{buf} + {off:#x}"), lo, nbits)
 }
@@ -3735,8 +3735,8 @@ fn narrow_field_window(lo: usize, nbits: usize) -> Option<(usize, usize)> {
 /// container.  `None` leaves the caller on the 128-bit form.
 ///
 /// Bytes outside the field keep their old values, which is what the wide form
-/// does too, so `comb_values` ends up byte-identical.  Slot offsets are only
-/// 4-byte aligned in general, hence the unaligned typedefs.
+/// does too, so `comb_values` ends up byte-identical. Slot offsets carry no
+/// alignment guarantee, hence the unaligned typedefs.
 fn narrow_field_store(
     rhs: &str,
     buf: &str,
@@ -11174,9 +11174,9 @@ fn emit_value(value: &Value, width: usize) -> Option<String> {
 fn native_c_type(nb: usize) -> Option<&'static str> {
     match nb {
         1 => Some("uint8_t"),
-        2 => Some("uint16_t"),
-        4 => Some("uint32_t"),
-        8 => Some("uint64_t"),
+        2 => Some("veryl_u16_ua"),
+        4 => Some("veryl_u32_ua"),
+        8 => Some("veryl_u64_ua"),
         // 65-128 bit values use the GCC/clang __uint128_t extension (16-byte
         // storage, uint64 operands promote implicitly).  The pointer-cast type
         // must be the 1-byte-aligned alias `veryl_u128_ua` (C prologue): a
@@ -11433,8 +11433,8 @@ mod tests {
     #[test]
     fn emit_var_comb_u32() {
         assert_eq!(
-            emit_var_load(&VarOffset::Comb(0x100), 16).as_deref(),
-            Some("((uint64_t)*((const uint32_t*)(comb_values + 0x100)))"),
+            emit_var_load(&VarOffset::Comb(0x100), 32).as_deref(),
+            Some("((uint64_t)*((const veryl_u32_ua*)(comb_values + 0x100)))"),
         );
     }
 
@@ -11442,7 +11442,7 @@ mod tests {
     fn emit_var_ff_u64() {
         assert_eq!(
             emit_var_load(&VarOffset::Ff(0x40), 64).as_deref(),
-            Some("((uint64_t)*((const uint64_t*)(ff_values + 0x40)))"),
+            Some("((uint64_t)*((const veryl_u64_ua*)(ff_values + 0x40)))"),
         );
     }
 
@@ -11571,7 +11571,7 @@ mod tests {
         let s = emit_stmt(&ProtoStatement::Assign(a)).unwrap();
         // Comb store: direct offset, no shadow shift.
         assert!(s.contains("comb_values + 0x20"));
-        assert!(s.contains("uint32_t"));
+        assert!(s.contains("veryl_u32_ua"));
         assert!(s.contains("0xdeadbeefULL"));
     }
 
@@ -13710,7 +13710,7 @@ mod tests {
         // Clamp to num_elements - 1 == 3.  Comparison is on _idx_raw.
         assert!(s.contains("_idx_raw < 3 ?"));
         assert!(s.contains("comb_values + 0x100"));
-        assert!(s.contains("uint32_t"));
+        assert!(s.contains("veryl_u32_ua"));
         // Stride and clamped idx feed the address computation.
         assert!(s.contains("(intptr_t)4 * (intptr_t)_idx"));
     }
@@ -14451,7 +14451,7 @@ mod tests {
         assert!(s.contains("_idx_raw"));
         assert!(s.contains("_idx_raw < 3 ?"));
         assert!(s.contains("comb_values + 0x100"));
-        assert!(s.contains("uint32_t"));
+        assert!(s.contains("veryl_u32_ua"));
         assert!(s.contains("0xdeadbeefULL"));
     }
 
@@ -14901,7 +14901,7 @@ mod tests {
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
         assert!(
-            !s.contains("(const uint32_t*)(comb_values + 0x40)"),
+            !s.contains("(const uint8_t*)(comb_values + 0x40)"),
             "still loads the index from storage: {s}"
         );
         assert!(s.contains("_it0"), "lost the loop variable: {s}");
@@ -14930,7 +14930,7 @@ mod tests {
         };
         let s = emit_stmt(&ProtoStatement::For(for_stmt)).unwrap();
         assert!(
-            s.contains("(const uint32_t*)(comb_values + 0x40)"),
+            s.contains("(const uint8_t*)(comb_values + 0x40)"),
             "substituted an index the body overwrites: {s}"
         );
     }
@@ -15255,7 +15255,7 @@ mod tests {
 
     #[test]
     fn wide_helpers_act_on_a_sub_word_byte_count() {
-        // `native_bytes` returns 4 for widths <= 32, so `nb = 4` really does
+        // `native_bytes` is below 8 for widths <= 32, so `nb = 4` really does
         // reach these helpers.  A truncating `nb / 8` made them no-ops there,
         // leaving the destination at whatever it held — uninitialized stack
         // for a scratch declared without `= {0}`.
@@ -16451,9 +16451,9 @@ mod tests {
         let s = emit_stmt(&stmt).unwrap();
         assert!(!s.contains("if ("), "no comparisons should remain: {s}");
         // The element type follows the widest entry; the store follows the
-        // destination's native storage size (4 bytes for a 16-bit signal).
+        // destination's native storage size (2 bytes for a 16-bit signal).
         assert!(s.contains("static const uint16_t"), "{s}");
-        assert!(s.contains("*((uint32_t*)(comb_values + 0x80))"), "{s}");
+        assert!(s.contains("*((veryl_u16_ua*)(comb_values + 0x80))"), "{s}");
         // Slots 0..9 hold the arms; 10 is the "no arm matched" slot, and it
         // and every clamped value above it hold the default.
         let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
@@ -16564,8 +16564,8 @@ mod tests {
         let s = emit_stmt(&stmt).unwrap();
         assert!(!s.contains("if ("), "no comparisons should remain: {s}");
         assert!(s.contains("[22]"), "11 slots of 2: {s}");
-        assert!(s.contains("*((uint32_t*)(comb_values + 0x80))"), "{s}");
-        assert!(s.contains("*((uint32_t*)(comb_values + 0x90))"), "{s}");
+        assert!(s.contains("*((uint8_t*)(comb_values + 0x80))"), "{s}");
+        assert!(s.contains("*((uint8_t*)(comb_values + 0x90))"), "{s}");
         let body = s.split('{').nth(2).unwrap().split('}').next().unwrap();
         let cells: Vec<u64> = body
             .split(',')

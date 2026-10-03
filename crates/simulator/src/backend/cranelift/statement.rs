@@ -15,7 +15,7 @@ use crate::ir::{
 };
 use cranelift::codegen::ir::{Block, BlockArg};
 use cranelift::prelude::Value as CraneliftValue;
-use cranelift::prelude::types::{I32, I64, I128};
+use cranelift::prelude::types::{I8, I16, I32, I64, I128};
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlagsData};
 use veryl_analyzer::ir as air;
 use veryl_analyzer::value::ValueU64;
@@ -496,7 +496,7 @@ impl ProtoAssignDynamicStatement {
             };
             emit_log_push(context, builder, result, mask_result);
         } else {
-            // An 8-bit element has 4-byte storage, and its readers load all
+            // A 12-bit element has 2-byte storage, and its readers load all
             // of it trusting the bits above the width to be zero.
             let fills_storage = self.dst_width == nb * 8;
             let (payload_to_store, payload_for_log) = if fills_storage {
@@ -1154,12 +1154,18 @@ impl ProtoForStatement {
         nb: usize,
     ) {
         if nb <= 4 {
-            let v32 = builder.ins().ireduce(I32, val_i64);
+            // A narrow slot's neighbour starts right after it.
+            let ty = match nb {
+                1 => I8,
+                2 => I16,
+                _ => I32,
+            };
+            let v = builder.ins().ireduce(ty, val_i64);
             builder
                 .ins()
-                .store(MemFlagsData::trusted(), v32, base_addr, offset);
+                .store(MemFlagsData::trusted(), v, base_addr, offset);
             if context.use_4state {
-                let zero = builder.ins().iconst(I32, 0);
+                let zero = builder.ins().iconst(ty, 0);
                 builder
                     .ins()
                     .store(MemFlagsData::trusted(), zero, base_addr, offset + nb as i32);
