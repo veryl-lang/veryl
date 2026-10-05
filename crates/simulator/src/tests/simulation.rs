@@ -1763,6 +1763,52 @@ fn a_validate_run_counts_the_dispatches_it_compared() {
 }
 
 #[test]
+fn a_one_hot_encoder_or_chain_keeps_its_value() {
+    // Besides the plain terms: k = 0, a bare repeat (k = 2^W - 1), a repeated k
+    // and a constant with bits above W. `s` uses signed repeats, which sign-extend
+    // and must stay off the loop.
+    let code = r#"
+    module Top (
+        clk: input  clock    ,
+        x  : input  logic<16>,
+        o  : output logic<4> ,
+        s  : output logic<8> ,
+    ) {
+        assign o = TERMS;
+        assign s = SIGNED;
+    }
+    "#
+    .replace("TERMS", "({x[0] repeat 4} & 4'd0) | ({x[1] repeat 4} & 4'd1) | ({x[2] repeat 4} & 4'd2) | ({x[3] repeat 4} & 8'h13) | ({x[4] repeat 4} & 4'd4) | ({x[5] repeat 4} & 4'd5) | ({x[6] repeat 4} & 4'd6) | ({x[7] repeat 4} & 4'd7) | ({x[8] repeat 4} & 4'd8) | ({x[9] repeat 4} & 4'd9) | ({x[10] repeat 4} & 4'd10) | ({x[11] repeat 4} & 4'd11) | ({x[12] repeat 4} & 4'd12) | ({x[13] repeat 4} & 4'd13) | ({x[13] repeat 4} & 4'd13) | ({x[14] repeat 4} & 4'd14) | {x[15] repeat 4}")
+    .replace("SIGNED", &["$signed({x[7] repeat 3})"; 8].join(" | "));
+    let mut configs = Config::all();
+    if crate::backend::aot_c::cc_available() {
+        configs.push(aot_native_validate_config());
+    }
+    for config in configs {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for x in [
+            0u64, 1, 2, 0x8000, 0x0400, 0x0006, 0x8421, 0xffff, 0x1234, 0x0080,
+        ] {
+            sim.set("x", Value::new(x, 16, false));
+            sim.step(&Event::Clock(VarId::SYNTHETIC));
+            let want = (1..16).filter(|k| x >> k & 1 == 1).fold(0u64, |a, k| a | k);
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(want, 4, false),
+                "x={x:#x} under {config:?}"
+            );
+            let want_s = if x >> 7 & 1 == 1 { 0xff } else { 0 };
+            assert_eq!(
+                sim.get("s").unwrap(),
+                Value::new(want_s, 8, false),
+                "x={x:#x} under {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn sub_byte_fields_of_one_byte_compose_in_program_order() {
     // Sub-byte fields of ONE byte: each entry necessarily carries its
     // neighbours' bits, so only the commit's in-order last-write-wins makes
