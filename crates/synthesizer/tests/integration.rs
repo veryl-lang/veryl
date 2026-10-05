@@ -5578,3 +5578,107 @@ fn dynamic_array_slice_keeps_inner_indices_in_their_row() {
         }
     }
 }
+
+#[test]
+fn reset_loop_sets_every_array_element() {
+    // Regression: a reset write to an array element dropped every reset value
+    // of the FF, so the array's FFs all reset to 0.
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            we : input  logic,
+            idx: input  logic<7>,
+            d  : input  logic<2>,
+            q  : output logic<2>,
+        ) {
+            var ctr: logic<2> [100];
+            assign q = ctr[idx];
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..100 {
+                        ctr[i] = 2'b10;
+                    }
+                } else if we {
+                    ctr[idx] = d;
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    assert_eq!(gate.module.ffs.len(), 200);
+    assert_eq!(
+        gate.module.ffs.iter().filter(|f| f.reset_value).count(),
+        100
+    );
+}
+
+#[test]
+fn reset_of_a_struct_member_in_an_array_lands_on_the_member() {
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            idx: input  logic<2>,
+            q  : output logic<2>,
+        ) {
+            struct pair {
+                hi: logic,
+                lo: logic,
+            }
+            var arr: pair [4];
+            assign q = {arr[idx].hi, arr[idx].lo};
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..4 {
+                        arr[i].hi = 1'b1;
+                    }
+                } else {
+                    arr[idx].hi = ~arr[idx].hi;
+                    arr[idx].lo = ~arr[idx].lo;
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    let set: Vec<usize> = gate
+        .module
+        .ffs
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.reset_value)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(gate.module.ffs.len(), 8);
+    assert_eq!(set, vec![1, 3, 5, 7]);
+}
+
+#[test]
+fn reset_of_a_concatenated_destination_does_not_spill_into_other_elements() {
+    // The concatenation is not split into its destinations, so the block keeps
+    // no reset value rather than one smeared over arr[0] to arr[3].
+    let code = r#"
+        module Top (
+            clk: input  clock,
+            rst: input  reset,
+            idx: input  logic<2>,
+            q  : output logic<2>,
+        ) {
+            var arr: logic<2> [4];
+            assign q = arr[idx];
+            always_ff (clk, rst) {
+                if_reset {
+                    {arr[0], arr[1]} = 4'b1001;
+                } else {
+                    arr[idx] = ~arr[idx];
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    assert_eq!(gate.module.ffs.len(), 8);
+    assert!(gate.module.ffs[4..].iter().all(|f| !f.reset_value));
+}
