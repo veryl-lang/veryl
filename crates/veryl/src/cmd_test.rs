@@ -195,12 +195,22 @@ fn create_wave_dumper(
     Ok(dumper.with_path(path))
 }
 
+/// A guard, so the handoff also runs when `exec` fails or panics.
+struct DetachPendingCompiles;
+
+impl Drop for DetachPendingCompiles {
+    fn drop(&mut self) {
+        veryl_simulator::backend::aot_c::detach_pending_compiles();
+    }
+}
+
 impl CmdTest {
     pub fn new(opt: OptTest) -> Self {
         Self { opt }
     }
 
     pub fn exec(&self, metadata: &mut Metadata) -> Result<bool> {
+        let _detach = DetachPendingCompiles;
         // A dump wants every comb word.  These passes leave the words no later
         // reader needs holding stale or initial values, so waveforms would
         // disagree with a full settle while the run still passes.  Before

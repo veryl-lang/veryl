@@ -27,6 +27,11 @@ pub fn force_disable_localize() {
     emit::force_disable_localize();
 }
 
+/// Hands the AOT-C compiles still queued to a detached runner; call at exit.
+pub fn detach_pending_compiles() {
+    emit::detach_pending_compiles();
+}
+
 pub struct AotCBackend {
     async_mode: bool,
     /// When false, only whole-comb compile is attempted.

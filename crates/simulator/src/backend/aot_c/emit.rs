@@ -21,14 +21,14 @@ use crate::ir::{
 };
 use crate::{HashMap, HashSet};
 use std::cell::RefCell;
+use std::collections::BinaryHeap;
 use std::ffi::c_void;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use veryl_analyzer::ir::Op;
@@ -4911,6 +4911,33 @@ struct CompileJob {
     cell: AotCell,
 }
 
+// Largest source first: cold, longest-job-first shortens the makespan; warm,
+// the biggest module, where the run spends its time, loads before the small ones.
+impl PartialEq for CompileJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.src.len() == other.src.len()
+    }
+}
+
+impl Eq for CompileJob {}
+
+impl PartialOrd for CompileJob {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CompileJob {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.src.len().cmp(&other.src.len())
+    }
+}
+
+struct CompileQueue {
+    jobs: Mutex<BinaryHeap<CompileJob>>,
+    ready: Condvar,
+}
+
 /// Concurrent external `cc` cap — the `-jN` knob for the compile pool (see
 /// [`compile_pool`]).  Default `max(2, available_parallelism / 4)`, override
 /// with `VERYL_AOT_C_COMPILE_JOBS`.  Only a quarter of the cores because
@@ -4957,38 +4984,42 @@ fn renice_compile_thread() {
 fn renice_compile_thread() {}
 
 /// Lazily-started global pool of `compile_jobs()` workers draining a shared
-/// queue; returns the job sender.
+/// queue.
 ///
 /// In async mode each whole-module compile used to get its own detached
 /// `thread::spawn` → `cc`.  The simulator never blocks on them (it stays
 /// on Cranelift until the `.so` lands), so the ~220-test fast suite spawned
 /// `cc` faster than they finished — hundreds at once, load average over 100.
 /// The pool caps in-flight `cc` like `make -jN`.
-fn compile_pool() -> &'static Sender<CompileJob> {
-    static POOL: OnceLock<Sender<CompileJob>> = OnceLock::new();
+static POOL: OnceLock<Arc<CompileQueue>> = OnceLock::new();
+
+fn compile_pool() -> &'static CompileQueue {
     POOL.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel::<CompileJob>();
-        // Shared receiver behind a Mutex: a worker holds the lock only to
-        // dequeue, then releases it before compiling.  recv blocks under the
-        // lock only when the queue is empty, so this never serializes compiles.
-        let rx = Arc::new(Mutex::new(rx));
+        let queue = Arc::new(CompileQueue {
+            jobs: Mutex::new(BinaryHeap::new()),
+            ready: Condvar::new(),
+        });
         for _ in 0..compile_jobs() {
-            let rx = Arc::clone(&rx);
+            let queue = Arc::clone(&queue);
             let _ = thread::Builder::new()
                 .name("veryl-aot-cc".into())
                 .spawn(move || {
                     renice_compile_thread();
                     loop {
                         let job = {
-                            let guard = match rx.lock() {
-                                Ok(g) => g,
-                                Err(_) => break, // poisoned: drop this worker
+                            let Ok(mut jobs) = queue.jobs.lock() else {
+                                break; // poisoned: drop this worker
                             };
-                            guard.recv()
+                            loop {
+                                if let Some(job) = jobs.pop() {
+                                    break job;
+                                }
+                                jobs = match queue.ready.wait(jobs) {
+                                    Ok(g) => g,
+                                    Err(_) => return,
+                                };
+                            }
                         };
-                        // Err only if every sender dropped; the sender is
-                        // 'static, so this never fires — but exit cleanly.
-                        let Ok(job) = job else { break };
                         // Isolate a compile panic so it can't permanently shrink
                         // the pool (compile_source returns Err for all expected
                         // failures, so this only ever fires on a bug).
@@ -5000,7 +5031,7 @@ fn compile_pool() -> &'static Sender<CompileJob> {
                     }
                 });
         }
-        tx
+        queue
     })
 }
 
@@ -5018,8 +5049,12 @@ fn compile_or_spawn(src: String, async_mode: bool) -> AotCell {
             src,
             cell: Arc::clone(&cell),
         };
-        // A failed send just leaves the cell empty → Cranelift handles it.
-        let _ = compile_pool().send(job);
+        let pool = compile_pool();
+        // A poisoned queue just leaves the cell empty → Cranelift handles it.
+        if let Ok(mut jobs) = pool.jobs.lock() {
+            jobs.push(job);
+            pool.ready.notify_one();
+        }
     } else if let Ok(m) = compile_source(&src) {
         let _ = cell.set(m);
     }
@@ -5557,7 +5592,7 @@ fn is_temp_artifact(name: &str) -> bool {
     stem.starts_with("veryl_aot_")
         && pid.parse::<u64>().is_ok()
         && ctr.parse::<u64>().is_ok()
-        && matches!(ext, "c" | "so")
+        && matches!(ext, "c" | "so" | "job" | "list")
 }
 
 fn sweep_temp_artifacts(dir: &Path, cutoff: std::time::SystemTime) {
@@ -5780,16 +5815,8 @@ const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))"
 const CHUNK_DEF_PREFIX: &str =
     "__attribute__((noinline,visibility(\"hidden\"))) void veryl_aot_chunk_";
 
-/// `compile_source` with an explicit cache directory instead of resolving
-/// it from `VERYL_AOT_CACHE_DIR`/`XDG_CACHE_HOME`/`HOME`.  Tests pass a
-/// per-test dir here directly: the cache dir is a *process-global* env var,
-/// so mutating it from one test perturbs every other test compiling
-/// concurrently (libtest runs tests multi-threaded by default).  Passing it
-/// as an argument keeps each test hermetic without touching shared state.
-fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, String> {
-    fs::create_dir_all(cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
-    gc_orphan_temps(cache_dir);
-
+/// The compiler, its flags and the cache hash for `src`.
+fn compile_key(src: &str) -> (String, Vec<String>, String) {
     let cc_name = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
     // Full flag list — built once and used for *both* the cache key and the
     // actual invocation so they can never drift apart.
@@ -5847,6 +5874,20 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         std::env::consts::OS,
         src,
     ]);
+    (cc_name, flags, hash)
+}
+
+/// `compile_source` with an explicit cache directory instead of resolving
+/// it from `VERYL_AOT_CACHE_DIR`/`XDG_CACHE_HOME`/`HOME`.  Tests pass a
+/// per-test dir here directly: the cache dir is a *process-global* env var,
+/// so mutating it from one test perturbs every other test compiling
+/// concurrently (libtest runs tests multi-threaded by default).  Passing it
+/// as an argument keeps each test hermetic without touching shared state.
+fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, String> {
+    fs::create_dir_all(cache_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    gc_orphan_temps(cache_dir);
+
+    let (cc_name, flags, hash) = compile_key(src);
     let so_path = cache_dir.join(format!("veryl_aot_{hash}.so"));
 
     // One compiler per artifact hash, across processes and pool workers alike.
@@ -5865,42 +5906,31 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         CompileTicket::Published | CompileTicket::Unlocked => None,
     };
     if !matches!(ticket, CompileTicket::Published) && !so_path.exists() {
-        // Identical sources hash to the same `so_path`, so a `cc -o so_path`
-        // from one thread can be dlopened half-written by another. Compile to a
-        // unique temp, then `rename`/`mv` (atomic within the dir) to publish.
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static TMP_CTR: AtomicU64 = AtomicU64::new(0);
-        let uniq = format!(
-            "{}.{}",
-            std::process::id(),
-            TMP_CTR.fetch_add(1, Ordering::Relaxed)
-        );
-        let c_path = cache_dir.join(format!("veryl_aot_{hash}.c"));
-        let tmp_c = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.c"));
-        let tmp_so = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.so"));
-        // Where the compiler's own output goes: removed on success, left
-        // beside the kept `.c` on failure.
-        let log_path = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.log"));
-        fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
-
-        // Split units are compiled in parallel and linked; `tmp_c` above stays
-        // the source that gets published, so the cache entry keeps naming the
-        // whole module however it was built.
         #[cfg(unix)]
-        let unit_paths: Vec<PathBuf> = split_translation_units(src, tu_split_count(src))
-            .map(|units| {
-                units
-                    .iter()
-                    .enumerate()
-                    .map(|(i, u)| {
-                        let p = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.u{i}.c"));
-                        fs::write(&p, u).map(|_| p)
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()
-            .map_err(|e| format!("write split unit: {e}"))?
-            .unwrap_or_default();
+        let staged = stage_compile(
+            cache_dir,
+            src,
+            &CompileKey {
+                cc: &cc_name,
+                flags: &flags,
+                hash: &hash,
+            },
+            lock_path.as_deref(),
+        )?;
+        #[cfg(unix)]
+        let (tmp_c, log_path) = (staged.tmp_c.clone(), staged.log.clone());
+        #[cfg(not(unix))]
+        let (tmp_c, tmp_so, c_path, log_path) = {
+            let uniq = temp_infix();
+            let tmp_c = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.c"));
+            fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
+            (
+                tmp_c,
+                cache_dir.join(format!("veryl_aot_{hash}.{uniq}.so")),
+                cache_dir.join(format!("veryl_aot_{hash}.c")),
+                cache_dir.join(format!("veryl_aot_{hash}.{uniq}.log")),
+            )
+        };
 
         // The compile AND the publish run through one shell so the cache
         // entry lands even when this process exits first: a short run
@@ -5911,25 +5941,8 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         // shell-quoting territory.
         #[cfg(unix)]
         let out = {
-            let paths = CompileScriptPaths {
-                cc: &cc_name,
-                tmp_so: &tmp_so,
-                tmp_c: &tmp_c,
-                published_c: &c_path,
-                published_so: &so_path,
-                lock: lock_path.as_deref(),
-                log: &log_path,
-            };
             let mut cmd = Command::new("/bin/sh");
-            if unit_paths.is_empty() {
-                cmd.arg("-c")
-                    .arg(COMPILE_SCRIPT)
-                    .args(compile_script_args(&paths, &flags));
-            } else {
-                cmd.arg("-c")
-                    .arg(SPLIT_COMPILE_SCRIPT)
-                    .args(split_script_args(&paths, &flags, &unit_paths));
-            }
+            cmd.arg("-c").arg(staged.script).args(&staged.args);
             // Own process group: a group-delivered signal (Ctrl-C on the
             // run, a harness killing its group) must not take the publish
             // down with it.
@@ -6022,6 +6035,193 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         _lib: lib,
     })
 }
+
+fn temp_infix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Seeded per process: in a PID namespace consecutive runs share a pid,
+    // and a detached runner may still be compiling under the last run's names.
+    static TMP_CTR: OnceLock<AtomicU64> = OnceLock::new();
+    let ctr = TMP_CTR.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        AtomicU64::new(u64::from(nanos) << 16)
+    });
+    format!(
+        "{}.{}",
+        std::process::id(),
+        ctr.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+#[cfg(unix)]
+struct CompileKey<'a> {
+    cc: &'a str,
+    flags: &'a [String],
+    hash: &'a str,
+}
+
+/// One artifact's compile with its temp sources written: running
+/// `/bin/sh -c script args` compiles and publishes it.
+#[cfg(unix)]
+struct StagedCompile {
+    script: &'static str,
+    args: Vec<std::ffi::OsString>,
+    tmp_c: PathBuf,
+    log: PathBuf,
+    temps: Vec<PathBuf>,
+}
+
+#[cfg(unix)]
+fn stage_compile(
+    cache_dir: &Path,
+    src: &str,
+    key: &CompileKey,
+    lock: Option<&Path>,
+) -> Result<StagedCompile, String> {
+    let hash = key.hash;
+    // Identical sources hash to the same published path, so a `cc -o` straight
+    // to it could be dlopened half-written by another thread. Compile to a
+    // unique temp, then `mv` (atomic within the dir) to publish.
+    let uniq = temp_infix();
+    let c_path = cache_dir.join(format!("veryl_aot_{hash}.c"));
+    let so_path = cache_dir.join(format!("veryl_aot_{hash}.so"));
+    let tmp_c = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.c"));
+    let tmp_so = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.so"));
+    // Where the compiler's own output goes: removed on success, left
+    // beside the kept `.c` on failure.
+    let log = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.log"));
+    fs::write(&tmp_c, src).map_err(|e| format!("write {}: {}", tmp_c.display(), e))?;
+
+    // Split units are compiled in parallel and linked; `tmp_c` above stays
+    // the source that gets published, so the cache entry keeps naming the
+    // whole module however it was built.
+    let unit_paths: Vec<PathBuf> = split_translation_units(src, tu_split_count(src))
+        .map(|units| {
+            units
+                .iter()
+                .enumerate()
+                .map(|(i, u)| {
+                    let p = cache_dir.join(format!("veryl_aot_{hash}.{uniq}.u{i}.c"));
+                    fs::write(&p, u).map(|_| p)
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+        .map_err(|e| format!("write split unit: {e}"))?
+        .unwrap_or_default();
+
+    let paths = CompileScriptPaths {
+        cc: key.cc,
+        tmp_so: &tmp_so,
+        tmp_c: &tmp_c,
+        published_c: &c_path,
+        published_so: &so_path,
+        lock,
+        log: &log,
+    };
+    let (script, args) = if unit_paths.is_empty() {
+        (COMPILE_SCRIPT, compile_script_args(&paths, key.flags))
+    } else {
+        (
+            SPLIT_COMPILE_SCRIPT,
+            split_script_args(&paths, key.flags, &unit_paths),
+        )
+    };
+    let mut temps = vec![tmp_c.clone()];
+    temps.extend(unit_paths);
+    Ok(StagedCompile {
+        script,
+        args,
+        tmp_c,
+        log,
+        temps,
+    })
+}
+
+/// A running compile survives the exit on its own, but a queued one would be
+/// dropped, so a run shorter than the queue would never leave the cache warm.
+#[cfg(unix)]
+pub fn detach_pending_compiles() {
+    let Some(pool) = POOL.get() else {
+        return;
+    };
+    let mut jobs = Vec::new();
+    if let Ok(mut heap) = pool.jobs.lock() {
+        while let Some(job) = heap.pop() {
+            jobs.push(job);
+        }
+    }
+    if jobs.is_empty() {
+        return;
+    }
+    let Ok(cache_dir) = aot_c_cache_dir() else {
+        return;
+    };
+    let quote = |s: &std::ffi::OsStr| format!("'{}'", s.to_string_lossy().replace('\'', "'\\''"));
+    let mut list = String::new();
+    let mut seen = HashSet::default();
+    for job in &jobs {
+        let (cc, flags, hash) = compile_key(&job.src);
+        let so_path = cache_dir.join(format!("veryl_aot_{hash}.so"));
+        if !seen.insert(hash.clone()) || so_path.exists() {
+            continue;
+        }
+        let lock_path = cache_dir.join(format!("veryl_aot_{hash}.lock"));
+        let key = CompileKey {
+            cc: &cc,
+            flags: &flags,
+            hash: &hash,
+        };
+        let Ok(staged) = stage_compile(&cache_dir, &job.src, &key, Some(&lock_path)) else {
+            continue;
+        };
+        // `exec` keeps the pid written into the lock for the compile.
+        let temps: Vec<String> = staged.temps.iter().map(|t| quote(t.as_os_str())).collect();
+        let mut body = format!(
+            "rm -f \"$0\"\n[ -e {so} ] && {{ rm -f {t}; exit 0; }}\n( set -C; echo $$ > {lk} ) 2>/dev/null || {{ rm -f {t}; exit 0; }}\nexec /bin/sh -c {}",
+            quote(staged.script.as_ref()),
+            so = quote(so_path.as_os_str()),
+            lk = quote(lock_path.as_os_str()),
+            t = temps.join(" "),
+        );
+        for a in &staged.args {
+            body.push(' ');
+            body.push_str(&quote(a));
+        }
+        body.push('\n');
+        let job_path = cache_dir.join(format!("veryl_aot_{hash}.{}.job", temp_infix()));
+        if fs::write(&job_path, body).is_ok() {
+            list.push_str(&job_path.to_string_lossy());
+            list.push('\0');
+        }
+    }
+    if list.is_empty() {
+        return;
+    }
+    let list_path = cache_dir.join(format!("veryl_aot_handoff.{}.list", temp_infix()));
+    if fs::write(&list_path, list).is_err() {
+        return;
+    }
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c")
+        .arg(r#"nice -n "$1" xargs -0 -P "$2" -n 1 /bin/sh < "$3"; rm -f "$3""#)
+        .arg("sh")
+        .arg(compile_nice().to_string())
+        .arg(compile_jobs().to_string())
+        .arg(&list_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let _ = cmd.spawn();
+}
+
+#[cfg(not(unix))]
+pub fn detach_pending_compiles() {}
 
 /// Compile one source and publish it, releasing the compile lock (`$lk`) at
 /// the end — from the script, not just from `Drop`, because the shell outlives
