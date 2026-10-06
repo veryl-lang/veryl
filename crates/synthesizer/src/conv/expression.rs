@@ -468,13 +468,26 @@ fn synth_factor(
                         selectors.push((selector, size));
                     }
                     for (selector, size) in selectors.into_iter().rev() {
-                        let limit = build_constant(size as u64, selector.len() + 1);
-                        let extended = resize(selector.clone(), selector.len() + 1, false);
-                        let valid = arith::compare(ctx, &extended, &limit, Op::Less, false)?;
+                        // `dynamic_mux_tree` pads the branches past the last
+                        // element with zero, but stops once one branch is left
+                        // and ignores the selector bits above that. Only a
+                        // selector wider than it resolves needs its own check.
+                        let resolved = size.next_power_of_two().trailing_zeros() as usize;
+                        let valid = if selector.len() > resolved {
+                            let limit = build_constant(size as u64, selector.len() + 1);
+                            let extended = resize(selector.clone(), selector.len() + 1, false);
+                            Some(arith::compare(ctx, &extended, &limit, Op::Less, false)?)
+                        } else {
+                            None
+                        };
                         elements = elements
                             .chunks(size)
                             .map(|group| {
-                                arith::dynamic_mux_tree(ctx, group, &selector)
+                                let selected = arith::dynamic_mux_tree(ctx, group, &selector);
+                                let Some(valid) = valid else {
+                                    return selected;
+                                };
+                                selected
                                     .into_iter()
                                     .map(|n| ctx.add_cell(CellKind::And2, vec![n, valid]))
                                     .collect()
