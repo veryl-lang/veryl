@@ -85,6 +85,29 @@ pub fn convert_module_with_library(
     CONV_DEPTH.with(|d| d.set(d.get() + 1));
     let _depth_guard = DepthGuard;
 
+    // Gate conversion requires concrete write lanes (including RAM byte/bit
+    // masks). Lower only a backend-owned copy; common analysis keeps For nodes.
+    let mut lowered = module.clone();
+    let mut analyzer_context = veryl_analyzer::conv::Context::default();
+    analyzer_context.variables = module.variables.clone();
+    analyzer_context.functions = module.functions.clone();
+    veryl_analyzer::ir::peel::lower_constant_loops(
+        &mut analyzer_context,
+        module,
+        &mut lowered.declarations,
+        usize::MAX,
+    );
+    for function in lowered.functions.values_mut() {
+        for body in &mut function.functions {
+            veryl_analyzer::ir::peel::lower_constant_loop_body(
+                &mut analyzer_context,
+                &mut body.statements,
+                usize::MAX,
+            );
+        }
+    }
+    let module = &lowered;
+
     let timed = module.declarations.len() > 600 && env::var_os("VERYL_SYNTH_TIME").is_some();
     macro_rules! phase {
         ($label:expr, $e:expr) => {{

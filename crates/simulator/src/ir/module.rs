@@ -5942,18 +5942,26 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
     result
 }
 
-/// `src`'s declarations with the loops whose `break`s are decided peeled,
-/// or `None` when none is; `analyzer_context` holds `src`'s variables.
+/// A private native-simulator copy with bounded constant loops lowered and
+/// decided `break` loops peeled. Returns `None` when no loop changes;
+/// `analyzer_context` holds `src`'s variables.
 pub(crate) fn peeled_declarations(
     src: &air::Module,
     analyzer_context: &mut veryl_analyzer::conv::Context,
 ) -> Option<Vec<air::Declaration>> {
-    if !veryl_analyzer::ir::peel::has_break_loop(&src.declarations) {
+    if !veryl_analyzer::ir::peel::has_for_loop(&src.declarations) {
         return None;
     }
     let mut declarations = src.declarations.clone();
-    veryl_analyzer::ir::peel::peel_decided_loops(analyzer_context, src, &mut declarations)
-        .then_some(declarations)
+    let lowered = veryl_analyzer::ir::peel::lower_constant_loops(
+        analyzer_context,
+        src,
+        &mut declarations,
+        32768,
+    );
+    let peeled =
+        veryl_analyzer::ir::peel::peel_decided_loops(analyzer_context, src, &mut declarations);
+    (lowered || peeled).then_some(declarations)
 }
 
 /// The declarations of `src` the simulator builds from, and the `FfTable`

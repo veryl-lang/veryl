@@ -40,7 +40,7 @@ const VISIT_LIMIT: usize = 16384;
 const TRACKED_LIMIT: usize = 256;
 
 /// True when `stmts` hold a `break` of the loop they are the body of.
-fn has_own_break(stmts: &[Statement]) -> bool {
+pub(crate) fn has_own_break(stmts: &[Statement]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::Break => true,
         Statement::If(x) => has_own_break(&x.true_side) || has_own_break(&x.false_side),
@@ -62,6 +62,118 @@ pub fn has_break_loop(decls: &[Declaration]) -> bool {
     decls
         .iter()
         .any(|decl| matches!(decl, Declaration::Comb(x) if x.statements.iter().any(is_break_loop)))
+}
+
+fn contains_for(stmts: &[Statement]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Statement::For(_) => true,
+        Statement::If(x) => contains_for(&x.true_side) || contains_for(&x.false_side),
+        Statement::IfReset(x) => contains_for(&x.true_side) || contains_for(&x.false_side),
+        Statement::Case(x) => {
+            contains_for(&x.default) || x.arms.iter().any(|arm| contains_for(&arm.body))
+        }
+        _ => false,
+    })
+}
+
+/// Whether a combinational or sequential procedure contains a loop.
+/// Backends can skip copying declarations when no loop needs lowering.
+pub fn has_for_loop(decls: &[Declaration]) -> bool {
+    decls.iter().any(|decl| match decl {
+        Declaration::Comb(x) => contains_for(&x.statements),
+        Declaration::Ff(x) => contains_for(&x.statements),
+        _ => false,
+    })
+}
+
+/// Lower bounded constant loops for a backend that requires concrete write
+/// lanes. The caller owns a private copy; shared analysis IR stays compact.
+/// Loops containing a break remain available to the decided-loop peeler.
+pub fn lower_constant_loops(
+    context: &mut Context,
+    module: &Module,
+    declarations: &mut [Declaration],
+    statement_limit: usize,
+) -> bool {
+    if is_test_module(module) {
+        return false;
+    }
+    let mut changed = false;
+    for decl in declarations {
+        let stmts = match decl {
+            Declaration::Comb(x) => &mut x.statements,
+            Declaration::Ff(x) => &mut x.statements,
+            _ => continue,
+        };
+        changed |= lower_constant_loop_body(context, stmts, statement_limit);
+    }
+    changed
+}
+
+/// Lower constant loops in a backend-owned procedure or function body.
+/// Exceeding the caller's statement budget leaves the original body intact.
+pub fn lower_constant_loop_body(
+    context: &mut Context,
+    stmts: &mut Vec<Statement>,
+    statement_limit: usize,
+) -> bool {
+    fn lower(
+        context: &mut Context,
+        stmts: &[Statement],
+        budget: &mut usize,
+        changed: &mut bool,
+    ) -> Option<Vec<Statement>> {
+        let mut out = Vec::new();
+        for stmt in stmts {
+            *budget = budget.checked_sub(1)?;
+            if let Statement::For(x) = stmt
+                && !has_own_break(&x.body)
+                && let Some(iterations) = x.range.eval_iter(context)
+            {
+                for iteration in iterations {
+                    let body = specialize_iteration(context, x, iteration)?;
+                    out.extend(lower(context, &body, budget, changed)?);
+                }
+                *changed = true;
+                continue;
+            }
+            let mut stmt = stmt.clone();
+            match &mut stmt {
+                Statement::For(x) => x.body = lower(context, &x.body, budget, changed)?,
+                Statement::If(x) => {
+                    x.true_side = lower(context, &x.true_side, budget, changed)?;
+                    x.false_side = lower(context, &x.false_side, budget, changed)?;
+                }
+                Statement::IfReset(x) => {
+                    x.true_side = lower(context, &x.true_side, budget, changed)?;
+                    x.false_side = lower(context, &x.false_side, budget, changed)?;
+                }
+                Statement::Case(x) => {
+                    for arm in &mut x.arms {
+                        arm.body = lower(context, &arm.body, budget, changed)?;
+                    }
+                    x.default = lower(context, &x.default, budget, changed)?;
+                }
+                _ => {}
+            }
+            out.push(stmt);
+        }
+        Some(out)
+    }
+
+    if !contains_for(stmts) {
+        return false;
+    }
+    let mut budget = statement_limit;
+    let mut expanded = false;
+    if let Some(lowered) = lower(context, stmts, &mut budget, &mut expanded)
+        && expanded
+    {
+        *stmts = lowered;
+        true
+    } else {
+        false
+    }
 }
 
 /// Peels the decided loops of the `always_comb` declarations in `decls`, a
@@ -507,6 +619,46 @@ fn eval_range(context: &mut Context, env: &KnownValues, range: &ForRange) -> Opt
     Some(ret.map_or(Iterations::Runtime, Iterations::Known))
 }
 
+pub(crate) fn specialize_expression(
+    context: &mut Context,
+    expression: &Expression,
+    id: VarId,
+    value: Value,
+) -> Option<Expression> {
+    let mut expression = expression.clone();
+    let values = [(id, value)];
+    Subst {
+        context,
+        subs: &values,
+        analysis: true,
+    }
+    .expr(&mut expression)?;
+    Some(expression)
+}
+
+/// Specialize one iteration for a consumer that needs concrete positions.
+/// The shared IR keeps the original loop; this temporary body is discarded
+/// after the iteration and does not allocate per-iteration variables.
+pub(crate) fn specialize_iteration(
+    context: &mut Context,
+    statement: &ir::ForStatement,
+    iteration: usize,
+) -> Option<Vec<Statement>> {
+    let width = statement.var_type.total_width()?;
+    let values = [(
+        statement.var_id,
+        Value::new(iteration as u64, width, statement.var_type.signed),
+    )];
+    let mut body = statement.body.clone();
+    let mut subst = Subst {
+        context,
+        subs: &values,
+        analysis: true,
+    };
+    subst.stmts(&mut body)?;
+    Some(body)
+}
+
 /// Reads each iterator of the loops being peeled as its constant, as an
 /// ordinary unrolled loop has them, keeping the read's type and context, and
 /// folds each index and select made only of constants. A constant index or
@@ -515,11 +667,75 @@ fn eval_range(context: &mut Context, env: &KnownValues, range: &ForRange) -> Opt
 struct Subst<'a> {
     context: &'a mut Context,
     subs: &'a [(VarId, Value)],
+    analysis: bool,
 }
 
 impl<'a> Subst<'a> {
     fn new(context: &'a mut Context, subs: &'a [(VarId, Value)]) -> Self {
-        Self { context, subs }
+        Self {
+            context,
+            subs,
+            analysis: false,
+        }
+    }
+
+    fn call(&mut self, call: &mut ir::FunctionCall) -> Option<()> {
+        for input in call.inputs.values_mut() {
+            self.expr(input)?;
+        }
+        for outputs in call.outputs.values_mut() {
+            for output in outputs {
+                self.selector(
+                    output.id,
+                    &mut output.index,
+                    &mut output.select,
+                    &output.comptime,
+                )?;
+            }
+        }
+        Some(())
+    }
+
+    fn system_call(&mut self, call: &mut ir::SystemFunctionCall) -> Option<()> {
+        match &mut call.kind {
+            SystemFunctionKind::Bits(x)
+            | SystemFunctionKind::Clog2(x)
+            | SystemFunctionKind::Onehot(x)
+            | SystemFunctionKind::Signed(x)
+            | SystemFunctionKind::Unsigned(x) => self.expr(&mut x.0)?,
+            SystemFunctionKind::Size(x, y) => {
+                self.expr(&mut x.0)?;
+                if let Some(y) = y {
+                    self.expr(&mut y.0)?;
+                }
+            }
+            SystemFunctionKind::Readmemh(x, y) => {
+                self.expr(&mut x.0)?;
+                if let ir::system_function::Output::Local(outputs) = y {
+                    for output in outputs {
+                        self.selector(
+                            output.id,
+                            &mut output.index,
+                            &mut output.select,
+                            &output.comptime,
+                        )?;
+                    }
+                }
+            }
+            SystemFunctionKind::Display(xs) | SystemFunctionKind::Write(xs) => {
+                for x in xs {
+                    self.expr(&mut x.0)?;
+                }
+            }
+            SystemFunctionKind::Assert { cond, args, .. } => {
+                self.expr(&mut cond.0)?;
+                for x in args {
+                    self.expr(&mut x.0)?;
+                }
+            }
+            SystemFunctionKind::Finish => {}
+        }
+        Some(())
     }
 
     fn value_of(&self, id: VarId) -> Option<&Value> {
@@ -584,6 +800,8 @@ impl<'a> Subst<'a> {
                     self.stmts(&mut x.body)?;
                 }
                 Statement::Break | Statement::Null | Statement::Unsupported(_) => {}
+                Statement::FunctionCall(call) if self.analysis => self.call(call)?,
+                Statement::SystemFunctionCall(call) if self.analysis => self.system_call(call)?,
                 Statement::SystemFunctionCall(_)
                 | Statement::FunctionCall(_)
                 | Statement::TbMethodCall(_) => return None,
@@ -629,7 +847,7 @@ impl<'a> Subst<'a> {
     fn folded(&mut self, expr: &Expression) -> Option<Expression> {
         let mut reads = false;
         expr_reads(expr, &mut |_| reads = true);
-        if reads || expr.comptime().is_const {
+        if reads || matches!(expr, Expression::Term(x) if matches!(x.as_ref(), Factor::Value(_))) {
             return None;
         }
         let value = expr.eval_value(self.context)?;
@@ -666,7 +884,7 @@ impl<'a> Subst<'a> {
             }
             changed = true;
         }
-        if changed {
+        if changed && !self.analysis {
             self.check_in_range(id, index, select, comptime)?;
         }
         Some(())
@@ -685,7 +903,7 @@ impl<'a> Subst<'a> {
     }
 
     fn expr(&mut self, expr: &mut Expression) -> Option<()> {
-        match expr {
+        let result = match expr {
             Expression::Term(x) => {
                 if let Factor::Variable(id, ..) = x.as_ref()
                     && self.value_of(*id).is_some()
@@ -734,7 +952,15 @@ impl<'a> Subst<'a> {
                 }
                 Some(())
             }
+        };
+        result?;
+        if self.analysis
+            && (!expr_has_call(expr) || expr.gather_context(self.context).is_const)
+            && let Some(folded) = self.folded(expr)
+        {
+            *expr = folded;
         }
+        Some(())
     }
 
     fn factor(&mut self, factor: &mut Factor) -> Option<()> {
@@ -746,12 +972,14 @@ impl<'a> Subst<'a> {
             Factor::HierVariable(x) => {
                 (!self.selector_reads_iter(&x.index, &x.select)).then_some(())
             }
+            Factor::SystemFunctionCall(x) if self.analysis => self.system_call(x),
             Factor::SystemFunctionCall(x) => match &mut x.kind {
                 SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
                     self.expr(&mut input.0)
                 }
                 _ => Some(()),
             },
+            Factor::FunctionCall(call) if self.analysis => self.call(call),
             Factor::FunctionCall(_) => None,
             Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => Some(()),
         }

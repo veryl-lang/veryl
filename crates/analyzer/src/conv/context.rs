@@ -81,6 +81,9 @@ impl Default for Config {
 #[derive(Default)]
 pub struct Context {
     pub config: Config,
+    /// Constant procedural ranges in scope while converting a retained body.
+    /// Used to prove a condition uniform without duplicating that body.
+    pub(crate) for_ranges: Vec<(VarId, crate::ir::ForRange)>,
     pub var_id: VarId,
     pub var_paths: HashMap<VarPath, (VarId, Comptime)>,
     pub func_paths: HashMap<FuncPath, VarId>,

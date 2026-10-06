@@ -113,6 +113,38 @@ fn simple_dff() {
 }
 
 #[test]
+fn constant_reset_loop_folds_iterator_dependent_function_calls() {
+    let code = r#"
+        module Top (
+            clk: input clock,
+            rst: input reset,
+            d: input logic<8>,
+            q: output logic<8>,
+        ) {
+            function reset_value(index: input i32) -> logic<8> {
+                return (index + 10) as 8;
+            }
+            always_ff (clk, rst) {
+                if_reset {
+                    for i in 0..4 {
+                        q = reset_value(i);
+                    }
+                } else {
+                    q = d;
+                }
+            }
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize retained reset loop");
+    assert_eq!(gate.module.ffs.len(), 8);
+    for ff in &gate.module.ffs {
+        let (_, bit) = ff.origin.expect("output bit origin");
+        assert_eq!(ff.reset_value, (13 >> bit) & 1 != 0, "bit={bit}");
+    }
+}
+
+#[test]
 fn ripple_carry_adder() {
     let code = r#"
         module Top (
