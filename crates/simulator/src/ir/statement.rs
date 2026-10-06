@@ -51,7 +51,7 @@ fn const_array_operand(expr: &air::Expression) -> Option<(&air::Comptime, &[Valu
 
 /// Array shape an operand still has after its index prefix -- `s[0]` against
 /// `logic<8> [2, 3]` leaves `[3]`. `None` when there is no element list to
-/// expand over: a scalar, or a prefix that isn't constant.
+/// expand over: a scalar or a fully indexed element.
 fn remaining_array_shape(
     context: &mut Context,
     id: &air::VarId,
@@ -59,7 +59,7 @@ fn remaining_array_shape(
 ) -> Option<air::Shape> {
     let shape = &context.scope().variable_meta.get(id)?.r#type.array;
     let dim = index.dimension();
-    if dim >= shape.dims() || !index.is_const() {
+    if dim >= shape.dims() {
         return None;
     }
     Some(air::Shape::new(shape.as_slice()[dim..].to_vec()))
@@ -115,15 +115,21 @@ pub(crate) fn array_literal_element_exprs(
     // k-th entry belongs to the k-th element.  A non-empty `select` means the
     // literal filled a packed vector rather than the array; that is not this
     // wiring.
-    if array_exprs.len() != elements || array_exprs.iter().any(|x| !x.select.is_empty()) {
+    if array_exprs.iter().any(|x| !x.select.is_empty()) {
         return None;
     }
 
     let mut out = Vec::with_capacity(elements);
     for array_expr in &array_exprs {
-        out.push(Conv::conv(context, &array_expr.expr).ok()?);
+        if let Some(values) =
+            super::expression::array_slice_elements(context, &array_expr.expr).ok()?
+        {
+            out.extend(values);
+        } else {
+            out.push(Conv::conv(context, &array_expr.expr).ok()?);
+        }
     }
-    Some(out)
+    (out.len() == elements).then_some(out)
 }
 
 #[derive(Clone)]
@@ -3811,7 +3817,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                 let tb_ret: Option<(VarId, RetWidthCheck)> = match &x.ret {
                     None => None,
                     Some(dst) => {
-                        if dst.index.0.is_empty()
+                        if dst.index.indices.is_empty()
                             && dst.select.0.is_empty()
                             && dst.select.1.is_none()
                         {
@@ -4059,9 +4065,37 @@ fn conv_assign_statements(
             let dst0 = &src.dst[0];
             if let Some(dst_shape) = remaining_array_shape(context, &dst0.id, &dst0.index) {
                 let total: usize = dst_shape.iter().map(|d| d.unwrap_or(1)).product();
+                if let Some(elements) = super::expression::array_slice_elements(context, &src.expr)?
+                {
+                    if elements.len() != total {
+                        return Err(SimulatorError::unsupported_description(&src.token));
+                    }
+                    let mut result = Vec::with_capacity(total);
+                    let elements = elements
+                        .into_iter()
+                        .map(|expr| super::expression::snapshot_expression(context, expr))
+                        .collect::<Vec<_>>();
+                    let mut sampled_dst = dst0.clone();
+                    super::expression::snapshot_selectors(context, &mut sampled_dst.index.indices)?;
+                    super::expression::snapshot_selectors(context, &mut sampled_dst.select.0)?;
+                    for (i, expr) in elements.into_iter().enumerate() {
+                        let mut dst = sampled_dst.clone();
+                        dst.index.append(&air::VarIndex::from_index(i, &dst_shape));
+                        dst.comptime.r#type.array.clear();
+                        let assign =
+                            ProtoStatement::conv_local_assignment(context, src, &dst, Some(expr))?;
+                        result.push(assign);
+                    }
+                    if in_initial {
+                        append_ff_next_copies(&mut result);
+                    }
+                    return Ok(result);
+                }
 
-                if let air::Expression::Term(factor) = &src.expr
+                if dst0.index.is_const()
+                    && let air::Expression::Term(factor) = &src.expr
                     && let air::Factor::Variable(rhs_id, rhs_index, _, _) = factor.as_ref()
+                    && rhs_index.is_const()
                     && let Some(rhs_shape) = remaining_array_shape(context, rhs_id, rhs_index)
                     && rhs_shape.iter().map(|d| d.unwrap_or(1)).product::<usize>() == total
                 {
@@ -4098,7 +4132,8 @@ fn conv_assign_statements(
                 // so SystemVerilog replicates it into every element, and the
                 // single-statement path below, which needs one destination
                 // shape to size it against, declines the design instead.
-                if dst0.select.is_empty()
+                if dst0.index.is_const()
+                    && dst0.select.is_empty()
                     && let air::Expression::Term(factor) = &src.expr
                     && let air::Factor::Value(comptime) = factor.as_ref()
                     && comptime.r#type.array.is_empty()
@@ -4127,7 +4162,8 @@ fn conv_assign_statements(
                 }
 
                 // A const array on the RHS (`s = pk::TBL;`).
-                if dst0.select.is_empty()
+                if dst0.index.is_const()
+                    && dst0.select.is_empty()
                     && let Some((comptime, values)) = const_array_operand(&src.expr)
                 {
                     if values.len() != total {
@@ -4165,7 +4201,8 @@ fn conv_assign_statements(
                 // An array-returning call on the RHS (`state = round(state);`).
                 // Inlined once: re-converting the call per element would
                 // inline the body N times.
-                if dst0.select.is_empty()
+                if dst0.index.is_const()
+                    && dst0.select.is_empty()
                     && let air::Expression::Term(factor) = &src.expr
                     && let air::Factor::FunctionCall(call) = factor.as_ref()
                 {
@@ -4651,7 +4688,19 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         }
 
         // TODO multiple dst
-        let dst = &src.dst[0];
+        Self::conv_local_assignment(context, src, &src.dst[0], None)
+    }
+}
+
+impl ProtoStatement {
+    /// Aggregate lowering supplies an already sampled RHS for each projected
+    /// destination. Keep address handling and FF mirroring on the scalar path.
+    fn conv_local_assignment(
+        context: &mut Context,
+        src: &air::AssignStatement,
+        dst: &air::AssignDestination,
+        rhs: Option<ProtoExpression>,
+    ) -> Result<Self, SimulatorError> {
         let id = dst.id;
         let in_initial = context.in_initial;
         let in_comb = context.in_comb;
@@ -4732,7 +4781,10 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
                 VarOffset::Comb(current_offset)
             };
 
-            let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+            let mut expr = match rhs {
+                Some(expr) => expr,
+                None => Conv::conv(context, &src.expr)?,
+            };
             size_literal_rhs(
                 &mut expr,
                 select,
@@ -4796,7 +4848,10 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
             };
 
             let index_proto = build_linear_index_expr(context, &array_shape, &dst.index)?;
-            let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
+            let mut expr = match rhs {
+                Some(expr) => expr,
+                None => Conv::conv(context, &src.expr)?,
+            };
             size_literal_rhs(
                 &mut expr,
                 select,
@@ -5064,6 +5119,30 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
                 continue;
             }
 
+            if let Some(arg_meta) = arg_meta_clone.as_ref()
+                && let Some(elements) = super::expression::array_slice_elements(context, expr)?
+            {
+                if elements.len() != arg_meta.elements.len() {
+                    return Err(SimulatorError::unsupported_description(&src.comptime.token));
+                }
+                result.append(&mut context.pending_statements);
+                for (element, mut expr) in arg_meta.elements.iter().zip(elements) {
+                    size_literal_rhs(&mut expr, None, None, arg_meta.width);
+                    result.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: element.current,
+                        dst_width: arg_meta.width,
+                        select: None,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: 0,
+                        comb_direct: false,
+                        token: src.comptime.token,
+                    }));
+                }
+                continue;
+            }
+
             // Array argument fed by a const array (`f(pk::TBL)`).
             if let Some(arg_meta) = arg_meta_clone.as_ref()
                 && let Some(exprs) = const_array_element_exprs(expr, arg_meta.elements.len())
@@ -5096,7 +5175,7 @@ impl Conv<&FunctionCall> for Vec<ProtoStatement> {
             {
                 let parent_scope = context.scope();
                 if let Some(parent_meta) = parent_scope.variable_meta.get(parent_id).cloned() {
-                    let base_index = if index.0.is_empty() {
+                    let base_index = if index.indices.is_empty() {
                         Some(0)
                     } else if let Some(idx_vals) =
                         index.eval_value(&mut parent_scope.analyzer_context)

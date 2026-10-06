@@ -731,8 +731,14 @@ impl AssignDestination {
                 return;
             }
             if let Some(index) = self.index.eval_value(context) {
-                if let Some(index) = variable.r#type.array.calc_index(&index) {
-                    table.insert_assigned(self.id, index, decl);
+                if index.is_empty() && variable.r#type.is_array() {
+                    if let Some(total) = variable.r#type.total_array() {
+                        table.insert_assigned_whole(self.id, total, decl);
+                    }
+                } else if let Some((start, end)) = variable.r#type.array.calc_range(&index) {
+                    for index in start..=end {
+                        table.insert_assigned(self.id, index, decl);
+                    }
                 }
             } else if let Some(total_array) = variable.r#type.total_array() {
                 table.insert_assigned_whole(self.id, total_array, decl);
@@ -743,8 +749,14 @@ impl AssignDestination {
     pub fn gather_ff_comb_assign(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
         if let Some(variable) = context.get_variable_info(self.id) {
             if let Some(index) = self.index.eval_value(context) {
-                if let Some(index) = variable.r#type.array.calc_index(&index) {
-                    table.insert_assigned_comb(self.id, index, decl);
+                if index.is_empty() && variable.r#type.is_array() {
+                    if let Some(total) = variable.r#type.total_array() {
+                        table.insert_assigned_comb_whole(self.id, total, decl);
+                    }
+                } else if let Some((start, end)) = variable.r#type.array.calc_range(&index) {
+                    for index in start..=end {
+                        table.insert_assigned_comb(self.id, index, decl);
+                    }
                 }
             } else if let Some(total_array) = variable.r#type.total_array() {
                 table.insert_assigned_comb_whole(self.id, total_array, decl);
@@ -837,7 +849,27 @@ pub struct AssignStatement {
 
 impl AssignStatement {
     pub fn eval_value(&self, context: &mut Context) {
-        if let Some(value) = self.expr.eval_value(context) {
+        if let Some(dst) = self.dst.first()
+            && self.expr.comptime().r#type.is_array()
+            && let Some(count) = self.expr.comptime().r#type.total_array()
+            && let Some(values) = super::function::array_arg_values(context, &self.expr, count)
+            && let Some(prefix) = dst.index.eval_value(context)
+            && let Some(variable) = context.variables.get(&dst.id)
+            && let Some((start, end)) = variable.r#type.array.calc_range(&prefix)
+            && end - start + 1 == values.len()
+        {
+            let shape = variable.r#type.array.clone();
+            let r#type = variable.r#type.clone();
+            let range = dst.select.eval_value(context, &r#type, false);
+            for (offset, value) in values.into_iter().enumerate() {
+                let index = VarIndex::from_index(start + offset, &shape)
+                    .eval_value(context)
+                    .unwrap();
+                if let Some(variable) = context.variable_mut(&dst.id) {
+                    variable.set_value(&index, value, range);
+                }
+            }
+        } else if let Some(value) = self.expr.eval_value(context) {
             // TODO multiple dst
             if let Some(index) = self.dst[0].index.eval_value(context)
                 && let Some((beg, end)) =

@@ -242,14 +242,7 @@ pub(super) fn var_reads(
 }
 
 fn array_access_span(index: &VarIndex, r#type: &Type, ctx: &mut Context) -> Option<ArraySpan> {
-    let prefix_len = index
-        .0
-        .iter()
-        .take_while(|expression| expression.comptime().is_const)
-        .count();
-    let prefix = VarIndex(index.0[..prefix_len].to_vec());
-    let values = prefix.eval_value(ctx)?;
-    let (start, inclusive_end) = r#type.array.calc_range(&values)?;
+    let (start, inclusive_end) = index.read_range(ctx, &r#type.array)?;
     Some(ArraySpan {
         start,
         length: inclusive_end.checked_sub(start)?.checked_add(1)?,

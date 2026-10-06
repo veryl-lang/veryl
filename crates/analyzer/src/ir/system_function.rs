@@ -187,7 +187,7 @@ fn create_output(
     if dst.is_empty()
         && let Expression::Term(factor) = &expr
         && let Factor::HierVariable(hier) = factor.as_ref()
-        && hier.index.0.is_empty()
+        && hier.index.indices.is_empty()
         && hier.select.is_empty()
     {
         return Output::Hier(hier.clone());

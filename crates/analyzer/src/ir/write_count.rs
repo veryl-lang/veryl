@@ -27,21 +27,19 @@ use crate::value::{Value, ValueBigUint};
 #[derive(Clone, Debug, Default)]
 pub struct UnsafeSelfReads {
     elements: HashMap<(usize, VarId), HashSet<usize>>,
-    /// Every element below the length.
-    whole: HashMap<(usize, VarId), usize>,
+    /// Contiguous reads remain intervals, including whole-array accesses.
+    ranges: HashMap<(usize, VarId), Vec<std::ops::Range<usize>>>,
 }
 
 impl UnsafeSelfReads {
     pub fn contains(&self, decl: usize, id: VarId, index: usize) -> bool {
-        self.whole_len(decl, id).is_some_and(|len| index < len)
+        self.ranges
+            .get(&(decl, id))
+            .is_some_and(|ranges| ranges.iter().any(|r| r.contains(&index)))
             || self
                 .elements
                 .get(&(decl, id))
                 .is_some_and(|x| x.contains(&index))
-    }
-
-    fn whole_len(&self, decl: usize, id: VarId) -> Option<usize> {
-        self.whole.get(&(decl, id)).copied()
     }
 
     fn insert(&mut self, decl: usize, id: VarId, index: usize) {
@@ -49,13 +47,30 @@ impl UnsafeSelfReads {
     }
 
     fn insert_whole(&mut self, decl: usize, id: VarId, len: usize) {
-        let x = self.whole.entry((decl, id)).or_default();
-        *x = (*x).max(len);
+        self.insert_range(decl, id, 0..len);
+    }
+
+    fn insert_range(&mut self, decl: usize, id: VarId, mut range: std::ops::Range<usize>) {
+        if range.is_empty() {
+            return;
+        }
+        let ranges = self.ranges.entry((decl, id)).or_default();
+        ranges.retain(|other| {
+            if range.start <= other.end && other.start <= range.end {
+                range.start = range.start.min(other.start);
+                range.end = range.end.max(other.end);
+                false
+            } else {
+                true
+            }
+        });
+        ranges.push(range);
     }
 
     #[cfg(test)]
     pub fn stored(&self) -> usize {
-        self.elements.values().map(HashSet::len).sum::<usize>() + self.whole.len()
+        self.elements.values().map(HashSet::len).sum::<usize>()
+            + self.ranges.values().map(Vec::len).sum::<usize>()
     }
 }
 
@@ -275,21 +290,25 @@ impl Walk<'_> {
             Dst::Whole(id, len, mask) => (*id, *len, mask),
         };
         let whole_reads = reads
-            .and_then(|x| x.whole_refered.get(&id))
+            .and_then(|x| x.range_refered.get(&id))
             .map(Vec::as_slice)
             .unwrap_or_default();
         let prior = written.get_whole(id);
-        // An element with reads or writes of its own sees a superset of what
-        // the rest see, so the rest hitting means every element does.
-        let read = match reads {
-            Some(_) => read_mask(whole_reads.iter().map(|(_, r)| r)),
-            None => Some(mask.clone()),
-        };
-        if let (Some(read), Some(prior)) = (read, prior)
-            && overlaps(&read, &prior)
-        {
-            self.out.insert_whole(self.decl, id, len);
-            return;
+        if let Some(prior) = prior {
+            match reads {
+                Some(_) => {
+                    for (range, reference) in whole_reads {
+                        if let Some(read) = read_mask(std::iter::once(reference))
+                            && overlaps(&read, &prior)
+                        {
+                            self.out
+                                .insert_range(self.decl, id, range.start..range.end.min(len));
+                        }
+                    }
+                }
+                None if overlaps(mask, &prior) => self.out.insert_whole(self.decl, id, len),
+                None => {}
+            }
         }
         let own_reads = reads
             .into_iter()
@@ -368,22 +387,20 @@ impl Walk<'_> {
             .select
             .eval_value(context, &r#type, false)
             .map(|(beg, end)| ValueBigUint::gen_mask_range(beg, end));
-        if let Some(index) = dst.index.eval_value(context) {
-            if let Some(variable) = context.get_variable_info(dst.id)
-                && let Some(index) = variable.r#type.array.calc_index(&index)
-            {
-                out.push(Dst::Element(dst.id, index, mask));
-            }
-        } else if let Some(total_array) = context
-            .get_variable_info(dst.id)
-            .and_then(|v| v.r#type.total_array())
-        {
-            if self.per_element {
-                for i in 0..total_array {
-                    out.push(Dst::Element(dst.id, i, mask.clone()));
+        let range = if let Some(index) = dst.index.eval_value(context) {
+            r#type.array.calc_range(&index)
+        } else {
+            r#type
+                .total_array()
+                .and_then(|n| n.checked_sub(1).map(|end| (0, end)))
+        };
+        if let Some((start, end)) = range {
+            if !self.per_element && start == 0 && Some(end + 1) == r#type.total_array() && end > 0 {
+                out.push(Dst::Whole(dst.id, end + 1, mask));
+            } else {
+                for index in start..=end {
+                    out.push(Dst::Element(dst.id, index, mask.clone()));
                 }
-            } else if total_array != 0 {
-                out.push(Dst::Whole(dst.id, total_array, mask));
             }
         }
     }
