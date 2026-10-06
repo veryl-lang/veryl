@@ -1018,6 +1018,51 @@ dep = {path = "../dep"}
 }
 
 #[test]
+fn lockfile_paths_order_is_deterministic() {
+    let tempdir = tempfile::tempdir().unwrap();
+
+    let deps = ["dep_a", "dep_b", "dep_c", "dep_d"];
+    for dep in deps {
+        let dep_path = tempdir.path().join(dep);
+        fs::create_dir_all(dep_path.join("src")).unwrap();
+        fs::write(
+            dep_path.join("Veryl.toml"),
+            format!(
+                r#"
+[project]
+name = "{dep}"
+version = "0.1.0"
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(dep_path.join("src/a.veryl"), "module A {}\n").unwrap();
+    }
+
+    let main_toml = r#"
+[project]
+name = "main"
+version = "0.1.0"
+
+[dependencies]
+dep_a = {path = "../dep_a"}
+dep_b = {path = "../dep_b"}
+dep_c = {path = "../dep_c"}
+dep_d = {path = "../dep_d"}
+"#;
+    let metadata = create_project(tempdir.path(), "main", main_toml, false);
+
+    // Each Lockfile has a freshly created lock_table, so iteration order
+    // depending on the hasher seed would show up across iterations.
+    for _ in 0..10 {
+        let lockfile = Lockfile::new(&metadata).unwrap();
+        let paths = lockfile.paths(Path::new("target")).unwrap();
+        let prjs: Vec<_> = paths.iter().map(|x| x.prj.as_str()).collect();
+        assert_eq!(prjs, deps);
+    }
+}
+
+#[test]
 fn define_global_properties() {
     let toml = r#"
 [project]
