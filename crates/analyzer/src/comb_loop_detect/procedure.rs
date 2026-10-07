@@ -146,7 +146,9 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
     }
     let result = match expression {
         Expression::Term(factor) => match factor.as_ref() {
-            Factor::Variable(id, index, select, _) if index.0.is_empty() && select.is_empty() => {
+            Factor::Variable(id, index, select, _)
+                if index.indices.is_empty() && select.is_empty() =>
+            {
                 Some(AffineIndex::variable(*id))
             }
             Factor::Value(_) => affine_constant(expression, ctx),
@@ -851,7 +853,7 @@ fn collect_summary_destination_variables(
 }
 
 fn collect_summary_index_variables(module: &Module, index: &VarIndex, ids: &mut HashSet<VarId>) {
-    for expression in &index.0 {
+    for expression in index.expressions() {
         collect_summary_expression_variables(module, expression, ids);
     }
 }
@@ -1721,7 +1723,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         for expression in destination
             .index
-            .0
+            .indices
             .iter()
             .chain(destination.select.0.iter())
         {
@@ -1741,7 +1743,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::Variable(_, index, select, _) => {
-                    for expression in index.0.iter().chain(select.0.iter()) {
+                    for expression in index.expressions().chain(select.0.iter()) {
                         self.collect_expression_write_footprint(expression, keys, visited);
                     }
                     if let Some((_, expression)) = &select.1 {
@@ -1755,7 +1757,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     self.collect_system_call_write_footprint(call, keys, visited);
                 }
                 Factor::HierVariable(reference) => {
-                    for expression in reference.index.0.iter().chain(reference.select.0.iter()) {
+                    for expression in reference
+                        .index
+                        .expressions()
+                        .chain(reference.select.0.iter())
+                    {
                         self.collect_expression_write_footprint(expression, keys, visited);
                     }
                     if let Some((_, expression)) = &reference.select.1 {
@@ -1931,7 +1937,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn write_keys(&mut self, destination: &AssignDestination) -> Vec<NodeKey> {
         if !self.ctx.variables.contains_key(&destination.id)
-            && destination.index.0.is_empty()
+            && destination.index.indices.is_empty()
             && destination.select.is_empty()
         {
             return self.keys_for_id(destination.id);
@@ -1959,7 +1965,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn flattened_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<AffineIndex> {
         let index = self.receiver_index(id, index);
         let variable = self.ctx.variables.get(&id)?;
-        if index.dimension() != variable.r#type.array.dims() {
+        if index.is_range() || index.dimension() != variable.r#type.array.dims() {
             return None;
         }
         let dimensions = variable.r#type.array.clone();
@@ -1968,7 +1974,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // Validate the original bit-vector expressions before flattening.
         // Layout strides are integer coordinate arithmetic, not synthetic
         // expressions with missing width/signedness metadata.
-        for (expression, dimension) in index.0.iter().zip(dimensions.iter()).rev() {
+        for (expression, dimension) in index.indices.iter().zip(dimensions.iter()).rev() {
             let coordinate = affine_index(expression, &mut self.ctx)?;
             result.add_scaled(&coordinate, stride)?;
             stride = stride.checked_mul(isize::try_from((*dimension)?).ok()?)?;
@@ -2017,10 +2023,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }) {
             return index.clone();
         }
-        self.receiver_indices
-            .last()
-            .and_then(Clone::clone)
-            .unwrap_or_else(|| index.clone())
+        let Some(receiver) = self.receiver_indices.last().and_then(Option::as_ref) else {
+            return index.clone();
+        };
+        // Function bodies already carry an instance prefix. Specializing a
+        // summary replaces that prefix while retaining the local selection.
+        let mut index = index.clone();
+        let prefix = receiver.dimension().min(index.dimension());
+        index
+            .indices
+            .splice(..prefix, receiver.indices.iter().cloned());
+        index
     }
 
     fn project_read(
@@ -2048,7 +2061,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         select: &VarSelect,
         member_select_domain: Option<MemberSelectDomain>,
     ) -> Vec<(NodeKey, VersionId)> {
-        if !self.ctx.variables.contains_key(&id) && index.0.is_empty() && select.is_empty() {
+        if !self.ctx.variables.contains_key(&id) && index.indices.is_empty() && select.is_empty() {
             return self
                 .keys_for_id(id)
                 .into_iter()
@@ -2057,7 +2070,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         let index = self.receiver_index(id, index);
         let accesses = var_reads(id, &index, select, member_select_domain, &mut self.ctx);
-        if accesses.is_empty() {
+        if accesses.is_empty() && !(index.is_const() && select.is_const_with_range()) {
             self.status = self.status.max(AnalysisStatus::Partial);
         }
         let mut values = Vec::new();
@@ -2093,7 +2106,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return None;
         };
         let mut selectors = Vec::new();
-        for expression in index.0.iter().chain(select.0.iter()) {
+        for expression in index.expressions().chain(select.0.iter()) {
             selectors.extend(self.eval_expr(expression));
         }
         if let Some((_, expression)) = &select.1 {
@@ -2122,7 +2135,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut sources = Vec::new();
         for expression in destination
             .index
-            .0
+            .indices
             .iter()
             .chain(destination.select.0.iter())
         {
@@ -2808,7 +2821,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut iteration_controls = range_controls.to_vec();
         for value in iterations {
             self.set_known_iterator_value(statement, value);
-            let result = self.eval_block(&statement.body, &iteration_controls);
+            let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
+            let result = self.eval_block(
+                body.as_deref().unwrap_or(&statement.body),
+                &iteration_controls,
+            );
             flow = result.flow;
             if flow != ProcedureFlow::Continue || self.guard_work.is_none() {
                 break;
@@ -3070,7 +3087,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         sampled.selectors.clone()
                     } else {
                         let mut sources = Vec::new();
-                        for expression in index.0.iter().chain(select.0.iter()) {
+                        for expression in index.expressions().chain(select.0.iter()) {
                             sources.extend(self.eval_expr(expression));
                         }
                         if let Some((_, expression)) = &select.1 {
@@ -3108,9 +3125,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 }?;
                                 destination.destination_offset_from(&source)
                             });
-                        let position_preserving =
-                            receiver.0.iter().all(|index| index.comptime().is_const)
-                                && accesses.len() == 1;
+                        let selected_array = if receiver.is_const() && accesses.len() == 1 {
+                            variable.as_ref().and_then(|variable| {
+                                receiver.eval_selection(&mut self.ctx, &variable.r#type.array)
+                            })
+                        } else {
+                            None
+                        };
                         if let Some(source_span) = requested.translated(0, low) {
                             for (idx, access) in &accesses {
                                 let source_array = if let Some(offset) = dynamic_array_offset {
@@ -3125,9 +3146,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                             )
                                         })
                                         .and_then(|requested| requested.intersection(*idx))
-                                } else if position_preserving {
+                                } else if let Some(selection) = selected_array {
                                     requested_array
-                                        .translated(0, idx.start)
+                                        .intersection(ArraySpan {
+                                            start: selection.result_start,
+                                            length: selection.length,
+                                        })
+                                        .and_then(|requested| {
+                                            requested.translated(
+                                                selection.result_start,
+                                                selection.source_start,
+                                            )
+                                        })
                                         .and_then(|requested| requested.intersection(*idx))
                                 } else {
                                     Some(*idx)
@@ -3161,11 +3191,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         // correspondence, not the selected packed positions.
                         let offset = PositionRelation {
                             array: dynamic_array_offset.or_else(|| {
-                                position_preserving
-                                    .then(|| {
-                                        isize::try_from(accesses[0].0.start).ok()?.checked_neg()
-                                    })
-                                    .flatten()
+                                selected_array.and_then(|selection| {
+                                    signed_difference(
+                                        selection.result_start,
+                                        selection.source_start,
+                                    )
+                                })
                             }),
                             packed: isize::try_from(low).ok().and_then(isize::checked_neg),
                         };
@@ -4125,7 +4156,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     reads.extend(sampled.values.values().copied());
                     return;
                 }
-                for expression in index.0.iter().chain(select.0.iter()) {
+                for expression in index.expressions().chain(select.0.iter()) {
                     reads.extend(self.eval_expr(expression));
                 }
                 if let Some((_, expression)) = &select.1 {
@@ -4531,9 +4562,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let Factor::Variable(id, index, select, _) = factor.as_ref() else {
                 return None;
             };
-            if !index.0.is_empty()
+            if !index.indices.is_empty()
                 || !select.is_empty()
-                || !self.receiver_index(*id, index).0.is_empty()
+                || !self.receiver_index(*id, index).indices.is_empty()
             {
                 return None;
             }
@@ -5035,7 +5066,7 @@ fn statements_have_unknown(statements: &[Statement]) -> bool {
 }
 
 fn concrete_var_index(index: &[usize]) -> VarIndex {
-    VarIndex(
+    VarIndex::new(
         index
             .iter()
             .map(|index| {

@@ -286,7 +286,7 @@ fn conv_tb_method_call_assignment(
     // full declared width. Indexed/selected destinations go through the
     // expression-position hoist (a temporary plus an ordinary assignment,
     // which handles selects).
-    if dst.index.0.is_empty() && dst.select.0.is_empty() && dst.select.1.is_none() {
+    if dst.index.indices.is_empty() && dst.select.0.is_empty() && dst.select.1.is_none() {
         method_call.ret = Some(Box::new(dst));
         return Ok(Some(ir::StatementBlock(vec![ir::Statement::TbMethodCall(
             method_call,
@@ -599,19 +599,54 @@ fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, 
             _ => {}
         }
     }
-    // Leaf: mirror `check_true_false` (no `is_xz` guard) so `if`, `if_reset`,
-    // and fully-constant conditions fold x/z the same way.
     if cond.comptime().is_const
         && let Some(value) = cond.eval_value(context)
     {
-        if value.is_true() {
-            (true, false)
-        } else {
-            (false, true)
-        }
-    } else {
-        (false, false)
+        return (value.is_true(), !value.is_true());
     }
+    // A retained iterator is runtime state in emitted SV. A condition may
+    // nevertheless have the same truth value for every value of its range.
+    // Prove only uniform conditions; leave varying conditions in the loop.
+    for (id, range) in context.for_ranges.clone() {
+        let Some(iterations) = range.eval_iter(context) else {
+            continue;
+        };
+        let Some(variable) = context.variables.get(&id) else {
+            continue;
+        };
+        let Some(width) = variable.r#type.total_width() else {
+            continue;
+        };
+        let signed = variable.r#type.signed;
+        let mut uniform = None;
+        let mut decided = true;
+        for iteration in iterations {
+            let value = crate::value::Value::new(iteration as u64, width, signed);
+            let Some(condition) = crate::ir::peel::specialize_expression(context, cond, id, value)
+            else {
+                decided = false;
+                break;
+            };
+            if !condition.comptime().is_const {
+                decided = false;
+                break;
+            }
+            let Some(value) = condition.eval_value(context) else {
+                decided = false;
+                break;
+            };
+            let truth = value.is_true();
+            if uniform.is_some_and(|previous| previous != truth) {
+                decided = false;
+                break;
+            }
+            uniform = Some(truth);
+        }
+        if decided && let Some(truth) = uniform {
+            return (truth, !truth);
+        }
+    }
+    (false, false)
 }
 
 /// Append `block` to the innermost `else` of the `else if` chain in `false_side`.
@@ -871,149 +906,8 @@ impl Conv<&ForStatement> for ir::StatementBlock {
 
         let for_range = build_for_range(context, &value.range, rev, step)?;
 
-        // Testbench for-loops may iterate many times at runtime; do not unroll.
-        // A body with `break` also stays a runtime For: flattening would strand a
-        // runtime-conditional Break with no loop to leave, running every iteration.
-        if !context.in_test_module
-            && !statement_block_has_break(value.statement_block.as_ref())
-            && let Some(range) = for_range.eval_iter(context)
-        {
-            return unroll_for(context, value, &r#type, clock_domain, &range, token);
-        }
-
         build_for_statement(context, value, &r#type, clock_domain, for_range, token)
     }
-}
-
-/// True when the block contains a `break` that would target THIS loop:
-/// nested for-loops consume their own breaks, so the scan stops there.
-fn statement_block_has_break(block: &StatementBlock) -> bool {
-    block
-        .statement_block_list
-        .iter()
-        .any(|x| statement_block_group_has_break(&x.statement_block_group))
-}
-
-fn statement_block_group_has_break(group: &StatementBlockGroup) -> bool {
-    match &*group.statement_block_group_group {
-        StatementBlockGroupGroup::BlockLBraceStatementBlockGroupGroupListRBrace(x) => x
-            .statement_block_group_group_list
-            .iter()
-            .any(|x| statement_block_group_has_break(&x.statement_block_group)),
-        StatementBlockGroupGroup::StatementBlockItem(x) => match x.statement_block_item.as_ref() {
-            StatementBlockItem::Statement(x) => statement_has_break(&x.statement),
-            _ => false,
-        },
-    }
-}
-
-fn statement_has_break(stmt: &Statement) -> bool {
-    match stmt {
-        Statement::BreakStatement(_) => true,
-        Statement::IfStatement(x) => {
-            let x = &x.if_statement;
-            statement_block_has_break(&x.statement_block)
-                || x.if_statement_list
-                    .iter()
-                    .any(|x| statement_block_has_break(&x.statement_block))
-                || x.if_statement_opt
-                    .as_ref()
-                    .is_some_and(|x| statement_block_has_break(&x.statement_block))
-        }
-        Statement::IfResetStatement(x) => {
-            let x = &x.if_reset_statement;
-            statement_block_has_break(&x.statement_block)
-                || x.if_reset_statement_list
-                    .iter()
-                    .any(|x| statement_block_has_break(&x.statement_block))
-                || x.if_reset_statement_opt
-                    .as_ref()
-                    .is_some_and(|x| statement_block_has_break(&x.statement_block))
-        }
-        Statement::CaseStatement(x) => x.case_statement.case_statement_list.iter().any(|x| match x
-            .case_item
-            .case_item_group0
-            .as_ref()
-        {
-            CaseItemGroup0::Statement(x) => statement_has_break(&x.statement),
-            CaseItemGroup0::StatementBlock(x) => statement_block_has_break(&x.statement_block),
-        }),
-        Statement::SwitchStatement(x) => x.switch_statement.switch_statement_list.iter().any(|x| {
-            match x.switch_item.switch_item_group0.as_ref() {
-                SwitchItemGroup0::Statement(x) => statement_has_break(&x.statement),
-                SwitchItemGroup0::StatementBlock(x) => {
-                    statement_block_has_break(&x.statement_block)
-                }
-            }
-        }),
-        // A break inside a nested for belongs to that loop.
-        Statement::ForStatement(_) => false,
-        Statement::IdentifierStatement(_) | Statement::ReturnStatement(_) => false,
-    }
-}
-
-fn unroll_for(
-    context: &mut Context,
-    value: &ForStatement,
-    r#type: &ir::Type,
-    clock_domain: crate::symbol::ClockDomain,
-    range: &[usize],
-    token: TokenRange,
-) -> ir::IrResult<ir::StatementBlock> {
-    use veryl_parser::resource_table;
-
-    let mut ret = ir::StatementBlock::default();
-    'outer: for &i in range {
-        let label = format!("[{}]", i);
-        let label = resource_table::insert_str(&label);
-
-        context.push_hierarchy(label);
-
-        let block = context.block(|c| {
-            let index = value.identifier.text();
-            let path = ir::VarPath::new(index);
-            let kind = ir::VarKind::Const;
-            let mut comptime = ir::Comptime::from_type(r#type.clone(), clock_domain, token);
-            comptime.is_const = true;
-            if let Some(total_width) = r#type.total_width() {
-                comptime.value = ir::ValueVariant::Numeric(crate::value::Value::new(
-                    i as u64,
-                    total_width,
-                    r#type.signed,
-                ));
-            }
-
-            let id = c.insert_var_path(path.clone(), comptime.clone());
-            let array_limit = c.config.evaluate_array_limit;
-            let variable = ir::Variable::new(
-                id,
-                path,
-                kind,
-                comptime.r#type.clone(),
-                vec![comptime.get_value().unwrap().clone()],
-                c.get_affiliation(),
-                &token,
-                array_limit,
-            );
-            c.insert_variable(id, variable);
-
-            let block: ir::IrResult<ir::StatementBlock> =
-                Conv::conv(c, value.statement_block.as_ref());
-            block
-        });
-
-        context.pop_hierarchy();
-
-        if let Ok(mut block) = block {
-            for stmt in block.0.drain(..) {
-                if matches!(stmt, ir::Statement::Break) {
-                    break 'outer;
-                }
-                ret.0.push(stmt);
-            }
-        }
-    }
-    Ok(ret)
 }
 
 impl Conv<&CaseStatement> for ir::StatementBlock {

@@ -208,6 +208,14 @@ pub fn eval_expr(
             comptime.value = ValueVariant::NumericArray(values);
         }
 
+        if comptime.is_const
+            && let ir::Expression::Term(factor) = &expr
+            && factor.array_index().is_some_and(VarIndex::is_range)
+            && let Some(values) = factor.array_values(context)
+        {
+            comptime.value = ValueVariant::NumericArray(values);
+        }
+
         Ok((comptime, expr))
     } else {
         let comptime = Comptime::create_unknown(token);
@@ -339,7 +347,7 @@ impl ArrayLiteralExpression {
             );
             ret.push(expr);
         }
-        VarIndex(ret)
+        VarIndex::new(ret)
     }
 
     pub fn to_var_select(&self) -> VarSelect {
@@ -928,6 +936,20 @@ fn eval_array_literal_expressions(
     let mut value: Option<Value> = None;
     let mut prev = None;
     for expr in exprs {
+        if let ir::Expression::Term(factor) = &expr.expr
+            && factor.array_index().is_some_and(VarIndex::is_range)
+        {
+            let Some(values) = factor.array_values(context) else {
+                return Ok(None);
+            };
+            if let Some(part) = value.take() {
+                ret.push(part);
+            }
+            ret.extend(values);
+            prev = None;
+            continue;
+        }
+
         if prev != Some(expr.index.clone())
             && let Some(x) = value
         {
@@ -1190,10 +1212,38 @@ pub fn eval_variable(
 
 fn check_reset_non_elaborative(context: &mut Context, expr: &mut ir::Expression) {
     let comptime = expr.eval_comptime(context, None);
-    if context.in_if_reset && !comptime.is_const {
+    if !context.in_if_reset || comptime.is_const {
+        return;
+    }
+    let token = comptime.token;
+    // A constant-range iterator is elaborative for reset-value checks, but
+    // remains a variable in the shared IR. Check a temporary expression so
+    // each iteration still computes its own value at runtime.
+    let elaborative = if context.for_ranges.is_empty() {
+        false
+    } else {
+        let mut specialized = Some(expr.clone());
+        for (id, range) in context.for_ranges.clone() {
+            let Some(iterations) = range.eval_iter(context) else {
+                continue;
+            };
+            let Some(iteration) = iterations.first() else {
+                continue;
+            };
+            let variable = &context.variables[&id];
+            let Some(width) = variable.r#type.total_width() else {
+                continue;
+            };
+            let value = Value::new(*iteration as u64, width, variable.r#type.signed);
+            specialized = specialized
+                .and_then(|expr| ir::peel::specialize_expression(context, &expr, id, value));
+        }
+        specialized.is_some_and(|mut expr| expr.gather_context(context).is_const)
+    };
+    if !elaborative {
         context.insert_error(AnalyzerError::unevaluable_value(
             UnevaluableValueKind::ResetValue,
-            &comptime.token,
+            &token,
         ));
     }
 }
@@ -2118,8 +2168,7 @@ fn build_for_range_inner(
     }
 }
 
-/// Convert a `ForStatement` AST node into a runtime `ir::Statement::For`.
-/// Used for dynamic-range for-loops that cannot be unrolled at compile time.
+/// Preserve a procedural loop, including constant ranges, in the shared IR.
 pub fn build_for_statement(
     context: &mut Context,
     value: &ForStatement,
@@ -2154,7 +2203,10 @@ pub fn build_for_statement(
     );
     context.insert_variable(loop_var_id, variable);
 
-    let body: ir::StatementBlock = Conv::conv(context, value.statement_block.as_ref())?;
+    context.for_ranges.push((loop_var_id, for_range.clone()));
+    let body: IrResult<ir::StatementBlock> = Conv::conv(context, value.statement_block.as_ref());
+    context.for_ranges.pop();
+    let body = body?;
 
     Ok(ir::StatementBlock(vec![ir::Statement::For(Box::new(
         ir::ForStatement {
@@ -2650,57 +2702,52 @@ fn eval_factor_path_inner(
 
         comptime.is_global = false;
 
-        if array_select.is_range() {
-            // TODO
-            Err(ir_error!(token))
-        } else {
-            let index = array_select.to_index();
-            let array = comptime.r#type.array.clone();
-            comptime.r#type.array.drain(0..index.dimension());
+        let index = array_select.to_index();
+        let array = comptime.r#type.array.clone();
+        comptime.r#type.array = index.selected_shape(context, &array, token)?;
 
-            comptime.is_const &= index.is_const() && width_select.is_const();
+        comptime.is_const &= index.is_const() && width_select.is_const();
 
-            // The whole-array value doesn't describe a selected part of it; drop
-            // it so consumers resolve the selection from the variable table.
-            if (index.dimension() > 0 || !width_select.is_empty())
-                && let ValueVariant::NumericArray(values) = &comptime.value
-            {
-                // Except for a `string`: it has no width to lay out, so the
-                // variable table holds nothing to resolve against and the
-                // element has to be folded here.
-                let element = if comptime.r#type.is_string() && width_select.is_empty() {
-                    index
-                        .eval_value(context)
-                        .and_then(|x| array.calc_index(&x))
-                        .and_then(|x| values.get(x))
-                        .cloned()
-                } else {
-                    None
-                };
-                comptime.value = match element {
-                    Some(x) => ValueVariant::Numeric(x),
-                    None => ValueVariant::Unknown,
-                };
-            }
-
-            comptime.token = token;
-            // A `string` read is only ever its value: there is no variable
-            // behind it for a later stage to look up.
-            let is_folded_string = comptime.r#type.is_string()
-                && width_select.is_empty()
-                && matches!(comptime.value, ValueVariant::Numeric(_));
-            if comptime.r#type.is_type() || is_folded_string {
-                Ok(ir::Factor::Value(comptime))
+        // The whole-array value doesn't describe a selected part of it; drop
+        // it so consumers resolve the selection from the variable table.
+        if (index.dimension() > 0 || !width_select.is_empty())
+            && let ValueVariant::NumericArray(values) = &comptime.value
+        {
+            // Except for a `string`: it has no width to lay out, so the
+            // variable table holds nothing to resolve against and the
+            // element has to be folded here.
+            let element = if comptime.r#type.is_string() && width_select.is_empty() {
+                index
+                    .eval_value(context)
+                    .and_then(|x| array.calc_index(&x))
+                    .and_then(|x| values.get(x))
+                    .cloned()
             } else {
-                // Params arrive with evaluated=true (set by eval_expr), which
-                // would make gather_context skip applying the select width —
-                // and skip the index/select clock-domain check, laundering a
-                // foreign-domain index into a const lookup table.
-                if !width_select.is_empty() || !index.is_const() {
-                    comptime.evaluated = false;
-                }
-                Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
+                None
+            };
+            comptime.value = match element {
+                Some(x) => ValueVariant::Numeric(x),
+                None => ValueVariant::Unknown,
+            };
+        }
+
+        comptime.token = token;
+        // A `string` read is only ever its value: there is no variable
+        // behind it for a later stage to look up.
+        let is_folded_string = comptime.r#type.is_string()
+            && width_select.is_empty()
+            && matches!(comptime.value, ValueVariant::Numeric(_));
+        if comptime.r#type.is_type() || is_folded_string {
+            Ok(ir::Factor::Value(comptime))
+        } else {
+            // Params arrive with evaluated=true (set by eval_expr), which
+            // would make gather_context skip applying the select width —
+            // and skip the index/select clock-domain check, laundering a
+            // foreign-domain index into a const lookup table.
+            if !width_select.is_empty() || !index.is_const() || index.is_range() {
+                comptime.evaluated = false;
             }
+            Ok(ir::Factor::Variable(var_id, index, width_select, comptime))
         }
     } else if let HierReference::Resolved {
         inst_path,
@@ -2737,29 +2784,27 @@ fn eval_factor_path_inner(
         }
         .ok_or_else(|| ir_error!(token))?;
 
-        if array_select.is_range() {
-            Err(ir_error!(token))
-        } else {
-            let index = array_select.to_index();
-            comptime.r#type.array.drain(0..index.dimension());
-
-            if !width_select.is_empty() {
-                comptime.r#type.flatten_struct_union_enum();
-                if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
-                    comptime.r#type.set_concrete_width(width);
-                }
-                comptime.r#type.signed = member_signed;
+        let array = comptime.r#type.array.clone();
+        let index = array_select.to_index();
+        comptime.r#type.array = index.selected_shape(context, &array, token)?;
+        if !width_select.is_empty() {
+            comptime.r#type.flatten_struct_union_enum();
+            if let Some(width) = width_select.eval_comptime(context, &comptime.r#type, false) {
+                comptime.r#type.set_concrete_width(width);
             }
-            comptime.token = token;
-
-            Ok(ir::Factor::HierVariable(Box::new(ir::HierVarRef {
-                inst_path,
-                var_path,
-                index,
-                select: width_select,
-                comptime,
-            })))
+            comptime.r#type.signed = member_signed;
         }
+        comptime.token = token;
+
+        let source = ir::Factor::HierVariable(Box::new(ir::HierVarRef {
+            inst_path,
+            var_path,
+            index,
+            select: width_select,
+            array,
+            comptime,
+        }));
+        Ok(source)
     } else if !matches!(hier, HierReference::NotHier) {
         match hier {
             HierReference::UnknownMember { owner, member } => {
@@ -2849,6 +2894,15 @@ fn apply_symbol_select(
         // has to shrink its type, or the select is invisible to the operand
         // and compatibility checks.
         _ => {
+            let (array_select, _) = select.clone().split(comptime.r#type.array.dims());
+            if array_select.is_range() {
+                comptime.r#type.array = array_select.to_index().selected_shape(
+                    context,
+                    &comptime.r#type.array,
+                    token,
+                )?;
+                return Ok(ir::Factor::Value(comptime));
+            }
             reduce_unevaluable_select(context, &mut comptime, select, token);
             return Ok(ir::Factor::Value(comptime));
         }
@@ -2859,8 +2913,15 @@ fn apply_symbol_select(
     // Array select type check (out-of-range / wrong-order).
     let _ = array_select.eval_comptime(context, &comptime.r#type, true);
     if array_select.is_range() {
-        // TODO: array range select.
-        return Err(ir_error!(token));
+        let id = materialize_const(context, &comptime, values, symbol, token)?;
+        let index = array_select.to_index();
+        comptime.r#type.array = index.selected_shape(context, &array, token)?;
+        comptime.is_const &= index.is_const() && width_select.is_const_with_range();
+        comptime.is_global &= comptime.is_const;
+        comptime.value = ValueVariant::Unknown;
+        comptime.evaluated = false;
+        comptime.token = token;
+        return Ok(ir::Factor::Variable(id, index, width_select, comptime));
     }
     let index = array_select.to_index();
     let is_const_select = index.is_const() && width_select.is_const_with_range();
@@ -4411,40 +4472,11 @@ pub fn get_port_connects(
     })
 }
 
-/// Expands an unpacked-array slice connection (`i: arr[2*n+:2]`) into one
-/// expression per port element; anything else stays a single expression.
-///
-/// Separate from `insert_port_connect` so the caller can clock-domain check the
-/// result: unexpanded, the slice evaluates to `Unknown`, which carries no domain.
-pub fn expand_input_connect(
-    context: &mut Context,
-    variable: &ir::Variable,
-    dst: &[VarPathSelect],
-    expr: ir::Expression,
-) -> Vec<ir::Expression> {
-    if variable.kind != VarKind::Input
-        || variable.r#type.array.is_empty()
-        || dst.len() != 1
-        || !dst[0].is_array_range(context)
-    {
-        return vec![expr];
-    }
-
-    // A mismatched count keeps the single-expression form, so a malformed
-    // connection is diagnosed downstream as before.
-    let exprs = dst[0].clone().to_expressions(context);
-    if exprs.len() == variable.r#type.total_array().unwrap_or(1) {
-        exprs
-    } else {
-        vec![expr]
-    }
-}
-
 pub fn insert_port_connect(
     context: &mut Context,
     variable: &ir::Variable,
     dst: Vec<VarPathSelect>,
-    exprs: Vec<ir::Expression>,
+    expr: ir::Expression,
     inputs: &mut Vec<ir::InstInput>,
     outputs: &mut Vec<ir::InstOutput>,
 ) {
@@ -4452,12 +4484,10 @@ pub fn insert_port_connect(
         VarKind::Input => {
             inputs.push(ir::InstInput {
                 id: variable.id,
-                exprs,
+                expr,
             });
         }
         VarKind::Output => {
-            // Expansion applies to inputs only, so an output always has one.
-            let expr = &exprs[0];
             if !expr.is_assignable() {
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
             }

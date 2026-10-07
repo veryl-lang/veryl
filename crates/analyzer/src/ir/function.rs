@@ -195,9 +195,12 @@ pub(crate) struct FunctionValueCache {
 
 /// The element values behind an unpacked-array actual argument: the folded
 /// array a const reference carries, or the elements of the variable it names.
-/// A partial index is left unresolved -- it would need the element stride, and
-/// guessing one is worse than the caller's existing `None` path.
-fn array_arg_values(context: &mut Context, expr: &Expression, len: usize) -> Option<Vec<Value>> {
+/// Partial indices and slices retain the source's flat element order.
+pub(crate) fn array_arg_values(
+    context: &mut Context,
+    expr: &Expression,
+    len: usize,
+) -> Option<Vec<Value>> {
     let Expression::Term(factor) = expr else {
         return None;
     };
@@ -207,11 +210,22 @@ fn array_arg_values(context: &mut Context, expr: &Expression, len: usize) -> Opt
             _ => None,
         },
         crate::ir::Factor::Variable(id, index, select, _) => {
-            if !select.is_empty() || !index.eval_value(context)?.is_empty() {
+            if index.is_range() {
+                return factor.array_values(context).filter(|x| x.len() == len);
+            }
+            let index = index.eval_value(context)?;
+            let src = context.variables.get(id)?;
+            let (start, end) = src.r#type.array.calc_range(&index)?;
+            if end - start + 1 != len {
                 return None;
             }
-            let src = context.variables.get(id)?;
-            src.value.get(0..len).map(<[Value]>::to_vec)
+            let values = src.value.get(start..=end)?.to_vec();
+            if select.is_empty() {
+                return Some(values);
+            }
+            let r#type = src.r#type.clone();
+            let (high, low) = select.eval_value(context, &r#type, false)?;
+            Some(values.into_iter().map(|v| v.select(high, low)).collect())
         }
         _ => None,
     }
@@ -259,7 +273,7 @@ impl FunctionCall {
                 .r#type
                 .total_array()
                 .unwrap_or(1);
-            if total > 1 {
+            if context.variables.get(&id)?.r#type.is_array() {
                 // An unpacked array has no single value to evaluate --
                 // `get_value(&[])` wants one index per dimension -- so the
                 // whole-array actual has to be copied element by element, the

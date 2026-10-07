@@ -85,6 +85,29 @@ pub fn convert_module_with_library(
     CONV_DEPTH.with(|d| d.set(d.get() + 1));
     let _depth_guard = DepthGuard;
 
+    // Gate conversion requires concrete write lanes (including RAM byte/bit
+    // masks). Lower only a backend-owned copy; common analysis keeps For nodes.
+    let mut lowered = module.clone();
+    let mut analyzer_context = veryl_analyzer::conv::Context::default();
+    analyzer_context.variables = module.variables.clone();
+    analyzer_context.functions = module.functions.clone();
+    veryl_analyzer::ir::peel::lower_constant_loops(
+        &mut analyzer_context,
+        module,
+        &mut lowered.declarations,
+        usize::MAX,
+    );
+    for function in lowered.functions.values_mut() {
+        for body in &mut function.functions {
+            veryl_analyzer::ir::peel::lower_constant_loop_body(
+                &mut analyzer_context,
+                &mut body.statements,
+                usize::MAX,
+            );
+        }
+    }
+    let module = &lowered;
+
     let timed = module.declarations.len() > 600 && env::var_os("VERYL_SYNTH_TIME").is_some();
     macro_rules! phase {
         ($label:expr, $e:expr) => {{
@@ -695,13 +718,16 @@ impl ConvContext {
             }
             Declaration::Ff(x) => {
                 let mut current = init_current_ff(self, x);
-                let (reset_values, main_stmts) = split_if_reset(&x.statements);
+                let (reset_values, main_stmts) =
+                    split_if_reset(&x.statements, &self.variables, &mut self.eval_ctx);
                 if let Some(reset_map) = reset_values {
-                    for (vid, bits) in reset_map {
+                    for (vid, writes) in reset_map {
                         if let Some(pre) = self.ff_allocation.get(&vid) {
-                            for (bit, v) in bits.iter().enumerate() {
-                                if let Some(ff_idx) = pre.ff_indices.get(bit) {
-                                    self.ffs[*ff_idx].reset_value = *v;
+                            for (offset, bits) in writes {
+                                for (bit, v) in bits.iter().enumerate() {
+                                    if let Some(ff_idx) = pre.ff_indices.get(offset + bit) {
+                                        self.ffs[*ff_idx].reset_value = *v;
+                                    }
                                 }
                             }
                         }
@@ -857,23 +883,7 @@ impl ConvContext {
                     port_path
                 )));
             }
-            // Element-wise wiring: one expression per port element.
-            let expr_nets = if let Some(expr) = input.single() {
-                synthesize_expr(self, expr, current, child_nets.len())?
-            } else {
-                if input.exprs.is_empty() || child_nets.len() % input.exprs.len() != 0 {
-                    return Err(SynthesizerError::internal(format!(
-                        "port {:?} element count does not divide its net count",
-                        port_path
-                    )));
-                }
-                let per_element = child_nets.len() / input.exprs.len();
-                let mut nets = Vec::with_capacity(child_nets.len());
-                for expr in &input.exprs {
-                    nets.extend(synthesize_expr(self, expr, current, per_element)?);
-                }
-                nets
-            };
+            let expr_nets = synthesize_expr(self, &input.expr, current, child_nets.len())?;
             for (cn, en) in child_nets.iter().zip(expr_nets.iter()) {
                 net_map[*cn as usize] = *en;
             }
@@ -1399,12 +1409,17 @@ fn init_current_ff(ctx: &ConvContext, ff: &air::FfDeclaration) -> HashMap<air::V
 /// values and the clocked path (the else branch plus any statements trailing the
 /// `if_reset`, which Veryl allows and SV runs after the else on a clock edge).
 /// Otherwise return the body as-is with no reset values.
-fn split_if_reset(stmts: &[Statement]) -> (Option<HashMap<air::VarId, Vec<bool>>>, Vec<Statement>) {
+fn split_if_reset(
+    stmts: &[Statement],
+    variables: &HashMap<air::VarId, VarSlot>,
+    eval_ctx: &mut veryl_analyzer::Context,
+) -> (Option<ResetMap>, Vec<Statement>) {
     if let Some(Statement::IfReset(ifreset)) = stmts.first() {
         let mut main_stmts = ifreset.false_side.clone();
         main_stmts.extend_from_slice(&stmts[1..]);
-        let mut reset_map: HashMap<air::VarId, Vec<bool>> = HashMap::new();
-        if extract_constant_assigns(&ifreset.true_side, &mut reset_map).is_ok() {
+        let mut reset_map = ResetMap::new();
+        if extract_constant_assigns(&ifreset.true_side, variables, eval_ctx, &mut reset_map).is_ok()
+        {
             return (Some(reset_map), main_stmts);
         }
         // Non-constant reset expression: drop the reset branch; FFs keep
@@ -1414,9 +1429,16 @@ fn split_if_reset(stmts: &[Statement]) -> (Option<HashMap<air::VarId, Vec<bool>>
     (None, stmts.to_vec())
 }
 
+/// Reset values by variable: `(bit offset, bits)` per constant write.
+type ResetMap = HashMap<air::VarId, Vec<(usize, Vec<bool>)>>;
+
+/// Collect the constant writes of a reset branch: whole variables, array
+/// elements at constant indices and their struct members.
 fn extract_constant_assigns(
     stmts: &[Statement],
-    map: &mut HashMap<air::VarId, Vec<bool>>,
+    variables: &HashMap<air::VarId, VarSlot>,
+    eval_ctx: &mut veryl_analyzer::Context,
+    map: &mut ResetMap,
 ) -> Result<(), ()> {
     for s in stmts {
         match s {
@@ -1426,12 +1448,47 @@ fn extract_constant_assigns(
                     return Err(());
                 }
                 let value = eval_constant_bits(&a.expr, width).ok_or(())?;
-                for d in &a.dst {
-                    if !d.select.is_empty() || !d.index.0.is_empty() {
+                let [d] = a.dst.as_slice() else {
+                    return Err(());
+                };
+                let offset = if d.index.indices.is_empty() {
+                    0
+                } else {
+                    let slot = variables.get(&d.id).ok_or(())?;
+                    let indices = d
+                        .index
+                        .indices
+                        .iter()
+                        .zip(slot.shape.iter())
+                        .map(|(i, n)| {
+                            let k =
+                                usize::try_from(crate::conv::expression::try_constant(i)?).ok()?;
+                            (k < (*n)?).then_some(k)
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or(())?;
+                    slot.shape.calc_index(&indices).ok_or(())? * slot.scalar_width
+                };
+                // As in `write_to_dst`: a select is already in element
+                // coordinates, otherwise the member path gives the offset.
+                let member = if d.select.is_empty() {
+                    d.comptime
+                        .part_select
+                        .as_ref()
+                        .map_or(0, |ps| ps.part_select.iter().map(|p| p.pos).sum())
+                } else if d.select.is_const() {
+                    let (hi, lo) = d
+                        .select
+                        .eval_value(eval_ctx, &d.comptime.r#type, false)
+                        .ok_or(())?;
+                    if hi + 1 - lo != width {
                         return Err(());
                     }
-                    map.insert(d.id, value.clone());
-                }
+                    lo
+                } else {
+                    return Err(());
+                };
+                map.entry(d.id).or_default().push((offset + member, value));
             }
             _ => return Err(()),
         }

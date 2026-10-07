@@ -45,10 +45,14 @@ impl VarOffset {
     }
 }
 
-/// Returns native storage width in bytes: 4 for width <= 32, 8 for 33-64, 16 for 65-128,
-/// and 8-byte aligned for >128.
+/// The load/store, write-log and payload paths handle exactly these sizes.
+/// Slots are packed with no alignment.
 pub fn native_bytes(width: usize) -> usize {
-    if width <= 32 {
+    if width <= 8 {
+        1
+    } else if width <= 16 {
+        2
+    } else if width <= 32 {
         4
     } else if width <= 64 {
         8

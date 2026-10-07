@@ -334,6 +334,77 @@ fn synth_factor(
             &x.comptime.token,
         )),
         Factor::Variable(id, index, select, ct) => {
+            if index.is_range() {
+                let mut reference = factor.clone();
+                // Capture selector calls once. Each projected element then reads
+                // the same coordinate, even when a call updates another variable.
+                let mut temporaries = Vec::new();
+                for index in &mut reference.array_index_mut().unwrap().indices {
+                    if index.comptime().is_const {
+                        continue;
+                    }
+                    let width = index.comptime().r#type.total_width().unwrap_or(1);
+                    let nets = synthesize_expr(ctx, index, current, width)?;
+                    while ctx.variables.contains_key(&ctx.eval_ctx.var_id) {
+                        ctx.eval_ctx.var_id.inc();
+                    }
+                    let id = ctx.eval_ctx.var_id;
+                    ctx.eval_ctx.var_id.inc();
+                    let mut comptime = index.comptime().clone();
+                    comptime.value = air::ValueVariant::Unknown;
+                    comptime.is_const = false;
+                    ctx.variables.insert(
+                        id,
+                        super::VarSlot {
+                            nets,
+                            width,
+                            scalar_width: width,
+                            shape: air::Shape::default(),
+                            r#type: comptime.r#type.clone(),
+                            name: veryl_parser::resource_table::insert_str("__slice_index"),
+                            kind: air::VarKind::Variable,
+                            driver: super::VarDriverKind::CombMulti,
+                        },
+                    );
+                    temporaries.push(id);
+                    *index = Expression::Term(Box::new(Factor::Variable(
+                        id,
+                        air::VarIndex::default(),
+                        air::VarSelect::default(),
+                        comptime,
+                    )));
+                }
+                let width = reference
+                    .comptime()
+                    .r#type
+                    .total_width()
+                    .ok_or_else(|| SynthesizerError::internal("slice width is unresolved"))?;
+                let count = reference
+                    .comptime()
+                    .r#type
+                    .total_array()
+                    .ok_or_else(|| SynthesizerError::internal("slice shape is unresolved"))?;
+                let shape = ctx
+                    .variables
+                    .get(id)
+                    .ok_or_else(|| SynthesizerError::internal("array reference has no storage"))?
+                    .shape
+                    .clone();
+                let mut nets = Vec::with_capacity(width * count);
+                for i in 0..count {
+                    let element = reference
+                        .array_element(&mut ctx.eval_ctx, &shape, i)
+                        .ok_or_else(|| {
+                            SynthesizerError::internal("array reference cannot be projected")
+                        })?;
+                    nets.extend(synthesize_expr(ctx, &element, current, width)?);
+                }
+                for id in temporaries {
+                    ctx.variables.remove(&id);
+                }
+                return Ok(nets);
+            }
+
             // RAM-inferred arrays resolve `mem[addr]` to a macro read port
             // (allocated once per distinct address) instead of an element mux
             // tree. The port yields the whole word; any bit/part `select` below
@@ -358,7 +429,7 @@ fn synth_factor(
                     (slot.scalar_width, slot.shape.clone())
                 };
 
-                if index.0.is_empty() {
+                if index.indices.is_empty() {
                     src_nets
                 } else if index.is_const() {
                     let indices = index.eval_value(&mut ctx.eval_ctx).ok_or_else(|| {
@@ -377,27 +448,55 @@ fn synth_factor(
                     let start = flat * scalar_width;
                     src_nets[start..start + scalar_width].to_vec()
                 } else {
-                    if shape.dims() != 1 {
-                        return Err(SynthesizerError::unsupported(
-                            UnsupportedKind::DynamicMultiDimIndex {
-                                what: format!("variable {}", id),
-                            },
-                            &ct.token,
-                        ));
+                    // Resolve one dimension at a time. A flat mux address
+                    // alone would let an invalid inner index reach the next row.
+                    let remaining = shape
+                        .iter()
+                        .skip(index.indices.len())
+                        .map(|n| n.unwrap_or(1))
+                        .product::<usize>();
+                    let width = scalar_width * remaining;
+                    let mut elements: Vec<Vec<NetId>> =
+                        src_nets.chunks(width).map(|x| x.to_vec()).collect();
+                    let mut selectors = Vec::new();
+                    for (position, size) in index.indices.iter().zip(shape.iter()) {
+                        let size = size
+                            .ok_or_else(|| SynthesizerError::internal("unresolved array shape"))?;
+                        let bits = arith::index_bits_for(size)
+                            .max(position.comptime().r#type.total_width().unwrap_or(1));
+                        let selector = synthesize_expr(ctx, position, current, bits)?;
+                        selectors.push((selector, size));
                     }
-                    let num_elements = shape.total().unwrap_or(0);
-                    if num_elements == 0 {
-                        return Err(SynthesizerError::internal(format!(
-                            "{} has zero elements",
-                            id
-                        )));
+                    for (selector, size) in selectors.into_iter().rev() {
+                        // `dynamic_mux_tree` pads the branches past the last
+                        // element with zero, but stops once one branch is left
+                        // and ignores the selector bits above that. Only a
+                        // selector wider than it resolves needs its own check.
+                        let resolved = size.next_power_of_two().trailing_zeros() as usize;
+                        let valid = if selector.len() > resolved {
+                            let limit = build_constant(size as u64, selector.len() + 1);
+                            let extended = resize(selector.clone(), selector.len() + 1, false);
+                            Some(arith::compare(ctx, &extended, &limit, Op::Less, false)?)
+                        } else {
+                            None
+                        };
+                        elements = elements
+                            .chunks(size)
+                            .map(|group| {
+                                let selected = arith::dynamic_mux_tree(ctx, group, &selector);
+                                let Some(valid) = valid else {
+                                    return selected;
+                                };
+                                selected
+                                    .into_iter()
+                                    .map(|n| ctx.add_cell(CellKind::And2, vec![n, valid]))
+                                    .collect()
+                            })
+                            .collect();
                     }
-                    let idx_bits = arith::index_bits_for(num_elements);
-                    let idx_nets = synthesize_expr(ctx, &index.0[0], current, idx_bits)?;
-                    let elements: Vec<Vec<NetId>> = (0..num_elements)
-                        .map(|k| src_nets[k * scalar_width..(k + 1) * scalar_width].to_vec())
-                        .collect();
-                    arith::dynamic_mux_tree(ctx, &elements, &idx_nets)
+                    elements
+                        .pop()
+                        .ok_or_else(|| SynthesizerError::internal("empty array selection"))?
                 }
             };
 
@@ -506,7 +605,7 @@ fn read_ram(
 ) -> Result<Vec<NetId>, SynthesizerError> {
     let cand = ctx.ram_vars[id];
     let idx_expr = index
-        .0
+        .indices
         .first()
         .ok_or_else(|| SynthesizerError::internal(format!("RAM read {} has no index", id)))?;
     // Same signature `read_pattern_ok` uses to count distinct read ports, so

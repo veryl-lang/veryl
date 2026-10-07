@@ -5704,6 +5704,25 @@ fn invalid_type_declaration() {
 }
 
 #[test]
+fn array_slice_shape_mismatch() {
+    let code = r#"
+    module Leaf(i: input logic[4], o: output logic) { assign o = i[0]; }
+    module Top(d: input logic[4, 2], o: output logic) {
+        inst u: Leaf(i: d[1+:2], o: o);
+    }
+    "#;
+    let errors = analyze(code);
+    assert_eq!(errors.len(), 1, "{errors:#?}");
+    assert!(matches!(
+        errors[0],
+        AnalyzerError::MismatchAssignment {
+            kind: crate::analyzer_error::MismatchAssignmentKind::ArrayShape,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn mismatch_assignment() {
     // The unpacked dimensions disagree. No SystemVerilog tool accepts that, so
     // the help says which axis is wrong, but the severity stays the warning the
@@ -12244,6 +12263,32 @@ fn unevaluable_value_const_value() {
     let code = r#"
     package a_pkg {
         const A: bit<4> = {2'b00, 2'b00} as 4;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtPkg {
+        const W: u32;
+    }
+    package Pkg::<V: u32> for ProtPkg {
+        const W: u32 = V;
+    }
+    package WidthPkg {
+        const DW: u32 = 32;
+    }
+    package AliasPkg {
+        import WidthPkg::DW;
+        alias package BusPkg = Pkg::<DW>;
+    }
+    interface InterfaceA::<PKG: ProtPkg> {
+        const W: u32 = PKG::W;
+    }
+    module ModuleA {
+        import AliasPkg::BusPkg;
+        inst u: InterfaceA::<BusPkg>;
     }
     "#;
 
@@ -22970,4 +23015,26 @@ fn decided_break_loop_is_analyzed_as_a_runtime_loop() {
         ),
         "{errors:?}"
     );
+}
+
+#[test]
+fn array_slice_rejects_non_positive_width() {
+    for (width, zero) in [("0", true), ("-1", false)] {
+        let code = format!(
+            r#"
+        module Top(i: input logic[4], index: input u32, o: output logic[2]) {{
+            assign o = i[index+:{width}];
+        }}
+        "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors.iter().any(|error| if zero {
+                matches!(error, AnalyzerError::ZeroSize { .. })
+            } else {
+                matches!(error, AnalyzerError::NonPositiveValue { .. })
+            }),
+            "{errors:?}"
+        );
+    }
 }

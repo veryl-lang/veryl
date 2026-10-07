@@ -5942,18 +5942,26 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
     result
 }
 
-/// `src`'s declarations with the loops whose `break`s are decided peeled,
-/// or `None` when none is; `analyzer_context` holds `src`'s variables.
+/// A private native-simulator copy with bounded constant loops lowered and
+/// decided `break` loops peeled. Returns `None` when no loop changes;
+/// `analyzer_context` holds `src`'s variables.
 pub(crate) fn peeled_declarations(
     src: &air::Module,
     analyzer_context: &mut veryl_analyzer::conv::Context,
 ) -> Option<Vec<air::Declaration>> {
-    if !veryl_analyzer::ir::peel::has_break_loop(&src.declarations) {
+    if !veryl_analyzer::ir::peel::has_for_loop(&src.declarations) {
         return None;
     }
     let mut declarations = src.declarations.clone();
-    veryl_analyzer::ir::peel::peel_decided_loops(analyzer_context, src, &mut declarations)
-        .then_some(declarations)
+    let lowered = veryl_analyzer::ir::peel::lower_constant_loops(
+        analyzer_context,
+        src,
+        &mut declarations,
+        32768,
+    );
+    let peeled =
+        veryl_analyzer::ir::peel::peel_decided_loops(analyzer_context, src, &mut declarations);
+    (lowered || peeled).then_some(declarations)
 }
 
 /// The declarations of `src` the simulator builds from, and the `FfTable`
@@ -7536,11 +7544,7 @@ pub(crate) fn collect_inst_reset_kinds(
         let air::Component::Module(child) = inst.component.as_ref() else {
             continue;
         };
-        for (port_id, expr) in inst
-            .inputs
-            .iter()
-            .filter_map(|x| x.single().map(|e| (x.id, e)))
-        {
+        for (port_id, expr) in inst.inputs.iter().map(|x| (x.id, &x.expr)) {
             let Some(kind) = child
                 .variables
                 .get(&port_id)
@@ -7554,7 +7558,7 @@ pub(crate) fn collect_inst_reset_kinds(
             let air::Factor::Variable(net, idx, sel, _) = factor.as_ref() else {
                 continue;
             };
-            if !idx.0.is_empty() || !sel.is_empty() {
+            if !idx.indices.is_empty() || !sel.is_empty() {
                 continue;
             }
             record(&mut out, *net, kind);
@@ -7569,7 +7573,7 @@ pub(crate) fn collect_inst_reset_kinds(
                 continue;
             };
             for dst in &output.dst {
-                if dst.index.0.is_empty() && dst.select.is_empty() {
+                if dst.index.indices.is_empty() && dst.select.is_empty() {
                     record(&mut out, dst.id, kind);
                 }
             }

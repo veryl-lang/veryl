@@ -72,9 +72,8 @@ use crate::HashSet;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, Component, Comptime, Declaration, Expression, Factor,
-    InstDeclaration, Ir, MemberSelectDomain, Module, Op, Shape, Signature, Statement,
-    SystemFunctionKind, VarSelect, Variable,
+    AssignDestination, Component, Declaration, Expression, Factor, InstDeclaration, Ir,
+    MemberSelectDomain, Module, Op, Signature, Statement, SystemFunctionKind, VarSelect, Variable,
 };
 use crate::symbol::{Affiliation, Direction};
 use daggy::petgraph::graph::NodeIndex;
@@ -187,23 +186,12 @@ fn build_bit_partition(
     // Inst input expressions are not represented by procedure statements.
     for inst in walk_insts(module) {
         for inp in &inst.inputs {
-            for expr in &inp.exprs {
-                collect_expr_spans(expr, &mut accesses, ctx);
-            }
+            collect_expr_spans(&inp.expr, &mut accesses, ctx);
         }
         for out in &inst.outputs {
             for dst in &out.dst {
-                if let Some((idx, packed)) = eval_dst_span(dst, &module.variables, ctx) {
-                    accesses
-                        .entry((
-                            dst.id,
-                            ArraySpan {
-                                start: idx,
-                                length: 1,
-                            },
-                        ))
-                        .or_default()
-                        .push(packed);
+                for (array, packed) in dst_writes(dst, ctx) {
+                    accesses.entry((dst.id, array)).or_default().push(packed);
                 }
             }
         }
@@ -354,7 +342,7 @@ fn summary_parent_access(
         .or_else(|| child.interface_members.get(&region.id))?;
     if let Some(actual) = instance_port_region_actual(inst, region.id, direction) {
         return translated_summary_access(region, variable, actual, ctx)
-            .map(|(array, packed, _)| (actual.parent, array, packed));
+            .and_then(|access| Some((actual.parent, access.array?, access.packed)));
     }
     let binding = inst
         .interface_bindings
@@ -371,7 +359,7 @@ fn summary_parent_access(
         },
         ctx,
     )
-    .map(|(array, packed, _)| (binding.parent, array, packed))
+    .and_then(|access| Some((binding.parent, access.array?, access.packed)))
 }
 
 #[derive(Default)]
@@ -658,7 +646,7 @@ fn collect_factor_spans(
             if let Some(variable) = ctx.variables.get(id) {
                 add_whole_type_access(out, *id, &variable.r#type);
             }
-            for expression in index.0.iter().chain(select.0.iter()) {
+            for expression in index.expressions().chain(select.0.iter()) {
                 collect_expr_spans(expression, out, ctx);
             }
             if let Some((_, expression)) = &select.1 {
@@ -735,7 +723,23 @@ fn collect_statement_spans(
                 collect_statement_spans(&statement.default, out, ctx);
             }
             Statement::For(statement) => {
-                collect_statement_spans(&statement.body, out, ctx);
+                // Storage boundaries still belong to this consumer. Keeping
+                // the common IR compact must not turn distinct constant
+                // iterations into one strong-write alias region.
+                if !crate::ir::peel::has_own_break(&statement.body)
+                    && let Some(iterations) = statement.range.eval_iter(ctx)
+                {
+                    for iteration in iterations {
+                        let body = crate::ir::peel::specialize_iteration(ctx, statement, iteration);
+                        collect_statement_spans(
+                            body.as_deref().unwrap_or(&statement.body),
+                            out,
+                            ctx,
+                        );
+                    }
+                } else {
+                    collect_statement_spans(&statement.body, out, ctx);
+                }
             }
             Statement::FunctionCall(call) => {
                 for input in call.inputs.values() {
@@ -757,24 +761,6 @@ fn collect_statement_spans(
             | Statement::Null => {}
         }
     }
-}
-
-/// None if the index is dynamic.
-fn eval_dst_span(
-    dst: &AssignDestination,
-    parent_vars: &HashMap<VarId, Variable>,
-    ctx: &mut Context,
-) -> Option<(usize, PackedSpan)> {
-    let v = parent_vars.get(&dst.id)?;
-    let idx_path = dst.index.eval_value(ctx)?;
-    let flat = v.r#type.array.calc_index(&idx_path)?;
-    let span = if let Some((high, low)) = dst.select.eval_value(ctx, &v.r#type, false) {
-        PackedSpan::from_select(high, low)?
-    } else {
-        let width = v.total_width()?;
-        PackedSpan::whole(width)?
-    };
-    Some((flat, span))
 }
 
 fn build_module_graph(
@@ -945,7 +931,6 @@ impl<'a> ModuleGraphBuilder<'a> {
         let bit_part = self.bit_part;
         let graph = &mut self.graph;
         let node_map = &mut self.node_map;
-        let parent_vars = &module.variables;
         let ctx = &mut self.ctx;
         let procedure_context = &mut self.procedure_context;
         let function_summaries = &mut self.function_summaries;
@@ -957,20 +942,16 @@ impl<'a> ModuleGraphBuilder<'a> {
             if !is_pure_input_or_output(inp.id, &child.variables, Direction::Input) {
                 continue;
             }
-            let mut reads = Vec::new();
-            for expression in &inp.exprs {
-                let (sources, dependencies, actual_complete) = analyze_instance_actual(
-                    bit_part,
-                    expression,
-                    ctx,
-                    procedure_context,
-                    function_summaries,
-                );
-                complete &= actual_complete;
-                reads.extend(sources);
-                if let Some(dependencies) = dependencies {
-                    add_procedure_graph(graph, node_map, bit_part, module, dependencies);
-                }
+            let (mut reads, dependencies, actual_complete) = analyze_instance_actual(
+                bit_part,
+                &inp.expr,
+                ctx,
+                procedure_context,
+                function_summaries,
+            );
+            complete &= actual_complete;
+            if let Some(dependencies) = dependencies {
+                add_procedure_graph(graph, node_map, bit_part, module, dependencies);
             }
             reads.sort_unstable_by_key(|source| {
                 (source.key, source.offset, source.condition.clone())
@@ -993,7 +974,7 @@ impl<'a> ModuleGraphBuilder<'a> {
             let mut keys = Vec::new();
             for dst in &out.dst {
                 let mut destination_keys = Vec::new();
-                collect_dst_node_keys(dst, bit_part, &mut destination_keys, parent_vars, ctx);
+                collect_dst_node_keys(dst, bit_part, &mut destination_keys, ctx);
                 let (selector_reads, dependencies, selector_complete) =
                     analyze_instance_destination(
                         bit_part,
@@ -1403,8 +1384,8 @@ fn map_instance_source_region(
         .iter()
         .all(|source| source.offset.is_some())
     {
-        // Preserve exact connection metadata rather than reinterpreting an IR
-        // expression that may not represent an unpacked range as one value.
+        // Connection metadata already gives the exact coordinate mapping;
+        // project it directly.
         let sources = resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
         return actuals.project_mapping(graph, region, &sources, budget);
     }
@@ -1517,31 +1498,8 @@ impl InstanceActuals {
             let width = variable
                 .total_width()
                 .expect("deferred inputs have known widths");
-            let literal;
-            let flat_type;
-            let (expression, context_type) = if let Some(expression) = input.single() {
-                (expression, &variable.r#type)
-            } else {
-                // IR expands an unpacked slice into one expression per scalar
-                // array element. Restore that positional view for projection;
-                // the flattened coordinates are also used by SummaryRegion.
-                let mut r#type = variable.r#type.clone();
-                r#type.array = Shape::new(vec![Some(input.exprs.len())]);
-                literal = Expression::ArrayLiteral(
-                    input
-                        .exprs
-                        .iter()
-                        .cloned()
-                        .map(|expression| ArrayLiteralItem::Value(Box::new(expression), None))
-                        .collect(),
-                    Box::new(Comptime {
-                        r#type: r#type.clone(),
-                        ..Default::default()
-                    }),
-                );
-                flat_type = r#type;
-                (&literal, &flat_type)
-            };
+            let expression = &input.expr;
+            let context_type = &variable.r#type;
             let mut analysis =
                 procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
             let dag =
@@ -1981,7 +1939,7 @@ fn instance_port_region_actual(
     match direction {
         Direction::Input => {
             let input = inst.inputs.iter().find(|input| input.id == child)?;
-            let Expression::Term(factor) = input.single()? else {
+            let Expression::Term(factor) = &input.expr else {
                 return None;
             };
             let Factor::Variable(parent, index, select, comptime) = factor.as_ref() else {
@@ -2017,24 +1975,30 @@ fn map_summary_region(
     bit_part: &BitPartition,
     ctx: &mut Context,
 ) -> InstanceRegionMapping {
+    if let Some(access) = translated_summary_access(region, child, actual, ctx) {
+        return InstanceRegionMapping {
+            nodes: access
+                .array
+                .into_iter()
+                .flat_map(|array| bit_part.overlapping_access(actual.parent, array, access.packed))
+                .map(|key| MappedNode {
+                    key,
+                    offset: Some(access.offset),
+                    condition: PathCondition::default(),
+                })
+                .collect(),
+        };
+    }
     let mut keys = Vec::new();
-    let offset = if let Some((array, packed, offset)) =
-        translated_summary_access(region, child, actual, ctx)
-    {
+    for (array, packed) in var_reads(
+        actual.parent,
+        actual.index,
+        actual.select,
+        actual.member_select_domain,
+        ctx,
+    ) {
         keys.extend(bit_part.overlapping_access(actual.parent, array, packed));
-        Some(offset)
-    } else {
-        for (array, packed) in var_reads(
-            actual.parent,
-            actual.index,
-            actual.select,
-            actual.member_select_domain,
-            ctx,
-        ) {
-            keys.extend(bit_part.overlapping_access(actual.parent, array, packed));
-        }
-        None
-    };
+    }
     keys.sort_unstable();
     keys.dedup();
     InstanceRegionMapping {
@@ -2042,11 +2006,17 @@ fn map_summary_region(
             .into_iter()
             .map(|key| MappedNode {
                 key,
-                offset,
+                offset: None,
                 condition: PathCondition::default(),
             })
             .collect(),
     }
+}
+
+struct TranslatedSummaryAccess {
+    array: Option<ArraySpan>,
+    packed: PackedSpan,
+    offset: (isize, isize),
 }
 
 fn translated_summary_access(
@@ -2054,7 +2024,27 @@ fn translated_summary_access(
     child: &Variable,
     actual: ParentAccess<'_>,
     ctx: &mut Context,
-) -> Option<(ArraySpan, PackedSpan, (isize, isize))> {
+) -> Option<TranslatedSummaryAccess> {
+    if !actual.index.is_const() || !actual.select.is_const_with_range() {
+        return None;
+    }
+    let parent = ctx.variables.get(&actual.parent)?.clone();
+    let selected_shape = actual
+        .index
+        .selected_shape(
+            ctx,
+            &parent.r#type.array,
+            actual
+                .index
+                .indices
+                .last()
+                .map(|x| x.token_range())
+                .unwrap_or_default(),
+        )
+        .ok()?;
+    if child.r#type.array.total() != selected_shape.total() {
+        return None;
+    }
     let accesses = var_reads(
         actual.parent,
         actual.index,
@@ -2065,31 +2055,30 @@ fn translated_summary_access(
     let [(parent_array, parent_packed)] = accesses.as_slice() else {
         return None;
     };
-    if !actual
-        .index
-        .0
-        .iter()
-        .all(|expression| expression.comptime().is_const)
-        || !actual.select.is_const_with_range()
-        || child.r#type.array.total() != Some(parent_array.length)
-        || child.total_width() != Some(parent_packed.length)
-    {
+    if child.total_width() != Some(parent_packed.length) {
         return None;
     }
-    let start = region.array.start.checked_add(parent_array.start)?;
-    let array = (region.array.end()? <= parent_array.length).then_some(ArraySpan {
-        start,
-        length: region.array.length,
-    })?;
+    let selection = actual.index.eval_selection(ctx, &parent.r#type.array)?;
+    let array = region
+        .array
+        .intersection(ArraySpan {
+            start: selection.result_start,
+            length: selection.length,
+        })
+        .and_then(|array| array.translated(selection.result_start, selection.source_start));
     let packed = region
         .packed
         .translated(0, parent_packed.start)?
         .intersection(*parent_packed)?;
     let offset = (
-        signed_difference(parent_array.start, 0)?,
+        signed_difference(selection.source_start, selection.result_start)?,
         signed_difference(parent_packed.start, 0)?,
     );
-    Some((array, packed, offset))
+    Some(TranslatedSummaryAccess {
+        array: array.and_then(|array| array.intersection(*parent_array)),
+        packed,
+        offset,
+    })
 }
 
 fn resolve_instance_mapping(
@@ -2226,7 +2215,7 @@ fn analyze_instance_destination<'a>(
     );
     for expression in destination
         .index
-        .0
+        .indices
         .iter()
         .chain(destination.select.0.iter())
     {
@@ -2308,7 +2297,7 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
                     self.eval(expression);
                 }
                 Factor::Variable(_, index, select, _) => {
-                    for expression in index.0.iter().chain(select.0.iter()) {
+                    for expression in index.expressions().chain(select.0.iter()) {
                         self.eval(expression);
                     }
                     if let Some((_, expression)) = &select.1 {
@@ -2408,18 +2397,10 @@ fn collect_dst_node_keys(
     dst: &AssignDestination,
     bit_part: &BitPartition,
     out: &mut Vec<NodeKey>,
-    parent_vars: &HashMap<VarId, Variable>,
     ctx: &mut Context,
 ) {
-    let Some((idx, packed)) = eval_dst_span(dst, parent_vars, ctx) else {
-        return;
-    };
-    let span = ArraySpan {
-        start: idx,
-        length: 1,
-    };
-    for r in bit_part.overlapping((dst.id, span), packed) {
-        out.push((dst.id, span, r));
+    for (array, packed) in dst_writes(dst, ctx) {
+        out.extend(bit_part.overlapping_access(dst.id, array, packed));
     }
 }
 
