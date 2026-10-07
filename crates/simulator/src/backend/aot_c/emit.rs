@@ -3492,7 +3492,9 @@ fn sink_census(stmts: &[ProtoStatement], chunks: &[&[ProtoStatement]]) {
 ///   const candidates that touch it;
 /// - a statement reading OR writing an event-written offset
 ///   (`unsafe_comb`) is never const — the per-settle rerun is what keeps
-///   clobbering the event's value.
+///   clobbering the event's value;
+/// - a non-const reader between two writers of an offset demotes them: it
+///   must see the earlier value, and the run-once prefix leaves only the last.
 ///
 /// `None` disarms the split entirely (a Readmemh / TB-method statement,
 /// or a CompiledBlock without original statements, writes storage this
@@ -3669,6 +3671,14 @@ fn const_cone_partition(
                     .all(|&w| !in_wrange(w) && !unsafe_comb.contains(&w))
         })
         .collect();
+    let mut readers: HashMap<isize, Vec<usize>> = HashMap::default();
+    for (i, io) in ios.iter().enumerate() {
+        for &(ff, o) in &io.reads {
+            if !ff {
+                readers.entry(o).or_default().push(i);
+            }
+        }
+    }
     loop {
         let mut changed = false;
         for i in 0..ios.len() {
@@ -3679,10 +3689,14 @@ fn const_cone_partition(
                 writers
                     .get(&o)
                     .is_none_or(|ws| ws.iter().all(|&j| is_const[j] && j < i))
-            }) && ios[i]
-                .writes
-                .iter()
-                .all(|&w| writers[&w].iter().all(|&j| is_const[j]));
+            }) && ios[i].writes.iter().all(|&w| {
+                let ws = &writers[&w];
+                let (first, last) = (ws[0], ws[ws.len() - 1]);
+                ws.iter().all(|&j| is_const[j])
+                    && readers
+                        .get(&w)
+                        .is_none_or(|rs| rs.iter().all(|&r| is_const[r] || r <= first || r >= last))
+            });
             if !ok {
                 is_const[i] = false;
                 changed = true;
@@ -16642,6 +16656,40 @@ mod tests {
         });
         let stmts = vec![cond_write, cassign(0x0, 32, const_expr(7, 32))];
         assert!(const_cone_partition(&stmts, &HashSet::default()).is_none());
+    }
+
+    #[test]
+    fn const_partition_keeps_an_offset_with_two_writers_live() {
+        // A non-const reader between two literal writes of 0x0 must see the
+        // first one; running both writes once up front leaves only the second.
+        let stmts = vec![
+            cassign(0x0, 32, const_expr(1, 32)),
+            cassign(
+                0x8,
+                32,
+                ProtoExpression::Binary {
+                    x: Box::new(var_expr(VarOffset::Comb(0x0), 32)),
+                    op: Op::BitAnd,
+                    y: Box::new(var_expr(VarOffset::Ff(0), 32)),
+                    width: 32,
+                    expr_context: ExpressionContext {
+                        width: 32,
+                        signed: false,
+                    },
+                },
+            ),
+            cassign(0x0, 32, const_expr(0, 32)),
+        ];
+        assert!(const_cone_partition(&stmts, &HashSet::default()).is_none());
+
+        // Read only after the last write, the offset holds one value for
+        // every non-const reader, so both writes stay const.
+        let mut after = stmts.clone();
+        after.swap(1, 2);
+        assert_eq!(
+            const_cone_partition(&after, &HashSet::default()).map(|(_, n, _)| n),
+            Some(2)
+        );
     }
 
     #[test]
