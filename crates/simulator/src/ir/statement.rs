@@ -4398,7 +4398,9 @@ fn conv_assign_statements(
                 dst.comptime.r#type.total_width().unwrap()
             };
 
-            let rhs_select = Some(msb_first_window(&mut remaining, dst_elem_width));
+            let window = msb_first_window(&mut remaining, dst_elem_width);
+            let (dst_expr, rhs_select) = narrow_destructure_rhs(&expr, window)
+                .unwrap_or_else(|| (expr.clone(), Some(window)));
 
             let scope = context.scope();
             let meta = scope.variable_meta.get(&id).unwrap();
@@ -4426,7 +4428,7 @@ fn conv_assign_statements(
                     select,
                     dynamic_select,
                     rhs_select,
-                    expr: expr.clone(),
+                    expr: dst_expr,
                     dst_ff_current_offset: element.current_offset(),
                     comb_direct,
                     token: src.token,
@@ -4463,7 +4465,7 @@ fn conv_assign_statements(
                     select,
                     dynamic_select,
                     rhs_select,
-                    expr: expr.clone(),
+                    expr: dst_expr,
                     dst_ff_current_base_offset: base_current,
                     comb_direct,
                 }));
@@ -4643,7 +4645,7 @@ pub(crate) fn size_literal_rhs(
 }
 
 /// The reads of an assignment's right-hand side, narrowed to the destination
-/// window: a concat destructure keeps the WHOLE source and slices it with
+/// window: a concat destructure may keep the whole source and slice it with
 /// `rhs_select`, so the unnarrowed read would span every field.
 pub(crate) fn gather_assign_rhs_reads(
     expr: &ProtoExpression,
@@ -4664,6 +4666,93 @@ pub(crate) fn gather_assign_rhs_reads(
 pub(crate) fn msb_first_window(remaining: &mut usize, elem_width: usize) -> (usize, usize) {
     *remaining -= elem_width;
     (*remaining + elem_width - 1, *remaining)
+}
+
+/// Narrows a destructured concatenation to the parts under `(hi, lo)`, so each
+/// destination stops rebuilding the whole of it. A window above the
+/// concatenation gets `None`: only the whole source zero-extends.
+fn narrow_destructure_rhs(
+    expr: &ProtoExpression,
+    (hi, lo): (usize, usize),
+) -> Option<(ProtoExpression, Option<(usize, usize)>)> {
+    let ProtoExpression::Concatenation {
+        elements,
+        expr_context,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    let total: usize = elements.iter().map(|(_, r, w)| r * w).sum();
+    if expr_context.signed || hi < lo || hi >= total {
+        return None;
+    }
+    let mut lsb = 0usize;
+    let mut first = None;
+    let mut last = None;
+    for (i, (_, repeat, elem_width)) in elements.iter().enumerate().rev() {
+        let width = repeat * elem_width;
+        if width == 0 {
+            continue;
+        }
+        let msb = lsb + width - 1;
+        if msb >= lo && lsb <= hi {
+            if first.is_none() {
+                first = Some((i, lsb));
+            }
+            last = Some(i);
+        }
+        lsb += width;
+    }
+    let ((lo_idx, base), hi_idx) = (first?, last?);
+    if hi_idx == 0 && lo_idx == elements.len() - 1 {
+        return None;
+    }
+    let (rel_hi, rel_lo) = (hi - base, lo - base);
+    if hi_idx == lo_idx {
+        let (elem, repeat, elem_width) = &elements[lo_idx];
+        if *repeat == 1
+            && let ProtoExpression::Variable {
+                var_offset,
+                select,
+                dynamic_select: None,
+                width,
+                var_full_width,
+                ..
+            } = elem.as_ref()
+            && *width == *elem_width
+        {
+            let sel_lo = select.map_or(0, |(_, l)| l);
+            let w = rel_hi - rel_lo + 1;
+            return Some((
+                ProtoExpression::Variable {
+                    var_offset: *var_offset,
+                    select: Some((sel_lo + rel_hi, sel_lo + rel_lo)),
+                    dynamic_select: None,
+                    width: w,
+                    var_full_width: *var_full_width,
+                    expr_context: ExpressionContext {
+                        width: w,
+                        signed: false,
+                    },
+                },
+                None,
+            ));
+        }
+    }
+    let part = &elements[hi_idx..=lo_idx];
+    let width = part.iter().map(|(_, r, w)| r * w).sum();
+    Some((
+        ProtoExpression::Concatenation {
+            elements: part.to_vec(),
+            width,
+            expr_context: ExpressionContext {
+                width,
+                signed: false,
+            },
+        },
+        Some((rel_hi, rel_lo)),
+    ))
 }
 
 impl Conv<&air::AssignStatement> for ProtoStatement {
@@ -5538,5 +5627,90 @@ mod emit_ff_log_tests {
             let e = &buf.wide_entries_slice()[0];
             assert_eq!((e.offset, e.native_bytes), (off, nb), "span [{hi}:{lo}]");
         }
+    }
+}
+
+#[cfg(test)]
+mod narrow_destructure_rhs_tests {
+    use super::narrow_destructure_rhs;
+    use crate::ir::{ExpressionContext, ProtoExpression, VarOffset};
+
+    fn ctx(width: usize) -> ExpressionContext {
+        ExpressionContext {
+            width,
+            signed: false,
+        }
+    }
+
+    fn var(off: isize, width: usize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: None,
+            dynamic_select: None,
+            width,
+            var_full_width: width,
+            expr_context: ctx(width),
+        }
+    }
+
+    /// `{a, b, c}` with a, b, c 40 bits each: c holds bits [39:0].
+    fn concat3() -> ProtoExpression {
+        ProtoExpression::Concatenation {
+            elements: vec![
+                (Box::new(var(0x10, 40)), 1, 40),
+                (Box::new(var(0x20, 40)), 1, 40),
+                (Box::new(var(0x30, 40)), 1, 40),
+            ],
+            width: 120,
+            expr_context: ctx(120),
+        }
+    }
+
+    #[test]
+    fn a_window_inside_one_variable_becomes_its_select() {
+        let (e, rhs_select) = narrow_destructure_rhs(&concat3(), (59, 45)).unwrap();
+        assert_eq!(rhs_select, None);
+        let ProtoExpression::Variable {
+            var_offset,
+            select,
+            width,
+            ..
+        } = e
+        else {
+            panic!("expected a variable, got {e:?}");
+        };
+        assert_eq!(
+            (var_offset, select, width),
+            (VarOffset::Comb(0x20), Some((19, 5)), 15)
+        );
+    }
+
+    #[test]
+    fn a_straddling_window_keeps_only_the_parts_it_reads() {
+        let (e, rhs_select) = narrow_destructure_rhs(&concat3(), (99, 50)).unwrap();
+        // a and b span bits [119:40]; the window rebases onto b's lsb.
+        assert_eq!(rhs_select, Some((59, 10)));
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = e
+        else {
+            panic!("expected a concatenation, got {e:?}");
+        };
+        assert_eq!(width, 80);
+        let offsets: Vec<_> = elements
+            .iter()
+            .map(|(x, _, _)| match x.as_ref() {
+                ProtoExpression::Variable { var_offset, .. } => *var_offset,
+                other => panic!("unexpected part {other:?}"),
+            })
+            .collect();
+        assert_eq!(offsets, vec![VarOffset::Comb(0x10), VarOffset::Comb(0x20)]);
+    }
+
+    #[test]
+    fn a_window_over_every_part_is_left_alone() {
+        assert!(narrow_destructure_rhs(&concat3(), (119, 0)).is_none());
+        assert!(narrow_destructure_rhs(&concat3(), (129, 90)).is_none());
+        assert!(narrow_destructure_rhs(&var(0x10, 40), (9, 0)).is_none());
     }
 }
