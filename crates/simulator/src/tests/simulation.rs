@@ -34291,3 +34291,53 @@ fn a_loop_skips_the_index_of_its_untaken_branch() {
         }
     }
 }
+
+#[test]
+fn a_reset_loop_over_a_runtime_indexed_array_resets_every_element() {
+    // Runtime-indexed outside reset, so the reset loop stays a loop.
+    let code = r#"
+    module Top (
+        clk : input  clock   ,
+        rst : input  reset   ,
+        we  : input  logic   ,
+        addr: input  logic<3>,
+        d   : input  logic<4>,
+        ra  : input  logic<3>,
+        q   : output logic<4>,
+    ) {
+        var mem: logic<4> [8];
+        always_ff {
+            if_reset {
+                for i in 0..8 {
+                    mem[i] = i as 4 + 1;
+                }
+            } else if we {
+                mem[addr] = d;
+            }
+        }
+        assign q = mem[ra];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.set("we", Value::new(1, 1, false));
+        sim.set("addr", Value::new(5, 3, false));
+        sim.set("d", Value::new(0xf, 4, false));
+        sim.step(&clk);
+        sim.set("we", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+        for i in 0..8u64 {
+            sim.set("ra", Value::new(i, 3, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("q").unwrap(),
+                Value::new(i + 1, 4, false),
+                "mem[{i}] under {config:?}"
+            );
+        }
+    }
+}
