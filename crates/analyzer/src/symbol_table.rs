@@ -2886,7 +2886,7 @@ impl ResolveContext<'_> {
     }
 }
 
-const DEFINED_NAMESPACES: [&str; 4] = ["$sv", "$std", "$tb", "$comp"];
+const DEFINED_NAMESPACES: [&str; 5] = ["$sv", "$define", "$std", "$tb", "$comp"];
 
 // Refer IEEE Std 1800-2023 Table B.1 - Reserved keywords
 // This list must be sorted to enable binary search
@@ -3622,6 +3622,8 @@ mod tests {
         var memberC: TypeA;
         var memberD: $sv::SvTypeA;
         var memberE: PackageA::UnionA;
+        var memberF: $define::DefineTypeA;
+        var memberG: $define::DefinePkgA::DefineTypeA;
 
         inst instA: InterfaceA;
     }
@@ -4033,6 +4035,23 @@ mod tests {
 
         let symbol = resolve(&["memberD", "memberA", "memberA", "memberA"], &["ModuleA"]);
         check_found(symbol, "$sv::SvTypeA");
+    }
+
+    #[test]
+    fn define_member() {
+        parse();
+
+        let symbol = resolve(&["memberF"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
+
+        let symbol = resolve(&["memberF", "memberA"], &["ModuleA"]);
+        check_found(symbol, "$define::DefineTypeA");
+
+        let symbol = resolve(&["memberG"], &["ModuleA"]);
+        check_found(symbol, "prj::ModuleA");
+
+        let symbol = resolve(&["memberG", "memberA"], &["ModuleA"]);
+        check_found(symbol, "$define::DefinePkgA::DefineTypeA");
     }
 
     #[test]

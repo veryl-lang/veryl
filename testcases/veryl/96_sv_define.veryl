@@ -1,0 +1,12 @@
+module Module96 (
+    i_a: input  logic<$define::WIDTH>,
+    o_a: output logic<$define::WIDTH>,
+) {
+    const A: u32 = $define::A;
+    const B: u32 = $define::PKG::B;
+
+    var c: $define::TYPE;
+
+    assign c   = A + B;
+    assign o_a = i_a;
+}
