@@ -973,8 +973,12 @@ impl<'a> Subst<'a> {
     /// `(true_side_only, false_side_only)`, as conversion decides an unrolled `if`.
     fn decided_sides(&mut self, cond: &Expression) -> (bool, bool) {
         let mut cond = cond.clone();
+        // Errors on the copy were reported at conversion if they are real.
+        self.context.begin_analysis_transaction();
         cond.gather_context(self.context);
-        crate::conv::statement::eval_cond_true_false(self.context, &cond)
+        let sides = crate::conv::statement::eval_cond_true_false(self.context, &cond);
+        self.context.rollback_analysis_transaction();
+        sides
     }
 
     /// `expr` as a constant when it reads no variable and evaluates free of

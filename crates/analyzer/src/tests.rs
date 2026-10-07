@@ -23251,3 +23251,31 @@ fn loop_iteration_ignores_the_index_of_an_untaken_branch() {
     let errors = analyze(code);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn loop_iteration_decision_reports_no_error_of_its_own() {
+    // Regression: deciding the `if` per iteration re-checked its condition and
+    // reported the zero repeat below as an unsized literal.
+    let code = r#"
+    module ModuleA #(
+        param W: u32 = 1,
+    ) (
+        a: input  logic<W>,
+        s: input  logic   ,
+        d: input  logic<4>,
+        o: output logic   ,
+    ) {
+        always_comb {
+            o = 1'b0;
+            for i in 0..4 {
+                if (a + {{1'b0 repeat W - 1}, s}) == i[W - 1:0] {
+                    o |= d[i];
+                }
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
