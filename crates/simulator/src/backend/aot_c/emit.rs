@@ -9238,6 +9238,131 @@ fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
     Some(s)
 }
 
+/// A one-hot to binary encoder, `|({W{x[k]}} & k)` over the bits of `x`, as a
+/// loop over the set bits: spelled out, a few dozen of them in one function
+/// exhaust gcc's memory.
+fn emit_onehot_encode(expr: &ProtoExpression) -> Option<String> {
+    // `{W{x[k]}}`, unsigned.
+    fn repeat_bit(e: &ProtoExpression) -> Option<(VarOffset, usize, usize, usize)> {
+        let ProtoExpression::Concatenation {
+            elements,
+            expr_context,
+            ..
+        } = e
+        else {
+            return None;
+        };
+        let [(sub, repeat, _)] = elements.as_slice() else {
+            return None;
+        };
+        let ProtoExpression::Variable {
+            var_offset,
+            select: Some((hi, lo)),
+            dynamic_select: None,
+            var_full_width,
+            ..
+        } = sub.as_ref()
+        else {
+            return None;
+        };
+        (!expr_context.signed && hi == lo && *var_full_width <= 64).then_some((
+            *var_offset,
+            *var_full_width,
+            *lo,
+            *repeat,
+        ))
+    }
+    // `Some(None)` is a zero leaf, which contributes no bit.
+    fn leaf(l: &ProtoExpression, var: &mut Option<(VarOffset, usize)>) -> Option<Option<usize>> {
+        if let ProtoExpression::Value {
+            value: Value::U64(v),
+            ..
+        } = l
+            && v.payload == 0
+            && v.mask_xz == 0
+        {
+            return Some(None);
+        }
+        let (rep, c) = match l {
+            ProtoExpression::Binary {
+                x,
+                op: Op::BitAnd,
+                y,
+                ..
+            } => {
+                let (r, v) = match (x.as_ref(), y.as_ref()) {
+                    (r, ProtoExpression::Value { value, .. })
+                    | (ProtoExpression::Value { value, .. }, r) => (r, value),
+                    _ => return None,
+                };
+                let Value::U64(v) = v else { return None };
+                if v.mask_xz != 0 {
+                    return None;
+                }
+                (repeat_bit(r)?, Some(v.payload))
+            }
+            _ => (repeat_bit(l)?, None),
+        };
+        let (off, full, k, w) = rep;
+        if w == 0 || w >= 64 || var.is_some_and(|v| v != (off, full)) {
+            return None;
+        }
+        *var = Some((off, full));
+        let wmask = (1u64 << w) - 1;
+        (c.unwrap_or(wmask) & wmask == k as u64).then_some(Some(k))
+    }
+    let ProtoExpression::Binary { expr_context, .. } = expr else {
+        return None;
+    };
+    if expr_context.width > 64 {
+        return None;
+    }
+    // Gives up at the first leaf that does not fit, so a long chain of another
+    // shape costs one pass.
+    let mut var: Option<(VarOffset, usize)> = None;
+    let mut bits = 0u64;
+    let mut leaves = 0usize;
+    let mut stack = vec![expr];
+    while let Some(e) = stack.pop() {
+        match e {
+            ProtoExpression::Binary {
+                x,
+                op: Op::BitOr,
+                y,
+                ..
+            } => {
+                stack.push(y);
+                stack.push(x);
+            }
+            _ => {
+                leaves += 1;
+                if let Some(k) = leaf(e, &mut var)? {
+                    bits |= 1u64 << k;
+                }
+            }
+        }
+    }
+    if leaves < 8 {
+        return None;
+    }
+    let (off, full) = var?;
+    let x = emit_expr(&ProtoExpression::Variable {
+        var_offset: off,
+        select: None,
+        dynamic_select: None,
+        width: full,
+        var_full_width: full,
+        expr_context: ExpressionContext {
+            width: full,
+            signed: false,
+        },
+    })?;
+    Some(format!(
+        "({{ uint64_t _ohv = ((uint64_t)({x})) & 0x{bits:x}ULL, _ohr = 0; \
+         while (_ohv) {{ _ohr |= (uint64_t)__builtin_ctzll(_ohv); _ohv &= _ohv - 1; }} _ohr; }})"
+    ))
+}
+
 /// `VERYL_AOT_C_BITMERGE=0` opts bit-test merging out.
 fn bitmerge_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -10010,6 +10135,11 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             expr_context,
             ..
         } => {
+            if matches!(op, Op::BitOr)
+                && let Some(s) = emit_onehot_encode(expr)
+            {
+                return Some(s);
+            }
             // Bit-test merging: see emit_bit_test_merge.
             if matches!(op, Op::BitAnd | Op::BitOr | Op::BitXor)
                 && expr_context.width == 1
