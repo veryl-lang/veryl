@@ -4491,6 +4491,18 @@ pub fn insert_port_connect(
             if !expr.is_assignable() {
                 context.insert_error(AnalyzerError::unassignable_output(&expr.token_range()));
             }
+            // An output connection is a continuous assignment, whose packed selects
+            // must be constant.
+            for VarPathSelect(_, select, _) in &dst {
+                let part_select = select.1.iter().map(|(_, x)| x);
+                for x in select.0.iter().chain(part_select) {
+                    if !x.comptime().is_const {
+                        context.insert_error(AnalyzerError::non_constant_output_select(
+                            &x.token_range(),
+                        ));
+                    }
+                }
+            }
             let dst = var_path_to_assign_destination(context, dst, false);
             outputs.push(ir::InstOutput {
                 id: variable.id,

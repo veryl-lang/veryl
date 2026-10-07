@@ -37,6 +37,9 @@ fn instance_source_guard_limit_preserves_independent_cycles() {
                 assert!(
                     errors.iter().all(|error| match error {
                         AnalyzerError::CombinationalLoop { .. } => true,
+                        // The runtime output select is part of the case, and is
+                        // reported separately.
+                        AnalyzerError::NonConstantOutputSelect { .. } => selector,
                         AnalyzerError::UnassignVariable { identifier, .. } =>
                             identifier == "independent",
                         _ => false,
