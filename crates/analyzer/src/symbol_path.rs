@@ -527,7 +527,16 @@ impl GenericSymbolPath {
                 }
                 visited.push(symbol.found.id);
 
-                alias_target.resolve_imported(scope, &define_context, Some(&generic_maps));
+                // Imports used by the target are declared around the alias
+                // declaration, not around the referring site.
+                let (alias_scope, alias_define_context) =
+                    scope::token_scope(alias_target.paths[0].base.id)
+                        .unwrap_or((scope, define_context.clone()));
+                alias_target.resolve_imported(
+                    alias_scope,
+                    &alias_define_context,
+                    Some(&generic_maps),
+                );
                 alias_target.apply_map(&generic_maps);
                 if (i + 1) < self.len() {
                     for j in (i + 1)..self.len() {

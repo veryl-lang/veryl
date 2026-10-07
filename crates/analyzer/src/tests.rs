@@ -12175,6 +12175,32 @@ fn unevaluable_value_const_value() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    proto package ProtPkg {
+        const W: u32;
+    }
+    package Pkg::<V: u32> for ProtPkg {
+        const W: u32 = V;
+    }
+    package WidthPkg {
+        const DW: u32 = 32;
+    }
+    package AliasPkg {
+        import WidthPkg::DW;
+        alias package BusPkg = Pkg::<DW>;
+    }
+    interface InterfaceA::<PKG: ProtPkg> {
+        const W: u32 = PKG::W;
+    }
+    module ModuleA {
+        import AliasPkg::BusPkg;
+        inst u: InterfaceA::<BusPkg>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
