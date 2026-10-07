@@ -96,6 +96,7 @@ pub fn convert_module_with_library(
         module,
         &mut lowered.declarations,
         usize::MAX,
+        false,
     );
     for function in lowered.functions.values_mut() {
         for body in &mut function.functions {
@@ -103,6 +104,7 @@ pub fn convert_module_with_library(
                 &mut analyzer_context,
                 &mut body.statements,
                 usize::MAX,
+                false,
             );
         }
     }

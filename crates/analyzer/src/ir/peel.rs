@@ -89,24 +89,142 @@ pub fn has_for_loop(decls: &[Declaration]) -> bool {
 /// Lower bounded constant loops for a backend that requires concrete write
 /// lanes. The caller owns a private copy; shared analysis IR stays compact.
 /// Loops containing a break remain available to the decided-loop peeler.
+/// `keep_reset` keeps a reset-side loop, outside the budget, when every array
+/// it indexes at runtime already is outside reset, so no array changes layout.
 pub fn lower_constant_loops(
     context: &mut Context,
     module: &Module,
     declarations: &mut [Declaration],
     statement_limit: usize,
+    keep_reset: bool,
 ) -> bool {
     if is_test_module(module) {
         return false;
     }
     let mut changed = false;
-    for decl in declarations {
+    for decl in declarations.iter_mut() {
         let stmts = match decl {
             Declaration::Comb(x) => &mut x.statements,
             Declaration::Ff(x) => &mut x.statements,
             _ => continue,
         };
-        changed |= lower_constant_loop_body(context, stmts, statement_limit);
+        changed |= lower_constant_loop_body(context, stmts, statement_limit, keep_reset);
     }
+    if keep_reset {
+        let mut dynamic = HashSet::default();
+        for decl in declarations.iter() {
+            if let Declaration::Comb(x) = decl {
+                runtime_indexed(&x.statements, false, &mut dynamic);
+            } else if let Declaration::Ff(x) = decl {
+                runtime_indexed(&x.statements, false, &mut dynamic);
+            }
+        }
+        for decl in declarations.iter_mut() {
+            let stmts = match decl {
+                Declaration::Comb(x) => &mut x.statements,
+                Declaration::Ff(x) => &mut x.statements,
+                _ => continue,
+            };
+            changed |= lower_reset_loops(context, stmts, &dynamic, statement_limit, false);
+        }
+    }
+    changed
+}
+
+fn runtime_indexed(stmts: &[Statement], in_reset: bool, out: &mut HashSet<VarId>) {
+    fn dst(x: &AssignDestination, out: &mut HashSet<VarId>) {
+        if !x.index.is_const() {
+            out.insert(x.id);
+        }
+    }
+    for stmt in stmts {
+        match stmt {
+            Statement::Assign(x) => x.dst.iter().for_each(|x| dst(x, out)),
+            Statement::FunctionCall(x) => x.outputs.values().flatten().for_each(|x| dst(x, out)),
+            Statement::If(x) => {
+                runtime_indexed(&x.true_side, in_reset, out);
+                runtime_indexed(&x.false_side, in_reset, out);
+            }
+            Statement::IfReset(x) => {
+                if in_reset {
+                    runtime_indexed(&x.true_side, in_reset, out);
+                }
+                runtime_indexed(&x.false_side, in_reset, out);
+            }
+            Statement::Case(x) => {
+                for arm in &x.arms {
+                    runtime_indexed(&arm.body, in_reset, out);
+                }
+                runtime_indexed(&x.default, in_reset, out);
+            }
+            Statement::For(x) => runtime_indexed(&x.body, in_reset, out),
+            _ => {}
+        }
+    }
+}
+
+/// Lowers each reset-side loop that would make an array runtime-indexed.
+fn lower_reset_loops(
+    context: &mut Context,
+    stmts: &mut Vec<Statement>,
+    dynamic: &HashSet<VarId>,
+    statement_limit: usize,
+    in_reset: bool,
+) -> bool {
+    let mut changed = false;
+    let mut out = Vec::with_capacity(stmts.len());
+    for mut stmt in std::mem::take(stmts) {
+        match &mut stmt {
+            Statement::IfReset(x) => {
+                changed |=
+                    lower_reset_loops(context, &mut x.true_side, dynamic, statement_limit, true);
+            }
+            Statement::If(x) => {
+                changed |= lower_reset_loops(
+                    context,
+                    &mut x.true_side,
+                    dynamic,
+                    statement_limit,
+                    in_reset,
+                );
+                changed |= lower_reset_loops(
+                    context,
+                    &mut x.false_side,
+                    dynamic,
+                    statement_limit,
+                    in_reset,
+                );
+            }
+            Statement::Case(x) => {
+                for arm in &mut x.arms {
+                    changed |= lower_reset_loops(
+                        context,
+                        &mut arm.body,
+                        dynamic,
+                        statement_limit,
+                        in_reset,
+                    );
+                }
+                changed |=
+                    lower_reset_loops(context, &mut x.default, dynamic, statement_limit, in_reset);
+            }
+            Statement::For(_) if in_reset => {
+                let mut written = HashSet::default();
+                runtime_indexed(std::slice::from_ref(&stmt), true, &mut written);
+                if !written.is_subset(dynamic) {
+                    let mut lowered = vec![stmt.clone()];
+                    if lower_constant_loop_body(context, &mut lowered, statement_limit, false) {
+                        out.extend(lowered);
+                        changed = true;
+                        continue;
+                    }
+                }
+            }
+            _ => {}
+        }
+        out.push(stmt);
+    }
+    *stmts = out;
     changed
 }
 
@@ -116,12 +234,14 @@ pub fn lower_constant_loop_body(
     context: &mut Context,
     stmts: &mut Vec<Statement>,
     statement_limit: usize,
+    keep_reset: bool,
 ) -> bool {
     fn lower(
         context: &mut Context,
         stmts: &[Statement],
         budget: &mut usize,
         changed: &mut bool,
+        keep_reset: bool,
     ) -> Option<Vec<Statement>> {
         let mut out = Vec::new();
         for stmt in stmts {
@@ -132,27 +252,29 @@ pub fn lower_constant_loop_body(
             {
                 for iteration in iterations {
                     let body = specialize_iteration(context, x, iteration)?;
-                    out.extend(lower(context, &body, budget, changed)?);
+                    out.extend(lower(context, &body, budget, changed, keep_reset)?);
                 }
                 *changed = true;
                 continue;
             }
             let mut stmt = stmt.clone();
             match &mut stmt {
-                Statement::For(x) => x.body = lower(context, &x.body, budget, changed)?,
+                Statement::For(x) => x.body = lower(context, &x.body, budget, changed, keep_reset)?,
                 Statement::If(x) => {
-                    x.true_side = lower(context, &x.true_side, budget, changed)?;
-                    x.false_side = lower(context, &x.false_side, budget, changed)?;
+                    x.true_side = lower(context, &x.true_side, budget, changed, keep_reset)?;
+                    x.false_side = lower(context, &x.false_side, budget, changed, keep_reset)?;
                 }
                 Statement::IfReset(x) => {
-                    x.true_side = lower(context, &x.true_side, budget, changed)?;
-                    x.false_side = lower(context, &x.false_side, budget, changed)?;
+                    if !keep_reset {
+                        x.true_side = lower(context, &x.true_side, budget, changed, keep_reset)?;
+                    }
+                    x.false_side = lower(context, &x.false_side, budget, changed, keep_reset)?;
                 }
                 Statement::Case(x) => {
                     for arm in &mut x.arms {
-                        arm.body = lower(context, &arm.body, budget, changed)?;
+                        arm.body = lower(context, &arm.body, budget, changed, keep_reset)?;
                     }
-                    x.default = lower(context, &x.default, budget, changed)?;
+                    x.default = lower(context, &x.default, budget, changed, keep_reset)?;
                 }
                 _ => {}
             }
@@ -166,7 +288,7 @@ pub fn lower_constant_loop_body(
     }
     let mut budget = statement_limit;
     let mut expanded = false;
-    if let Some(lowered) = lower(context, stmts, &mut budget, &mut expanded)
+    if let Some(lowered) = lower(context, stmts, &mut budget, &mut expanded, keep_reset)
         && expanded
     {
         *stmts = lowered;

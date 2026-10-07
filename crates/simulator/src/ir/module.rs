@@ -5957,7 +5957,8 @@ pub(crate) fn peeled_declarations(
         analyzer_context,
         src,
         &mut declarations,
-        32768,
+        4096,
+        true,
     );
     let peeled =
         veryl_analyzer::ir::peel::peel_decided_loops(analyzer_context, src, &mut declarations);
