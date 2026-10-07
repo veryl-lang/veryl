@@ -34341,3 +34341,53 @@ fn a_reset_loop_over_a_runtime_indexed_array_resets_every_element() {
         }
     }
 }
+
+#[test]
+fn dynamic_struct_member_range_select_keeps_width() {
+    // Regression: `d.a[i][7:0]` under a dynamic index rebased to
+    // `[base+7:base]`, whose bounds gave a 1-bit width, so 0x34 read as 0x00.
+    let code = r#"
+    module Top (
+        s  : input  logic<40>   ,
+        sel: input  logic<2>    ,
+        idx: input  logic       ,
+        o  : output logic<2, 16>,
+        p  : output logic<8>    ,
+    ) {
+        struct data_t {
+            hdr: logic<8>    ,
+            a  : logic<2, 16>,
+        }
+        var d: data_t;
+        assign d = s;
+        always_comb {
+            for i in 0..2 {
+                o[i] = d.a[i];
+                if sel[i] {
+                    o[i][15:8] = d.a[i][7:0];
+                }
+            }
+        }
+        assign p = d.a[idx][7:0];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("s", Value::new(0x5a_1234_5678, 40, false));
+        sim.set("sel", Value::new(0b11, 2, false));
+        sim.set("idx", Value::new(1, 1, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new(0x3434_7878, 32, false),
+            "config={config:?}"
+        );
+        assert_eq!(
+            sim.get("p").unwrap(),
+            Value::new(0x34, 8, false),
+            "config={config:?}"
+        );
+    }
+}

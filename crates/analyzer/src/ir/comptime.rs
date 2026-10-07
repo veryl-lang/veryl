@@ -109,9 +109,23 @@ impl PartSelectPath {
         let mut pos_width: Option<(Expression, usize, Option<usize>)> = None;
 
         let (range_select, range_op_width) = if let Some((op, end)) = &select.1 {
-            // Keep `+:`/`-:` width so the rebased select stays `low +: w`.
+            // Keep the width so the rebased select stays `low +: w`. A constant
+            // `[hi:lo]` needs it too when an outer coordinate is dynamic.
             let op_width = if matches!(op, VarSelectOp::Colon) {
-                None
+                let (coords, beg) = select.0.split_at(select.0.len() - 1);
+                let beg = &beg[0];
+                if coords.iter().any(|x| !x.comptime().is_const)
+                    && beg.comptime().is_const
+                    && end.comptime().is_const
+                {
+                    let beg = const_usize(context, beg);
+                    let end = const_usize(context, end);
+                    beg.zip(end)
+                        .and_then(|(beg, end)| beg.checked_sub(end))
+                        .map(|w| w + 1)
+                } else {
+                    None
+                }
             } else {
                 end.clone()
                     .eval_value(context)
@@ -340,6 +354,12 @@ impl PartSelectPath {
             None
         }
     }
+}
+
+fn const_usize(context: &mut Context, x: &Expression) -> Option<usize> {
+    x.eval_value(context)
+        .filter(|v| !v.is_xz())
+        .and_then(|v| v.to_usize_saturating())
 }
 
 impl fmt::Display for PartSelectPath {
