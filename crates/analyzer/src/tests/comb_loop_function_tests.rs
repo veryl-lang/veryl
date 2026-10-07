@@ -1755,7 +1755,7 @@ fn function_summary_guard_sharing_separates_static_iterations() {
 }
 
 #[test]
-fn function_summary_distinct_guarded_expansion_is_bounded_and_incomplete() {
+fn function_summary_distinct_guarded_expansion_is_bounded_and_complete() {
     const DEPTH: usize = 24;
     let mut functions = String::from(
         "function f0(x: input logic, sel: input logic) -> logic { return if sel ? x : 0; }\n",
@@ -1774,9 +1774,11 @@ fn function_summary_distinct_guarded_expansion_is_bounded_and_incomplete() {
         "exhaustion must not invent feedback: {errors:#?}"
     );
     let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
-    eprintln!("distinct guarded fanout depth={DEPTH} nodes={nodes}");
-    assert!(nodes < 100_000);
-    assert!(!comb_loop_analysis_is_complete(&code));
+    // Each level calls the previous one with opposite selectors, so calls
+    // cannot share branches. A branch read by one summary edge correlates
+    // nothing and is eliminated exactly instead of doubling per level.
+    assert!(nodes < 4096, "{nodes} summary nodes");
+    assert!(comb_loop_analysis_is_complete(&code));
 }
 
 #[test]

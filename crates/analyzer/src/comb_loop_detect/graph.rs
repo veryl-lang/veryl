@@ -370,7 +370,7 @@ fn insert_cycle_state<R: Clone + Eq>(
     if !budget.spend(relation_size.saturating_add(1)) {
         return None;
     }
-    states.push((relation.clone(), condition.clone()));
+    states.push((relation.clone(), condition));
     Some(condition)
 }
 
@@ -666,7 +666,7 @@ pub(super) fn diagnostic_cycle(
                     continue;
                 }
                 previous.retain(|(r, c)| !relation.piecewise_covers(r) || !condition.covers(c));
-                previous.push((relation.clone(), condition.clone()));
+                previous.push((relation.clone(), condition));
                 queue.push_back(states.len());
                 states.push((next, condition, relation, Some((index, edge))));
             }
@@ -1616,7 +1616,7 @@ mod tests {
                     array: Link::from_offset(Some(0)),
                     packed: Link::from_offset(Some(1)),
                 },
-                condition.clone(),
+                condition,
             ),
             (
                 BitDependency {
@@ -1644,7 +1644,7 @@ mod tests {
                     array: Link::from_offset(Some(1)),
                     packed: Link::from_offset(Some(0)),
                 },
-                condition.clone(),
+                condition,
             ),
             (
                 BitDependency {
@@ -1672,14 +1672,14 @@ mod tests {
                     array: Link::from_offset(Some(1)),
                     packed: Link::from_offset(Some(0)),
                 },
-                condition.clone(),
+                condition,
             ),
             (
                 BitDependency {
                     array: Link::from_offset(Some(0)),
                     packed: Link::from_offset(Some(1)),
                 },
-                condition.clone(),
+                condition,
             ),
             (
                 BitDependency {

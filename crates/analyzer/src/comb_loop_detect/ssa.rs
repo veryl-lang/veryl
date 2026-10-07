@@ -92,6 +92,14 @@ pub(super) struct BranchId {
 }
 
 impl BranchId {
+    /// Remapping a branch to this marker eliminates it: a valuation of the
+    /// other branches is admitted when some arm of this branch admits it.
+    pub(super) const ERASED: Self = Self {
+        procedure: usize::MAX,
+        local: usize::MAX,
+        arms: 1,
+    };
+
     pub(super) const fn new(procedure: usize, local: usize, arms: usize) -> Self {
         Self {
             procedure,
@@ -105,294 +113,7 @@ impl BranchId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct BranchConstraint {
-    branch: BranchId,
-    allowed: ArmSet,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct ArmSet {
-    ranges: Vec<(usize, usize)>,
-}
-
-impl ArmSet {
-    fn range(start: usize, end: usize) -> Self {
-        Self {
-            ranges: (start < end).then_some((start, end)).into_iter().collect(),
-        }
-    }
-
-    fn intersection(&self, other: &Self) -> Self {
-        let mut ranges = Vec::new();
-        let mut left = 0;
-        let mut right = 0;
-        while left < self.ranges.len() && right < other.ranges.len() {
-            let a = self.ranges[left];
-            let b = other.ranges[right];
-            let start = a.0.max(b.0);
-            let end = a.1.min(b.1);
-            if start < end {
-                ranges.push((start, end));
-            }
-            if a.1 < b.1 {
-                left += 1;
-            } else {
-                right += 1;
-            }
-        }
-        Self { ranges }
-    }
-
-    fn union(&self, other: &Self) -> Self {
-        let mut ranges = self
-            .ranges
-            .iter()
-            .chain(&other.ranges)
-            .copied()
-            .collect::<Vec<_>>();
-        ranges.sort_unstable();
-        let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
-        for range in ranges {
-            if let Some(previous) = merged.last_mut()
-                && range.0 <= previous.1
-            {
-                previous.1 = previous.1.max(range.1);
-            } else {
-                merged.push(range);
-            }
-        }
-        Self { ranges: merged }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.ranges.is_empty()
-    }
-
-    fn is_all(&self, arms: usize) -> bool {
-        self.ranges.as_slice() == [(0, arms)]
-    }
-
-    fn is_subset_of(&self, other: &Self) -> bool {
-        self.intersection(other) == *self
-    }
-}
-
-/// A compact Cartesian over-approximation of feasible branch choices.
-///
-/// Correlations between distinct syntactic branches are intentionally not
-/// retained. Choices of the same branch remain exact, which is sufficient to
-/// reject cycles assembled from mutually exclusive arms without enumerating
-/// every combination of independent conditions.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct PathCondition {
-    constraints: Rc<Vec<BranchConstraint>>,
-}
-
-impl PathCondition {
-    pub(super) fn branch_count(&self) -> usize {
-        self.constraints.len()
-    }
-
-    /// Count a constraint and its first arm range as one work unit, preserving
-    /// the cost of compact guards. Every additional disjoint range costs
-    /// another unit, so a single branch cannot hide an unbounded payload.
-    pub(super) fn work_size(&self) -> usize {
-        self.constraints.iter().fold(0usize, |cost, constraint| {
-            cost.saturating_add(constraint.allowed.ranges.len().max(1))
-        })
-    }
-
-    pub(super) fn is_unconditional(&self) -> bool {
-        self.constraints.is_empty()
-    }
-
-    pub(super) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
-        self.with_choice_range(branch, arm, arm.saturating_add(1))
-    }
-
-    pub(super) fn with_choice_range(&self, branch: BranchId, start: usize, end: usize) -> Self {
-        debug_assert!(start < end && end <= branch.arms);
-        let mut constraints = self.constraints.as_ref().clone();
-        let constraint = BranchConstraint {
-            branch,
-            allowed: ArmSet::range(start, end),
-        };
-        match constraints.binary_search_by_key(&branch, |constraint| constraint.branch) {
-            Ok(index) => constraints[index] = constraint,
-            Err(index) => constraints.insert(index, constraint),
-        }
-        Self {
-            constraints: Rc::new(constraints),
-        }
-    }
-
-    /// Joins alternative paths into the least Cartesian condition that covers
-    /// every input condition.
-    pub(super) fn try_disjoin_all<'a>(
-        conditions: impl IntoIterator<Item = &'a Self>,
-        work: &mut usize,
-    ) -> Option<Self> {
-        let mut conditions = conditions.into_iter();
-        let Some(first) = conditions.next() else {
-            return Some(Self::default());
-        };
-        let mut combined = first.clone();
-        for condition in conditions {
-            // The accumulated union can grow at each step even when every
-            // input has just one range. Charge before allocating its copy.
-            reserve_guard_work(work, [&combined, condition])?;
-            combined = combined.disjoin(condition);
-        }
-        Some(combined)
-    }
-
-    pub(super) fn conjoin_if_compatible(&self, other: &Self) -> Option<Self> {
-        let mut constraints = Vec::with_capacity(self.constraints.len() + other.constraints.len());
-        let mut left = self.constraints.iter().peekable();
-        let mut right = other.constraints.iter().peekable();
-        loop {
-            match (left.peek(), right.peek()) {
-                (Some(a), Some(b)) if a.branch == b.branch => {
-                    let allowed = a.allowed.intersection(&b.allowed);
-                    if allowed.is_empty() {
-                        return None;
-                    }
-                    constraints.push(BranchConstraint {
-                        branch: a.branch,
-                        allowed,
-                    });
-                    left.next();
-                    right.next();
-                }
-                (Some(a), Some(b)) if a.branch < b.branch => {
-                    constraints.push((*a).clone());
-                    left.next();
-                }
-                (Some(_), Some(b)) => {
-                    constraints.push((*b).clone());
-                    right.next();
-                }
-                (Some(a), None) => {
-                    constraints.push((*a).clone());
-                    left.next();
-                }
-                (None, Some(b)) => {
-                    constraints.push((*b).clone());
-                    right.next();
-                }
-                (None, None) => break,
-            }
-        }
-        Some(Self {
-            constraints: Rc::new(constraints),
-        })
-    }
-
-    /// Returns true when every branch valuation admitted by `other` is also
-    /// admitted by `self`.
-    pub(super) fn covers(&self, other: &Self) -> bool {
-        self.constraints.iter().all(|constraint| {
-            other
-                .constraints
-                .binary_search_by_key(&constraint.branch, |other| other.branch)
-                .ok()
-                .is_some_and(|index| {
-                    other.constraints[index]
-                        .allowed
-                        .is_subset_of(&constraint.allowed)
-                })
-        })
-    }
-
-    pub(super) fn branches(&self) -> impl Iterator<Item = BranchId> {
-        self.constraints
-            .iter()
-            .map(|constraint| constraint.branch)
-            .collect::<Vec<_>>()
-            .into_iter()
-    }
-
-    pub(super) fn remapped(&self, branches: &HashMap<BranchId, BranchId>) -> Self {
-        let mut constraints = self
-            .constraints
-            .iter()
-            .map(|constraint| BranchConstraint {
-                branch: branches
-                    .get(&constraint.branch)
-                    .copied()
-                    .unwrap_or(constraint.branch),
-                allowed: constraint.allowed.clone(),
-            })
-            .collect::<Vec<_>>();
-        constraints.sort_unstable_by_key(|constraint| constraint.branch);
-        Self {
-            constraints: Rc::new(constraints),
-        }
-    }
-
-    /// Returns the least Cartesian condition covering either input.
-    pub(super) fn disjoin(&self, other: &Self) -> Self {
-        let mut constraints = Vec::new();
-        for constraint in self.constraints.iter() {
-            let Ok(index) = other
-                .constraints
-                .binary_search_by_key(&constraint.branch, |other| other.branch)
-            else {
-                continue;
-            };
-            let allowed = constraint.allowed.union(&other.constraints[index].allowed);
-            if !allowed.is_all(constraint.branch.arms) {
-                constraints.push(BranchConstraint {
-                    branch: constraint.branch,
-                    allowed,
-                });
-            }
-        }
-        Self {
-            constraints: Rc::new(constraints),
-        }
-    }
-
-    /// An exact union is Cartesian when the two cubes differ on at most one
-    /// branch. Unlike `disjoin`, this never drops cross-branch correlations.
-    pub(super) fn disjoin_exact(&self, other: &Self) -> Option<Self> {
-        if self.covers(other) {
-            return Some(self.clone());
-        }
-        if other.covers(self) {
-            return Some(other.clone());
-        }
-        let mut differences = 0;
-        for left in self.constraints.iter() {
-            let different = match other
-                .constraints
-                .binary_search_by_key(&left.branch, |c| c.branch)
-            {
-                Ok(index) => left.allowed != other.constraints[index].allowed,
-                Err(_) => !left.allowed.is_all(left.branch.arms),
-            };
-            differences += usize::from(different);
-            if differences > 1 {
-                return None;
-            }
-        }
-        for right in other.constraints.iter() {
-            if self
-                .constraints
-                .binary_search_by_key(&right.branch, |c| c.branch)
-                .is_err()
-                && !right.allowed.is_all(right.branch.arms)
-            {
-                differences += 1;
-                if differences > 1 {
-                    return None;
-                }
-            }
-        }
-        Some(self.disjoin(other))
-    }
-}
+pub(super) use super::condition::PathCondition;
 
 use super::position::Axis;
 #[cfg(test)]
@@ -607,7 +328,7 @@ where
         let version = self.versions.len();
         self.versions.push(Version::Definition {
             sources,
-            condition: condition.clone(),
+            condition: *condition,
         });
         version
     }
@@ -827,7 +548,7 @@ where
                     // until another expression actually reads the merged value.
                     self.versions.push(Version::Guarded {
                         source,
-                        condition: condition.clone(),
+                        condition: *condition,
                     });
                     version
                 })
@@ -951,7 +672,7 @@ where
         Some(
             sources
                 .iter()
-                .map(|(&(source, relation), condition)| (source, relation, condition.clone()))
+                .map(|(&(source, relation), condition)| (source, relation, *condition))
                 .collect(),
         )
     }
@@ -1070,8 +791,7 @@ where
                     let inputs = sources
                         .iter()
                         .filter_map(|(source, relation)| {
-                            mapped[&(*source, true)]
-                                .map(|source| (source, *relation, condition.clone()))
+                            mapped[&(*source, true)].map(|source| (source, *relation, *condition))
                         })
                         .collect();
                     Some(builder.internal(inputs, Vec::new(), site))
@@ -1094,7 +814,7 @@ where
                 Version::Guarded { source, condition } => {
                     work = work.checked_sub(condition.work_size().saturating_add(1))?;
                     let inputs = mapped[&(*source, include_entry)]
-                        .map(|source| (source, PositionRelation::default(), condition.clone()))
+                        .map(|source| (source, PositionRelation::default(), *condition))
                         .into_iter()
                         .collect();
                     Some(builder.internal(inputs, Vec::new(), site))
@@ -1199,7 +919,7 @@ where
             #[cfg(test)]
             SOURCE_WALK_VISITS.set(SOURCE_WALK_VISITS.get() + 1);
             queued.remove(&state);
-            let condition = reached[&state].clone();
+            let condition = reached[&state];
 
             if current != version
                 && let Some(cached) = cache.summaries.get(&(current, include_entry))
@@ -1252,16 +972,12 @@ where
                         continue;
                     };
                     for (input, offset) in sources {
-                        enqueue(
-                            (*input, true, relation.compose(*offset)),
-                            condition.clone(),
-                            work,
-                        )?;
+                        enqueue((*input, true, relation.compose(*offset)), condition, work)?;
                     }
                 }
                 Version::Phi(inputs) => {
                     for input in inputs {
-                        enqueue((*input, include_entry, relation), condition.clone(), work)?;
+                        enqueue((*input, include_entry, relation), condition, work)?;
                     }
                 }
                 Version::Guarded {
@@ -1298,7 +1014,7 @@ where
                                         .compose(*binding_relation)
                                         .compose(imported_relation),
                                 ),
-                                condition.clone(),
+                                condition,
                                 work,
                             )?;
                         }
@@ -1354,7 +1070,7 @@ where
         #[cfg(test)]
         SOURCE_WALK_VISITS.set(SOURCE_WALK_VISITS.get() + 1);
         queued.remove(&state);
-        let condition = reached[&state].clone();
+        let condition = reached[&state];
         if let DependencyDagNode::External(key) = graph.nodes[node] {
             merge_source(&mut sources, (key, relation), condition, work)?;
             continue;
@@ -1399,7 +1115,7 @@ where
 /// Joins and source walks can accumulate quadratic guard payloads. Charge each
 /// allocating operation before combining/remapping conditions, including
 /// fragmented arm ranges. Rc clones and unguarded traversals need no extra work.
-fn reserve_guard_work<'a>(
+pub(super) fn reserve_guard_work<'a>(
     work: &mut usize,
     conditions: impl IntoIterator<Item = &'a PathCondition>,
 ) -> Option<()> {
@@ -1452,7 +1168,7 @@ where
             };
             condition
         } else {
-            condition.clone()
+            *condition
         };
         merge_source(destination, key, condition, work)?;
     }
@@ -1966,19 +1682,20 @@ mod tests {
     }
 
     #[test]
-    fn fragmented_arm_joins_charge_accumulated_ranges() {
+    fn fragmented_arm_joins_stay_compact() {
         let branch = BranchId::new(1, 0, 129);
         for stride in [1, 2] {
             let conditions = (0..64)
                 .map(|arm| PathCondition::default().with_choice(branch, arm * stride))
                 .collect::<Vec<_>>();
-            assert_eq!(
-                PathCondition::try_disjoin_all(&conditions, &mut 512).is_some(),
-                stride == 1
-            );
-            // Retrying with enough work must retain exactly the allowed arms,
-            // including the gaps that made the smaller budget insufficient.
+            // Every second arm is one digit of the arm index, so a fragmented
+            // set is as small as a contiguous one.
             let joined = PathCondition::try_disjoin_all(&conditions, &mut 8192).unwrap();
+            assert!(
+                joined.work_size() <= 16,
+                "stride {stride}: {} nodes",
+                joined.work_size()
+            );
             for arm in 0..branch.arms() {
                 let choice = PathCondition::default().with_choice(branch, arm);
                 assert_eq!(
@@ -1990,7 +1707,7 @@ mod tests {
     }
 
     #[test]
-    fn fragmented_guards_bound_dependency_exports_and_imports() {
+    fn fragmented_guards_export_and_import_compactly() {
         let branch = BranchId::new(1, 0, 129);
         for stride in [1, 2] {
             let conditions = (0..64)
@@ -2000,10 +1717,7 @@ mod tests {
             let mut callee = SsaStore::default();
             let input = callee.read("input");
             let output = callee.definition_guarded(vec![input], &condition);
-            assert_eq!(
-                callee.try_dependency_dag(&[output], |_| true, 64).is_some(),
-                stride == 1
-            );
+            assert!(callee.try_dependency_dag(&[output], |_| true, 64).is_some());
             let graph = Rc::new(callee.dependency_dag(&[output], |_| true));
 
             let mut caller = SsaStore::default();
@@ -2021,7 +1735,7 @@ mod tests {
                     .into(),
             );
             for limit in [64, 256] {
-                assert_eq!(
+                assert!(
                     caller
                         .try_dependency_dag_with_import_limit(
                             &[imported],
@@ -2030,7 +1744,7 @@ mod tests {
                             limit,
                         )
                         .is_some(),
-                    stride == 1 || limit == 256
+                    "stride {stride}, limit {limit}"
                 );
             }
         }
@@ -2088,8 +1802,13 @@ mod tests {
             left.disjoin_exact(&right),
             Some(PathCondition::default().with_choice(b, 0))
         );
+        // A correlated union is exact as well; it is neither operand nor
+        // their hull.
         let correlated = PathCondition::default().with_choice(a, 1).with_choice(b, 1);
-        assert_eq!(left.disjoin_exact(&correlated), None);
+        let union = left.disjoin_exact(&correlated).unwrap();
+        assert!(union.covers(&left) && union.covers(&correlated));
+        let mixed = PathCondition::default().with_choice(a, 0).with_choice(b, 1);
+        assert!(union.conjoin_if_compatible(&mixed).is_none());
         assert_eq!(
             left.disjoin_exact(&PathCondition::default()),
             Some(PathCondition::default())

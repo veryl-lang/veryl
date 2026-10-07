@@ -11,6 +11,7 @@
 //! boxes, `inout` ports, recursive functions) add no edges; the
 //! simulator's `analyze_dependency` is the backup safety net.
 
+mod condition;
 mod diagnostics;
 mod graph;
 mod hierarchy;
@@ -106,6 +107,8 @@ pub(crate) fn is_complete(ir: &Ir) -> bool {
 }
 
 fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
+    // Branch conditions of a previous analysis are never used again.
+    condition::reset();
     let mut errors = Vec::new();
     let mut complete = true;
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
@@ -377,6 +380,7 @@ struct PackedBoundary {
 // sorting. Charge only emitted atoms, before allocating them. The linear
 // allowance keeps large, non-amplifying source inputs outside this limit.
 const PARTITION_EXTRA_ATOMS: usize = 1_000_000;
+
 const PARTITION_ATOMS_PER_ACCESS: usize = 8;
 
 struct PartitionExpansionBudget {
@@ -957,9 +961,7 @@ impl<'a> ModuleGraphBuilder<'a> {
             if let Some(dependencies) = dependencies {
                 add_procedure_graph(graph, node_map, bit_part, module, dependencies);
             }
-            reads.sort_unstable_by_key(|source| {
-                (source.key, source.offset, source.condition.clone())
-            });
+            reads.sort_unstable_by_key(|source| (source.key, source.offset, source.condition));
             reads.dedup_by(|left, right| {
                 left.key == right.key
                     && left.offset == right.offset
@@ -1001,7 +1003,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                             *destination,
                             GraphDependency {
                                 kind: BitDependency::WHOLE,
-                                condition: source.condition.clone(),
+                                condition: source.condition,
                             },
                         );
                     }
@@ -1770,18 +1772,39 @@ fn remap_module_summary_branches(
     summary: &ModuleCombSummary,
     inst: &InstDeclaration,
 ) -> HashMap<BranchId, BranchId> {
-    let mut branches = summary
-        .edges
-        .iter()
-        .flat_map(|dependency| dependency.condition.branches())
-        .collect::<Vec<_>>();
-    branches.sort_unstable();
-    branches.dedup();
+    let branches = summary_branches(summary.edges.iter().map(|edge| &edge.condition));
     let namespace = std::ptr::from_ref(inst).addr();
     branches
         .into_iter()
         .enumerate()
-        .map(|(local, branch)| (branch, BranchId::new(namespace, local, branch.arms())))
+        .map(|(local, (branch, shared))| {
+            let target = if shared {
+                BranchId::new(namespace, local, branch.arms())
+            } else {
+                BranchId::ERASED
+            };
+            (branch, target)
+        })
+        .collect()
+}
+
+/// The branches read by summary edge `conditions`, each with whether more
+/// than one edge reads it. A branch read by one edge correlates nothing:
+/// every walk through the summary takes that edge under one valuation, so
+/// eliminating the branch from its condition is exact. Only shared branches
+/// need fresh instances, so that separate instances stay independent.
+fn summary_branches<'a>(
+    conditions: impl Iterator<Item = &'a PathCondition>,
+) -> Vec<(BranchId, bool)> {
+    let mut readers: std::collections::BTreeMap<BranchId, usize> = Default::default();
+    for condition in conditions {
+        for branch in condition.branches() {
+            *readers.entry(branch).or_default() += 1;
+        }
+    }
+    readers
+        .into_iter()
+        .map(|(branch, readers)| (branch, readers > 1))
         .collect()
 }
 
@@ -1922,7 +1945,7 @@ fn instance_region_mapping(
             .map(|source| MappedNode {
                 key: source.key,
                 offset: None,
-                condition: source.condition.clone(),
+                condition: source.condition,
             })
             .collect(),
     }
@@ -2270,7 +2293,7 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
         bool,
     ) {
         self.reads
-            .sort_unstable_by_key(|source| (source.key, source.condition.clone()));
+            .sort_unstable_by_key(|source| (source.key, source.condition));
         self.reads
             .dedup_by(|left, right| left.key == right.key && left.condition == right.condition);
         let (dependencies, complete) = if let Some(mut procedure) = self.procedure.take() {

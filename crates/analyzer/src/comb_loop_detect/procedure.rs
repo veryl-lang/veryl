@@ -1634,7 +1634,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             })
             .filter(|source| self.is_module_scope_key(source.key))
             .collect::<Vec<_>>();
-        sources.sort_unstable_by_key(|source| (source.key, source.condition.clone()));
+        sources.sort_unstable_by_key(|source| (source.key, source.condition));
         sources.dedup_by(|left, right| left.key == right.key && left.condition == right.condition);
         sources
     }
@@ -3659,7 +3659,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         return_id: Option<VarId>,
         controls: &[VersionId],
     ) {
-        let caller_condition = self.path_condition.clone();
+        let caller_condition = self.path_condition;
         let checkpoint = self.ssa.checkpoint();
         self.function_flows.push(FunctionFlow {
             return_id,
@@ -3699,7 +3699,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         };
         let state = FlowState {
             state: self.ssa.snapshot_since(r#loop.checkpoint),
-            condition: self.path_condition.clone(),
+            condition: self.path_condition,
         };
         self.loop_flows
             .last_mut()
@@ -4075,14 +4075,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
 
         let branch = self.next_branch_id(arms.len());
-        let parent_condition = self.path_condition.clone();
+        let parent_condition = self.path_condition;
         let mut branches = Vec::with_capacity(arms.len());
         for (arm, (side, confinement)) in arms.into_iter().enumerate() {
             self.choose_path(&parent_condition, branch, arm);
             let checkpoint = self.ssa.checkpoint();
             let flow = self.eval_confined_side(confinement, side, &nested_controls);
             let state = self.ssa.capture_and_rollback(checkpoint);
-            branches.push((flow, state, self.path_condition.clone()));
+            branches.push((flow, state, self.path_condition));
         }
         self.path_condition = parent_condition;
         self.merge_branches(branches, &sources)
@@ -4354,7 +4354,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
 
             let branch = self.next_branch_id(statement.arms.len() + 1);
-            let parent_condition = self.path_condition.clone();
+            let parent_condition = self.path_condition;
             let mut states = Vec::with_capacity(possible.len() + usize::from(!has_definite_match));
             for index in possible {
                 if !self.choose_path(&parent_condition, branch, index) {
@@ -4363,21 +4363,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let checkpoint = self.ssa.checkpoint();
                 let flow = self.eval_block(&statement.arms[index].body, &nested_controls);
                 let state = self.ssa.capture_and_rollback(checkpoint);
-                states.push((flow, state, self.path_condition.clone()));
+                states.push((flow, state, self.path_condition));
             }
             if !has_definite_match {
                 self.choose_path(&parent_condition, branch, statement.arms.len());
                 let checkpoint = self.ssa.checkpoint();
                 let flow = self.eval_block(&statement.default, &nested_controls);
                 let state = self.ssa.capture_and_rollback(checkpoint);
-                states.push((flow, state, self.path_condition.clone()));
+                states.push((flow, state, self.path_condition));
             }
             self.path_condition = parent_condition;
             return self.merge_branches(states, &condition);
         }
 
         let branch = self.next_branch_id(statement.arms.len() + 1);
-        let parent_condition = self.path_condition.clone();
+        let parent_condition = self.path_condition;
         let mut states = Vec::with_capacity(statement.arms.len() + 1);
         for (index, arm) in statement.arms.iter().enumerate() {
             if !self.choose_path(&parent_condition, branch, index) {
@@ -4386,13 +4386,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let checkpoint = self.ssa.checkpoint();
             let flow = self.eval_block(&arm.body, &nested_controls);
             let state = self.ssa.capture_and_rollback(checkpoint);
-            states.push((flow, state, self.path_condition.clone()));
+            states.push((flow, state, self.path_condition));
         }
         self.choose_path(&parent_condition, branch, statement.arms.len());
         let checkpoint = self.ssa.checkpoint();
         let flow = self.eval_block(&statement.default, &nested_controls);
         let state = self.ssa.capture_and_rollback(checkpoint);
-        states.push((flow, state, self.path_condition.clone()));
+        states.push((flow, state, self.path_condition));
         self.path_condition = parent_condition;
         self.merge_branches(states, &condition)
     }
@@ -4481,7 +4481,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         range_controls: &[VersionId],
         iterations: Vec<usize>,
     ) -> FlowResult {
-        let parent_condition = self.path_condition.clone();
+        let parent_condition = self.path_condition;
         let checkpoint = self.ssa.checkpoint();
         self.loop_flows.push(LoopFlow {
             checkpoint,
@@ -4515,7 +4515,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if flow == ProcedureFlow::Continue {
             loop_flow.breaks.push(FlowState {
                 state: fallthrough,
-                condition: self.path_condition.clone(),
+                condition: self.path_condition,
             });
         }
         if loop_flow.breaks.is_empty() {
@@ -4628,7 +4628,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // LSP region. Evaluate the body once without binding the iterator so
         // the ordinary dynamic-access rules conservatively retain that alias.
         self.forget_runtime_iterator_value(statement.var_id);
-        let parent_condition = self.path_condition.clone();
+        let parent_condition = self.path_condition;
         let checkpoint = self.ssa.checkpoint();
         self.loop_flows.push(LoopFlow {
             checkpoint,
@@ -4645,7 +4645,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if flow.flow == ProcedureFlow::Continue {
             loop_flow.breaks.push(FlowState {
                 state: body_state,
-                condition: self.path_condition.clone(),
+                condition: self.path_condition,
             });
         }
         self.path_condition = parent_condition;
@@ -5384,11 +5384,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     )),
                     None => {
                         let branch = self.expression_branch_id(expression);
-                        let parent_condition = self.path_condition.clone();
+                        let parent_condition = self.path_condition;
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 0);
-                        let left_condition = self.path_condition.clone();
+                        let left_condition = self.path_condition;
                         let left = self.eval_expr_in_context(
                             left,
                             requested_array,
@@ -5401,7 +5401,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 1);
-                        let right_condition = self.path_condition.clone();
+                        let right_condition = self.path_condition;
                         let right = self.eval_expr_in_context(
                             right,
                             requested_array,
@@ -5943,10 +5943,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     )),
                     None => {
                         let branch = self.expression_branch_id(expression);
-                        let parent_condition = self.path_condition.clone();
+                        let parent_condition = self.path_condition;
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 0);
-                        let left_condition = self.path_condition.clone();
+                        let left_condition = self.path_condition;
                         let left = self.eval_expr_bits_in(
                             left,
                             requested_array,
@@ -5958,7 +5958,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let left_state = self.ssa.capture_and_rollback(checkpoint);
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 1);
-                        let right_condition = self.path_condition.clone();
+                        let right_condition = self.path_condition;
                         let right = self.eval_expr_bits_in(
                             right,
                             requested_array,
@@ -6213,17 +6213,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Some(true) => reads.extend(self.eval_expr_inner(right, prune_constant_branches)),
             None => {
                 let branch = self.expression_branch_id(expression);
-                let parent_condition = self.path_condition.clone();
+                let parent_condition = self.path_condition;
                 if !self.choose_path(&parent_condition, branch, 0) {
                     return reads;
                 }
-                let taken = self.path_condition.clone();
+                let taken = self.path_condition;
                 let checkpoint = self.ssa.checkpoint();
                 let right = self.eval_expr_inner(right, prune_constant_branches);
                 let right = self.ssa.definition_guarded(right, &self.path_condition);
                 let evaluated_state = self.ssa.capture_and_rollback(checkpoint);
                 if self.choose_path(&parent_condition, branch, 1) {
-                    let skipped = self.path_condition.clone();
+                    let skipped = self.path_condition;
                     self.merge_expression_states(
                         [
                             (&evaluated_state, &taken),
@@ -6348,18 +6348,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                     None => {
                         let branch = self.expression_branch_id(expression);
-                        let parent_condition = self.path_condition.clone();
+                        let parent_condition = self.path_condition;
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 0);
-                        let left_condition = self.path_condition.clone();
+                        let left_condition = self.path_condition;
                         let left = self.eval_expr_shaped(left, prune_constant_branches, shape);
                         let left = self.ssa.definition_guarded(left, &self.path_condition);
                         let left_state = self.ssa.capture_and_rollback(checkpoint);
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 1);
-                        let right_condition = self.path_condition.clone();
+                        let right_condition = self.path_condition;
                         let right = self.eval_expr_shaped(right, prune_constant_branches, shape);
                         let right = self.ssa.definition_guarded(right, &self.path_condition);
                         let right_state = self.ssa.capture_and_rollback(checkpoint);
@@ -6921,17 +6921,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         summary: &FunctionSummary,
     ) -> HashMap<BranchId, BranchId> {
-        let mut branches = summary
-            .graph
-            .edges
-            .iter()
-            .flat_map(|edge| edge.condition.branches())
-            .collect::<Vec<_>>();
-        branches.sort_unstable();
-        branches.dedup();
-        branches
+        // Each call instantiates fresh branches so that calls taking
+        // different arms stay independent.
+        super::summary_branches(summary.graph.edges.iter().map(|edge| &edge.condition))
             .into_iter()
-            .map(|branch| (branch, self.next_branch_id(branch.arms())))
+            .map(|(branch, shared)| {
+                let target = if shared {
+                    self.next_branch_id(branch.arms())
+                } else {
+                    BranchId::ERASED
+                };
+                (branch, target)
+            })
             .collect()
     }
 

@@ -224,7 +224,7 @@ fn wire_hierarchy_summaries_grow_linearly() {
 }
 
 #[test]
-fn nontrivial_hierarchy_expansion_is_bounded_and_reports_incomplete() {
+fn nontrivial_hierarchy_expansion_contracts_to_ports() {
     const LIMIT: usize = 512;
     for body in [
         "var half: logic<8>; assign half = i; assign o = half;",
@@ -257,10 +257,11 @@ fn nontrivial_hierarchy_expansion_is_bounded_and_reports_incomplete() {
                     input_edges <= LIMIT * (depth + 1),
                     "hierarchy expansion must stay bounded per module: depth={depth}, edges={input_edges}"
                 );
-                assert_eq!(
+                // Each wrapper's summary contracts to its ports, so the
+                // hierarchy fits even a small per-module budget.
+                assert!(
                     comb_loop_analysis_is_complete(&code),
-                    depth == 2,
-                    "a cutoff must propagate through the remaining hierarchy: {code}"
+                    "depth={depth}: {body}"
                 );
             });
         }
@@ -518,4 +519,41 @@ fn generated_guarded_shift_networks_match_expanded_bit_graphs() {
         (16..112).contains(&cyclic),
         "both cyclic and acyclic networks must be exercised: {cyclic}"
     );
+}
+
+#[test]
+fn many_shared_branches_keep_their_correlation_across_instances() {
+    // Each lane routes `i1` to `o1` on one arm and `i2` to `o2` on the
+    // other, so the feedback wired around a lane needs both arms at once.
+    // The lanes give the summary 80 branches, each read by two edges.
+    const LANES: usize = 80;
+    for exclusive in [true, false] {
+        let lanes = (0..LANES)
+            .map(|k| {
+                let other = if exclusive {
+                    "0".to_string()
+                } else {
+                    format!("i2[{k}]")
+                };
+                format!(
+                    "if c[{k}] {{ o1[{k}] = i1[{k}]; o2[{k}] = {other}; }} else {{ o1[{k}] = 0; o2[{k}] = i2[{k}]; }}"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let code = format!(
+            r#"
+            module Lanes (c: input logic<{LANES}>, i1: input logic<{LANES}>, i2: input logic<{LANES}>, o1: output logic<{LANES}>, o2: output logic<{LANES}>) {{
+                always_comb {{ {lanes} }}
+            }}
+            module Top (c: input logic<{LANES}>, o: output logic<{LANES}>) {{
+                var a: logic<{LANES}>;
+                var b: logic<{LANES}>;
+                inst lanes: Lanes (c, i1: b, i2: a, o1: a, o2: b);
+                assign o = b;
+            }}
+            "#
+        );
+        check(&code, !exclusive);
+    }
 }

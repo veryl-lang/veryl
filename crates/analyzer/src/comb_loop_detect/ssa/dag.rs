@@ -188,6 +188,9 @@ pub(super) struct Builder<K> {
     pub(super) graph: DependencyDag<K>,
     interned: HashMap<InternalNode, usize>,
     replicated_sources: HashMap<usize, usize>,
+    /// Unconditional single-input operations without bounds, read through
+    /// as their source and relation.
+    folded: HashMap<usize, (usize, PositionRelation)>,
 }
 
 impl<K> Builder<K> {
@@ -202,6 +205,7 @@ impl<K> Builder<K> {
             },
             interned: HashMap::default(),
             replicated_sources: HashMap::default(),
+            folded: HashMap::default(),
         }
     }
 
@@ -238,6 +242,15 @@ impl<K> Builder<K> {
         mut site: Option<DefinitionSite<usize>>,
         mut replication: Option<Replication>,
     ) -> usize {
+        // Read through an unconditional, unbounded single-input operation by
+        // composing its relation. The value is the same, and equal inputs
+        // reached through different aliases can then be interned together.
+        for input in &mut inputs {
+            if let Some(&(source, relation)) = self.folded.get(&input.0) {
+                *input = (source, relation.compose(input.1), input.2);
+            }
+        }
+        inputs.retain(|(_, relation, _)| !relation.is_empty());
         inputs.sort_unstable();
         inputs.dedup();
         domains.sort_unstable();
@@ -307,6 +320,14 @@ impl<K> Builder<K> {
             return node;
         }
         let node = self.graph.nodes.len();
+        if replication.is_none()
+            && key.site.is_none()
+            && key.domains.is_empty()
+            && let [(source, relation, condition)] = key.inputs.as_slice()
+            && condition.is_unconditional()
+        {
+            self.folded.insert(node, (*source, *relation));
+        }
         self.graph.nodes.push(match replication {
             Some(replication) => DependencyDagNode::Replicated { replication },
             None => DependencyDagNode::Internal,
@@ -321,7 +342,7 @@ impl<K> Builder<K> {
                         source: *source,
                         destination: node,
                         relation: *relation,
-                        condition: condition.clone(),
+                        condition: *condition,
                     }),
             );
         if let Some(site) = &key.site {
@@ -470,7 +491,7 @@ mod tests {
                         array: Link::from_offset(Some(0)),
                         packed: Link::from_offset(Some((stage % 3) as isize - 1)),
                     },
-                    condition: condition.clone(),
+                    condition,
                 });
                 raw.edges.push(DependencyDagEdge {
                     source: 1,

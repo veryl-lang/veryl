@@ -372,7 +372,7 @@ fn instance_actual_expansion_limit_keeps_independent_cycles() {
 }
 
 #[test]
-fn procedural_guard_limit_counts_fragmented_case_ranges() {
+fn procedural_guard_limit_admits_fragmented_case_ranges() {
     for fragmented in [false, true] {
         for (iterations, unrolled) in [(0, true), (64, true), (64, false)] {
             let gate = gate_stages(unrolled, iterations, |_| "s".to_string());
@@ -409,11 +409,9 @@ fn procedural_guard_limit_counts_fragmented_case_ranges() {
                 let case = format!(
                     "fragmented={fragmented}, iterations={iterations}, unrolled={unrolled}"
                 );
-                assert_eq!(
-                    comb_loop_analysis_is_complete(&code),
-                    !fragmented || iterations == 0 || !unrolled,
-                    "{case}"
-                );
+                // Fragmented arm sets are compact decision diagrams, so the
+                // copies fit as well.
+                assert!(comb_loop_analysis_is_complete(&code), "{case}");
                 let errors = analyze(&code);
                 assert!(
                     errors.iter().all(|error| match error {

@@ -1578,7 +1578,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         controls: &[crate::comb_loop_detect::ssa::VersionId],
     ) -> super::FlowResult {
         let branch = self.next_branch_id(cells.len());
-        let parent_condition = self.path_condition.clone();
+        let parent_condition = self.path_condition;
         let previous_split = self.split_statement.replace(std::ptr::from_ref(statement));
         let iterators = self.counted_iterators.clone();
         let mut branches = Vec::with_capacity(cells.len());
@@ -1589,7 +1589,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let flow = self.eval_statement(statement, controls);
             self.counted_iterators.clone_from(&iterators);
             let state = self.ssa.capture_and_rollback(checkpoint);
-            branches.push((flow, state, self.path_condition.clone()));
+            branches.push((flow, state, self.path_condition));
         }
         self.split_statement = previous_split;
         self.path_condition = parent_condition;

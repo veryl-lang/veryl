@@ -60,7 +60,7 @@ pub(super) fn guarded_cycle_displacements_cancel(
         }
         if let Some((dependency, feasible)) = cycle.relation.exact_translation() {
             grouped
-                .entry((dependency, cycle.condition.clone()))
+                .entry((dependency, cycle.condition))
                 .or_default()
                 .extend(feasible);
         } else {
@@ -244,7 +244,7 @@ fn guarded_relations_close(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBu
             &mut reached,
             &mut queue,
             cycle.relation.clone(),
-            cycle.condition.clone(),
+            cycle.condition,
             budget,
         );
     }
@@ -371,7 +371,7 @@ fn guarded_translations_cancel(cycles: &[GuardedTranslation], budget: &mut Searc
                 &mut reached,
                 &mut queue,
                 cycle.dependency,
-                cycle.condition.clone(),
+                cycle.condition,
                 cycle.feasible.clone(),
                 budget,
             );
@@ -574,7 +574,7 @@ fn guarded_transition_components_that_can_cancel<'a>(
             .collect::<Vec<_>>();
         let displacements = cycles
             .iter()
-            .map(|cycle| (cycle.dependency, cycle.condition.clone()))
+            .map(|cycle| (cycle.dependency, cycle.condition))
             .collect();
         if compatible_cycle_displacements_cancel(&displacements, budget) {
             components.push(cycles);
