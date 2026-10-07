@@ -778,6 +778,12 @@ impl<'a> Subst<'a> {
                 }
                 Statement::If(x) => {
                     self.expr(&mut x.cond)?;
+                    // The untaken side may index out of range at this iteration.
+                    match self.decided_sides(&x.cond) {
+                        (true, _) => x.false_side.clear(),
+                        (_, true) => x.true_side.clear(),
+                        _ => {}
+                    }
                     self.stmts(&mut x.true_side)?;
                     self.stmts(&mut x.false_side)?;
                 }
@@ -840,6 +846,13 @@ impl<'a> Subst<'a> {
         comptime.value = ValueVariant::Numeric(value);
         comptime.is_const = true;
         Some(Factor::Value(comptime))
+    }
+
+    /// `(true_side_only, false_side_only)`, as conversion decides an unrolled `if`.
+    fn decided_sides(&mut self, cond: &Expression) -> (bool, bool) {
+        let mut cond = cond.clone();
+        cond.gather_context(self.context);
+        crate::conv::statement::eval_cond_true_false(self.context, &cond)
     }
 
     /// `expr` as a constant when it reads no variable and evaluates free of

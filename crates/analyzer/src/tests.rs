@@ -23038,3 +23038,69 @@ fn array_slice_rejects_non_positive_width() {
         );
     }
 }
+
+#[test]
+fn loop_iteration_ignores_the_index_of_an_untaken_branch() {
+    // Regression: the untaken `r[j - 1]` at j = 0 exceeded the evaluate size limit.
+    let code = r#"
+    module ModuleA #(
+        param N: u32 = 4,
+    ) (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        en : input  logic   ,
+        a  : input  logic<2>,
+        o  : output logic<2>,
+        p  : output logic<2>,
+    ) {
+        var r: logic<N, 2>;
+        var q: logic<N, 2>;
+        var s: logic<N, N, 2>;
+        always_ff {
+            if_reset {
+                r = '0;
+            } else {
+                for j in 0..N {
+                    if j == 0 {
+                        r[j] = a;
+                    } else {
+                        r[j] = r[j - 1];
+                    }
+                }
+            }
+        }
+        always_ff {
+            if_reset {
+                q = '0;
+            } else {
+                q[0] = a;
+                for j in 0..N {
+                    if j != 0 && en {
+                        q[j] = q[j - 1];
+                    }
+                }
+            }
+        }
+        assign p = q[N - 1];
+        for i in 0..N :g {
+            always_ff {
+                if_reset {
+                    s[i] = '0;
+                } else {
+                    for j in i..N {
+                        if j == i {
+                            s[i][j] = r[i];
+                        } else {
+                            s[i][j] = s[i][j - 1];
+                        }
+                    }
+                }
+            }
+        }
+        assign o = s[0][N - 1];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:?}");
+}
