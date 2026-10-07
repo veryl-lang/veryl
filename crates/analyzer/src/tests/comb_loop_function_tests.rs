@@ -1429,10 +1429,10 @@ fn comb_loop_split_observation_reuses_one_function_evaluation() {
 }
 
 #[test]
-fn comb_loop_static_loop_reevaluates_nested_function_actuals() {
+fn comb_loop_static_loop_evaluates_nested_function_actuals_once() {
     crate::comb_loop_detect::reset_function_evaluation_count();
     assert_comb_loop(
-        "a nested call is reevaluated when its static-loop actual changes",
+        "a nested call in a static loop sees every iteration's actual",
         r#"
         module Top (
             o: output logic,
@@ -1463,10 +1463,12 @@ fn comb_loop_static_loop_reevaluates_nested_function_actuals() {
         "#,
         true,
     );
+    // A counted loop is evaluated once with a symbolic iterator, so the
+    // nested call covers both iterations' actuals in a single evaluation.
     assert_eq!(
         crate::comb_loop_detect::function_barrier_evaluation_count(),
-        2,
-        "both static-loop invocations must cross the callee cache barrier"
+        1,
+        "a counted loop must not evaluate its body once per iteration"
     );
 }
 

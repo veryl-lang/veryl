@@ -15,6 +15,7 @@ mod diagnostics;
 mod graph;
 mod hierarchy;
 mod model;
+mod position;
 mod procedure;
 mod region;
 mod ssa;
@@ -47,6 +48,7 @@ pub(crate) use graph::{
 };
 use hierarchy::{module_postorder, walk_insts};
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
+use position::Link;
 use region::{
     ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
@@ -723,10 +725,10 @@ fn collect_statement_spans(
                 collect_statement_spans(&statement.default, out, ctx);
             }
             Statement::For(statement) => {
-                // Storage boundaries still belong to this consumer. Keeping
-                // the common IR compact must not turn distinct constant
-                // iterations into one strong-write alias region.
-                if !crate::ir::peel::has_own_break(&statement.body)
+                // Loops that break still enumerate their constant iterations
+                // during evaluation, which needs each iteration's boundaries.
+                // Every other loop is evaluated once with a symbolic iterator.
+                if crate::ir::peel::has_own_break(&statement.body)
                     && let Some(iterations) = statement.range.eval_iter(ctx)
                 {
                     for iteration in iterations {
@@ -1324,8 +1326,8 @@ fn add_procedure_graph(
             root,
             destination,
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(0),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(0)),
             }),
         );
     }
@@ -2122,20 +2124,21 @@ fn add_resolved_dependency_edges(
                 Some((destination_array, destination_packed)),
             ) = (source.offset, destination.offset)
             {
-                BitDependency {
-                    array: dependency.array.map(|array| {
-                        array
-                            .checked_add(destination_array)
-                            .and_then(|offset| offset.checked_sub(source_array))
-                            .expect("mapped array dependency offset must fit in isize")
-                    }),
-                    packed: dependency.packed.map(|packed| {
-                        packed
-                            .checked_add(destination_packed)
-                            .and_then(|offset| offset.checked_sub(source_packed))
-                            .expect("mapped packed dependency offset must fit in isize")
-                    }),
-                }
+                // Parent coordinates are child coordinates displaced by
+                // each region's offset.
+                BitDependency::translation(
+                    source_array
+                        .checked_neg()
+                        .expect("mapped array source offset must fit in isize"),
+                    source_packed
+                        .checked_neg()
+                        .expect("mapped packed source offset must fit in isize"),
+                )
+                .compose(dependency)
+                .compose(BitDependency::translation(
+                    destination_array,
+                    destination_packed,
+                ))
             } else {
                 BitDependency::WHOLE
             };

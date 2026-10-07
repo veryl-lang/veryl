@@ -34,6 +34,7 @@
 use super::relation::PositionRelationSet;
 use super::{FeasiblePosition, SearchBudget, insert_cycle_state, intersect_axis};
 use crate::comb_loop_detect::model::BitDependency;
+use crate::comb_loop_detect::position::Link;
 use crate::comb_loop_detect::ssa::PathCondition;
 use crate::{HashMap, HashSet};
 use daggy::petgraph::Graph;
@@ -778,8 +779,8 @@ fn repeat_guarded_cycle(
     }
     Some((
         BitDependency {
-            array: Some(offset.0.checked_mul(count)?),
-            packed: Some(offset.1.checked_mul(count)?),
+            array: Link::from_offset(Some(offset.0.checked_mul(count)?)),
+            packed: Link::from_offset(Some(offset.1.checked_mul(count)?)),
         },
         feasible,
     ))
@@ -979,8 +980,8 @@ mod fixed_return_tests {
             let mut cycles = vec![
                 GuardedTranslation {
                     dependency: BitDependency {
-                        array: Some(3),
-                        packed: Some(0),
+                        array: Link::from_offset(Some(3)),
+                        packed: Link::from_offset(Some(0)),
                     },
                     condition: PathCondition::default(),
                     feasible: vec![FeasiblePosition {
@@ -990,8 +991,8 @@ mod fixed_return_tests {
                 },
                 GuardedTranslation {
                     dependency: BitDependency {
-                        array: Some(3 - width),
-                        packed: Some(0),
+                        array: Link::from_offset(Some(3 - width)),
+                        packed: Link::from_offset(Some(0)),
                     },
                     condition: PathCondition::default(),
                     feasible: vec![FeasiblePosition {
@@ -1179,16 +1180,16 @@ mod fixed_return_tests {
             let cycles = [
                 GuardedTranslation {
                     dependency: BitDependency {
-                        array: Some(jump.0),
-                        packed: Some(jump.1),
+                        array: Link::from_offset(Some(jump.0)),
+                        packed: Link::from_offset(Some(jump.1)),
                     },
                     condition: PathCondition::default().with_choice(branch, case % 2),
                     feasible,
                 },
                 GuardedTranslation {
                     dependency: BitDependency {
-                        array: Some(step.0),
-                        packed: Some(step.1),
+                        array: Link::from_offset(Some(step.0)),
+                        packed: Link::from_offset(Some(step.1)),
                     },
                     condition: if case % 7 == 0 {
                         PathCondition::default().with_choice(branch, 1 - case % 2)
@@ -1217,8 +1218,8 @@ mod fixed_return_tests {
         let cycles = [
             GuardedTranslation {
                 dependency: BitDependency {
-                    array: Some(0),
-                    packed: Some(isize::MIN),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(isize::MIN)),
                 },
                 condition: PathCondition::default(),
                 feasible: vec![FeasiblePosition {
@@ -1228,8 +1229,8 @@ mod fixed_return_tests {
             },
             GuardedTranslation {
                 dependency: BitDependency {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
                 condition: PathCondition::default(),
                 feasible: vec![FeasiblePosition {
@@ -1261,8 +1262,8 @@ mod fixed_return_tests {
         let branch = BranchId::new(0, 0, 2);
         let translation = |packed, ranges: &[(isize, isize)]| GuardedTranslation {
             dependency: BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             },
             condition: PathCondition::default(),
             feasible: ranges

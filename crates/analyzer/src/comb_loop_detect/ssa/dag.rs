@@ -372,11 +372,17 @@ mod tests {
                         assert!(edge.source < node);
                         for source_array in 0..4 {
                             for source_bit in 0..4 {
-                                if edge.relation.array.is_none_or(|offset| {
-                                    source_array as isize + offset == array as isize
-                                }) && edge.relation.packed.is_none_or(|offset| {
-                                    source_bit as isize + offset == bit as isize
-                                }) {
+                                if edge
+                                    .relation
+                                    .array
+                                    .translation_offset()
+                                    .is_none_or(|offset| {
+                                        source_array as isize + offset == array as isize
+                                    })
+                                    && edge.relation.packed.translation_offset().is_none_or(
+                                        |offset| source_bit as isize + offset == bit as isize,
+                                    )
+                                {
                                     let sources =
                                         values[edge.source][source_array * 4 + source_bit].clone();
                                     values[node][array * 4 + bit].extend(sources);
@@ -458,8 +464,8 @@ mod tests {
                     source,
                     destination: node,
                     relation: PositionRelation {
-                        array: Some(0),
-                        packed: Some((stage % 3) as isize - 1),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some((stage % 3) as isize - 1)),
                     },
                     condition: condition.clone(),
                 });
@@ -467,8 +473,8 @@ mod tests {
                     source: 1,
                     destination: node,
                     relation: PositionRelation {
-                        array: Some(0),
-                        packed: None,
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(None),
                     },
                     condition: PathCondition::default(),
                 });

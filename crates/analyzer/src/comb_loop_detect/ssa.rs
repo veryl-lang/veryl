@@ -3,6 +3,8 @@
 mod dag;
 mod repeated;
 
+pub(super) use repeated::TransferCoverage;
+
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::hash::Hash;
@@ -392,11 +394,10 @@ impl PathCondition {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct PositionRelation {
-    pub(super) array: Option<isize>,
-    pub(super) packed: Option<isize>,
-}
+use super::position::Axis;
+#[cfg(test)]
+use super::position::Link;
+pub(super) use super::position::Relation as PositionRelation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Replication {
@@ -413,23 +414,20 @@ impl Replication {
 
     pub(super) fn relation(self) -> PositionRelation {
         match self {
-            Self::Array(stride) => PositionRelation {
-                array: Some(stride),
-                packed: Some(0),
-            },
-            Self::Packed(stride) => PositionRelation {
-                array: Some(0),
-                packed: Some(stride),
-            },
+            Self::Array(stride) => PositionRelation::translation(stride, 0),
+            Self::Packed(stride) => PositionRelation::translation(0, stride),
         }
     }
 
-    fn forget_position(self, mut relation: PositionRelation) -> PositionRelation {
+    pub(super) fn axis(self) -> Axis {
         match self {
-            Self::Array(_) => relation.array = None,
-            Self::Packed(_) => relation.packed = None,
+            Self::Array(_) => Axis::Array,
+            Self::Packed(_) => Axis::Packed,
         }
-        relation
+    }
+
+    fn forget_position(self, relation: PositionRelation) -> PositionRelation {
+        relation.forget(self.axis())
     }
 }
 
@@ -475,51 +473,6 @@ pub(super) struct PositionDomain {
     pub(super) packed_length: usize,
 }
 
-impl Default for PositionRelation {
-    fn default() -> Self {
-        Self {
-            array: Some(0),
-            packed: Some(0),
-        }
-    }
-}
-
-impl PositionRelation {
-    pub(super) const fn whole() -> Self {
-        Self {
-            array: None,
-            packed: None,
-        }
-    }
-
-    pub(super) fn compose(self, other: Self) -> Self {
-        Self {
-            array: compose_axis(self.array, other.array),
-            packed: compose_axis(self.packed, other.packed),
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn union(self, other: Self) -> Self {
-        Self {
-            array: (self.array == other.array).then_some(self.array).flatten(),
-            packed: (self.packed == other.packed)
-                .then_some(self.packed)
-                .flatten(),
-        }
-    }
-}
-
-fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(
-            left.checked_add(right)
-                .expect("composed position offset must fit in isize"),
-        ),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct Checkpoint {
     undo_start: usize,
@@ -532,6 +485,10 @@ pub(super) struct BranchState<K> {
 }
 
 impl<K> BranchState<K> {
+    pub(super) fn keys(&self) -> impl Iterator<Item = &K> {
+        self.bindings.keys()
+    }
+
     pub(super) fn len(&self) -> usize {
         self.bindings.len()
     }
@@ -697,7 +654,7 @@ where
         replication: Replication,
     ) -> VersionId {
         assert!(
-            replication.stride() > 0,
+            replication.stride() != 0,
             "replication must advance its axis"
         );
         let version = self.versions.len();
@@ -881,6 +838,7 @@ where
         may_skip: bool,
         import_work: &mut usize,
         domain: impl Fn(K) -> Option<PositionDomain>,
+        coverage: impl Fn(K) -> TransferCoverage,
     ) -> Option<()> {
         repeated::try_close(
             self,
@@ -889,6 +847,7 @@ where
             may_skip,
             import_work,
             domain,
+            coverage,
         )
     }
 
@@ -907,6 +866,7 @@ where
             may_skip,
             &mut import_work,
             domain,
+            |_| TransferCoverage::default(),
         )
         .expect("unlimited runtime transfer construction");
     }
@@ -1646,15 +1606,15 @@ mod tests {
             (
                 Replication::Array(2),
                 PositionRelation {
-                    array: None,
-                    packed: Some(3),
+                    array: Link::from_offset(None),
+                    packed: Link::from_offset(Some(3)),
                 },
             ),
             (
                 Replication::Packed(2),
                 PositionRelation {
-                    array: Some(1),
-                    packed: None,
+                    array: Link::from_offset(Some(1)),
+                    packed: Link::from_offset(None),
                 },
             ),
         ] {
@@ -1663,8 +1623,8 @@ mod tests {
             let translated = ssa.related_definition(vec![(
                 source,
                 PositionRelation {
-                    array: Some(1),
-                    packed: Some(3),
+                    array: Link::from_offset(Some(1)),
+                    packed: Link::from_offset(Some(3)),
                 },
             )]);
             let repeated = ssa.replicated(
@@ -1700,23 +1660,23 @@ mod tests {
         let first = ssa.related_definition(vec![(
             source,
             PositionRelation {
-                array: Some(3),
-                packed: Some(-2),
+                array: Link::from_offset(Some(3)),
+                packed: Link::from_offset(Some(-2)),
             },
         )]);
         let destination = ssa.related_definition(vec![(
             first,
             PositionRelation {
-                array: Some(-1),
-                packed: Some(5),
+                array: Link::from_offset(Some(-1)),
+                packed: Link::from_offset(Some(5)),
             },
         )]);
 
         assert_eq!(
             ssa.root_source_relations(destination).get("source"),
             Some(&PositionRelation {
-                array: Some(2),
-                packed: Some(3),
+                array: Link::from_offset(Some(2)),
+                packed: Link::from_offset(Some(3)),
             })
         );
     }
@@ -1730,8 +1690,8 @@ mod tests {
             (
                 source,
                 PositionRelation {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
             ),
         ]);
@@ -1739,8 +1699,8 @@ mod tests {
         assert_eq!(
             ssa.root_source_relations(destination).get("source"),
             Some(&PositionRelation {
-                array: Some(0),
-                packed: None,
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(None),
             })
         );
     }
@@ -1900,8 +1860,8 @@ mod tests {
                 (
                     value,
                     PositionRelation {
-                        array: Some(0),
-                        packed: Some(1isize << shift),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some(1isize << shift)),
                     },
                 ),
             ]);
@@ -2140,8 +2100,8 @@ mod tests {
                 (
                     value,
                     PositionRelation {
-                        array: Some(0),
-                        packed: Some(1isize << shift),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some(1isize << shift)),
                     },
                 ),
             ]);

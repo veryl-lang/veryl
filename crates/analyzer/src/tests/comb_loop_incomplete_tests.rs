@@ -1,9 +1,34 @@
 // Incomplete-effect boundary coverage for comb-loop analysis.
 use super::*;
 
+/// A gate made of `stages` sequential branches, either as a counted loop or
+/// as the equivalent straight-line statements.
+fn gate_stages(unrolled: bool, stages: usize, condition: impl Fn(&str) -> String) -> String {
+    if unrolled {
+        (0..stages)
+            .map(|index| {
+                format!(
+                    "if {} {{ v = !v; }} else {{ v = 0; }}",
+                    condition(&index.to_string())
+                )
+            })
+            .collect()
+    } else {
+        let condition = condition("index");
+        let iterator = if condition.contains("index") {
+            "index"
+        } else {
+            "_index"
+        };
+        format!(
+            "for {iterator} in 0..{stages} {{ if {condition} {{ v = !v; }} else {{ v = 0; }} }}"
+        )
+    }
+}
+
 #[test]
 fn instance_source_guard_limit_preserves_independent_cycles() {
-    for selector in [false, true] {
+    for (selector, unrolled) in [(false, false), (false, true), (true, false), (true, true)] {
         for stages in [4, 64] {
             let ports = if selector {
                 "i: i, o: o[gate(flags, i)]"
@@ -11,6 +36,7 @@ fn instance_source_guard_limit_preserves_independent_cycles() {
                 "i: gate(flags, i), o: o"
             };
             let width = if selector { 2 } else { 1 };
+            let gate = gate_stages(unrolled, stages, |index| format!("s[{index}]"));
             let code = format!(
                 "module Child (i: input logic, o: output logic) {{ assign o = i; }}
                  module Top (flags: input logic<{stages}>, i: input logic,
@@ -18,9 +44,7 @@ fn instance_source_guard_limit_preserves_independent_cycles() {
                     function gate (s: input logic<{stages}>, x: input logic) -> logic {{
                         var v: logic;
                         v = x;
-                        for index in 0..{stages} {{
-                            if s[index] {{ v = !v; }} else {{ v = 0; }}
-                        }}
+                        {gate}
                         return v;
                     }}
                     inst child: Child ({ports});
@@ -28,11 +52,16 @@ fn instance_source_guard_limit_preserves_independent_cycles() {
                  }}"
             );
             // Each assignment has only one guard, so construction fits in
-            // either case. Walking back from the result accumulates a growing
-            // prefix and must share the guard budget with its caller.
+            // either case. Walking back from the unrolled result accumulates a
+            // growing prefix and must share the guard budget with its caller.
+            // A counted loop is closed from one symbolic iteration instead.
             crate::comb_loop_detect::with_procedure_guard_limit(1024, || {
-                let case = format!("selector={selector}, stages={stages}");
-                assert_eq!(comb_loop_analysis_is_complete(&code), stages == 4, "{case}");
+                let case = format!("selector={selector}, unrolled={unrolled}, stages={stages}");
+                assert_eq!(
+                    comb_loop_analysis_is_complete(&code),
+                    stages == 4 || !unrolled,
+                    "{case}"
+                );
                 let errors = analyze(&code);
                 assert!(
                     errors.iter().all(|error| match error {
@@ -146,7 +175,8 @@ fn nested_runtime_loop_copy_limit_preserves_independent_cycles() {
 #[test]
 fn runtime_loop_import_limit_preserves_independent_cycles() {
     for kind in ["block", "overwritten", "separate", "function"] {
-        for calls in [1, 16] {
+        for (calls, unrolled) in [(1, true), (16, true), (16, false)] {
+            let gate = gate_stages(unrolled, 8, |_| "s".to_string());
             let destination = if kind == "function" {
                 "_discarded"
             } else {
@@ -182,7 +212,7 @@ fn runtime_loop_import_limit_preserves_independent_cycles() {
                     function gate (s: input logic, x: input logic) -> logic {{
                         var v: logic;
                         v = x;
-                        for _index in 0..8 {{ if s {{ v = !v; }} else {{ v = 0; }} }}
+                        {gate}
                         return v;
                     }}
                     {body}
@@ -190,11 +220,13 @@ fn runtime_loop_import_limit_preserves_independent_cycles() {
                 }}
                 "#
             );
+            // Unrolled stages are copied by every repeated transfer. A counted
+            // loop imports one closed iteration, which fits in the same limit.
             crate::comb_loop_detect::with_procedure_import_limit(1024, || {
                 assert_eq!(
                     comb_loop_analysis_is_complete(&code),
-                    calls == 1,
-                    "{kind}, calls={calls}"
+                    calls == 1 || !unrolled,
+                    "{kind}, calls={calls}, unrolled={unrolled}"
                 );
                 let errors = analyze(&code);
                 let loops = errors
@@ -215,7 +247,8 @@ fn runtime_loop_import_limit_preserves_independent_cycles() {
 #[test]
 fn procedural_import_limit_preserves_independent_cycles() {
     for kind in ["procedure", "instance_side_effect"] {
-        for calls in [1, 16] {
+        for (calls, unrolled) in [(1, true), (16, true), (16, false)] {
+            let gate = gate_stages(unrolled, 8, |_| "s".to_string());
             let body = if kind == "procedure" {
                 let assignments = (0..calls)
                     .map(|index| format!("o[{index}] = gate(1'b1, i);"))
@@ -240,7 +273,7 @@ fn procedural_import_limit_preserves_independent_cycles() {
                     function gate (s: input logic, x: input logic) -> logic {{
                         var v: logic;
                         v = x;
-                        for _index in 0..8 {{ if s {{ v = !v; }} else {{ v = 0; }} }}
+                        {gate}
                         return v;
                     }}
                     {body}
@@ -251,8 +284,8 @@ fn procedural_import_limit_preserves_independent_cycles() {
             crate::comb_loop_detect::with_procedure_import_limit(1024, || {
                 assert_eq!(
                     comb_loop_analysis_is_complete(&code),
-                    calls == 1,
-                    "{kind}, calls={calls}"
+                    calls == 1 || !unrolled,
+                    "{kind}, calls={calls}, unrolled={unrolled}"
                 );
                 let errors = analyze(&code);
                 assert!(
@@ -341,7 +374,8 @@ fn instance_actual_expansion_limit_keeps_independent_cycles() {
 #[test]
 fn procedural_guard_limit_counts_fragmented_case_ranges() {
     for fragmented in [false, true] {
-        for iterations in [0, 64] {
+        for (iterations, unrolled) in [(0, true), (64, true), (64, false)] {
+            let gate = gate_stages(unrolled, iterations, |_| "s".to_string());
             let arms = (0..64)
                 .map(|index| {
                     let returns = if fragmented {
@@ -360,9 +394,7 @@ fn procedural_guard_limit_counts_fragmented_case_ranges() {
                         case sel {{ {arms} default: {{}} }}
                         var v: logic;
                         v = x;
-                        for _i in 0..{iterations} {{
-                            if s {{ v = !v; }} else {{ v = 0; }}
-                        }}
+                        {gate}
                         return v;
                     }}
                     assign o = gate(sel, s, x);
@@ -371,12 +403,15 @@ fn procedural_guard_limit_counts_fragmented_case_ranges() {
             );
             // Both continuations constrain only one case branch. Alternating
             // returns leave many disjoint ranges that each later if must copy;
-            // contiguous returns leave just one range. The case join alone fits.
+            // contiguous returns leave just one range. The case join alone fits,
+            // and so does the single symbolic iteration of a counted loop.
             crate::comb_loop_detect::with_procedure_guard_limit(4096, || {
-                let case = format!("fragmented={fragmented}, iterations={iterations}");
+                let case = format!(
+                    "fragmented={fragmented}, iterations={iterations}, unrolled={unrolled}"
+                );
                 assert_eq!(
                     comb_loop_analysis_is_complete(&code),
-                    !fragmented || iterations == 0,
+                    !fragmented || iterations == 0 || !unrolled,
                     "{case}"
                 );
                 let errors = analyze(&code);
@@ -642,7 +677,7 @@ fn comb_loop_dynamic_for_bound_with_unknown_effect_is_incomplete() {
 }
 
 #[test]
-fn comb_loop_oversized_constant_range_is_incomplete_without_false_feedback() {
+fn comb_loop_oversized_constant_range_is_complete_without_false_feedback() {
     let evaluate_size_limit = Metadata::create_default("prj")
         .unwrap()
         .build
@@ -668,13 +703,16 @@ fn comb_loop_oversized_constant_range_is_incomplete_without_false_feedback() {
         evaluate_size_limit + 1
     );
 
-    assert!(!comb_loop_analysis_is_complete(&code));
+    // A counted loop is not enumerated, so the evaluation size limit does not
+    // apply. Each element is written from its predecessor after that element
+    // was written, so the seeded feedback never reaches `value[2]`.
+    assert!(comb_loop_analysis_is_complete(&code));
     let errors = analyze(&code);
     assert!(
         errors
             .iter()
             .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
-        "the expansion limit must not create a combinational-loop diagnostic: {errors:#?}"
+        "an oversized counted loop must not create a combinational-loop diagnostic: {errors:#?}"
     );
 }
 

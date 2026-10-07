@@ -1,43 +1,65 @@
-//! Exact symbolic relations between an anchor position and the current node.
+//! Symbolic relations between an anchor position and the current node.
 //!
 //! # Correctness
 //!
-//! For an axis range `I`, let `L(k, I) = {(x, x + k) | x in I}` and
-//! `U(I, J) = I x J`; an absent range denotes all integer positions.
-//! `Linked` and `Unlinked` represent `L` and `U` respectively. Relational
-//! composition stays in these two forms:
+//! A `RelationPiece` is a set of `(anchor, current)` position pairs. The
+//! anchor lies in a box of per-axis ranges (an absent range denotes all
+//! integer positions). Each current coordinate is either
 //!
-//! ```text
-//! L(a, I); L(b, J) = L(a + b, I intersect (J - a))
-//! L(a, I); U(J, K) = U(I intersect (J - a), K)
-//! U(I, J); L(b, K) = U(I, (J intersect K) + b)
-//! U(I, J); U(K, L) = U(I, L), if J intersects K
-//! ```
+//! - `Unlinked(J)`: any position of `J`, independently of the anchor; or
+//! - `Linked(m)`: the image of one anchor coordinate under the map `m` of
+//!   `position.rs`, defined on the anchor coordinates of its progression.
 //!
-//! These are the four cases in `compose_axis`. `extend_axis` is the same
-//! composition specialized to one dependency edge, with its result restricted
-//! to the destination domain. Array and packed relations form a Cartesian
-//! product, and composition distributes over the union of `RelationPiece`s.
-//! Consequently, induction over a path proves that `PositionRelationSet`
-//! contains exactly the reachable `(anchor, current)` position pairs.
+//! A translation `L(k, I)` of the previous formulation is `Linked` with a
+//! translation map and anchor range `I`; `U(I, J)` is an anchor range `I`
+//! with `Unlinked(J)`. Extending a piece by an edge composes each current
+//! coordinate with the edge link that reads it and then restricts the anchor
+//! so that the new coordinate lies in the destination domain. Composing two
+//! pieces does the same with the second piece's anchor box as the domain.
+//! For translations this is exactly the previous algebra, so every
+//! statement about exact translation relations still holds.
 //!
-//! `axis_intersects_identity` is exactly the test for an `L` or `U` relation
-//! to contain `(x, x)`. A successful `piecewise_covers` test implies semantic
-//! set inclusion; the converse is not required for pruning. Normalization
-//! removes only duplicates or pieces covered by that implication, so it
-//! preserves the represented relation.
+//! For other maps, composition through one intermediate coordinate is exact.
+//! It over-approximates only when an intermediate coordinate is not read by
+//! any later map (its progression constraint is dropped), when two current
+//! coordinates read one intermediate coordinate (their correlation is
+//! dropped), and when an unlinked range is mapped (its strided image is
+//! replaced by a hull). A coordinate that the previous formulation could
+//! represent only as unlinked is therefore never less precise here.
+//!
+//! `intersects_identity` decides exactly whether a piece contains some
+//! `(x, x)`: every case reduces to linear equations over at most two integer
+//! parameters with interval bounds. A successful `piecewise_covers` test
+//! implies semantic set inclusion; the converse is not required for pruning.
+//! Normalization removes only duplicates or pieces covered by that
+//! implication, so it preserves the represented relation.
 //!
 //! Domain endpoints and every intermediate translation, negation, sum, and
-//! repeated product are required to be representable in `isize`; composition
-//! fails the construction invariant instead of weakening overflow to WHOLE.
+//! repeated product of translations are required to be representable in
+//! `isize`. An overflowing map composition is weakened to an unlinked
+//! coordinate restricted to its destination domain, which is a superset.
 
 use super::{FeasiblePosition, SearchBudget};
 use crate::comb_loop_detect::model::BitDependency;
+use crate::comb_loop_detect::position::{Link, Map};
 use crate::comb_loop_detect::ssa::PositionDomain;
 
 type AxisRange = Option<(isize, isize)>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Current {
+    Linked(Map),
+    Unlinked(AxisRange),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct RelationPiece {
+    anchor: [AxisRange; 2],
+    current: [Current; 2],
+}
+
+/// The view of one axis used by translation repetition checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AxisRelation {
     /// `current = start + offset` for every position in `start`.
     Linked { offset: isize, start: AxisRange },
@@ -48,16 +70,151 @@ enum AxisRelation {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct RelationPiece {
-    array: AxisRelation,
-    packed: AxisRelation,
-}
-
-/// A union of rectangular products of per-axis binary relations.
+/// A union of pieces.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(super) struct PositionRelationSet {
     pieces: Vec<RelationPiece>,
+}
+
+fn read_axis(axis: usize, map: Map) -> usize {
+    if map.crossed { 1 - axis } else { axis }
+}
+
+impl RelationPiece {
+    fn translation_view(&self, axis: usize) -> Option<AxisRelation> {
+        match self.current[axis] {
+            Current::Linked(map) => Some(AxisRelation::Linked {
+                offset: map.translation_offset()?,
+                start: self.anchor[axis],
+            }),
+            Current::Unlinked(current) => Some(AxisRelation::Unlinked {
+                start: self.anchor[axis],
+                current,
+            }),
+        }
+    }
+
+    /// Restrict the anchor coordinate read by `map` so that the mapped
+    /// coordinate lies in `range`. `None` means the piece becomes empty.
+    fn restrict_linked(mut self, axis: usize, map: Map, range: AxisRange) -> Option<Self> {
+        let Some((start, end)) = range else {
+            return Some(self);
+        };
+        let read = read_axis(axis, map);
+        let (first, last) = map.destination_parameters(start, end)?;
+        if first != isize::MIN || last != isize::MAX {
+            let hull = map.source_hull(first, last)?;
+            self.anchor[read] = intersect_range(self.anchor[read], Some(hull))?;
+        }
+        Some(self)
+    }
+
+    /// Compose a current coordinate with a link that reads it, restricting
+    /// the result to `range`.
+    fn extend(self, axis: usize, link: Link, range: AxisRange) -> Option<(Self, Current)> {
+        match link {
+            Link::Never => None,
+            Link::Unlinked => Some((self, Current::Unlinked(range))),
+            Link::Map(next) => {
+                let read = read_axis(axis, next);
+                match self.current[read] {
+                    Current::Linked(first) => match first.then(next) {
+                        Some(Some(map)) => {
+                            let piece = self.restrict_linked(axis, map, range)?;
+                            Some((piece, Current::Linked(map)))
+                        }
+                        Some(None) => None,
+                        None => Some((self, Current::Unlinked(range))),
+                    },
+                    Current::Unlinked(source) => {
+                        let image = map_range(next, source)?;
+                        Some((self, Current::Unlinked(intersect_range(image, range)?)))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Drop empty pieces and canonicalize single-point maps so that equal
+    /// relations compare equal.
+    fn simplified(mut self) -> Option<Self> {
+        for range in self.anchor {
+            if range.is_some_and(|(start, end)| start >= end) {
+                return None;
+            }
+        }
+        for axis in 0..2 {
+            match self.current[axis] {
+                Current::Unlinked(range) => {
+                    if range.is_some_and(|(start, end)| start >= end) {
+                        return None;
+                    }
+                }
+                Current::Linked(map) => {
+                    let read = read_axis(axis, map);
+                    if let Some((start, end)) = self.anchor[read] {
+                        // No anchor value of the progression lies in range.
+                        let (first, last) = map.source_parameters(start, end)?;
+                        if let Some(hull) = map.source_hull(first, last) {
+                            self.anchor[read] = intersect_range(self.anchor[read], Some(hull))?;
+                        }
+                        let value = map
+                            .base
+                            .checked_add(map.step.checked_mul(first).unwrap_or(isize::MAX));
+                        if first == last
+                            && map.translation_offset().is_none()
+                            && let Some(value) = value
+                        {
+                            // One anchor value maps to one current value.
+                            // Translations keep their form for the exact
+                            // translation solver.
+                            self.current[axis] = Current::Linked(Map {
+                                crossed: map.crossed,
+                                modulus: 1,
+                                residue: 0,
+                                base: value,
+                                step: 0,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        // Two maps reading one anchor coordinate need a common value.
+        if let (Current::Linked(left), Current::Linked(right)) = (self.current[0], self.current[1])
+            && read_axis(0, left) == read_axis(1, right)
+        {
+            let (residue, modulus) = intersect_progressions(
+                (left.residue, left.modulus),
+                (right.residue, right.modulus),
+            )?;
+            let read = read_axis(0, left);
+            if let Some((start, end)) = self.anchor[read] {
+                progression_in_range(residue, modulus, start, end)?;
+            }
+        }
+        Some(self)
+    }
+
+    fn intersects_identity(&self) -> bool {
+        identity_solution(self).is_some()
+    }
+
+    fn contains(&self, inner: &Self) -> bool {
+        (0..2).all(|axis| range_contains(self.anchor[axis], inner.anchor[axis]))
+            && (0..2).all(|axis| match (self.current[axis], inner.current[axis]) {
+                (Current::Linked(outer), Current::Linked(inner)) => outer == inner,
+                (Current::Unlinked(outer), Current::Unlinked(inner)) => {
+                    range_contains(outer, inner)
+                }
+                (Current::Unlinked(outer), Current::Linked(map)) => {
+                    let read = read_axis(axis, map);
+                    let image = map_range(map, inner.anchor[read]);
+                    image.is_some_and(|image| range_contains(outer, image))
+                }
+                (Current::Linked(_), Current::Unlinked(_)) => false,
+            })
+    }
 }
 
 impl PositionRelationSet {
@@ -66,30 +223,22 @@ impl PositionRelationSet {
     }
 
     pub(super) fn identity(domains: &[PositionDomain]) -> Self {
+        let linked = [Current::Linked(Map::translation(0)); 2];
         let pieces = if domains.is_empty() {
             vec![RelationPiece {
-                array: AxisRelation::Linked {
-                    offset: 0,
-                    start: None,
-                },
-                packed: AxisRelation::Linked {
-                    offset: 0,
-                    start: None,
-                },
+                anchor: [None, None],
+                current: linked,
             }]
         } else {
             domains
                 .iter()
                 .filter_map(|domain| {
                     Some(RelationPiece {
-                        array: AxisRelation::Linked {
-                            offset: 0,
-                            start: finite_range(domain.array_start, domain.array_length)?,
-                        },
-                        packed: AxisRelation::Linked {
-                            offset: 0,
-                            start: finite_range(domain.packed_start, domain.packed_length)?,
-                        },
+                        anchor: [
+                            finite_range(domain.array_start, domain.array_length)?,
+                            finite_range(domain.packed_start, domain.packed_length)?,
+                        ],
+                        current: linked,
                     })
                 })
                 .collect()
@@ -103,29 +252,48 @@ impl PositionRelationSet {
         destination: &[PositionDomain],
     ) -> Self {
         let domains = if destination.is_empty() {
-            vec![(None, None)]
+            vec![[None, None]]
         } else {
             destination
                 .iter()
                 .filter_map(|domain| {
-                    Some((
+                    Some([
                         finite_range(domain.array_start, domain.array_length)?,
                         finite_range(domain.packed_start, domain.packed_length)?,
-                    ))
+                    ])
                 })
                 .collect()
         };
         let mut pieces = Vec::new();
         for piece in &self.pieces {
-            for &(array_domain, packed_domain) in &domains {
-                let Some(array) = extend_axis(piece.array, dependency.array, array_domain) else {
+            for domain in &domains {
+                let mut next = *piece;
+                let mut current = piece.current;
+                let mut feasible = true;
+                for axis in 0..2 {
+                    // Each new coordinate reads the coordinates before this edge.
+                    let source = RelationPiece {
+                        anchor: next.anchor,
+                        current: piece.current,
+                    };
+                    match source.extend(axis, dependency.link(axis_of(axis)), domain[axis]) {
+                        Some((extended, coordinate)) => {
+                            next.anchor = extended.anchor;
+                            current[axis] = coordinate;
+                        }
+                        None => {
+                            feasible = false;
+                            break;
+                        }
+                    }
+                }
+                if !feasible {
                     continue;
-                };
-                let Some(packed) = extend_axis(piece.packed, dependency.packed, packed_domain)
-                else {
-                    continue;
-                };
-                pieces.push(RelationPiece { array, packed });
+                }
+                next.current = current;
+                if let Some(next) = next.simplified() {
+                    pieces.push(next);
+                }
             }
         }
         Self::normalized(pieces)
@@ -134,23 +302,56 @@ impl PositionRelationSet {
     pub(super) fn then(&self, next: &Self) -> Self {
         let mut pieces = Vec::new();
         for left in &self.pieces {
-            for right in &next.pieces {
-                let Some(array) = compose_axis(left.array, right.array) else {
-                    continue;
-                };
-                let Some(packed) = compose_axis(left.packed, right.packed) else {
-                    continue;
-                };
-                pieces.push(RelationPiece { array, packed });
+            'right: for right in &next.pieces {
+                // The intermediate position lies in the right anchor box.
+                let mut middle = *left;
+                for axis in 0..2 {
+                    match left.current[axis] {
+                        Current::Linked(map) => {
+                            let Some(restricted) =
+                                middle.restrict_linked(axis, map, right.anchor[axis])
+                            else {
+                                continue 'right;
+                            };
+                            middle = restricted;
+                        }
+                        Current::Unlinked(range) => {
+                            let Some(range) = intersect_range(range, right.anchor[axis]) else {
+                                continue 'right;
+                            };
+                            middle.current[axis] = Current::Unlinked(range);
+                        }
+                    }
+                }
+                let mut composed = middle;
+                for axis in 0..2 {
+                    let link = match right.current[axis] {
+                        Current::Linked(map) => Link::Map(map),
+                        Current::Unlinked(range) => {
+                            composed.current[axis] = Current::Unlinked(range);
+                            continue;
+                        }
+                    };
+                    let source = RelationPiece {
+                        anchor: composed.anchor,
+                        current: middle.current,
+                    };
+                    let Some((extended, coordinate)) = source.extend(axis, link, None) else {
+                        continue 'right;
+                    };
+                    composed.anchor = extended.anchor;
+                    composed.current[axis] = coordinate;
+                }
+                if let Some(composed) = composed.simplified() {
+                    pieces.push(composed);
+                }
             }
         }
         Self::normalized(pieces)
     }
 
     pub(super) fn intersects_identity(&self) -> bool {
-        self.pieces.iter().any(|piece| {
-            axis_intersects_identity(piece.array) && axis_intersects_identity(piece.packed)
-        })
+        self.pieces.iter().any(RelationPiece::intersects_identity)
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -158,11 +359,10 @@ impl PositionRelationSet {
     }
 
     pub(super) fn piecewise_covers(&self, other: &Self) -> bool {
-        other.pieces.iter().all(|inner| {
-            self.pieces
-                .iter()
-                .any(|outer| piece_contains(*outer, *inner))
-        })
+        other
+            .pieces
+            .iter()
+            .all(|inner| self.pieces.iter().any(|outer| outer.contains(inner)))
     }
 
     pub(super) fn exact_translation(&self) -> Option<(BitDependency, Vec<FeasiblePosition>)> {
@@ -170,15 +370,15 @@ impl PositionRelationSet {
         let mut feasible = Vec::new();
         for piece in &self.pieces {
             let (
-                AxisRelation::Linked {
+                Some(AxisRelation::Linked {
                     offset: array,
                     start: array_start,
-                },
-                AxisRelation::Linked {
+                }),
+                Some(AxisRelation::Linked {
                     offset: packed,
                     start: packed_start,
-                },
-            ) = (piece.array, piece.packed)
+                }),
+            ) = (piece.translation_view(0), piece.translation_view(1))
             else {
                 return None;
             };
@@ -195,18 +395,13 @@ impl PositionRelationSet {
         let (array, packed) = offset?;
         feasible.sort_unstable();
         feasible.dedup();
-        Some((
-            BitDependency {
-                array: Some(array),
-                packed: Some(packed),
-            },
-            feasible,
-        ))
+        Some((BitDependency::translation(array, packed), feasible))
     }
 
     /// Checks `self ; translation^n` for some positive `n` without walking
     /// once per position. This accelerates WHOLE paths followed by a regular
-    /// shift back into their starting range.
+    /// shift back into their starting range. Pieces with other maps are left
+    /// to the general search.
     pub(super) fn closes_after_repeating_translation(
         &self,
         offset: (isize, isize),
@@ -214,13 +409,18 @@ impl PositionRelationSet {
         budget: &mut SearchBudget,
     ) -> bool {
         for piece in &self.pieces {
+            let (Some(array), Some(packed)) =
+                (piece.translation_view(0), piece.translation_view(1))
+            else {
+                continue;
+            };
             for &guard in guards {
                 if !budget.spend(1) {
                     return false;
                 }
                 let mut exact_count = None;
-                if !linked_repetition_count(piece.array, offset.0, &mut exact_count)
-                    || !linked_repetition_count(piece.packed, offset.1, &mut exact_count)
+                if !linked_repetition_count(array, offset.0, &mut exact_count)
+                    || !linked_repetition_count(packed, offset.1, &mut exact_count)
                 {
                     continue;
                 }
@@ -232,13 +432,8 @@ impl PositionRelationSet {
                 }
 
                 let mut bounds = (1, isize::MAX);
-                if !unlinked_repetition_bounds(piece.array, offset.0, guard.array, &mut bounds)
-                    || !unlinked_repetition_bounds(
-                        piece.packed,
-                        offset.1,
-                        guard.packed,
-                        &mut bounds,
-                    )
+                if !unlinked_repetition_bounds(array, offset.0, guard.array, &mut bounds)
+                    || !unlinked_repetition_bounds(packed, offset.1, guard.packed, &mut bounds)
                     || bounds.0 > bounds.1
                 {
                     continue;
@@ -279,14 +474,11 @@ impl PositionRelationSet {
             return false;
         };
         let translation = Self::normalized(vec![RelationPiece {
-            array: AxisRelation::Linked {
-                offset: array_offset,
-                start: array_start,
-            },
-            packed: AxisRelation::Linked {
-                offset: packed_offset,
-                start: packed_start,
-            },
+            anchor: [array_start, packed_start],
+            current: [
+                Current::Linked(Map::translation(array_offset)),
+                Current::Linked(Map::translation(packed_offset)),
+            ],
         }]);
         budget.spend_product(self.piece_count(), translation.piece_count())
             && self.then(&translation).intersects_identity()
@@ -297,16 +489,304 @@ impl PositionRelationSet {
         pieces.dedup();
         let mut retained = Vec::new();
         for (index, piece) in pieces.iter().copied().enumerate() {
+            // Distinct pieces cover each other only if they are equal, which
+            // `dedup` already removed.
             if pieces
                 .iter()
                 .enumerate()
-                .any(|(outer, candidate)| outer != index && piece_contains(*candidate, piece))
+                .any(|(outer, candidate)| outer != index && candidate.contains(&piece))
             {
                 continue;
             }
             retained.push(piece);
         }
         Self { pieces: retained }
+    }
+}
+
+fn axis_of(axis: usize) -> crate::comb_loop_detect::position::Axis {
+    if axis == 0 {
+        crate::comb_loop_detect::position::Axis::Array
+    } else {
+        crate::comb_loop_detect::position::Axis::Packed
+    }
+}
+
+/// Hull of the image of a range under a map. `None` when no position maps.
+fn map_range(map: Map, range: AxisRange) -> Option<AxisRange> {
+    let Some((start, end)) = range else {
+        return Some(if map.step == 0 {
+            Some((map.base, map.base.checked_add(1)?))
+        } else {
+            None
+        });
+    };
+    let (first, last) = map.source_parameters(start, end)?;
+    Some(map.destination_hull(first, last))
+}
+
+/// `x = residue + modulus * k` with the smallest non-negative residue.
+fn intersect_progressions(left: (isize, isize), right: (isize, isize)) -> Option<(isize, isize)> {
+    use crate::comb_loop_detect::position::solve_congruence;
+    // left.0 + left.1 * u = right.0 (mod right.1)
+    let (first, period) = solve_congruence(left.1, right.0.checked_sub(left.0), right.1)??;
+    let modulus = left.1.checked_mul(period)?;
+    let residue = left
+        .0
+        .checked_add(left.1.checked_mul(first)?)?
+        .rem_euclid(modulus);
+    Some((residue, modulus))
+}
+
+fn progression_in_range(residue: isize, modulus: isize, start: isize, end: isize) -> Option<()> {
+    let offset = start.checked_sub(residue)?.rem_euclid(modulus);
+    let first = if offset == 0 {
+        start
+    } else {
+        start.checked_add(modulus - offset)?
+    };
+    (first < end).then_some(())
+}
+
+/// Integer parameters `u` with `start <= value + slope * u < end`.
+fn parameter_interval(value: isize, slope: isize, range: AxisRange) -> Option<(i128, i128)> {
+    let Some((start, end)) = range else {
+        return Some((i128::MIN, i128::MAX));
+    };
+    let (value, slope, start, end) = (value as i128, slope as i128, start as i128, end as i128 - 1);
+    if slope == 0 {
+        return (start <= value && value <= end).then_some((i128::MIN, i128::MAX));
+    }
+    let floor = |a: i128, b: i128| a.div_euclid(b) - i128::from(b < 0 && a.rem_euclid(b) != 0);
+    let ceil = |a: i128, b: i128| -floor(-a, b);
+    let (first, last) = if slope > 0 {
+        (ceil(start - value, slope), floor(end - value, slope))
+    } else {
+        (ceil(end - value, slope), floor(start - value, slope))
+    };
+    (first <= last).then_some((first, last))
+}
+
+/// Whether some integer `u` satisfies every `(value, slope, range)`.
+fn parameter_exists(constraints: &[(isize, isize, AxisRange)]) -> bool {
+    let mut low = i128::MIN;
+    let mut high = i128::MAX;
+    for &(value, slope, range) in constraints {
+        let Some((first, last)) = parameter_interval(value, slope, range) else {
+            return false;
+        };
+        low = low.max(first);
+        high = high.min(last);
+    }
+    low <= high
+}
+
+/// Fixed points of a non-crossed map on one axis: `None` when there are
+/// none, `Some((value, 0))` for one value, `Some((residue, modulus))` for a
+/// progression.
+fn self_fixed_points(map: Map) -> Option<(isize, isize)> {
+    // residue + modulus * t = base + step * t
+    let slope = map.modulus.checked_sub(map.step)?;
+    let constant = map.base.checked_sub(map.residue)?;
+    if slope == 0 {
+        return (constant == 0).then_some((map.residue, map.modulus));
+    }
+    if constant % slope != 0 {
+        return None;
+    }
+    let t = constant / slope;
+    Some((map.residue.checked_add(map.modulus.checked_mul(t)?)?, 0))
+}
+
+/// Whether a set of the form returned by `self_fixed_points` meets a range.
+fn fixed_points_in_range(points: (isize, isize), range: AxisRange) -> bool {
+    let (value, modulus) = points;
+    match range {
+        None => true,
+        Some((start, end)) => {
+            if modulus == 0 {
+                start <= value && value < end
+            } else {
+                progression_in_range(value, modulus, start, end).is_some()
+            }
+        }
+    }
+}
+
+/// Solutions `t = first + period * u` of `coefficient * t = constant`
+/// restricted to the integer `t` with `value = base + slope * t` in a set of
+/// the form returned by `self_fixed_points`.
+fn parameters_hitting(base: isize, slope: isize, points: (isize, isize)) -> Option<(isize, isize)> {
+    use crate::comb_loop_detect::position::solve_congruence;
+    let (value, modulus) = points;
+    if modulus == 0 {
+        // base + slope * t = value
+        if slope == 0 {
+            return (base == value).then_some((0, 1));
+        }
+        let difference = value.checked_sub(base)?;
+        if difference % slope != 0 {
+            return None;
+        }
+        return Some((difference / slope, 0));
+    }
+    // base + slope * t = value (mod modulus)
+    solve_congruence(slope, value.checked_sub(base), modulus)?
+}
+
+fn identity_solution(piece: &RelationPiece) -> Option<()> {
+    let anchor = piece.anchor;
+    match (piece.current[0], piece.current[1]) {
+        (Current::Unlinked(array), Current::Unlinked(packed)) => {
+            intersect_range(array, anchor[0])?;
+            intersect_range(packed, anchor[1])?;
+            Some(())
+        }
+        (Current::Linked(map), Current::Unlinked(range))
+        | (Current::Unlinked(range), Current::Linked(map)) => {
+            let linked = if matches!(piece.current[0], Current::Linked(_)) {
+                0
+            } else {
+                1
+            };
+            let free = 1 - linked;
+            let free_range = intersect_range(range, anchor[free])?;
+            if !map.crossed {
+                let points = self_fixed_points(map)?;
+                fixed_points_in_range(points, anchor[linked]).then_some(())
+            } else {
+                // anchor[linked] = base + step t, anchor[free] = residue + modulus t.
+                parameter_exists(&[
+                    (map.base, map.step, anchor[linked]),
+                    (map.residue, map.modulus, free_range),
+                ])
+                .then_some(())
+            }
+        }
+        (Current::Linked(array), Current::Linked(packed)) => {
+            match (array.crossed, packed.crossed) {
+                (false, false) => {
+                    let array_points = self_fixed_points(array)?;
+                    let packed_points = self_fixed_points(packed)?;
+                    (fixed_points_in_range(array_points, anchor[0])
+                        && fixed_points_in_range(packed_points, anchor[1]))
+                    .then_some(())
+                }
+                (true, false) | (false, true) => {
+                    // One coordinate maps onto itself; the other reads it.
+                    let (own, own_axis, reader, reader_axis) = if array.crossed {
+                        (packed, 1, array, 0)
+                    } else {
+                        (array, 0, packed, 1)
+                    };
+                    let points = self_fixed_points(own)?;
+                    // The reader's parameter t gives own coordinate residue + modulus t.
+                    let (first, period) =
+                        parameters_hitting(reader.residue, reader.modulus, points)?;
+                    let slope = |coefficient: isize| -> Option<isize> {
+                        if period == 0 {
+                            Some(0)
+                        } else {
+                            coefficient.checked_mul(period)
+                        }
+                    };
+                    let own_value = reader
+                        .residue
+                        .checked_add(reader.modulus.checked_mul(first)?)?;
+                    let reader_value = reader.base.checked_add(reader.step.checked_mul(first)?)?;
+                    parameter_exists(&[
+                        (own_value, slope(reader.modulus)?, anchor[own_axis]),
+                        (reader_value, slope(reader.step)?, anchor[reader_axis]),
+                    ])
+                    .then_some(())
+                }
+                (true, true) => swapped_identity(array, packed, anchor),
+            }
+        }
+    }
+}
+
+/// Both coordinates read the other anchor coordinate.
+fn swapped_identity(array: Map, packed: Map, anchor: [AxisRange; 2]) -> Option<()> {
+    // anchor[0] = array.base + array.step * t0 = packed.residue + packed.modulus * t1
+    // anchor[1] = array.residue + array.modulus * t0 = packed.base + packed.step * t1
+    let (a, b, c) = (
+        array.step as i128,
+        -(packed.modulus as i128),
+        packed.residue as i128 - array.base as i128,
+    );
+    let (d, e, f) = (
+        array.modulus as i128,
+        -(packed.step as i128),
+        packed.base as i128 - array.residue as i128,
+    );
+    let determinant = a * e - b * d;
+    let check = |t0: i128| -> bool {
+        let first = array.base as i128 + array.step as i128 * t0;
+        let second = array.residue as i128 + array.modulus as i128 * t0;
+        let inside = |value: i128, range: AxisRange| {
+            range.is_none_or(|(start, end)| start as i128 <= value && value < end as i128)
+        };
+        inside(first, anchor[0]) && inside(second, anchor[1])
+    };
+    if determinant != 0 {
+        let t0 = c * e - b * f;
+        let t1 = a * f - c * d;
+        if t0 % determinant != 0 || t1 % determinant != 0 {
+            return None;
+        }
+        return check(t0 / determinant).then_some(());
+    }
+    // Dependent equations: solve the first, then require the second.
+    // a t0 + b t1 = c with b != 0 because every modulus is positive.
+    let (gcd, x, _) = extended_gcd_i128(a, b);
+    if c % gcd != 0 {
+        return None;
+    }
+    // t0 = t0p + (b / gcd) u, t1 = t1p - (a / gcd) u
+    let t0p = x * (c / gcd);
+    let t1p = (c - a * t0p) / b;
+    let (s0, s1) = (b / gcd, -(a / gcd));
+    // Second equation: d t0 + e t1 = f must hold for some u.
+    let constant = f - d * t0p - e * t1p;
+    let slope = d * s0 + e * s1;
+    let us: Vec<i128> = if slope == 0 {
+        if constant != 0 {
+            return None;
+        }
+        Vec::new()
+    } else {
+        if constant % slope != 0 {
+            return None;
+        }
+        vec![constant / slope]
+    };
+    if let Some(&u) = us.first() {
+        return check(t0p + s0 * u).then_some(());
+    }
+    // Every u: anchor[0] and anchor[1] are linear in u.
+    let narrow = |value: i128| isize::try_from(value).ok();
+    let base0 = narrow(array.base as i128 + array.step as i128 * t0p)?;
+    let slope0 = narrow(array.step as i128 * s0)?;
+    let base1 = narrow(array.residue as i128 + array.modulus as i128 * t0p)?;
+    let slope1 = narrow(array.modulus as i128 * s0)?;
+    parameter_exists(&[(base0, slope0, anchor[0]), (base1, slope1, anchor[1])]).then_some(())
+}
+
+fn extended_gcd_i128(a: i128, b: i128) -> (i128, i128, i128) {
+    let (mut old_r, mut r) = (a, b);
+    let (mut old_s, mut s) = (1i128, 0i128);
+    let (mut old_t, mut t) = (0i128, 1i128);
+    while r != 0 {
+        let quotient = old_r / r;
+        (old_r, r) = (r, old_r - quotient * r);
+        (old_s, s) = (s, old_s - quotient * s);
+        (old_t, t) = (t, old_t - quotient * t);
+    }
+    if old_r < 0 {
+        (-old_r, -old_s, -old_t)
+    } else {
+        (old_r, old_s, old_t)
     }
 }
 
@@ -428,188 +908,12 @@ fn repeat_range(range: AxisRange, total_shift: isize) -> Option<AxisRange> {
     (repeated.0 < repeated.1).then_some(Some(repeated))
 }
 
-fn extend_axis(
-    relation: AxisRelation,
-    dependency: Option<isize>,
-    destination: AxisRange,
-) -> Option<AxisRelation> {
-    match (relation, dependency) {
-        (AxisRelation::Linked { offset, start }, Some(next)) => {
-            let offset = offset
-                .checked_add(next)
-                .expect("composed position offset must fit in isize");
-            let allowed = translate_range(
-                destination,
-                offset
-                    .checked_neg()
-                    .expect("reversed position offset must fit in isize"),
-            );
-            Some(AxisRelation::Linked {
-                offset,
-                start: intersect_range(start, allowed)?,
-            })
-        }
-        (AxisRelation::Unlinked { start, current }, Some(offset)) => {
-            let current = translate_range(current, offset);
-            Some(AxisRelation::Unlinked {
-                start,
-                current: intersect_range(current, destination)?,
-            })
-        }
-        (AxisRelation::Linked { start, .. }, None)
-        | (AxisRelation::Unlinked { start, .. }, None) => Some(AxisRelation::Unlinked {
-            start,
-            current: destination,
-        }),
-    }
-}
-
-fn compose_axis(left: AxisRelation, right: AxisRelation) -> Option<AxisRelation> {
-    match (left, right) {
-        (
-            AxisRelation::Linked {
-                offset: left_offset,
-                start: left_start,
-            },
-            AxisRelation::Linked {
-                offset: right_offset,
-                start: right_start,
-            },
-        ) => {
-            let right_start = translate_range(
-                right_start,
-                left_offset
-                    .checked_neg()
-                    .expect("reversed position offset must fit in isize"),
-            );
-            Some(AxisRelation::Linked {
-                offset: left_offset
-                    .checked_add(right_offset)
-                    .expect("composed position offset must fit in isize"),
-                start: intersect_range(left_start, right_start)?,
-            })
-        }
-        (
-            AxisRelation::Linked {
-                offset,
-                start: left_start,
-            },
-            AxisRelation::Unlinked {
-                start: right_start,
-                current,
-            },
-        ) => {
-            let right_start = translate_range(
-                right_start,
-                offset
-                    .checked_neg()
-                    .expect("reversed position offset must fit in isize"),
-            );
-            Some(AxisRelation::Unlinked {
-                start: intersect_range(left_start, right_start)?,
-                current,
-            })
-        }
-        (
-            AxisRelation::Unlinked {
-                start,
-                current: left_current,
-            },
-            AxisRelation::Linked {
-                offset,
-                start: right_start,
-            },
-        ) => {
-            let middle = intersect_range(left_current, right_start)?;
-            Some(AxisRelation::Unlinked {
-                start,
-                current: translate_range(middle, offset),
-            })
-        }
-        (
-            AxisRelation::Unlinked {
-                start,
-                current: left_current,
-            },
-            AxisRelation::Unlinked {
-                start: right_start,
-                current,
-            },
-        ) => {
-            intersect_range(left_current, right_start)?;
-            Some(AxisRelation::Unlinked { start, current })
-        }
-    }
-}
-
-fn axis_intersects_identity(relation: AxisRelation) -> bool {
-    match relation {
-        AxisRelation::Linked { offset, .. } => offset == 0,
-        AxisRelation::Unlinked { start, current } => intersect_range(start, current).is_some(),
-    }
-}
-
-fn piece_contains(outer: RelationPiece, inner: RelationPiece) -> bool {
-    axis_contains_relation(outer.array, inner.array)
-        && axis_contains_relation(outer.packed, inner.packed)
-}
-
-fn axis_contains_relation(outer: AxisRelation, inner: AxisRelation) -> bool {
-    match (outer, inner) {
-        (
-            AxisRelation::Linked {
-                offset: outer_offset,
-                start: outer_start,
-            },
-            AxisRelation::Linked {
-                offset: inner_offset,
-                start: inner_start,
-            },
-        ) => outer_offset == inner_offset && range_contains(outer_start, inner_start),
-        (
-            AxisRelation::Unlinked {
-                start: outer_start,
-                current: outer_current,
-            },
-            AxisRelation::Unlinked {
-                start: inner_start,
-                current: inner_current,
-            },
-        ) => {
-            range_contains(outer_start, inner_start) && range_contains(outer_current, inner_current)
-        }
-        (
-            AxisRelation::Unlinked {
-                start: outer_start,
-                current: outer_current,
-            },
-            AxisRelation::Linked { offset, start },
-        ) => {
-            range_contains(outer_start, start)
-                && range_contains(outer_current, translate_range(start, offset))
-        }
-        (AxisRelation::Linked { .. }, AxisRelation::Unlinked { .. }) => false,
-    }
-}
-
 fn finite_range(start: usize, length: usize) -> Option<AxisRange> {
     let start = isize::try_from(start).expect("position domain start must fit in isize");
     let end = start
         .checked_add_unsigned(length)
         .expect("position domain end must fit in isize");
     (start < end).then_some(Some((start, end)))
-}
-
-fn translate_range(range: AxisRange, offset: isize) -> AxisRange {
-    range.map(|(start, end)| {
-        (
-            start
-                .checked_add(offset)
-                .expect("translated range start must fit in isize"),
-            end.checked_add(offset)
-                .expect("translated range end must fit in isize"),
-        )
-    })
 }
 
 fn intersect_range(left: AxisRange, right: AxisRange) -> Option<AxisRange> {
