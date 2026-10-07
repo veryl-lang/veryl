@@ -10620,6 +10620,27 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                 if matches!(op, Op::Div | Op::Rem) {
                     return Some(format!("(({ys}) == 0 ? 0 : (({xs}) {c_op} ({ys})))"));
                 }
+                // Emitting an operand twice doubles a nested add/sub tree per level.
+                if overflow_cond.is_some()
+                    && matches!(op, Op::Add | Op::Sub)
+                    && needs_clean
+                    && x.width() <= 64
+                    && y.width() <= 64
+                {
+                    let mask = (1u64 << expr_context.width) - 1;
+                    let sh = expr_context.width - 1;
+                    let cond = if matches!(op, Op::Add) {
+                        format!("((_ox | _oy) >> {sh})")
+                    } else {
+                        format!("(((_ox | _oy) >> {sh}) != 0 || _ox < _oy)")
+                    };
+                    return Some(format!(
+                        "({{ uint64_t _ox = ({xs}); uint64_t _oy = ({ys}); \
+                         uint64_t _t = ((_ox) {c_op} (_oy)); \
+                         if (__builtin_expect(({cond}) != 0, 0)) {{ _t &= 0x{mask:x}ULL; \
+                         __asm__ volatile(\"\" : \"+r\"(_t)); }} _t; }})"
+                    ));
+                }
                 return Some(wmask(format!("(({}) {} ({}))", xs, c_op, ys)));
             }
             match op {
@@ -12988,6 +13009,159 @@ mod tests {
             9,
             "the 8-bit -1 must sign-extend to 66 bits, not add 255"
         );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    fn popcount_assign(leaves: usize) -> ProtoStatement {
+        fn tree(lo: usize, n: usize) -> ProtoExpression {
+            if n == 1 {
+                return var_expr(VarOffset::Comb(lo as isize), 1);
+            }
+            let w = n.trailing_zeros() as usize + 1;
+            let half = |lo| ProtoExpression::Resize {
+                x: Box::new(tree(lo, n / 2)),
+                width: w,
+                sign_extend: false,
+                expr_context: ctx(w, false),
+            };
+            ProtoExpression::Binary {
+                x: Box::new(half(lo)),
+                op: Op::Add,
+                y: Box::new(half(lo + n / 2)),
+                width: w,
+                expr_context: ctx(w, false),
+            }
+        }
+        comb_assign(
+            leaves as isize,
+            leaves.trailing_zeros() as usize + 1,
+            None,
+            tree(0, leaves),
+        )
+    }
+
+    #[test]
+    fn nested_masked_adds_emit_linear_source() {
+        // Superlinear growth puts a deep tree over the per-statement ceiling.
+        let len = |leaves| {
+            emit_function(&[popcount_assign(leaves)])
+                .expect("popcount must emit")
+                .len()
+        };
+        let (half, full) = (len(512), len(1024));
+        assert!(full < half * 5 / 2, "{half} B -> {full} B");
+        if !cc_available() {
+            eprintln!("nested_masked_adds_emit_linear_source: cc unavailable, skipping");
+            return;
+        }
+        const LEAVES: usize = 1024;
+        let src = emit_function(&[popcount_assign(LEAVES)]).expect("popcount must emit");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_popcnt_{}", std::process::id()));
+        let Some(module) = compile_for_test(&tmp, &src, "nested_masked_adds_emit_linear_source")
+        else {
+            return;
+        };
+        let mut ff = vec![0u8; 16];
+        let mut log = vec![0u64; 16];
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        for fill in [Some(0u8), Some(1), None] {
+            let mut comb = vec![0u8; LEAVES + 8];
+            for b in comb.iter_mut().take(LEAVES) {
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                *b = fill.unwrap_or((seed >> 63) as u8);
+            }
+            let expect: u64 = comb[..LEAVES].iter().map(|&b| b as u64).sum();
+            unsafe {
+                (module.func)(
+                    ff.as_mut_ptr(),
+                    comb.as_mut_ptr(),
+                    log.as_mut_ptr() as *mut u8,
+                    0,
+                );
+            }
+            let got = u16::from_le_bytes([comb[LEAVES], comb[LEAVES + 1]]) as u64;
+            assert_eq!(got, expect);
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn masked_add_sub_feeding_a_compare_clean_carry_and_borrow() {
+        // An unsigned compare reads every bit, so a missed mask is observable.
+        if !cc_available() {
+            eprintln!(
+                "masked_add_sub_feeding_a_compare_clean_carry_and_borrow: cc unavailable, skipping"
+            );
+            return;
+        }
+        let v = |off: isize| Box::new(var_expr(VarOffset::Comb(off), 8));
+        let bin = |x: Box<ProtoExpression>, op: Op, y: Box<ProtoExpression>| {
+            Box::new(ProtoExpression::Binary {
+                x,
+                op,
+                y,
+                width: 8,
+                expr_context: ctx(8, false),
+            })
+        };
+        let eq = |x: Box<ProtoExpression>, d: isize| ProtoExpression::Binary {
+            x,
+            op: Op::Eq,
+            y: v(d),
+            width: 1,
+            expr_context: ctx(1, false),
+        };
+        let stmts = [
+            comb_assign(0x10, 1, None, eq(bin(v(0), Op::Add, v(1)), 0x08)),
+            comb_assign(
+                0x11,
+                1,
+                None,
+                eq(bin(bin(v(0), Op::Add, v(1)), Op::Sub, v(2)), 0x09),
+            ),
+            comb_assign(
+                0x12,
+                1,
+                None,
+                eq(bin(bin(v(0), Op::Sub, v(2)), Op::Add, v(1)), 0x0a),
+            ),
+        ];
+        let src = emit_function(&stmts).expect("compares over add/sub must emit");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_addsub_{}", std::process::id()));
+        let Some(module) = compile_for_test(
+            &tmp,
+            &src,
+            "masked_add_sub_feeding_a_compare_clean_carry_and_borrow",
+        ) else {
+            return;
+        };
+        let edges = [0u8, 1, 0x3f, 0x7f, 0x80, 0x81, 0xfe, 0xff];
+        let mut ff = vec![0u8; 16];
+        let mut log = vec![0u64; 16];
+        for &a in &edges {
+            for &b in &edges {
+                for &c in &edges {
+                    let mut comb = vec![0u8; 0x20];
+                    comb[0] = a;
+                    comb[1] = b;
+                    comb[2] = c;
+                    comb[0x08] = a.wrapping_add(b);
+                    comb[0x09] = a.wrapping_add(b).wrapping_sub(c);
+                    comb[0x0a] = a.wrapping_sub(c).wrapping_add(b);
+                    unsafe {
+                        (module.func)(
+                            ff.as_mut_ptr(),
+                            comb.as_mut_ptr(),
+                            log.as_mut_ptr() as *mut u8,
+                            0,
+                        );
+                    }
+                    assert_eq!(comb[0x10..0x13], [1, 1, 1], "a={a:#x} b={b:#x} c={c:#x}");
+                }
+            }
+        }
         let _ = fs::remove_dir_all(&tmp);
     }
 
