@@ -34243,3 +34243,51 @@ fn iterator_select_by_a_variable_keeps_the_loop() {
     assert_matches_runtime_loop(&design, &control, &["o", "p"], |_| true);
     assert_eq!(runtime_loops(&design, "Top"), 2);
 }
+
+#[test]
+fn a_loop_skips_the_index_of_its_untaken_branch() {
+    // Regression: the untaken `r[j - 1]` at j = 0 got the design rejected.
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<2>,
+        o  : output logic<2>,
+    ) {
+        var r: logic<4, 2>;
+        always_ff {
+            if_reset {
+                r = '0;
+            } else {
+                for j in 0..4 {
+                    if j == 0 {
+                        r[j] = a;
+                    } else {
+                        r[j] = r[j - 1];
+                    }
+                }
+            }
+        }
+        assign o = r[3];
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        let inputs = [1u64, 2, 3, 0, 2, 1, 3, 3];
+        for (t, &a) in inputs.iter().enumerate() {
+            sim.set("a", Value::new(a, 2, false));
+            sim.step(&clk);
+            let want = if t >= 3 { inputs[t - 3] } else { 0 };
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(want, 2, false),
+                "t={t} under {config:?}"
+            );
+        }
+    }
+}

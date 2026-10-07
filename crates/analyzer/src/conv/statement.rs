@@ -583,7 +583,7 @@ pub(crate) fn check_true_false(comptime: &Comptime) -> (bool, bool) {
 /// (e.g. the `i >= 4` arms of an unrolled `if i >= 4 || sig`), so a dead arm's
 /// out-of-range select never reaches the range check or the simulator.
 /// Returns `(true_side_only, false_side_only)`.
-fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, bool) {
+pub(crate) fn eval_cond_true_false(context: &mut Context, cond: &ir::Expression) -> (bool, bool) {
     if let ir::Expression::Binary(x, op, y, _) = cond {
         match op {
             ir::Op::LogicOr => {
