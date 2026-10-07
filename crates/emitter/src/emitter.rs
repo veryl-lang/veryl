@@ -6862,6 +6862,10 @@ fn namespace_string(
             // "$sv" namespace should be removed
             if text == "$sv_" {
                 in_sv_namespace = true;
+            } else if text == "$define_" {
+                // "$define" namespace is emitted as a macro reference
+                ret.push('`');
+                in_sv_namespace = true;
             } else {
                 let emit_prj_prefix = if context.build_opt.omit_project_prefix {
                     context.project_name != Some(*path)

@@ -722,9 +722,15 @@ impl VerylGrammarTrait for CreateSymbolTable {
                 self.add_reference_candidate((arg, self.in_import).into());
             }
 
-            // Add symbols under $sv namespace
+            // Add symbols under $sv / $define namespace
             if let ScopedIdentifierGroup::DollarIdentifier(x) = arg.scoped_identifier_group.as_ref()
-                && x.dollar_identifier.dollar_identifier_token.to_string() == "$sv"
+                && matches!(
+                    x.dollar_identifier
+                        .dollar_identifier_token
+                        .to_string()
+                        .as_str(),
+                    "$sv" | "$define"
+                )
             {
                 let mut namespace = Namespace::new();
                 for (i, token) in scoped_identifier_tokens(arg).iter().enumerate() {

@@ -6189,6 +6189,17 @@ fn mismatch_assignment() {
 
     let code = r#"
     module ModuleA {
+        const A: u32 = 0;
+        const B: u32 = $define::B | A;
+        const C: u32 = $define::pkg::a | A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
         enum EnumA: bit<_> {
             A = 1'bx,
         }
@@ -6240,6 +6251,30 @@ fn mismatch_assignment() {
     }
     module ModuleA #(
         param CHANNELS: u32 = $sv::pkg::CHANNELS,
+    ) (
+        i_data: input  logic [CHANNELS / 2],
+        o_data: output logic [CHANNELS / 2],
+    ) {
+        inst u: Inner (
+            i_data: i_data,
+            o_data: o_data,
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // Array size from a `$define::` macro: unknown dimensions should match any size.
+    let code = r#"
+    module Inner (
+        i_data: input  logic [4],
+        o_data: output logic [4],
+    ) {
+        assign o_data = i_data;
+    }
+    module ModuleA #(
+        param CHANNELS: u32 = $define::CHANNELS,
     ) (
         i_data: input  logic [CHANNELS / 2],
         o_data: output logic [CHANNELS / 2],
@@ -6601,6 +6636,27 @@ fn missing_reset_statement() {
         i_rst: input reset,
     ) {
         var a: $sv::StructA;
+
+        always_ff {
+            if_reset {
+                a.a = 0;
+                a.b = 0;
+            } else {
+                a = 0;
+            }
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA (
+        i_clk: input clock,
+        i_rst: input reset,
+    ) {
+        var a: $define::StructA;
 
         always_ff {
             if_reset {
@@ -8063,6 +8119,17 @@ fn referring_before_definition() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    let code = r#"
+    module ModuleA #(
+        const A: bit<$define::WIDTH> = 0,
+    ) {
+        let _a: bit<$define::WIDTH> = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
     // A width the analyzer cannot evaluate says nothing about where the
     // constant was declared.
     let code = r#"
@@ -9126,6 +9193,25 @@ fn unknown_member() {
     assert!(errors.is_empty());
 
     let code = r#"
+    module a_module {
+        var _a: $define::foo_bar;
+        var _b: $define::foo_bar;
+        always_comb {
+            _a = $define::foo_bar'{
+                foo: 0,
+                bar: 1,
+            };
+
+            _b.foo = 0;
+            _b.bar = 1;
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
     interface a_if {
         var a: logic;
         modport mp_a {
@@ -9251,6 +9337,16 @@ fn unknown_msb() {
     let code = r#"
     module ModuleA {
         var a: $sv::SvType;
+        let b: logic = a[msb];
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(matches!(errors[0], AnalyzerError::UnknownMsb { .. }));
+
+    let code = r#"
+    module ModuleA {
+        var a: $define::SvType;
         let b: logic = a[msb];
     }
     "#;
@@ -12233,6 +12329,33 @@ fn unevaluable_value_const_value() {
 
     let code = r#"
     module ModuleA {
+        const y: logic = $define::func();
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: $define::a_struct = $define::a_struct'{ a: 1 };
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        const A: bit<5>[1] = '{$define::FOO};
+        const B: bit<5>[1] = A;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
         const A: u32[1] = '{ 1 + 1 };
     }
     "#;
@@ -12670,6 +12793,18 @@ fn invalid_logical_operand() {
     let errors = analyze(code);
     assert!(errors.is_empty());
 
+    let code = r#"
+    module ModuleA {
+        const X : u32      = $define::X;
+        const Y : u32      = $define::pkg::Y;
+        let a : logic<2> = 1;
+        let _b: logic    = a[X - 1] && 1'b1;
+        let _c: logic    = a[Y - 1] && 1'b1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
     // `inside` comparing an enum reached through a $sv-imported interface
     // must yield a 1-bit result (not the enum's width).
     let code = r#"
@@ -12972,6 +13107,18 @@ fn call_non_function() {
         var a: logic;
 
         assign a = $sv::pkg::func() + 1;
+    }"#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    let code = r#"
+    module ModuleA {
+        var a: logic;
+        var b: logic;
+
+        assign a = $define::func() + 1;
+        assign b = $define::pkg::func() + 1;
     }"#;
 
     let errors = analyze(code);
