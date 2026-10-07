@@ -5,7 +5,7 @@
 //! Safety: These functions are called from JIT-compiled code via function pointers.
 //! The caller guarantees that pointers are valid and that `nb` is a multiple of 8
 //! matching the buffer sizes.  Pointers may NOT be 8-byte aligned (variable layout
-//! can place wide values at 4-byte-aligned offsets), so all accesses use
+//! gives slots no alignment guarantee), so all accesses use
 //! read_unaligned / write_unaligned.
 
 #![allow(clippy::missing_safety_doc)]
