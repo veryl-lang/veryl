@@ -3957,6 +3957,100 @@ fn array_slice_assignment_checks_each_destination_dimension() {
 }
 
 #[test]
+fn signed_index_reaching_past_half_its_range_stays_bounds_checked() {
+    // With 12 elements and a 4-bit index, -8..-5 read as 8..11 and would
+    // address the array; with 4 elements none of them can.
+    for (count, bits) in [(12, 4), (4, 4), (4, 16)] {
+        let code = format!(
+            r#"
+    module Top(index: input signed logic<{bits}>, read: output logic<8>, written: output logic<8>) {{
+        var source: logic<8>[{count}];
+        var target: logic<8>[{count}];
+        for i in 0..{count} :g {{
+            assign source[i] = 8'hA0 + i;
+        }}
+        always_comb {{
+            for i in 0..{count} {{
+                target[i] = 0;
+            }}
+            target[index] = 8'hEE;
+            read = source[index];
+            written = 0;
+            for i in 0..{count} {{
+                written |= target[i];
+            }}
+        }}
+    }}
+    "#
+        );
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            for index in -8i64..8 {
+                sim.set(
+                    "index",
+                    Value::new((index as u64) & ((1 << bits) - 1), bits, true),
+                );
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                let inside = (0..count).contains(&index);
+                let read = if inside {
+                    Value::new(0xa0 + index as u64, 8, false)
+                } else if config.use_4state {
+                    Value::new_x(8, false)
+                } else {
+                    Value::new(0, 8, false)
+                };
+                assert_eq!(
+                    sim.get("read").unwrap(),
+                    read,
+                    "{config:?}, count={count}, bits={bits}, index={index}"
+                );
+                assert_eq!(
+                    sim.get("written").unwrap(),
+                    Value::new(if inside { 0xee } else { 0 }, 8, false),
+                    "{config:?}, count={count}, bits={bits}, index={index}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn coordinates_that_cannot_leave_their_dimension_keep_addressing_it() {
+    // Both coordinates span exactly their dimension, so the per-coordinate
+    // range check folds away.
+    let code = r#"
+    module Top(row: input logic<2>, column: input logic, o: output logic<64>) {
+        var data: logic<8>[4, 2];
+        always_comb {
+            data = '{'{1, 2}, '{3, 4}, '{5, 6}, '{7, 8}};
+            data[row][column] = 8'hBB;
+            o = {data[3][1], data[3][0], data[2][1], data[2][0],
+                 data[1][1], data[1][0], data[0][1], data[0][0]};
+        }
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for row in 0..4u64 {
+            for column in 0..2u64 {
+                sim.set("row", Value::new(row, 2, false));
+                sim.set("column", Value::new(column, 1, false));
+                sim.step(&Event::Clock(VarId::SYNTHETIC));
+                let mut expected = 0x0807_0605_0403_0201u64;
+                let byte = row * 2 + column;
+                expected &= !(0xffu64 << (byte * 8));
+                expected |= 0xbbu64 << (byte * 8);
+                assert_eq!(
+                    sim.get("o").unwrap(),
+                    Value::new(expected, 64, false),
+                    "{config:?}, row={row}, column={column}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn array_slice_narrow_index_agrees_in_constants_and_at_runtime() {
     for kind in ["logic", "bit"] {
         let code = format!(

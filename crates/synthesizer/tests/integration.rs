@@ -5682,3 +5682,98 @@ fn reset_of_a_concatenated_destination_does_not_spill_into_other_elements() {
     assert_eq!(gate.module.ffs.len(), 8);
     assert!(gate.module.ffs[4..].iter().all(|f| !f.reset_value));
 }
+
+#[test]
+fn coordinates_that_cannot_leave_their_dimension_keep_addressing_it() {
+    // Both coordinates span exactly their dimension, so the mux tree's own
+    // zero padding covers the range and no validity gate is built.
+    let code = r#"
+        module Top(d: input logic<2>[4, 2], row: input logic<2>, column: input logic,
+                   o: output logic<2>) {
+            assign o = d[row][column];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        &gate
+            .ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap()
+            .nets
+    };
+    let d = port("d");
+    assert_eq!(d.len(), 16);
+    for row in 0..4usize {
+        for column in 0..2usize {
+            for active in 0..d.len() {
+                let inputs = d
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &n)| (n, i == active))
+                    .chain(
+                        port("row")
+                            .iter()
+                            .enumerate()
+                            .map(|(bit, &n)| (n, (row >> bit) & 1 != 0)),
+                    )
+                    .chain(port("column").iter().map(|&n| (n, column != 0)))
+                    .collect();
+                let mut memo = std::collections::HashMap::new();
+                for (bit, &net) in port("o").iter().enumerate() {
+                    assert_eq!(
+                        eval_net(&gate, net, &inputs, &mut memo),
+                        active == (row * 2 + column) * 2 + bit,
+                        "row={row}, column={column}, active={active}, bit={bit}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn single_element_dimension_still_rejects_an_out_of_range_selector() {
+    // `dynamic_mux_tree` resolves no selector bit for a one-element dimension,
+    // so its range check cannot be left to the padding.
+    let code = r#"
+        module Top(d: input logic<2>[1, 2], row: input logic, column: input logic,
+                   o: output logic<2>) {
+            assign o = d[row][column];
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize").module;
+    let port = |name: &str| {
+        &gate
+            .ports
+            .iter()
+            .find(|p| p.name.to_string() == name)
+            .unwrap()
+            .nets
+    };
+    let d = port("d");
+    assert_eq!(d.len(), 4);
+    for row in 0..2usize {
+        for column in 0..2usize {
+            for active in 0..d.len() {
+                let inputs = d
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &n)| (n, i == active))
+                    .chain(port("row").iter().map(|&n| (n, row != 0)))
+                    .chain(port("column").iter().map(|&n| (n, column != 0)))
+                    .collect();
+                let mut memo = std::collections::HashMap::new();
+                for (bit, &net) in port("o").iter().enumerate() {
+                    assert_eq!(
+                        eval_net(&gate, net, &inputs, &mut memo),
+                        row == 0 && active == column * 2 + bit,
+                        "row={row}, column={column}, active={active}, bit={bit}"
+                    );
+                }
+            }
+        }
+    }
+}

@@ -2046,6 +2046,34 @@ fn extend_to_width(expr: ProtoExpression, width: usize) -> ProtoExpression {
     resize_to_width(expr, width, expr_context)
 }
 
+/// Whether the use-site bounds check covers every value a coordinate can take.
+/// It compares against the element count, so a signed coordinate's negatives,
+/// which arrive as the top half of its unsigned range, are covered only once
+/// the array ends below that half. A width the host cannot shift by answers no.
+fn use_site_check_suffices(coordinate: &ProtoExpression, dim_size: usize) -> bool {
+    if !coordinate.expr_context().signed {
+        return true;
+    }
+    coordinate
+        .width()
+        .checked_sub(1)
+        .and_then(|bits| u32::try_from(bits).ok())
+        .and_then(|bits| 1usize.checked_shl(bits))
+        .is_some_and(|negatives_start| dim_size <= negatives_start)
+}
+
+/// Whether a coordinate can hold a value its dimension does not address: a
+/// signed one always can, through its negatives.
+fn can_leave_dimension(coordinate: &ProtoExpression, dim_size: usize) -> bool {
+    if coordinate.expr_context().signed {
+        return true;
+    }
+    u32::try_from(coordinate.width())
+        .ok()
+        .and_then(|bits| 1usize.checked_shl(bits))
+        .is_none_or(|span| span > dim_size)
+}
+
 /// Build a ProtoExpression computing the linear index from a multi-dimensional VarIndex.
 /// Equivalent to calc_index_expr but produces ProtoExpression directly with correct widths.
 pub fn build_linear_index_expr(
@@ -2091,44 +2119,49 @@ pub fn build_linear_index_expr(
     for (i, dim_size) in array.iter().enumerate().rev() {
         let dim_size = dim_size.expect("array dimension size must be known");
         let idx_proto: ProtoExpression = Conv::conv(context, &index.indices[i])?;
-        // Dynamic reads and writes already bounds-check a flat index. Keep a
-        // native unsigned one-dimensional index as-is: its original width may
-        // prove that check unnecessary as well. Per-coordinate checks remain
-        // necessary before flattening dimensions or narrowing a wide index.
+        // Dynamic reads and writes already bounds-check a flat index, which for
+        // one dimension is the coordinate itself. Flattening dimensions, or
+        // narrowing a wide coordinate, needs a check of its own first.
         if array.dims() == 1
-            && !idx_proto.expr_context().signed
             && (1..=64).contains(&idx_proto.width())
+            && use_site_check_suffices(&idx_proto, dim_size)
         {
             return Ok(idx_proto);
         }
-        // Extend each coordinate before comparing or flattening. Invalid inner
-        // coordinates must not alias the next row, and negative signed indices
-        // must not become small positive offsets.
-        let idx_proto = resize_to_width(idx_proto, index_width, index_expr_context);
-        let check = ProtoExpression::Binary {
-            x: Box::new(idx_proto.clone()),
-            op: Op::Less,
-            y: Box::new(ProtoExpression::Value {
-                value: Value::new(dim_size as u64, index_width, false),
-                width: index_width,
-                expr_context: index_expr_context,
-            }),
-            width: 1,
-            expr_context: index_expr_context,
-        };
-        valid = Some(match valid {
-            Some(previous) => ProtoExpression::Binary {
-                x: Box::new(previous),
-                op: Op::LogicAnd,
-                y: Box::new(check),
+        // Widening first keeps an invalid inner coordinate from aliasing the
+        // next row, and a negative one from becoming a small positive offset.
+        // One that stays inside needs neither, and the arithmetic below widens
+        // it anyway.
+        let idx_proto = if can_leave_dimension(&idx_proto, dim_size) {
+            let idx_proto = resize_to_width(idx_proto, index_width, index_expr_context);
+            let check = ProtoExpression::Binary {
+                x: Box::new(idx_proto.clone()),
+                op: Op::Less,
+                y: Box::new(ProtoExpression::Value {
+                    value: Value::new(dim_size as u64, index_width, false),
+                    width: index_width,
+                    expr_context: index_expr_context,
+                }),
                 width: 1,
-                expr_context: ExpressionContext {
+                expr_context: index_expr_context,
+            };
+            valid = Some(match valid {
+                Some(previous) => ProtoExpression::Binary {
+                    x: Box::new(previous),
+                    op: Op::LogicAnd,
+                    y: Box::new(check),
                     width: 1,
-                    signed: false,
+                    expr_context: ExpressionContext {
+                        width: 1,
+                        signed: false,
+                    },
                 },
-            },
-            None => check,
-        });
+                None => check,
+            });
+            idx_proto
+        } else {
+            idx_proto
+        };
 
         let mul_expr = if base == 1 {
             idx_proto
@@ -2167,11 +2200,19 @@ pub fn build_linear_index_expr(
         width: 64,
         signed: false,
     };
+    let ret = if ret.width() == 64 && !ret.expr_context().signed {
+        ret
+    } else {
+        resize_to_width(ret, 64, native)
+    };
+    let Some(valid) = valid else {
+        return Ok(ret);
+    };
     // Invalid coordinates produce the one-past-end sentinel understood by both
     // dynamic reads and writes. Narrow only after checking all dimensions.
     Ok(ProtoExpression::Ternary {
-        cond: Box::new(valid.unwrap()),
-        true_expr: Box::new(resize_to_width(ret, 64, native)),
+        cond: Box::new(valid),
+        true_expr: Box::new(ret),
         false_expr: Box::new(ProtoExpression::Value {
             value: Value::new(base as u64, 64, false),
             width: 64,
