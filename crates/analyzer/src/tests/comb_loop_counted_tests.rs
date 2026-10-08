@@ -1189,3 +1189,11 @@ fn counted_iterator_divisions_are_charged_to_the_procedure_work() {
         assert!(!divided_loop_completes(case, 64, 48), "{case}");
     }
 }
+
+counted_case!(
+    counted_iterator_values_beyond_the_size_limit_stay_conservative,
+    "a body that needs its iterator's values beyond the size limit reads whole",
+    "var y: logic [4];
+     always_comb { for i in 0..4194304 { y[i >> 20] = y[1]; } o = {7'd0, y[0]}; }",
+    true
+);

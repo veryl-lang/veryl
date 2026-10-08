@@ -1235,8 +1235,9 @@ fn add_dependency_dag(
         if let DependencyDagNode::Replicated { replication } = node
             && let Some(node) = mapped[index]
         {
-            // A bounded positive translation represents every copy without
-            // expanding bits, repetitions or paths through function imports.
+            // A bounded nonzero translation, forward or backward, represents
+            // every copy without expanding bits, repetitions or paths through
+            // function imports.
             let relation = replication.relation();
             add_dependency_edge(
                 graph,

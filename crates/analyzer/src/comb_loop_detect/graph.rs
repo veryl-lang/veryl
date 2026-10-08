@@ -5,7 +5,7 @@ mod relation;
 
 use super::diagnostics::SummaryEdgeCause;
 use super::model::{BitDependency, SummaryRegion};
-use super::position::{Axis, Link};
+use super::position::{Axis, Link, Overflow};
 #[cfg(test)]
 use super::region::translate_position;
 use super::region::{BitPartition, NodeKey};
@@ -277,6 +277,15 @@ impl SearchBudget {
         )
     }
 
+    /// The result of a relation operation, or `None` when its arithmetic
+    /// overflowed. The search then stops as incomplete, as when it runs out
+    /// of work.
+    fn checked<T>(&mut self, result: Result<T, Overflow>) -> Option<T> {
+        let value = result.ok();
+        self.exhausted |= value.is_none();
+        value
+    }
+
     fn spend(&mut self, work: usize) -> bool {
         if self.exhausted || work > self.remaining {
             self.exhausted = true;
@@ -520,11 +529,17 @@ fn has_compatible_cycle_with_budget(
                 }
                 let next_relation =
                     relation.then_dependency(edge.weight().kind, &graph[next].domains);
+                let Some(next_relation) = budget.checked(next_relation) else {
+                    return false;
+                };
                 if next_relation.is_empty() {
                     continue;
                 }
                 if next == start {
-                    if next_relation.intersects_identity() {
+                    let Some(closes) = budget.checked(next_relation.intersects_identity()) else {
+                        return false;
+                    };
+                    if closes {
                         return true;
                     }
                     let inserted = cycles.insert(GuardedCycle {
@@ -623,11 +638,12 @@ pub(super) fn diagnostic_cycle(
                     return None;
                 }
                 let relation = relation.then_dependency(graph[edge].kind, &graph[next].domains);
+                let relation = budget.checked(relation)?;
                 if relation.is_empty() {
                     continue;
                 }
                 if next == start {
-                    if relation.intersects_identity() {
+                    if budget.checked(relation.intersects_identity())? {
                         let mut path = vec![edge];
                         let mut cursor = index;
                         while let Some((parent, edge)) = states[cursor].3 {

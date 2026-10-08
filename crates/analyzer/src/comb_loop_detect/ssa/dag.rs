@@ -263,8 +263,10 @@ impl<K> Builder<K> {
 
         // Repeating complete adjacent blocks of a repetition is one larger
         // repetition. Retain clipping, array coordinates and diagnostic sites;
-        // use the recorded seed instead of scanning predecessor paths.
+        // use the recorded seed instead of scanning predecessor paths. Only
+        // forward repetitions form blocks from the start of the domain.
         if let Some(Replication::Packed(stride)) = replication
+            && let Ok(stride) = usize::try_from(stride)
             && site.is_none()
             && let [(source, relation, condition)] = inputs.as_slice()
             && *relation == PositionRelation::default()
@@ -274,12 +276,13 @@ impl<K> Builder<K> {
             && let DependencyDagNode::Replicated {
                 replication: Replication::Packed(inner),
             } = self.graph.nodes[*source]
+            && let Ok(inner_stride) = usize::try_from(inner)
             && !self.graph.domains[seed].is_empty()
             && self.graph.domains[seed].iter().all(|domain| {
                 domain
                     .packed_start
                     .checked_add(domain.packed_length)
-                    .is_some_and(|end| end <= inner as usize)
+                    .is_some_and(|end| end <= inner_stride)
             })
             && let [outer_domain] = domains.as_slice()
             && let [inner_domain] = self.graph.domains[*source].as_slice()
@@ -287,8 +290,8 @@ impl<K> Builder<K> {
             && inner_domain.array_length == outer_domain.array_length
             && inner_domain.packed_start == 0
             && outer_domain.packed_start == 0
-            && inner_domain.packed_length == stride as usize
-            && inner_domain.packed_length.is_multiple_of(inner as usize)
+            && inner_domain.packed_length == stride
+            && inner_domain.packed_length.is_multiple_of(inner_stride)
         {
             inputs[0].0 = seed;
             replication = Some(Replication::Packed(inner));

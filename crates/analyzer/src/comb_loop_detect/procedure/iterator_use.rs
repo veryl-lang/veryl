@@ -20,14 +20,18 @@ pub(in crate::comb_loop_detect) enum LoopEvaluation {
     Enumerated(Vec<usize>),
     /// Once with a symbolic iterator over the counted iterations.
     Counted(CountedIterations),
-    /// Neither: a loop beyond the size limit, or with runtime bounds.
-    Other,
+    /// A statically known loop that breaks or steps beyond the size limit.
+    OverLimit,
+    /// A loop with runtime bounds.
+    Runtime,
 }
 
 /// How `statement` is evaluated. A loop that breaks, or whose step is not
 /// additive, reaches values a symbolic iterator over `min..=max` cannot
-/// represent, and a body may use its iterator other than affinely; such a
-/// loop takes each iteration's value while that stays within the size limit.
+/// represent, so it takes each iteration's value or nothing symbolic. A body
+/// that uses its iterator other than affinely takes each value too while
+/// that stays within the size limit; beyond it, the symbolic iteration reads
+/// and writes those positions as wholly dynamic, which over-approximates.
 /// Every other statically known loop is counted symbolically.
 pub(in crate::comb_loop_detect) fn loop_evaluation(
     statement: &ForStatement,
@@ -46,7 +50,11 @@ pub(in crate::comb_loop_detect) fn loop_evaluation(
     {
         return LoopEvaluation::Counted(iterations);
     }
-    LoopEvaluation::Other
+    if statement.range.is_over_size_limit(context) {
+        LoopEvaluation::OverLimit
+    } else {
+        LoopEvaluation::Runtime
+    }
 }
 
 fn iterator_needs_values(statements: &[Statement], iterator: VarId) -> bool {

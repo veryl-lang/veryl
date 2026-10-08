@@ -250,10 +250,9 @@ impl ForRange {
                 if high < start {
                     return Some(CountedIterations::EMPTY);
                 }
-                let step = (*step).max(1);
-                let count = (high - start) / step + 1;
+                let count = (high - start) / *step + 1;
                 Some(CountedIterations {
-                    min: high - (count - 1) * step,
+                    min: high - (count - 1) * *step,
                     max: high,
                     count,
                 })

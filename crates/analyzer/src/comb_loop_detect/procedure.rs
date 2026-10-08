@@ -1,7 +1,7 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::model::SummaryRegion;
-use super::position::{Axis, Link, greatest_common_divisor};
+use super::position::{Axis, Link, first_in_class, greatest_common_divisor, intersect_classes};
 use super::region::{
     ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference, var_reads,
 };
@@ -1453,6 +1453,14 @@ struct CountedCoverage {
     step: isize,
 }
 
+/// Which side a branch condition takes: always one, each on its own
+/// iterations, or either.
+enum Decision {
+    Constant(bool),
+    Split(IteratorSplit),
+    Unknown,
+}
+
 /// One side of a two-way branch: a block, or an assignment of one operand of
 /// a ternary.
 #[derive(Clone, Copy)]
@@ -1495,21 +1503,17 @@ impl CountedIterator {
     /// The values in `min..=max` congruent to `residue` modulo `modulus` as
     /// well, or `None` when there are none. `min` and `max` are values.
     fn confined(self, min: isize, max: isize, modulus: isize, residue: isize) -> Option<Self> {
-        // value = self.residue + self.modulus * u = residue (mod modulus)
-        let (first, period) = super::position::solve_congruence(
-            self.modulus,
-            residue.checked_sub(self.residue),
-            modulus,
-        )??;
-        let modulus = self.modulus.checked_mul(period)?;
-        let residue = self
-            .residue
-            .checked_add(self.modulus.checked_mul(first)?)?
-            .rem_euclid(modulus);
+        let (residue, modulus) =
+            intersect_classes((self.residue, self.modulus), (residue, modulus))??;
+        // Within the iterator's own values, so a request beyond them, such
+        // as `i < isize::MIN`, is empty before any arithmetic.
         let min = min.max(self.min);
         let max = max.min(self.max);
-        let min = min.checked_add((residue - min).rem_euclid(modulus))?;
-        let max = max.checked_sub((max - residue).rem_euclid(modulus))?;
+        if min > max {
+            return None;
+        }
+        let min = first_in_class(residue, modulus, min)?;
+        let max = max.checked_sub(max.checked_sub(residue)?.rem_euclid(modulus))?;
         (min <= max).then_some(Self {
             min,
             max,
@@ -2420,7 +2424,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
             // The first nonnegative position of the progression.
             let first = if first < 0 {
-                first.checked_add(first.checked_neg()?.checked_add(step - 1)? / step * step)?
+                first_in_class(first, step, 0)?
             } else {
                 first
             };
@@ -2491,9 +2495,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let pieces = progressions
             .iter()
             .filter_map(|&(start, length, step)| {
-                let first = start.max(key_start);
                 let end = (start + length).min(key_start + key_length);
-                let first = first + (step - (first - start) % step) % step;
+                // The first position of the progression from the key's start.
+                let first = start
+                    + start
+                        .max(key_start)
+                        .checked_sub(start)?
+                        .checked_next_multiple_of(step)?;
                 (first < end).then(|| (first, end - first, step))
             })
             .collect::<Vec<_>>();
@@ -3836,11 +3844,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // An iterator condition confines each value to the
                 // iterations that select it.
                 if let Expression::Ternary(condition, true_value, false_value, _) = &assign.expr
-                    && let Some(split) = self.iterator_condition_split(condition)
+                    && let decision @ Decision::Split(_) = self.decide(condition)
                 {
                     return self.eval_sides(
                         condition,
-                        Some(split),
+                        decision,
                         [
                             Side::Assign(assign, true_value),
                             Side::Assign(assign, false_value),
@@ -4006,14 +4014,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn eval_if(&mut self, statement: &IfStatement, controls: &[VersionId]) -> FlowResult {
-        let split = self
-            .constant_truth(&statement.cond)
-            .is_none()
-            .then(|| self.iterator_condition_split(&statement.cond))
-            .flatten();
+        let decision = self.decide(&statement.cond);
         self.eval_sides(
             &statement.cond,
-            split,
+            decision,
             [
                 Side::Block(&statement.true_side),
                 Side::Block(&statement.false_side),
@@ -4022,33 +4026,40 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         )
     }
 
-    /// Evaluate the true and false sides of `condition`, given its iterator
-    /// split if it has one.
+    /// What is known statically about which side `condition` takes.
+    fn decide(&mut self, condition: &Expression) -> Decision {
+        if let Some(truth) = self.constant_truth(condition) {
+            Decision::Constant(truth)
+        } else if let Some(split) = self.iterator_condition_split(condition) {
+            Decision::Split(split)
+        } else {
+            Decision::Unknown
+        }
+    }
+
+    /// Evaluate the true and false sides of `condition` as `decision`
+    /// selects them.
     fn eval_sides(
         &mut self,
         condition: &Expression,
-        split: Option<IteratorSplit>,
+        decision: Decision,
         [true_side, false_side]: [Side<'_>; 2],
         controls: &[VersionId],
     ) -> FlowResult {
         let sources = self.eval_control_condition(condition);
         let mut nested_controls = controls.to_vec();
         nested_controls.extend_from_slice(&sources);
-        let truth = self.constant_truth(condition);
         // Each arm is a side with the iterations that take it. A side that no
         // iteration takes is never evaluated, and a side whose iterations form
         // several progressions is evaluated once per progression.
-        let arms = match (split, truth) {
-            (_, Some(true)) => vec![(true_side, None)],
-            (_, Some(false)) => vec![(false_side, None)],
-            (
-                Some(IteratorSplit {
-                    position,
-                    holds,
-                    fails,
-                }),
-                None,
-            ) => holds
+        let arms = match decision {
+            Decision::Constant(true) => vec![(true_side, None)],
+            Decision::Constant(false) => vec![(false_side, None)],
+            Decision::Split(IteratorSplit {
+                position,
+                holds,
+                fails,
+            }) => holds
                 .into_iter()
                 .map(|iterator| (true_side, Some((position, iterator))))
                 .chain(
@@ -4057,7 +4068,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .map(|iterator| (false_side, Some((position, iterator)))),
                 )
                 .collect::<Vec<_>>(),
-            (None, None) => vec![(true_side, None), (false_side, None)],
+            Decision::Unknown => vec![(true_side, None), (false_side, None)],
         };
         if let [(side, confinement)] = arms.as_slice() {
             return self.eval_confined_side(*confinement, *side, &nested_controls);
@@ -4394,27 +4405,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
         match loop_evaluation(statement, &mut self.ctx) {
             LoopEvaluation::Enumerated(values) => {
-                return self.eval_known_for_iterations(statement, &range_controls, values);
+                self.eval_known_for_iterations(statement, &range_controls, values)
             }
             LoopEvaluation::Counted(iterations) if iterations.count == 0 => {
-                return FlowResult::new(ProcedureFlow::Continue);
+                FlowResult::new(ProcedureFlow::Continue)
             }
             LoopEvaluation::Counted(iterations) => {
-                return self.eval_counted_for(statement, &range_controls, iterations);
+                self.eval_counted_for(statement, &range_controls, iterations)
             }
-            LoopEvaluation::Other => {}
-        }
-        if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
-            self.eval_known_for_iterations(statement, &range_controls, iterations)
-        } else if statement.range.is_over_size_limit(&mut self.ctx) {
             // A resource limit must not turn a finite, statically known loop
             // into the more conservative runtime-loop semantics. Without an
             // exact finite summary, suppress dependencies from this procedure
             // and report the analysis as incomplete.
-            self.status = AnalysisStatus::Barrier;
-            FlowResult::new(ProcedureFlow::Continue)
-        } else {
-            self.eval_runtime_for(statement, &range_controls)
+            LoopEvaluation::OverLimit => {
+                self.status = AnalysisStatus::Barrier;
+                FlowResult::new(ProcedureFlow::Continue)
+            }
+            LoopEvaluation::Runtime => self.eval_runtime_for(statement, &range_controls),
         }
     }
 
@@ -7450,5 +7457,27 @@ fn expression_has_unknown(expression: &Expression) -> bool {
         Expression::StructConstructor(_, fields, _) => fields
             .iter()
             .any(|(_, expression)| expression_has_unknown(expression)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counted_iterator_is_empty_below_the_most_negative_bound() {
+        let iterator = CountedIterator {
+            id: VarId::default(),
+            min: 1,
+            max: 3,
+            modulus: 2,
+            residue: 1,
+        };
+        // `i < isize::MIN` leaves no value, without subtracting the residue
+        // from that bound.
+        assert!(iterator.within(1, isize::MIN).is_none());
+        assert!(iterator.within(isize::MAX, 3).is_none());
+        let within = iterator.within(2, isize::MAX).expect("3 remains");
+        assert_eq!((within.min, within.max), (3, 3));
     }
 }

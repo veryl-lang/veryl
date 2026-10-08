@@ -37,15 +37,16 @@
 //! Normalization removes only duplicates or pieces covered by that
 //! implication, so it preserves the represented relation.
 //!
-//! Domain endpoints and every intermediate translation, negation, sum, and
-//! repeated product of translations are required to be representable in
-//! `isize`. An overflowing map composition is weakened to an unlinked
-//! coordinate restricted to its destination domain, which is a superset.
+//! Every coordinate lies in a declared domain, so its arithmetic fits in
+//! `isize`. An operation that would leave it reports `Overflow` instead of
+//! an empty or a guessed result, and the search that meets it stops as
+//! incomplete.
 
 use super::{FeasiblePosition, SearchBudget};
 use crate::comb_loop_detect::model::BitDependency;
 use crate::comb_loop_detect::position::{
-    Link, Map, ceil_div_wide, extended_gcd, first_in_class, floor_div_wide,
+    Link, Map, Overflow, ceil_div_wide, checked, extended_gcd, first_in_class, floor_div_wide,
+    intersect_classes, narrow,
 };
 use crate::comb_loop_detect::ssa::PositionDomain;
 
@@ -65,38 +66,37 @@ enum Current {
 /// An unlinked coordinate with its range tightened to the first and last
 /// positions of its class there, and a single position without a class, so
 /// that equal sets compare equal. `None` when no position remains.
-fn unlinked(class: Class, range: AxisRange) -> Option<Current> {
+fn unlinked(class: Class, range: AxisRange) -> Result<Option<Current>, Overflow> {
     let (modulus, residue) = class;
     if modulus <= 1 {
-        return Some(Current::Unlinked(EVERY, range));
+        return Ok(Some(Current::Unlinked(EVERY, range)));
     }
     let residue = residue.rem_euclid(modulus);
     let Some((start, end)) = range else {
-        return Some(Current::Unlinked((modulus, residue), None));
+        return Ok(Some(Current::Unlinked((modulus, residue), None)));
     };
-    let first = start.checked_add(residue.checked_sub(start)?.rem_euclid(modulus))?;
-    let last_value = end.checked_sub(1)?;
-    let last = last_value.checked_sub(last_value.checked_sub(residue)?.rem_euclid(modulus))?;
+    let first = checked(first_in_class(residue, modulus, start))?;
+    let last_value = checked(end.checked_sub(1))?;
+    let offset = checked(last_value.checked_sub(residue))?.rem_euclid(modulus);
+    let last = checked(last_value.checked_sub(offset))?;
     if first > last {
-        return None;
+        return Ok(None);
     }
-    let range = Some((first, last.checked_add(1)?));
-    if first == last {
-        Some(Current::Unlinked(EVERY, range))
+    let range = Some((first, checked(last.checked_add(1))?));
+    Ok(Some(if first == last {
+        Current::Unlinked(EVERY, range)
     } else {
-        Some(Current::Unlinked((modulus, residue), range))
-    }
+        Current::Unlinked((modulus, residue), range)
+    }))
 }
 
 /// Whether some coordinate of `class` lies in `range`.
-fn class_meets(class: Class, range: AxisRange) -> bool {
+fn class_meets(class: Class, range: AxisRange) -> Result<bool, Overflow> {
     let (modulus, residue) = class;
     match range {
-        None => true,
-        Some((start, end)) => {
-            modulus <= 1 && start < end
-                || progression_in_range(residue, modulus, start, end).is_some()
-        }
+        None => Ok(true),
+        Some((start, end)) if modulus <= 1 => Ok(start < end),
+        Some((start, end)) => progression_in_range(residue, modulus, start, end),
     }
 }
 
@@ -117,43 +117,54 @@ fn class_contains(outer: Class, inner: Class, inner_range: AxisRange) -> bool {
 
 /// The class and hull of the image of the coordinates of `class` in
 /// `range` under `map`. `None` when no coordinate maps.
-fn map_class_range(map: Map, class: Class, range: AxisRange) -> Option<(Class, AxisRange)> {
+fn map_class_range(
+    map: Map,
+    class: Class,
+    range: AxisRange,
+) -> Result<Option<(Class, AxisRange)>, Overflow> {
     use crate::comb_loop_detect::position::solve_congruence;
     // map.residue + map.modulus * t = class.1 (mod class.0)
-    let Some(solution) = solve_congruence(map.modulus, class.1.checked_sub(map.residue), class.0)
+    let Some((first, period)) = checked(solve_congruence(
+        map.modulus,
+        class.1.checked_sub(map.residue),
+        class.0,
+    ))?
     else {
-        // An overflow keeps the hull, which is a superset.
-        return Some((EVERY, map_range(map, range)?));
+        return Ok(None);
     };
-    let (first, period) = solution?;
     let (low, high) = match range {
         Some((start, end)) => {
-            let (low, high) = map.source_parameters(start, end)?;
+            let Some((low, high)) = map.source_parameters(start, end)? else {
+                return Ok(None);
+            };
             // The parameters `first + period * u` in `[low, high]`.
-            let low = low.checked_add(first.checked_sub(low)?.rem_euclid(period))?;
-            let high = high.checked_sub(high.checked_sub(first)?.rem_euclid(period))?;
+            let low = checked(first_in_class(first, period, low))?;
+            let offset = checked(high.checked_sub(first))?.rem_euclid(period);
+            let high = checked(high.checked_sub(offset))?;
             if low > high {
-                return None;
+                return Ok(None);
             }
             (Some(low), Some(high))
         }
         None => (None, None),
     };
-    let step = map.step.checked_mul(period);
-    let base = map
-        .step
-        .checked_mul(first)
-        .and_then(|offset| map.base.checked_add(offset));
-    let class = match (step, base) {
-        (Some(step), Some(base)) if step != 0 => (step.checked_abs().unwrap_or(1), base),
-        _ => EVERY,
+    let step = checked(map.step.checked_mul(period))?;
+    let base = checked(
+        map.step
+            .checked_mul(first)
+            .and_then(|offset| map.base.checked_add(offset)),
+    )?;
+    let class = if step == 0 {
+        EVERY
+    } else {
+        (checked(step.checked_abs())?, base)
     };
     let hull = match (low, high) {
         (Some(low), Some(high)) => Some(map.destination_hull(low, high)?),
-        _ if map.step == 0 => Some((map.base, map.base.checked_add(1)?)),
+        _ if map.step == 0 => Some((map.base, checked(map.base.checked_add(1))?)),
         _ => None,
     };
-    Some((class, hull))
+    Ok(Some((class, hull)))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -201,42 +212,60 @@ impl RelationPiece {
 
     /// Restrict the anchor coordinate read by `map` so that the mapped
     /// coordinate lies in `range`. `None` means the piece becomes empty.
-    fn restrict_linked(mut self, axis: usize, map: Map, range: AxisRange) -> Option<Self> {
+    fn restrict_linked(
+        mut self,
+        axis: usize,
+        map: Map,
+        range: AxisRange,
+    ) -> Result<Option<Self>, Overflow> {
         let Some((start, end)) = range else {
-            return Some(self);
+            return Ok(Some(self));
         };
         let read = read_axis(axis, map);
-        let (first, last) = map.destination_parameters(start, end)?;
+        let Some((first, last)) = map.destination_parameters(start, end)? else {
+            return Ok(None);
+        };
         if first != isize::MIN || last != isize::MAX {
             let hull = map.source_hull(first, last)?;
-            self.anchor[read] = intersect_range(self.anchor[read], Some(hull))?;
+            let Some(anchor) = intersect_range(self.anchor[read], Some(hull)) else {
+                return Ok(None);
+            };
+            self.anchor[read] = anchor;
         }
-        Some(self)
+        Ok(Some(self))
     }
 
     /// Compose a current coordinate with a link that reads it, restricting
     /// the result to `range`.
-    fn extend(self, axis: usize, link: Link, range: AxisRange) -> Option<(Self, Current)> {
+    fn extend(
+        self,
+        axis: usize,
+        link: Link,
+        range: AxisRange,
+    ) -> Result<Option<(Self, Current)>, Overflow> {
+        let with = |current: Option<Current>| current.map(|current| (self, current));
         match link {
-            Link::Never => None,
-            Link::Unlinked => Some((self, unlinked(EVERY, range)?)),
-            Link::Strided { modulus, residue } => {
-                Some((self, unlinked((modulus, residue), range)?))
-            }
+            Link::Never => Ok(None),
+            Link::Unlinked => Ok(with(unlinked(EVERY, range)?)),
+            Link::Strided { modulus, residue } => Ok(with(unlinked((modulus, residue), range)?)),
             Link::Map(next) => {
                 let read = read_axis(axis, next);
                 match self.current[read] {
-                    Current::Linked(first) => match first.then(next) {
-                        Some(Some(map)) => {
-                            let piece = self.restrict_linked(axis, map, range)?;
-                            Some((piece, Current::Linked(map)))
-                        }
-                        Some(None) => None,
-                        None => Some((self, unlinked(EVERY, range)?)),
-                    },
+                    Current::Linked(first) => {
+                        let Some(map) = checked(first.then(next))? else {
+                            return Ok(None);
+                        };
+                        let piece = self.restrict_linked(axis, map, range)?;
+                        Ok(piece.map(|piece| (piece, Current::Linked(map))))
+                    }
                     Current::Unlinked(class, source) => {
-                        let (class, image) = map_class_range(next, class, source)?;
-                        Some((self, unlinked(class, intersect_range(image, range)?)?))
+                        let Some((class, image)) = map_class_range(next, class, source)? else {
+                            return Ok(None);
+                        };
+                        let Some(range) = intersect_range(image, range) else {
+                            return Ok(None);
+                        };
+                        Ok(with(unlinked(class, range)?))
                     }
                 }
             }
@@ -245,47 +274,47 @@ impl RelationPiece {
 
     /// Drop empty pieces and canonicalize single-point maps so that equal
     /// relations compare equal.
-    fn simplified(mut self) -> Option<Self> {
-        for range in self.anchor {
-            if range.is_some_and(|(start, end)| start >= end) {
-                return None;
-            }
+    fn simplified(mut self) -> Result<Option<Self>, Overflow> {
+        if self.anchor.iter().any(|range| is_empty_range(*range)) {
+            return Ok(None);
         }
         for axis in 0..2 {
             match self.current[axis] {
                 Current::Unlinked(class, range) => {
-                    if range.is_some_and(|(start, end)| start >= end) {
-                        return None;
+                    if is_empty_range(range) {
+                        return Ok(None);
                     }
-                    self.current[axis] = unlinked(class, range)?;
+                    let Some(current) = unlinked(class, range)? else {
+                        return Ok(None);
+                    };
+                    self.current[axis] = current;
                 }
                 Current::Linked(map) => {
                     let read = read_axis(axis, map);
-                    if let Some((start, end)) = self.anchor[read] {
-                        // No anchor value of the progression lies in range.
-                        let (first, last) = map.source_parameters(start, end)?;
-                        if let Some(hull) = map.source_hull(first, last) {
-                            self.anchor[read] = intersect_range(self.anchor[read], Some(hull))?;
-                        }
-                        let value = map
-                            .step
-                            .checked_mul(first)
-                            .and_then(|offset| map.base.checked_add(offset));
-                        if first == last
-                            && map.translation_offset().is_none()
-                            && let Some(value) = value
-                        {
-                            // One anchor value maps to one current value.
-                            // Translations keep their form for the exact
-                            // translation solver.
-                            self.current[axis] = Current::Linked(Map {
-                                crossed: map.crossed,
-                                modulus: 1,
-                                residue: 0,
-                                base: value,
-                                step: 0,
-                            });
-                        }
+                    let Some((start, end)) = self.anchor[read] else {
+                        continue;
+                    };
+                    // No anchor value of the progression lies in range.
+                    let Some((first, last)) = map.source_parameters(start, end)? else {
+                        return Ok(None);
+                    };
+                    let hull = map.source_hull(first, last)?;
+                    let Some(anchor) = intersect_range(self.anchor[read], Some(hull)) else {
+                        return Ok(None);
+                    };
+                    self.anchor[read] = anchor;
+                    if first == last && map.translation_offset().is_none() {
+                        // One anchor value maps to one current value.
+                        // Translations keep their form for the exact
+                        // translation solver.
+                        let (value, _) = map.destination_hull(first, last)?;
+                        self.current[axis] = Current::Linked(Map {
+                            crossed: map.crossed,
+                            modulus: 1,
+                            residue: 0,
+                            base: value,
+                            step: 0,
+                        });
                     }
                 }
             }
@@ -294,20 +323,25 @@ impl RelationPiece {
         if let (Current::Linked(left), Current::Linked(right)) = (self.current[0], self.current[1])
             && read_axis(0, left) == read_axis(1, right)
         {
-            let (residue, modulus) = intersect_progressions(
+            let Some((residue, modulus)) = intersect_progressions(
                 (left.residue, left.modulus),
                 (right.residue, right.modulus),
-            )?;
+            )?
+            else {
+                return Ok(None);
+            };
             let read = read_axis(0, left);
-            if let Some((start, end)) = self.anchor[read] {
-                progression_in_range(residue, modulus, start, end)?;
+            if let Some((start, end)) = self.anchor[read]
+                && !progression_in_range(residue, modulus, start, end)?
+            {
+                return Ok(None);
             }
         }
-        Some(self)
+        Ok(Some(self))
     }
 
-    fn intersects_identity(&self) -> bool {
-        identity_solution(self).is_some()
+    fn intersects_identity(&self) -> Result<bool, Overflow> {
+        identity_solution(self)
     }
 
     fn contains(&self, inner: &Self) -> bool {
@@ -320,6 +354,8 @@ impl RelationPiece {
                 (Current::Unlinked(class, outer), Current::Linked(map)) => {
                     let read = read_axis(axis, map);
                     let image = map_range(map, inner.anchor[read]);
+                    // A range beyond `isize` is not known to be covered.
+                    let image = image.ok().flatten();
                     // Every image position `base + step * t` is in the class.
                     let in_class = class.0 <= 1
                         || (map.step % class.0 == 0 && map.base.rem_euclid(class.0) == class.1);
@@ -363,7 +399,7 @@ impl PositionRelationSet {
         &self,
         dependency: BitDependency,
         destination: &[PositionDomain],
-    ) -> Self {
+    ) -> Result<Self, Overflow> {
         let domains = if destination.is_empty() {
             vec![[None, None]]
         } else {
@@ -389,7 +425,7 @@ impl PositionRelationSet {
                         anchor: next.anchor,
                         current: piece.current,
                     };
-                    match source.extend(axis, dependency.link(axis_of(axis)), domain[axis]) {
+                    match source.extend(axis, dependency.link(axis_of(axis)), domain[axis])? {
                         Some((extended, coordinate)) => {
                             next.anchor = extended.anchor;
                             current[axis] = coordinate;
@@ -404,15 +440,15 @@ impl PositionRelationSet {
                     continue;
                 }
                 next.current = current;
-                if let Some(next) = next.simplified() {
+                if let Some(next) = next.simplified()? {
                     pieces.push(next);
                 }
             }
         }
-        Self::normalized(pieces)
+        Ok(Self::normalized(pieces))
     }
 
-    pub(super) fn then(&self, next: &Self) -> Self {
+    pub(super) fn then(&self, next: &Self) -> Result<Self, Overflow> {
         let mut pieces = Vec::new();
         for left in &self.pieces {
             'right: for right in &next.pieces {
@@ -422,16 +458,17 @@ impl PositionRelationSet {
                     match left.current[axis] {
                         Current::Linked(map) => {
                             let Some(restricted) =
-                                middle.restrict_linked(axis, map, right.anchor[axis])
+                                middle.restrict_linked(axis, map, right.anchor[axis])?
                             else {
                                 continue 'right;
                             };
                             middle = restricted;
                         }
                         Current::Unlinked(class, range) => {
-                            let Some(current) = intersect_range(range, right.anchor[axis])
-                                .and_then(|range| unlinked(class, range))
-                            else {
+                            let Some(range) = intersect_range(range, right.anchor[axis]) else {
+                                continue 'right;
+                            };
+                            let Some(current) = unlinked(class, range)? else {
                                 continue 'right;
                             };
                             middle.current[axis] = current;
@@ -451,22 +488,32 @@ impl PositionRelationSet {
                         anchor: composed.anchor,
                         current: middle.current,
                     };
-                    let Some((extended, coordinate)) = source.extend(axis, link, None) else {
+                    let Some((extended, coordinate)) = source.extend(axis, link, None)? else {
                         continue 'right;
                     };
                     composed.anchor = extended.anchor;
                     composed.current[axis] = coordinate;
                 }
-                if let Some(composed) = composed.simplified() {
+                if let Some(composed) = composed.simplified()? {
                     pieces.push(composed);
                 }
             }
         }
-        Self::normalized(pieces)
+        Ok(Self::normalized(pieces))
     }
 
-    pub(super) fn intersects_identity(&self) -> bool {
-        self.pieces.iter().any(RelationPiece::intersects_identity)
+    /// Whether some piece contains a position related to itself. A piece
+    /// that overflows leaves the answer unknown unless another one closes.
+    pub(super) fn intersects_identity(&self) -> Result<bool, Overflow> {
+        let mut overflow = None;
+        for piece in &self.pieces {
+            match piece.intersects_identity() {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error) => overflow = Some(error),
+            }
+        }
+        overflow.map_or(Ok(false), Err)
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -523,6 +570,16 @@ impl PositionRelationSet {
         guards: &[FeasiblePosition],
         budget: &mut SearchBudget,
     ) -> bool {
+        let closes = self.closes_after_some_repetition(offset, guards, budget);
+        budget.checked(closes).unwrap_or(false)
+    }
+
+    fn closes_after_some_repetition(
+        &self,
+        offset: (isize, isize),
+        guards: &[FeasiblePosition],
+        budget: &mut SearchBudget,
+    ) -> Result<bool, Overflow> {
         for piece in &self.pieces {
             let (Some(array), Some(packed)) =
                 (piece.translation_view(0), piece.translation_view(1))
@@ -531,34 +588,34 @@ impl PositionRelationSet {
             };
             for &guard in guards {
                 if !budget.spend(1) {
-                    return false;
+                    return Ok(false);
                 }
                 let mut exact_count = None;
-                if !linked_repetition_count(array, offset.0, &mut exact_count)
-                    || !linked_repetition_count(packed, offset.1, &mut exact_count)
+                if !linked_repetition_count(array, offset.0, &mut exact_count)?
+                    || !linked_repetition_count(packed, offset.1, &mut exact_count)?
                 {
                     continue;
                 }
                 if let Some(count) = exact_count {
-                    if self.closes_after_translation_count(offset, guard, count, budget) {
-                        return true;
+                    if self.closes_after_translation_count(offset, guard, count, budget)? {
+                        return Ok(true);
                     }
                     continue;
                 }
 
                 let mut bounds = (1, isize::MAX);
-                if !unlinked_repetition_bounds(array, offset.0, guard.array, &mut bounds)
-                    || !unlinked_repetition_bounds(packed, offset.1, guard.packed, &mut bounds)
+                if !unlinked_repetition_bounds(array, offset.0, guard.array, &mut bounds)?
+                    || !unlinked_repetition_bounds(packed, offset.1, guard.packed, &mut bounds)?
                     || bounds.0 > bounds.1
                 {
                     continue;
                 }
-                if self.closes_after_translation_count(offset, guard, bounds.0, budget) {
-                    return true;
+                if self.closes_after_translation_count(offset, guard, bounds.0, budget)? {
+                    return Ok(true);
                 }
             }
         }
-        false
+        Ok(false)
     }
 
     fn closes_after_translation_count(
@@ -567,27 +624,18 @@ impl PositionRelationSet {
         guard: FeasiblePosition,
         count: isize,
         budget: &mut SearchBudget,
-    ) -> bool {
-        let Some(repetitions) = count.checked_sub(1) else {
-            return false;
-        };
-        let (Some(array_shift), Some(packed_shift)) = (
-            offset.0.checked_mul(repetitions),
-            offset.1.checked_mul(repetitions),
-        ) else {
-            return false;
-        };
+    ) -> Result<bool, Overflow> {
+        let repetitions = checked(count.checked_sub(1))?;
+        let array_shift = checked(offset.0.checked_mul(repetitions))?;
+        let packed_shift = checked(offset.1.checked_mul(repetitions))?;
         let (Some(array_start), Some(packed_start)) = (
-            repeat_range(guard.array, array_shift),
-            repeat_range(guard.packed, packed_shift),
+            repeat_range(guard.array, array_shift)?,
+            repeat_range(guard.packed, packed_shift)?,
         ) else {
-            return false;
+            return Ok(false);
         };
-        let (Some(array_offset), Some(packed_offset)) =
-            (offset.0.checked_mul(count), offset.1.checked_mul(count))
-        else {
-            return false;
-        };
+        let array_offset = checked(offset.0.checked_mul(count))?;
+        let packed_offset = checked(offset.1.checked_mul(count))?;
         let translation = Self::normalized(vec![RelationPiece {
             anchor: [array_start, packed_start],
             current: [
@@ -595,8 +643,10 @@ impl PositionRelationSet {
                 Current::Linked(Map::translation(packed_offset)),
             ],
         }]);
-        budget.spend_product(self.piece_count(), translation.piece_count())
-            && self.then(&translation).intersects_identity()
+        if !budget.spend_product(self.piece_count(), translation.piece_count()) {
+            return Ok(false);
+        }
+        self.then(&translation)?.intersects_identity()
     }
 
     fn normalized(mut pieces: Vec<RelationPiece>) -> Self {
@@ -627,34 +677,36 @@ fn axis_of(axis: usize) -> crate::comb_loop_detect::position::Axis {
     }
 }
 
-/// Hull of the image of a range under a map. `None` when no position maps.
-fn map_range(map: Map, range: AxisRange) -> Option<AxisRange> {
+/// Hull of the image of a range under a map, `None` when no position maps.
+fn map_range(map: Map, range: AxisRange) -> Result<Option<AxisRange>, Overflow> {
     let Some((start, end)) = range else {
-        return Some(if map.step == 0 {
-            Some((map.base, map.base.checked_add(1)?))
+        return Ok(Some(if map.step == 0 {
+            Some((map.base, checked(map.base.checked_add(1))?))
         } else {
             None
-        });
+        }));
     };
-    let (first, last) = map.source_parameters(start, end)?;
-    Some(map.destination_hull(first, last))
+    let Some((first, last)) = map.source_parameters(start, end)? else {
+        return Ok(None);
+    };
+    Ok(Some(Some(map.destination_hull(first, last)?)))
 }
 
 /// `x = residue + modulus * k` with the smallest non-negative residue.
-fn intersect_progressions(left: (isize, isize), right: (isize, isize)) -> Option<(isize, isize)> {
-    use crate::comb_loop_detect::position::solve_congruence;
-    // left.0 + left.1 * u = right.0 (mod right.1)
-    let (first, period) = solve_congruence(left.1, right.0.checked_sub(left.0), right.1)??;
-    let modulus = left.1.checked_mul(period)?;
-    let residue = left
-        .0
-        .checked_add(left.1.checked_mul(first)?)?
-        .rem_euclid(modulus);
-    Some((residue, modulus))
+fn intersect_progressions(
+    left: (isize, isize),
+    right: (isize, isize),
+) -> Result<Option<(isize, isize)>, Overflow> {
+    checked(intersect_classes(left, right))
 }
 
-fn progression_in_range(residue: isize, modulus: isize, start: isize, end: isize) -> Option<()> {
-    (first_in_class(residue, modulus, start)? < end).then_some(())
+fn progression_in_range(
+    residue: isize,
+    modulus: isize,
+    start: isize,
+    end: isize,
+) -> Result<bool, Overflow> {
+    Ok(checked(first_in_class(residue, modulus, start))? < end)
 }
 
 /// Integer parameters `u` with `start <= value + slope * u < end`.
@@ -697,63 +749,71 @@ fn parameter_exists(constraints: &[(isize, isize, AxisRange)]) -> bool {
 /// Fixed points of a non-crossed map on one axis: `None` when there are
 /// none, `Some((value, 0))` for one value, `Some((residue, modulus))` for a
 /// progression.
-fn self_fixed_points(map: Map) -> Option<(isize, isize)> {
+fn self_fixed_points(map: Map) -> Result<Option<(isize, isize)>, Overflow> {
     // residue + modulus * t = base + step * t
-    let slope = map.modulus.checked_sub(map.step)?;
-    let constant = map.base.checked_sub(map.residue)?;
+    let slope = checked(map.modulus.checked_sub(map.step))?;
+    let constant = checked(map.base.checked_sub(map.residue))?;
     if slope == 0 {
-        return (constant == 0).then_some((map.residue, map.modulus));
+        return Ok((constant == 0).then_some((map.residue, map.modulus)));
     }
-    if constant % slope != 0 {
-        return None;
+    if checked(constant.checked_rem(slope))? != 0 {
+        return Ok(None);
     }
-    let t = constant / slope;
-    Some((map.residue.checked_add(map.modulus.checked_mul(t)?)?, 0))
+    let t = checked(constant.checked_div(slope))?;
+    let value = checked(
+        map.modulus
+            .checked_mul(t)
+            .and_then(|offset| map.residue.checked_add(offset)),
+    )?;
+    Ok(Some((value, 0)))
 }
 
 /// Whether a set of the form returned by `self_fixed_points` meets a range.
-fn fixed_points_in_range(points: (isize, isize), range: AxisRange) -> bool {
+fn fixed_points_in_range(points: (isize, isize), range: AxisRange) -> Result<bool, Overflow> {
     let (value, modulus) = points;
     match range {
-        None => true,
-        Some((start, end)) => {
-            if modulus == 0 {
-                start <= value && value < end
-            } else {
-                progression_in_range(value, modulus, start, end).is_some()
-            }
-        }
+        None => Ok(true),
+        Some((start, end)) if modulus == 0 => Ok(start <= value && value < end),
+        Some((start, end)) => progression_in_range(value, modulus, start, end),
     }
 }
 
 /// Solutions `t = first + period * u` of `coefficient * t = constant`
 /// restricted to the integer `t` with `value = base + slope * t` in a set of
 /// the form returned by `self_fixed_points`.
-fn parameters_hitting(base: isize, slope: isize, points: (isize, isize)) -> Option<(isize, isize)> {
+fn parameters_hitting(
+    base: isize,
+    slope: isize,
+    points: (isize, isize),
+) -> Result<Option<(isize, isize)>, Overflow> {
     use crate::comb_loop_detect::position::solve_congruence;
     let (value, modulus) = points;
     if modulus == 0 {
         // base + slope * t = value
         if slope == 0 {
-            return (base == value).then_some((0, 1));
+            return Ok((base == value).then_some((0, 1)));
         }
-        let difference = value.checked_sub(base)?;
-        if difference % slope != 0 {
-            return None;
+        let difference = checked(value.checked_sub(base))?;
+        if checked(difference.checked_rem(slope))? != 0 {
+            return Ok(None);
         }
-        return Some((difference / slope, 0));
+        return Ok(Some((checked(difference.checked_div(slope))?, 0)));
     }
     // base + slope * t = value (mod modulus)
-    solve_congruence(slope, value.checked_sub(base), modulus)?
+    checked(solve_congruence(slope, value.checked_sub(base), modulus))
 }
 
-fn identity_solution(piece: &RelationPiece) -> Option<()> {
+fn identity_solution(piece: &RelationPiece) -> Result<bool, Overflow> {
     let anchor = piece.anchor;
     match (piece.current[0], piece.current[1]) {
         (Current::Unlinked(array_class, array), Current::Unlinked(packed_class, packed)) => {
-            let array = intersect_range(array, anchor[0])?;
-            let packed = intersect_range(packed, anchor[1])?;
-            (class_meets(array_class, array) && class_meets(packed_class, packed)).then_some(())
+            let (Some(array), Some(packed)) = (
+                intersect_range(array, anchor[0]),
+                intersect_range(packed, anchor[1]),
+            ) else {
+                return Ok(false);
+            };
+            Ok(class_meets(array_class, array)? && class_meets(packed_class, packed)?)
         }
         (Current::Linked(map), Current::Unlinked(class, range))
         | (Current::Unlinked(class, range), Current::Linked(map)) => {
@@ -763,40 +823,52 @@ fn identity_solution(piece: &RelationPiece) -> Option<()> {
                 1
             };
             let free = 1 - linked;
-            let free_range = intersect_range(range, anchor[free])?;
+            let Some(free_range) = intersect_range(range, anchor[free]) else {
+                return Ok(false);
+            };
             if !map.crossed {
-                let points = self_fixed_points(map)?;
-                (class_meets(class, free_range) && fixed_points_in_range(points, anchor[linked]))
-                    .then_some(())
+                let Some(points) = self_fixed_points(map)? else {
+                    return Ok(false);
+                };
+                Ok(class_meets(class, free_range)?
+                    && fixed_points_in_range(points, anchor[linked])?)
             } else {
                 // anchor[linked] = base + step t, anchor[free] = residue + modulus t,
                 // with anchor[free] in the class: t = first + period * u.
                 use crate::comb_loop_detect::position::solve_congruence;
-                let (first, period) =
-                    solve_congruence(map.modulus, class.1.checked_sub(map.residue), class.0)??;
-                parameter_exists(&[
-                    (
-                        map.base.checked_add(map.step.checked_mul(first)?)?,
-                        map.step.checked_mul(period)?,
-                        anchor[linked],
-                    ),
-                    (
-                        map.residue.checked_add(map.modulus.checked_mul(first)?)?,
-                        map.modulus.checked_mul(period)?,
-                        free_range,
-                    ),
-                ])
-                .then_some(())
+                let Some((first, period)) = checked(solve_congruence(
+                    map.modulus,
+                    class.1.checked_sub(map.residue),
+                    class.0,
+                ))?
+                else {
+                    return Ok(false);
+                };
+                // `base + slope * t` as a value and slope in `u`.
+                let along = |base: isize, slope: isize| -> Result<(isize, isize), Overflow> {
+                    let value = slope
+                        .checked_mul(first)
+                        .and_then(|offset| base.checked_add(offset));
+                    Ok((checked(value)?, checked(slope.checked_mul(period))?))
+                };
+                let (linked_value, linked_slope) = along(map.base, map.step)?;
+                let (free_value, free_slope) = along(map.residue, map.modulus)?;
+                Ok(parameter_exists(&[
+                    (linked_value, linked_slope, anchor[linked]),
+                    (free_value, free_slope, free_range),
+                ]))
             }
         }
         (Current::Linked(array), Current::Linked(packed)) => {
             match (array.crossed, packed.crossed) {
                 (false, false) => {
-                    let array_points = self_fixed_points(array)?;
-                    let packed_points = self_fixed_points(packed)?;
-                    (fixed_points_in_range(array_points, anchor[0])
-                        && fixed_points_in_range(packed_points, anchor[1]))
-                    .then_some(())
+                    let (Some(array_points), Some(packed_points)) =
+                        (self_fixed_points(array)?, self_fixed_points(packed)?)
+                    else {
+                        return Ok(false);
+                    };
+                    Ok(fixed_points_in_range(array_points, anchor[0])?
+                        && fixed_points_in_range(packed_points, anchor[1])?)
                 }
                 (true, false) | (false, true) => {
                     // One coordinate maps onto itself; the other reads it.
@@ -805,26 +877,35 @@ fn identity_solution(piece: &RelationPiece) -> Option<()> {
                     } else {
                         (array, 0, packed, 1)
                     };
-                    let points = self_fixed_points(own)?;
+                    let Some(points) = self_fixed_points(own)? else {
+                        return Ok(false);
+                    };
                     // The reader's parameter t gives own coordinate residue + modulus t.
-                    let (first, period) =
-                        parameters_hitting(reader.residue, reader.modulus, points)?;
-                    let slope = |coefficient: isize| -> Option<isize> {
+                    let Some((first, period)) =
+                        parameters_hitting(reader.residue, reader.modulus, points)?
+                    else {
+                        return Ok(false);
+                    };
+                    let slope = |coefficient: isize| {
                         if period == 0 {
-                            Some(0)
+                            Ok(0)
                         } else {
-                            coefficient.checked_mul(period)
+                            checked(coefficient.checked_mul(period))
                         }
                     };
-                    let own_value = reader
-                        .residue
-                        .checked_add(reader.modulus.checked_mul(first)?)?;
-                    let reader_value = reader.base.checked_add(reader.step.checked_mul(first)?)?;
-                    parameter_exists(&[
+                    let value = |base: isize, slope: isize| {
+                        checked(
+                            slope
+                                .checked_mul(first)
+                                .and_then(|offset| base.checked_add(offset)),
+                        )
+                    };
+                    let own_value = value(reader.residue, reader.modulus)?;
+                    let reader_value = value(reader.base, reader.step)?;
+                    Ok(parameter_exists(&[
                         (own_value, slope(reader.modulus)?, anchor[own_axis]),
                         (reader_value, slope(reader.step)?, anchor[reader_axis]),
-                    ])
-                    .then_some(())
+                    ]))
                 }
                 (true, true) => swapped_identity(array, packed, anchor),
             }
@@ -833,95 +914,97 @@ fn identity_solution(piece: &RelationPiece) -> Option<()> {
 }
 
 /// Both coordinates read the other anchor coordinate.
-fn swapped_identity(array: Map, packed: Map, anchor: [AxisRange; 2]) -> Option<()> {
+fn swapped_identity(array: Map, packed: Map, anchor: [AxisRange; 2]) -> Result<bool, Overflow> {
+    let wide = |value: isize| value as i128;
+    let add = |left: i128, right: i128| checked(left.checked_add(right));
+    let sub = |left: i128, right: i128| checked(left.checked_sub(right));
+    let mul = |left: i128, right: i128| checked(left.checked_mul(right));
+    let divides = |divisor: i128, value: i128| -> Result<bool, Overflow> {
+        Ok(checked(value.checked_rem(divisor))? == 0)
+    };
     // anchor[0] = array.base + array.step * t0 = packed.residue + packed.modulus * t1
     // anchor[1] = array.residue + array.modulus * t0 = packed.base + packed.step * t1
     let (a, b, c) = (
-        array.step as i128,
-        -(packed.modulus as i128),
-        packed.residue as i128 - array.base as i128,
+        wide(array.step),
+        -wide(packed.modulus),
+        wide(packed.residue) - wide(array.base),
     );
     let (d, e, f) = (
-        array.modulus as i128,
-        -(packed.step as i128),
-        packed.base as i128 - array.residue as i128,
+        wide(array.modulus),
+        -wide(packed.step),
+        wide(packed.base) - wide(array.residue),
     );
-    let determinant = a * e - b * d;
-    let check = |t0: i128| -> bool {
-        let first = array.base as i128 + array.step as i128 * t0;
-        let second = array.residue as i128 + array.modulus as i128 * t0;
+    let check = |t0: i128| -> Result<bool, Overflow> {
+        let first = add(wide(array.base), mul(wide(array.step), t0)?)?;
+        let second = add(wide(array.residue), mul(wide(array.modulus), t0)?)?;
         let inside = |value: i128, range: AxisRange| {
-            range.is_none_or(|(start, end)| start as i128 <= value && value < end as i128)
+            range.is_none_or(|(start, end)| wide(start) <= value && value < wide(end))
         };
-        inside(first, anchor[0]) && inside(second, anchor[1])
+        Ok(inside(first, anchor[0]) && inside(second, anchor[1]))
     };
+    let determinant = sub(mul(a, e)?, mul(b, d)?)?;
     if determinant != 0 {
-        let t0 = c * e - b * f;
-        let t1 = a * f - c * d;
-        if t0 % determinant != 0 || t1 % determinant != 0 {
-            return None;
+        let t0 = sub(mul(c, e)?, mul(b, f)?)?;
+        let t1 = sub(mul(a, f)?, mul(c, d)?)?;
+        if !divides(determinant, t0)? || !divides(determinant, t1)? {
+            return Ok(false);
         }
-        return check(t0 / determinant).then_some(());
+        return check(t0 / determinant);
     }
     // Dependent equations: solve the first, then require the second.
     // a t0 + b t1 = c with b != 0 because every modulus is positive.
     let (gcd, x, _) = extended_gcd(a, b);
-    if c % gcd != 0 {
-        return None;
+    if !divides(gcd, c)? {
+        return Ok(false);
     }
     // t0 = t0p + (b / gcd) u, t1 = t1p - (a / gcd) u
-    let t0p = x * (c / gcd);
-    let t1p = (c - a * t0p) / b;
+    let t0p = mul(x, c / gcd)?;
+    let t1p = sub(c, mul(a, t0p)?)? / b;
     let (s0, s1) = (b / gcd, -(a / gcd));
     // Second equation: d t0 + e t1 = f must hold for some u.
-    let constant = f - d * t0p - e * t1p;
-    let slope = d * s0 + e * s1;
-    let us: Vec<i128> = if slope == 0 {
-        if constant != 0 {
-            return None;
+    let constant = sub(sub(f, mul(d, t0p)?)?, mul(e, t1p)?)?;
+    let slope = add(mul(d, s0)?, mul(e, s1)?)?;
+    if slope != 0 {
+        if !divides(slope, constant)? {
+            return Ok(false);
         }
-        Vec::new()
-    } else {
-        if constant % slope != 0 {
-            return None;
-        }
-        vec![constant / slope]
-    };
-    if let Some(&u) = us.first() {
-        return check(t0p + s0 * u).then_some(());
+        return check(add(t0p, mul(s0, constant / slope)?)?);
+    }
+    if constant != 0 {
+        return Ok(false);
     }
     // Every u: anchor[0] and anchor[1] are linear in u.
-    let narrow = |value: i128| isize::try_from(value).ok();
-    let base0 = narrow(array.base as i128 + array.step as i128 * t0p)?;
-    let slope0 = narrow(array.step as i128 * s0)?;
-    let base1 = narrow(array.residue as i128 + array.modulus as i128 * t0p)?;
-    let slope1 = narrow(array.modulus as i128 * s0)?;
-    parameter_exists(&[(base0, slope0, anchor[0]), (base1, slope1, anchor[1])]).then_some(())
+    let base0 = narrow(add(wide(array.base), mul(wide(array.step), t0p)?)?)?;
+    let slope0 = narrow(mul(wide(array.step), s0)?)?;
+    let base1 = narrow(add(wide(array.residue), mul(wide(array.modulus), t0p)?)?)?;
+    let slope1 = narrow(mul(wide(array.modulus), s0)?)?;
+    Ok(parameter_exists(&[
+        (base0, slope0, anchor[0]),
+        (base1, slope1, anchor[1]),
+    ]))
 }
 
 fn linked_repetition_count(
     relation: AxisRelation,
     translation: isize,
     count: &mut Option<isize>,
-) -> bool {
+) -> Result<bool, Overflow> {
     let AxisRelation::Linked { offset, .. } = relation else {
-        return true;
+        return Ok(true);
     };
     if translation == 0 {
-        return offset == 0;
+        return Ok(offset == 0);
     }
-    let Some(required) = offset.checked_neg() else {
-        return false;
-    };
-    if required % translation != 0 {
-        return false;
+    let required = checked(offset.checked_neg())?;
+    if checked(required.checked_rem(translation))? != 0 {
+        return Ok(false);
     }
-    let required = required / translation;
+    let required = checked(required.checked_div(translation))?;
     if required < 1 || count.is_some_and(|count| count != required) {
-        return false;
+        return Ok(false);
     }
     *count = Some(required);
-    true
+    Ok(true)
 }
 
 fn unlinked_repetition_bounds(
@@ -929,9 +1012,9 @@ fn unlinked_repetition_bounds(
     translation: isize,
     guard: AxisRange,
     bounds: &mut (isize, isize),
-) -> bool {
+) -> Result<bool, Overflow> {
     let AxisRelation::Unlinked { start, current } = relation else {
-        return true;
+        return Ok(true);
     };
     let mut lowers = Vec::new();
     let mut uppers = Vec::new();
@@ -941,34 +1024,27 @@ fn unlinked_repetition_bounds(
     }
     if let Some((start, end)) = guard {
         if translation >= 0 {
-            let Some(intercept) = end.checked_add(translation) else {
-                return false;
-            };
             lowers.push((0, start));
-            uppers.push((-translation, intercept));
+            uppers.push((-translation, checked(end.checked_add(translation))?));
         } else {
-            let Some(slope) = translation.checked_neg() else {
-                return false;
-            };
-            let Some(intercept) = start.checked_add(translation) else {
-                return false;
-            };
-            lowers.push((slope, intercept));
+            let slope = checked(translation.checked_neg())?;
+            lowers.push((slope, checked(start.checked_add(translation))?));
             uppers.push((0, end));
         }
     }
     if let Some((start, end)) = start {
-        let Some(slope) = translation.checked_neg() else {
-            return false;
-        };
+        let slope = checked(translation.checked_neg())?;
         lowers.push((slope, start));
         uppers.push((slope, end));
     }
-    lowers.iter().all(|&lower| {
-        uppers
-            .iter()
-            .all(|&upper| constrain_strict_inequality(lower, upper, bounds))
-    })
+    for &lower in &lowers {
+        for &upper in &uppers {
+            if !constrain_strict_inequality(lower, upper, bounds)? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }
 
 /// Restricts positive integer `n` so `lower(n) < upper(n)`.
@@ -976,45 +1052,41 @@ fn constrain_strict_inequality(
     lower: (isize, isize),
     upper: (isize, isize),
     bounds: &mut (isize, isize),
-) -> bool {
-    let (Some(slope), Some(intercept)) =
-        (lower.0.checked_sub(upper.0), upper.1.checked_sub(lower.1))
-    else {
-        return false;
-    };
+) -> Result<bool, Overflow> {
+    let slope = checked(lower.0.checked_sub(upper.0))?;
+    let intercept = checked(upper.1.checked_sub(lower.1))?;
     match slope.cmp(&0) {
-        std::cmp::Ordering::Equal => intercept > 0,
+        std::cmp::Ordering::Equal => Ok(intercept > 0),
         std::cmp::Ordering::Greater => {
-            let Some(numerator) = intercept.checked_sub(1) else {
-                return false;
-            };
+            let numerator = checked(intercept.checked_sub(1))?;
             bounds.1 = bounds.1.min(numerator.div_euclid(slope));
-            bounds.0 <= bounds.1
+            Ok(bounds.0 <= bounds.1)
         }
         std::cmp::Ordering::Less => {
-            let (Some(divisor), Some(numerator)) = (slope.checked_neg(), intercept.checked_neg())
-            else {
-                return false;
-            };
-            let Some(lower) = numerator.div_euclid(divisor).checked_add(1) else {
-                return false;
-            };
+            let divisor = checked(slope.checked_neg())?;
+            let numerator = checked(intercept.checked_neg())?;
+            let lower = checked(numerator.div_euclid(divisor).checked_add(1))?;
             bounds.0 = bounds.0.max(lower);
-            bounds.0 <= bounds.1
+            Ok(bounds.0 <= bounds.1)
         }
     }
 }
 
-fn repeat_range(range: AxisRange, total_shift: isize) -> Option<AxisRange> {
+fn repeat_range(range: AxisRange, total_shift: isize) -> Result<Option<AxisRange>, Overflow> {
     let Some((start, end)) = range else {
-        return Some(None);
+        return Ok(Some(None));
     };
     let repeated = if total_shift >= 0 {
-        (start, end.checked_sub(total_shift)?)
+        (start, checked(end.checked_sub(total_shift))?)
     } else {
-        (start.checked_sub(total_shift)?, end)
+        (checked(start.checked_sub(total_shift))?, end)
     };
-    (repeated.0 < repeated.1).then_some(Some(repeated))
+    Ok((repeated.0 < repeated.1).then_some(Some(repeated)))
+}
+
+/// Whether a bounded range holds no position.
+fn is_empty_range(range: AxisRange) -> bool {
+    range.is_some_and(|(start, end)| start >= end)
 }
 
 fn finite_range(start: usize, length: usize) -> Option<AxisRange> {
@@ -1048,7 +1120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn single_anchor_map_keeps_its_form_when_its_value_overflows() {
+    fn single_anchor_map_reports_a_value_beyond_isize() {
         let map = Map {
             crossed: false,
             modulus: 1,
@@ -1060,8 +1132,25 @@ mod tests {
             anchor: [Some((2, 3)), None],
             current: [Current::Linked(map), Current::Unlinked(EVERY, None)],
         };
-        // The only anchor value maps past `isize::MAX`; no constant stands in.
-        let simplified = piece.simplified().expect("the anchor value is in range");
-        assert_eq!(simplified.current[0], Current::Linked(map));
+        // The only anchor value maps past `isize::MAX`. Neither a bogus
+        // constant nor an empty piece stands in for it.
+        assert_eq!(piece.simplified(), Err(Overflow));
+    }
+
+    #[test]
+    fn overflowing_identity_is_unknown_rather_than_absent() {
+        // A fixed point beyond `isize` neither closes nor rules out a cycle.
+        let map = Map {
+            crossed: false,
+            modulus: 2,
+            residue: 1,
+            base: isize::MIN,
+            step: 1,
+        };
+        let piece = RelationPiece {
+            anchor: [None, None],
+            current: [Current::Linked(map), Current::Unlinked(EVERY, None)],
+        };
+        assert_eq!(identity_solution(&piece), Err(Overflow));
     }
 }

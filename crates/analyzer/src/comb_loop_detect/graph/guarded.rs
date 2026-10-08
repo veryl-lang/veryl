@@ -259,11 +259,16 @@ fn guarded_relations_close(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBu
             if !budget.spend_product(relation.piece_count(), cycle.relation.piece_count()) {
                 return false;
             }
-            let next_relation = relation.then(&cycle.relation);
+            let Some(next_relation) = budget.checked(relation.then(&cycle.relation)) else {
+                return false;
+            };
             if next_relation.is_empty() {
                 continue;
             }
-            if next_relation.intersects_identity() {
+            let Some(closes) = budget.checked(next_relation.intersects_identity()) else {
+                return false;
+            };
+            if closes {
                 return true;
             }
             insert_guarded_relation(

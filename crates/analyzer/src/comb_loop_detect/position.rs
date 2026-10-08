@@ -150,47 +150,64 @@ impl Map {
         (!self.crossed && self.modulus == 1 && self.step == 1).then_some(self.base)
     }
 
-    /// Parameters `t` whose source coordinate lies in `[start, end)`.
-    pub(super) fn source_parameters(self, start: isize, end: isize) -> Option<(isize, isize)> {
-        let first = div_ceil(start.checked_sub(self.residue)?, self.modulus)?;
-        let last = div_floor(end.checked_sub(1)?.checked_sub(self.residue)?, self.modulus)?;
-        (first <= last).then_some((first, last))
+    /// Parameters `t` whose source coordinate lies in `[start, end)`, `None`
+    /// when there are none.
+    pub(super) fn source_parameters(
+        self,
+        start: isize,
+        end: isize,
+    ) -> Result<Option<(isize, isize)>, Overflow> {
+        let first = div_ceil(checked(start.checked_sub(self.residue))?, self.modulus)?;
+        let last = div_floor(
+            checked(
+                end.checked_sub(1)
+                    .and_then(|last| last.checked_sub(self.residue)),
+            )?,
+            self.modulus,
+        )?;
+        Ok((first <= last).then_some((first, last)))
     }
 
-    /// Parameters `t` whose destination coordinate lies in `[start, end)`.
-    pub(super) fn destination_parameters(self, start: isize, end: isize) -> Option<(isize, isize)> {
-        let last_value = end.checked_sub(1)?;
-        match self.step.cmp(&0) {
+    /// Parameters `t` whose destination coordinate lies in `[start, end)`,
+    /// `None` when there are none. A fixed destination in the range takes
+    /// every parameter, given as `(isize::MIN, isize::MAX)`.
+    pub(super) fn destination_parameters(
+        self,
+        start: isize,
+        end: isize,
+    ) -> Result<Option<(isize, isize)>, Overflow> {
+        let last_value = checked(end.checked_sub(1))?;
+        let (first, last) = match self.step.cmp(&0) {
             std::cmp::Ordering::Equal => {
-                (start <= self.base && self.base <= last_value).then_some((isize::MIN, isize::MAX))
+                let inside = start <= self.base && self.base <= last_value;
+                return Ok(inside.then_some((isize::MIN, isize::MAX)));
             }
-            std::cmp::Ordering::Greater => {
-                let first = div_ceil(start.checked_sub(self.base)?, self.step)?;
-                let last = div_floor(last_value.checked_sub(self.base)?, self.step)?;
-                (first <= last).then_some((first, last))
-            }
-            std::cmp::Ordering::Less => {
-                let first = div_ceil(last_value.checked_sub(self.base)?, self.step)?;
-                let last = div_floor(start.checked_sub(self.base)?, self.step)?;
-                (first <= last).then_some((first, last))
-            }
-        }
+            std::cmp::Ordering::Greater => (
+                div_ceil(checked(start.checked_sub(self.base))?, self.step)?,
+                div_floor(checked(last_value.checked_sub(self.base))?, self.step)?,
+            ),
+            std::cmp::Ordering::Less => (
+                div_ceil(checked(last_value.checked_sub(self.base))?, self.step)?,
+                div_floor(checked(start.checked_sub(self.base))?, self.step)?,
+            ),
+        };
+        Ok((first <= last).then_some((first, last)))
     }
 
     /// Smallest half-open range of destination coordinates for parameters in
     /// `[first, last]`.
-    pub(super) fn destination_hull(self, first: isize, last: isize) -> Option<(isize, isize)> {
-        let a = self.base.checked_add(self.step.checked_mul(first)?)?;
-        let b = self.base.checked_add(self.step.checked_mul(last)?)?;
-        Some((a.min(b), a.max(b).checked_add(1)?))
+    pub(super) fn destination_hull(
+        self,
+        first: isize,
+        last: isize,
+    ) -> Result<(isize, isize), Overflow> {
+        hull(self.base, self.step, first, last)
     }
 
     /// Smallest half-open range of source coordinates for parameters in
     /// `[first, last]`.
-    pub(super) fn source_hull(self, first: isize, last: isize) -> Option<(isize, isize)> {
-        let a = self.residue.checked_add(self.modulus.checked_mul(first)?)?;
-        let b = self.residue.checked_add(self.modulus.checked_mul(last)?)?;
-        Some((a.min(b), a.max(b).checked_add(1)?))
+    pub(super) fn source_hull(self, first: isize, last: isize) -> Result<(isize, isize), Overflow> {
+        hull(self.residue, self.modulus, first, last)
     }
 
     /// `next` applied after `self`, where `next` reads the coordinate that
@@ -417,11 +434,17 @@ impl Relation {
                     Axis::Array => source[0],
                     Axis::Packed => source[1],
                 };
-                let Some((first, last)) = map.source_parameters(start, end) else {
+                // Arithmetic beyond `isize` keeps the conservative answer.
+                let Ok(parameters) = map.source_parameters(start, end) else {
+                    return true;
+                };
+                let Some((first, last)) = parameters else {
                     return false;
                 };
-                map.destination_hull(first, last)
-                    .is_none_or(|(low, high)| low < destination.1 && destination.0 < high)
+                match map.destination_hull(first, last) {
+                    Ok((low, high)) => low < destination.1 && destination.0 < high,
+                    Err(Overflow) => true,
+                }
             }
         }
     }
@@ -503,16 +526,37 @@ pub(super) fn ceil_div_wide(numerator: i128, denominator: i128) -> i128 {
     -floor_div_wide(-numerator, denominator)
 }
 
-fn div_floor(numerator: isize, denominator: isize) -> Option<isize> {
-    (denominator != 0)
-        .then(|| floor_div_wide(numerator as i128, denominator as i128))
-        .and_then(|quotient| isize::try_from(quotient).ok())
+/// `numerator / denominator` rounded down, for a nonzero denominator.
+fn div_floor(numerator: isize, denominator: isize) -> Result<isize, Overflow> {
+    narrow(floor_div_wide(numerator as i128, denominator as i128))
 }
 
-fn div_ceil(numerator: isize, denominator: isize) -> Option<isize> {
-    (denominator != 0)
-        .then(|| ceil_div_wide(numerator as i128, denominator as i128))
-        .and_then(|quotient| isize::try_from(quotient).ok())
+/// `numerator / denominator` rounded up, for a nonzero denominator.
+fn div_ceil(numerator: isize, denominator: isize) -> Result<isize, Overflow> {
+    narrow(ceil_div_wide(numerator as i128, denominator as i128))
+}
+
+/// `base + slope * t` over `t` in `[first, last]`, as a half-open range.
+fn hull(base: isize, slope: isize, first: isize, last: isize) -> Result<(isize, isize), Overflow> {
+    let value = |t: isize| narrow(base as i128 + slope as i128 * t as i128);
+    let (a, b) = (value(first)?, value(last)?);
+    Ok((a.min(b), checked(a.max(b).checked_add(1))?))
+}
+
+/// Arithmetic whose result does not fit in `isize`. Positions lie in
+/// declared domains, so a design does not reach it; an analysis that meets
+/// it stops as incomplete rather than guessing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Overflow;
+
+/// A checked arithmetic result, `Overflow` when it failed.
+pub(super) fn checked<T>(value: Option<T>) -> Result<T, Overflow> {
+    value.ok_or(Overflow)
+}
+
+/// A wide intermediate value narrowed back to `isize`.
+pub(super) fn narrow(value: i128) -> Result<isize, Overflow> {
+    isize::try_from(value).map_err(|_| Overflow)
 }
 
 /// The first coordinate from `start` in the class `residue` modulo
@@ -544,6 +588,24 @@ pub(super) fn solve_congruence(
     let period = modulus / gcd;
     let first = ((constant / gcd) * inverse).rem_euclid(period);
     Some(Some((first as isize, period as isize)))
+}
+
+/// The coordinates in both classes `(residue, modulus)`, as one class with
+/// the smallest non-negative residue. `None` when they share none; the
+/// outer `None` means arithmetic overflow.
+#[allow(clippy::option_option)]
+pub(super) fn intersect_classes(
+    left: (isize, isize),
+    right: (isize, isize),
+) -> Option<Option<(isize, isize)>> {
+    // left.0 + left.1 * u = right.0 (mod right.1)
+    let Some((first, period)) = solve_congruence(left.1, right.0.checked_sub(left.0), right.1)?
+    else {
+        return Some(None);
+    };
+    let modulus = left.1.checked_mul(period)?;
+    let value = left.0.checked_add(left.1.checked_mul(first)?)?;
+    Some(Some((value.rem_euclid(modulus), modulus)))
 }
 
 pub(super) fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
