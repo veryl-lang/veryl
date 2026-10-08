@@ -2414,6 +2414,55 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some(self.ssa.projected(value, domain))
     }
 
+    /// `version` written to `key` only at the positions of `progressions`
+    /// on `axis`, each `(start, length, step)`. `None` when no position lies
+    /// in the key, so the key keeps its value. A progression that cannot be
+    /// expressed leaves the version whole.
+    fn confine_to_progressions(
+        &mut self,
+        version: VersionId,
+        key: NodeKey,
+        progressions: &[(usize, usize, usize)],
+        axis: Axis,
+    ) -> Option<VersionId> {
+        let packed = self.key_span(key)?;
+        let (key_start, key_length) = match axis {
+            Axis::Array => (key.1.start, key.1.length),
+            Axis::Packed => (packed.start, packed.length),
+        };
+        // The positions of each progression within the key, from its first
+        // position there.
+        let pieces = progressions
+            .iter()
+            .filter_map(|&(start, length, step)| {
+                let first = start.max(key_start);
+                let end = (start + length).min(key_start + key_length);
+                let first = first + (step - (first - start) % step) % step;
+                (first < end).then(|| (first, end - first, step))
+            })
+            .collect::<Vec<_>>();
+        if pieces.is_empty() {
+            return None;
+        }
+        if pieces == [(key_start, key_length, 1)] {
+            return Some(version);
+        }
+        let alternatives = pieces
+            .into_iter()
+            .map(|(start, length, step)| {
+                let domain = match axis {
+                    Axis::Array => position_domain(ArraySpan { start, length }, packed),
+                    Axis::Packed => position_domain(key.1, PackedSpan { start, length }),
+                };
+                self.progression_value(version, domain, axis, step)
+            })
+            .collect::<Option<Vec<_>>>();
+        Some(match alternatives {
+            Some(alternatives) => self.ssa.phi(alternatives),
+            None => version,
+        })
+    }
+
     fn counted_iterator(&self, id: VarId) -> Option<CountedIterator> {
         self.counted_iterators
             .iter()
@@ -3079,79 +3128,31 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             if let Some(token) = self.active_assignment {
                 self.ssa.record_site(version, token, controls);
             }
-            if let (Some(reachable), Some(packed)) = (&reachable, self.key_span(key)) {
-                // The positions of each progression within the key, from its
-                // first position there.
-                let pieces = reachable
+            if let Some(reachable) = &reachable {
+                let progressions = reachable
                     .iter()
-                    .filter_map(|&(span, step)| {
-                        let region = key.1.intersection(span)?;
-                        let skip = (step - (region.start - span.start) % step) % step;
-                        let start = region.start.checked_add(skip)?;
-                        let length = (region.start + region.length)
-                            .checked_sub(start)
-                            .filter(|&n| n > 0)?;
-                        Some((ArraySpan { start, length }, step))
-                    })
+                    .map(|&(span, step)| (span.start, span.length, step))
                     .collect::<Vec<_>>();
                 // Positions outside the reachable ones keep their value.
-                if pieces.is_empty() {
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, &progressions, Axis::Array)
+                else {
                     continue;
-                }
-                if pieces != [(key.1, 1)] {
-                    let alternatives = pieces
-                        .into_iter()
-                        .map(|(region, step)| {
-                            self.progression_value(
-                                version,
-                                position_domain(region, packed),
-                                Axis::Array,
-                                step,
-                            )
-                        })
-                        .collect::<Option<Vec<_>>>();
-                    let Some(alternatives) = alternatives else {
-                        continue;
-                    };
-                    version = self.ssa.phi(alternatives);
-                }
+                };
+                version = confined;
             }
-            if let (Some((reachable, _)), Some(packed)) = (&packed_reachable, self.key_span(key)) {
-                // The bits of each progression within the key, from its first
-                // bit there.
-                let pieces = reachable
+            if let Some((reachable, _)) = &packed_reachable {
+                let progressions = reachable
                     .iter()
-                    .filter_map(|&(span, step)| {
-                        let region = packed.intersection(span)?;
-                        let skip = (step - (region.start - span.start) % step) % step;
-                        let start = region.start.checked_add(skip)?;
-                        let length = (region.start + region.length)
-                            .checked_sub(start)
-                            .filter(|&n| n > 0)?;
-                        Some((PackedSpan { start, length }, step))
-                    })
+                    .map(|&(span, step)| (span.start, span.length, step))
                     .collect::<Vec<_>>();
                 // Bits outside the reachable ones keep their value.
-                if pieces.is_empty() {
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, &progressions, Axis::Packed)
+                else {
                     continue;
-                }
-                if pieces != [(packed, 1)] {
-                    let alternatives = pieces
-                        .into_iter()
-                        .map(|(region, step)| {
-                            self.progression_value(
-                                version,
-                                position_domain(key.1, region),
-                                Axis::Packed,
-                                step,
-                            )
-                        })
-                        .collect::<Option<Vec<_>>>();
-                    let Some(alternatives) = alternatives else {
-                        continue;
-                    };
-                    version = self.ssa.phi(alternatives);
-                }
+                };
+                version = confined;
             }
             self.bind_destination(key, version, dynamic);
         }
@@ -3189,6 +3190,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Some(region) = PackedSpan::new(low, high - low + 1) else {
             return false;
         };
+        let progressions = self.affine_progressions(&select.index).map(|progressions| {
+            progressions
+                .into_iter()
+                .map(|(span, step)| (span.start, span.length, step))
+                .collect::<Vec<_>>()
+        });
         let mut selected_destination = destination.clone();
         selected_destination.index = self.receiver_index(destination.id, &destination.index);
         let Some(destination_array) = dst_writes(&selected_destination, &mut self.ctx)
@@ -3254,11 +3261,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // Packed coordinates are already destination bits.
                 *relation = relation.compose(PositionRelation::translation(base, 0));
             }
-            let version = self
+            let mut version = self
                 .ssa
                 .related_definition_guarded(sources.sources, &self.path_condition);
             if let Some(token) = self.active_assignment {
                 self.ssa.record_site(version, token, controls);
+            }
+            // Bits between the steps of the select keep their value.
+            if let Some(progressions) = &progressions {
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, progressions, Axis::Packed)
+                else {
+                    continue;
+                };
+                version = confined;
             }
             self.bind_destination(key, version, true);
         }

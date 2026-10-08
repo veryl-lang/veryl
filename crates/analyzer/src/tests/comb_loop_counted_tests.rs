@@ -859,3 +859,42 @@ fn counted_strided_writes_do_not_grow_with_the_iteration_count() {
         );
     }
 }
+
+#[test]
+fn counted_strided_bit_write_reaches_only_its_bits() {
+    // A scalar written to an iterator-affine bit reaches only the bits the
+    // select takes, not the bits between its steps.
+    for (case, body, expected) in [
+        (
+            "a gap bit",
+            "for i in 0..4 { v[4 * i] = o; } p = v[1];",
+            false,
+        ),
+        (
+            "a written bit",
+            "for i in 0..4 { v[4 * i] = o; } p = v[4];",
+            true,
+        ),
+        (
+            "a gap bit of a descending stride",
+            "for i in 0..4 { v[12 - 4 * i] = o; } p = v[5];",
+            false,
+        ),
+        (
+            "a gap bit with a source moving along",
+            "for i in 0..4 { v[4 * i] = s[i] ^ o; } p = v[2];",
+            false,
+        ),
+    ] {
+        let code = format!(
+            "module Top (s: input logic<4>, o: output logic) {{
+                var v: logic<16>; var p: logic;
+                always_comb {{ v = 0; {body} }}
+                assign o = p;
+            }}"
+        );
+        let loops = comb_loops(&code);
+        assert_eq!(!loops.is_empty(), expected, "{case}: {loops:?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{case}");
+    }
+}
