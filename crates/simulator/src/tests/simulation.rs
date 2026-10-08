@@ -1688,7 +1688,7 @@ fn wide_256_aot_native_comb() {
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
     assert!(
-        ir.whole_comb.is_some(),
+        comb_is_aot_native(&ir),
         "wide comb module must be AOT-C-native (whole_comb=Some), not bailed to Cranelift",
     );
     let mut sim = Simulator::new(ir, None);
@@ -1754,6 +1754,9 @@ fn a_validate_run_counts_the_dispatches_it_compared() {
     // counts -- where the artifact never lands every dispatch falls back, and
     // reporting THAT is the whole point of the field.
     for kind in ["whole_comb:", "whole_event:"] {
+        if kind == "whole_comb:" && dataflow_on() {
+            continue;
+        }
         assert!(
             got.iter()
                 .any(|(k, ran, fell_back)| k.starts_with(kind) && ran + fell_back > 0),
@@ -2492,7 +2495,7 @@ fn probe_r4_wide_dynsel_store() {
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
     assert!(
-        ir.whole_comb.is_some(),
+        comb_is_aot_native(&ir),
         "wide dynsel-store comb must be AOT-C-native",
     );
     let mut sim = Simulator::new(ir, None);
@@ -2575,7 +2578,7 @@ fn probe_r4_shift_left_128() {
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
     assert!(
-        ir.whole_comb.is_some(),
+        comb_is_aot_native(&ir),
         "128-bit shift comb must be AOT-C-native",
     );
     let mut sim = Simulator::new(ir, None);
@@ -2612,7 +2615,7 @@ fn probe_r4_wide_src_rhs_select() {
     let config = aot_native_validate_config();
     let ir = analyze(code, &config);
     assert!(
-        ir.whole_comb.is_some(),
+        comb_is_aot_native(&ir),
         "wide-src rhs_select comb must be AOT-C-native",
     );
     let mut sim = Simulator::new(ir, None);
@@ -19454,6 +19457,142 @@ fn iterator_read_in_a_function_keeps_the_loop() {
     assert_eq!(runtime_loops(&design, "Top"), 1);
 }
 
+/// A loop variable whose storage a statement outside the loop reads: the
+/// loop's store must reach that reader within the same settle.
+#[test]
+fn loop_variable_storage_read_outside_the_loop_settles() {
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+        z: output logic<32>,
+    ) {
+        var i: logic<32>;
+        assign i = 7;
+        always_comb {
+            o = a;
+            for i in 0..4 {
+                if i == 3 {
+                    break;
+                }
+                o = o + i;
+            }
+        }
+        function f () -> logic<32> {
+            return i + 1;
+        }
+        assign z = f();
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for a in [0u64, 5, 9] {
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(sim.get("o").unwrap().payload_u64(), a + 3, "{config:?}");
+            assert_eq!(sim.get("z").unwrap().payload_u64(), 4, "{config:?}");
+        }
+    }
+}
+
+/// The event-side counterpart: an `always_ff` loop variable whose storage a
+/// comb statement reads.
+#[test]
+fn loop_variable_storage_written_by_an_event_reaches_the_comb() {
+    let code = r#"
+    module Top (
+        clk: input  clock,
+        rst: input  reset,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+        z  : output logic<32>,
+    ) {
+        var i  : logic<32>;
+        var acc: logic<8>;
+        assign i = 7;
+        always_ff {
+            if_reset {
+                acc = 0;
+            } else {
+                for i in 0..4 {
+                    if i == a[1:0] {
+                        break;
+                    }
+                    acc = acc + 1;
+                }
+            }
+        }
+        assign o = acc;
+        assign z = i + 1;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for a in [0u64, 2, 3, 1, 2] {
+            sim.set("a", Value::new(a, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("z").unwrap().payload_u64(),
+                a + 1,
+                "a={a} {config:?}"
+            );
+        }
+    }
+}
+
+/// The dataflow settle cache outlives a build session, so a build under a
+/// config that compiles the settle differently must not get another's.
+#[test]
+fn dataflow_cache_keeps_compile_configs_apart() {
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        b: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        var t: logic<8>;
+        assign t = a + b;
+        assign o = t ^ 8'h5a;
+    }
+    "#;
+    let config = |aot_c_async| Config {
+        use_jit: true,
+        aot_c: true,
+        aot_c_event: true,
+        aot_c_async,
+        ..Default::default()
+    };
+    let mut built = Vec::new();
+    for aot_c_async in [false, true, false] {
+        let ir = analyze(code, &config(aot_c_async));
+        assert_eq!(ir.dataflow.is_some(), dataflow_on());
+        built.push(ir.dataflow.clone());
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(3, 8, false));
+        sim.set("b", Value::new(4, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("o").unwrap().payload_u64(), 7 ^ 0x5a);
+    }
+    if let [Some(sync), Some(async_), Some(again)] = &built[..] {
+        assert!(
+            !std::sync::Arc::ptr_eq(sync, async_),
+            "async build reused the sync settle"
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(sync, again),
+            "an identical build must hit the cache"
+        );
+    }
+}
+
 /// A body whose copies would hold too many expression nodes keeps its loop,
 /// however few statements it has.
 #[test]
@@ -20936,7 +21075,7 @@ fn wide_signed_compare_asymmetric_width_aot_c() {
     for (a, b, egt, elt) in cases {
         let ir = analyze(code, &config);
         assert!(
-            ir.whole_comb.is_some(),
+            comb_is_aot_native(&ir),
             "wide signed compare must be AOT-C-native to exercise vw_scmp_asym",
         );
         let mut sim = Simulator::new(ir, None);
@@ -23123,15 +23262,19 @@ fn assert_aot_comb_executed(sim: &Simulator, config: &Config) {
         }) {
             return;
         }
-        assert!(
-            sim.ir.whole_comb_dispatch[0].load(Relaxed) > 0,
-            "C did not execute"
-        );
-        assert_eq!(
-            sim.ir.whole_comb_dispatch[1].load(Relaxed),
-            0,
-            "C fell back"
-        );
+        if dataflow_on() {
+            assert!(comb_is_aot_native(&sim.ir), "C did not land");
+        } else {
+            assert!(
+                sim.ir.whole_comb_dispatch[0].load(Relaxed) > 0,
+                "C did not execute"
+            );
+            assert_eq!(
+                sim.ir.whole_comb_dispatch[1].load(Relaxed),
+                0,
+                "C fell back"
+            );
+        }
     }
 }
 
@@ -26977,7 +27120,7 @@ fn comb_display_output_matches_across_backends() {
     if crate::backend::aot_c::cc_available() {
         let ir = analyze(code, &aot_native_validate_config());
         assert!(
-            ir.whole_comb.is_some(),
+            comb_is_aot_native(&ir),
             "a comb $display must stay AOT-C-native"
         );
     }
@@ -28892,6 +29035,9 @@ fn cone_gate_chain_design(n: usize) -> (String, impl Fn(u64) -> u64) {
 
 #[test]
 fn cone_gate_skips_only_when_the_result_is_unchanged() {
+    if dataflow_on() {
+        return;
+    }
     // Holding `sel` still lets the segment prime, converge and then skip;
     // changing it must make the very next settle recompute.  The sweep
     // alternates runs of repeats with changes and checks the output after
@@ -28946,6 +29092,9 @@ fn cone_gate_skips_only_when_the_result_is_unchanged() {
 
 #[test]
 fn cone_gate_group_skips_both_cones_and_reruns_them_on_a_change() {
+    if dataflow_on() {
+        return;
+    }
     // Two flat cones fed by the same input sit under one group at the top:
     // its boundary is that input, cheaper than the two compares it replaces.
     // Holding the input lets the group go clean and both cones skip; a change
@@ -32243,7 +32392,7 @@ fn narrowing_cast_at_operand_width_still_truncates() {
         let config = aot_native_validate_config();
         let ir = analyze(code, &config);
         assert!(
-            ir.whole_comb.is_some(),
+            comb_is_aot_native(&ir),
             "the AOT-C config must actually compile this module, or the check below is empty",
         );
         let mut sim = Simulator::new(ir, None);
@@ -32274,7 +32423,7 @@ fn narrowing_cast_of_a_signed_quotient_still_truncates() {
 
     let sweep = |config: &Config| {
         let ir = analyze(code, config);
-        let whole = ir.whole_comb.is_some();
+        let whole = comb_is_aot_native(&ir);
         let mut sim = Simulator::new(ir, None);
         let mut out: Vec<(u64, u64, u64, u64)> = Vec::new();
         for a in 0u64..16 {
@@ -35088,4 +35237,273 @@ fn store_past_the_variable_from_a_loop() {
             "config={config:?}"
         );
     }
+}
+
+fn dataflow_event_config() -> Config {
+    Config {
+        use_4state: false,
+        use_jit: true,
+        aot_c: true,
+        aot_c_event: true,
+        aot_c_async: false,
+        aot_c_validate: false,
+        aot_c_min_stmts: 0,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn aot_c_event_break_between_stores_to_one_watch() {
+    // Two stores to `r` share one watch; the `break` between them leaves after
+    // the first, which must still compare and mark.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (clk: input clock, rst: input reset, o: output logic<8>) {
+        var r: logic<8>;
+        var c: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; c = 0; } else {
+                c = c + 1;
+                for i in 0..4 {
+                    if i == 0 {
+                        r = c;
+                        if c[0] { break; }
+                        r = c + 8'd100;
+                    }
+                }
+            }
+        }
+        assign o = r;
+    }
+    "#;
+    let ir = analyze(code, &dataflow_event_config());
+    assert!(!ir.whole_events.is_empty(), "the event must run as AOT-C");
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let rst = sim.get_reset("rst").unwrap();
+    sim.step_reset(&clk, &rst);
+    for c in 0..8u64 {
+        sim.step(&clk);
+        sim.ensure_comb_updated();
+        let exp = if c & 1 == 1 { c } else { c + 100 };
+        assert_eq!(sim.get("o").unwrap().payload_u64(), exp, "cycle {c}");
+    }
+}
+
+#[test]
+fn aot_c_event_source_is_independent_of_prior_emission() {
+    // The `.so` cache is keyed on the C text, so emitting the same design
+    // twice on one thread must produce the same sources.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (clk: input clock, rst: input reset, o: output logic<8>) {
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; } else { r = r + 1; }
+        }
+        assign o = r;
+    }
+    "#;
+    let mut sources = Vec::new();
+    for _ in 0..2 {
+        crate::backend::aot_c::emit::take_event_sources();
+        let _ir = analyze(code, &dataflow_event_config());
+        sources.push(crate::backend::aot_c::emit::take_event_sources());
+    }
+    assert!(!sources[0].is_empty());
+    assert_eq!(sources[0], sources[1]);
+}
+
+#[test]
+fn aot_c_event_break_between_uncompared_stores_to_one_watch() {
+    // As above for a watch too wide to compare, which marks after its last store.
+    if !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (clk: input clock, rst: input reset, idx: input logic<7>, o: output logic<8>) {
+        var m: logic<8> [80];
+        var c: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { m = '{default: 0}; c = 0; } else {
+                c = c + 1;
+                for i in 0..4 {
+                    if i == 0 {
+                        m[idx] = c;
+                        if c[0] { break; }
+                        m[idx] = c + 8'd100;
+                    }
+                }
+            }
+        }
+        assign o = m[idx];
+    }
+    "#;
+    let ir = analyze(code, &dataflow_event_config());
+    assert!(!ir.whole_events.is_empty(), "the event must run as AOT-C");
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let rst = sim.get_reset("rst").unwrap();
+    sim.set("idx", Value::new(5, 7, false));
+    sim.step_reset(&clk, &rst);
+    for c in 0..8u64 {
+        sim.step(&clk);
+        sim.ensure_comb_updated();
+        let exp = if c & 1 == 1 { c } else { c + 100 };
+        assert_eq!(sim.get("o").unwrap().payload_u64(), exp, "cycle {c}");
+    }
+}
+
+#[test]
+fn wide_ff_dynamic_window_store_marks_its_readers() {
+    // A window store into a >64-byte element of a runtime-indexed FF array,
+    // kept in FF storage by a read in the same `always_ff`.  Under the
+    // dataflow settle the comb reader must see each cycle's new value.
+    let code = r#"
+    module Top (
+        i_clk : input  '_ clock    ,
+        i_rst : input  '_ reset    ,
+        i_widx: input  logic<2>    ,
+        i_ridx: input  logic<2>    ,
+        i_v   : input  logic<64>   ,
+        o     : output logic<64>   ,
+        o_q   : output logic<64>   ,
+    ) {
+        var mem: logic<1024> [4];
+        var q  : logic<64>;
+        always_ff {
+            if_reset {
+                mem[0] = 0;
+                mem[1] = 0;
+                mem[2] = 0;
+                mem[3] = 0;
+                q      = 0;
+            } else {
+                q                   = mem[i_ridx][100:37];
+                mem[i_widx][100:37] = i_v;
+            }
+        }
+        assign o   = mem[i_ridx][100:37];
+        assign o_q = q;
+    }
+    "#;
+
+    let configs = [
+        // AOT-C comb with the event left to Cranelift.
+        Config {
+            use_4state: false,
+            use_jit: true,
+            aot_c: true,
+            aot_c_event: false,
+            aot_c_async: false,
+            aot_c_min_stmts: 0,
+            ..Default::default()
+        },
+        Config {
+            use_4state: false,
+            use_jit: true,
+            ..Default::default()
+        },
+    ];
+    for config in configs {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_widx", Value::new(1, 2, false));
+        sim.set("i_ridx", Value::new(1, 2, false));
+        sim.set("i_v", Value::new(0, 64, false));
+        sim.step_reset(&clk, &rst);
+        for c in 1..10u64 {
+            sim.set("i_v", Value::new(c * 0x1111, 64, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("o").unwrap(),
+                Value::new(c * 0x1111, 64, false),
+                "cycle {c}, config={config:?}"
+            );
+            assert_eq!(
+                sim.get("o_q").unwrap(),
+                Value::new((c - 1) * 0x1111, 64, false),
+                "cycle {c}, config={config:?}"
+            );
+        }
+    }
+}
+
+/// The Cranelift cells run a dataflow settle until the `.so` lands, and keep
+/// no boundary shadow.  The first `.so` settle must not trust the shadows it
+/// finds: here `x` goes from nonzero to zero right after the switch, which a
+/// zeroed shadow would take for no change, leaving `o` stale.
+#[test]
+fn dataflow_switch_from_jit_cells_to_the_so_reruns_every_cell() {
+    if !dataflow_on() || !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    // A fresh constant keeps the `.so` out of the cache, so the compile is
+    // really asynchronous and the Cranelift cells really run first.
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64
+        | 1;
+    let code = format!(
+        r#"
+    module Top (
+        a : input  logic<8>,
+        z1: input  logic<8>,
+        z2: input  logic<8>,
+        z3: input  logic<8>,
+        z4: input  logic<8>,
+        o : output logic<8>,
+        k : output logic<64>,
+    ) {{
+        var x: logic<8>;
+        assign x = a & 8'h0f;
+        assign o = x + (z1 ^ z2 ^ z3 ^ z4);
+        assign k = {{z1, z2, z3, z4, z1, z2, z3, z4}} ^ 64'h{nonce:x};
+    }}
+    "#
+    );
+    let config = Config {
+        use_4state: false,
+        use_jit: true,
+        aot_c: true,
+        aot_c_event: true,
+        aot_c_async: true,
+        aot_c_min_stmts: 0,
+        ..Default::default()
+    };
+    let ir = analyze(&code, &config);
+    let df = ir.dataflow.clone().expect("a dataflow settle");
+    assert!(df.jit.is_some(), "the Cranelift cells must be built");
+    let mut sim = Simulator::new(ir, None);
+    let v = |x: u64| Value::new(x, 8, false);
+    for z in ["z1", "z2", "z3", "z4"] {
+        sim.set(z, v(0));
+    }
+    sim.set("a", v(0x35));
+    assert_eq!(sim.get("o").unwrap(), v(0x05));
+    let on_jit = !sim.ir.dataflow_on_aot.get();
+
+    let t = std::time::Instant::now();
+    while df.cell.get().is_none() {
+        assert!(t.elapsed().as_secs() < 120, "the .so never landed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    sim.set("a", v(0x30));
+    assert_eq!(
+        sim.get("o").unwrap(),
+        v(0x00),
+        "o kept x's value from the JIT cells"
+    );
+    assert!(sim.ir.dataflow_on_aot.get());
+    assert!(
+        on_jit,
+        "the .so landed before the first settle; nothing was handed over"
+    );
 }

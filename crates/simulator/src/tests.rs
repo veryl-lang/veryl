@@ -14,6 +14,18 @@ use veryl_analyzer::{Analyzer, AnalyzerError, Context, symbol_table};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
+/// Whether the comb runs as AOT-C code: one whole-comb function, or the cells
+/// of the dataflow settle.
+pub(crate) fn comb_is_aot_native(ir: &Ir) -> bool {
+    ir.whole_comb.is_some() || ir.dataflow.as_ref().is_some_and(|d| d.cell.get().is_some())
+}
+
+/// The dataflow settle replaces the cone gate, the fall partial settles and
+/// the whole-comb dispatch, so tests of those have nothing to check under it.
+pub(crate) fn dataflow_on() -> bool {
+    crate::ir::opt::dataflow::enabled()
+}
+
 #[track_caller]
 fn analyze(code: &str, config: &Config) -> Ir {
     analyze_top(code, config, "Top").unwrap()
@@ -525,6 +537,7 @@ where
 
 mod component;
 mod component_sim;
+mod dataflow;
 mod derived_clock;
 mod dut_reuse;
 mod error;

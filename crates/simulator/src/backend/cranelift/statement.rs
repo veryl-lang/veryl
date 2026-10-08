@@ -3130,4 +3130,149 @@ mod tests {
             }
         }
     }
+
+    mod dataflow_marks {
+        use crate::backend::cranelift::runtime::{
+            CellWatch, build_binary_marked, build_cell_binary,
+        };
+        use crate::ir::opt::dataflow::{EventMarks, MarkTable, StoreMarks};
+        use crate::ir::variable::VarOffset;
+        use crate::ir::write_log::WriteLogBuffer;
+        use crate::ir::{
+            Config, ExpressionContext, ProtoAssignStatement, ProtoExpression, ProtoStatement,
+        };
+        use veryl_parser::token_range::TokenRange;
+
+        fn cvar(off: isize) -> ProtoExpression {
+            ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(off),
+                select: None,
+                dynamic_select: None,
+                width: 8,
+                var_full_width: 8,
+                expr_context: ExpressionContext {
+                    width: 8,
+                    signed: false,
+                },
+            }
+        }
+
+        fn assign(dst: VarOffset, src: isize) -> ProtoStatement {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst,
+                dst_width: 8,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: cvar(src),
+                dst_ff_current_offset: dst.raw(),
+                comb_direct: false,
+                token: TokenRange::default(),
+            })
+        }
+
+        /// A cell copying comb byte 0 to byte 8 marks its consumers exactly
+        /// when byte 8 changed, or on every run when told to.
+        #[test]
+        fn a_cell_marks_its_consumers_only_when_its_boundary_moved() {
+            let consumers = [(0u32, 0b100u64), (1, 0b1)];
+            let run = |always: bool, src: u8, old: u8| -> [u64; 2] {
+                let watch = CellWatch {
+                    boundary: &[(8, 9)],
+                    consumers: &consumers,
+                    always,
+                };
+                let stmt = assign(VarOffset::Comb(8), 0);
+                let (f, _keep) = build_cell_binary(&Config::default(), vec![stmt], &watch)
+                    .expect("the cell must compile");
+                let mut comb = [0u8; 16];
+                comb[0] = src;
+                comb[8] = old;
+                let ff = [0u8; 8];
+                let mut log = WriteLogBuffer::with_capacity(4, 4);
+                let mut dirty = [0u64; 2];
+                unsafe {
+                    f(
+                        ff.as_ptr(),
+                        comb.as_mut_ptr(),
+                        &mut log as *mut _ as *mut u8,
+                        dirty.as_mut_ptr() as isize,
+                    )
+                };
+                assert_eq!(comb[8], src);
+                dirty
+            };
+            assert_eq!(run(false, 5, 0), [0b100, 0b1], "a change must mark");
+            assert_eq!(run(false, 5, 5), [0, 0], "no change marks nothing");
+            assert_eq!(run(true, 5, 5), [0b100, 0b1], "`always` marks every run");
+        }
+
+        fn event_marks(comb: MarkTable, ff: MarkTable) -> StoreMarks {
+            std::sync::Arc::new(EventMarks { comb, ff })
+        }
+
+        /// Runs `stmt` as marked event code, `dirty` wired through the write
+        /// log header unless `live` is false.
+        fn run_event(
+            stmt: ProtoStatement,
+            marks: StoreMarks,
+            comb: &mut [u8],
+            ff: &mut [u8],
+            live: bool,
+        ) -> ([u64; 2], WriteLogBuffer) {
+            let (f, _keep) =
+                build_binary_marked(&Config::default(), vec![stmt], false, Some(marks))
+                    .expect("the event chunk must compile");
+            let mut log = WriteLogBuffer::with_capacity(4, 4);
+            let mut dirty = [0u64; 2];
+            if live {
+                log.df_dirty = dirty.as_mut_ptr();
+            }
+            unsafe {
+                f(
+                    ff.as_ptr(),
+                    comb.as_mut_ptr(),
+                    &mut log as *mut _ as *mut u8,
+                    0,
+                )
+            };
+            (dirty, log)
+        }
+
+        /// An event store into the middle of a watched comb span marks the
+        /// span's readers when the byte changed, and only then.
+        #[test]
+        fn an_event_comb_store_marks_readers_when_it_changes_a_byte() {
+            let marks = || event_marks(vec![(8, 16, vec![(1, 0b10)])], Vec::new());
+            let stmt = || assign(VarOffset::Comb(12), 0);
+            let mut ff = [0u8; 8];
+            let mut comb = [0u8; 16];
+            comb[0] = 7;
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!((comb[12], dirty), (7, [0, 0b10]), "a change must mark");
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0, 0], "rewriting the same value marks nothing");
+            comb[0] = 9;
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, false);
+            assert_eq!((comb[12], dirty), (9, [0, 0]), "no dirty words, no marks");
+        }
+
+        /// A logged FF write marks the FF readers when the pushed value
+        /// differs from the current slot, and still pushes either way.
+        #[test]
+        fn an_event_ff_push_marks_readers_when_the_value_differs() {
+            let marks = || event_marks(Vec::new(), vec![(0, 1, vec![(0, 0b1000)])]);
+            let stmt = || assign(VarOffset::Ff(0), 0);
+            let mut ff = [3u8; 8];
+            let mut comb = [0u8; 16];
+            comb[0] = 4;
+            let (dirty, log) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0b1000, 0], "a differing push must mark");
+            assert_eq!(log.narrow_count, 1);
+            comb[0] = 3;
+            let (dirty, log) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0, 0], "pushing the current value marks nothing");
+            assert_eq!(log.narrow_count, 1);
+        }
+    }
 }

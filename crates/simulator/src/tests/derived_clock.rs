@@ -1262,6 +1262,9 @@ fn fall_group_of(sim: &Simulator, name: &str) -> u32 {
 /// only the settle before the batch can give it.
 #[test]
 fn fall_partial_settles_every_group_the_batch_names() {
+    if dataflow_on() {
+        return;
+    }
     let code = r#"
     module Top (
         i_clk: input  '_ clock,
@@ -1527,6 +1530,9 @@ fn fall_partial_group_settles_the_clock_net() {
 /// subset does not run there either.
 #[test]
 fn fall_partial_skips_a_clean_comb() {
+    if dataflow_on() {
+        return;
+    }
     let code = r#"
     module Top (
         i_clk: input  '_ clock,
@@ -1590,6 +1596,9 @@ fn fall_partial_skips_a_clean_comb() {
 /// Cranelift reference, and counts what it compared.
 #[test]
 fn fall_partial_is_compared_under_validate() {
+    if dataflow_on() {
+        return;
+    }
     if !crate::backend::aot_c::cc_available() {
         return;
     }

@@ -1321,3 +1321,285 @@ pub fn stores_all_marked(stmts: &[ProtoStatement], marks: &StoreMarks) -> bool {
         _ => !writes_marked(s, marks),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::opt::cone_gate::FfOwner;
+    use crate::ir::{ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement};
+    use veryl_analyzer::value::{Value, ValueU64};
+    use veryl_parser::token_range::TokenRange;
+
+    fn dynamic_store(base: isize, stride: isize, n: usize, width: usize) -> ProtoStatement {
+        let index = ProtoExpression::Value {
+            value: Value::U64(ValueU64 {
+                payload: 0,
+                mask_xz: 0,
+                width: 8,
+                signed: false,
+            }),
+            width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: false,
+            },
+        };
+        ProtoStatement::AssignDynamic(ProtoAssignDynamicStatement {
+            dst_base: VarOffset::Comb(base),
+            dst_stride: stride,
+            dst_num_elements: n,
+            dst_index_expr: index.clone(),
+            dst_width: width,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: index,
+            dst_ff_current_base_offset: -1,
+            comb_direct: false,
+        })
+    }
+
+    #[test]
+    fn store_span_covers_every_element_for_either_stride() {
+        // Four 2-byte elements, element 0 at 0x20.
+        assert_eq!(
+            store_span(&dynamic_store(0x20, 2, 4, 16)),
+            Some((0x20, 0x28))
+        );
+        assert_eq!(
+            store_span(&dynamic_store(0x20, -2, 4, 16)),
+            Some((0x1a, 0x22))
+        );
+        // Elements padded apart: the span ends at the last element's bytes.
+        assert_eq!(
+            store_span(&dynamic_store(0x20, 8, 3, 32)),
+            Some((0x20, 0x34))
+        );
+        assert_eq!(
+            store_span(&dynamic_store(0x20, -8, 3, 32)),
+            Some((0x10, 0x24))
+        );
+        assert_eq!(
+            store_span(&dynamic_store(0x20, -2, 1, 16)),
+            Some((0x20, 0x22))
+        );
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn cache_key_tells_compile_configs_apart() {
+        let base = crate::ir::Config::default();
+        let key = |config: &crate::ir::Config, localize| cache_key(7, config, localize);
+        let block: crate::backend::LocalizeInfo = ([4, 12].into_iter().collect(), vec![]);
+        let same: crate::backend::LocalizeInfo = ([12, 4].into_iter().collect(), vec![]);
+        let other: crate::backend::LocalizeInfo = ([4].into_iter().collect(), vec![]);
+        assert_eq!(key(&base, None), key(&base.clone(), None));
+        assert_eq!(key(&base, Some(&block)), key(&base, Some(&same)));
+        assert_ne!(key(&base, Some(&block)), key(&base, Some(&other)));
+        assert_ne!(key(&base, None), key(&base, Some(&block)));
+        for config in [
+            crate::ir::Config {
+                aot_c_async: true,
+                ..base.clone()
+            },
+            crate::ir::Config {
+                disable_ff_opt: true,
+                ..base.clone()
+            },
+        ] {
+            assert_ne!(key(&base, None), key(&config, None), "{config:?}");
+        }
+    }
+
+    #[test]
+    fn strided_span_is_symmetric_in_the_stride_sign() {
+        assert_eq!(crate::ir::strided_span(100, 4, 5, 4), Some((100, 120)));
+        assert_eq!(crate::ir::strided_span(100, -4, 5, 4), Some((84, 104)));
+        assert_eq!(crate::ir::strided_span(100, 4, 0, 4), Some((100, 104)));
+        assert_eq!(crate::ir::strided_span(0, isize::MAX, 3, 1), None);
+    }
+
+    fn cvar(off: isize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: false,
+            },
+        }
+    }
+
+    fn add(x: isize, y: isize) -> ProtoExpression {
+        ProtoExpression::Binary {
+            x: Box::new(cvar(x)),
+            op: crate::ir::Op::Add,
+            y: Box::new(cvar(y)),
+            width: 8,
+            expr_context: ExpressionContext {
+                width: 8,
+                signed: false,
+            },
+        }
+    }
+
+    fn assign_expr(dst: isize, expr: ProtoExpression) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: 8,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: TokenRange::default(),
+        })
+    }
+
+    fn assign(dst: isize, src: isize) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst),
+            dst_width: 8,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: cvar(src),
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: TokenRange::default(),
+        })
+    }
+
+    /// One-byte comb variables at offsets `0, 8, 16, ...`.
+    fn inputs(vars: usize) -> ConeGateInputs {
+        ConeGateInputs {
+            node_parent: vec![u32::MAX],
+            node_path: vec![String::new()],
+            comb_owner: (0..vars).map(|i| (i * 8, i * 8 + 1, 0)).collect(),
+            ff_owner: FfOwner::default(),
+            ff_node: Vec::new(),
+            comb_var: Vec::new(),
+            event_written_comb: Vec::new(),
+            trigger_events: Vec::new(),
+            event_writes: Vec::new(),
+            master_clocks: Vec::new(),
+            ff_next_alias: Vec::new(),
+            tour: std::sync::OnceLock::new(),
+        }
+    }
+
+    fn cell_of(p: &DataflowPlan, stmt: u32) -> usize {
+        p.cells.iter().position(|c| c.contains(&stmt)).unwrap()
+    }
+
+    #[test]
+    fn a_read_between_two_writers_stays_between_them() {
+        // `b` reads `a` between its two writers, so it sees `x`, not `y`.
+        // Its other inputs give it its own co-activity signature, so only
+        // the node rule keeps it in `a`'s cell.
+        let v = |i: isize| i * 8;
+        let (x, y, a, b) = (v(0), v(1), v(2), v(3));
+        let mut stmts = vec![assign(a, x)];
+        let mut e = cvar(a);
+        for i in 4..12 {
+            e = ProtoExpression::Binary {
+                x: Box::new(e),
+                op: crate::ir::Op::Add,
+                y: Box::new(cvar(v(i))),
+                width: 8,
+                expr_context: ExpressionContext {
+                    width: 8,
+                    signed: false,
+                },
+            };
+        }
+        stmts.push(assign_expr(b, e));
+        stmts.push(assign(a, y));
+        let p = plan(&stmts, &inputs(12)).expect("plannable");
+        let k = cell_of(&p, 0);
+        assert_eq!(p.cells[k], vec![0, 1, 2], "{:?}", p.cells);
+    }
+
+    #[test]
+    fn a_read_before_the_first_writer_declines() {
+        // `b = a` before `a = x` consumes last settle's `a`.
+        let (x, a, b) = (0, 8, 16);
+        let stmts = vec![assign(b, a), assign(a, x)];
+        assert!(plan(&stmts, &inputs(3)).is_none());
+    }
+
+    #[test]
+    fn every_reader_of_a_boundary_is_marked_and_runs_later() {
+        // Chains over distinct inputs joined pairwise, so the co-activity
+        // signatures differ and the joins read across cells.
+        let v = |i: isize| i * 8;
+        let mut stmts = Vec::new();
+        for i in 0..6 {
+            stmts.push(assign(v(8 + i), v(i)));
+        }
+        for i in 0..5 {
+            stmts.push(assign_expr(v(16 + i), add(v(8 + i), v(9 + i))));
+        }
+        let p = plan(&stmts, &inputs(24)).expect("plannable");
+        let mut checked = 0;
+        for (a, b, readers) in &p.comb_readers {
+            let Some(w) = p.written.iter().position(|&(wa, wb)| wa == *a && wb == *b) else {
+                continue;
+            };
+            let wc = p.writer_cell[w];
+            for &r in readers.iter().filter(|&&r| r != wc) {
+                assert!(r > wc, "reader cell {r} runs before writer cell {wc}");
+                let (word, mask) = (r / 64, 1u64 << (r % 64));
+                assert!(
+                    p.consumers[wc as usize]
+                        .iter()
+                        .any(|&(w, m)| w == word && m & mask != 0),
+                    "cell {wc} does not mark reader {r} of [{a}, {b})"
+                );
+                assert!(
+                    p.boundary[wc as usize]
+                        .iter()
+                        .any(|&(lo, hi)| lo <= *a && *b <= hi),
+                    "cell {wc} does not watch [{a}, {b})"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "one cell holds everything: {:?}", p.cells);
+    }
+
+    #[test]
+    fn a_store_inside_a_span_hits_it() {
+        let marks: StoreMarks = std::sync::Arc::new(EventMarks {
+            comb: vec![
+                (0, 4, vec![(0, 1)]),
+                (8, 16, vec![(0, 2)]),
+                (16, 24, vec![(1, 4)]),
+            ],
+            ff: Vec::new(),
+        });
+        assert_eq!(store_hits(&marks, 12, 13), Some((8, 16, vec![(0, 2)])));
+        assert_eq!(store_hits(&marks, 4, 8), None);
+        assert_eq!(
+            store_hits(&marks, 15, 17),
+            Some((8, 24, vec![(0, 2), (1, 4)]))
+        );
+    }
+
+    #[test]
+    fn marked_tables_include_the_writing_cell() {
+        // An outside write to `a` must rerun `a`'s writer, or its value stands.
+        // Nothing reads `a`, so only the writer rule puts it in the table.
+        let (x, a) = (0, 8);
+        let stmts = vec![assign(a, x)];
+        let p = plan(&stmts, &inputs(2)).expect("plannable");
+        let wc = cell_of(&p, 0) as u32;
+        let row = p.comb_marked.iter().find(|r| r.0 == a as u32);
+        let row = row.unwrap_or_else(|| panic!("{:?}", p.comb_marked));
+        assert!(row.2.contains(&wc), "{:?}", p.comb_marked);
+    }
+}
