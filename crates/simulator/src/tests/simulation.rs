@@ -28846,6 +28846,94 @@ fn event_gate_skips_an_idle_subtree_and_follows_its_inputs() {
 }
 
 #[test]
+fn event_gate_sees_a_comb_input_its_event_never_reads() {
+    // The child's gate compares the parent's `g`, which no event names.
+    // `o_g` keeps `g` a variable of its own, and the wide `w` makes the
+    // parent's gate dearer than the child's.
+    const N: usize = 64;
+    let (mut decls, mut steps) = (String::new(), String::new());
+    for i in 0..N {
+        decls.push_str(&format!("        var r{i}: logic<16>;\n"));
+    }
+    steps.push_str("                r0 = r0 + 16'd1;\n");
+    for i in 1..N {
+        steps.push_str(&format!("                r{i} = r{p} + r{i};\n", p = i - 1));
+    }
+    let code = format!(
+        r#"
+    module Idle (
+        clk: input  clock,
+        en8: input  logic<8>,
+        o:   output logic<16>,
+    ) {{
+{decls}
+        always_ff {{
+            if en8[1] {{
+{steps}
+            }}
+        }}
+        assign o = r0 + r{last};
+    }}
+
+    module Top (
+        clk:    input  clock,
+        a:      input  logic,
+        b:      input  logic,
+        w:      input  logic<512>,
+        o_idle: output logic<16>,
+        o_g:    output logic,
+        o_w:    output logic<512>,
+    ) {{
+        let g: logic<8> = {{7'd0, a & b}};
+        assign o_g = g[0];
+        assign o_w = w + 1;
+        inst u: Idle (clk, en8: g + 8'd1, o: o_idle);
+    }}
+"#,
+        last = N - 1,
+    );
+    let tick = |r: &mut [u16; N], en: bool| {
+        if en {
+            let old = *r;
+            r[0] = old[0].wrapping_add(1);
+            for i in 1..N {
+                r[i] = old[i - 1].wrapping_add(old[i]);
+            }
+        }
+    };
+    for mut config in Config::all().into_iter().filter(|c| !c.use_4state) {
+        config.aot_c_min_stmts = 0;
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let mut r = [0u16; N];
+        sim.set("a", Value::new(1, 1, false));
+        sim.set("b", Value::new(0, 1, false));
+        for (phase, (b, cycles)) in [(false, 4), (true, 3), (false, 3), (true, 3)]
+            .into_iter()
+            .enumerate()
+        {
+            sim.set("b", Value::new(u64::from(b), 1, false));
+            for cycle in 0..cycles {
+                sim.step(&clk);
+                tick(&mut r, b);
+                assert_eq!(
+                    sim.get("o_idle").unwrap().payload_u64(),
+                    r[0].wrapping_add(r[N - 1]) as u64,
+                    "phase {phase} cycle {cycle}, {config:?}"
+                );
+            }
+        }
+        if config.aot_c && !config.use_4state {
+            assert!(
+                !sim.ir.event_gate_flags.is_empty(),
+                "no gate planned, {config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn wide_concat_element_placement() {
     // A >128-bit concatenation places each element into the word it lands in,
     // so the two shapes that stress the position arithmetic are one element per

@@ -7252,6 +7252,18 @@ impl Conv<&air::Module> for ProtoModule {
                 }
             }
         }
+        // A gate compares comb bytes its event may never name, so a C local
+        // would leave it a stale buffer. Per byte: ranges are scanned linearly.
+        let localize_info = localize_info.map(|(mut block, ranges)| {
+            for g in event_gates.values().flatten() {
+                for &(is_ff, a, b) in &g.compare {
+                    if !is_ff {
+                        block.extend((a..b).map(|o| o as isize));
+                    }
+                }
+            }
+            (block, ranges)
+        });
 
         // AOT-C event path: compile each event's FF-next + write-log to C,
         // keyed by Event.  `prepare_event` returns None on any uncovered stmt,
