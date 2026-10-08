@@ -97,6 +97,10 @@ pub struct WriteLogBuffer {
     /// additional narrow/wide entries.  Called once from the AOT-C event
     /// prologue so the per-push code stays unchecked.
     pub reserve: unsafe extern "C" fn(*mut WriteLogBuffer, u32, u32),
+    /// The dataflow dirty words that compiled event stores mark, or null
+    /// when the module settles without dataflow or the whole-settle entry is
+    /// running the settles.
+    pub df_dirty: *mut u64,
     /// Owning storage — keeps `narrow_entries_ptr` valid.
     _narrow_owner: Box<[WriteLogEntry]>,
     /// Owning storage — keeps `wide_entries_ptr` valid.
@@ -140,6 +144,7 @@ pub const WRITE_LOG_OFFSET_GROW_PUSH_WIDE: i32 =
     std::mem::offset_of!(WriteLogBuffer, grow_push_wide) as i32;
 #[allow(dead_code)]
 pub const WRITE_LOG_OFFSET_RESERVE: i32 = std::mem::offset_of!(WriteLogBuffer, reserve) as i32;
+pub const WRITE_LOG_OFFSET_DF_DIRTY: i32 = std::mem::offset_of!(WriteLogBuffer, df_dirty) as i32;
 
 #[allow(dead_code)]
 pub const WRITE_LOG_ENTRY_SIZE: i32 = std::mem::size_of::<WriteLogEntry>() as i32;
@@ -191,6 +196,7 @@ impl WriteLogBuffer {
             grow_push_narrow: write_log_grow_push_narrow,
             grow_push_wide: write_log_grow_push_wide,
             reserve: write_log_reserve,
+            df_dirty: std::ptr::null_mut(),
             _narrow_owner: narrow,
             _wide_owner: wide,
         }

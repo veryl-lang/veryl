@@ -991,6 +991,95 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<Dataflo
     })
 }
 
+/// One Cranelift function per cell, indexed like `DataflowPlan::cells`.
+#[cfg(not(target_family = "wasm"))]
+pub struct DataflowJit {
+    /// `None` for a cell Cranelift could not compile; `interp` holds it.
+    pub funcs: Vec<Option<crate::FuncPtr>>,
+    /// The cells the dispatcher interprets, with their statements.
+    pub interp: Vec<(usize, Vec<ProtoStatement>)>,
+    _keepalive: Vec<memmap2::Mmap>,
+}
+
+/// Compile every cell with Cranelift, in parallel, to run until the `.so`
+/// lands.
+#[cfg(not(target_family = "wasm"))]
+pub fn compile_jit(
+    config: &crate::ir::Config,
+    stmts: &[ProtoStatement],
+    plan: &DataflowPlan,
+) -> Option<DataflowJit> {
+    use crate::backend::cranelift::runtime::{CellWatch, build_cell_binary};
+    let t = std::time::Instant::now();
+    let n = plan.cells.len();
+    let body = |k: usize| -> Vec<ProtoStatement> {
+        plan.cells[k]
+            .iter()
+            .map(|&i| stmts[i as usize].clone())
+            .collect()
+    };
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |p| p.get())
+        .clamp(1, 8);
+    let per = n.div_ceil(threads).max(1);
+    type Compiled = Option<(crate::FuncPtr, Option<memmap2::Mmap>)>;
+    let results: Vec<Compiled> = std::thread::scope(|sc| {
+        let handles: Vec<_> = (0..n)
+            .step_by(per)
+            .map(|lo| {
+                std::thread::Builder::new()
+                    .stack_size(crate::IR_WALK_STACK_BYTES)
+                    .spawn_scoped(sc, move || {
+                        (lo..(lo + per).min(n))
+                            .map(|k| {
+                                let watch = CellWatch {
+                                    boundary: &plan.boundary[k],
+                                    consumers: &plan.consumers[k],
+                                    always: plan.mark_always[k],
+                                };
+                                build_cell_binary(config, body(k), &watch)
+                            })
+                            .collect::<Vec<Compiled>>()
+                    })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.ok().and_then(|h| h.join().ok()).unwrap_or_default())
+            .collect()
+    });
+    if results.len() != n {
+        return None;
+    }
+    let mut funcs = Vec::with_capacity(n);
+    let mut interp = Vec::new();
+    let mut keep = Vec::new();
+    for (k, r) in results.into_iter().enumerate() {
+        match r {
+            Some((f, m)) => {
+                funcs.push(Some(f));
+                keep.extend(m);
+            }
+            None => {
+                funcs.push(None);
+                interp.push((k, body(k)));
+            }
+        }
+    }
+    if diag() {
+        eprintln!(
+            "[dataflow] jit: {n} cells in {:.2} s, {} interpreted",
+            t.elapsed().as_secs_f64(),
+            interp.len()
+        );
+    }
+    Some(DataflowJit {
+        funcs,
+        interp,
+        _keepalive: keep,
+    })
+}
+
 /// A byte range `[lo, hi)` with the `(word, mask)` dirty bits of the cells
 /// reading it.
 pub type MarkSpan = (u32, u32, Vec<(u32, u64)>);
