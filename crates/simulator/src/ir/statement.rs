@@ -731,71 +731,112 @@ pub fn format_assert_message(
     format_display_string(format_str, &values)
 }
 
-fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
-    let mut result = String::new();
-    let mut chars = format_str.chars().peekable();
-    let mut arg_idx = 0;
+/// Ceiling on a `$display` field width: the digits come from a source
+/// literal, so without one the padding is an allocation the user sizes by
+/// typing.  The argument is still consumed, so later conversions keep theirs.
+const MAX_FIELD_WIDTH: usize = 1 << 16;
 
-    while let Some(ch) = chars.next() {
-        if ch == '%' {
-            if let Some(&spec) = chars.peek() {
-                chars.next();
-                match spec {
-                    '%' => result.push('%'),
-                    'h' | 'H' | 'x' | 'X' => {
-                        if let Some(v) = values.get(arg_idx) {
-                            result.push_str(&v.format_hex());
-                        }
-                        arg_idx += 1;
-                    }
-                    'd' | 'D' => {
-                        if let Some(v) = values.get(arg_idx) {
-                            result.push_str(&v.format_dec());
-                        }
-                        arg_idx += 1;
-                    }
-                    'o' | 'O' => {
-                        if let Some(v) = values.get(arg_idx) {
-                            result.push_str(&v.format_oct());
-                        }
-                        arg_idx += 1;
-                    }
-                    'b' | 'B' => {
-                        if let Some(v) = values.get(arg_idx) {
-                            result.push_str(&v.format_bin());
-                        }
-                        arg_idx += 1;
-                    }
-                    'c' | 'C' => {
-                        if let Some(v) = values.get(arg_idx) {
-                            let ch = (v.payload_u64() & 0xFF) as u8 as char;
-                            result.push(ch);
-                        }
-                        arg_idx += 1;
-                    }
-                    's' | 'S' => {
-                        if let Some(v) = values.get(arg_idx) {
-                            result.push_str(&byte_value_to_string_lossy(v));
-                        }
-                        arg_idx += 1;
-                    }
-                    'm' | 'M' => {
-                        result.push_str("<hierarchy>");
-                    }
-                    't' | 'T' => {
-                        result.push('0');
-                    }
-                    _ => {
-                        result.push('%');
-                        result.push(spec);
-                    }
-                }
-            } else {
-                result.push('%');
-            }
-        } else {
-            result.push(ch);
+/// Minimal form of a padded conversion: `%0h` drops the leading zeros the
+/// default width pads with.  One digit always survives.
+fn trim_leading_zeros(s: &str) -> String {
+    let trimmed = s.trim_start_matches('0');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn format_display_string(format_str: &str, values: &[AnalyzerValue]) -> String {
+    let chars: Vec<char> = format_str.chars().collect();
+    let mut result = String::new();
+    let mut arg_idx = 0;
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] != '%' {
+            result.push(chars[i]);
+            i += 1;
+            continue;
         }
+        // `%[-][0][width]<conv>`.  The width belongs to the spec and has to
+        // be consumed with it: left in place, `%0d` prints literally AND
+        // leaves its argument to the next conversion, sliding every later
+        // one along.
+        let start = i;
+        let mut j = i + 1;
+        let left_justify = chars.get(j) == Some(&'-');
+        if left_justify {
+            j += 1;
+        }
+        let digits_start = j;
+        while chars.get(j).is_some_and(|c| c.is_ascii_digit()) {
+            j += 1;
+        }
+        // A leading `0` is C's pad-with-zeros flag; `%0d` is its degenerate
+        // case, which Verilog reads as the minimal form.
+        let zero_pad = chars.get(digits_start) == Some(&'0');
+        let width: Option<usize> = (j > digits_start).then(|| {
+            chars[digits_start..j].iter().fold(0usize, |acc, c| {
+                acc.saturating_mul(10)
+                    .saturating_add(c.to_digit(10).unwrap() as usize)
+                    .min(MAX_FIELD_WIDTH)
+            })
+        });
+        let Some(&spec) = chars.get(j) else {
+            result.extend(&chars[start..]);
+            break;
+        };
+        i = j + 1;
+
+        let mut take = |f: &dyn Fn(&AnalyzerValue) -> String| -> String {
+            let s = values.get(arg_idx).map(f).unwrap_or_default();
+            arg_idx += 1;
+            s
+        };
+        // No width at all keeps whatever each conversion pads to on its own.
+        let minimal = width == Some(0);
+        let mut body = match spec {
+            '%' => {
+                result.push('%');
+                continue;
+            }
+            'h' | 'H' | 'x' | 'X' => take(&|v| v.format_hex()),
+            'd' | 'D' => take(&|v| v.format_dec()),
+            'o' | 'O' => take(&|v| v.format_oct()),
+            'b' | 'B' => take(&|v| v.format_bin()),
+            'c' | 'C' => take(&|v| ((v.payload_u64() & 0xFF) as u8 as char).to_string()),
+            's' | 'S' => take(&byte_value_to_string_lossy),
+            'm' | 'M' => "<hierarchy>".to_string(),
+            't' | 'T' => "0".to_string(),
+            _ => {
+                result.extend(&chars[start..=j]);
+                continue;
+            }
+        };
+        if minimal && matches!(spec, 'h' | 'H' | 'x' | 'X' | 'o' | 'O' | 'b' | 'B') {
+            body = trim_leading_zeros(&body);
+        }
+        if let Some(width) = width {
+            let len = body.chars().count();
+            if len < width {
+                let count = width - len;
+                let numeric = matches!(
+                    spec,
+                    'd' | 'D' | 'h' | 'H' | 'x' | 'X' | 'o' | 'O' | 'b' | 'B'
+                );
+                if left_justify {
+                    body.push_str(&" ".repeat(count));
+                } else if zero_pad && numeric {
+                    // Behind the sign, as C pads: `%05d` of -7 is `-0007`.
+                    let at = usize::from(body.starts_with('-'));
+                    body.insert_str(at, &"0".repeat(count));
+                } else {
+                    body.insert_str(0, &" ".repeat(count));
+                }
+            }
+        }
+        result.push_str(&body);
     }
     result
 }
@@ -5718,5 +5759,59 @@ mod narrow_destructure_rhs_tests {
         assert!(narrow_destructure_rhs(&concat3(), (119, 0)).is_none());
         assert!(narrow_destructure_rhs(&concat3(), (129, 90)).is_none());
         assert!(narrow_destructure_rhs(&var(0x10, 40), (9, 0)).is_none());
+    }
+}
+
+#[cfg(test)]
+mod display_format_tests {
+    use super::*;
+
+    fn v(payload: u64, width: usize) -> AnalyzerValue {
+        AnalyzerValue::new(payload, width, false)
+    }
+
+    fn signed(payload: u64, width: usize) -> AnalyzerValue {
+        AnalyzerValue::new(payload, width, true)
+    }
+
+    #[test]
+    fn field_width_is_part_of_the_spec() {
+        // Regression: `%0d` printed literally and slid every later
+        // conversion along by one argument.
+        assert_eq!(
+            format_display_string("%0d %d %h %0h", &[v(10, 8), v(11, 8), v(12, 32), v(12, 32)]),
+            "10 11 0000000c c",
+        );
+        assert_eq!(
+            format_display_string("[%5d][%-5d]", &[v(7, 8), v(7, 8)]),
+            "[    7][7    ]",
+        );
+        // A default rendering already past the field width is not truncated.
+        assert_eq!(format_display_string("%2h", &[v(9, 32)]), "00000009");
+        // Unknown specs and an unterminated one stay text.
+        assert_eq!(format_display_string("%% %q", &[v(1, 8)]), "% %q");
+        assert_eq!(format_display_string("ends with %5", &[]), "ends with %5");
+    }
+
+    #[test]
+    fn a_leading_zero_pads_with_zeros() {
+        // The flag the emitted SystemVerilog is read with.
+        assert_eq!(format_display_string("%05d", &[v(7, 8)]), "00007");
+        assert_eq!(format_display_string("%04h", &[v(0xc, 8)]), "000c");
+        assert_eq!(format_display_string("%0d", &[v(7, 8)]), "7");
+        // Behind the sign, and `-` wins over it as in C.
+        assert_eq!(format_display_string("%05d", &[signed(0xf9, 8)]), "-0007");
+        assert_eq!(format_display_string("%-05d", &[v(7, 8)]), "7    ");
+        // A non-numeric conversion has no digits to pad.
+        assert_eq!(format_display_string("[%05c]", &[v(0x41, 8)]), "[    A]");
+    }
+
+    #[test]
+    fn an_absurd_field_width_is_capped() {
+        // Clamped rather than allocated, and the conversion after it still
+        // gets its own argument.
+        let out = format_display_string("%99999999999999999999d|%d", &[v(7, 8), v(9, 8)]);
+        assert_eq!(out.chars().count(), MAX_FIELD_WIDTH + 2);
+        assert!(out.ends_with("7|9"), "{:?}", &out[out.len() - 8..]);
     }
 }
