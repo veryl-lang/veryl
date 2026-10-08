@@ -229,28 +229,32 @@ fn affine_index(
     result.representative(context.width, context.signed, ctx, iterators)
 }
 
-/// A storage coordinate. A wrapped unsigned value that would be negative as
-/// an integer selects no element, exactly like the negative integer, as long
-/// as every such value stays in the upper half of the context range and no
-/// positive value wraps. Every dimension is smaller than that half, so the
-/// selected positions of the integer form and of the bit vector agree.
+/// A storage coordinate into a dimension of `size` positions. A wrapped
+/// unsigned value that would be negative as an integer selects no element,
+/// exactly like the negative integer, as long as it wraps past the last
+/// position and no positive value wraps. The selected positions of the
+/// integer form and of the bit vector then agree.
 fn affine_position(
     expression: &Expression,
     ctx: &mut Context,
     iterators: &[CountedIterator],
+    size: usize,
 ) -> Option<AffineIndex> {
     if let Some(position) = affine_index(expression, ctx, iterators) {
         return Some(position);
     }
     let comptime = expression.comptime();
     let context = comptime.expr_context;
-    if context.signed || context.width < 2 {
+    if context.signed || context.width < 1 {
         return None;
     }
     let result = affine_ring(expression, ctx, iterators, context.width)?;
     let (min, max) = result.extent(ctx, iterators)?;
-    let half = 1i128.checked_shl(u32::try_from(context.width - 1).ok()?)?;
-    (-half <= min && max < half).then_some(result)
+    let modulus = 1i128.checked_shl(u32::try_from(context.width).ok()?)?;
+    let wraps_past_last = min
+        .checked_add(modulus)
+        .is_some_and(|wrapped| wrapped >= size as i128);
+    (-modulus <= min && max < modulus && wraps_past_last).then_some(result)
 }
 
 fn affine_ring(
@@ -2197,9 +2201,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // Layout strides are integer coordinate arithmetic, not synthetic
         // expressions with missing width/signedness metadata.
         for (expression, dimension) in index.indices.iter().zip(dimensions.iter()).rev() {
-            let coordinate = affine_position(expression, &mut self.ctx, &self.counted_iterators)?;
+            let dimension = (*dimension)?;
+            let coordinate = affine_position(
+                expression,
+                &mut self.ctx,
+                &self.counted_iterators,
+                dimension,
+            )?;
             result.add_scaled(&coordinate, stride)?;
-            stride = stride.checked_mul(isize::try_from((*dimension)?).ok()?)?;
+            stride = stride.checked_mul(isize::try_from(dimension).ok()?)?;
         }
         Some(result)
     }
@@ -2223,11 +2233,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         };
         let dimensions = variable.r#type.width().clone();
         let dimension = select.dimension();
+        // The selected dimension, or the element bits of a value without
+        // packed dimensions.
+        let size = if dimensions.dims() < dimension {
+            element_width
+        } else {
+            dimensions.iter().nth(dimension - 1).copied().flatten()?
+        };
         let (element, count) = |position: &Expression,
                                 ctx: &mut Context,
                                 iterators: &[CountedIterator]|
          -> Option<(AffineIndex, usize)> {
-            let x = affine_position(position, ctx, iterators)?;
+            let x = affine_position(position, ctx, iterators, size)?;
             let constant =
                 |expression: &Expression, ctx: &mut Context| expression.eval_value(ctx)?.to_usize();
             Some(match &select.1 {
@@ -2243,7 +2260,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     (element, count)
                 }
                 Some((VarSelectOp::Colon, end)) => {
-                    let y = affine_position(end, ctx, iterators)?;
+                    let y = affine_position(end, ctx, iterators, size)?;
                     if x.terms != y.terms {
                         return None;
                     }
@@ -2276,7 +2293,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 width = count.checked_mul(base)?;
             } else if i > skip {
                 let position = &select.0[dimension - (i - skip) - 1];
-                let x = affine_position(position, &mut self.ctx, &self.counted_iterators)?;
+                let x = affine_position(position, &mut self.ctx, &self.counted_iterators, size)?;
                 low.add_scaled(&x, isize::try_from(base).ok()?)?;
             }
             base = base.checked_mul(size)?;

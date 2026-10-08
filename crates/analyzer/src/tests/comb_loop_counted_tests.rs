@@ -719,3 +719,26 @@ fn counted_scalar_writes_reach_only_their_positions() {
         assert!(comb_loop_analysis_is_complete(&code), "{case}");
     }
 }
+
+#[test]
+fn counted_wrapped_index_selects_the_element_it_wraps_to() {
+    // An index below zero in its own width wraps to an unsigned value. It
+    // selects nothing only when that value lies past the last element.
+    for (case, index, expected) in [
+        ("narrow wrap stays in range", "(i as 2) - 2'd1", true),
+        ("narrow operand wraps in range", "k - 2'd1", true),
+        ("wide wrap leaves the range", "i - 1", false),
+    ] {
+        let code = format!(
+            "module Top (a: input logic, k: input logic, o: output logic) {{
+                var x: logic [4]; var y: logic [2];
+                assign x[0] = a; assign x[1] = a; assign x[2] = a; assign x[3] = y[0];
+                always_comb {{ for i in 0..2 {{ y[i] = x[{index}]; }} }}
+                assign o = y[1];
+            }}"
+        );
+        let loops = comb_loops(&code);
+        assert_eq!(!loops.is_empty(), expected, "{case}: {loops:?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{case}");
+    }
+}
