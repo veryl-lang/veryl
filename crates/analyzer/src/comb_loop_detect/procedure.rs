@@ -421,7 +421,7 @@ mod footprint;
 mod iterator_use;
 mod last_writer;
 use footprint::{LoopAccesses, for_range_step};
-pub(super) use iterator_use::iterator_needs_values;
+pub(super) use iterator_use::{iterator_needs_values, loop_needs_values};
 use last_writer::{Step, WriterId, WriterScope};
 
 #[derive(Clone)]
@@ -4321,18 +4321,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return FlowResult::new(ProcedureFlow::Continue);
         }
 
-        if !crate::ir::peel::has_own_break(&statement.body)
+        // A loop that needs its iterator's values takes each iteration's
+        // value while the iterations stay within the size limit.
+        if loop_needs_values(statement)
+            && let Some(values) = statement.range.eval_iter(&mut self.ctx)
+        {
+            self.eval_known_for_iterations(statement, &range_controls, values)
+        } else if !crate::ir::peel::has_own_break(&statement.body)
+            && !matches!(statement.range, ForRange::Stepped { .. })
             && let Some(iterations) = statement.range.eval_counted(&mut self.ctx)
         {
             if iterations.count == 0 {
                 return FlowResult::new(ProcedureFlow::Continue);
-            }
-            // An iterator used other than affinely takes each iteration's
-            // value while the iterations stay within the size limit.
-            if iterator_needs_values(&statement.body, statement.var_id)
-                && let Some(values) = statement.range.eval_iter(&mut self.ctx)
-            {
-                return self.eval_known_for_iterations(statement, &range_controls, values);
             }
             self.eval_counted_for(statement, &range_controls, iterations)
         } else if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
@@ -5982,6 +5982,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                     .0
                                     .iter()
                                     .all(|x| pure_expression(analysis, x, depth))
+                                && destination
+                                    .select
+                                    .1
+                                    .as_ref()
+                                    .is_none_or(|(_, x)| pure_expression(analysis, x, depth))
                         })
                 }
                 Statement::If(statement) => {

@@ -266,8 +266,9 @@ impl RelationPiece {
                             self.anchor[read] = intersect_range(self.anchor[read], Some(hull))?;
                         }
                         let value = map
-                            .base
-                            .checked_add(map.step.checked_mul(first).unwrap_or(isize::MAX));
+                            .step
+                            .checked_mul(first)
+                            .and_then(|offset| map.base.checked_add(offset));
                         if first == last
                             && map.translation_offset().is_none()
                             && let Some(value) = value
@@ -1056,5 +1057,28 @@ fn range_contains(outer: AxisRange, inner: AxisRange) -> bool {
         (None, _) => true,
         (Some(_), None) => false,
         (Some(outer), Some(inner)) => outer.0 <= inner.0 && inner.1 <= outer.1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_anchor_map_keeps_its_form_when_its_value_overflows() {
+        let map = Map {
+            crossed: false,
+            modulus: 1,
+            residue: 0,
+            base: -10,
+            step: isize::MAX,
+        };
+        let piece = RelationPiece {
+            anchor: [Some((2, 3)), None],
+            current: [Current::Linked(map), Current::Unlinked(EVERY, None)],
+        };
+        // The only anchor value maps past `isize::MAX`; no constant stands in.
+        let simplified = piece.simplified().expect("the anchor value is in range");
+        assert_eq!(simplified.current[0], Current::Linked(map));
     }
 }

@@ -8,9 +8,19 @@
 //! each iteration's value instead while that stays within the size limit.
 
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CasePattern, Expression, Factor, ForBound, ForRange, Op,
-    Statement, SystemFunctionKind, VarId, VarIndex, VarSelect,
+    ArrayLiteralItem, AssignDestination, CasePattern, Expression, Factor, ForBound, ForRange,
+    ForStatement, Op, Statement, SystemFunctionKind, VarId, VarIndex, VarSelect,
 };
+
+/// Whether a statically known loop takes each iteration's constant value
+/// instead of one symbolic iteration. A loop that breaks, or whose step is not
+/// additive, reaches values a symbolic iterator over `min..=max` cannot
+/// represent; a body may also use its iterator other than affinely.
+pub(in crate::comb_loop_detect) fn loop_needs_values(statement: &ForStatement) -> bool {
+    crate::ir::peel::has_own_break(&statement.body)
+        || matches!(statement.range, ForRange::Stepped { .. })
+        || iterator_needs_values(&statement.body, statement.var_id)
+}
 
 /// Whether `statements` use `iterator` in a form a symbolic iteration loses.
 pub(in crate::comb_loop_detect) fn iterator_needs_values(
@@ -130,12 +140,20 @@ fn value_needs_values(expression: &Expression, iterator: VarId) -> bool {
         Expression::Ternary(condition, left, right, _) => {
             condition_needs_values(condition, iterator) || recurse(left) || recurse(right)
         }
-        Expression::Concatenation(parts, _) => parts
-            .iter()
-            .any(|(part, repeat)| recurse(part) || repeat.as_ref().is_some_and(recurse)),
+        // A repeat count sets how many positions the value has, so the
+        // iterator in it is a coordinate, not a value.
+        Expression::Concatenation(parts, _) => parts.iter().any(|(part, repeat)| {
+            recurse(part)
+                || repeat
+                    .as_ref()
+                    .is_some_and(|repeat| mentions(repeat, iterator))
+        }),
         Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
             ArrayLiteralItem::Value(value, repeat) => {
-                recurse(value) || repeat.as_deref().is_some_and(recurse)
+                recurse(value)
+                    || repeat
+                        .as_deref()
+                        .is_some_and(|repeat| mentions(repeat, iterator))
             }
             ArrayLiteralItem::Defaul(value) => recurse(value),
         }),

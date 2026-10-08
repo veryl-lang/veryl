@@ -726,12 +726,11 @@ fn collect_statement_spans(
                 collect_statement_spans(&statement.default, out, ctx);
             }
             Statement::For(statement) => {
-                // Loops that break, or use their iterator other than
-                // affinely, still enumerate their constant iterations during
-                // evaluation, which needs each iteration's boundaries. Every
-                // other loop is evaluated once with a symbolic iterator.
-                if (crate::ir::peel::has_own_break(&statement.body)
-                    || procedure::iterator_needs_values(&statement.body, statement.var_id))
+                // Loops that need their iterator's values still enumerate
+                // their constant iterations during evaluation, which needs
+                // each iteration's boundaries. Every other loop is evaluated
+                // once with a symbolic iterator.
+                if procedure::loop_needs_values(statement)
                     && let Some(iterations) = statement.range.eval_iter(ctx)
                 {
                     for iteration in iterations {

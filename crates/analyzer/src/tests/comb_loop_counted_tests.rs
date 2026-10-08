@@ -1115,3 +1115,40 @@ counted_case!(
      always_comb { x[0] = y; for i in 1..4 { x[i] = x[i - 1]; } o = x[3]; }",
     true
 );
+
+counted_case!(
+    counted_multiplied_step_takes_only_its_iterations,
+    "a multiplied step skips the values between its iterations",
+    "var x: logic [9];
+     always_comb {
+         x[3] = a[0];
+         x[0] = x[4];
+         for i in 1..9 step *= 2 { x[i] = x[i - 1]; }
+         o = {7'd0, x[8]};
+     }",
+    false
+);
+
+counted_case!(
+    counted_multiplied_step_keeps_its_loops,
+    "a multiplied step relates each iteration to its predecessor",
+    "var x: logic [9];
+     always_comb {
+         x[0] = x[4];
+         for i in 1..9 step *= 2 { x[i] = x[i >> 1]; }
+         o = {7'd0, x[8]};
+     }",
+    true
+);
+
+counted_case!(
+    counted_iterator_repeat_count_takes_each_iteration,
+    "an iterator repeat count sets the positions each iteration writes",
+    "var u: logic<6>;
+     always_comb {
+         u[4] = u[1];
+         for i in 2..3 { u[3:0] = {u[5:4] repeat i}; }
+         o = {2'd0, u};
+     }",
+    false
+);
