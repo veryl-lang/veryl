@@ -742,3 +742,83 @@ fn counted_wrapped_index_selects_the_element_it_wraps_to() {
         assert!(comb_loop_analysis_is_complete(&code), "{case}");
     }
 }
+
+#[test]
+fn counted_static_signed_operands_extend_by_their_context() {
+    // A static signed operand is sign-extended in a signed context and
+    // zero-extended in an unsigned one, both in an index and in a branch on
+    // the iterator.
+    for (case, body, expected) in [
+        (
+            "signed index context",
+            "always_comb { for i in 0..32 { z[i] = if i == 7 ? q[0] : a; } }
+             always_comb { for i in 0..2 { q[i] = z[i + S + 8]; } }",
+            true,
+        ),
+        (
+            "unsigned index context",
+            "always_comb { for i in 0..32 { z[i] = if i == 23 ? q[0] : a; } }
+             always_comb { for i in 0..2 { q[i] = z[i + S + 8'd8]; } }",
+            true,
+        ),
+        (
+            "unsigned index context skips the sign-extended element",
+            "always_comb { for i in 0..32 { z[i] = if i == 7 ? q[0] : a; } }
+             always_comb { for i in 0..2 { q[i] = z[i + S + 8'd8]; } }",
+            false,
+        ),
+        (
+            "a negative constant equals no iteration",
+            "always_comb { for i in 0..16 { z[i] = if i == S ? a : q[0]; } }
+             always_comb { for i in 0..2 { q[i] = z[15]; } }",
+            true,
+        ),
+    ] {
+        let code = format!(
+            "module Top (a: input logic, o: output logic) {{
+                const S: signed logic<4> = 4'b1111;
+                var z: logic [32]; var q: logic [2];
+                {body}
+                assign o = q[0] ^ q[1];
+            }}"
+        );
+        let loops = comb_loops(&code);
+        assert_eq!(!loops.is_empty(), expected, "{case}: {loops:?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{case}");
+    }
+}
+
+#[test]
+fn counted_concatenated_bit_select_receives_its_own_part() {
+    // A bit selected by the iterator inside a concatenated destination
+    // receives only its own part of the value and only the bits it takes.
+    for (case, body, expected) in [
+        (
+            "its own part",
+            "for i in 0..4 { {x[i], y} = {f, a}; }",
+            true,
+        ),
+        (
+            "the other part",
+            "for i in 0..4 { {x[i], y} = {a, f}; }",
+            false,
+        ),
+        (
+            "an unwritten bit",
+            "for i in 0..3 { {x[i], y} = {f, a}; }",
+            false,
+        ),
+    ] {
+        let code = format!(
+            "module Top (a: input logic, o: output logic<5>) {{
+                var x: logic<4>; var y: logic; var f: logic;
+                always_comb {{ x = 0; y = 0; {body} }}
+                assign f = x[3];
+                assign o = {{x, y}};
+            }}"
+        );
+        let loops = comb_loops(&code);
+        assert_eq!(!loops.is_empty(), expected, "{case}: {loops:?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{case}");
+    }
+}

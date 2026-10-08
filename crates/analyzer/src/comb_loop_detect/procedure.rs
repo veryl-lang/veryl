@@ -196,14 +196,26 @@ impl SampledAffineIndex {
 }
 
 fn affine_constant(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
-    let constant = expression
-        .eval_value(ctx)
-        .and_then(|value| value.to_usize())
-        .and_then(|value| isize::try_from(value).ok())?;
     Some(AffineIndex {
         terms: Vec::new(),
-        constant,
+        constant: constant_integer(expression, ctx)?,
     })
+}
+
+/// The integer a constant operand has in its context. A signed context
+/// extends the value's own sign bit; an unsigned one extends with zeros.
+fn constant_integer(expression: &Expression, ctx: &mut Context) -> Option<isize> {
+    let value = expression.eval_value(ctx)?;
+    let bits = value.to_usize()? as i128;
+    let width = u32::try_from(value.width()).ok()?;
+    let negative =
+        expression.comptime().expr_context.signed && width > 0 && (bits >> (width - 1)) & 1 == 1;
+    let integer = if negative {
+        bits - 1i128.checked_shl(width)?
+    } else {
+        bits
+    };
+    isize::try_from(integer).ok()
 }
 
 /// An integer coordinate whose bit-vector evaluation cannot wrap.
@@ -2870,6 +2882,29 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let dynamic_array = !destination.index.is_const();
         let dynamic_packed = !destination.select.is_const_with_range();
         let dynamic = dynamic_array || dynamic_packed;
+        // A packed select that moves with the counted iterators receives
+        // only its own bits of the expression and writes only the bits its
+        // position takes.
+        let packed_reachable = (dynamic_packed
+            && destination_array.is_some_and(|array| array.length == 1))
+        .then(|| {
+            let (select, width) = self.packed_affine_select(destination.id, &destination.select)?;
+            let mut spans: Vec<PackedSpan> = Vec::new();
+            for span in self.affine_spans(&select)? {
+                let end = span.start + span.length - 1 + width;
+                match spans.last_mut() {
+                    Some(last) if last.start + last.length >= span.start => {
+                        last.length = last.length.max(end - last.start);
+                    }
+                    _ => spans.push(PackedSpan {
+                        start: span.start,
+                        length: end - span.start,
+                    }),
+                }
+            }
+            Some((spans, width))
+        })
+        .flatten();
         let anchor = dynamic_array
             && destination_index
                 .as_ref()
@@ -2962,6 +2997,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 } else {
                     ExpressionSources::default()
                 }
+            } else if let Some((_, width)) = packed_reachable {
+                self.eval_expr_requested_in(
+                    expression,
+                    ArraySpan {
+                        start: 0,
+                        length: 1,
+                    },
+                    PackedSpan {
+                        start: expression_offset,
+                        length: width,
+                    },
+                    expression_context_width,
+                    &ProjectionContext {
+                        array_shape: Some(destination.comptime.r#type.array.clone()),
+                        ..ProjectionContext::default()
+                    },
+                )
             } else {
                 ExpressionSources::whole(self.eval_expr(expression))
             };
@@ -3012,6 +3064,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     let domains = regions
                         .into_iter()
                         .map(|region| position_domain(region, packed))
+                        .collect::<Vec<_>>();
+                    version = self.ssa.projected_union(version, &domains);
+                }
+            }
+            if let (Some((reachable, _)), Some(packed)) = (&packed_reachable, self.key_span(key)) {
+                let regions = reachable
+                    .iter()
+                    .filter_map(|span| packed.intersection(*span))
+                    .collect::<Vec<_>>();
+                // Bits outside the reachable ones keep their value.
+                if regions.is_empty() {
+                    continue;
+                }
+                if regions != [packed] {
+                    let domains = regions
+                        .into_iter()
+                        .map(|region| position_domain(key.1, region))
                         .collect::<Vec<_>>();
                     version = self.ssa.projected_union(version, &domains);
                 }
@@ -3847,17 +3916,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if !comptime.is_const {
             return None;
         }
-        // The operands are compared at their common context, where a signed
-        // constant with its sign bit set is negative.
-        let context = comptime.expr_context;
-        let bits = constant.eval_value(&mut self.ctx)?.to_usize()? as i128;
-        let width = u32::try_from(context.width).ok()?;
-        let constant = if context.signed && width > 0 && (bits >> (width - 1)) & 1 == 1 {
-            bits - 1i128.checked_shl(width)?
-        } else {
-            bits
-        };
-        let constant = isize::try_from(constant).ok()?;
+        // The operands are compared at their common context.
+        let constant = constant_integer(constant, &mut self.ctx)?;
         let iterator = self.counted_iterators[position];
         let (min, max) = (iterator.min, iterator.max);
         // Iterations below and from `bound`.
