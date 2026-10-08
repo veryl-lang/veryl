@@ -1418,19 +1418,67 @@ struct CountedCoverage {
 }
 
 /// Iterations of the counted iterator at `position` on which a condition
-/// holds and fails; `None` when no iteration takes that side.
-#[derive(Clone, Copy)]
+/// holds and fails, each as disjoint progressions; empty when no iteration
+/// takes that side.
 struct IteratorSplit {
     position: usize,
-    holds: Option<(isize, isize)>,
-    fails: Option<(isize, isize)>,
+    holds: Vec<CountedIterator>,
+    fails: Vec<CountedIterator>,
 }
 
+/// The values a counted iterator takes: those in `min..=max` that are
+/// congruent to `residue` modulo `modulus`.
 #[derive(Clone, Copy, Debug)]
 struct CountedIterator {
     id: VarId,
     min: isize,
     max: isize,
+    modulus: isize,
+    residue: isize,
+}
+
+impl CountedIterator {
+    fn new(id: VarId, min: isize, max: isize) -> Self {
+        Self {
+            id,
+            min,
+            max,
+            modulus: 1,
+            residue: 0,
+        }
+    }
+
+    /// The values in `min..=max` congruent to `residue` modulo `modulus` as
+    /// well, or `None` when there are none. `min` and `max` are values.
+    fn confined(self, min: isize, max: isize, modulus: isize, residue: isize) -> Option<Self> {
+        // value = self.residue + self.modulus * u = residue (mod modulus)
+        let (first, period) = super::position::solve_congruence(
+            self.modulus,
+            residue.checked_sub(self.residue),
+            modulus,
+        )??;
+        let modulus = self.modulus.checked_mul(period)?;
+        let residue = self
+            .residue
+            .checked_add(self.modulus.checked_mul(first)?)?
+            .rem_euclid(modulus);
+        let min = min.max(self.min);
+        let max = max.min(self.max);
+        let min = min.checked_add((residue - min).rem_euclid(modulus))?;
+        let max = max.checked_sub((max - residue).rem_euclid(modulus))?;
+        (min <= max).then_some(Self {
+            min,
+            max,
+            modulus,
+            residue,
+            ..self
+        })
+    }
+
+    /// The values in `min..=max`, or `None` when there are none.
+    fn within(self, min: isize, max: isize) -> Option<Self> {
+        self.confined(min, max, 1, 0)
+    }
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
@@ -2268,12 +2316,59 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some((min, max))
     }
 
+    /// Whether `index` reads a counted iterator that takes only the values
+    /// congruent to a residue.
+    fn reads_confined_iterator(&self, index: &AffineIndex) -> bool {
+        index.terms.iter().any(|(id, _)| {
+            self.counted_iterators
+                .iter()
+                .rev()
+                .find(|iterator| iterator.id == *id)
+                .is_some_and(|iterator| iterator.modulus > 1)
+        })
+    }
+
+    /// The link from a source coordinate to a destination coordinate when both
+    /// are affine in the same symbolic values, restricted to the source
+    /// coordinates that the values of a confined iterator reach.
+    fn affine_link(
+        &self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+    ) -> Option<Link> {
+        let link = self.unconfined_affine_link(destination, source, crossed)?;
+        let Link::Map(map) = link else {
+            return Some(link);
+        };
+        // With one symbolic value, the source is `coefficient * i + constant`
+        // and `i = residue (mod modulus)`.
+        let [(id, coefficient)] = source.index.terms.as_slice() else {
+            return Some(link);
+        };
+        let Some(iterator) = self
+            .counted_iterators
+            .iter()
+            .rev()
+            .find(|iterator| iterator.id == *id)
+            .filter(|iterator| iterator.modulus > 1)
+        else {
+            return Some(link);
+        };
+        let modulus = coefficient.checked_abs()?.checked_mul(iterator.modulus)?;
+        let residue = coefficient
+            .checked_mul(iterator.residue)?
+            .checked_add(source.index.constant)?
+            .rem_euclid(modulus);
+        map.restricted(modulus, residue)
+    }
+
     /// The link from a source coordinate to a destination coordinate when both
     /// are affine in the same symbolic values. Eliminating those values gives
     /// `destination = lambda * (source - source_base) + destination_base` if
     /// their coefficient vectors are proportional. A constant destination is
     /// reached only from the positions the source coordinate can take.
-    fn affine_link(
+    fn unconfined_affine_link(
         &self,
         destination: &SampledAffineIndex,
         source: &SampledAffineIndex,
@@ -3434,91 +3529,68 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let condition = self.eval_control_condition(&statement.cond);
         let mut nested_controls = controls.to_vec();
         nested_controls.extend_from_slice(&condition);
-        let mut truth = self.constant_truth(&statement.cond);
+        let truth = self.constant_truth(&statement.cond);
         let split = truth
             .is_none()
             .then(|| self.iterator_condition_split(&statement.cond))
             .flatten();
-        let (true_extent, false_extent) = match split {
-            Some(IteratorSplit {
-                position,
-                holds,
-                fails,
-            }) => {
-                // A side that no iteration takes is never evaluated.
-                truth = match (holds, fails) {
-                    (Some(_), None) => Some(true),
-                    (None, Some(_)) => Some(false),
-                    _ => None,
-                };
-                (
-                    holds.map(|extent| (position, extent)),
-                    fails.map(|extent| (position, extent)),
+        // Each arm is a side with the iterations that take it. A side that no
+        // iteration takes is never evaluated, and a side whose iterations form
+        // several progressions is evaluated once per progression.
+        let true_side = statement.true_side.as_slice();
+        let false_side = statement.false_side.as_slice();
+        let arms = match (split, truth) {
+            (
+                Some(IteratorSplit {
+                    position,
+                    holds,
+                    fails,
+                }),
+                _,
+            ) => holds
+                .into_iter()
+                .map(|iterator| (true_side, Some((position, iterator))))
+                .chain(
+                    fails
+                        .into_iter()
+                        .map(|iterator| (false_side, Some((position, iterator)))),
                 )
-            }
-            None => (None, None),
+                .collect::<Vec<_>>(),
+            (None, Some(true)) => vec![(true_side, None)],
+            (None, Some(false)) => vec![(false_side, None)],
+            (None, None) => vec![(true_side, None), (false_side, None)],
         };
-        match truth {
-            Some(true) => {
-                return self.eval_confined_block(
-                    true_extent,
-                    &statement.true_side,
-                    &nested_controls,
-                );
-            }
-            Some(false) => {
-                return self.eval_confined_block(
-                    false_extent,
-                    &statement.false_side,
-                    &nested_controls,
-                );
-            }
-            None => {}
+        if let [(statements, confinement)] = arms.as_slice() {
+            return self.eval_confined_block(*confinement, statements, &nested_controls);
         }
 
-        let branch = self.next_branch_id(2);
+        let branch = self.next_branch_id(arms.len());
         let parent_condition = self.path_condition.clone();
-        self.choose_path(&parent_condition, branch, 0);
-        let checkpoint = self.ssa.checkpoint();
-        let true_flow =
-            self.eval_confined_block(true_extent, &statement.true_side, &nested_controls);
-        let true_state = self.ssa.capture_and_rollback(checkpoint);
-        let true_condition = self.path_condition.clone();
-
-        self.choose_path(&parent_condition, branch, 1);
-        let checkpoint = self.ssa.checkpoint();
-        let false_flow =
-            self.eval_confined_block(false_extent, &statement.false_side, &nested_controls);
-        let false_state = self.ssa.capture_and_rollback(checkpoint);
-        let false_condition = self.path_condition.clone();
-
+        let mut branches = Vec::with_capacity(arms.len());
+        for (arm, (statements, confinement)) in arms.into_iter().enumerate() {
+            self.choose_path(&parent_condition, branch, arm);
+            let checkpoint = self.ssa.checkpoint();
+            let flow = self.eval_confined_block(confinement, statements, &nested_controls);
+            let state = self.ssa.capture_and_rollback(checkpoint);
+            branches.push((flow, state, self.path_condition.clone()));
+        }
         self.path_condition = parent_condition;
-        self.merge_branches(
-            vec![
-                (true_flow, true_state, true_condition),
-                (false_flow, false_state, false_condition),
-            ],
-            &condition,
-        )
+        self.merge_branches(branches, &condition)
     }
 
     /// Evaluate a block with one counted iterator confined to the iterations
     /// that reach it, so affine accesses inside address only their positions.
     fn eval_confined_block(
         &mut self,
-        confinement: Option<(usize, (isize, isize))>,
+        confinement: Option<(usize, CountedIterator)>,
         statements: &[Statement],
         controls: &[VersionId],
     ) -> FlowResult {
-        let Some((position, (min, max))) = confinement else {
+        let Some((position, confined)) = confinement else {
             return self.eval_block(statements, controls);
         };
         let iterator = self.counted_iterators[position];
-        self.counted_iterators[position] = CountedIterator {
-            min,
-            max,
-            ..iterator
-        };
+        self.counted_iterators[position] = confined;
         let flow = self.eval_block(statements, controls);
         self.counted_iterators[position] = iterator;
         flow
@@ -3527,14 +3599,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// The iterations on which a comparison of a counted iterator with a
     /// constant holds and fails. Such a condition reads no signal.
     fn iterator_condition_split(&mut self, condition: &Expression) -> Option<IteratorSplit> {
+        if let Expression::Binary(left, op @ (Op::Eq | Op::Ne), right, _) = condition
+            && let Some(split) = self
+                .iterator_remainder_split(left, *op, right)
+                .or_else(|| self.iterator_remainder_split(right, *op, left))
+        {
+            return Some(split);
+        }
         let (left, op, right) = match condition {
             Expression::Binary(left, op, right, _) => (left, *op, right),
             Expression::Unary(Op::LogicNot, operand, _) => {
                 let split = self.iterator_condition_split(operand)?;
                 return Some(IteratorSplit {
+                    position: split.position,
                     holds: split.fails,
                     fails: split.holds,
-                    ..split
                 });
             }
             _ => return None,
@@ -3580,26 +3659,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             bits
         };
         let constant = isize::try_from(constant).ok()?;
-        let CountedIterator { min, max, .. } = self.counted_iterators[position];
-        let extent = |low: isize, high: isize| (low <= high).then_some((low, high));
+        let iterator = self.counted_iterators[position];
+        let (min, max) = (iterator.min, iterator.max);
         // Iterations below and from `bound`.
         let below = |bound: isize| {
             (
-                extent(min, max.min(bound.saturating_sub(1))),
-                extent(min.max(bound), max),
+                iterator.within(min, bound.saturating_sub(1)),
+                iterator.within(bound, max),
             )
         };
         let (holds, fails) = match op {
             Op::Eq | Op::Ne => {
-                let equal = extent(constant.max(min), constant.min(max));
-                let unequal = if equal.is_none() {
-                    Some((min, max))
-                } else if constant == min {
-                    extent(min + 1, max)
-                } else if constant == max {
-                    extent(min, max - 1)
-                } else {
-                    Some((min, max))
+                let equal = iterator.within(constant, constant);
+                // The other values form one progression unless the constant
+                // is an inner value.
+                let unequal = match equal {
+                    None => Some(iterator),
+                    Some(_) if constant == min => iterator.within(min + 1, max),
+                    Some(_) if constant == max => iterator.within(min, max - 1),
+                    Some(_) => Some(iterator),
                 };
                 if op == Op::Eq {
                     (equal, unequal)
@@ -3621,13 +3699,82 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         };
         Some(IteratorSplit {
             position,
+            holds: holds.into_iter().collect(),
+            fails: fails.into_iter().collect(),
+        })
+    }
+
+    /// The iterations on which the remainder of a counted iterator by a
+    /// constant equals (`Eq`) or differs from (`Ne`) a constant. Each
+    /// remainder that an iteration leaves is one progression.
+    fn iterator_remainder_split(
+        &mut self,
+        remainder: &Expression,
+        op: Op,
+        value: &Expression,
+    ) -> Option<IteratorSplit> {
+        let Expression::Binary(dividend, Op::Rem, divisor, _) = remainder else {
+            return None;
+        };
+        let Expression::Term(factor) = dividend.as_ref() else {
+            return None;
+        };
+        let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+            return None;
+        };
+        if !index.indices.is_empty() || !select.is_empty() {
+            return None;
+        }
+        let position = self
+            .counted_iterators
+            .iter()
+            .rposition(|iterator| iterator.id == *id)?;
+        let iterator = self.counted_iterators[position];
+        let mut constant = |expression: &Expression| {
+            if !expression.comptime().is_const {
+                return None;
+            }
+            let value = expression.eval_value(&mut self.ctx)?.to_usize()?;
+            isize::try_from(value).ok()
+        };
+        let divisor = constant(divisor)?;
+        let value = constant(value)?;
+        // A negative dividend would leave a negative remainder.
+        if divisor <= 0 || iterator.min < 0 {
+            return None;
+        }
+        // Consecutive iterations leave every remainder they can within one
+        // period of their own progression, so no more than there are
+        // iterations.
+        let mut equal = Vec::new();
+        let mut unequal = Vec::new();
+        let mut current = iterator.min;
+        let mut seen = HashSet::default();
+        while current <= iterator.max {
+            let remainder = current.rem_euclid(divisor);
+            if !seen.insert(remainder) {
+                break;
+            }
+            let class = iterator.confined(iterator.min, iterator.max, divisor, remainder)?;
+            if remainder == value {
+                equal.push(class);
+            } else {
+                unequal.push(class);
+            }
+            current = current.checked_add(iterator.modulus)?;
+        }
+        let (holds, fails) = if op == Op::Eq {
+            (equal, unequal)
+        } else {
+            (unequal, equal)
+        };
+        Some(IteratorSplit {
+            position,
             holds,
             fails,
         })
     }
 
-    /// An assignment of a ternary on a counted iterator as the equivalent
-    /// branch, so that each value is written only on its own iterations.
     fn iterator_ternary(&mut self, assign: &AssignStatement) -> Option<IfStatement> {
         let Expression::Ternary(condition, true_value, false_value, _) = &assign.expr else {
             return None;
@@ -3891,11 +4038,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.status = AnalysisStatus::Barrier;
             return FlowResult::new(ProcedureFlow::Continue);
         };
-        let iterator = CountedIterator {
-            id: statement.var_id,
-            min,
-            max,
-        };
+        let iterator = CountedIterator::new(statement.var_id, min, max);
         self.counted_iterators.push(iterator);
         let coverage = for_range_step(&statement.range).map(|step| {
             let per_iteration = self.loop_accesses(&statement.body);
@@ -4283,10 +4426,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             comptime.member_select_domain,
                             &mut self.ctx,
                         );
+                        // A translation would also relate the positions that
+                        // a confined iterator skips; those are mapped below.
                         let dynamic_array_offset = projection
                             .destination_index
                             .as_ref()
-                            .filter(|destination| !destination.index.terms.is_empty())
+                            .filter(|destination| {
+                                !destination.index.terms.is_empty()
+                                    && !self.reads_confined_iterator(&destination.index)
+                            })
                             .and_then(|destination| {
                                 let source = if let Some(sampled) = &sampled {
                                     sampled.index.clone()

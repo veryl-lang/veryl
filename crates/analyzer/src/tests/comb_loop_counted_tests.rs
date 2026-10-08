@@ -296,6 +296,46 @@ counted_case!(
 );
 
 counted_case!(
+    counted_remainder_branches_are_feed_forward,
+    "even elements read y and odd elements of y read x",
+    "var x: logic [4]; var y: logic [4];
+     always_comb { for i in 0..4 { if i % 2 == 0 { x[i] = y[i]; } else { x[i] = a[i]; } } }
+     always_comb { for i in 0..4 { if i % 2 == 1 { y[i] = x[i]; } else { y[i] = b[i]; } } }
+     assign o = {4'd0, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_remainder_branches_close_through_one_residue,
+    "even elements of x and y read each other",
+    "var x: logic [4]; var y: logic [4];
+     always_comb { for i in 0..4 { if i % 2 == 0 { x[i] = y[i]; } else { x[i] = a[i]; } } }
+     always_comb { for i in 0..4 { if i % 2 != 1 { y[i] = x[i]; } else { y[i] = b[i]; } } }
+     assign o = {4'd0, y[0], y[1], y[2], y[3]};",
+    true
+);
+
+counted_case!(
+    counted_remainder_branches_by_three_are_feed_forward,
+    "elements one past a multiple of three read y, and the others of y read x",
+    "var x: logic<6>; var y: logic<6>;
+     always_comb { x = 0; for i in 0..6 { if i % 3 == 1 { x[i] = y[i]; } } }
+     always_comb { y = 0; for i in 0..6 { if i % 3 != 1 { y[i] = x[i]; } } }
+     assign o = {2'd0, y};",
+    false
+);
+
+counted_case!(
+    counted_remainder_branches_keep_the_skipped_elements,
+    "odd elements keep the value they had before the loop",
+    "var x: logic [4]; var y: logic [4];
+     always_comb { x = y; for i in 0..4 { if i % 2 == 0 { x[i] = a[i]; } } }
+     assign y = x;
+     assign o = {4'd0, x[0], x[1], x[2], x[3]};",
+    true
+);
+
+counted_case!(
     counted_reversed_arrays_are_feed_forward,
     "two reversals form a chain from the first element",
     "var x: logic<8> [4]; var y: logic<8> [4];

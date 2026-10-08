@@ -110,6 +110,35 @@ impl Map {
         }
     }
 
+    /// The map on the source coordinates congruent to `residue` modulo
+    /// `modulus` only. `None` on arithmetic overflow.
+    pub(super) fn restricted(self, modulus: isize, residue: isize) -> Option<Link> {
+        // residue + modulus * u = self.residue + self.modulus * t
+        let Some((first, period)) =
+            solve_congruence(self.modulus, residue.checked_sub(self.residue), modulus)?
+        else {
+            return Some(Link::Never);
+        };
+        // t = first + period * v
+        let source = self.residue.checked_add(self.modulus.checked_mul(first)?)?;
+        let source_modulus = self.modulus.checked_mul(period)?;
+        let source_residue = source.rem_euclid(source_modulus);
+        // Renumber v so that it starts at the smallest source coordinate.
+        let shift = (source - source_residue) / source_modulus;
+        let step = self.step.checked_mul(period)?;
+        let base = self
+            .base
+            .checked_add(self.step.checked_mul(first)?)?
+            .checked_sub(step.checked_mul(shift)?)?;
+        Some(Link::Map(Self {
+            modulus: source_modulus,
+            residue: source_residue,
+            base,
+            step,
+            ..self
+        }))
+    }
+
     pub(super) fn translation_offset(self) -> Option<isize> {
         (!self.crossed && self.modulus == 1 && self.step == 1).then_some(self.base)
     }

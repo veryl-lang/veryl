@@ -309,11 +309,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         accesses.opaque = true;
                         return accesses;
                     };
-                    let iterator = CountedIterator {
-                        id: statement.var_id,
-                        min,
-                        max,
-                    };
+                    let iterator = CountedIterator::new(statement.var_id, min, max);
                     self.counted_iterators.push(iterator);
                     let mut nested_exits = false;
                     let body = self.loop_accesses_nested(&statement.body, &mut nested_exits);
