@@ -898,3 +898,65 @@ fn counted_strided_bit_write_reaches_only_its_bits() {
         assert!(comb_loop_analysis_is_complete(&code), "{case}");
     }
 }
+
+#[test]
+fn counted_non_affine_iterator_uses_take_each_iteration() {
+    // An iterator used other than affinely selects positions a symbolic
+    // iteration cannot follow, so the loop takes each iteration's value.
+    for (case, body, expected) in [
+        (
+            "a shifted index is feed-forward",
+            "always_comb { a[0] = s[0]; for i in 1..4 { a[i] = a[i >> 1]; } }
+             assign o = a[3];",
+            false,
+        ),
+        (
+            "a shifted index closes through its root",
+            "always_comb { a[0] = o; for i in 1..4 { a[i] = a[i >> 1]; } }
+             assign o = a[3];",
+            true,
+        ),
+        (
+            "a case on the iterator",
+            "always_comb { for i in 0..4 { case i { 0: a[i] = o; default: a[i] = s[0]; } } }
+             assign o = a[1];",
+            false,
+        ),
+        (
+            "a squared index",
+            "always_comb { for i in 0..10 { b[i] = if i == 9 ? o : s[0]; } }
+             always_comb { for i in 0..3 { a[i] = b[i * i]; } }
+             assign o = a[2];",
+            false,
+        ),
+    ] {
+        let code = format!(
+            "module Top (s: input logic<4>, o: output logic) {{
+                var a: logic [4]; var b: logic [10];
+                {body}
+            }}"
+        );
+        let loops = comb_loops(&code);
+        assert_eq!(!loops.is_empty(), expected, "{case}: {loops:?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{case}");
+    }
+}
+
+#[test]
+fn counted_step_takes_only_its_values() {
+    for (case, read, expected) in [
+        ("a skipped element", "y[1]", false),
+        ("a taken element", "y[2]", true),
+    ] {
+        let code = format!(
+            "module Top (o: output logic) {{
+                var y: logic [8];
+                always_comb {{ y = '{{default: 0}}; for i in 0..8 step += 2 {{ y[i] = o; }} }}
+                assign o = {read};
+            }}"
+        );
+        let loops = comb_loops(&code);
+        assert_eq!(!loops.is_empty(), expected, "{case}: {loops:?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{case}");
+    }
+}

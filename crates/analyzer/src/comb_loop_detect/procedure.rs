@@ -417,7 +417,9 @@ fn project_repeated_span(
 use std::cell::Cell;
 
 mod footprint;
+mod iterator_use;
 use footprint::{LoopAccesses, for_range_step};
+pub(super) use iterator_use::iterator_needs_values;
 
 #[derive(Clone)]
 struct CallResult {
@@ -4247,6 +4249,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             if iterations.count == 0 {
                 return FlowResult::new(ProcedureFlow::Continue);
             }
+            // An iterator used other than affinely takes each iteration's
+            // value while the iterations stay within the size limit.
+            if iterator_needs_values(&statement.body, statement.var_id)
+                && let Some(values) = statement.range.eval_iter(&mut self.ctx)
+            {
+                return self.eval_known_for_iterations(statement, &range_controls, values);
+            }
             self.eval_counted_for(statement, &range_controls, iterations)
         } else if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
             self.eval_known_for_iterations(statement, &range_controls, iterations)
@@ -4381,7 +4390,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.status = AnalysisStatus::Barrier;
             return FlowResult::new(ProcedureFlow::Continue);
         };
-        let iterator = CountedIterator::new(statement.var_id, min, max);
+        let mut iterator = CountedIterator::new(statement.var_id, min, max);
+        // An additive step takes every `|step|`-th value from the first one.
+        if let Some(modulus) = for_range_step(&statement.range).and_then(isize::checked_abs)
+            && modulus > 1
+        {
+            iterator.modulus = modulus;
+            iterator.residue = min.rem_euclid(modulus);
+        }
         self.counted_iterators.push(iterator);
         let coverage = for_range_step(&statement.range).map(|step| {
             let per_iteration = self.loop_accesses(&statement.body);
