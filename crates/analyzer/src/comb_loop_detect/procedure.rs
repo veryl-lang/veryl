@@ -12,10 +12,11 @@ use super::ssa::{
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, CountedIterations, Expression,
-    ExpressionContext, Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement,
-    MemberSelectDomain, Module, Op, Shape, Statement, SystemFunctionCall, SystemFunctionKind,
-    TbMethod, Type, VarIndex, VarPath, VarSelect, VarSelectOp,
+    ArrayLiteralItem, AssignDestination, AssignStatement, CasePattern, CaseStatement,
+    CountedIterations, Expression, ExpressionContext, Factor, ForBound, ForRange, ForStatement,
+    FunctionCall, IfStatement, MemberSelectDomain, Module, Op, Shape, Statement,
+    SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex, VarPath, VarSelect,
+    VarSelectOp,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
@@ -1403,6 +1404,9 @@ struct ProcedureAnalysis<'a, 's> {
     /// Control versions whose array coordinates are positions of an affine
     /// iterator frame rather than of an ordinary value.
     control_frames: HashMap<VersionId, SampledAffineIndex>,
+    /// Whether each called function specialization depends only on its
+    /// inputs. Anchored expressions ask this once per occurrence.
+    pure_functions: HashMap<(VarId, Option<Vec<usize>>), bool>,
 }
 
 /// Accesses of a counted loop body, per iteration and over all iterations.
@@ -1411,6 +1415,15 @@ struct CountedCoverage {
     closed: LoopAccesses,
     iterator: CountedIterator,
     step: isize,
+}
+
+/// Iterations of the counted iterator at `position` on which a condition
+/// holds and fails; `None` when no iteration takes that side.
+#[derive(Clone, Copy)]
+struct IteratorSplit {
+    position: usize,
+    holds: Option<(isize, isize)>,
+    fails: Option<(isize, isize)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1462,6 +1475,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             shared_call_branches: HashMap::default(),
             counted_iterators: Vec::new(),
             control_frames: HashMap::default(),
+            pure_functions: HashMap::default(),
         }
     }
 
@@ -2143,7 +2157,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// Lowest bit and width of a packed select whose coordinates are affine.
-    /// Lowest bit and width of a packed select whose coordinates are affine.
     /// This mirrors `VarSelect::eval_value`, so a struct member rebased to
     /// base bits and the equivalent bit select have the same position.
     fn packed_affine_select(
@@ -2591,6 +2604,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .as_ref()
                 .is_some_and(|index| !index.index.terms.is_empty())
             && expression.comptime().r#type.array.total().unwrap_or(1) == 1;
+        // An anchored destination addresses only the positions its index
+        // takes over the iterations that reach this write.
+        let reachable = anchor
+            .then(|| {
+                let (low, high) = self.affine_hull(&destination_index.as_ref()?.index)?;
+                let low = usize::try_from(low.max(0)).ok()?;
+                let high = usize::try_from(high).ok()?;
+                Some(ArraySpan {
+                    start: low,
+                    length: high.checked_sub(low)?.checked_add(1)?,
+                })
+            })
+            .flatten();
         // Controls anchored at the destination's frame keep its displacement.
         let mut anchored_controls = Vec::new();
         let mut whole_controls = Vec::new();
@@ -2620,7 +2646,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let mut sources = if let (Some(destination_array), Some((_, low)), Some(key_span)) =
                 (destination_array, selected, self.key_span(key))
             {
-                let destination_region = key.1.intersection(destination_array);
+                let destination_region =
+                    key.1
+                        .intersection(destination_array)
+                        .and_then(|region| match reachable {
+                            Some(reachable) => region.intersection(reachable),
+                            None => Some(region),
+                        });
                 let expression_array = destination_region.and_then(|array| {
                     if anchor {
                         Some(array)
@@ -2687,11 +2719,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     relation.array = Link::from_offset(None);
                 }
             }
-            let version = self
+            let mut version = self
                 .ssa
                 .related_definition_guarded(sources.sources, &self.path_condition);
             if let Some(token) = self.active_assignment {
                 self.ssa.record_site(version, token, controls);
+            }
+            if let (Some(reachable), Some(packed)) = (reachable, self.key_span(key))
+                && key.1.intersection(reachable) != Some(key.1)
+            {
+                // Positions outside the reachable ones keep their value.
+                version = match key.1.intersection(reachable) {
+                    Some(region) => self.ssa.projected(version, position_domain(region, packed)),
+                    None => continue,
+                };
             }
             self.bind_destination(key, version, dynamic);
         }
@@ -3242,6 +3283,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> FlowResult {
         match statement {
             Statement::Assign(assign) => {
+                if let Some(statement) = self.iterator_ternary(assign) {
+                    return self.eval_if(&statement, controls);
+                }
                 let previous_assignment = self.active_assignment;
                 self.active_assignment = self.tracing.then_some(assign.token);
                 self.call_caches.push(Some(EvaluationCache {
@@ -3390,9 +3434,45 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let condition = self.eval_control_condition(&statement.cond);
         let mut nested_controls = controls.to_vec();
         nested_controls.extend_from_slice(&condition);
-        match self.constant_truth(&statement.cond) {
-            Some(true) => return self.eval_block(&statement.true_side, &nested_controls),
-            Some(false) => return self.eval_block(&statement.false_side, &nested_controls),
+        let mut truth = self.constant_truth(&statement.cond);
+        let split = truth
+            .is_none()
+            .then(|| self.iterator_condition_split(&statement.cond))
+            .flatten();
+        let (true_extent, false_extent) = match split {
+            Some(IteratorSplit {
+                position,
+                holds,
+                fails,
+            }) => {
+                // A side that no iteration takes is never evaluated.
+                truth = match (holds, fails) {
+                    (Some(_), None) => Some(true),
+                    (None, Some(_)) => Some(false),
+                    _ => None,
+                };
+                (
+                    holds.map(|extent| (position, extent)),
+                    fails.map(|extent| (position, extent)),
+                )
+            }
+            None => (None, None),
+        };
+        match truth {
+            Some(true) => {
+                return self.eval_confined_block(
+                    true_extent,
+                    &statement.true_side,
+                    &nested_controls,
+                );
+            }
+            Some(false) => {
+                return self.eval_confined_block(
+                    false_extent,
+                    &statement.false_side,
+                    &nested_controls,
+                );
+            }
             None => {}
         }
 
@@ -3400,13 +3480,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let parent_condition = self.path_condition.clone();
         self.choose_path(&parent_condition, branch, 0);
         let checkpoint = self.ssa.checkpoint();
-        let true_flow = self.eval_block(&statement.true_side, &nested_controls);
+        let true_flow =
+            self.eval_confined_block(true_extent, &statement.true_side, &nested_controls);
         let true_state = self.ssa.capture_and_rollback(checkpoint);
         let true_condition = self.path_condition.clone();
 
         self.choose_path(&parent_condition, branch, 1);
         let checkpoint = self.ssa.checkpoint();
-        let false_flow = self.eval_block(&statement.false_side, &nested_controls);
+        let false_flow =
+            self.eval_confined_block(false_extent, &statement.false_side, &nested_controls);
         let false_state = self.ssa.capture_and_rollback(checkpoint);
         let false_condition = self.path_condition.clone();
 
@@ -3418,6 +3500,154 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             ],
             &condition,
         )
+    }
+
+    /// Evaluate a block with one counted iterator confined to the iterations
+    /// that reach it, so affine accesses inside address only their positions.
+    fn eval_confined_block(
+        &mut self,
+        confinement: Option<(usize, (isize, isize))>,
+        statements: &[Statement],
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let Some((position, (min, max))) = confinement else {
+            return self.eval_block(statements, controls);
+        };
+        let iterator = self.counted_iterators[position];
+        self.counted_iterators[position] = CountedIterator {
+            min,
+            max,
+            ..iterator
+        };
+        let flow = self.eval_block(statements, controls);
+        self.counted_iterators[position] = iterator;
+        flow
+    }
+
+    /// The iterations on which a comparison of a counted iterator with a
+    /// constant holds and fails. Such a condition reads no signal.
+    fn iterator_condition_split(&mut self, condition: &Expression) -> Option<IteratorSplit> {
+        let (left, op, right) = match condition {
+            Expression::Binary(left, op, right, _) => (left, *op, right),
+            Expression::Unary(Op::LogicNot, operand, _) => {
+                let split = self.iterator_condition_split(operand)?;
+                return Some(IteratorSplit {
+                    holds: split.fails,
+                    fails: split.holds,
+                    ..split
+                });
+            }
+            _ => return None,
+        };
+        let iterator = |expression: &Expression, iterators: &[CountedIterator]| {
+            let Expression::Term(factor) = expression else {
+                return None;
+            };
+            let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+                return None;
+            };
+            if !index.indices.is_empty() || !select.is_empty() {
+                return None;
+            }
+            iterators.iter().rposition(|iterator| iterator.id == *id)
+        };
+        let (position, constant, op) =
+            if let Some(position) = iterator(left, &self.counted_iterators) {
+                (position, right, op)
+            } else {
+                let position = iterator(right, &self.counted_iterators)?;
+                let op = match op {
+                    Op::Less => Op::Greater,
+                    Op::LessEq => Op::GreaterEq,
+                    Op::Greater => Op::Less,
+                    Op::GreaterEq => Op::LessEq,
+                    op => op,
+                };
+                (position, left, op)
+            };
+        let comptime = constant.comptime();
+        if !comptime.is_const {
+            return None;
+        }
+        // The operands are compared at their common context, where a signed
+        // constant with its sign bit set is negative.
+        let context = comptime.expr_context;
+        let bits = constant.eval_value(&mut self.ctx)?.to_usize()? as i128;
+        let width = u32::try_from(context.width).ok()?;
+        let constant = if context.signed && width > 0 && (bits >> (width - 1)) & 1 == 1 {
+            bits - 1i128.checked_shl(width)?
+        } else {
+            bits
+        };
+        let constant = isize::try_from(constant).ok()?;
+        let CountedIterator { min, max, .. } = self.counted_iterators[position];
+        let extent = |low: isize, high: isize| (low <= high).then_some((low, high));
+        // Iterations below and from `bound`.
+        let below = |bound: isize| {
+            (
+                extent(min, max.min(bound.saturating_sub(1))),
+                extent(min.max(bound), max),
+            )
+        };
+        let (holds, fails) = match op {
+            Op::Eq | Op::Ne => {
+                let equal = extent(constant.max(min), constant.min(max));
+                let unequal = if equal.is_none() {
+                    Some((min, max))
+                } else if constant == min {
+                    extent(min + 1, max)
+                } else if constant == max {
+                    extent(min, max - 1)
+                } else {
+                    Some((min, max))
+                };
+                if op == Op::Eq {
+                    (equal, unequal)
+                } else {
+                    (unequal, equal)
+                }
+            }
+            Op::Less => below(constant),
+            Op::LessEq => below(constant.saturating_add(1)),
+            Op::Greater => {
+                let (lower, upper) = below(constant.saturating_add(1));
+                (upper, lower)
+            }
+            Op::GreaterEq => {
+                let (lower, upper) = below(constant);
+                (upper, lower)
+            }
+            _ => return None,
+        };
+        Some(IteratorSplit {
+            position,
+            holds,
+            fails,
+        })
+    }
+
+    /// An assignment of a ternary on a counted iterator as the equivalent
+    /// branch, so that each value is written only on its own iterations.
+    fn iterator_ternary(&mut self, assign: &AssignStatement) -> Option<IfStatement> {
+        let Expression::Ternary(condition, true_value, false_value, _) = &assign.expr else {
+            return None;
+        };
+        self.iterator_condition_split(condition)?;
+        let side = |value: &Expression| {
+            vec![Statement::Assign(AssignStatement {
+                dst: assign.dst.clone(),
+                hier_dst: assign.hier_dst.clone(),
+                width: assign.width,
+                expr: value.clone(),
+                token: assign.token,
+            })]
+        };
+        Some(IfStatement {
+            cond: (**condition).clone(),
+            true_side: side(true_value),
+            false_side: side(false_value),
+            token: assign.token,
+        })
     }
 
     fn eval_case(&mut self, statement: &CaseStatement, controls: &[VersionId]) -> FlowResult {
@@ -3741,7 +3971,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             checkpoint,
             breaks: Vec::new(),
         });
+        let returns = self.recorded_returns();
         let flow = self.eval_block(&statement.body, range_controls);
+        let returns_in_body = self.recorded_returns() != returns;
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
         if self.guard_work.is_none() {
@@ -3781,8 +4013,33 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .is_none()
         {
             self.exhaust_work();
+        } else if returns_in_body {
+            self.record_later_iteration_returns(&statement.body, range_controls);
         }
         FlowResult::new(ProcedureFlow::Continue)
+    }
+
+    fn recorded_returns(&self) -> Option<usize> {
+        self.function_flows
+            .last()
+            .map(|function| function.returns.len())
+    }
+
+    /// The single symbolic iteration records its returns with the loop entry
+    /// state, but a later iteration returns with the state that earlier
+    /// iterations left. Evaluate the body again from the closed loop state and
+    /// keep only the return paths it records.
+    fn record_later_iteration_returns(&mut self, body: &[Statement], controls: &[VersionId]) {
+        let parent_condition = self.path_condition.clone();
+        let checkpoint = self.ssa.checkpoint();
+        self.loop_flows.push(LoopFlow {
+            checkpoint,
+            breaks: Vec::new(),
+        });
+        self.eval_block(body, controls);
+        self.loop_flows.pop();
+        self.ssa.capture_and_rollback(checkpoint);
+        self.path_condition = parent_condition;
     }
 
     fn merge_flow_state_bindings(&mut self, states: &[FlowState]) -> BranchState<SsaKey> {
@@ -5053,7 +5310,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     /// Whether a call depends only on its inputs: its body reads and writes
     /// nothing but function variables and calls only such functions.
-    fn function_is_pure(&self, call: &FunctionCall) -> bool {
+    fn function_is_pure(&mut self, call: &FunctionCall) -> bool {
+        let key = (call.id, call.index.clone());
+        if let Some(&pure) = self.pure_functions.get(&key) {
+            return pure;
+        }
         fn pure_expression(
             analysis: &ProcedureAnalysis<'_, '_>,
             expression: &Expression,
@@ -5167,7 +5428,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             };
             body.is_some_and(|body| pure_statements(analysis, &body.statements, depth))
         }
-        pure_call(self, call, 0)
+        let pure = pure_call(self, call, 0);
+        self.pure_functions.insert(key, pure);
+        pure
     }
 
     fn is_function_variable(&self, id: VarId) -> bool {

@@ -461,3 +461,101 @@ counted_case!(
      always_comb { for i in 0..4 { x[i] = if i == 0 ? f : x[i - 1]; } o = x[0]; }",
     true
 );
+
+counted_case!(
+    counted_seeded_element_is_overwritten_by_a_map_from_the_first_element,
+    "a loop writing from the first element replaces a pre-loop write before reading it",
+    "var v: logic<8> [3]; var f: logic<8>;
+     assign f = v[2];
+     always_comb { v = '{default: 0}; v[1] = f; for i in 0..3 { v[i] = if i == 0 ? a : v[i - 1]; } o = f; }",
+    false
+);
+
+#[test]
+fn counted_iterator_branches_write_only_their_iterations() {
+    // A branch on the iterator against a constant confines each side to the
+    // iterations that take it, as enumerating the iterations did.
+    for (case, body, expected) in [
+        (
+            "equal",
+            "for i in 0..5 { y[i] = if i == 0 ? o : a; } p = y[1];",
+            false,
+        ),
+        (
+            "equal reaches its element",
+            "for i in 0..5 { y[i] = if i == 0 ? o : a; } p = y[0];",
+            true,
+        ),
+        (
+            "unequal",
+            "for i in 0..5 { y[i] = if i != 0 ? a : o; } p = y[1];",
+            false,
+        ),
+        (
+            "interior equal leaves the other iterations",
+            "for i in 0..5 { y[i] = if i == 2 ? a : o; } p = y[4];",
+            true,
+        ),
+        (
+            "less",
+            "for i in 0..5 { y[i] = if i <: 2 ? o : a; } p = y[3];",
+            false,
+        ),
+        (
+            "less or equal",
+            "for i in 0..5 { y[i] = if i <= 2 ? o : a; } p = y[2];",
+            true,
+        ),
+        (
+            "greater",
+            "for i in 0..5 { y[i] = if i >: 2 ? o : a; } p = y[2];",
+            false,
+        ),
+        (
+            "greater or equal",
+            "for i in 0..5 { y[i] = if i >= 2 ? o : a; } p = y[1];",
+            false,
+        ),
+        (
+            "constant on the left",
+            "for i in 0..5 { y[i] = if 2 <: i ? o : a; } p = y[2];",
+            false,
+        ),
+        (
+            "negated statement branch",
+            "for i in 0..5 { if !(i == 0) { y[i] = o; } else { y[i] = a; } } p = y[0];",
+            false,
+        ),
+        (
+            "reverse",
+            "for i in rev 0..5 { y[i] = if i == 4 ? o : a; } p = y[3];",
+            false,
+        ),
+        (
+            "outer iterator",
+            "for i in 0..2 { for j in 0..2 { w[i][j] = if i == 0 ? o : a; } } p = w[1][0];",
+            false,
+        ),
+        (
+            "packed",
+            "for i in 0..5 { z[i] = if i == 0 ? o[0] : a[0]; } p = {7'b0, z[1]};",
+            false,
+        ),
+        (
+            "runtime conjunct keeps the branch",
+            "for i in 0..5 { if i == 0 && b[0] { y[i] = o; } else { y[i] = a; } } p = y[0];",
+            true,
+        ),
+    ] {
+        let code = format!(
+            "module Top (a: input logic<8>, b: input logic<8>, o: output logic<8>) {{
+                var y: logic<8> [5]; var z: logic<5>; var w: logic<8> [2, 2]; var p: logic<8>;
+                always_comb {{ {body} }}
+                assign o = p;
+            }}"
+        );
+        let loops = comb_loops(&code);
+        assert_eq!(!loops.is_empty(), expected, "{case}: {loops:?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{case}");
+    }
+}

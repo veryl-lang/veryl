@@ -192,7 +192,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     pub(super) fn loop_accesses(&mut self, statements: &[Statement]) -> LoopAccesses {
         let mut accesses = LoopAccesses::default();
         let mut exits = false;
-        for statement in statements {
+        let mut rest = statements.iter();
+        for statement in rest.by_ref() {
             let statement_accesses = self.statement_accesses(statement, &mut exits);
             accesses.extend_reads(LoopAccesses {
                 writes: HashMap::default(),
@@ -206,18 +207,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 accesses.writes.entry(id).or_default().extend(footprints);
             }
         }
-        if exits {
-            // Statements after an early return are not executed by every
-            // iteration; reads before it remain may-accesses.
-            for statement in statements {
-                let mut ignored = false;
-                let rest = self.statement_accesses(statement, &mut ignored);
-                accesses.extend_reads(LoopAccesses {
-                    writes: HashMap::default(),
-                    reads: rest.reads,
-                    opaque: rest.opaque,
-                });
-            }
+        // Statements after an early return are not executed by every
+        // iteration; their reads remain may-accesses and their writes are
+        // not guaranteed.
+        for statement in rest {
+            let mut ignored = false;
+            let statement_accesses = self.statement_accesses(statement, &mut ignored);
+            accesses.extend_reads(LoopAccesses {
+                writes: HashMap::default(),
+                reads: statement_accesses.reads,
+                opaque: statement_accesses.opaque,
+            });
         }
         accesses
     }
@@ -571,7 +571,8 @@ fn exposed_positions(
         .filter(|(low, high)| low <= high)
         .filter_map(|(low, high)| {
             let low = usize::try_from(low.max(0)).ok()?;
-            let high = usize::try_from(high).unwrap_or(usize::MAX / 2);
+            // A span that ends below zero addresses no element.
+            let high = usize::try_from(high).ok()?;
             Some(ArraySpan {
                 start: low,
                 length: high.checked_sub(low)?.checked_add(1)?,

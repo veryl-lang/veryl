@@ -4025,3 +4025,42 @@ fn function_summary_instance_actual_keeps_shifted_bit_dependencies() {
         assert!(comb_loop_analysis_is_complete(&code));
     }
 }
+
+#[test]
+fn comb_loop_runtime_loop_return_sees_earlier_iterations() {
+    // A return inside a runtime loop exits from some later iteration, which
+    // reads the state that earlier iterations left behind.
+    for (body, expected) in [
+        (
+            "for i in 0..n { if a[i] { return acc; } acc = acc ^ b[i]; } return 0;",
+            true,
+        ),
+        (
+            "for i in 0..n { if a[i] { return acc; } acc = b[0]; } return 0;",
+            true,
+        ),
+        (
+            "for i in 0..n { if a[i] { return acc; } other = b[i]; } return 0;",
+            false,
+        ),
+    ] {
+        let code = format!(
+            r#"
+            module Top (a: input logic<4>, n: input logic<3>, o: output logic) {{
+                var b: logic<4>;
+                function f (a: input logic<4>, b: input logic<4>, n: input logic<3>) -> logic {{
+                    var acc: logic;
+                    var other: logic;
+                    acc = 0;
+                    other = 0;
+                    {body}
+                }}
+                assign o = f(a, b, n);
+                assign b = {{o, o, o, o}};
+            }}
+        "#
+        );
+        assert_comb_loop(body, &code, expected);
+        assert!(comb_loop_analysis_is_complete(&code), "{body}");
+    }
+}
