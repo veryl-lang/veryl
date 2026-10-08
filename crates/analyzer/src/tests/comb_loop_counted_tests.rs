@@ -960,3 +960,158 @@ fn counted_step_takes_only_its_values() {
         assert!(comb_loop_analysis_is_complete(&code), "{case}");
     }
 }
+
+counted_case!(
+    counted_heap_tree_reads_children_written_by_earlier_iterations,
+    "each node of a heap-indexed adder tree reads its children, written earlier or by the leaves",
+    "var node: logic<8> [16];
+     always_comb {
+         for i in 0..8 { node[8 + i] = a; }
+         for i in rev 1..8 { node[i] = node[2 * i] + node[2 * i + 1]; }
+         o = node[1];
+     }",
+    false
+);
+
+counted_case!(
+    counted_inner_loop_folds_an_element_written_by_the_outer_iteration,
+    "each element is copied from its predecessor and then folded in place",
+    "var c_tap: logic<8> [5];
+     always_comb {
+         c_tap[0] = a;
+         for b in 0..4 {
+             c_tap[b + 1] = c_tap[b];
+             for i in 0..8 {
+                 c_tap[b + 1] = (c_tap[b + 1] >> 1) ^ ({ (c_tap[b + 1][0] ^ a[i]) repeat 8 });
+             }
+         }
+         o = c_tap[4];
+     }",
+    false
+);
+
+counted_case!(
+    counted_inner_loop_accumulates_into_an_element_cleared_first,
+    "each element is cleared and then accumulated by an inner loop",
+    "var pcnt: logic<4> [16]; var ip: logic<4>;
+     always_comb {
+         for i in 0..16 {
+             ip = i as 4;
+             pcnt[i] = '0;
+             for b in 0..4 { pcnt[i] = pcnt[i] + ip[b]; }
+         }
+         o = pcnt[3];
+     }",
+    false
+);
+
+counted_case!(
+    counted_bit_written_in_an_iteration_feeds_the_next_state,
+    "a scrambler bit is written and then shifted into the next state",
+    "var st: logic<8> [9]; var scr: logic<8>;
+     always_comb {
+         st[0] = a;
+         for i in 0..8 {
+             scr[i] = b[i] ^ st[i][3] ^ st[i][7];
+             st[i + 1] = {st[i][6:0], scr[i]};
+         }
+         o = scr;
+     }",
+    false
+);
+
+counted_case!(
+    counted_reversed_bit_written_in_an_iteration_feeds_the_next_state,
+    "a scrambler bit at a descending position feeds the next state",
+    "var st: logic<8> [9]; var scr: logic<8>;
+     always_comb {
+         st[0] = a;
+         for j in 0..8 {
+             scr[7 - j] = b[7 - j] ^ st[j][3] ^ st[j][7];
+             st[j + 1] = {st[j][6:0], scr[7 - j]};
+         }
+         o = scr;
+     }",
+    false
+);
+
+counted_case!(
+    counted_element_rewritten_in_the_same_iteration_reads_its_new_value,
+    "an element is written from its predecessor and then updated in place",
+    "var x: logic<8> [5];
+     always_comb { x[0] = a; for i in 1..5 { x[i] = x[i - 1]; x[i] = x[i] ^ b; } o = x[4]; }",
+    false
+);
+
+counted_case!(
+    counted_initialized_elements_read_ahead_without_feedback,
+    "every element is written before a loop reads its successor",
+    "var x: logic<8> [8];
+     always_comb {
+         for i in 0..8 { x[i] = a; }
+         for i in 1..7 { x[i] = x[i - 1] ^ x[i + 1]; }
+         o = x[3];
+     }",
+    false
+);
+
+counted_case!(
+    counted_uninitialized_elements_read_ahead_close_a_loop,
+    "an element reads its successor before the loop writes it",
+    "var x: logic<8> [8];
+     always_comb { x[0] = a; x[7] = b; for i in 1..7 { x[i] = x[i - 1] ^ x[i + 1]; } o = x[3]; }",
+    true
+);
+
+counted_case!(
+    counted_conditional_update_keeps_the_unconditional_write,
+    "a conditional update reads the element written before it",
+    "var x: logic<8> [4];
+     always_comb { for i in 0..4 { x[i] = a; if b[i] { x[i] = x[i] ^ b; } } o = x[1]; }",
+    false
+);
+
+counted_case!(
+    counted_both_arms_write_before_a_read,
+    "both arms of a branch write the element that is read after it",
+    "var x: logic<8> [4]; var y: logic<8> [4];
+     always_comb { for i in 0..4 { if b[i] { x[i] = a; } else { x[i] = b; } y[i] = x[i]; } o = y[1]; }",
+    false
+);
+
+counted_case!(
+    counted_iterator_branch_chains_from_the_first_element,
+    "the first iteration writes the head and the others read the previous element",
+    "var x: logic<8> [4];
+     always_comb { for i in 0..4 { if i == 0 { x[i] = a; } else { x[i] = x[i - 1] ^ b; } } o = x[3]; }",
+    false
+);
+
+counted_case!(
+    counted_inner_loop_chains_along_each_row,
+    "each row starts from an input and chains along its columns",
+    "var x: logic<8> [4, 4];
+     always_comb { for i in 0..4 { x[i][0] = a; for j in 1..4 { x[i][j] = x[i][j - 1] ^ b; } } o = x[2][3]; }",
+    false
+);
+
+counted_case!(
+    counted_rows_chain_from_the_previous_row,
+    "each row reads the row the previous outer iteration wrote",
+    "var x: logic<8> [4, 4];
+     always_comb {
+         for j in 0..4 { x[0][j] = a; }
+         for i in 1..4 { for j in 0..4 { x[i][j] = x[i - 1][j] ^ b; } }
+         o = x[3][2];
+     }",
+    false
+);
+
+counted_case!(
+    counted_chain_closes_through_an_element_written_after_the_loop_reads_it,
+    "the head of a chain reads its tail",
+    "var x: logic<8> [4]; var y: logic<8>;
+     assign y = x[3];
+     always_comb { x[0] = y; for i in 1..4 { x[i] = x[i - 1]; } o = x[3]; }",
+    true
+);

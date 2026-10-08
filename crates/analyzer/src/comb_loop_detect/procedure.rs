@@ -418,8 +418,10 @@ use std::cell::Cell;
 
 mod footprint;
 mod iterator_use;
+mod last_writer;
 use footprint::{LoopAccesses, for_range_step};
 pub(super) use iterator_use::iterator_needs_values;
+use last_writer::{Step, WriterId, WriterScope};
 
 #[derive(Clone)]
 struct CallResult {
@@ -511,6 +513,8 @@ fn destination_packed_shape(destination: &AssignDestination) -> Cow<'_, [Option<
 struct SsaKey {
     node: NodeKey,
     call_frame: Option<usize>,
+    /// The table of one write in a counted loop nest, see `last_writer`.
+    writer: Option<WriterId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1421,6 +1425,15 @@ struct ProcedureAnalysis<'a, 's> {
     /// Whether each called function specialization depends only on its
     /// inputs. Anchored expressions ask this once per occurrence.
     pure_functions: HashMap<(VarId, Option<Vec<usize>>), bool>,
+    /// The writes of the outermost counted loop being evaluated, when its
+    /// reads take their last writers.
+    writer_scope: Option<Rc<WriterScope>>,
+    /// The places of the statements being evaluated in that loop.
+    statement_places: Vec<Vec<Step>>,
+    /// The destination being written by the current assignment.
+    current_writer: Option<WriterId>,
+    /// A statement being evaluated once per set of iterations.
+    split_statement: Option<*const Statement>,
 }
 
 /// Accesses of a counted loop body, per iteration and over all iterations.
@@ -1538,6 +1551,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             counted_iterators: Vec::new(),
             control_frames: HashMap::default(),
             pure_functions: HashMap::default(),
+            writer_scope: None,
+            statement_places: Vec::new(),
+            current_writer: None,
+            split_statement: None,
         }
     }
 
@@ -1778,11 +1795,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Function)
             .then(|| self.call_frames.last().copied())
             .flatten();
-        SsaKey { node, call_frame }
+        SsaKey {
+            node,
+            call_frame,
+            writer: None,
+        }
     }
 
     fn read_key(&mut self, node: NodeKey) -> VersionId {
         self.ssa.read(self.ssa_key(node))
+    }
+
+    /// The value of `node` from its last writers, when they are known.
+    fn read_source_key(
+        &mut self,
+        node: NodeKey,
+        sources: Option<&[last_writer::Source]>,
+    ) -> VersionId {
+        match sources {
+            Some(sources) => self.last_writer_value(node, sources),
+            None => self.read_key(node),
+        }
     }
 
     fn bind_key(&mut self, node: NodeKey, version: VersionId) {
@@ -1820,11 +1853,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     DependencyDagNode::External(SsaKey {
                         node,
                         call_frame: None,
+                        writer: None,
                     }) => DependencyDagNode::External(node),
-                    DependencyDagNode::External(SsaKey {
-                        call_frame: Some(_),
-                        ..
-                    }) => unreachable!("call-frame storage is not a visible DAG source"),
+                    DependencyDagNode::External(SsaKey { .. }) => {
+                        unreachable!("call-frame storage and tables are not visible DAG sources")
+                    }
                     DependencyDagNode::Internal => DependencyDagNode::Internal,
                     DependencyDagNode::Replicated { replication } => {
                         DependencyDagNode::Replicated { replication }
@@ -1843,7 +1876,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // module partition for every declaration makes sparse writes quadratic.
         #[cfg(test)]
         VISIBLE_SOURCE_PROBES.set(VISIBLE_SOURCE_PROBES.get() + 1);
-        key.call_frame.is_none() && self.is_module_scope_key(key.node)
+        key.call_frame.is_none() && key.writer.is_none() && self.is_module_scope_key(key.node)
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
@@ -2697,6 +2730,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
+        self.record_table_write(key, version);
         // Later statements read this version without passing through the
         // circuit graph's variable node. Keep its storage bounds in SSA so
         // discarded bits cannot reach a subsequent whole-value read.
@@ -2768,6 +2802,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .map(|key| (key, self.read_key(key)))
                 .collect();
         }
+        let sources = self.last_writer_sources(id, index, select, member_select_domain);
         let index = self.receiver_index(id, index);
         let accesses = var_reads(id, &index, select, member_select_domain, &mut self.ctx);
         if accesses.is_empty() && !(index.is_const() && select.is_const_with_range()) {
@@ -2776,7 +2811,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut values = Vec::new();
         for (array, packed) in accesses {
             for key in self.bit_part.overlapping_access(id, array, packed) {
-                let version = self.read_key(key);
+                let version = self.read_source_key(key, sources.as_deref());
                 values.push((key, self.project_read(key, version, array, packed)));
             }
         }
@@ -3322,10 +3357,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         projection: &ProjectionContext,
         selectors: &[VersionId],
     ) -> Option<ExpressionSources> {
-        let Factor::Variable(id, index, select, _) = factor else {
+        let Factor::Variable(id, index, select, comptime) = factor else {
             return None;
         };
         let destination = projection.destination_index.as_ref()?;
+        let last_writers =
+            self.last_writer_sources(*id, index, select, comptime.member_select_domain);
         let receiver = self.receiver_index(*id, index);
         if !receiver.is_const() {
             return None;
@@ -3366,7 +3403,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     continue;
                 };
                 for key in self.bit_part.overlapping_access(*id, *array, span) {
-                    let version = self.read_key(key);
+                    let version = self.read_source_key(key, last_writers.as_deref());
                     reads.push(self.project_read(key, version, *array, span), relation);
                 }
             }
@@ -3393,6 +3430,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if let Some((_, expression)) = &select.1 {
             selector_sources.extend(self.eval_expr(expression));
         }
+        let last_writers =
+            self.last_writer_sources(*id, index, select, comptime.member_select_domain);
         let receiver = self.receiver_index(*id, index);
         if receiver.is_const()
             && let Some(reads) = self.eval_packed_anchored_bit(
@@ -3402,6 +3441,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 requested_array,
                 requested,
                 anchor,
+                last_writers.as_deref(),
             )
         {
             let mut reads = reads;
@@ -3409,8 +3449,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return reads;
         }
         if select.is_const_with_range()
-            && let Some(reads) =
-                self.eval_packed_anchored_element(*id, index, select, requested_array, anchor)
+            && let Some(reads) = self.eval_packed_anchored_element(
+                *id,
+                index,
+                select,
+                requested_array,
+                anchor,
+                last_writers.as_deref(),
+            )
         {
             let mut reads = reads;
             reads.extend_whole(selector_sources);
@@ -3426,6 +3472,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// One bit at an affine packed position of a constant element.
+    #[allow(clippy::too_many_arguments)]
     fn eval_packed_anchored_bit(
         &mut self,
         id: VarId,
@@ -3434,6 +3481,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         requested_array: ArraySpan,
         requested: PackedSpan,
         anchor: &SampledAffineIndex,
+        last_writers: Option<&[last_writer::Source]>,
     ) -> Option<ExpressionSources> {
         let (source, width) = self.sample_packed_select(id, select)?;
         if width != 1 || source.index.terms.is_empty() {
@@ -3488,7 +3536,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .bit_part
                         .overlapping_access(id, source_array, source_span)
                     {
-                        let version = self.read_key(key);
+                        let version = self.read_source_key(key, last_writers);
                         let version = self.project_read(key, version, source_array, source_span);
                         reads.push(
                             version,
@@ -3518,6 +3566,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         select: &VarSelect,
         requested_array: ArraySpan,
         anchor: &SampledAffineIndex,
+        last_writers: Option<&[last_writer::Source]>,
     ) -> Option<ExpressionSources> {
         let source = self.sample_affine_index(id, index)?;
         if source.index.terms.is_empty() {
@@ -3555,7 +3604,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 continue;
             };
             for key in self.bit_part.overlapping_access(id, array, packed) {
-                let version = self.read_key(key);
+                let version = self.read_source_key(key, last_writers);
                 reads.push(self.project_read(key, version, array, packed), relation);
             }
         }
@@ -3730,6 +3779,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> FlowResult {
+        let entered = self.enter_statement_place(statement);
+        let result = match self.last_writer_split(statement) {
+            Some(cells) => self.eval_split_statement(statement, cells, controls),
+            None => self.eval_statement_inner(statement, controls),
+        };
+        if entered {
+            self.statement_places.pop();
+        }
+        result
+    }
+
+    fn eval_statement_inner(
+        &mut self,
+        statement: &Statement,
+        controls: &[VersionId],
+    ) -> FlowResult {
         match statement {
             Statement::Assign(assign) => {
                 if let Some(statement) = self.iterator_ternary(assign) {
@@ -3765,9 +3830,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if widths.iter().all(Option::is_some) {
                     let total_width = widths.iter().flatten().sum();
                     let mut offset = total_width;
-                    for (destination, width) in assign.dst.iter().zip(widths) {
+                    for (index, (destination, width)) in assign.dst.iter().zip(widths).enumerate() {
                         let width = width.expect("checked above");
                         offset -= width;
+                        self.current_writer = Some((assign.token, index));
                         self.write_assignment_destination(
                             destination,
                             &assign.expr,
@@ -3777,10 +3843,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         );
                     }
                 } else {
-                    for destination in &assign.dst {
+                    for (index, destination) in assign.dst.iter().enumerate() {
+                        self.current_writer = Some((assign.token, index));
                         self.write_destination(destination, &sources, controls);
                     }
                 }
+                self.current_writer = None;
                 self.call_caches.pop();
                 self.active_assignment = previous_assignment;
                 if self.is_return_assignment(&assign.dst) {
@@ -4399,6 +4467,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             iterator.residue = min.rem_euclid(modulus);
         }
         self.counted_iterators.push(iterator);
+        let opened = self.writer_scope.is_none();
+        if opened {
+            self.open_writer_scope(statement);
+        }
         let coverage = for_range_step(&statement.range).map(|step| {
             let per_iteration = self.loop_accesses(&statement.body);
             let closed = per_iteration.clone().close(&iterator, step);
@@ -4410,6 +4482,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         });
         let result = self.eval_repeated_for(statement, range_controls, false, coverage.as_ref());
+        if opened {
+            self.close_writer_scope();
+        }
         self.counted_iterators.pop();
         result
     }
@@ -4494,6 +4569,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // body or enumerating runtime iterator values.
         let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
         let bit_part = self.bit_part;
+        let tables = self.writer_scope.clone();
         let coverage = coverage
             .map(|coverage| self.counted_transfer_coverage(coverage, &transfer))
             .unwrap_or_default();
@@ -4505,10 +4581,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 may_execute_zero_times,
                 &mut self.import_work,
                 |key| {
-                    bit_part
+                    let domain = bit_part
                         .ranges_of((key.node.0, key.node.1))
                         .get(key.node.2)
-                        .map(|packed| position_domain(key.node.1, *packed))
+                        .map(|packed| position_domain(key.node.1, *packed))?;
+                    Some(match (key.writer, &tables) {
+                        (Some(writer), Some(tables)) => {
+                            tables.table_domain(key.node.0, writer, domain)
+                        }
+                        _ => domain,
+                    })
                 },
                 |key| coverage.get(&key).cloned().unwrap_or_default(),
             )
@@ -4903,11 +4985,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                             source_array,
                                             source_span,
                                         ) {
-                                            let version = if let Some(sampled) = &sampled {
-                                                sampled.values.get(&key).copied()
-                                            } else {
-                                                Some(self.read_key(key))
-                                            };
+                                            let version =
+                                                if let Some(sampled) = &sampled {
+                                                    sampled.values.get(&key).copied()
+                                                } else {
+                                                    let last_writers = self.last_writer_sources(
+                                                        *id,
+                                                        index,
+                                                        select,
+                                                        comptime.member_select_domain,
+                                                    );
+                                                    Some(self.read_source_key(
+                                                        key,
+                                                        last_writers.as_deref(),
+                                                    ))
+                                                };
                                             if let Some(version) = version {
                                                 reads.push(self.project_read(
                                                     key,

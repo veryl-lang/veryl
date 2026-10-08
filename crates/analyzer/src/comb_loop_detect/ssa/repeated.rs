@@ -542,12 +542,17 @@ fn condense<'v, K: Copy + Eq + Hash>(
                 data_inputs.push(ssa.related_definition(sources));
             }
             let data_value = join(ssa, data_inputs);
+            let bounds = member_bounds(graph, nodes);
             for &node in nodes {
                 for &source in &retained {
                     layers.retain_from(node, source);
                 }
+                let domains = match bounds.get(&node) {
+                    Some(Bound::Hull(domain)) => std::slice::from_ref(domain),
+                    _ => graph[node].domains.as_slice(),
+                };
                 layers.data[node.index()] =
-                    data_value.map(|value| ssa.projected_union(value, &graph[node].domains));
+                    data_value.map(|value| ssa.projected_union(value, domains));
             }
         } else {
             let node = nodes[0];
@@ -587,6 +592,97 @@ fn condense<'v, K: Copy + Eq + Hash>(
     }
     debug_assert!(pending.iter().all(|&count| count == 0));
     layers
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bound {
+    Empty,
+    Hull(PositionDomain),
+    Unbounded,
+}
+
+impl Bound {
+    fn of(domains: &[PositionDomain]) -> Self {
+        domains
+            .iter()
+            .fold(Self::Empty, |bound, &domain| bound.join(Self::Hull(domain)))
+    }
+
+    fn join(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Empty, bound) | (bound, Self::Empty) => bound,
+            (Self::Hull(left), Self::Hull(right)) => {
+                let array_start = left.array_start.min(right.array_start);
+                let packed_start = left.packed_start.min(right.packed_start);
+                let array_end = (left.array_start + left.array_length)
+                    .max(right.array_start + right.array_length);
+                let packed_end = (left.packed_start + left.packed_length)
+                    .max(right.packed_start + right.packed_length);
+                Self::Hull(PositionDomain {
+                    array_start,
+                    array_length: array_end - array_start,
+                    packed_start,
+                    packed_length: packed_end - packed_start,
+                })
+            }
+            _ => Self::Unbounded,
+        }
+    }
+}
+
+/// The positions at which each member of a recurrence without domains of its
+/// own can hold a value. A value changes position only through an edge that
+/// moves it, so a member reached only through edges that keep positions
+/// holds values only where its sources do. Data entering the recurrence with
+/// its positions forgotten is then confined to those positions instead of
+/// reaching every position of the member.
+fn member_bounds(graph: &TransferGraph, nodes: &[NodeIndex]) -> HashMap<NodeIndex, Bound> {
+    let members = nodes.iter().copied().collect::<HashSet<_>>();
+    let mut bounds = nodes
+        .iter()
+        .map(|&node| {
+            let bound = if graph[node].domains.is_empty() {
+                Bound::Empty
+            } else {
+                Bound::of(&graph[node].domains)
+            };
+            (node, bound)
+        })
+        .collect::<HashMap<_, _>>();
+    loop {
+        let mut changed = false;
+        for &node in nodes {
+            if !graph[node].domains.is_empty() {
+                continue;
+            }
+            let mut bound = if graph[node].input.is_some() || graph[node].replication.is_some() {
+                Bound::Unbounded
+            } else {
+                Bound::Empty
+            };
+            for edge in graph.edges_directed(node, daggy::petgraph::Direction::Incoming) {
+                let relation = edge.weight().relation;
+                let source =
+                    if relation.array != Link::IDENTITY || relation.packed != Link::IDENTITY {
+                        Bound::Unbounded
+                    } else if members.contains(&edge.source()) {
+                        bounds[&edge.source()]
+                    } else if graph[edge.source()].domains.is_empty() {
+                        Bound::Unbounded
+                    } else {
+                        Bound::of(&graph[edge.source()].domains)
+                    };
+                bound = bound.join(source);
+            }
+            if bounds[&node] != bound {
+                bounds.insert(node, bound);
+                changed = true;
+            }
+        }
+        if !changed {
+            return bounds;
+        }
+    }
 }
 
 fn full<K: Copy + Eq + Hash>(
