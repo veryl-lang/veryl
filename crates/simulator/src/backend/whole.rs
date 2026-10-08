@@ -37,6 +37,7 @@ pub(crate) fn compile_whole_comb(
             config,
             use_4state: config.use_4state,
             contains_compiled_block: false,
+            df_marks: None,
         };
         // Thread-local channel to the AOT-C emitter (no-op when
         // VERYL_AOT_C_LOCALIZE is off); cleared after so it cannot leak into

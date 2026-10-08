@@ -167,7 +167,10 @@ impl BackendRegistry {
                 .iter_mut()
                 .find_map(|b| b.compile_chunk(ctx, stmts));
         }
-        let key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
+        let mut key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
+        if let Some((_, marks_fp)) = ctx.df_marks {
+            key = key.rotate_left(1) ^ marks_fp;
+        }
         if let Some(artifact) = self.chunk_cache.lock().unwrap().get(&key) {
             return Some(Arc::clone(artifact));
         }
@@ -558,6 +561,7 @@ mod tests {
             config: &config,
             use_4state: false,
             contains_compiled_block: false,
+            df_marks: None,
         };
         // 20 entries x 201 statements = 4020 statements, budget 1024.
         let group: Vec<ProtoStatement> = (0..20).map(|_| fat_if(100)).collect();
@@ -593,6 +597,7 @@ mod tests {
             config: &config,
             use_4state: false,
             contains_compiled_block: false,
+            df_marks: None,
         };
         let group: Vec<ProtoStatement> = (0..40).map(|_| fat_if(50)).collect();
         let shape = |out: &[ChunkOutput]| -> Vec<(bool, u128)> {
@@ -631,6 +636,7 @@ mod tests {
             config: &config,
             use_4state: false,
             contains_compiled_block: false,
+            df_marks: None,
         };
         let group = vec![assign(0), fat_if(2000), assign(4)];
         let out = r.build_chunked(&ctx, group, 1024);

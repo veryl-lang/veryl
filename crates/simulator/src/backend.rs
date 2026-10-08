@@ -111,6 +111,30 @@ pub trait CompiledWhole: Send + Sync {
     fn localized_comb_bytes(&self) -> &[(isize, usize)] {
         &[]
     }
+
+    /// `try_dispatch` with `ff_delta` set: a dataflow-marked event takes the
+    /// dirty words there.
+    fn try_dispatch_delta(
+        &self,
+        ff: *const u8,
+        comb: *mut u8,
+        log: *mut u8,
+        _delta: isize,
+    ) -> DispatchOutcome {
+        self.try_dispatch(ff, comb, log)
+    }
+
+    /// Whether every comb store a dataflow cell can read marks the readers
+    /// itself (see `aot_c::emit::set_dataflow_event_marks`).
+    fn dataflow_marked(&self) -> bool {
+        false
+    }
+
+    /// Whether every log push that can change an FF a dataflow cell reads
+    /// marks the readers itself.
+    fn dataflow_ff_marked(&self) -> bool {
+        false
+    }
 }
 
 #[must_use]
@@ -174,4 +198,6 @@ pub struct CompileCtx<'a> {
     /// Cranelift disables load-cache CSE in this case because nested
     /// helpers can mutate comb storage between cached loads.
     pub contains_compiled_block: bool,
+    /// Event code only: the dataflow store marks and their fingerprint.
+    pub df_marks: Option<&'a (crate::ir::opt::dataflow::StoreMarks, u128)>,
 }

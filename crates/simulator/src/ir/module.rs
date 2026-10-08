@@ -1278,6 +1278,7 @@ fn jit_pieces(
             config: &context.config,
             use_4state: context.config.use_4state,
             contains_compiled_block,
+            df_marks: None,
         };
         if helpers {
             compile_plans_parallel(&mut context.backends, &ctx, plans)
@@ -1368,6 +1369,7 @@ fn build_chunked_via_registry(
             config: &context.config,
             use_4state: context.config.use_4state,
             contains_compiled_block,
+            df_marks: None,
         };
         context.backends.build_chunked(&ctx, proto, max_chunk_size)
     };
@@ -7376,6 +7378,7 @@ impl Conv<&air::Module> for ProtoModule {
                 config: &context.config,
                 use_4state: context.config.use_4state,
                 contains_compiled_block: false,
+                df_marks: None,
             };
             let mut map = HashMap::default();
             for (event, stmts) in all_event_statements.iter() {

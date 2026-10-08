@@ -780,6 +780,21 @@ impl LocalAnalysis {
     }
 }
 
+/// Whether the `w` bytes at comb offset `off` meet a localize range: an
+/// element of a strided array, or with stride 1 any byte of a byte range.
+fn localize_range_hit(ranges: &[(isize, usize, isize)], off: isize, w: usize) -> bool {
+    ranges.iter().any(|&(base, num, stride)| {
+        if stride == 0 || num == 0 {
+            return false;
+        }
+        if stride == 1 {
+            return off < base + num as isize && base < off + w.max(1) as isize;
+        }
+        let delta = off - base;
+        delta >= 0 && delta % stride == 0 && (delta / stride) < num as isize
+    })
+}
+
 /// Per-chunk localization sets: comb offsets safe to keep in a C local within
 /// each chunk (written by one clean top-level scalar Assign there, read only in
 /// that chunk, not blocklisted).  Empty vec of empty sets when the knob is off.
@@ -788,15 +803,6 @@ fn compute_localize_sets(
     blocklist: &HashSet<isize>,
     ranges: &[(isize, usize, isize)],
 ) -> (Vec<HashSet<isize>>, HashMap<isize, usize>) {
-    let in_range = |off: isize| -> bool {
-        ranges.iter().any(|&(base, num, stride)| {
-            if stride == 0 || num == 0 {
-                return false;
-            }
-            let delta = off - base;
-            delta >= 0 && delta % stride == 0 && (delta / stride) < num as isize
-        })
-    };
     let mut a = LocalAnalysis::default();
     for (i, chunk) in chunks.iter().enumerate() {
         for s in *chunk {
@@ -809,7 +815,7 @@ fn compute_localize_sets(
         if a.bad.contains(off)
             || a.read_before_write.contains(off)
             || blocklist.contains(off)
-            || in_range(*off)
+            || localize_range_hit(ranges, *off, *a.width.get(off).unwrap_or(&8))
         {
             continue;
         }
@@ -2190,13 +2196,24 @@ fn extend_scalar_operand(s: &str, src_width: usize, width: usize, signed: bool) 
 /// Unchecked: the event prologue's bulk reserve guarantees room.
 /// Mirrors `event_write_log_push_wide` / `emit_wide_log_chunks`.
 fn emit_wide_log_chunks(src_ptr: &str, base_off: &str, nb: usize) -> String {
+    emit_wide_log_chunks_in(src_ptr, base_off, nb, None)
+}
+
+/// `emit_wide_log_chunks` for a runtime `base_off` known to lie in FF bytes
+/// `span` (see `emit_log_push_in`).
+fn emit_wide_log_chunks_in(
+    src_ptr: &str,
+    base_off: &str,
+    nb: usize,
+    span: Option<(u32, u32)>,
+) -> String {
     use crate::ir::write_log::{
         WRITE_LOG_WIDE_ENTRY_OFFSET_NB, WRITE_LOG_WIDE_ENTRY_OFFSET_OFFSET,
         WRITE_LOG_WIDE_ENTRY_OFFSET_PAYLOAD, WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES,
         WRITE_LOG_WIDE_ENTRY_SIZE, WRITE_LOG_WIDE_OFFSET_COUNT, WRITE_LOG_WIDE_OFFSET_ENTRIES_PTR,
     };
     let cap = WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES;
-    let mut out = String::new();
+    let mut out = df_ff_wide_push_mark(base_off, src_ptr, nb, span);
     let mut written = 0usize;
     while written < nb {
         let chunk = (nb - written).min(cap);
@@ -2293,6 +2310,17 @@ fn guard_push(changed: &str, push: &str) -> String {
 /// are C expressions; `wc` is native bytes ∈ {1,2,4,8}.  Unchecked: the
 /// event prologue's bulk reserve guarantees room.
 fn emit_log_push(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
+    emit_log_push_in(offset_expr, payload_expr, wc, None)
+}
+
+/// `emit_log_push` for a runtime offset known to lie in FF bytes `span`: the
+/// change test reads the runtime slot, the marks cover every reader of `span`.
+fn emit_log_push_in(
+    offset_expr: &str,
+    payload_expr: &str,
+    wc: usize,
+    span: Option<(u32, u32)>,
+) -> String {
     // Offsets shared with the Cranelift push via write_log.rs consts,
     // so a layout change can't silently desync this emitted C.
     use crate::ir::write_log::{
@@ -2301,8 +2329,9 @@ fn emit_log_push(offset_expr: &str, payload_expr: &str, wc: usize) -> String {
         WRITE_LOG_NARROW_OFFSET_COUNT, WRITE_LOG_NARROW_OFFSET_ENTRIES_PTR,
     };
     EVENT_NARROW_PUSHES.with(|c| c.set(c.get() + 1));
+    let mark = df_ff_push_mark(offset_expr, payload_expr, wc, span);
     format!(
-        "{{ unsigned char* _lb = (unsigned char*)write_log; \
+        "{mark}{{ unsigned char* _lb = (unsigned char*)write_log; \
             unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
             unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (unsigned long)_lc * {esz}ul; \
             *(unsigned int*)(_ls + {o_off}) = (unsigned int)({off}); \
@@ -3276,15 +3305,6 @@ fn plan_field_groups(stmts: &[ProtoStatement]) -> FieldPlan {
     // localization can turn it into a C local.
     let blocklist = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
     let ranges = LOCALIZE_RANGES.with(|r| r.borrow().clone());
-    let in_range = |off: isize| -> bool {
-        ranges.iter().any(|&(base, num, stride)| {
-            stride != 0
-                && num != 0
-                && (off - base) >= 0
-                && (off - base) % stride == 0
-                && (off - base) / stride < num as isize
-        })
-    };
     let moved: HashSet<usize> = moves.iter().map(|&(s, _)| s).collect();
     let mut sinks: Vec<(usize, usize)> = Vec::new();
     if localize_armed() {
@@ -3306,7 +3326,7 @@ fn plan_field_groups(stmts: &[ProtoStatement]) -> FieldPlan {
                 || a.dst_width == 0
                 || a.dst_width > 64
                 || blocklist.contains(&off)
-                || in_range(off)
+                || localize_range_hit(&ranges, off, native_bytes(a.dst_width))
             {
                 continue;
             }
@@ -4553,10 +4573,13 @@ fn emit_event_ff_assign_wide_dynsel(
     );
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks(
+        &emit_wide_log_chunks_in(
             &format!("(uint8_t*)_w{d}"),
             &format!("({cur_off:#x}u + (unsigned)(_di{d} * {nb}u))"),
             nb,
+            u32::try_from(cur_off)
+                .ok()
+                .and_then(|lo| Some((lo, lo.checked_add(u32::try_from(ne * nb).ok()?)?))),
         ),
     );
     let (g0, g1) = oob_guard(&format!("_dir{d}"), ds.index_expr.width(), ne);
@@ -4699,6 +4722,13 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
     }
 }
 
+/// The FF bytes every element of the dynamic-indexed array `a` covers, from
+/// its current base `cur_base` with `nb`-byte elements.
+fn dyn_ff_span(a: &ProtoAssignDynamicStatement, cur_base: isize, nb: usize) -> Option<(u32, u32)> {
+    let (lo, hi) = crate::ir::strided_span(cur_base, a.dst_stride, a.dst_num_elements, nb)?;
+    Some((u32::try_from(lo).ok()?, u32::try_from(hi).ok()?))
+}
+
 /// Event-path FF write to a dynamic-indexed array.  Writes the element
 /// slot and pushes a WriteLogEntry at `current_base + stride*idx`.
 /// 2-state.  A static or dynamic bit-select does an element RMW, mirroring
@@ -4789,7 +4819,8 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
             dw = dwmask
         )
     };
-    let push = emit_log_push("_woff", "_wval", nb);
+    let span = dyn_ff_span(a, cur_base, nb);
+    let push = emit_log_push_in("_woff", "_wval", nb, span);
     // Packed: skip the in-place store; the log push delivers it read-OLD (NBA).
     // See AssignDynamicStatement::ff_is_packed. Unpacked keeps it.
     let ff_is_packed = dst_base_raw == cur_base;
@@ -4944,9 +4975,10 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
         &format!("_c{d}"),
         &format!("__builtin_memcmp((const uint8_t*)_w{d}, {elem}, {nb}u) != 0"),
     );
+    let span = dyn_ff_span(a, cur_base, nb);
     let push = guard_push(
         &format!("_c{d}"),
-        &emit_wide_log_chunks(&format!("(uint8_t*)_w{d}"), "_woff", nb),
+        &emit_wide_log_chunks_in(&format!("(uint8_t*)_w{d}"), "_woff", nb, span),
     );
     let (g0, g1) = oob_guard("_idx_raw", a.dst_index_expr.width(), a.dst_num_elements);
     Some(format!(
@@ -4974,6 +5006,9 @@ pub struct EmittedModule {
     /// Run-once constant-cone entry (`veryl_aot_eval_const`); absent when the
     /// module has no const prefix.  Same ABI as `func`.
     pub const_func: Option<FuncPtr>,
+    /// A dataflow comb's whole-settle entry (`veryl_aot_eval_coarse`): every
+    /// statement, no per-cell test.  Same ABI as `func`.
+    pub coarse_func: Option<FuncPtr>,
     /// Keep-alive: dropping unloads the library and invalidates `func`.
     _lib: libloading::Library,
 }
@@ -5144,15 +5179,81 @@ pub fn prepare_comb(stmts: &[ProtoStatement], async_mode: bool) -> Option<AotCel
     Some(compile_or_spawn(src, async_mode))
 }
 
-/// Event-path `prepare_comb`.  Caller gates on `Config::aot_c_event`.
+/// Event-path `prepare_comb`.  Caller gates on `Config::aot_c_event`.  The
+/// flags say whether the event's comb stores and FF pushes mark every
+/// dataflow reader they can reach.
 pub fn prepare_event(
     stmts: &[ProtoStatement],
     async_mode: bool,
     skip_unchanged: bool,
     gates: &[EventGate],
-) -> Option<AotCell> {
+) -> Option<(AotCell, bool, bool)> {
+    DF_COVERED.with(|c| c.borrow_mut().clear());
+    DF_FF_UNCOVERED.with(|c| c.set(false));
+    DF_FF_UNCOVERED_WHY.with(|c| c.set([0; 2]));
+    DF_LOCAL_WORDS.with(|n| n.set(0));
     let src = emit_event_function(stmts, skip_unchanged, gates)?;
-    Some(compile_or_spawn(src, async_mode))
+    #[cfg(test)]
+    EVENT_SOURCES.with(|v| v.borrow_mut().push(src.clone()));
+    let marks = DF_EVENT_MARKS.with(|m| m.borrow().clone());
+    let comb_marked = marks
+        .as_ref()
+        .is_some_and(|marks| dataflow_event_covered(stmts, marks));
+    let ff_marked = marks.is_some() && !DF_FF_UNCOVERED.with(|c| c.get());
+    if marks.is_some() && crate::ir::opt::dataflow::diag() {
+        let why = DF_FF_UNCOVERED_WHY.with(|c| c.replace([0; 2]));
+        eprintln!(
+            "[dataflow] event: comb_marked={comb_marked} ff_marked={ff_marked} unmarked pushes: runtime offset {}, odd width {}",
+            why[0], why[1]
+        );
+    }
+    Some((compile_or_spawn(src, async_mode), comb_marked, ff_marked))
+}
+
+#[cfg(test)]
+thread_local! {
+    static EVENT_SOURCES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The event sources `prepare_event` emitted on this thread since the last call.
+#[cfg(test)]
+pub(crate) fn take_event_sources() -> Vec<String> {
+    EVENT_SOURCES.with(|v| std::mem::take(&mut *v.borrow_mut()))
+}
+
+/// Whether every comb range with a dataflow reader that the event can write
+/// was covered by a marking store.
+fn dataflow_event_covered(stmts: &[ProtoStatement], marks: &DataflowMarks) -> bool {
+    let mut spans = DF_COVERED.with(|c| c.borrow().clone());
+    spans.sort_unstable();
+    let mut covered: Vec<(u32, u32)> = Vec::with_capacity(spans.len());
+    for (a, b) in spans {
+        match covered.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => covered.push((a, b)),
+        }
+    }
+    let mut ins: Vec<VarOffset> = Vec::new();
+    let mut outs: Vec<VarOffset> = Vec::new();
+    for st in stmts {
+        st.gather_variable_offsets(&mut ins, &mut outs);
+        // `emit_for` stores the loop variable without a mark.
+        crate::ir::opt::dataflow::loop_vars(st, &mut outs);
+    }
+    outs.iter().all(|o| match o {
+        VarOffset::Comb(off) if *off >= 0 => {
+            let x = *off as u32;
+            let i = marks.partition_point(|t| t.1 <= x);
+            match marks.get(i) {
+                Some(t) if t.0 <= x => {
+                    let j = covered.partition_point(|c| c.1 <= x);
+                    covered.get(j).is_some_and(|c| c.0 <= x)
+                }
+                _ => true,
+            }
+        }
+        _ => true,
+    })
 }
 
 /// The idle-subtree gates of `emit_event_function`, applied innermost first:
@@ -5231,7 +5332,8 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
         let mut calls = String::new();
         for (m, part) in parts.iter().enumerate() {
             fns.push_str(&format!(
-                "static __attribute__((noinline)) void veryl_evg_{k}_{m}{ENTRY_SIG} {{\n{part}}}\n\n"
+                "static __attribute__((noinline)) void veryl_evg_{k}_{m}{ENTRY_SIG} {{\n{}}}\n\n",
+                df_local_marks(part)
             ));
             calls.push_str(&format!("        veryl_evg_{k}_{m}{ENTRY_ARGS};\n"));
         }
@@ -5361,6 +5463,7 @@ fn emit_event_function(
     gates: &[EventGate],
 ) -> Option<String> {
     reset_wide_tmp();
+    DF_WRAP_SEQ.with(|c| c.set(0));
     // Localization never applies to the event path; clear any residue a failed
     // comb emit may have left so event reads never hit `_cl_*`.
     clear_current_local();
@@ -5505,7 +5608,27 @@ fn emit_event_function(
         &emit_reserve_prologue(narrow_pushes, wide_pushes),
         &units,
     ));
+    DF_LOCAL_WORDS.with(|n| n.set(0));
     Some(src)
+}
+
+/// `body` with the `_dfm` its marks collect in declared ahead of it and
+/// flushed into `ff_delta` after it.  Every C function holding marks gets
+/// its own: a read-modify-write of `ff_delta` per mark would chain the marks
+/// through store forwarding.
+fn df_local_marks(body: &str) -> String {
+    let nw = DF_LOCAL_WORDS.with(|n| n.get());
+    if nw == 0 || !body.contains("_dfm[") {
+        return body.to_string();
+    }
+    let mut out = format!("    uint64_t _dfm[{nw}] = {{0}};\n{body}    if (ff_delta) {{\n");
+    for w in 0..nw {
+        out.push_str(&format!(
+            "        ((uint64_t *)ff_delta)[{w}] |= _dfm[{w}];\n"
+        ));
+    }
+    out.push_str("    }\n");
+    out
 }
 
 /// Prologue for `veryl_aot_eval`: one bulk reserve covering the body's
@@ -5710,6 +5833,19 @@ fn gc_orphan_temps(cache_dir: &Path) {
 /// The chunked emit writes this a few hundred lines above, so the split below
 /// cannot drift from it.
 const CHUNK_FN_MARKER: &str = "static __attribute__((noinline)) void veryl_aot_chunk_";
+/// A dataflow cell: returns the marks it sets in its own dirty word.
+const CELL_FN_MARKER: &str = "static __attribute__((noinline)) uint64_t veryl_aot_chunk_";
+
+/// The return type of the chunk function `line` starts, if it starts one.
+fn chunk_fn_ret(line: &str) -> Option<&'static str> {
+    if line.starts_with(CHUNK_FN_MARKER) {
+        Some("void")
+    } else if line.starts_with(CELL_FN_MARKER) {
+        Some("uint64_t")
+    } else {
+        None
+    }
+}
 
 /// Bytes of C per translation unit, and the ceiling on how many to make.
 ///
@@ -5761,7 +5897,7 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
     let chunk_starts: Vec<usize> = lines
         .iter()
         .enumerate()
-        .filter(|(_, l)| l.starts_with(CHUNK_FN_MARKER))
+        .filter(|(_, l)| chunk_fn_ret(l).is_some())
         .map(|(i, _)| i)
         .collect();
     // Fewer chunks than units would leave empty ones; the entry functions must
@@ -5799,12 +5935,14 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
     let decls: Vec<String> = chunk_starts
         .iter()
         .filter_map(|&i| {
+            let ret = chunk_fn_ret(lines[i])?;
             let name = lines[i]
-                .strip_prefix(CHUNK_FN_MARKER)?
+                .strip_prefix(CHUNK_FN_MARKER)
+                .or_else(|| lines[i].strip_prefix(CELL_FN_MARKER))?
                 .split('(')
                 .next()?
                 .trim();
-            Some(format!("{CHUNK_DECL_ATTR} void veryl_aot_chunk_{name}(uint8_t *__restrict__, uint8_t *__restrict__, uint64_t *__restrict__);"))
+            Some(format!("{CHUNK_DECL_ATTR} {ret} veryl_aot_chunk_{name}(uint8_t *__restrict__, uint8_t *__restrict__, uint64_t *__restrict__);"))
         })
         .collect();
     if decls.len() != chunk_starts.len() {
@@ -5865,11 +6003,10 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
             }
         }
         out.extend(decls.iter().cloned());
-        out.extend(
-            lines[lo..hi]
-                .iter()
-                .map(|l| l.replace(CHUNK_FN_MARKER, CHUNK_DEF_PREFIX)),
-        );
+        out.extend(lines[lo..hi].iter().map(|l| {
+            l.replace(CHUNK_FN_MARKER, CHUNK_DEF_PREFIX)
+                .replace(CELL_FN_MARKER, CELL_DEF_PREFIX)
+        }));
         if part == 0 {
             out.extend(entries.iter().map(|l| (*l).to_string()));
         }
@@ -5888,12 +6025,14 @@ const WIDEOPS_SET: &str = "void veryl_set_wideops(";
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
 const CHUNK_DEF_PREFIX: &str =
     "__attribute__((noinline,visibility(\"hidden\"))) void veryl_aot_chunk_";
+const CELL_DEF_PREFIX: &str =
+    "__attribute__((noinline,visibility(\"hidden\"))) uint64_t veryl_aot_chunk_";
 
 /// The compiler, its flags and the cache hash for `src`.
 fn compile_key(src: &str) -> (String, Vec<String>, String) {
     let cc_name = std::env::var("VERYL_AOT_CC").unwrap_or_else(|_| "cc".to_string());
-    // Full flag list — built once and used for *both* the cache key and the
-    // actual invocation so they can never drift apart.
+    // Full flag list, built once and used for both the cache key and the
+    // invocation so they can never drift apart.
     let mut flags: Vec<String> = [
         // -fstrict-aliasing (default at -O3) lets gcc assume the differently
         // typed pointer views of one FF (e.g. uint64_t store vs uint32_t
@@ -5949,6 +6088,15 @@ fn compile_key(src: &str) -> (String, Vec<String>, String) {
         src,
     ]);
     (cc_name, flags, hash)
+}
+
+/// Has `src` already been compiled into the cache?
+fn is_compiled(src: &str) -> bool {
+    let Ok(cache_dir) = aot_c_cache_dir() else {
+        return false;
+    };
+    let (_, _, hash) = compile_key(src);
+    cache_dir.join(format!("veryl_aot_{hash}.so")).exists()
 }
 
 /// `compile_source` with an explicit cache directory instead of resolving
@@ -6082,6 +6230,9 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     let const_func: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_const\0") }
         .ok()
         .map(|s| *s);
+    let coarse_func: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_coarse\0") }
+        .ok()
+        .map(|s| *s);
     // Publish the wide-op helper table into the .so so emitted wide-op calls
     // dispatch to the same `wide_ops::*` Rust helpers Cranelift uses.  The
     // setter is always present (decls emitted unconditionally) and copies the
@@ -6106,6 +6257,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     Ok(EmittedModule {
         func,
         const_func,
+        coarse_func,
         _lib: lib,
     })
 }
@@ -6644,9 +6796,7 @@ fn split_entry_function(entry_preamble: &str, units: &[String]) -> String {
         && std::env::var("VERYL_AOT_C_ENTRY_SPLIT").as_deref() != Ok("0");
     if !split {
         let mut out = format!("{ENTRY_ATTR}\nvoid veryl_aot_eval{SIG} {{\n{entry_preamble}");
-        for u in units {
-            out.push_str(u);
-        }
+        out.push_str(&df_local_marks(&units.concat()));
         out.push_str("}\n");
         return out;
     }
@@ -6664,7 +6814,8 @@ fn split_entry_function(entry_preamble: &str, units: &[String]) -> String {
     let mut out = String::with_capacity(total + parts.len() * 256);
     for (k, part) in parts.iter().enumerate() {
         out.push_str(&format!(
-            "static __attribute__((noinline)) void veryl_aot_eval_p{k}{SIG} {{\n{part}}}\n\n"
+            "static __attribute__((noinline)) void veryl_aot_eval_p{k}{SIG} {{\n{}}}\n\n",
+            df_local_marks(part)
         ));
     }
     out.push_str(&format!(
@@ -8101,8 +8252,288 @@ pub fn emit_stmt(stmt: &ProtoStatement) -> Option<String> {
     Some(out)
 }
 
+/// Comb ranges a dataflow settle reads, with the `(word, mask)` of the cells
+/// reading each; set while emitting events so their comb stores mark them.
+pub type DataflowMarks = std::sync::Arc<crate::ir::opt::dataflow::MarkTable>;
+
+thread_local! {
+    static DF_EVENT_MARKS: RefCell<Option<DataflowMarks>> = const { RefCell::new(None) };
+    static DF_WRAPPING: Cell<bool> = const { Cell::new(false) };
+    /// Numbers the `_dfs` snapshots; reset per event emit, as the `.so` cache
+    /// keys on the source text.
+    static DF_WRAP_SEQ: Cell<u64> = const { Cell::new(0) };
+    /// Mark ranges the wrapped stores of the current event cover.
+    static DF_COVERED: RefCell<Vec<(u32, u32)>> = const { RefCell::new(Vec::new()) };
+    /// Mark words the wrapped stores of the current event collect in `_dfm`.
+    static DF_LOCAL_WORDS: Cell<u32> = const { Cell::new(0) };
+    /// FF counterpart of `DF_EVENT_MARKS`, marked at the log push.
+    static DF_FF_MARKS: RefCell<Option<DataflowMarks>> = const { RefCell::new(None) };
+    /// A push the current event makes could reach a dataflow reader without
+    /// marking it: a runtime offset with no known span, or a width the change
+    /// test cannot load.
+    static DF_FF_UNCOVERED: Cell<bool> = const { Cell::new(false) };
+    /// Why pushes were left unmarked, for `VERYL_DATAFLOW_DIAG`: runtime
+    /// offset without a span, width not 1/2/4/8.
+    static DF_FF_UNCOVERED_WHY: Cell<[u32; 2]> = const { Cell::new([0; 2]) };
+}
+
+fn df_ff_uncovered(why: usize) {
+    DF_FF_UNCOVERED.with(|c| c.set(true));
+    DF_FF_UNCOVERED_WHY.with(|c| {
+        let mut v = c.get();
+        v[why] += 1;
+        c.set(v);
+    });
+}
+
+pub fn set_dataflow_ff_marks(marks: Option<DataflowMarks>) {
+    DF_FF_MARKS.with(|m| *m.borrow_mut() = marks);
+}
+
+fn parse_offset(s: &str) -> Option<u32> {
+    let s = s.trim();
+    match s.strip_prefix("0x") {
+        Some(h) => u32::from_str_radix(h, 16).ok(),
+        None => s.parse().ok(),
+    }
+}
+
+/// Where an FF push's change test reads and which readers it marks: a
+/// constant offset marks the readers of `[off, off + nb)`, a runtime one the
+/// readers of all of `span`.  `None` when nothing needs marking; a push that
+/// cannot be bounded notes the event as uncovered.
+fn df_ff_push_target(
+    offset_expr: &str,
+    nb: usize,
+    span: Option<(u32, u32)>,
+) -> Option<(String, Vec<(u32, u64)>)> {
+    if !event_mode() {
+        return None;
+    }
+    let marks = DF_FF_MARKS.with(|m| m.borrow().clone())?;
+    let (off, end, slot) = match (parse_offset(offset_expr), span) {
+        (Some(off), _) => (off, off + nb as u32, format!("{off:#x}")),
+        (None, Some((lo, hi))) => (lo, hi, format!("(intptr_t)({offset_expr})")),
+        (None, None) => {
+            df_ff_uncovered(0);
+            return None;
+        }
+    };
+    let first = marks.partition_point(|t| t.1 <= off);
+    let mut words: Vec<(u32, u64)> = Vec::new();
+    for (_, _, c) in marks[first..].iter().take_while(|t| t.0 < end) {
+        for &(w, m) in c {
+            match words.iter_mut().find(|x| x.0 == w) {
+                Some(x) => x.1 |= m,
+                None => words.push((w, m)),
+            }
+        }
+    }
+    if words.is_empty() {
+        return None;
+    }
+    DF_LOCAL_WORDS.with(|n| {
+        n.set(
+            n.get()
+                .max(words.iter().map(|x| x.0 + 1).max().unwrap_or(0)),
+        )
+    });
+    Some((slot, words))
+}
+
+fn df_mark_set(words: &[(u32, u64)]) -> String {
+    words
+        .iter()
+        .map(|&(w, m)| format!("_dfm[{w}] |= {m:#x}ULL; "))
+        .collect()
+}
+
+/// Code marking the dataflow readers of an FF push when the pushed payload
+/// differs from the current value, run before the push.
+fn df_ff_push_mark(
+    offset_expr: &str,
+    payload: &str,
+    nb: usize,
+    span: Option<(u32, u32)>,
+) -> String {
+    debug_assert!(
+        matches!(nb, 1 | 2 | 4 | 8),
+        "a narrow FF push of {nb} bytes"
+    );
+    // Slots are packed, so the current value is read unaligned.
+    let (ty, ld) = match nb {
+        1 => ("uint8_t", "uint8_t"),
+        2 => ("uint16_t", "veryl_u16_ua"),
+        4 => ("uint32_t", "veryl_u32_ua"),
+        8 => ("uint64_t", "veryl_u64_ua"),
+        _ => {
+            if df_ff_push_target(offset_expr, nb, span).is_some() {
+                df_ff_uncovered(1);
+            }
+            return String::new();
+        }
+    };
+    let Some((slot, words)) = df_ff_push_target(offset_expr, nb, span) else {
+        return String::new();
+    };
+    format!(
+        "if (*(const {ld} *)(ff_values + {slot}) != ({ty})({payload})) {{ {}}} ",
+        df_mark_set(&words)
+    )
+}
+
+/// `df_ff_push_mark` for a wide push of the `nb` bytes at `src_ptr`.
+fn df_ff_wide_push_mark(
+    base_off: &str,
+    src_ptr: &str,
+    nb: usize,
+    span: Option<(u32, u32)>,
+) -> String {
+    let Some((slot, words)) = df_ff_push_target(base_off, nb, span) else {
+        return String::new();
+    };
+    format!(
+        "if (__builtin_memcmp(ff_values + {slot}, {src_ptr}, {nb}) != 0) {{ {}}} ",
+        df_mark_set(&words)
+    )
+}
+
+pub fn set_dataflow_event_marks(marks: Option<DataflowMarks>) {
+    DF_EVENT_MARKS.with(|m| *m.borrow_mut() = marks);
+}
+
+fn df_marks() -> Option<DataflowMarks> {
+    if !event_mode() {
+        return None;
+    }
+    DF_EVENT_MARKS.with(|m| m.borrow().clone())
+}
+
+/// Above this many watched bytes a store marks without comparing: a
+/// dynamic-index write to a big array touches one element of it.
+const DF_COMPARE_MAX_BYTES: u32 = 64;
+
+/// What an event store into comb storage some cell reads must watch: the
+/// compared byte span `[a, a + len)` and the `(word, mask)` marks of its
+/// readers.
+struct DfWatch {
+    a: u32,
+    len: u32,
+    words: Vec<(u32, u64)>,
+}
+
+impl DfWatch {
+    /// Compared up to the cap; past it the marks are set unconditionally.
+    fn compared(&self) -> bool {
+        self.len <= DF_COMPARE_MAX_BYTES
+    }
+
+    fn set(&self) -> String {
+        self.words
+            .iter()
+            .map(|&(w, m)| format!("_dfm[{w}] |= {m:#x}ULL; "))
+            .collect()
+    }
+
+    /// Snapshot declaration `k`, before the first store.
+    fn head(&self, k: u64) -> String {
+        format!(
+            "uint8_t _dfs{k}[{len}]; __builtin_memcpy(_dfs{k}, comb_values + {a:#x}, {len}); ",
+            len = self.len,
+            a = self.a
+        )
+    }
+
+    /// Compare against snapshot `k` and mark, after the last store.
+    fn tail(&self, k: u64) -> String {
+        let (a, len) = (self.a, self.len);
+        format!(
+            "if (ff_delta && __builtin_memcmp(_dfs{k}, comb_values + {a:#x}, {len}) != 0) {{ {}}}",
+            self.set()
+        )
+    }
+}
+
+/// Records the covered ranges as a side effect.
+fn df_watch(stmt: &ProtoStatement, marks: &DataflowMarks) -> Option<DfWatch> {
+    let (lo, hi) = crate::ir::opt::dataflow::store_span(stmt)?;
+    let first = marks.partition_point(|t| t.1 <= lo);
+    let hit: Vec<&crate::ir::opt::dataflow::MarkSpan> =
+        marks[first..].iter().take_while(|t| t.0 < hi).collect();
+    if hit.is_empty() {
+        return None;
+    }
+    DF_COVERED.with(|c| c.borrow_mut().extend(hit.iter().map(|t| (t.0, t.1))));
+    let mut words: Vec<(u32, u64)> = Vec::new();
+    for (_, _, c) in &hit {
+        for &(w, m) in c {
+            match words.iter_mut().find(|x| x.0 == w) {
+                Some(x) => x.1 |= m,
+                None => words.push((w, m)),
+            }
+        }
+    }
+    DF_LOCAL_WORDS.with(|n| {
+        n.set(
+            n.get()
+                .max(words.iter().map(|x| x.0 + 1).max().unwrap_or(0)),
+        )
+    });
+    let (a, b) = (hit[0].0, hit[hit.len() - 1].1);
+    Some(DfWatch {
+        a,
+        len: b - a,
+        words,
+    })
+}
+
+fn df_wrap_seq() -> u64 {
+    DF_WRAP_SEQ.with(|c| {
+        let v = c.get();
+        c.set(v + 1);
+        v
+    })
+}
+
+/// `stmt` with no watch of its own, for a store a block-level watch covers.
+fn emit_stmt_unwatched(stmt: &ProtoStatement) -> Option<String> {
+    DF_WRAPPING.with(|w| w.set(true));
+    let inner = emit_stmt(stmt);
+    DF_WRAPPING.with(|w| w.set(false));
+    inner
+}
+
+/// An event store into comb storage some cell reads: snapshot the target,
+/// store, and mark the readers when the bytes moved.  `ff_delta` carries the
+/// dirty words; zero (no dataflow settle running) skips the marking.
+fn df_wrap_store(stmt: &ProtoStatement, marks: &DataflowMarks) -> Option<Option<String>> {
+    let watch = df_watch(stmt, marks)?;
+    DF_WRAPPING.with(|w| w.set(true));
+    let inner = emit_stmt_inner(stmt);
+    DF_WRAPPING.with(|w| w.set(false));
+    let Some(inner) = inner else {
+        return Some(None);
+    };
+    if !watch.compared() {
+        return Some(Some(format!("{{ {inner} {}}}", watch.set())));
+    }
+    let k = df_wrap_seq();
+    Some(Some(format!(
+        "{{ {}{inner}          {} }}",
+        watch.head(k),
+        watch.tail(k)
+    )))
+}
+
 fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
+    if !DF_WRAPPING.with(|w| w.get())
+        && let Some(marks) = df_marks()
+        && let Some(wrapped) = df_wrap_store(stmt, &marks)
+    {
+        return wrapped;
+    }
     if matches!(stmt, ProtoStatement::If(_) | ProtoStatement::Case(_))
+        && df_marks().is_none()
         && decode_table_enabled()
         && let Some(s) = emit_decode_table(stmt)
     {
@@ -9304,10 +9735,81 @@ fn emit_for(for_stmt: &ProtoForStatement) -> Option<String> {
 /// Flat statement sequence → one C-source body.  A single failure
 /// propagates `None`.
 fn emit_block(stmts: &[ProtoStatement]) -> Option<String> {
+    if let Some(marks) = df_marks() {
+        return emit_block_watched(stmts, &marks);
+    }
     let mut s = String::new();
     for st in stmts {
         s.push_str(&emit_stmt(st)?);
         s.push(' ');
+    }
+    Some(s)
+}
+
+/// Whether `stmt` can leave the enclosing loop body, skipping what follows it.
+fn may_break(stmt: &ProtoStatement) -> bool {
+    match stmt {
+        ProtoStatement::Break => true,
+        ProtoStatement::If(x) => {
+            x.true_side.iter().any(may_break) || x.false_side.iter().any(may_break)
+        }
+        ProtoStatement::Case(x) => {
+            x.arms.iter().any(|a| a.body.iter().any(may_break)) || x.default.iter().any(may_break)
+        }
+        ProtoStatement::SequentialBlock(body) => body.iter().any(may_break),
+        ProtoStatement::CompiledBlock(cb) => cb.original_stmts.iter().any(may_break),
+        _ => false,
+    }
+}
+
+/// `emit_block` for an event that marks dataflow readers.  Stores in this one
+/// block to the same watched span share one watch: snapshot before the first,
+/// compare after the last.  A statement that may break ends the run of stores
+/// sharing a watch, so every path that runs any of them runs both ends; this
+/// only drops work, and a value that comes back to where it started marks
+/// nothing, as the settle would also see no change.
+fn emit_block_watched(stmts: &[ProtoStatement], marks: &DataflowMarks) -> Option<String> {
+    let watches: Vec<Option<DfWatch>> = stmts.iter().map(|st| df_watch(st, marks)).collect();
+    let mut run = 0u32;
+    let runs: Vec<u32> = stmts
+        .iter()
+        .map(|st| {
+            let r = run;
+            run += may_break(st) as u32;
+            r
+        })
+        .collect();
+    let key = |i: usize, w: &DfWatch| (runs[i], w.a, w.len);
+    let mut count: HashMap<(u32, u32, u32), usize> = HashMap::default();
+    for (i, w) in watches.iter().enumerate() {
+        if let Some(w) = w {
+            *count.entry(key(i, w)).or_default() += 1;
+        }
+    }
+    let mut seen: HashMap<(u32, u32, u32), (usize, u64)> = HashMap::default();
+    let mut s = String::new();
+    for (i, (st, w)) in stmts.iter().zip(&watches).enumerate() {
+        let Some(w) = w.as_ref().filter(|w| count[&key(i, w)] > 1) else {
+            s.push_str(&emit_stmt(st)?);
+            s.push(' ');
+            continue;
+        };
+        let entry = seen.entry(key(i, w)).or_insert_with(|| (0, df_wrap_seq()));
+        entry.0 += 1;
+        let (n, k) = *entry;
+        if n == 1 && w.compared() {
+            s.push_str(&w.head(k));
+        }
+        s.push_str(&emit_stmt_unwatched(st)?);
+        s.push(' ');
+        if n == count[&key(i, w)] {
+            if w.compared() {
+                s.push_str(&w.tail(k));
+            } else {
+                s.push_str(&w.set());
+            }
+            s.push(' ');
+        }
     }
     Some(s)
 }
@@ -11671,6 +12173,321 @@ fn expr_c_type(width: usize) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Above this many statements a dataflow comb gets no whole-settle entry,
+/// which would repeat every statement.
+const DATAFLOW_COARSE_MAX_STMTS: usize = 20_000;
+
+/// The comb offsets each unit may keep in locals, with their widths: written
+/// in the unit and read nowhere else.
+fn local_sets_of(units: &[&[&ProtoStatement]]) -> Vec<HashSet<(isize, usize)>> {
+    let mut sets: Vec<HashSet<(isize, usize)>> = vec![HashSet::default(); units.len()];
+    if !localize_armed() {
+        return sets;
+    }
+    let bl = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
+    let rg = LOCALIZE_RANGES.with(|r| r.borrow().clone());
+    let mut a = LocalAnalysis::default();
+    for (i, unit) in units.iter().enumerate() {
+        for s in unit.iter() {
+            a.walk_stmt(s, i, true);
+        }
+    }
+    for (off, wc) in &a.write_chunk {
+        let Some(i) = wc else { continue };
+        let w = *a.width.get(off).unwrap_or(&8);
+        if a.bad.contains(off)
+            || a.read_before_write.contains(off)
+            || bl.contains(off)
+            || localize_range_hit(&rg, *off, w)
+        {
+            continue;
+        }
+        match a.read_chunk.get(off) {
+            Some(Some(k)) if k == i => {}
+            None => {}
+            _ => continue,
+        }
+        sets[*i].insert((*off, w));
+    }
+    sets
+}
+
+/// C source for a dataflow settle (see `ir::opt::dataflow`).  The entry has
+/// the whole-comb ABI with `ff_delta` carrying the dirty bitset: it runs the
+/// set cells in index order, clearing each bit first, and a cell whose
+/// boundary outputs moved sets its consumers' bits, which always lie after
+/// it.  Statements keep their buffer traffic except the variables a part
+/// alone writes and reads, which become locals as in `emit_function`.
+pub fn emit_dataflow_function(
+    stmts: &[ProtoStatement],
+    plan: &crate::ir::opt::dataflow::DataflowPlan,
+) -> Option<String> {
+    reset_wide_tmp();
+    EVENT_NARROW_PUSHES.with(|c| c.set(0));
+    EVENT_WIDE_PUSHES.with(|c| c.set(0));
+    let cells: Vec<Vec<&ProtoStatement>> = plan
+        .cells
+        .iter()
+        .map(|c| c.iter().map(|&i| &stmts[i as usize]).collect())
+        .collect();
+    // The unit of skipping is the cell, but a large cell is emitted as parts
+    // of at most this many statements, each a function with its own locals,
+    // as whole-comb chunks are: one function holding thousands of locals
+    // spills most of them.
+    const PART_LEN: usize = 128;
+    // `(cell, statements)` per part, in cell order.
+    let parts: Vec<(usize, &[&ProtoStatement])> = cells
+        .iter()
+        .enumerate()
+        .flat_map(|(k, c)| {
+            if c.is_empty() {
+                vec![(k, &c[..])]
+            } else {
+                c.chunks(PART_LEN).map(|p| (k, p)).collect()
+            }
+        })
+        .collect();
+    // A small comb also gets a whole-settle entry that runs every statement
+    // with no per-cell test, compare or mark, for the runtime to pick when
+    // most cells run anyway.  Its parts cut the cells' concatenated order.
+    let n_stmts: usize = cells.iter().map(|c| c.len()).sum();
+    let coarse = n_stmts <= DATAFLOW_COARSE_MAX_STMTS;
+    let all: Vec<&ProtoStatement> = if coarse {
+        cells.iter().flatten().copied().collect()
+    } else {
+        Vec::new()
+    };
+    let coarse_parts: Vec<&[&ProtoStatement]> = all.chunks(PART_LEN).collect();
+    let local_sets = local_sets_of(&parts.iter().map(|p| p.1).collect::<Vec<_>>());
+    // A whole-settle part keeps in locals only what a cell's part does too:
+    // a byte crossing cells must reach the buffer, because a settle that
+    // dirties nothing but the side-effect cells runs the per-cell entry,
+    // whose readers load it from there.
+    let fine_local: HashSet<(isize, usize)> = local_sets.iter().flatten().copied().collect();
+    let coarse_sets: Vec<HashSet<(isize, usize)>> = local_sets_of(&coarse_parts)
+        .into_iter()
+        .map(|s| s.intersection(&fine_local).copied().collect())
+        .collect();
+    LAST_LOCALIZED_BYTES.with(|b| {
+        let mut v = b.borrow_mut();
+        v.clear();
+        v.extend(local_sets.iter().flatten().copied());
+    });
+    let local_sets: Vec<HashSet<isize>> = local_sets
+        .into_iter()
+        .map(|s| s.into_iter().map(|x| x.0).collect())
+        .collect();
+    let coarse_sets: Vec<HashSet<isize>> = coarse_sets
+        .into_iter()
+        .map(|s| s.into_iter().map(|x| x.0).collect())
+        .collect();
+    let n_cells = cells.len();
+    // A part's code with its locals, indented for a function body.
+    let unit_body = |stmts: &[&ProtoStatement], local: &HashSet<isize>| -> Option<String> {
+        let mut c = String::new();
+        CURRENT_LOCAL.with(|l| *l.borrow_mut() = local.clone());
+        let mut offs: Vec<isize> = local.iter().copied().collect();
+        offs.sort_unstable();
+        for off in offs {
+            c.push_str(&format!("    uint64_t {} = 0;\n", local_name(off)));
+        }
+        for st in stmts {
+            c.push_str("    ");
+            c.push_str(&emit_stmt(st)?);
+            c.push('\n');
+        }
+        clear_current_local();
+        Some(c)
+    };
+    let part_body = |p: usize| unit_body(parts[p].1, &local_sets[p]);
+    // Parts of split cells become functions of their own, numbered after
+    // the cells and defined before them, after the whole-settle parts.
+    let mut part_fns = String::new();
+    let coarse_base = n_cells + parts.len();
+    for (q, unit) in coarse_parts.iter().enumerate() {
+        part_fns.push_str(&format!(
+            "{CHUNK_FN_MARKER}{}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ dirty) {{\n    (void)dirty;\n{}}}\n\n",
+            coarse_base + q,
+            unit_body(unit, &coarse_sets[q])?
+        ));
+    }
+    let mut cell_parts: Vec<Vec<usize>> = vec![Vec::new(); n_cells];
+    for (p, &(k, _)) in parts.iter().enumerate() {
+        cell_parts[k].push(p);
+    }
+    let mut body = String::new();
+    body.push_str(
+        "// AOT-C generated; do not edit.\n\
+         #include <stdint.h>\n\
+         typedef __uint128_t veryl_u128_ua __attribute__((__aligned__(1)));\n\
+         typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
+         typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
+         typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
+         typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+         __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
+         __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+    );
+    body.push_str(WIDEOPS_C_DECLS);
+    body.push_str(WIDEOPS_C_INLINE);
+    body.push('\n');
+    // Each cell's code, indented for a function body.
+    let mut cell_code: Vec<String> = Vec::with_capacity(cells.len());
+    let shadow_base = plan.words();
+    let mut shadow_at = 0u32;
+    for (k, own_parts) in cell_parts.iter().enumerate() {
+        let mut c = String::new();
+        let own = k / 64;
+        // A cell returns the marks it sets in its own word, so the
+        // dispatcher keeps that word in a register instead of storing it
+        // before each call and reloading it after.
+        let mark = |w: u32, m: u64| -> String {
+            if w as usize == own {
+                format!("_own |= {m:#x}ULL;")
+            } else {
+                format!("dirty[{w}] |= {m:#x}ULL;")
+            }
+        };
+        c.push_str("    uint64_t _own = 0;\n");
+        let watch = &plan.boundary[k];
+        let always = plan.mark_always[k];
+        let compare = !watch.is_empty() && !always;
+        if let [p] = own_parts[..] {
+            c.push_str(&part_body(p)?);
+        } else {
+            for &p in own_parts {
+                let f = n_cells + p;
+                part_fns.push_str(&format!(
+                    "{CHUNK_FN_MARKER}{f}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ dirty) {{\n    (void)dirty;\n{}}}\n\n",
+                    part_body(p)?
+                ));
+                c.push_str(&format!(
+                    "    veryl_aot_chunk_{f}(ff_values, comb_values, dirty);\n"
+                ));
+            }
+        }
+        if compare {
+            // Each boundary range keeps its value as of this cell's last run
+            // in the shadow, past the dirty words, so the bytes are not copied
+            // before every run.  An event store to them in between marks this
+            // cell's readers itself, and they run after this cell in the same
+            // settle; leaving the whole-settle entry reruns every cell.
+            let (mut conds, mut copies) = (Vec::new(), Vec::new());
+            for &(a, b) in watch {
+                let len = b - a;
+                conds.push(format!(
+                    "__builtin_memcmp(_sh + {shadow_at}, comb_values + {a:#x}, {len}) != 0"
+                ));
+                copies.push(format!(
+                    "        __builtin_memcpy(_sh + {shadow_at}, comb_values + {a:#x}, {len});\n"
+                ));
+                shadow_at += len;
+            }
+            c.push_str(&format!(
+                "    uint8_t *_sh = (uint8_t *)(dirty + {shadow_base});\n    if ({}) {{\n{}",
+                conds.join(" || "),
+                copies.concat()
+            ));
+            for &(w, m) in &plan.consumers[k] {
+                c.push_str(&format!("        {}\n", mark(w, m)));
+            }
+            c.push_str("    }\n");
+        } else if always {
+            for &(w, m) in &plan.consumers[k] {
+                c.push_str(&format!("    {}\n", mark(w, m)));
+            }
+        }
+        c.push_str("    return _own;\n");
+        cell_code.push(c);
+    }
+    body.push_str(&part_fns);
+    for (k, code) in cell_code.iter().enumerate() {
+        body.push_str(&format!(
+            "{CELL_FN_MARKER}{k}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ dirty) {{\n{code}}}\n\n"
+        ));
+    }
+    // A comb statement that logs an FF write needs a reserve prologue the
+    // dataflow entry does not emit.
+    if EVENT_NARROW_PUSHES.with(|c| c.get()) + EVENT_WIDE_PUSHES.with(|c| c.get()) > 0 {
+        return None;
+    }
+    // The whole-comb SLP policy, on the same statistic (see `emit_function`).
+    let (vw_calls, stmt_lines) = (body.matches("vw_").count(), body.lines().count());
+    let noslp = match std::env::var("VERYL_AOT_C_COMB_SLP").as_deref() {
+        Ok("1") => false,
+        Ok("0") => true,
+        _ => (vw_calls as f64) < 0.1 * (stmt_lines as f64),
+    };
+    if noslp {
+        body = body.replacen(
+            "// AOT-C generated; do not edit.",
+            "// AOT-C generated (noslp); do not edit.",
+            1,
+        );
+    }
+    let n = cells.len();
+    let nw = plan.words();
+    body.push_str(ENTRY_SECTION_MARKER);
+    body.push('\n');
+    body.push_str(
+        "typedef uint64_t (*veryl_cell_t)(uint8_t *__restrict__, uint8_t *__restrict__, uint64_t *__restrict__);\n",
+    );
+    body.push_str(&format!(
+        "static const veryl_cell_t veryl_cells[{n}] = {{\n"
+    ));
+    for k in 0..n {
+        body.push_str(&format!("    veryl_aot_chunk_{k},\n"));
+    }
+    body.push_str("};\n");
+    // A cell marks only cells after it: its own word through the return
+    // value, later words in memory, read when the scan reaches them.
+    body.push_str(&format!(
+        "{ENTRY_ATTR}\n\
+         void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+         \x20   (void)write_log;\n\
+         \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n\
+         \x20   for (unsigned w = 0; w < {nw}u; w++) {{\n\
+         \x20       uint64_t b = dirty[w];\n\
+         \x20       if (!b) continue;\n\
+         \x20       dirty[w] = 0;\n\
+         \x20       do {{\n\
+         \x20           unsigned k = w * 64u + (unsigned)__builtin_ctzll(b);\n\
+         \x20           b &= b - 1;\n\
+         \x20           b |= veryl_cells[k](ff_values, comb_values, dirty);\n\
+         \x20       }} while (b);\n\
+         \x20   }}\n\
+         }}\n"
+    ));
+    if coarse {
+        body.push_str(&format!(
+            "{ENTRY_ATTR}\n\
+             void veryl_aot_eval_coarse(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+             \x20   (void)write_log;\n\
+             \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n"
+        ));
+        for q in 0..coarse_parts.len() {
+            body.push_str(&format!(
+                "    veryl_aot_chunk_{}(ff_values, comb_values, dirty);\n",
+                coarse_base + q
+            ));
+        }
+        body.push_str("}\n");
+    }
+    Some(body)
+}
+
+/// `prepare_comb` for a dataflow settle: `None` when the emitter declines.
+pub fn prepare_dataflow(
+    stmts: &[ProtoStatement],
+    plan: &crate::ir::opt::dataflow::DataflowPlan,
+    async_mode: bool,
+) -> Option<AotCell> {
+    LAST_LOCALIZED_BYTES.with(|b| b.borrow_mut().clear());
+    let src = emit_dataflow_function(stmts, plan)?;
+    // A cached `.so` loads at once, so the Cranelift cells are never needed.
+    let async_mode = async_mode && !is_compiled(&src);
+    Some(compile_or_spawn(src, async_mode))
 }
 
 #[cfg(test)]

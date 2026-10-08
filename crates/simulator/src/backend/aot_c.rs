@@ -80,7 +80,12 @@ impl Backend for AotCBackend {
         // Localized comb byte ranges (intentionally-stale comb_values bytes) for
         // the validate dual-run to skip; empty unless VERYL_AOT_C_LOCALIZE is on.
         let localized = Arc::new(emit::take_last_localized_bytes());
-        Some(Arc::new(AotCWhole { cell, localized }))
+        Some(Arc::new(AotCWhole {
+            cell,
+            localized,
+            dataflow_marked: false,
+            dataflow_ff_marked: false,
+        }))
     }
 
     fn compile_whole_event(
@@ -93,7 +98,7 @@ impl Backend for AotCBackend {
         if ctx.use_4state || !self.event_enabled {
             return None;
         }
-        let cell = emit::prepare_event(
+        let (cell, dataflow_marked, dataflow_ff_marked) = emit::prepare_event(
             stmts,
             self.async_mode,
             matches!(event, Event::Clock(..)),
@@ -102,6 +107,8 @@ impl Backend for AotCBackend {
         Some(Arc::new(AotCWhole {
             cell,
             localized: Arc::new(Vec::new()),
+            dataflow_marked,
+            dataflow_ff_marked,
         }))
     }
 
@@ -119,9 +126,41 @@ struct AotCWhole {
     /// stale in comb_values; the validate dual-run skips these.  Empty for
     /// events and when localization is off.
     localized: Arc<Vec<(isize, usize)>>,
+    /// See `CompiledWhole::dataflow_marked`.
+    dataflow_marked: bool,
+    /// See `CompiledWhole::dataflow_ff_marked`.
+    dataflow_ff_marked: bool,
 }
 
 impl CompiledWhole for AotCWhole {
+    fn try_dispatch_delta(
+        &self,
+        ff: *const u8,
+        comb: *mut u8,
+        log: *mut u8,
+        delta: isize,
+    ) -> DispatchOutcome {
+        match self.cell.get() {
+            Some(m) => {
+                // SAFETY: as `try_dispatch`; a marked event reads `delta` as
+                // the dirty words, the others ignore it.
+                unsafe {
+                    (m.func)(ff, comb as *const u8, log, delta);
+                }
+                DispatchOutcome::Done
+            }
+            None => DispatchOutcome::NotReady,
+        }
+    }
+
+    fn dataflow_marked(&self) -> bool {
+        self.dataflow_marked
+    }
+
+    fn dataflow_ff_marked(&self) -> bool {
+        self.dataflow_ff_marked
+    }
+
     fn try_dispatch(&self, ff: *const u8, comb: *mut u8, log: *mut u8) -> DispatchOutcome {
         match self.cell.get() {
             Some(m) => {
