@@ -5,6 +5,9 @@
 //!
 //! - `Link::Unlinked`: every source position reaches every destination
 //!   coordinate on this axis;
+//! - `Link::Strided`: every source position reaches every destination
+//!   coordinate congruent to `residue` modulo `modulus` (at least 2) on this
+//!   axis, such as a scalar written to every other element;
 //! - `Link::Map`: the coordinate is an affine function of one source
 //!   coordinate (the same axis, or the other one when `crossed`) on an
 //!   arithmetic progression: `source = residue + modulus * t` reaches
@@ -19,6 +22,9 @@
 //! progression into another solves a linear congruence. Two destination axes
 //! that read the same source axis are composed independently, which forgets
 //! only their mutual correlation and therefore over-approximates.
+//!
+//! Mapping every coordinate, or a strided set of them, gives a strided set
+//! again, so composition keeps the congruence too.
 //!
 //! A consumer that only understands translations may treat every other link
 //! as `Unlinked`, because that is a superset of its positions.
@@ -59,6 +65,7 @@ pub(super) struct Map {
 pub(super) enum Link {
     Never,
     Map(Map),
+    Strided { modulus: isize, residue: isize },
     Unlinked,
 }
 
@@ -234,16 +241,75 @@ impl Link {
         offset.map_or(Self::Unlinked, Self::translation)
     }
 
+    /// Every coordinate congruent to `residue` modulo `modulus`.
+    pub(super) fn strided(modulus: isize, residue: isize) -> Self {
+        let modulus = modulus.saturating_abs();
+        if modulus <= 1 {
+            Self::Unlinked
+        } else {
+            Self::Strided {
+                modulus,
+                residue: residue.rem_euclid(modulus),
+            }
+        }
+    }
+
     /// The offset of a translation along the same axis.
     pub(super) fn translation_offset(self) -> Option<isize> {
         match self {
             Self::Map(map) => map.translation_offset(),
-            Self::Never | Self::Unlinked => None,
+            Self::Never | Self::Strided { .. } | Self::Unlinked => None,
         }
     }
 
+    /// Whether the destination coordinate does not depend on the source.
     pub(super) fn is_unlinked(self) -> bool {
-        self == Self::Unlinked
+        matches!(self, Self::Unlinked | Self::Strided { .. })
+    }
+
+    /// The destination coordinates that `self` reaches from every source
+    /// coordinate in `class` (`(modulus, residue)`; modulus 1 is every
+    /// coordinate) when it reads that coordinate.
+    fn image_of_class(self, class: (isize, isize)) -> Self {
+        let (modulus, residue) = class;
+        match self {
+            Self::Never => Self::Never,
+            Self::Unlinked => Self::Unlinked,
+            Self::Strided { .. } => self,
+            Self::Map(map) => {
+                // map.residue + map.modulus * t = residue (mod modulus)
+                let Some(solution) =
+                    solve_congruence(map.modulus, residue.checked_sub(map.residue), modulus)
+                else {
+                    return Self::Unlinked;
+                };
+                let Some((first, period)) = solution else {
+                    return Self::Never;
+                };
+                if map.step == 0 {
+                    // One coordinate, which a congruence cannot single out.
+                    return Self::Unlinked;
+                }
+                let base = map
+                    .step
+                    .checked_mul(first)
+                    .and_then(|offset| map.base.checked_add(offset));
+                match (base, map.step.checked_mul(period)) {
+                    (Some(base), Some(step)) => Self::strided(step, base),
+                    _ => Self::Unlinked,
+                }
+            }
+        }
+    }
+
+    /// Whether the destination coordinate can lie in `[start, end)`.
+    fn class_meets(modulus: isize, residue: isize, start: isize, end: isize) -> bool {
+        let Some(offset) = residue.checked_sub(start) else {
+            return true;
+        };
+        start
+            .checked_add(offset.rem_euclid(modulus))
+            .is_none_or(|first| first < end)
     }
 }
 
@@ -347,6 +413,9 @@ impl Relation {
         match self.link(axis) {
             Link::Never => false,
             Link::Unlinked => true,
+            Link::Strided { modulus, residue } => {
+                Link::class_meets(modulus, residue, destination.0, destination.1)
+            }
             Link::Map(map) => {
                 let read = if map.crossed { axis.other() } else { axis };
                 let (start, end) = match read {
@@ -368,6 +437,7 @@ impl Relation {
         let reaches = |link: Link, axis: Axis, destination: isize| match link {
             Link::Never => false,
             Link::Unlinked => true,
+            Link::Strided { modulus, residue } => destination.rem_euclid(modulus) == residue,
             Link::Map(map) => {
                 let read = if map.crossed { axis.other() } else { axis };
                 let coordinate = match read {
@@ -396,12 +466,15 @@ impl Relation {
         for axis in Axis::BOTH {
             let link = match next.link(axis) {
                 Link::Never => Link::Never,
-                Link::Unlinked => Link::Unlinked,
+                link @ (Link::Unlinked | Link::Strided { .. }) => link,
                 Link::Map(map) => {
                     let read = if map.crossed { axis.other() } else { axis };
                     match self.link(read) {
                         Link::Never => Link::Never,
-                        Link::Unlinked => Link::Unlinked,
+                        Link::Unlinked => next.link(axis).image_of_class((1, 0)),
+                        Link::Strided { modulus, residue } => {
+                            next.link(axis).image_of_class((modulus, residue))
+                        }
                         Link::Map(first) => match first.then(map) {
                             Some(Some(map)) => Link::Map(map),
                             Some(None) => Link::Never,
@@ -498,6 +571,7 @@ mod tests {
         match link {
             Link::Never => false,
             Link::Unlinked => true,
+            Link::Strided { modulus, residue } => destination.rem_euclid(modulus) == residue,
             Link::Map(map) => {
                 let coordinate = match (axis, map.crossed) {
                     (Axis::Array, false) | (Axis::Packed, true) => source.0,
@@ -517,7 +591,13 @@ mod tests {
     }
 
     fn sample_links() -> Vec<Link> {
-        let mut links = vec![Link::Unlinked, Link::Never];
+        let mut links = vec![
+            Link::Unlinked,
+            Link::Never,
+            Link::strided(2, 1),
+            Link::strided(3, 0),
+            Link::strided(4, 2),
+        ];
         for crossed in [false, true] {
             for numerator in [-2, -1, 0, 1, 3] {
                 for denominator in [1, 2, 3] {
@@ -640,6 +720,49 @@ mod tests {
                             "{a:?} then {b:?}: {source} -> {destination}"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn strided_composition_is_exact() {
+        // A strided or unlinked coordinate followed by a map on one axis.
+        let links = sample_links();
+        for &first in &links {
+            if !first.is_unlinked() {
+                continue;
+            }
+            for &second in &links {
+                let Link::Map(map) = second else {
+                    continue;
+                };
+                if map.crossed {
+                    continue;
+                }
+                let first_relation = Relation {
+                    array: first,
+                    packed: Link::IDENTITY,
+                };
+                let second_relation = Relation {
+                    array: second,
+                    packed: Link::IDENTITY,
+                };
+                let composed = first_relation.compose(second_relation);
+                if composed.array == Link::Unlinked && map.step == 0 {
+                    // One coordinate is widened to every coordinate.
+                    continue;
+                }
+                for destination in -10..10 {
+                    let expected = (-400..400).any(|middle| {
+                        reaches(first, Axis::Array, (0, 0), middle)
+                            && reaches(second, Axis::Array, (middle, 0), destination)
+                    });
+                    assert_eq!(
+                        reaches(composed.array, Axis::Array, (0, 0), destination),
+                        expected,
+                        "{first:?} then {second:?}: {destination}"
+                    );
                 }
             }
         }

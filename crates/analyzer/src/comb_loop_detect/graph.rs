@@ -1983,25 +1983,18 @@ mod tests {
         }
     }
 
-    #[test]
-    fn affine_cycle_detection_never_misses_an_expanded_cycle() {
-        use crate::comb_loop_detect::position::Map;
+    /// Compare the decision with the expanded graphs of random graphs whose
+    /// edges take links from `link`. Exact when `exact`, else only sound.
+    fn compare_with_expanded_graphs(
+        link: impl Fn(&mut dyn FnMut() -> u32) -> Link,
+        exact: bool,
+    ) -> (usize, usize) {
         use daggy::petgraph::algo::is_cyclic_directed;
 
         let mut state = 0x1357_9bdf_u32;
         let mut random = || {
             state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             state >> 8
-        };
-        let link = |random: &mut dyn FnMut() -> u32| match random() % 6 {
-            0 => Link::Unlinked,
-            1 | 2 => Link::translation(random() as isize % 5 - 2),
-            _ => Map::scaled(
-                random().is_multiple_of(3),
-                [-2isize, -1, 1, 2, 3][random() as usize % 5],
-                random() as isize % 7 - 3,
-                1 + random() as isize % 3,
-            ),
         };
         let (mut matched, mut over) = (0, 0);
         for case in 0..6_000 {
@@ -2086,13 +2079,49 @@ mod tests {
                 symbolic || !concrete,
                 "case {case}: missed a cycle in [{array_width}, {packed_width}] with {edges:?}"
             );
+            assert!(
+                !exact || symbolic == concrete,
+                "case {case}: invented a cycle in [{array_width}, {packed_width}] with {edges:?}"
+            );
             if symbolic == concrete {
                 matched += 1;
             } else {
                 over += 1;
             }
         }
+        (matched, over)
+    }
+
+    #[test]
+    fn affine_cycle_detection_never_misses_an_expanded_cycle() {
+        use crate::comb_loop_detect::position::Map;
+        let link = |random: &mut dyn FnMut() -> u32| match random() % 7 {
+            0 => Link::Unlinked,
+            1 => Link::strided(2 + random() as isize % 2, random() as isize % 3),
+            2 | 3 => Link::translation(random() as isize % 5 - 2),
+            _ => Map::scaled(
+                random().is_multiple_of(3),
+                [-2isize, -1, 1, 2, 3][random() as usize % 5],
+                random() as isize % 7 - 3,
+                1 + random() as isize % 3,
+            ),
+        };
+        let (matched, over) = compare_with_expanded_graphs(link, false);
         eprintln!("affine cycle detection: {matched} exact, {over} conservative");
+    }
+
+    #[test]
+    fn strided_cycle_detection_matches_expanded_graphs() {
+        // Strided and unlinked coordinates with translations and strides
+        // lose no precision.
+        use crate::comb_loop_detect::position::Map;
+        let link = |random: &mut dyn FnMut() -> u32| match random() % 5 {
+            0 => Link::Unlinked,
+            1 | 2 => Link::strided(2 + random() as isize % 2, random() as isize % 3),
+            3 => Map::scaled(false, 2, random() as isize % 3, 1),
+            _ => Link::translation(random() as isize % 5 - 2),
+        };
+        compare_with_expanded_graphs(link, true);
     }
 
     fn mapped_positions(position: usize, offset: Option<isize>, width: usize) -> Vec<usize> {

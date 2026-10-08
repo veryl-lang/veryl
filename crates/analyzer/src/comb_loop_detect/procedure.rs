@@ -1,7 +1,7 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::model::SummaryRegion;
-use super::position::{Link, greatest_common_divisor};
+use super::position::{Axis, Link, greatest_common_divisor};
 use super::region::{
     ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference, var_reads,
 };
@@ -2337,61 +2337,81 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// Nonnegative positions an affine index takes over the counted
-    /// iterators, as disjoint ascending spans of consecutive positions. Its
-    /// progressions are taken whole when consecutive and position by
-    /// position otherwise.
-    fn affine_spans(&self, index: &AffineIndex) -> Option<Vec<ArraySpan>> {
-        let mut runs = Vec::new();
-        if self.index_has_gaps(index) {
-            for assignment in self.index_progressions(index) {
-                let mut progression = AffineIndex {
-                    terms: Vec::new(),
-                    constant: index.constant,
-                };
-                for &(id, coefficient) in &index.terms {
-                    match assignment.iter().find(|(fixed, _)| *fixed == id) {
-                        Some(&(_, value)) => {
-                            progression.constant = progression
-                                .constant
-                                .checked_add(coefficient.checked_mul(value)?)?;
-                        }
-                        None => progression.terms.push((id, coefficient)),
-                    }
-                }
-                let terms = self.iterator_terms(&progression)?;
-                let (first, last) = self.affine_hull(&progression)?;
-                match terms.first() {
-                    Some(&(_, step, _)) if step > 1 => {
-                        let mut position = first;
-                        while position <= last {
-                            runs.push((position, position));
-                            position = position.checked_add(step)?;
-                        }
-                    }
-                    _ => runs.push((first, last)),
-                }
-            }
-        } else {
-            runs.push(self.affine_hull(index)?);
-        }
-        runs.sort_unstable();
-        let mut spans: Vec<ArraySpan> = Vec::new();
-        for (first, last) in runs {
-            let Ok(last) = usize::try_from(last) else {
-                continue;
+    /// iterators, as progressions: each span with the step between its
+    /// positions, starting at its first position. A progression is one entry
+    /// however many positions it has.
+    fn affine_progressions(&self, index: &AffineIndex) -> Option<Vec<(ArraySpan, usize)>> {
+        let mut progressions = Vec::new();
+        for assignment in self.index_progressions(index) {
+            let mut progression = AffineIndex {
+                terms: Vec::new(),
+                constant: index.constant,
             };
-            let first = usize::try_from(first.max(0)).ok()?;
-            match spans.last_mut() {
-                Some(span) if span.start + span.length >= first => {
-                    span.length = span.length.max(last + 1 - span.start);
+            for &(id, coefficient) in &index.terms {
+                match assignment.iter().find(|(fixed, _)| *fixed == id) {
+                    Some(&(_, value)) => {
+                        progression.constant = progression
+                            .constant
+                            .checked_add(coefficient.checked_mul(value)?)?;
+                    }
+                    None => progression.terms.push((id, coefficient)),
                 }
-                _ => spans.push(ArraySpan {
-                    start: first,
-                    length: last + 1 - first,
-                }),
             }
+            let step = self
+                .iterator_terms(&progression)
+                .and_then(|terms| terms.first().map(|&(_, step, _)| step))
+                .unwrap_or(1)
+                .max(1);
+            let (first, last) = self.affine_hull(&progression)?;
+            if last < 0 {
+                continue;
+            }
+            // The first nonnegative position of the progression.
+            let first = if first < 0 {
+                first.checked_add(first.checked_neg()?.checked_add(step - 1)? / step * step)?
+            } else {
+                first
+            };
+            if first > last {
+                continue;
+            }
+            let start = usize::try_from(first).ok()?;
+            let length = usize::try_from(last - first).ok()?.checked_add(1)?;
+            progressions.push((ArraySpan { start, length }, usize::try_from(step).ok()?));
         }
-        Some(spans)
+        Some(progressions)
+    }
+
+    /// `value` at the positions of `region` that are `step` apart from its
+    /// start. A stride keeps one relation, restricted to its residue, rather
+    /// than one projection per position.
+    fn progression_value(
+        &mut self,
+        value: VersionId,
+        domain: PositionDomain,
+        axis: Axis,
+        step: usize,
+    ) -> Option<VersionId> {
+        let value = if step > 1 {
+            let modulus = isize::try_from(step).ok()?;
+            let start = match axis {
+                Axis::Array => domain.array_start,
+                Axis::Packed => domain.packed_start,
+            };
+            let residue = isize::try_from(start).ok()?.rem_euclid(modulus);
+            let mut relation = PositionRelation::identity();
+            *relation.link_mut(axis) = Link::Map(super::position::Map {
+                crossed: false,
+                modulus,
+                residue,
+                base: residue,
+                step: modulus,
+            });
+            self.ssa.related_definition(vec![(value, relation)])
+        } else {
+            value
+        };
+        Some(self.ssa.projected(value, domain))
     }
 
     fn counted_iterator(&self, id: VarId) -> Option<CountedIterator> {
@@ -2880,20 +2900,32 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             && destination_array.is_some_and(|array| array.length == 1))
         .then(|| {
             let (select, width) = self.packed_affine_select(destination.id, &destination.select)?;
-            let mut spans: Vec<PackedSpan> = Vec::new();
-            for span in self.affine_spans(&select)? {
-                let end = span.start + span.length - 1 + width;
-                match spans.last_mut() {
-                    Some(last) if last.start + last.length >= span.start => {
-                        last.length = last.length.max(end - last.start);
+            // The bits of each progression of select positions: one span when
+            // the steps leave no gap, else one progression per bit of the
+            // width.
+            let mut pieces = Vec::new();
+            for (span, step) in self.affine_progressions(&select)? {
+                if step <= width {
+                    pieces.push((
+                        PackedSpan {
+                            start: span.start,
+                            length: span.length - 1 + width,
+                        },
+                        1,
+                    ));
+                } else {
+                    for bit in 0..width {
+                        pieces.push((
+                            PackedSpan {
+                                start: span.start + bit,
+                                length: span.length,
+                            },
+                            step,
+                        ));
                     }
-                    _ => spans.push(PackedSpan {
-                        start: span.start,
-                        length: end - span.start,
-                    }),
                 }
             }
-            Some((spans, width))
+            Some((pieces, width))
         })
         .flatten();
         let anchor = dynamic_array
@@ -2904,18 +2936,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // An anchored destination addresses only the positions its index
         // takes over the iterations that reach this write.
         let reachable = anchor
-            .then(|| self.affine_spans(&destination_index.as_ref()?.index))
+            .then(|| self.affine_progressions(&destination_index.as_ref()?.index))
             .flatten();
-        let reachable_hull = reachable.as_ref().map(|spans| match spans.as_slice() {
-            [first, .., last] => ArraySpan {
-                start: first.start,
-                length: last.start + last.length - first.start,
-            },
-            [only] => *only,
-            [] => ArraySpan {
-                start: 0,
-                length: 0,
-            },
+        let reachable_hull = reachable.as_ref().map(|progressions| {
+            let start = progressions
+                .iter()
+                .map(|(span, _)| span.start)
+                .min()
+                .unwrap_or(0);
+            let end = progressions
+                .iter()
+                .map(|(span, _)| span.start + span.length)
+                .max()
+                .unwrap_or(0);
+            ArraySpan {
+                start,
+                length: end.saturating_sub(start),
+            }
         });
         // Controls anchored at the destination's frame keep its displacement.
         let mut anchored_controls = Vec::new();
@@ -3043,37 +3080,77 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 self.ssa.record_site(version, token, controls);
             }
             if let (Some(reachable), Some(packed)) = (&reachable, self.key_span(key)) {
-                let regions = reachable
+                // The positions of each progression within the key, from its
+                // first position there.
+                let pieces = reachable
                     .iter()
-                    .filter_map(|span| key.1.intersection(*span))
+                    .filter_map(|&(span, step)| {
+                        let region = key.1.intersection(span)?;
+                        let skip = (step - (region.start - span.start) % step) % step;
+                        let start = region.start.checked_add(skip)?;
+                        let length = (region.start + region.length)
+                            .checked_sub(start)
+                            .filter(|&n| n > 0)?;
+                        Some((ArraySpan { start, length }, step))
+                    })
                     .collect::<Vec<_>>();
                 // Positions outside the reachable ones keep their value.
-                if regions.is_empty() {
+                if pieces.is_empty() {
                     continue;
                 }
-                if regions != [key.1] {
-                    let domains = regions
+                if pieces != [(key.1, 1)] {
+                    let alternatives = pieces
                         .into_iter()
-                        .map(|region| position_domain(region, packed))
-                        .collect::<Vec<_>>();
-                    version = self.ssa.projected_union(version, &domains);
+                        .map(|(region, step)| {
+                            self.progression_value(
+                                version,
+                                position_domain(region, packed),
+                                Axis::Array,
+                                step,
+                            )
+                        })
+                        .collect::<Option<Vec<_>>>();
+                    let Some(alternatives) = alternatives else {
+                        continue;
+                    };
+                    version = self.ssa.phi(alternatives);
                 }
             }
             if let (Some((reachable, _)), Some(packed)) = (&packed_reachable, self.key_span(key)) {
-                let regions = reachable
+                // The bits of each progression within the key, from its first
+                // bit there.
+                let pieces = reachable
                     .iter()
-                    .filter_map(|span| packed.intersection(*span))
+                    .filter_map(|&(span, step)| {
+                        let region = packed.intersection(span)?;
+                        let skip = (step - (region.start - span.start) % step) % step;
+                        let start = region.start.checked_add(skip)?;
+                        let length = (region.start + region.length)
+                            .checked_sub(start)
+                            .filter(|&n| n > 0)?;
+                        Some((PackedSpan { start, length }, step))
+                    })
                     .collect::<Vec<_>>();
                 // Bits outside the reachable ones keep their value.
-                if regions.is_empty() {
+                if pieces.is_empty() {
                     continue;
                 }
-                if regions != [packed] {
-                    let domains = regions
+                if pieces != [(packed, 1)] {
+                    let alternatives = pieces
                         .into_iter()
-                        .map(|region| position_domain(key.1, region))
-                        .collect::<Vec<_>>();
-                    version = self.ssa.projected_union(version, &domains);
+                        .map(|(region, step)| {
+                            self.progression_value(
+                                version,
+                                position_domain(key.1, region),
+                                Axis::Packed,
+                                step,
+                            )
+                        })
+                        .collect::<Option<Vec<_>>>();
+                    let Some(alternatives) = alternatives else {
+                        continue;
+                    };
+                    version = self.ssa.phi(alternatives);
                 }
             }
             self.bind_destination(key, version, dynamic);

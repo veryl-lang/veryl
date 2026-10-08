@@ -1169,7 +1169,7 @@ where
         Some(builder.graph)
     }
 
-    fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
+    pub(super) fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
         inputs.sort_unstable();
         inputs.dedup();
         if inputs.len() == 1 {

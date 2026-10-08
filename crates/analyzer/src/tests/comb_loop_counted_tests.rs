@@ -822,3 +822,40 @@ fn counted_concatenated_bit_select_receives_its_own_part() {
         assert!(comb_loop_analysis_is_complete(&code), "{case}");
     }
 }
+
+#[test]
+fn counted_strided_writes_do_not_grow_with_the_iteration_count() {
+    // A strided write keeps the positions between its steps, without one
+    // projection per position.
+    for (case, template) in [
+        (
+            "elements",
+            "var x: logic [SIZE]; always_comb { for i in 0..COUNT { x[i * 2] = a; x[i * 2 + 1] = b; } o = x[0]; }",
+        ),
+        (
+            "packed slices",
+            "var x: logic<SIZE>; always_comb { x = 0; for i in 0..COUNT { x[i * 4 +: 2] = {a, b}; } o = x[0]; }",
+        ),
+    ] {
+        let mut sizes = Vec::new();
+        for count in [1usize << 8, 1 << 12] {
+            let body = template
+                .replace("SIZE", &(count * 4).to_string())
+                .replace("COUNT", &count.to_string());
+            let code = format!(
+                "module Top (a: input logic, b: input logic, o: output logic) {{ {body} }}"
+            );
+            reset_analysis_size();
+            assert!(comb_loops(&code).is_empty(), "{case}, count={count}");
+            sizes.push(analysis_size());
+            assert!(
+                comb_loop_analysis_is_complete(&code),
+                "{case}, count={count}"
+            );
+        }
+        assert_eq!(
+            sizes[0], sizes[1],
+            "{case}: the graph grew with the iteration count"
+        );
+    }
+}

@@ -6,7 +6,8 @@
 //! anchor lies in a box of per-axis ranges (an absent range denotes all
 //! integer positions). Each current coordinate is either
 //!
-//! - `Unlinked(J)`: any position of `J`, independently of the anchor; or
+//! - `Unlinked(C, J)`: any position of `J` in the congruence class `C`,
+//!   independently of the anchor; or
 //! - `Linked(m)`: the image of one anchor coordinate under the map `m` of
 //!   `position.rs`, defined on the anchor coordinates of its progression.
 //!
@@ -23,9 +24,11 @@
 //! It over-approximates only when an intermediate coordinate is not read by
 //! any later map (its progression constraint is dropped), when two current
 //! coordinates read one intermediate coordinate (their correlation is
-//! dropped), and when an unlinked range is mapped (its strided image is
-//! replaced by a hull). A coordinate that the previous formulation could
-//! represent only as unlinked is therefore never less precise here.
+//! dropped). Mapping an unlinked range is exact: the image of the positions
+//! of a class in a range is the positions of another class in the hull of
+//! that image, except that a single image position keeps no class. A
+//! coordinate that the previous formulation could represent only as
+//! unlinked is therefore never less precise here.
 //!
 //! `intersects_identity` decides exactly whether a piece contains some
 //! `(x, x)`: every case reduces to linear equations over at most two integer
@@ -46,10 +49,109 @@ use crate::comb_loop_detect::ssa::PositionDomain;
 
 type AxisRange = Option<(isize, isize)>;
 
+/// The coordinates congruent to `.1` modulo `.0`; modulus 1 is all of them.
+type Class = (isize, isize);
+
+const EVERY: Class = (1, 0);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum Current {
     Linked(Map),
-    Unlinked(AxisRange),
+    Unlinked(Class, AxisRange),
+}
+
+/// An unlinked coordinate with its range tightened to the first and last
+/// positions of its class there, and a single position without a class, so
+/// that equal sets compare equal. `None` when no position remains.
+fn unlinked(class: Class, range: AxisRange) -> Option<Current> {
+    let (modulus, residue) = class;
+    if modulus <= 1 {
+        return Some(Current::Unlinked(EVERY, range));
+    }
+    let residue = residue.rem_euclid(modulus);
+    let Some((start, end)) = range else {
+        return Some(Current::Unlinked((modulus, residue), None));
+    };
+    let first = start.checked_add(residue.checked_sub(start)?.rem_euclid(modulus))?;
+    let last_value = end.checked_sub(1)?;
+    let last = last_value.checked_sub(last_value.checked_sub(residue)?.rem_euclid(modulus))?;
+    if first > last {
+        return None;
+    }
+    let range = Some((first, last.checked_add(1)?));
+    if first == last {
+        Some(Current::Unlinked(EVERY, range))
+    } else {
+        Some(Current::Unlinked((modulus, residue), range))
+    }
+}
+
+/// Whether some coordinate of `class` lies in `range`.
+fn class_meets(class: Class, range: AxisRange) -> bool {
+    let (modulus, residue) = class;
+    match range {
+        None => true,
+        Some((start, end)) => {
+            modulus <= 1 && start < end
+                || progression_in_range(residue, modulus, start, end).is_some()
+        }
+    }
+}
+
+/// Whether every coordinate of `inner` in `inner_range` belongs to `outer`.
+fn class_contains(outer: Class, inner: Class, inner_range: AxisRange) -> bool {
+    let (modulus, residue) = outer;
+    if modulus <= 1 {
+        return true;
+    }
+    if inner.0 % modulus == 0 && inner.1.rem_euclid(modulus) == residue {
+        return true;
+    }
+    // A single position.
+    inner_range.is_some_and(|(start, end)| {
+        end.checked_sub(start) == Some(1) && start.rem_euclid(modulus) == residue
+    })
+}
+
+/// The class and hull of the image of the coordinates of `class` in
+/// `range` under `map`. `None` when no coordinate maps.
+fn map_class_range(map: Map, class: Class, range: AxisRange) -> Option<(Class, AxisRange)> {
+    use crate::comb_loop_detect::position::solve_congruence;
+    // map.residue + map.modulus * t = class.1 (mod class.0)
+    let Some(solution) = solve_congruence(map.modulus, class.1.checked_sub(map.residue), class.0)
+    else {
+        // An overflow keeps the hull, which is a superset.
+        return Some((EVERY, map_range(map, range)?));
+    };
+    let (first, period) = solution?;
+    let (low, high) = match range {
+        Some((start, end)) => {
+            let (low, high) = map.source_parameters(start, end)?;
+            // The parameters `first + period * u` in `[low, high]`.
+            let low = low.checked_add(first.checked_sub(low)?.rem_euclid(period))?;
+            let high = high.checked_sub(high.checked_sub(first)?.rem_euclid(period))?;
+            if low > high {
+                return None;
+            }
+            (Some(low), Some(high))
+        }
+        None => (None, None),
+    };
+    let step = map.step.checked_mul(period);
+    let base = map
+        .step
+        .checked_mul(first)
+        .and_then(|offset| map.base.checked_add(offset));
+    let class = match (step, base) {
+        (Some(step), Some(base)) if step != 0 => (step.checked_abs().unwrap_or(1), base),
+        _ => EVERY,
+    };
+    let hull = match (low, high) {
+        (Some(low), Some(high)) => Some(map.destination_hull(low, high)?),
+        _ if map.step == 0 => Some((map.base, map.base.checked_add(1)?)),
+        _ => None,
+    };
+    Some((class, hull))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -87,7 +189,8 @@ impl RelationPiece {
                 offset: map.translation_offset()?,
                 start: self.anchor[axis],
             }),
-            Current::Unlinked(current) => Some(AxisRelation::Unlinked {
+            // The repetition checks assume every position of the range.
+            Current::Unlinked(class, current) => (class.0 <= 1).then_some(AxisRelation::Unlinked {
                 start: self.anchor[axis],
                 current,
             }),
@@ -114,7 +217,10 @@ impl RelationPiece {
     fn extend(self, axis: usize, link: Link, range: AxisRange) -> Option<(Self, Current)> {
         match link {
             Link::Never => None,
-            Link::Unlinked => Some((self, Current::Unlinked(range))),
+            Link::Unlinked => Some((self, unlinked(EVERY, range)?)),
+            Link::Strided { modulus, residue } => {
+                Some((self, unlinked((modulus, residue), range)?))
+            }
             Link::Map(next) => {
                 let read = read_axis(axis, next);
                 match self.current[read] {
@@ -124,11 +230,11 @@ impl RelationPiece {
                             Some((piece, Current::Linked(map)))
                         }
                         Some(None) => None,
-                        None => Some((self, Current::Unlinked(range))),
+                        None => Some((self, unlinked(EVERY, range)?)),
                     },
-                    Current::Unlinked(source) => {
-                        let image = map_range(next, source)?;
-                        Some((self, Current::Unlinked(intersect_range(image, range)?)))
+                    Current::Unlinked(class, source) => {
+                        let (class, image) = map_class_range(next, class, source)?;
+                        Some((self, unlinked(class, intersect_range(image, range)?)?))
                     }
                 }
             }
@@ -145,10 +251,11 @@ impl RelationPiece {
         }
         for axis in 0..2 {
             match self.current[axis] {
-                Current::Unlinked(range) => {
+                Current::Unlinked(class, range) => {
                     if range.is_some_and(|(start, end)| start >= end) {
                         return None;
                     }
+                    self.current[axis] = unlinked(class, range)?;
                 }
                 Current::Linked(map) => {
                     let read = read_axis(axis, map);
@@ -204,15 +311,18 @@ impl RelationPiece {
         (0..2).all(|axis| range_contains(self.anchor[axis], inner.anchor[axis]))
             && (0..2).all(|axis| match (self.current[axis], inner.current[axis]) {
                 (Current::Linked(outer), Current::Linked(inner)) => outer == inner,
-                (Current::Unlinked(outer), Current::Unlinked(inner)) => {
-                    range_contains(outer, inner)
+                (Current::Unlinked(outer_class, outer), Current::Unlinked(inner_class, inner)) => {
+                    range_contains(outer, inner) && class_contains(outer_class, inner_class, inner)
                 }
-                (Current::Unlinked(outer), Current::Linked(map)) => {
+                (Current::Unlinked(class, outer), Current::Linked(map)) => {
                     let read = read_axis(axis, map);
                     let image = map_range(map, inner.anchor[read]);
-                    image.is_some_and(|image| range_contains(outer, image))
+                    // Every image position `base + step * t` is in the class.
+                    let in_class = class.0 <= 1
+                        || (map.step % class.0 == 0 && map.base.rem_euclid(class.0) == class.1);
+                    in_class && image.is_some_and(|image| range_contains(outer, image))
                 }
-                (Current::Linked(_), Current::Unlinked(_)) => false,
+                (Current::Linked(_), Current::Unlinked(..)) => false,
             })
     }
 }
@@ -315,11 +425,13 @@ impl PositionRelationSet {
                             };
                             middle = restricted;
                         }
-                        Current::Unlinked(range) => {
-                            let Some(range) = intersect_range(range, right.anchor[axis]) else {
+                        Current::Unlinked(class, range) => {
+                            let Some(current) = intersect_range(range, right.anchor[axis])
+                                .and_then(|range| unlinked(class, range))
+                            else {
                                 continue 'right;
                             };
-                            middle.current[axis] = Current::Unlinked(range);
+                            middle.current[axis] = current;
                         }
                     }
                 }
@@ -327,8 +439,8 @@ impl PositionRelationSet {
                 for axis in 0..2 {
                     let link = match right.current[axis] {
                         Current::Linked(map) => Link::Map(map),
-                        Current::Unlinked(range) => {
-                            composed.current[axis] = Current::Unlinked(range);
+                        current @ Current::Unlinked(..) => {
+                            composed.current[axis] = current;
                             continue;
                         }
                     };
@@ -637,13 +749,13 @@ fn parameters_hitting(base: isize, slope: isize, points: (isize, isize)) -> Opti
 fn identity_solution(piece: &RelationPiece) -> Option<()> {
     let anchor = piece.anchor;
     match (piece.current[0], piece.current[1]) {
-        (Current::Unlinked(array), Current::Unlinked(packed)) => {
-            intersect_range(array, anchor[0])?;
-            intersect_range(packed, anchor[1])?;
-            Some(())
+        (Current::Unlinked(array_class, array), Current::Unlinked(packed_class, packed)) => {
+            let array = intersect_range(array, anchor[0])?;
+            let packed = intersect_range(packed, anchor[1])?;
+            (class_meets(array_class, array) && class_meets(packed_class, packed)).then_some(())
         }
-        (Current::Linked(map), Current::Unlinked(range))
-        | (Current::Unlinked(range), Current::Linked(map)) => {
+        (Current::Linked(map), Current::Unlinked(class, range))
+        | (Current::Unlinked(class, range), Current::Linked(map)) => {
             let linked = if matches!(piece.current[0], Current::Linked(_)) {
                 0
             } else {
@@ -653,12 +765,25 @@ fn identity_solution(piece: &RelationPiece) -> Option<()> {
             let free_range = intersect_range(range, anchor[free])?;
             if !map.crossed {
                 let points = self_fixed_points(map)?;
-                fixed_points_in_range(points, anchor[linked]).then_some(())
+                (class_meets(class, free_range) && fixed_points_in_range(points, anchor[linked]))
+                    .then_some(())
             } else {
-                // anchor[linked] = base + step t, anchor[free] = residue + modulus t.
+                // anchor[linked] = base + step t, anchor[free] = residue + modulus t,
+                // with anchor[free] in the class: t = first + period * u.
+                use crate::comb_loop_detect::position::solve_congruence;
+                let (first, period) =
+                    solve_congruence(map.modulus, class.1.checked_sub(map.residue), class.0)??;
                 parameter_exists(&[
-                    (map.base, map.step, anchor[linked]),
-                    (map.residue, map.modulus, free_range),
+                    (
+                        map.base.checked_add(map.step.checked_mul(first)?)?,
+                        map.step.checked_mul(period)?,
+                        anchor[linked],
+                    ),
+                    (
+                        map.residue.checked_add(map.modulus.checked_mul(first)?)?,
+                        map.modulus.checked_mul(period)?,
+                        free_range,
+                    ),
                 ])
                 .then_some(())
             }
