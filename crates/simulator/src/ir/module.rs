@@ -56,6 +56,12 @@ pub struct Module {
     /// The idle-subtree gates over each event's statements (`event_gate`),
     /// for the per-statement path.
     pub event_gates: HashMap<Event, crate::ir::opt::event_gate::RtEventGates>,
+    /// Events whose Cranelift code marks the dataflow readers of every comb
+    /// store it makes.
+    pub event_jit_marked: HashSet<Event>,
+    /// Events whose Cranelift code marks the dataflow readers of every FF
+    /// push that changes a value.
+    pub event_jit_ff_marked: HashSet<Event>,
     /// Unified comb statements: all port connections, child comb, and internal
     /// comb combined into a single dependency-sorted list.
     pub comb_statements: Vec<Statement>,
@@ -100,6 +106,11 @@ pub struct Module {
     /// to a one-function compile via `Backend::compile_whole_comb`.
     /// `None` keeps `settle_comb` on the per-chunk Cranelift loop.
     pub whole_comb: Option<Arc<dyn CompiledWhole>>,
+    /// Dataflow settle (`VERYL_DATAFLOW=1`); see `opt::dataflow`.
+    pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
+    /// The dataflow cells Cranelift could not compile, lowered onto this
+    /// module's buffers for the dispatcher to interpret.
+    pub dataflow_interp: Vec<(usize, Vec<Statement>)>,
     /// Per-event whole-event dispatch handles (today populated by AOT-C
     /// when `Config::aot_c_event` is set).  Empty when no backend
     /// covered the event.
@@ -163,6 +174,10 @@ pub struct ProtoModule {
     pub event_statements: HashMap<Event, ProtoStatements>,
     /// See `Module::event_gates`; the gates with the block ranges they chunk to.
     pub event_gates: HashMap<Event, Vec<crate::ir::opt::event_gate::ChunkedGate>>,
+    /// See `Module::event_jit_marked`.
+    pub event_jit_marked: HashSet<Event>,
+    /// See `Module::event_jit_ff_marked`.
+    pub event_jit_ff_marked: HashSet<Event>,
     /// Unified comb statements: all port connections, child comb, and internal
     /// comb combined into a single dependency-sorted list.
     pub comb_statements: ProtoStatements,
@@ -193,6 +208,8 @@ pub struct ProtoModule {
     /// See `Module::whole_comb`.  Built in `conv()` and shared
     /// (`Arc::clone`) with every `Module` produced by `instantiate()`.
     pub whole_comb: Option<Arc<dyn CompiledWhole>>,
+    /// See `Module::dataflow`.
+    pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// See `Module::whole_events`.  Built in `conv()`, shared
     /// (`Arc::clone`) with every `Module` from `instantiate()`.
     pub whole_events: HashMap<Event, Arc<dyn CompiledWhole>>,
@@ -582,6 +599,8 @@ impl ProtoModule {
 
             event_statements,
             event_gates,
+            event_jit_marked: self.event_jit_marked.clone(),
+            event_jit_ff_marked: self.event_jit_ff_marked.clone(),
             comb_statements,
             required_comb_passes: self.required_comb_passes,
             site_table: self.site_table.clone(),
@@ -589,6 +608,35 @@ impl ProtoModule {
             derived_clock_schedule: self.derived_clock_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
             whole_comb: self.whole_comb.clone(),
+            dataflow: self.dataflow.clone(),
+            #[cfg(not(target_family = "wasm"))]
+            dataflow_interp: self
+                .dataflow
+                .as_ref()
+                .and_then(|d| d.jit.as_ref())
+                .map(|j| {
+                    j.interp
+                        .iter()
+                        .map(|(k, ss)| {
+                            let lowered = ss
+                                .iter()
+                                .map(|s| unsafe {
+                                    s.apply_values_ptr(
+                                        ff_ptr,
+                                        ff_len,
+                                        comb_ptr,
+                                        comb_len,
+                                        self.use_4state,
+                                    )
+                                })
+                                .collect();
+                            (*k, lowered)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            #[cfg(target_family = "wasm")]
+            dataflow_interp: Vec::new(),
             whole_events: self.whole_events.clone(),
             external_components: self
                 .external_components
@@ -1278,7 +1326,7 @@ fn jit_pieces(
             config: &context.config,
             use_4state: context.config.use_4state,
             contains_compiled_block,
-            df_marks: None,
+            df_marks: context.df_event_marks.as_ref(),
         };
         if helpers {
             compile_plans_parallel(&mut context.backends, &ctx, plans)
@@ -1369,7 +1417,7 @@ fn build_chunked_via_registry(
             config: &context.config,
             use_4state: context.config.use_4state,
             contains_compiled_block,
-            df_marks: None,
+            df_marks: context.df_event_marks.as_ref(),
         };
         context.backends.build_chunked(&ctx, proto, max_chunk_size)
     };
@@ -2111,10 +2159,15 @@ fn run_comb_pipeline(
         ci
     });
     let cone_inputs = adopted_inputs.as_ref().or(cone_inputs);
+    // A dataflow settle runs no cone gate but keeps the plan's order: it lays
+    // each block's sequential chain out contiguously, and a dataflow node
+    // takes in whatever a chain spans.
+    let dataflow = crate::ir::opt::dataflow::enabled();
+    let plan_inputs = cone_inputs.filter(|_| cone_gate::enabled() || dataflow);
     // The outer `Option` is whether the rule ran at all; a decision whose plan
     // is `None` is still a decision, and re-planning it would be a third plan.
     let mut chosen_plan: Option<Option<cone_gate::ConePlan>> = None;
-    if let (Some(ci), Some((base_stmts, base_off))) = (cone_inputs, fusion_alt.take()) {
+    if let (Some(ci), Some((base_stmts, base_off))) = (plan_inputs, fusion_alt.take()) {
         let segs = |p: &Option<cone_gate::ConePlan>| p.as_ref().map(|x| x.segments.len());
         let p_sel = cone_gate::plan(&unified_sorted, ci);
         let p_base = cone_gate::plan(&base_stmts, ci);
@@ -2129,7 +2182,7 @@ fn run_comb_pipeline(
             chosen_plan = Some(p_base);
         }
     }
-    let (unified_sorted, cone_plan) = match cone_inputs {
+    let (unified_sorted, cone_plan) = match plan_inputs {
         Some(ci) => match chosen_plan
             .take()
             .unwrap_or_else(|| cone_gate::plan(&unified_sorted, ci))
@@ -2149,9 +2202,11 @@ fn run_comb_pipeline(
         },
         None => (unified_sorted, None),
     };
+    let reordered = cone_plan.is_some();
+    let cone_plan = cone_plan.filter(|_| !dataflow);
     // An exact hint for the OLD order carries only if no edge changed
     // direction; otherwise re-take the positional metric, never lower.
-    let required_comb_passes = if cone_plan.is_some() {
+    let required_comb_passes = if reordered {
         let repositioned = compute_required_passes("comb-after-cone-reorder", &unified_sorted);
         if cone_gate::diag() {
             eprintln!(
@@ -6371,32 +6426,35 @@ impl Conv<&air::Module> for ProtoModule {
         // Cone-gate inputs: node tables from the meta tree plus the
         // event-writable comb set.  `None` (also when the event writes cannot
         // be bounded) leaves the pipeline ungated.
-        let cone_event_written: Option<HashSet<isize>> = if cone_gate::enabled() {
-            collect_event_written_comb(&all_event_statements).map(|mut evt| {
-                // External components write their output connects into comb
-                // storage between settles — outside both the comb list and
-                // the event statements.  Add every connect's variable offsets
-                // (conservatively: inputs too) so a component write always
-                // lands in some segment's compare set.
-                let mut ins: Vec<VarOffset> = Vec::new();
-                // The compare set is keyed on unfolded offsets.
-                let unfolded = BigArrayFold::default();
-                for ext in &all_external_components {
-                    for c in &ext.connects {
-                        ins.clear();
-                        c.expr.gather_variable_offsets_expanded(&unfolded, &mut ins);
-                        for o in &ins {
-                            if let VarOffset::Comb(x) = o {
-                                evt.insert(*x);
+        // The owner tables these inputs carry are what the dataflow plan is
+        // built from, cone gate or not.
+        let cone_event_written: Option<HashSet<isize>> =
+            if cone_gate::enabled() || crate::ir::opt::dataflow::enabled() {
+                collect_event_written_comb(&all_event_statements).map(|mut evt| {
+                    // External components write their output connects into comb
+                    // storage between settles — outside both the comb list and
+                    // the event statements.  Add every connect's variable offsets
+                    // (conservatively: inputs too) so a component write always
+                    // lands in some segment's compare set.
+                    let mut ins: Vec<VarOffset> = Vec::new();
+                    // The compare set is keyed on unfolded offsets.
+                    let unfolded = BigArrayFold::default();
+                    for ext in &all_external_components {
+                        for c in &ext.connects {
+                            ins.clear();
+                            c.expr.gather_variable_offsets_expanded(&unfolded, &mut ins);
+                            for o in &ins {
+                                if let VarOffset::Comb(x) = o {
+                                    evt.insert(*x);
+                                }
                             }
                         }
                     }
-                }
-                evt
-            })
-        } else {
-            None
-        };
+                    evt
+                })
+            } else {
+                None
+            };
         // Part of the pipeline key: the masks they yield live in the cached plan.
         let trigger_inputs: cone_gate::TriggerInputs = if cone_event_written.is_some()
             && cone_gate::trigger_enabled()
@@ -7371,6 +7429,72 @@ impl Conv<&air::Module> for ProtoModule {
         // Only engage whole-module backends on big-enough modules — see
         // Config::aot_c_min_stmts.  Below threshold, per-chunk Cranelift
         // wins on compile latency.
+        if crate::ir::opt::dataflow::enabled() && crate::ir::opt::dataflow::diag() {
+            eprintln!(
+                "[dataflow] module {}: size_ok={size_ok} aot_c={} 4state={} passes={} cone_inputs={}",
+                src.name,
+                context.config.aot_c,
+                context.config.use_4state,
+                cached.required_comb_passes,
+                cached.cone_inputs.is_some()
+            );
+        }
+        // A module below the size threshold, or one built with dataflow or
+        // AOT-C switched off on purpose, is not expected to have it;
+        // reporting those would bury the declines that cost a big module
+        // its settle.
+        #[cfg(not(target_family = "wasm"))]
+        let dataflow_candidate =
+            size_ok && context.config.aot_c && crate::ir::opt::dataflow::enabled();
+        #[cfg(not(target_family = "wasm"))]
+        let mut dataflow_declined: Option<String> = if dataflow_candidate {
+            crate::ir::opt::dataflow::decline_reason(&context.config, cached.required_comb_passes)
+        } else {
+            None
+        };
+        #[cfg(not(target_family = "wasm"))]
+        let dataflow_wanted = dataflow_candidate && dataflow_declined.is_none();
+        #[cfg(not(target_family = "wasm"))]
+        let dataflow_key =
+            crate::ir::opt::dataflow::cache_key(key, &context.config, localize_info.as_ref());
+        #[cfg(not(target_family = "wasm"))]
+        let dataflow_cached = if dataflow_wanted {
+            crate::ir::opt::dataflow::cache_get(dataflow_key)
+        } else {
+            None
+        };
+        #[cfg(not(target_family = "wasm"))]
+        let dataflow_plan: Option<crate::ir::opt::dataflow::DataflowPlan> =
+            if dataflow_wanted && dataflow_cached.is_none() {
+                let plan = cached
+                    .cone_inputs
+                    .as_deref()
+                    .and_then(|ci| crate::ir::opt::dataflow::plan(&pre_jit_stmts, ci));
+                if plan.is_none() {
+                    dataflow_declined = Some(if cached.cone_inputs.is_none() {
+                        "event comb writes unbounded".into()
+                    } else {
+                        "planner declined".into()
+                    });
+                }
+                plan
+            } else {
+                None
+            };
+        // Events compiled now mark the dataflow cells reading what they store.
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let p = dataflow_cached
+                .as_ref()
+                .map(|rt| &rt.plan)
+                .or(dataflow_plan.as_ref());
+            crate::backend::aot_c::emit::set_dataflow_event_marks(
+                p.map(|p| Arc::new(p.store_marks())),
+            );
+            crate::backend::aot_c::emit::set_dataflow_ff_marks(
+                p.map(|p| Arc::new(p.ff_store_marks())),
+            );
+        }
         let whole_events: HashMap<Event, Arc<dyn CompiledWhole>> = if !size_ok {
             HashMap::default()
         } else {
@@ -7393,6 +7517,26 @@ impl Conv<&air::Module> for ProtoModule {
             }
             map
         };
+        #[cfg(not(target_family = "wasm"))]
+        {
+            crate::backend::aot_c::emit::set_dataflow_event_marks(None);
+            crate::backend::aot_c::emit::set_dataflow_ff_marks(None);
+        }
+        #[cfg(not(target_family = "wasm"))]
+        if (dataflow_plan.is_some() || dataflow_cached.is_some())
+            && crate::ir::opt::dataflow::diag()
+        {
+            let marked = whole_events
+                .values()
+                .filter(|w| w.dataflow_marked())
+                .count();
+            eprintln!(
+                "[dataflow] events: {} total, {} whole, {} marked",
+                all_event_statements.len(),
+                whole_events.len(),
+                marked
+            );
+        }
 
         if std::env::var("VERYL_AOT_C_EVENT_DIAG").as_deref() == Ok("1") {
             for (event, stmts) in all_event_statements.iter() {
@@ -7431,6 +7575,26 @@ impl Conv<&air::Module> for ProtoModule {
         // for sequential writes to the same variable.
         let mut event_gate_chunks: HashMap<Event, Vec<crate::ir::opt::event_gate::ChunkedGate>> =
             HashMap::default();
+        // Cranelift event code marks the dataflow readers of its comb stores
+        // the way the AOT-C event code does.
+        #[cfg(not(target_family = "wasm"))]
+        {
+            context.df_event_marks = dataflow_cached
+                .as_ref()
+                .map(|rt| &rt.plan)
+                .or(dataflow_plan.as_ref())
+                .map(|p| {
+                    let marks = crate::ir::opt::dataflow::EventMarks {
+                        comb: p.store_marks(),
+                        ff: p.ff_store_marks(),
+                    };
+                    let mut h = crate::backend::registry::Fp128::new();
+                    std::hash::Hash::hash(&marks, &mut h);
+                    (Arc::new(marks), h.finish_128())
+                });
+        }
+        let mut event_jit_marked: HashSet<Event> = HashSet::default();
+        let mut event_jit_ff_marked: HashSet<Event> = HashSet::default();
         let event_statements: HashMap<Event, ProtoStatements> = all_event_statements
             .into_iter()
             .map(|(event, stmts)| {
@@ -7452,6 +7616,13 @@ impl Conv<&air::Module> for ProtoModule {
                     let stmts = ProtoStatements(vec![ProtoStatementBlock::Interpreted(stmts)]);
                     return (event, stmts);
                 }
+                let covered = context
+                    .df_event_marks
+                    .as_ref()
+                    .is_some_and(|(m, _)| crate::ir::opt::dataflow::stores_all_marked(&stmts, m));
+                let ff_covered = context.df_event_marks.is_some()
+                    && !context.config.use_4state
+                    && crate::ir::opt::dataflow::ff_pushes_all_marked(&stmts);
                 let stmts = match event_gates.remove(&event) {
                     Some(gates) if !context.config.use_4state => {
                         let (stmts, chunked) = try_jit_gated(context, stmts, gates);
@@ -7460,15 +7631,124 @@ impl Conv<&air::Module> for ProtoModule {
                     }
                     _ => try_jit(context, stmts),
                 };
+                // Interpreted code stores without marking.
+                if covered
+                    && let Some((m, _)) = context.df_event_marks.as_ref()
+                    && stmts.0.iter().all(|b| match b {
+                        ProtoStatementBlock::Interpreted(v) => !v
+                            .iter()
+                            .any(|s| crate::ir::opt::dataflow::writes_marked(s, m)),
+                        ProtoStatementBlock::Compiled(_) => true,
+                    })
+                {
+                    event_jit_marked.insert(event.clone());
+                }
+                // Interpreted code pushes without marking.
+                if ff_covered
+                    && stmts.0.iter().all(|b| match b {
+                        ProtoStatementBlock::Interpreted(v) => {
+                            !v.iter().any(crate::ir::opt::dataflow::writes_ff_unmarked)
+                        }
+                        ProtoStatementBlock::Compiled(_) => true,
+                    })
+                {
+                    event_jit_ff_marked.insert(event.clone());
+                }
                 (event, stmts)
             })
             .collect();
+        if context.df_event_marks.is_some() && crate::ir::opt::dataflow::diag() {
+            eprintln!(
+                "[dataflow] cranelift events marked: {}/{} (ff {})",
+                event_jit_marked.len(),
+                event_statements.len(),
+                event_jit_ff_marked.len()
+            );
+            for (event, stmts) in &event_statements {
+                let comb = event_jit_marked.contains(event);
+                let ff = event_jit_ff_marked.contains(event);
+                if comb && ff {
+                    continue;
+                }
+                let interpreted: usize = stmts
+                    .0
+                    .iter()
+                    .map(|b| match b {
+                        ProtoStatementBlock::Interpreted(v) => v.len(),
+                        ProtoStatementBlock::Compiled(_) => 0,
+                    })
+                    .sum();
+                eprintln!(
+                    "[dataflow]   unmarked event {event:?}: comb={comb} ff={ff} whole={} blocks={} interpreted_stmts={interpreted}",
+                    whole_events.contains_key(event),
+                    stmts.0.len(),
+                );
+            }
+        }
+        context.df_event_marks = None;
+
+        #[cfg(not(target_family = "wasm"))]
+        let dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>> =
+            dataflow_cached.or_else(|| {
+                dataflow_plan.and_then(|plan| {
+                    if let Some((block, ranges)) = localize_info.as_ref() {
+                        crate::backend::aot_c::emit::set_localize_blocklist(
+                            block.clone(),
+                            ranges.clone(),
+                        );
+                    }
+                    let cell = crate::backend::aot_c::emit::prepare_dataflow(
+                        &pre_jit_stmts,
+                        &plan,
+                        context.config.aot_c_async,
+                    );
+                    crate::backend::aot_c::emit::clear_localize_blocklist();
+                    if cell.is_none() && crate::ir::opt::dataflow::diag() {
+                        eprintln!("[dataflow] declined: the emitter could not cover the cells");
+                    }
+                    let localized = crate::backend::aot_c::emit::take_last_localized_bytes();
+                    let cell = cell?;
+                    let jit = if cell.get().is_some() {
+                        None
+                    } else {
+                        crate::ir::opt::dataflow::compile_jit(
+                            &context.config,
+                            &pre_jit_stmts,
+                            &plan,
+                        )
+                    };
+                    let rt = Arc::new(crate::ir::opt::dataflow::DataflowRt {
+                        plan,
+                        cell,
+                        localized,
+                        jit,
+                    });
+                    crate::ir::opt::dataflow::cache_put(dataflow_key, Arc::clone(&rt));
+                    Some(rt)
+                })
+            });
+        #[cfg(not(target_family = "wasm"))]
+        if dataflow_wanted && dataflow.is_none() && dataflow_declined.is_none() {
+            dataflow_declined = Some("emitter could not cover the cells".into());
+        }
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(why) = dataflow_declined {
+            let name = src.name.to_string();
+            if crate::ir::opt::dataflow::diag() {
+                eprintln!("[dataflow] declined {name}: {why}");
+            }
+            crate::residency::record_fallback("dataflow_declined", &name);
+        }
+        #[cfg(target_family = "wasm")]
+        let dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>> = None;
 
         // Whole-comb backend (today: AOT-C) — when registered + size_ok,
         // try compile_whole_comb; backends that decline (4-state,
         // unsupported construct) return None and Ir::settle_comb stays
         // on the per-chunk Cranelift loop.
-        let whole_comb: Option<Arc<dyn CompiledWhole>> = if !size_ok {
+        // A dataflow settle replaces the whole-comb one; until its `.so` lands
+        // the Cranelift cells run it.
+        let whole_comb: Option<Arc<dyn CompiledWhole>> = if !size_ok || dataflow.is_some() {
             None
         } else {
             // Memoise the whole-comb compile by the same structural `key` as the
@@ -7550,6 +7830,7 @@ impl Conv<&air::Module> for ProtoModule {
             fall_partial: fall_partial.map(Arc::new),
             nontrivial_comb_scc,
             whole_comb,
+            dataflow,
             whole_events,
             external_components: all_external_components,
             rtl_driven,
@@ -7565,6 +7846,8 @@ impl Conv<&air::Module> for ProtoModule {
             cone_trigger_events,
             event_gate_flags,
             event_gates: event_gate_chunks,
+            event_jit_marked,
+            event_jit_ff_marked,
             settle_info: Default::default(),
         })
     }

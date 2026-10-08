@@ -121,6 +121,9 @@ pub struct Context {
     /// so without this record nothing owns it and `cone_gate` pins every
     /// statement touching it to the root.
     pub comb_reloc: Vec<(isize, isize, usize)>,
+    /// While events compile: the dataflow marks their comb stores and FF log
+    /// pushes set, with a fingerprint for the chunk cache.
+    pub df_event_marks: Option<(crate::ir::opt::dataflow::StoreMarks, u128)>,
 }
 
 impl Context {

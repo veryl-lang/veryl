@@ -48,6 +48,26 @@ pub fn enabled() -> bool {
     *ON.get_or_init(|| std::env::var("VERYL_DATAFLOW").as_deref() == Ok("1"))
 }
 
+/// Why a module built under `config` with this pass count gets no dataflow
+/// settle, judged before planning; `None` when it is planned.
+/// `VERYL_DATAFLOW=0` is not a reason here: callers check [`enabled`].
+pub(crate) fn decline_reason(
+    config: &crate::ir::Config,
+    required_comb_passes: usize,
+) -> Option<String> {
+    if !config.aot_c {
+        Some("aot_c off".into())
+    } else if !crate::component::loader::native_loading_supported() {
+        Some("native loading unsupported".into())
+    } else if config.use_4state {
+        Some("4-state".into())
+    } else if required_comb_passes > 1 {
+        Some(format!("{required_comb_passes} comb passes required"))
+    } else {
+        None
+    }
+}
+
 /// Statements a cell may hold before it stops absorbing co-active nodes.
 const CELL_CAP_STMTS: u32 = 64;
 
@@ -991,6 +1011,20 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<Dataflo
     })
 }
 
+/// A planned dataflow settle and its compiled module.
+pub struct DataflowRt {
+    pub plan: DataflowPlan,
+    /// Empty until the `.so` lands; the settle stays on the regular path
+    /// meanwhile.
+    #[cfg(not(target_family = "wasm"))]
+    pub cell: crate::backend::aot_c::emit::AotCell,
+    /// `(offset, bytes)` kept in C locals, never stored to the buffer.
+    pub localized: Vec<(isize, usize)>,
+    /// The same cells compiled by Cranelift, run until the `.so` lands.
+    #[cfg(not(target_family = "wasm"))]
+    pub jit: Option<DataflowJit>,
+}
+
 /// One Cranelift function per cell, indexed like `DataflowPlan::cells`.
 #[cfg(not(target_family = "wasm"))]
 pub struct DataflowJit {
@@ -1078,6 +1112,53 @@ pub fn compile_jit(
         interp,
         _keepalive: keep,
     })
+}
+
+/// Dataflow settles by the comb pipeline's structural key: a module converted
+/// again (another test, another instance) reuses the plan and the compile.
+#[cfg(not(target_family = "wasm"))]
+static CACHE: std::sync::Mutex<Option<HashMap<u128, std::sync::Arc<DataflowRt>>>> =
+    std::sync::Mutex::new(None);
+
+/// The `CACHE` key: the comb pipeline's key pins the statements and the plan,
+/// so this adds what the compile reads besides them.  The cache outlives a
+/// build session, so it sees every config a process builds with.
+#[cfg(not(target_family = "wasm"))]
+pub fn cache_key(
+    comb_key: u128,
+    config: &crate::ir::Config,
+    localize: Option<&crate::backend::LocalizeInfo>,
+) -> u128 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    // An async cell lands later, with Cranelift cells built to bridge the gap.
+    config.aot_c_async.hash(&mut h);
+    // The FF layout the plan's FF spans and next-slot aliases come from.
+    config.disable_ff_opt.hash(&mut h);
+    // A dump comes from the compile that asked for it.
+    config.dump_cranelift.hash(&mut h);
+    config.dump_asm.hash(&mut h);
+    // The bytes the emitter may keep in C locals.
+    localize
+        .map(|(block, ranges)| {
+            let mut block: Vec<isize> = block.iter().copied().collect();
+            block.sort_unstable();
+            (block, ranges)
+        })
+        .hash(&mut h);
+    comb_key ^ u128::from(h.finish())
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub fn cache_get(key: u128) -> Option<std::sync::Arc<DataflowRt>> {
+    CACHE.lock().ok()?.as_ref()?.get(&key).cloned()
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub fn cache_put(key: u128, rt: std::sync::Arc<DataflowRt>) {
+    if let Ok(mut c) = CACHE.lock() {
+        c.get_or_insert_with(HashMap::default).insert(key, rt);
+    }
 }
 
 /// A byte range `[lo, hi)` with the `(word, mask)` dirty bits of the cells

@@ -29,14 +29,14 @@ pub(crate) type ChunkArtifactCache = Arc<Mutex<HashMap<u128, Arc<ChunkArtifact>>
 /// Lets the IR's `Hash` impls feed XXH3-128 directly, replacing the old sink
 /// that fed `Debug`-formatted strings (its dominant per-test cost). Keying uses
 /// `finish_128`; the trait's 64-bit `finish` is unused.
-struct Fp128(twox_hash::xxhash3_128::Hasher);
+pub(crate) struct Fp128(twox_hash::xxhash3_128::Hasher);
 
 impl Fp128 {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Fp128(twox_hash::xxhash3_128::Hasher::new())
     }
 
-    fn finish_128(&self) -> u128 {
+    pub(crate) fn finish_128(&self) -> u128 {
         self.0.finish_128()
     }
 }

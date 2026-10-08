@@ -82,6 +82,10 @@ pub struct Ir {
     pub event_statements: HashMap<Event, Vec<Statement>>,
     /// See `Module::event_gates`.
     pub event_gates: HashMap<Event, opt::event_gate::RtEventGates>,
+    /// See `Module::event_jit_marked`.
+    pub(crate) event_jit_marked: HashSet<Event>,
+    /// See `Module::event_jit_ff_marked`.
+    pub(crate) event_jit_ff_marked: HashSet<Event>,
     /// Unified comb statements: all port connections, child comb, and internal
     /// comb combined into a single dependency-sorted list.
     pub comb_statements: Vec<Statement>,
@@ -125,6 +129,29 @@ pub struct Ir {
     /// `try_dispatch` in place of per-chunk Cranelift.  `None` keeps
     /// the per-chunk loop.
     pub whole_comb: Option<Arc<dyn CompiledWhole>>,
+    /// See `Module::dataflow`.
+    pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
+    /// See `Module::dataflow_interp`, by cell.
+    dataflow_interp: HashMap<usize, Vec<Statement>>,
+    /// Cells whose inputs changed since they last ran.
+    pub(crate) dataflow_dirty: std::cell::RefCell<Vec<u64>>,
+    /// Whether the dirty words record everything that moved since the last
+    /// dataflow settle.  Cleared when they cannot: a settle on the regular
+    /// path, `dataflow_mark_all`, a switch from the Cranelift cells to the
+    /// `.so` or back from the whole-settle entry, a CHECK mismatch.  The next
+    /// dataflow settle then runs every cell.
+    pub(crate) dataflow_live: std::cell::Cell<bool>,
+    /// Whether the last dataflow settle ran the `.so` cells (else Cranelift).
+    pub(crate) dataflow_on_aot: std::cell::Cell<bool>,
+    /// Per-cell dispatch or the whole-settle entry, settle by settle.
+    pub(crate) dataflow_mode: DataflowMode,
+    /// Bits of the cells dirty at every settle.
+    pub(crate) dataflow_always_mask: std::cell::OnceCell<Vec<u64>>,
+    /// The whole-settle entry is running the settles, so nothing reads the
+    /// cells' bits: events and commits skip their marks and only say that
+    /// something happened, in `dataflow_any`.
+    pub(crate) dataflow_unmarked: std::cell::Cell<bool>,
+    pub(crate) dataflow_any: std::cell::Cell<bool>,
     /// Whole-module compile of the derived-clock closure; `partial_settle`
     /// invokes it in place of stepping `derived_clock_eval_stmts`.
     pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
@@ -277,6 +304,8 @@ impl Ir {
             module_variables: module.module_variables,
             event_statements: module.event_statements,
             event_gates: module.event_gates,
+            event_jit_marked: module.event_jit_marked,
+            event_jit_ff_marked: module.event_jit_ff_marked,
             comb_statements: module.comb_statements,
             required_comb_passes: module.required_comb_passes,
             write_log_buffer: {
@@ -293,6 +322,21 @@ impl Ir {
             derived_clock_eval_passes: module.derived_clock_eval_passes,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
             whole_comb: module.whole_comb,
+            dataflow_dirty: std::cell::RefCell::new(vec![
+                0;
+                module
+                    .dataflow
+                    .as_ref()
+                    .map_or(0, |d| d.plan.buffer_words())
+            ]),
+            dataflow_live: std::cell::Cell::new(false),
+            dataflow_on_aot: std::cell::Cell::new(false),
+            dataflow_mode: DataflowMode::default(),
+            dataflow_always_mask: std::cell::OnceCell::new(),
+            dataflow_unmarked: std::cell::Cell::new(false),
+            dataflow_any: std::cell::Cell::new(false),
+            dataflow: module.dataflow,
+            dataflow_interp: module.dataflow_interp.into_iter().collect(),
             whole_derived_clock: module.whole_derived_clock,
             derived_clock_master_stmts: module.derived_clock_master_stmts,
             derived_clock_master_passes: module.derived_clock_master_passes,
@@ -338,6 +382,9 @@ impl Ir {
         // JIT-dispatched Compiled/CompiledBatch so emitted code can perform
         // inline log pushes without a TLS lookup.
         ir.install_write_log_ptr();
+        if ir.dataflow.is_some() {
+            ir.write_log_buffer.df_dirty = ir.dataflow_dirty.borrow_mut().as_mut_ptr();
+        }
         ir.backend_diag();
         if env::var("VERYL_DUMP_VARMAP").ok().as_deref() == Some("1") {
             ir.dump_varmap();
@@ -838,6 +885,7 @@ impl Ir {
         }
         let _ = profile; // suppress unused warning when profile feature is off
 
+        // A ready dataflow settle replaces all of what follows.
         // Dispatch: when a whole-comb backend (today: AOT-C) is ready,
         // invoke it in place of per-chunk Cranelift dispatch.  When
         // `--backend-validate` (`self.aot_c_validate`) we additionally
@@ -845,6 +893,10 @@ impl Ir {
         // first divergence.  Both paths fall through to Cranelift if
         // the whole-comb backend declines (`whole_comb == None`) or
         // returns `NotReady` (async compile pending).
+        #[cfg(not(target_family = "wasm"))]
+        if self.settle_dataflow() {
+            return;
+        }
         let whole_comb = self.whole_comb.as_ref();
         if let Some(whole) = whole_comb {
             // Cache env var lookups in a process-static OnceLock: settle_comb
@@ -903,6 +955,276 @@ impl Ir {
         }
 
         self.run_chunked_settle(mask_cache, profile);
+    }
+
+    /// Run the dirty cells through the dataflow module.  `false` when there is
+    /// none or it has not landed yet; the caller then settles everything.
+    #[cfg(not(target_family = "wasm"))]
+    fn settle_dataflow(&self) -> bool {
+        let Some(df) = self.dataflow.as_ref() else {
+            return false;
+        };
+        // The `.so` once it lands, the Cranelift cells until then.  Both run
+        // the same plan on the same dirty words.
+        let aot = df.cell.get();
+        let jit = if aot.is_none() { df.jit.as_ref() } else { None };
+        if aot.is_none() && jit.is_none() {
+            self.dataflow_live.set(false);
+            return false;
+        }
+        // The Cranelift cells keep no boundary shadow, so on the switch to the
+        // `.so` every shadow is stale: a cell whose new value happens to equal
+        // it would mark nothing.  Running every cell once refreshes them all.
+        if self.dataflow_on_aot.replace(aot.is_some()) != aot.is_some() {
+            self.dataflow_live.set(false);
+        }
+        let coarse_fn = aot.and_then(|m| m.coarse_func);
+        let (coarse, probing) = match coarse_fn {
+            Some(_) => self.dataflow_mode.next(),
+            None => (false, false),
+        };
+        // Under the whole-settle entry no event or commit needs to mark;
+        // the Cranelift events find no dirty words to mark in.
+        if self.dataflow_unmarked.replace(coarse) != coarse {
+            let buf =
+                (&*self.write_log_buffer) as *const _ as *mut crate::ir::write_log::WriteLogBuffer;
+            // SAFETY: the buffer is heap-stable and nothing else holds it
+            // between dispatches.
+            unsafe {
+                (*buf).df_dirty = if !coarse {
+                    self.dataflow_dirty.borrow_mut().as_mut_ptr()
+                } else {
+                    std::ptr::null_mut()
+                };
+            }
+        }
+        // The whole-settle entry leaves the cells' boundary shadows behind,
+        // so back on the cells every one of them runs once.
+        if self.dataflow_mode.was_coarse.replace(coarse) && !coarse {
+            self.dataflow_live.set(false);
+        }
+        static LANDED: std::sync::Once = std::sync::Once::new();
+        LANDED.call_once(|| {
+            if crate::ir::opt::dataflow::diag() {
+                eprintln!("[dataflow] {} cells live", df.plan.cells.len());
+            }
+        });
+        let mut dirty = self.dataflow_dirty.borrow_mut();
+        let diag = crate::ir::opt::dataflow::diag();
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        static FULL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        static SEEDED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        static NANOS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let t0 = if diag {
+            if !self.dataflow_live.get() {
+                FULL.fetch_add(1, Ordering::Relaxed);
+            }
+            let seeded: u32 = dirty[..df.plan.words()]
+                .iter()
+                .map(|w| w.count_ones())
+                .sum();
+            SEEDED.fetch_add(seeded as u64, Ordering::Relaxed);
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        if !self.dataflow_live.replace(true) {
+            let nw = df.plan.words();
+            dirty[..nw].iter_mut().for_each(|w| *w = u64::MAX);
+            let tail = df.plan.cells.len() % 64;
+            if tail != 0 {
+                dirty[nw - 1] = (1u64 << tail) - 1;
+            }
+        }
+        for &k in &df.plan.always_run {
+            dirty[k as usize / 64] |= 1u64 << (k % 64);
+        }
+        let ff_ptr = self.ff_values.as_ptr();
+        let comb_ptr = self.comb_values.as_ptr();
+        let log_ptr = (&*self.write_log_buffer as *const _ as *const u8) as *mut u8;
+        // SAFETY: the dataflow entry has the whole-comb ABI, reading and
+        // writing the same buffers; `ff_delta` carries the dirty words,
+        // which it clears as it runs.
+        let t_run = probing.then(std::time::Instant::now);
+        if let Some(m) = aot {
+            let nw = df.plan.words();
+            let always = self.dataflow_always_mask.get_or_init(|| {
+                let mut v = vec![0u64; nw];
+                for &k in &df.plan.always_run {
+                    v[k as usize / 64] |= 1u64 << (k % 64);
+                }
+                v
+            });
+            let any = self.dataflow_any.replace(false);
+            let whole =
+                coarse && (any || dirty[..nw].iter().zip(always).any(|(&d, &a)| d & !a != 0));
+            match coarse_fn {
+                Some(f) if whole => {
+                    unsafe {
+                        f(ff_ptr, comb_ptr, log_ptr, dirty.as_mut_ptr() as isize);
+                    }
+                    dirty[..nw].fill(0);
+                }
+                _ => unsafe {
+                    (m.func)(ff_ptr, comb_ptr, log_ptr, dirty.as_mut_ptr() as isize);
+                },
+            }
+        } else if let Some(j) = jit {
+            let bits = dirty.as_mut_ptr();
+            for w in 0..df.plan.words() {
+                // SAFETY: `w` is inside the dirty words; a cell only sets
+                // bits of later cells, through the same pointer.
+                unsafe {
+                    loop {
+                        let b = *bits.add(w);
+                        if b == 0 {
+                            break;
+                        }
+                        *bits.add(w) = b & (b - 1);
+                        let k = w * 64 + b.trailing_zeros() as usize;
+                        match j.funcs[k] {
+                            Some(f) => f(ff_ptr, comb_ptr, log_ptr, bits as isize),
+                            None => self.interpret_cell(df, k, bits),
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(t) = t_run {
+            self.dataflow_mode
+                .record(coarse, t.elapsed().as_nanos() as u64);
+        }
+        drop(dirty);
+        if let Some(t0) = t0 {
+            NANOS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            let n = N.fetch_add(1, Ordering::Relaxed) + 1;
+            if n.is_power_of_two() && n >= 1024 {
+                eprintln!(
+                    "[dataflow] settles {n}: every cell in {}, seeded cells/settle {:.1}, ns/settle {:.0}",
+                    FULL.load(Ordering::Relaxed),
+                    SEEDED.load(Ordering::Relaxed) as f64 / n as f64,
+                    NANOS.load(Ordering::Relaxed) as f64 / n as f64,
+                );
+            }
+        }
+        true
+    }
+
+    /// A cell Cranelift could not compile: its statements through the
+    /// interpreter, with the boundary watch the compiled cells carry.
+    ///
+    /// # Safety
+    /// `bits` points at the dirty words.
+    #[cfg(not(target_family = "wasm"))]
+    unsafe fn interpret_cell(
+        &self,
+        df: &crate::ir::opt::dataflow::DataflowRt,
+        k: usize,
+        bits: *mut u64,
+    ) {
+        let watch = &df.plan.boundary[k];
+        let before: Vec<u8> = watch
+            .iter()
+            .flat_map(|&(a, b)| self.comb_values[a as usize..b as usize].iter().copied())
+            .collect();
+        let mut mc = MaskCache::default();
+        for x in &self.dataflow_interp[&k] {
+            dispatch_stmt_fast(x, &mut mc);
+        }
+        let mut pos = 0usize;
+        let changed = df.plan.mark_always[k]
+            || watch.iter().any(|&(a, b)| {
+                let (a, b) = (a as usize, b as usize);
+                let moved = before[pos..pos + (b - a)] != self.comb_values[a..b];
+                pos += b - a;
+                moved
+            });
+        if changed {
+            for &(w, m) in &df.plan.consumers[k] {
+                // SAFETY: the caller's dirty words cover every consumer.
+                unsafe { *bits.add(w as usize) |= m };
+            }
+        }
+    }
+
+    /// Mark the cells reading or writing comb bytes `[a, b)`.
+    pub(crate) fn dataflow_mark_comb(&self, a: usize, b: usize) {
+        if let Some(df) = self.dataflow.as_ref() {
+            mark_readers(
+                &df.plan.comb_marked,
+                &mut self.dataflow_dirty.borrow_mut(),
+                a,
+                b,
+            );
+        }
+    }
+
+    /// Mark the cells reading or writing FF bytes `[a, b)`.
+    pub(crate) fn dataflow_mark_ff(&self, a: usize, b: usize) {
+        if let Some(df) = self.dataflow.as_ref() {
+            mark_readers(
+                &df.plan.ff_marked,
+                &mut self.dataflow_dirty.borrow_mut(),
+                a,
+                b,
+            );
+        }
+    }
+
+    /// Run every cell on the next dataflow settle.
+    #[track_caller]
+    pub(crate) fn dataflow_mark_all(&self) {
+        if self.dataflow.is_some() && crate::ir::opt::dataflow::diag() {
+            static SITES: std::sync::Mutex<Vec<(String, u64)>> = std::sync::Mutex::new(Vec::new());
+            let here = std::panic::Location::caller().to_string();
+            let mut v = SITES.lock().unwrap();
+            let n = match v.iter_mut().find(|x| x.0 == here) {
+                Some(x) => {
+                    x.1 += 1;
+                    x.1
+                }
+                None => {
+                    v.push((here.clone(), 1));
+                    1
+                }
+            };
+            if n.is_power_of_two() && n >= 64 {
+                eprintln!("[dataflow] mark_all from {here}: {n}");
+            }
+        }
+        self.dataflow_live.set(false);
+    }
+
+    /// Mark the readers of `len` bytes stored at `ptr`, in whichever buffer
+    /// holds them; anywhere else marks everything.
+    pub(crate) fn dataflow_mark_ptr(&self, ptr: *const u8, len: usize) {
+        if self.dataflow.is_none() {
+            return;
+        }
+        let p = ptr as usize;
+        let comb = self.comb_values.as_ptr() as usize;
+        let ff = self.ff_values.as_ptr() as usize;
+        if (comb..comb + self.comb_values.len()).contains(&p) {
+            self.dataflow_mark_comb(p - comb, p - comb + len);
+        } else if (ff..ff + self.ff_values.len()).contains(&p) {
+            self.dataflow_mark_ff(p - ff, p - ff + len);
+        } else {
+            self.dataflow_mark_all();
+        }
+    }
+
+    /// Whether settles currently run through the dataflow module.
+    pub(crate) fn dataflow_ready(&self) -> bool {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.dataflow
+                .as_ref()
+                .is_some_and(|d| d.cell.get().is_some() || d.jit.is_some())
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            false
+        }
     }
 
     /// Cranelift-only settle path, factored out so the validate mode can
@@ -1456,3 +1778,83 @@ impl Config {
 }
 
 // `lookup_comb_offset` has moved to `backend::validate`.
+
+pub(crate) fn mark_readers(
+    table: &crate::ir::opt::dataflow::Readers,
+    dirty: &mut [u64],
+    a: usize,
+    b: usize,
+) {
+    let (a, b) = (a as u32, b as u32);
+    let first = table.partition_point(|t| t.1 <= a);
+    for (s, _, readers) in &table[first..] {
+        if *s >= b {
+            break;
+        }
+        for &c in readers {
+            dirty[(c / 64) as usize] |= 1 << (c % 64);
+        }
+    }
+}
+
+/// Chooses, settle by settle, between a dataflow comb's per-cell dispatch and
+/// its whole-settle entry by timing both: the two alternate in short probe
+/// windows at the start of each period, and the faster one runs the rest of
+/// it.  Which pays depends on how many cells a settle dirties, which only a
+/// run shows.  A choice that holds doubles the next period, so a design that
+/// keeps its character stops paying for probes.
+#[derive(Default)]
+pub(crate) struct DataflowMode {
+    settles: std::cell::Cell<u64>,
+    /// `log2` of the current period, past `MIN_PERIOD_LOG2`.
+    backoff: std::cell::Cell<u32>,
+    decided: std::cell::Cell<bool>,
+    coarse: std::cell::Cell<bool>,
+    pub(crate) was_coarse: std::cell::Cell<bool>,
+    nanos: [std::cell::Cell<u64>; 2],
+    count: [std::cell::Cell<u64>; 2],
+}
+
+impl DataflowMode {
+    const PROBE: u64 = 1024;
+    const MIN_PERIOD_LOG2: u32 = 18;
+    const MAX_PERIOD_LOG2: u32 = 26;
+
+    /// This settle's mode, and whether it is a probe to time.
+    fn next(&self) -> (bool, bool) {
+        let i = self.settles.get();
+        let period = 1u64 << (Self::MIN_PERIOD_LOG2 + self.backoff.get());
+        self.settles.set(if i + 1 == period { 0 } else { i + 1 });
+        if i < 4 * Self::PROBE {
+            return ((i / Self::PROBE) % 2 == 1, true);
+        }
+        if i == 4 * Self::PROBE {
+            let avg = |m: usize| self.nanos[m].get() as f64 / self.count[m].get().max(1) as f64;
+            let (fine, whole) = (avg(0), avg(1));
+            let held = self.decided.replace(true) && (whole < fine) == self.coarse.get();
+            self.backoff.set(if held {
+                (self.backoff.get() + 1).min(Self::MAX_PERIOD_LOG2 - Self::MIN_PERIOD_LOG2)
+            } else {
+                0
+            });
+            self.coarse.set(whole < fine);
+            if crate::ir::opt::dataflow::diag() {
+                eprintln!(
+                    "[dataflow] mode: cells {fine:.0} ns, whole {whole:.0} ns -> {}",
+                    if whole < fine { "whole" } else { "cells" }
+                );
+            }
+            for m in 0..2 {
+                self.nanos[m].set(0);
+                self.count[m].set(0);
+            }
+        }
+        (self.coarse.get(), false)
+    }
+
+    fn record(&self, coarse: bool, nanos: u64) {
+        let m = usize::from(coarse);
+        self.nanos[m].set(self.nanos[m].get() + nanos);
+        self.count[m].set(self.count[m].get() + 1);
+    }
+}
