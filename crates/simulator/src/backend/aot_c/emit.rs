@@ -10214,292 +10214,319 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
             };
             let xs = emit_expr_inner(x, operand_needs_clean)?;
             let ys = emit_expr_inner(y, operand_needs_clean)?;
-            // `x & C` where the constant covers every bit x can carry (the
-            // shape a canonicalization wrapper leaves behind): the AND is a
-            // bit-exact no-op, so emit x alone.  The result is clean because
-            // x is, so any `needs_clean` request is still honored.
-            if clean_elide()
-                && matches!(op, Op::BitAnd)
-                && !expr_context.signed
-                && let ProtoExpression::Value {
-                    value: Value::U64(v),
-                    ..
-                } = &**y
-                && v.mask_xz == 0
-                && x.width() > 0
-                && x.width() <= 64
-                && (v.payload & width_mask(x.width())) == width_mask(x.width())
-                && expr_emits_clean(x)
-            {
-                return Some(xs);
-            }
-            // VERYL_AOT_C_BOOLFOLD: narrow LogicAnd/LogicOr as a branchless
-            // bitwise reduce of the `!=0` predicates — force-evaluates the
-            // short-circuited right arm to drop the data-dependent branch.
-            // Logic ops are 0/1, so no width mask.
-            let bf = boolfold_mode();
-            if bf > 0
-                && matches!(op, Op::LogicAnd | Op::LogicOr)
-                && (bf == 2 || is_cheap_boolfold_arm(y, 3))
-            {
-                let bit = if matches!(op, Op::LogicAnd) { "&" } else { "|" };
-                return Some(format!("((uint64_t)((({xs}) != 0) {bit} (({ys}) != 0)))"));
-            }
-            if is_signed_cmp || is_signed_divrem {
-                let x_w = x.width();
-                let y_w = y.width();
-                if x_w == 0 || y_w == 0 || x_w > 128 || y_w > 128 {
-                    // wide / zero-width signed compare.
-                    return None;
-                }
-                // A 65..128-bit operand is a `__uint128_t` scalar; sign-extend
-                // and compare there.  Div / Rem keep the 64-bit form — their
-                // zero / INT_MIN guards below are written against int64_t.
-                let cmp_bits = if x_w > 64 || y_w > 64 { 128 } else { 64 };
-                if cmp_bits == 128 && is_signed_divrem {
-                    return None;
-                }
-                let c_op = match op {
-                    Op::Less => "<",
-                    Op::Greater => ">",
-                    Op::LessEq => "<=",
-                    Op::GreaterEq => ">=",
-                    Op::Eq | Op::EqWildcard => "==",
-                    Op::Ne | Op::NeWildcard => "!=",
-                    Op::Div => "/",
-                    Op::Rem => "%",
-                    _ => unreachable!(),
-                };
-                let sext = |s: &str, w: usize| -> String {
-                    let (ity, uty) = if cmp_bits == 128 {
-                        ("__int128", "__uint128_t")
-                    } else {
-                        ("int64_t", "uint64_t")
-                    };
-                    if w == cmp_bits {
-                        format!("(({ity})(({uty})({s})))")
-                    } else {
-                        let shift = cmp_bits - w;
-                        format!("((({ity})(({uty})({s}) << {shift})) >> {shift})")
-                    }
-                };
-                let inner = format!("(({}) {} ({}))", sext(&xs, x_w), c_op, sext(&ys, y_w),);
-                // For Div / Rem we additionally guard against y == 0
-                // (and x == INT64_MIN with y == -1) to mirror the
-                // analyzer's checked-div fallback (as the Cranelift backend
-                // does).  Wrap the divide in a statement expression so the
-                // result drops to 0 on those edge cases; otherwise gcc's
-                // -O3 div traps SIGFPE.
-                if is_signed_divrem {
-                    return Some(format!(
-                        "({{ int64_t _y = {y}; int64_t _x = {x}; \
-                            (_y == 0) ? (int64_t)0 : \
-                            ((_y == -1 && _x == INT64_MIN) ? \
-                                {fallback} : (_x {op} _y)); }})",
-                        x = sext(&xs, x_w),
-                        y = sext(&ys, y_w),
-                        op = c_op,
-                        fallback = if matches!(op, Op::Rem) { "0" } else { "_x" },
-                    ));
-                }
-                return Some(inner);
-            }
-            // Pow (x ** y): binary exponentiation in native integer arithmetic
-            // (modular via wraparound), then mask to width.  The native
-            // mod-2^64/2^128 then a final mask to `width` is exact because
-            // 2^width | 2^{64,128}.  Mirrors the Cranelift Op::Pow loop; wide
-            // (>128) Pow stays on Cranelift/interpreter.
-            if matches!(op, Op::Pow) {
-                let w = expr_context.width;
-                if w == 0 || w > 128 {
-                    return None;
-                }
-                let id = next_wide_tmp();
-                let (cty_p, one) = if w <= 64 {
-                    ("uint64_t", "(uint64_t)1")
-                } else {
-                    ("__uint128_t", "(__uint128_t)1")
-                };
-                // Mask constant of `w` low bits, typed to match cty_p.
-                let mask_c = if w >= 128 {
-                    "(~(__uint128_t)0)".to_string()
-                } else if w > 64 {
-                    let m: u128 = (1u128 << w) - 1;
-                    format!(
-                        "(((__uint128_t)0x{hi:x}ULL << 64) | (__uint128_t)0x{lo:x}ULL)",
-                        hi = (m >> 64) as u64,
-                        lo = m as u64
-                    )
-                } else if w == 64 {
-                    "(~(uint64_t)0)".to_string()
-                } else {
-                    format!("(uint64_t)0x{m:x}ULL", m = (1u64 << w) - 1)
-                };
-                // IEEE 1800 11.4.3.1: a negative signed exponent yields 0 (|base|
-                // > 1) / 1 (base==1) / ±1 (base==-1); the unsigned loop would
-                // treat it as a huge count.  Applied only for a signed exponent
-                // of width 1..=64, mirroring the Cranelift Op::Pow table.
-                let y_w = y.width();
-                let neg_fixup = if y.expr_context().signed && y_w > 0 && y_w <= 64 {
-                    let base_is_m1 = if expr_context.signed {
-                        format!("_pb{id} == {mask_c}")
-                    } else {
-                        format!("_pb{id} == {one}")
-                    };
-                    // `base == 1` is the outermost select (as in the Cranelift
-                    // reference): base 1 to any power is 1, overriding the
-                    // `base_is_m1` arm, which for an unsigned base aliases to
-                    // `== 1` and would otherwise yield all-ones for an odd
-                    // exponent.
-                    format!(
-                        "_pb{id} = _pb{id} & {mask_c}; \
-                         int _neg{id} = (int)((_pe0{id} >> {sh}) & 1); \
-                         int _odd{id} = (int)(_pe0{id} & 1); \
-                         {cty_p} _tab{id} = (_pb{id} == {one}) ? {one} \
-                                        : (({base_is_m1}) ? (_odd{id} ? {mask_c} : {one}) : ({cty_p})0); \
-                         _pr{id} = _neg{id} ? _tab{id} : _pr{id}; ",
-                        sh = y_w - 1,
-                    )
-                } else {
-                    String::new()
-                };
-                // A signed base is sign-extended to the op width before the
-                // multiply (Verilog widens operands to the result signedness);
-                // the u64/u128 wraparound + final mask then gives the right
-                // low bits.  The exponent stays raw (the loop reads its bits;
-                // a negative one is caught by neg_fixup).
-                let x_w = x.width();
-                let base = if expr_context.signed && x_w > 0 && w <= 64 && x_w < 64 {
-                    let sh = 64 - x_w;
-                    format!("((uint64_t)(((int64_t)((uint64_t)({xs}) << {sh})) >> {sh}))")
-                } else if expr_context.signed && x_w > 0 && w > 64 && x_w < 128 {
-                    let sh = 128 - x_w;
-                    format!("((__uint128_t)(((__int128_t)((__uint128_t)({xs}) << {sh})) >> {sh}))")
-                } else {
-                    xs.clone()
-                };
-                let body = format!(
-                    "({{ {cty_p} _pb{id}=({cty_p})({base}); {cty_p} _pe0{id}=({cty_p})({ys}); \
-                        {cty_p} _we{id}=_pe0{id}; {cty_p} _wb{id}=_pb{id}; {cty_p} _pr{id}={one}; \
-                        while(_we{id}){{ if(_we{id}&1) _pr{id}*=_wb{id}; _wb{id}*=_wb{id}; _we{id}>>=1; }} \
-                        {neg_fixup}_pr{id}; }})"
+            // The guards repeat the count or divisor, and a narrow left shift's
+            // value; inline repeats compound per nesting level.
+            let scalar = x.width() <= 128 && y.width() <= 128;
+            let bind_y = scalar
+                && matches!(
+                    op,
+                    Op::LogicShiftL
+                        | Op::LogicShiftR
+                        | Op::ArithShiftL
+                        | Op::ArithShiftR
+                        | Op::Div
+                        | Op::Rem
                 );
-                return Some(if w < 64 {
-                    format!("(({body}) & 0x{m:x}ULL)", m = (1u64 << w) - 1)
-                } else if w > 64 && w < 128 {
-                    mask_u128(&body, w)
-                } else {
-                    body
-                });
-            }
-            // Most ops map directly.  ArithShiftR uses signed cast.
-            let direct = match op {
-                Op::Add => Some("+"),
-                Op::Sub => Some("-"),
-                Op::Mul => Some("*"),
-                Op::Div => Some("/"),
-                Op::Rem => Some("%"),
-                Op::Eq => Some("=="),
-                Op::Ne => Some("!="),
-                // EqWildcard / NeWildcard reduce to Eq / Ne in 2-state
-                // mode (in 2-state `mask_xz` is always 0
-                // and the analyzer's eval becomes a plain payload diff,
-                // see analyzer/op.rs::eval_value_binary Op::EqWildcard).
-                // 4-state semantics would need an X-bit-aware emit; out
-                // of scope until a 4-state target is added.
-                Op::EqWildcard => Some("=="),
-                Op::NeWildcard => Some("!="),
-                Op::Less => Some("<"),
-                Op::Greater => Some(">"),
-                Op::LessEq => Some("<="),
-                Op::GreaterEq => Some(">="),
-                Op::LogicAnd => Some("&&"),
-                Op::LogicOr => Some("||"),
-                Op::BitAnd => Some("&"),
-                Op::BitOr => Some("|"),
-                Op::BitXor => Some("^"),
-                Op::LogicShiftL | Op::ArithShiftL => Some("<<"),
-                Op::LogicShiftR => Some(">>"),
-                _ => None,
-            };
-            if let Some(c_op) = direct {
-                // 65..128-bit unsigned shift-LEFT with a narrow (≤64-bit) left
-                // operand: `(uint64_t)xs << ys` truncates to 64 bits, so promote
-                // xs to __uint128_t first. Placed before the `wide_truncates`
-                // bail below, which would otherwise send this to the interpreter.
-                if expr_context.width > 64
-                    && expr_context.width <= 128
-                    && matches!(op, Op::LogicShiftL | Op::ArithShiftL)
-                    && x.width() <= 64
+            let bind_x = scalar && matches!(op, Op::LogicShiftL | Op::ArithShiftL);
+            let body = |xs: String, ys: String| -> Option<String> {
+                // `x & C` where the constant covers every bit x can carry (the
+                // shape a canonicalization wrapper leaves behind): the AND is a
+                // bit-exact no-op, so emit x alone.  The result is clean because
+                // x is, so any `needs_clean` request is still honored.
+                if clean_elide()
+                    && matches!(op, Op::BitAnd)
                     && !expr_context.signed
+                    && let ProtoExpression::Value {
+                        value: Value::U64(v),
+                        ..
+                    } = &**y
+                    && v.mask_xz == 0
+                    && x.width() > 0
+                    && x.width() <= 64
+                    && (v.payload & width_mask(x.width())) == width_mask(x.width())
+                    && expr_emits_clean(x)
                 {
-                    let w = expr_context.width;
-                    let xm = if x.width() >= 64 {
-                        format!("((__uint128_t)((uint64_t)({xs})))")
-                    } else {
-                        format!(
-                            "((__uint128_t)(((uint64_t)({xs})) & 0x{:x}ULL))",
-                            width_mask(x.width())
-                        )
-                    };
-                    let shifted = format!(
-                        "((((__uint128_t)({ys})) >= {w}) ? (__uint128_t)0 : (({xm}) << ({ys})))"
-                    );
-                    return Some(if w < 128 {
-                        mask_u128(&shifted, w)
-                    } else {
-                        shifted
-                    });
+                    return Some(xs);
                 }
-                // Arithmetic and bitwise operators both require operand
-                // extension. Promote before operating so neither a narrow C
-                // type nor a cast's retained width truncates the result.
-                if expr_context.width > 64
-                    && expr_context.width <= 128
-                    && matches!(
-                        op,
-                        Op::Add | Op::Sub | Op::Mul | Op::BitAnd | Op::BitOr | Op::BitXor
-                    )
+                // VERYL_AOT_C_BOOLFOLD: narrow LogicAnd/LogicOr as a branchless
+                // bitwise reduce of the `!=0` predicates — force-evaluates the
+                // short-circuited right arm to drop the data-dependent branch.
+                // Logic ops are 0/1, so no width mask.
+                let bf = boolfold_mode();
+                if bf > 0
+                    && matches!(op, Op::LogicAnd | Op::LogicOr)
+                    && (bf == 2 || is_cheap_boolfold_arm(y, 3))
                 {
+                    let bit = if matches!(op, Op::LogicAnd) { "&" } else { "|" };
+                    return Some(format!("((uint64_t)((({xs}) != 0) {bit} (({ys}) != 0)))"));
+                }
+                if is_signed_cmp || is_signed_divrem {
+                    let x_w = x.width();
+                    let y_w = y.width();
+                    if x_w == 0 || y_w == 0 || x_w > 128 || y_w > 128 {
+                        // wide / zero-width signed compare.
+                        return None;
+                    }
+                    // A 65..128-bit operand is a `__uint128_t` scalar; sign-extend
+                    // and compare there.  Div / Rem keep the 64-bit form — their
+                    // zero / INT_MIN guards below are written against int64_t.
+                    let cmp_bits = if x_w > 64 || y_w > 64 { 128 } else { 64 };
+                    if cmp_bits == 128 && is_signed_divrem {
+                        return None;
+                    }
+                    let c_op = match op {
+                        Op::Less => "<",
+                        Op::Greater => ">",
+                        Op::LessEq => "<=",
+                        Op::GreaterEq => ">=",
+                        Op::Eq | Op::EqWildcard => "==",
+                        Op::Ne | Op::NeWildcard => "!=",
+                        Op::Div => "/",
+                        Op::Rem => "%",
+                        _ => unreachable!(),
+                    };
+                    let sext = |s: &str, w: usize| -> String {
+                        let (ity, uty) = if cmp_bits == 128 {
+                            ("__int128", "__uint128_t")
+                        } else {
+                            ("int64_t", "uint64_t")
+                        };
+                        if w == cmp_bits {
+                            format!("(({ity})(({uty})({s})))")
+                        } else {
+                            let shift = cmp_bits - w;
+                            format!("((({ity})(({uty})({s}) << {shift})) >> {shift})")
+                        }
+                    };
+                    let inner = format!("(({}) {} ({}))", sext(&xs, x_w), c_op, sext(&ys, y_w),);
+                    // For Div / Rem we additionally guard against y == 0
+                    // (and x == INT64_MIN with y == -1) to mirror the
+                    // analyzer's checked-div fallback (as the Cranelift backend
+                    // does).  Wrap the divide in a statement expression so the
+                    // result drops to 0 on those edge cases; otherwise gcc's
+                    // -O3 div traps SIGFPE.
+                    if is_signed_divrem {
+                        return Some(format!(
+                            "({{ int64_t _y = {y}; int64_t _x = {x}; \
+                                (_y == 0) ? (int64_t)0 : \
+                                ((_y == -1 && _x == INT64_MIN) ? \
+                                    {fallback} : (_x {op} _y)); }})",
+                            x = sext(&xs, x_w),
+                            y = sext(&ys, y_w),
+                            op = c_op,
+                            fallback = if matches!(op, Op::Rem) { "0" } else { "_x" },
+                        ));
+                    }
+                    return Some(inner);
+                }
+                // Pow (x ** y): binary exponentiation in native integer arithmetic
+                // (modular via wraparound), then mask to width.  The native
+                // mod-2^64/2^128 then a final mask to `width` is exact because
+                // 2^width | 2^{64,128}.  Mirrors the Cranelift Op::Pow loop; wide
+                // (>128) Pow stays on Cranelift/interpreter.
+                if matches!(op, Op::Pow) {
                     let w = expr_context.width;
-                    let xm =
-                        extend_scalar_operand(&xs, x.materialized_width(), w, expr_context.signed);
-                    let ym =
-                        extend_scalar_operand(&ys, y.materialized_width(), w, expr_context.signed);
-                    let body = format!("(({xm}) {c_op} ({ym}))");
-                    return Some(if needs_clean && w < 128 {
+                    if w == 0 || w > 128 {
+                        return None;
+                    }
+                    let id = next_wide_tmp();
+                    let (cty_p, one) = if w <= 64 {
+                        ("uint64_t", "(uint64_t)1")
+                    } else {
+                        ("__uint128_t", "(__uint128_t)1")
+                    };
+                    // Mask constant of `w` low bits, typed to match cty_p.
+                    let mask_c = if w >= 128 {
+                        "(~(__uint128_t)0)".to_string()
+                    } else if w > 64 {
+                        let m: u128 = (1u128 << w) - 1;
+                        format!(
+                            "(((__uint128_t)0x{hi:x}ULL << 64) | (__uint128_t)0x{lo:x}ULL)",
+                            hi = (m >> 64) as u64,
+                            lo = m as u64
+                        )
+                    } else if w == 64 {
+                        "(~(uint64_t)0)".to_string()
+                    } else {
+                        format!("(uint64_t)0x{m:x}ULL", m = (1u64 << w) - 1)
+                    };
+                    // IEEE 1800 11.4.3.1: a negative signed exponent yields 0 (|base|
+                    // > 1) / 1 (base==1) / ±1 (base==-1); the unsigned loop would
+                    // treat it as a huge count.  Applied only for a signed exponent
+                    // of width 1..=64, mirroring the Cranelift Op::Pow table.
+                    let y_w = y.width();
+                    let neg_fixup = if y.expr_context().signed && y_w > 0 && y_w <= 64 {
+                        let base_is_m1 = if expr_context.signed {
+                            format!("_pb{id} == {mask_c}")
+                        } else {
+                            format!("_pb{id} == {one}")
+                        };
+                        // `base == 1` is the outermost select (as in the Cranelift
+                        // reference): base 1 to any power is 1, overriding the
+                        // `base_is_m1` arm, which for an unsigned base aliases to
+                        // `== 1` and would otherwise yield all-ones for an odd
+                        // exponent.
+                        format!(
+                            "_pb{id} = _pb{id} & {mask_c}; \
+                             int _neg{id} = (int)((_pe0{id} >> {sh}) & 1); \
+                             int _odd{id} = (int)(_pe0{id} & 1); \
+                             {cty_p} _tab{id} = (_pb{id} == {one}) ? {one} \
+                                            : (({base_is_m1}) ? (_odd{id} ? {mask_c} : {one}) : ({cty_p})0); \
+                             _pr{id} = _neg{id} ? _tab{id} : _pr{id}; ",
+                            sh = y_w - 1,
+                        )
+                    } else {
+                        String::new()
+                    };
+                    // A signed base is sign-extended to the op width before the
+                    // multiply (Verilog widens operands to the result signedness);
+                    // the u64/u128 wraparound + final mask then gives the right
+                    // low bits.  The exponent stays raw (the loop reads its bits;
+                    // a negative one is caught by neg_fixup).
+                    let x_w = x.width();
+                    let base = if expr_context.signed && x_w > 0 && w <= 64 && x_w < 64 {
+                        let sh = 64 - x_w;
+                        format!("((uint64_t)(((int64_t)((uint64_t)({xs}) << {sh})) >> {sh}))")
+                    } else if expr_context.signed && x_w > 0 && w > 64 && x_w < 128 {
+                        let sh = 128 - x_w;
+                        format!(
+                            "((__uint128_t)(((__int128_t)((__uint128_t)({xs}) << {sh})) >> {sh}))"
+                        )
+                    } else {
+                        xs.clone()
+                    };
+                    let body = format!(
+                        "({{ {cty_p} _pb{id}=({cty_p})({base}); {cty_p} _pe0{id}=({cty_p})({ys}); \
+                            {cty_p} _we{id}=_pe0{id}; {cty_p} _wb{id}=_pb{id}; {cty_p} _pr{id}={one}; \
+                            while(_we{id}){{ if(_we{id}&1) _pr{id}*=_wb{id}; _wb{id}*=_wb{id}; _we{id}>>=1; }} \
+                            {neg_fixup}_pr{id}; }})"
+                    );
+                    return Some(if w < 64 {
+                        format!("(({body}) & 0x{m:x}ULL)", m = (1u64 << w) - 1)
+                    } else if w > 64 && w < 128 {
                         mask_u128(&body, w)
                     } else {
                         body
                     });
                 }
-                let wide_truncates = match op {
-                    Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
-                    _ => false,
+                // Most ops map directly.  ArithShiftR uses signed cast.
+                let direct = match op {
+                    Op::Add => Some("+"),
+                    Op::Sub => Some("-"),
+                    Op::Mul => Some("*"),
+                    Op::Div => Some("/"),
+                    Op::Rem => Some("%"),
+                    Op::Eq => Some("=="),
+                    Op::Ne => Some("!="),
+                    // EqWildcard / NeWildcard reduce to Eq / Ne in 2-state
+                    // mode (in 2-state `mask_xz` is always 0
+                    // and the analyzer's eval becomes a plain payload diff,
+                    // see analyzer/op.rs::eval_value_binary Op::EqWildcard).
+                    // 4-state semantics would need an X-bit-aware emit; out
+                    // of scope until a 4-state target is added.
+                    Op::EqWildcard => Some("=="),
+                    Op::NeWildcard => Some("!="),
+                    Op::Less => Some("<"),
+                    Op::Greater => Some(">"),
+                    Op::LessEq => Some("<="),
+                    Op::GreaterEq => Some(">="),
+                    Op::LogicAnd => Some("&&"),
+                    Op::LogicOr => Some("||"),
+                    Op::BitAnd => Some("&"),
+                    Op::BitOr => Some("|"),
+                    Op::BitXor => Some("^"),
+                    Op::LogicShiftL | Op::ArithShiftL => Some("<<"),
+                    Op::LogicShiftR => Some(">>"),
+                    _ => None,
                 };
-                if expr_context.width > 64 && (wide_truncates || expr_context.signed) {
-                    return None;
-                }
-                // For 65..128-bit shifts the C operator uses a mod-128 count on
-                // __uint128_t, so a runtime count >= width wrongly returns the
-                // operand instead of 0. Guard with a ternary matching the
-                // interpreter / SystemVerilog "count >= width => 0" semantics.
-                if expr_context.width > 64
-                    && expr_context.width <= 128
-                    && matches!(op, Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR)
-                {
-                    let w = expr_context.width;
-                    return Some(format!(
-                        "(((__uint128_t)({ys})) >= {w} ? (__uint128_t)0 : (({xs}) {c_op} ({ys})))"
-                    ));
-                }
-                // Operand-derived overflow predicate, computable in parallel
-                // with the op. When it proves no carry past `width` the mask is
-                // a no-op. Built here (not in `wmask`) so the closure doesn't
-                // borrow `xs`/`ys`. Unsigned only (signed operands are
-                // sign-extended, so a high bit no longer means large).
-                let overflow_cond: Option<String> =
-                    if expr_context.signed || expr_context.width == 0 || expr_context.width >= 64 {
+                if let Some(c_op) = direct {
+                    // 65..128-bit unsigned shift-LEFT with a narrow (≤64-bit) left
+                    // operand: `(uint64_t)xs << ys` truncates to 64 bits, so promote
+                    // xs to __uint128_t first. Placed before the `wide_truncates`
+                    // bail below, which would otherwise send this to the interpreter.
+                    if expr_context.width > 64
+                        && expr_context.width <= 128
+                        && matches!(op, Op::LogicShiftL | Op::ArithShiftL)
+                        && x.width() <= 64
+                        && !expr_context.signed
+                    {
+                        let w = expr_context.width;
+                        let xm = if x.width() >= 64 {
+                            format!("((__uint128_t)((uint64_t)({xs})))")
+                        } else {
+                            format!(
+                                "((__uint128_t)(((uint64_t)({xs})) & 0x{:x}ULL))",
+                                width_mask(x.width())
+                            )
+                        };
+                        let shifted = format!(
+                            "((((__uint128_t)({ys})) >= {w}) ? (__uint128_t)0 : (({xm}) << ({ys})))"
+                        );
+                        return Some(if w < 128 {
+                            mask_u128(&shifted, w)
+                        } else {
+                            shifted
+                        });
+                    }
+                    // Arithmetic and bitwise operators both require operand
+                    // extension. Promote before operating so neither a narrow C
+                    // type nor a cast's retained width truncates the result.
+                    if expr_context.width > 64
+                        && expr_context.width <= 128
+                        && matches!(
+                            op,
+                            Op::Add | Op::Sub | Op::Mul | Op::BitAnd | Op::BitOr | Op::BitXor
+                        )
+                    {
+                        let w = expr_context.width;
+                        let xm = extend_scalar_operand(
+                            &xs,
+                            x.materialized_width(),
+                            w,
+                            expr_context.signed,
+                        );
+                        let ym = extend_scalar_operand(
+                            &ys,
+                            y.materialized_width(),
+                            w,
+                            expr_context.signed,
+                        );
+                        let body = format!("(({xm}) {c_op} ({ym}))");
+                        return Some(if needs_clean && w < 128 {
+                            mask_u128(&body, w)
+                        } else {
+                            body
+                        });
+                    }
+                    let wide_truncates = match op {
+                        Op::LogicShiftL | Op::ArithShiftL => x.width() <= 64,
+                        _ => false,
+                    };
+                    if expr_context.width > 64 && (wide_truncates || expr_context.signed) {
+                        return None;
+                    }
+                    // For 65..128-bit shifts the C operator uses a mod-128 count on
+                    // __uint128_t, so a runtime count >= width wrongly returns the
+                    // operand instead of 0. Guard with a ternary matching the
+                    // interpreter / SystemVerilog "count >= width => 0" semantics.
+                    if expr_context.width > 64
+                        && expr_context.width <= 128
+                        && matches!(op, Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR)
+                    {
+                        let w = expr_context.width;
+                        return Some(format!(
+                            "(((__uint128_t)({ys})) >= {w} ? (__uint128_t)0 : (({xs}) {c_op} ({ys})))"
+                        ));
+                    }
+                    // Operand-derived overflow predicate, computable in parallel
+                    // with the op. When it proves no carry past `width` the mask is
+                    // a no-op. Built here (not in `wmask`) so the closure doesn't
+                    // borrow `xs`/`ys`. Unsigned only (signed operands are
+                    // sign-extended, so a high bit no longer means large).
+                    let overflow_cond: Option<String> = if expr_context.signed
+                        || expr_context.width == 0
+                        || expr_context.width >= 64
+                    {
                         None
                     } else {
                         // Shift by W-1 (not `& (1<<(W-1))`) so any operand bit at or
@@ -10525,272 +10552,295 @@ fn emit_expr_inner(expr: &ProtoExpression, needs_clean: bool) -> Option<String> 
                             _ => None,
                         }
                     };
-                // Width-growing results can set bits ≥ width — harmless once
-                // stored (the store re-masks) but they corrupt an inlined
-                // comparison, so mask to width. With an operand-derived
-                // predicate, gate the mask behind a rarely-taken branch to keep
-                // it off the critical path; the `volatile` asm stops gcc from
-                // if-converting it back to an unconditional `& mask`.
-                let wmask = |s: String| -> String {
-                    let growing = matches!(
-                        op,
-                        Op::Add | Op::Sub | Op::Mul | Op::LogicShiftL | Op::ArithShiftL
-                    );
-                    if needs_clean && expr_context.width < 64 && growing {
-                        let mask = (1u64 << expr_context.width) - 1;
-                        match &overflow_cond {
-                            Some(cond) => format!(
-                                "({{ uint64_t _t = ({s}); \
-                                 if (__builtin_expect(({cond}) != 0, 0)) {{ _t &= 0x{mask:x}ULL; \
-                                 __asm__ volatile(\"\" : \"+r\"(_t)); }} _t; }})"
-                            ),
-                            None => format!("(({s}) & 0x{mask:x}ULL)"),
-                        }
-                    } else if needs_clean
-                        && expr_context.width > 64
-                        && expr_context.width < 128
-                        && growing
-                    {
-                        // The op is computed in __uint128_t, so e.g. a 100-bit
-                        // add keeps a real carry at bit 100 that corrupts an
-                        // inlined comparison.
-                        mask_u128(&s, expr_context.width)
-                    } else {
-                        s
-                    }
-                };
-                // Verilog binary ops widen operands to result width before
-                // applying.  When signed, narrow operands must be sign-
-                // extended to expr_context.width so e.g. signed `8'shf2 +
-                // 8'shf2` in a 16-bit context produces 0xffe4, not 0x01e4.
-                // Mirrors `expand_sign` in expression.rs.  Shifts:
-                // y is the shift count and must NOT be sign-extended (its
-                // narrow MSB is value, not sign); shift_left already keeps
-                // bits faithfully so we only widen x.
-                if expr_context.signed && expr_context.width > 0 && expr_context.width <= 64 {
-                    let x_w = x.width();
-                    let y_w = y.width();
-                    let target = expr_context.width;
-                    let sext = |s: &str, w: usize| -> String {
-                        if w == 0 || w >= target {
-                            s.to_string()
+                    // Width-growing results can set bits ≥ width — harmless once
+                    // stored (the store re-masks) but they corrupt an inlined
+                    // comparison, so mask to width. With an operand-derived
+                    // predicate, gate the mask behind a rarely-taken branch to keep
+                    // it off the critical path; the `volatile` asm stops gcc from
+                    // if-converting it back to an unconditional `& mask`.
+                    let wmask = |s: String| -> String {
+                        let growing = matches!(
+                            op,
+                            Op::Add | Op::Sub | Op::Mul | Op::LogicShiftL | Op::ArithShiftL
+                        );
+                        if needs_clean && expr_context.width < 64 && growing {
+                            let mask = (1u64 << expr_context.width) - 1;
+                            match &overflow_cond {
+                                Some(cond) => format!(
+                                    "({{ uint64_t _t = ({s}); \
+                                     if (__builtin_expect(({cond}) != 0, 0)) {{ _t &= 0x{mask:x}ULL; \
+                                     __asm__ volatile(\"\" : \"+r\"(_t)); }} _t; }})"
+                                ),
+                                None => format!("(({s}) & 0x{mask:x}ULL)"),
+                            }
+                        } else if needs_clean
+                            && expr_context.width > 64
+                            && expr_context.width < 128
+                            && growing
+                        {
+                            // The op is computed in __uint128_t, so e.g. a 100-bit
+                            // add keeps a real carry at bit 100 that corrupts an
+                            // inlined comparison.
+                            mask_u128(&s, expr_context.width)
                         } else {
-                            let shift = 64 - w;
-                            format!("(((int64_t)((uint64_t)({}) << {})) >> {})", s, shift, shift,)
+                            s
                         }
                     };
-                    let is_shift = matches!(
-                        op,
-                        Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR
-                    );
-                    let xe = sext(&xs, x_w);
-                    let ye = if is_shift { ys } else { sext(&ys, y_w) };
-                    // Verilog `>>` is logical even on a signed operand (only
-                    // `>>>` is arithmetic).  Sign-extend to the context width,
-                    // mask to it, then shift unsigned — sign-extending to 64
-                    // and using C `>>` on an int64 shifts in sign bits (e.g.
-                    // `8'shf1 >> 2` in 16-bit is 0x3ffc, not 0xfffc).
-                    if matches!(op, Op::LogicShiftR) {
-                        let tmask = if target >= 64 {
-                            u64::MAX
-                        } else {
-                            (1u64 << target) - 1
+                    // Verilog binary ops widen operands to result width before
+                    // applying.  When signed, narrow operands must be sign-
+                    // extended to expr_context.width so e.g. signed `8'shf2 +
+                    // 8'shf2` in a 16-bit context produces 0xffe4, not 0x01e4.
+                    // Mirrors `expand_sign` in expression.rs.  Shifts:
+                    // y is the shift count and must NOT be sign-extended (its
+                    // narrow MSB is value, not sign); shift_left already keeps
+                    // bits faithfully so we only widen x.
+                    if expr_context.signed && expr_context.width > 0 && expr_context.width <= 64 {
+                        let x_w = x.width();
+                        let y_w = y.width();
+                        let target = expr_context.width;
+                        let sext = |s: &str, w: usize| -> String {
+                            if w == 0 || w >= target {
+                                s.to_string()
+                            } else {
+                                let shift = 64 - w;
+                                format!(
+                                    "(((int64_t)((uint64_t)({}) << {})) >> {})",
+                                    s, shift, shift,
+                                )
+                            }
                         };
-                        return Some(format!(
-                            "((((__uint128_t)({})) >= 64 ? 0 : ((uint64_t)(({}) & 0x{:x}ULL)) >> ({})))",
-                            ye, xe, tmask, ye,
-                        ));
-                    }
-                    if matches!(op, Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR) {
-                        // C shifts are UB for counts >= 64 (x86 wraps mod 64);
-                        // SystemVerilog yields 0.
-                        return Some(wmask(format!(
-                            "(((__uint128_t)({ye})) >= 64 ? 0 : (({xe}) {c_op} ({ye})))"
-                        )));
-                    }
-                    return Some(wmask(format!("(({}) {} ({}))", xe, c_op, ye)));
-                }
-                if matches!(op, Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR) {
-                    return Some(wmask(format!(
-                        "(((__uint128_t)({ys})) >= 64 ? 0 : (({xs}) {c_op} ({ys})))"
-                    )));
-                }
-                // C integer division by zero is UB (traps under -O3); yield 0
-                // to match the interpreter and the Cranelift lowering.
-                if matches!(op, Op::Div | Op::Rem) {
-                    return Some(format!("(({ys}) == 0 ? 0 : (({xs}) {c_op} ({ys})))"));
-                }
-                // Emitting an operand twice doubles a nested add/sub tree per level.
-                if overflow_cond.is_some()
-                    && matches!(op, Op::Add | Op::Sub)
-                    && needs_clean
-                    && x.width() <= 64
-                    && y.width() <= 64
-                {
-                    let mask = (1u64 << expr_context.width) - 1;
-                    let sh = expr_context.width - 1;
-                    let cond = if matches!(op, Op::Add) {
-                        format!("((_ox | _oy) >> {sh})")
-                    } else {
-                        format!("(((_ox | _oy) >> {sh}) != 0 || _ox < _oy)")
-                    };
-                    return Some(format!(
-                        "({{ uint64_t _ox = ({xs}); uint64_t _oy = ({ys}); \
-                         uint64_t _t = ((_ox) {c_op} (_oy)); \
-                         if (__builtin_expect(({cond}) != 0, 0)) {{ _t &= 0x{mask:x}ULL; \
-                         __asm__ volatile(\"\" : \"+r\"(_t)); }} _t; }})"
-                    ));
-                }
-                return Some(wmask(format!("(({}) {} ({}))", xs, c_op, ys)));
-            }
-            match op {
-                Op::ArithShiftR => {
-                    // Sign-extend the narrow operand from its declared width
-                    // before the arithmetic shift — otherwise the high bits are
-                    // zero and `>>` produces 0, not the sign-extended value
-                    // (mirrors expression.rs shift_mask_xz).
-                    let x_w = x.width();
-                    if x_w == 0 {
-                        return None; // zero-width signed shift
-                    }
-                    // Wide (>128-bit) operand with a scalar (≤128-bit) result:
-                    // materialize the operand wide, vw_ashr/vw_lshr by the count
-                    // (which handles count >= width), then read back the low
-                    // result bits.  The whole thing is a GCC statement
-                    // expression so the scratch decls stay inline.
-                    if x_w > 128 {
-                        let w = expr_context.width;
-                        if w == 0 || w > 128 {
-                            return None;
-                        }
-                        let src_nb = native_bytes(x_w);
-                        let src_nw = wide_words(src_nb);
-                        let mut pre = String::new();
-                        let xr = emit_wide_operand(x, src_nb, &mut pre)?;
-                        let count = emit_expr(y)?;
-                        let shift_fn = if expr_context.signed {
-                            "vw_ashr"
-                        } else {
-                            "vw_lshr"
-                        };
-                        let id = next_wide_tmp();
-                        let read_raw = if w <= 64 {
-                            format!("((veryl_u64_ua*)_r{id})[0]")
-                        } else {
-                            format!(
-                                "(((__uint128_t)((veryl_u64_ua*)_r{id})[0]) \
-                                 | ((__uint128_t)((veryl_u64_ua*)_r{id})[1] << 64))"
-                            )
-                        };
-                        // Mask the low bits above `width` cleared by the shift's
-                        // sign fill (vw_ashr fills to x_w, not `width`).
-                        let read = if w < 64 {
-                            format!("(({read_raw}) & 0x{m:x}ULL)", m = (1u64 << w) - 1)
-                        } else if w > 64 && w < 128 {
-                            mask_u128(&read_raw, w)
-                        } else {
-                            read_raw
-                        };
-                        let shift_arg = if expr_context.signed {
-                            format!("{pk}u", pk = wpack(src_nb, x_w))
-                        } else {
-                            format!("{src_nb}u")
-                        };
-                        return Some(format!(
-                            "({{ {pre} uint64_t _r{id}[{src_nw}]; \
-                                {shift_fn}((uint8_t*)_r{id}, {src}, (uint64_t)({count}), {shift_arg}); \
-                                {read}; }})",
-                            src = xr.addr,
-                        ));
-                    }
-                    if x_w > 64 {
-                        // 65..128-bit operand in __uint128_t.  Count >= width
-                        // yields all-sign (signed) / 0 (unsigned); C `>>` is UB
-                        // past 127, so clamp.
-                        if !expr_context.signed {
-                            // `>>>` on an unsigned operand is a logical shift.
+                        let is_shift = matches!(
+                            op,
+                            Op::LogicShiftL | Op::LogicShiftR | Op::ArithShiftL | Op::ArithShiftR
+                        );
+                        let xe = sext(&xs, x_w);
+                        let ye = if is_shift { ys } else { sext(&ys, y_w) };
+                        // Verilog `>>` is logical even on a signed operand (only
+                        // `>>>` is arithmetic).  Sign-extend to the context width,
+                        // mask to it, then shift unsigned — sign-extending to 64
+                        // and using C `>>` on an int64 shifts in sign bits (e.g.
+                        // `8'shf1 >> 2` in 16-bit is 0x3ffc, not 0xfffc).
+                        if matches!(op, Op::LogicShiftR) {
+                            let tmask = if target >= 64 {
+                                u64::MAX
+                            } else {
+                                (1u64 << target) - 1
+                            };
                             return Some(format!(
-                                "(((__uint128_t)({ys})) >= {x_w} ? (__uint128_t)0 : (((__uint128_t)({xs})) >> ((uint64_t)({ys}))))"
+                                "((((__uint128_t)({})) >= 64 ? 0 : ((uint64_t)(({}) & 0x{:x}ULL)) >> ({})))",
+                                ye, xe, tmask, ye,
                             ));
                         }
-                        // Signed: sign-extend from x_w to 128 (shift the sign bit
-                        // to bit 127, arithmetic-shift back), then arithmetic-
-                        // shift right, clamping the count to x_w-1.
-                        let lshift = 128 - x_w;
-                        let sx = if lshift == 0 {
-                            format!("((__int128_t)((__uint128_t)({xs})))")
+                        if matches!(op, Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR) {
+                            // C shifts are UB for counts >= 64 (x86 wraps mod 64);
+                            // SystemVerilog yields 0.
+                            return Some(wmask(format!(
+                                "(((__uint128_t)({ye})) >= 64 ? 0 : (({xe}) {c_op} ({ye})))"
+                            )));
+                        }
+                        return Some(wmask(format!("(({}) {} ({}))", xe, c_op, ye)));
+                    }
+                    if matches!(op, Op::LogicShiftL | Op::ArithShiftL | Op::LogicShiftR) {
+                        return Some(wmask(format!(
+                            "(((__uint128_t)({ys})) >= 64 ? 0 : (({xs}) {c_op} ({ys})))"
+                        )));
+                    }
+                    // C integer division by zero is UB (traps under -O3); yield 0
+                    // to match the interpreter and the Cranelift lowering.
+                    if matches!(op, Op::Div | Op::Rem) {
+                        return Some(format!("(({ys}) == 0 ? 0 : (({xs}) {c_op} ({ys})))"));
+                    }
+                    // Emitting an operand twice doubles a nested add/sub tree per level.
+                    if overflow_cond.is_some()
+                        && matches!(op, Op::Add | Op::Sub)
+                        && needs_clean
+                        && x.width() <= 64
+                        && y.width() <= 64
+                    {
+                        let mask = (1u64 << expr_context.width) - 1;
+                        let sh = expr_context.width - 1;
+                        let cond = if matches!(op, Op::Add) {
+                            format!("((_ox | _oy) >> {sh})")
                         } else {
-                            format!(
-                                "(((__int128_t)(((__uint128_t)({xs})) << {lshift})) >> {lshift})"
-                            )
+                            format!("(((_ox | _oy) >> {sh}) != 0 || _ox < _oy)")
                         };
                         return Some(format!(
-                            "((__uint128_t)(({sx}) >> (((__uint128_t)({ys})) >= {x_w} ? {clamp} : ((uint64_t)({ys})))))",
-                            clamp = x_w - 1,
+                            "({{ uint64_t _ox = ({xs}); uint64_t _oy = ({ys}); \
+                             uint64_t _t = ((_ox) {c_op} (_oy)); \
+                             if (__builtin_expect(({cond}) != 0, 0)) {{ _t &= 0x{mask:x}ULL; \
+                             __asm__ volatile(\"\" : \"+r\"(_t)); }} _t; }})"
                         ));
                     }
-                    if !expr_context.signed {
-                        // `>>>` on an *unsigned* operand is a logical
-                        // (zero-fill) shift — only a signed operand gets
-                        // sign-extended.  e.g. `8'hf1 >>> 2` is 0x003c,
-                        // not 0xfffc.
-                        Some(format!(
-                            "(((__uint128_t)({ys})) >= 64 ? 0 : ((uint64_t)({xs}) >> ({ys})))",
-                            xs = xs,
-                            ys = ys,
-                        ))
-                    } else if x_w == 64 {
-                        // Clamp the count to 63: `>>>` by >= width fills
-                        // with the sign bit, which a 63-shift produces.
-                        Some(format!(
-                            "((uint64_t)((int64_t)((uint64_t)({xs})) >> (((__uint128_t)({ys})) >= 64 ? 63 : ({ys}))))",
-                            xs = xs,
-                            ys = ys,
-                        ))
-                    } else {
-                        let shift = 64 - x_w;
-                        Some(format!(
-                            "((uint64_t)((((int64_t)((uint64_t)({xs}) << {sh})) >> {sh}) >> (((__uint128_t)({ys})) >= 64 ? 63 : ({ys}))))",
-                            xs = xs,
-                            ys = ys,
-                            sh = shift,
-                        ))
-                    }
+                    return Some(wmask(format!("(({}) {} ({}))", xs, c_op, ys)));
                 }
-                // `~` sets every bit above the width; mask when a consumer
-                // reads the high bits (mirrors the unary BitNot emission).
-                Op::BitXnor | Op::BitNand | Op::BitNor => {
-                    let w = expr_context.width;
-                    if w > 128 {
-                        return None;
+                match op {
+                    Op::ArithShiftR => {
+                        // Sign-extend the narrow operand from its declared width
+                        // before the arithmetic shift — otherwise the high bits are
+                        // zero and `>>` produces 0, not the sign-extended value
+                        // (mirrors expression.rs shift_mask_xz).
+                        let x_w = x.width();
+                        if x_w == 0 {
+                            return None; // zero-width signed shift
+                        }
+                        // Wide (>128-bit) operand with a scalar (≤128-bit) result:
+                        // materialize the operand wide, vw_ashr/vw_lshr by the count
+                        // (which handles count >= width), then read back the low
+                        // result bits.  The whole thing is a GCC statement
+                        // expression so the scratch decls stay inline.
+                        if x_w > 128 {
+                            let w = expr_context.width;
+                            if w == 0 || w > 128 {
+                                return None;
+                            }
+                            let src_nb = native_bytes(x_w);
+                            let src_nw = wide_words(src_nb);
+                            let mut pre = String::new();
+                            let xr = emit_wide_operand(x, src_nb, &mut pre)?;
+                            let count = emit_expr(y)?;
+                            let shift_fn = if expr_context.signed {
+                                "vw_ashr"
+                            } else {
+                                "vw_lshr"
+                            };
+                            let id = next_wide_tmp();
+                            let read_raw = if w <= 64 {
+                                format!("((veryl_u64_ua*)_r{id})[0]")
+                            } else {
+                                format!(
+                                    "(((__uint128_t)((veryl_u64_ua*)_r{id})[0]) \
+                                     | ((__uint128_t)((veryl_u64_ua*)_r{id})[1] << 64))"
+                                )
+                            };
+                            // Mask the low bits above `width` cleared by the shift's
+                            // sign fill (vw_ashr fills to x_w, not `width`).
+                            let read = if w < 64 {
+                                format!("(({read_raw}) & 0x{m:x}ULL)", m = (1u64 << w) - 1)
+                            } else if w > 64 && w < 128 {
+                                mask_u128(&read_raw, w)
+                            } else {
+                                read_raw
+                            };
+                            let shift_arg = if expr_context.signed {
+                                format!("{pk}u", pk = wpack(src_nb, x_w))
+                            } else {
+                                format!("{src_nb}u")
+                            };
+                            return Some(format!(
+                                "({{ {pre} uint64_t _r{id}[{src_nw}]; \
+                                    {shift_fn}((uint8_t*)_r{id}, {src}, (uint64_t)({count}), {shift_arg}); \
+                                    {read}; }})",
+                                src = xr.addr,
+                            ));
+                        }
+                        if x_w > 64 {
+                            // 65..128-bit operand in __uint128_t.  Count >= width
+                            // yields all-sign (signed) / 0 (unsigned); C `>>` is UB
+                            // past 127, so clamp.
+                            if !expr_context.signed {
+                                // `>>>` on an unsigned operand is a logical shift.
+                                return Some(format!(
+                                    "(((__uint128_t)({ys})) >= {x_w} ? (__uint128_t)0 : (((__uint128_t)({xs})) >> ((uint64_t)({ys}))))"
+                                ));
+                            }
+                            // Signed: sign-extend from x_w to 128 (shift the sign bit
+                            // to bit 127, arithmetic-shift back), then arithmetic-
+                            // shift right, clamping the count to x_w-1.
+                            let lshift = 128 - x_w;
+                            let sx = if lshift == 0 {
+                                format!("((__int128_t)((__uint128_t)({xs})))")
+                            } else {
+                                format!(
+                                    "(((__int128_t)(((__uint128_t)({xs})) << {lshift})) >> {lshift})"
+                                )
+                            };
+                            return Some(format!(
+                                "((__uint128_t)(({sx}) >> (((__uint128_t)({ys})) >= {x_w} ? {clamp} : ((uint64_t)({ys})))))",
+                                clamp = x_w - 1,
+                            ));
+                        }
+                        if !expr_context.signed {
+                            // `>>>` on an *unsigned* operand is a logical
+                            // (zero-fill) shift — only a signed operand gets
+                            // sign-extended.  e.g. `8'hf1 >>> 2` is 0x003c,
+                            // not 0xfffc.
+                            Some(format!(
+                                "(((__uint128_t)({ys})) >= 64 ? 0 : ((uint64_t)({xs}) >> ({ys})))",
+                                xs = xs,
+                                ys = ys,
+                            ))
+                        } else if x_w == 64 {
+                            // Clamp the count to 63: `>>>` by >= width fills
+                            // with the sign bit, which a 63-shift produces.
+                            Some(format!(
+                                "((uint64_t)((int64_t)((uint64_t)({xs})) >> (((__uint128_t)({ys})) >= 64 ? 63 : ({ys}))))",
+                                xs = xs,
+                                ys = ys,
+                            ))
+                        } else {
+                            let shift = 64 - x_w;
+                            Some(format!(
+                                "((uint64_t)((((int64_t)((uint64_t)({xs}) << {sh})) >> {sh}) >> (((__uint128_t)({ys})) >= 64 ? 63 : ({ys}))))",
+                                xs = xs,
+                                ys = ys,
+                                sh = shift,
+                            ))
+                        }
                     }
-                    let xs =
-                        extend_scalar_operand(&xs, x.materialized_width(), w, expr_context.signed);
-                    let ys =
-                        extend_scalar_operand(&ys, y.materialized_width(), w, expr_context.signed);
-                    let inner = match op {
-                        Op::BitXnor => format!("(~(({xs}) ^ ({ys})))"),
-                        Op::BitNand => format!("(~(({xs}) & ({ys})))"),
-                        Op::BitNor => format!("(~(({xs}) | ({ys})))"),
-                        _ => unreachable!(),
-                    };
-                    if needs_clean && w > 0 && w < 64 {
-                        Some(format!("(({inner}) & 0x{:x}ULL)", (1u64 << w) - 1))
-                    } else if needs_clean && w > 64 && w < 128 {
-                        Some(mask_u128(&inner, w))
-                    } else {
-                        Some(inner)
+                    // `~` sets every bit above the width; mask when a consumer
+                    // reads the high bits (mirrors the unary BitNot emission).
+                    Op::BitXnor | Op::BitNand | Op::BitNor => {
+                        let w = expr_context.width;
+                        if w > 128 {
+                            return None;
+                        }
+                        let xs = extend_scalar_operand(
+                            &xs,
+                            x.materialized_width(),
+                            w,
+                            expr_context.signed,
+                        );
+                        let ys = extend_scalar_operand(
+                            &ys,
+                            y.materialized_width(),
+                            w,
+                            expr_context.signed,
+                        );
+                        let inner = match op {
+                            Op::BitXnor => format!("(~(({xs}) ^ ({ys})))"),
+                            Op::BitNand => format!("(~(({xs}) & ({ys})))"),
+                            Op::BitNor => format!("(~(({xs}) | ({ys})))"),
+                            _ => unreachable!(),
+                        };
+                        if needs_clean && w > 0 && w < 64 {
+                            Some(format!("(({inner}) & 0x{:x}ULL)", (1u64 << w) - 1))
+                        } else if needs_clean && w > 64 && w < 128 {
+                            Some(mask_u128(&inner, w))
+                        } else {
+                            Some(inner)
+                        }
                     }
+                    // `As` is the type-cast op; the analyzer uses it to mark
+                    // a Binary{x, As, y_type} where y_type is a Type expression
+                    // (not a value).  At eval time the value passes through
+                    // unchanged (the analyzer's `Op::As` eval returns `x.clone()`); the
+                    // surrounding assignment / outer expression handles any
+                    // width truncation via the C target's type, so we emit
+                    // the operand directly.
+                    Op::As => Some(xs),
+                    _ => None, // Pow / EqWildcard / NeWildcard / etc.
                 }
-                // `As` is the type-cast op; the analyzer uses it to mark
-                // a Binary{x, As, y_type} where y_type is a Type expression
-                // (not a value).  At eval time the value passes through
-                // unchanged (the analyzer's `Op::As` eval returns `x.clone()`); the
-                // surrounding assignment / outer expression handles any
-                // width truncation via the C target's type, so we emit
-                // the operand directly.
-                Op::As => Some(xs),
-                _ => None, // Pow / EqWildcard / NeWildcard / etc.
+            };
+            if bind_y {
+                let (bx, x_decl) = if bind_x {
+                    ("_bx".to_string(), format!("__auto_type _bx = ({xs}); "))
+                } else {
+                    (xs, String::new())
+                };
+                let r = body(bx, "_by".to_string())?;
+                Some(format!("({{ {x_decl}__auto_type _by = ({ys}); {r}; }})"))
+            } else {
+                body(xs, ys)
             }
         }
         ProtoExpression::Ternary {
@@ -13038,6 +13088,142 @@ mod tests {
             None,
             tree(0, leaves),
         )
+    }
+
+    fn nested_binary(
+        op: Op,
+        width: usize,
+        signed: bool,
+        nest_y: bool,
+        depth: usize,
+    ) -> ProtoExpression {
+        let leaf = |k: usize| {
+            if signed {
+                var_expr_signed(VarOffset::Comb(8 * k as isize), width)
+            } else {
+                var_expr(VarOffset::Comb(8 * k as isize), width)
+            }
+        };
+        let mut e = leaf(0);
+        for k in 1..=depth {
+            let (x, y) = if nest_y { (leaf(k), e) } else { (e, leaf(k)) };
+            e = ProtoExpression::Binary {
+                x: Box::new(x),
+                op,
+                y: Box::new(y),
+                width,
+                expr_context: ctx(width, signed),
+            };
+        }
+        e
+    }
+
+    #[test]
+    fn nested_shift_and_division_emit_linear_source() {
+        let ops = [
+            Op::LogicShiftL,
+            Op::LogicShiftR,
+            Op::ArithShiftL,
+            Op::ArithShiftR,
+            Op::Div,
+            Op::Rem,
+        ];
+        for op in ops {
+            for width in [8, 63, 64, 100, 128] {
+                for signed in [false, true] {
+                    for nest_y in [false, true] {
+                        let len = |depth| {
+                            emit_stmt(&comb_assign(
+                                0x1000,
+                                width,
+                                None,
+                                nested_binary(op, width, signed, nest_y, depth),
+                            ))
+                            .map(|s| s.len())
+                        };
+                        let (Some(a), Some(b)) = (len(8), len(9)) else {
+                            continue;
+                        };
+                        assert!(
+                            b * 2 < a * 3,
+                            "{op:?} w={width} signed={signed} nest_y={nest_y}: {a} -> {b} B"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nested_shift_and_division_execute_correctly() {
+        if !cc_available() {
+            eprintln!("nested_shift_and_division_execute_correctly: cc unavailable, skipping");
+            return;
+        }
+        // Nesting makes a bound operand itself a guarded shift or division.
+        let ops = [
+            Op::LogicShiftL,
+            Op::LogicShiftR,
+            Op::ArithShiftR,
+            Op::Div,
+            Op::Rem,
+        ];
+        let mut stmts = Vec::new();
+        for (i, &op) in ops.iter().enumerate() {
+            for (j, nest_y) in [false, true].into_iter().enumerate() {
+                let dst = 0x100 + 2 * i as isize + j as isize;
+                stmts.push(comb_assign(
+                    dst,
+                    8,
+                    None,
+                    nested_binary(op, 8, false, nest_y, 2),
+                ));
+            }
+        }
+        let src = emit_function(&stmts).expect("shifts and divisions must emit");
+        let tmp = std::env::temp_dir().join(format!("veryl_aot_shdiv_{}", std::process::id()));
+        let Some(module) =
+            compile_for_test(&tmp, &src, "nested_shift_and_division_execute_correctly")
+        else {
+            return;
+        };
+        let reference = |op: Op, a: u8, b: u8| -> u8 {
+            match op {
+                Op::LogicShiftL => a.checked_shl(b as u32).unwrap_or(0),
+                Op::LogicShiftR | Op::ArithShiftR => a.checked_shr(b as u32).unwrap_or(0),
+                Op::Div => a.checked_div(b).unwrap_or(0),
+                Op::Rem => a.checked_rem(b).unwrap_or(0),
+                _ => unreachable!(),
+            }
+        };
+        let edges = [0u8, 1, 2, 3, 7, 8, 9, 0x80, 0xff];
+        let mut ff = vec![0u8; 16];
+        let mut log = vec![0u64; 16];
+        for &a in &edges {
+            for &b in &edges {
+                for &c in &edges {
+                    let mut comb = vec![0u8; 0x200];
+                    comb[0] = a;
+                    comb[8] = b;
+                    comb[16] = c;
+                    unsafe {
+                        (module.func)(
+                            ff.as_mut_ptr(),
+                            comb.as_mut_ptr(),
+                            log.as_mut_ptr() as *mut u8,
+                            0,
+                        );
+                    }
+                    for (i, &op) in ops.iter().enumerate() {
+                        let left = reference(op, reference(op, a, b), c);
+                        let right = reference(op, c, reference(op, b, a));
+                        let got = [comb[0x100 + 2 * i], comb[0x101 + 2 * i]];
+                        assert_eq!(got, [left, right], "{op:?} a={a:#x} b={b:#x} c={c:#x}");
+                    }
+                }
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
