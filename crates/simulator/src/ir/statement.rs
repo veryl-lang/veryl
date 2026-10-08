@@ -4824,6 +4824,21 @@ impl ProtoStatement {
             )
         };
 
+        // A constant select can name bits the destination does not have: the
+        // bounds check does not unroll the `for` the simulator unrolls.  The
+        // interpreter's `Value::assign` masks to the width on its own, but the
+        // compiling backends shift by the window's position, which wraps once
+        // it passes the register and lands on bits that do exist.
+        let select = match select {
+            Some((beg, end)) if beg >= dst_width => {
+                let Some(clipped) = clip_select_to_width(beg, end, dst_width) else {
+                    return Ok(ProtoStatement::SequentialBlock(Vec::new()));
+                };
+                Some(clipped)
+            }
+            select => select,
+        };
+
         let dynamic_select = if need_dynamic_select {
             Some(build_dynamic_bit_select(
                 context,

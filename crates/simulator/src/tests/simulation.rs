@@ -34631,3 +34631,51 @@ fn select_past_a_wide_variable_from_a_loop() {
         }
     }
 }
+
+/// A constant select on an assignment's LEFT side can name bits the
+/// destination does not have, and a backend that shifts by the window's
+/// position wraps onto bits that do.
+#[test]
+fn store_past_the_variable_from_a_loop() {
+    let code = r#"
+    module Top (
+        d : input  logic<24>,
+        o : output logic<80>,
+        g : output logic<80>,
+    ) {
+        var w    : logic<80>;
+        var guard: logic<80>;
+        always_comb {
+            guard = 80'h0;
+            w     = 80'h0;
+            for i in 0..8 {
+                w[24 * i+:24] = d;
+            }
+        }
+        assign o = w;
+        assign g = guard;
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    // Three whole copies, then the low byte of a fourth; the windows from
+    // bit 96 up write nothing.
+    let expected = BigUint::parse_bytes(b"efabcdefabcdefabcdef", 16).unwrap();
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("d", Value::new(0xabcdef, 24, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new_biguint(expected.clone(), 80, false),
+            "config={config:?}"
+        );
+        // A wrapped window would land in a neighbour, not only on `w`.
+        assert_eq!(
+            sim.get("g").unwrap(),
+            Value::new_biguint(BigUint::from(0u32), 80, false),
+            "config={config:?}"
+        );
+    }
+}
