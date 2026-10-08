@@ -22,17 +22,20 @@
 //! positions. A read whose last writers cannot be solved exactly reads the
 //! weakly updated storage as before.
 
+use super::children::children;
 use super::{
     AffineIndex, AnalysisStatus, CountedIterator, ProcedureAnalysis, SsaKey, affine_position,
     position_domain,
 };
 use crate::HashMap;
-use crate::comb_loop_detect::position::solve_congruence;
+use crate::comb_loop_detect::position::{
+    ceil_div_wide, extended_gcd, floor_div_wide, solve_congruence,
+};
 use crate::comb_loop_detect::region::NodeKey;
 use crate::comb_loop_detect::ssa::VersionId;
 use crate::ir::{
-    ArrayLiteralItem, CasePattern, Expression, Factor, ForRange, ForStatement, MemberSelectDomain,
-    Statement, SystemFunctionKind, VarId, VarIndex, VarSelect,
+    CasePattern, Expression, Factor, ForRange, ForStatement, MemberSelectDomain, Statement,
+    SystemFunctionKind, VarId, VarIndex, VarSelect,
 };
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -240,28 +243,6 @@ fn place_loops(place: &[Step]) -> Vec<usize> {
             _ => None,
         }))
         .collect()
-}
-
-fn floor_div(numerator: i128, denominator: i128) -> i128 {
-    let quotient = numerator / denominator;
-    if (numerator % denominator != 0) && ((numerator < 0) != (denominator < 0)) {
-        quotient - 1
-    } else {
-        quotient
-    }
-}
-
-fn ceil_div(numerator: i128, denominator: i128) -> i128 {
-    -floor_div(-numerator, denominator)
-}
-
-fn gcd(mut left: i128, mut right: i128) -> i128 {
-    left = left.abs();
-    right = right.abs();
-    while right != 0 {
-        (left, right) = (right, left % right);
-    }
-    left
 }
 
 fn count(iterator: &CountedIterator) -> isize {
@@ -583,8 +564,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             });
                     }
                 };
-                if let Some(rewritten) = self.iterator_ternary(assign) {
-                    let split = self.iterator_condition_split(&rewritten.cond)?;
+                if let Expression::Ternary(condition, ..) = &assign.expr
+                    && let Some(split) = self.iterator_condition_split(condition)
+                {
                     for (arm, iterators) in self.exact_arms(&split) {
                         let previous = self.counted_iterators[split.position];
                         for iterator in iterators {
@@ -679,19 +661,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if self.for_range_is_proven_empty(&statement.range) {
                     return Some(());
                 }
-                if crate::ir::peel::has_own_break(&statement.body)
-                    || matches!(statement.range, ForRange::Stepped { .. })
-                {
+                // Only a loop evaluated with a symbolic iterator is scanned.
+                let super::LoopEvaluation::Counted(iterations) =
+                    super::loop_evaluation(statement, &mut self.ctx)
+                else {
                     return None;
-                }
-                let iterations = statement.range.eval_counted(&mut self.ctx)?;
+                };
                 if iterations.count == 0 {
                     return Some(());
-                }
-                if super::iterator_needs_values(&statement.body, statement.var_id)
-                    && statement.range.eval_iter(&mut self.ctx).is_some()
-                {
-                    return None;
                 }
                 let iterator = self.counted_iterator_of(statement, iterations)?;
                 let next = scan.loops.len();
@@ -787,49 +764,28 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// Whether evaluating `expression` writes nothing: every call in it
     /// depends only on its inputs.
     fn reads_only(&mut self, expression: &Expression) -> bool {
-        match expression {
-            Expression::Term(factor) => match factor.as_ref() {
-                Factor::Variable(_, index, select, _) => index
-                    .expressions()
-                    .chain(select.0.iter())
-                    .chain(select.1.as_ref().map(|(_, end)| end))
-                    .all(|expression| self.reads_only(expression)),
-                Factor::FunctionCall(call) => {
-                    call.outputs.is_empty()
-                        && self.function_is_pure(call)
-                        && call.inputs.values().all(|input| self.reads_only(input))
+        if let Expression::Term(factor) = expression {
+            match factor.as_ref() {
+                Factor::FunctionCall(call)
+                    if !call.outputs.is_empty() || !self.function_is_pure(call) =>
+                {
+                    return false;
                 }
-                Factor::SystemFunctionCall(call) => match &call.kind {
-                    SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
-                        self.reads_only(&input.0)
-                    }
-                    _ => true,
-                },
-                Factor::HierVariable(_)
-                | Factor::Value(_)
-                | Factor::Anonymous(_)
-                | Factor::Unknown(_) => true,
-            },
-            Expression::Unary(_, operand, _) => self.reads_only(operand),
-            Expression::Binary(left, _, right, _) => {
-                self.reads_only(left) && self.reads_only(right)
-            }
-            Expression::Ternary(condition, left, right, _) => {
-                self.reads_only(condition) && self.reads_only(left) && self.reads_only(right)
-            }
-            Expression::Concatenation(parts, _) => parts.iter().all(|(part, repeat)| {
-                self.reads_only(part) && repeat.as_ref().is_none_or(|x| self.reads_only(x))
-            }),
-            Expression::ArrayLiteral(items, _) => items.iter().all(|item| match item {
-                ArrayLiteralItem::Value(value, repeat) => {
-                    self.reads_only(value) && repeat.as_deref().is_none_or(|x| self.reads_only(x))
+                // Only a sign cast reads the value of its input.
+                Factor::SystemFunctionCall(call) => {
+                    return match &call.kind {
+                        SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
+                            self.reads_only(&input.0)
+                        }
+                        _ => true,
+                    };
                 }
-                ArrayLiteralItem::Defaul(value) => self.reads_only(value),
-            }),
-            Expression::StructConstructor(_, fields, _) => {
-                fields.iter().all(|(_, value)| self.reads_only(value))
+                _ => {}
             }
         }
+        children(expression)
+            .into_iter()
+            .all(|child| self.reads_only(child))
     }
 
     /// The element coordinates and bits of an access whose positions are
@@ -1490,7 +1446,9 @@ fn eliminate(
                     let divisor = numerator
                         .k
                         .iter()
-                        .fold(gcd(numerator.c, denominator), |g, &x| gcd(g, x));
+                        .fold(extended_gcd(numerator.c, denominator).0, |g, &x| {
+                            extended_gcd(g, x).0
+                        });
                     if divisor > 1 {
                         numerator = Lin {
                             k: numerator.k.iter().map(|x| x / divisor).collect(),
@@ -1539,13 +1497,13 @@ fn restrict(cell: &mut Cell, constraint: Constraint) -> Option<bool> {
                     // low <= coefficient * k + c <= high
                     let (low, high) = if coefficient > 0 {
                         (
-                            low.map(|low| ceil_div(low - lin.c, coefficient)),
-                            high.map(|high| floor_div(high - lin.c, coefficient)),
+                            low.map(|low| ceil_div_wide(low - lin.c, coefficient)),
+                            high.map(|high| floor_div_wide(high - lin.c, coefficient)),
                         )
                     } else {
                         (
-                            high.map(|high| ceil_div(high - lin.c, coefficient)),
-                            low.map(|low| floor_div(low - lin.c, coefficient)),
+                            high.map(|high| ceil_div_wide(high - lin.c, coefficient)),
+                            low.map(|low| floor_div_wide(low - lin.c, coefficient)),
                         )
                     };
                     let clamp = |value: i128| {
@@ -1585,76 +1543,28 @@ type Read = (VarId, VarIndex, VarSelect, Option<MemberSelectDomain>);
 
 /// The variable reads of an expression, including those in coordinates.
 fn collect_reads(expression: &Expression, reads: &mut Vec<Read>) {
-    match expression {
-        Expression::Term(factor) => match factor.as_ref() {
-            Factor::Variable(id, index, select, comptime) => {
-                reads.push((
-                    *id,
-                    index.clone(),
-                    select.clone(),
-                    comptime.member_select_domain,
-                ));
-                for expression in index
-                    .expressions()
-                    .chain(select.0.iter())
-                    .chain(select.1.as_ref().map(|(_, end)| end))
-                {
-                    collect_reads(expression, reads);
-                }
-            }
-            Factor::FunctionCall(call) => {
-                for input in call.inputs.values() {
-                    collect_reads(input, reads);
-                }
-            }
+    if let Expression::Term(factor) = expression {
+        match factor.as_ref() {
+            Factor::Variable(id, index, select, comptime) => reads.push((
+                *id,
+                index.clone(),
+                select.clone(),
+                comptime.member_select_domain,
+            )),
+            // Only a sign cast reads the value of its input.
             Factor::SystemFunctionCall(call) => {
                 if let SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) =
                     &call.kind
                 {
                     collect_reads(&input.0, reads);
                 }
+                return;
             }
-            Factor::HierVariable(_)
-            | Factor::Value(_)
-            | Factor::Anonymous(_)
-            | Factor::Unknown(_) => {}
-        },
-        Expression::Unary(_, operand, _) => collect_reads(operand, reads),
-        Expression::Binary(left, _, right, _) => {
-            collect_reads(left, reads);
-            collect_reads(right, reads);
+            _ => {}
         }
-        Expression::Ternary(condition, left, right, _) => {
-            collect_reads(condition, reads);
-            collect_reads(left, reads);
-            collect_reads(right, reads);
-        }
-        Expression::Concatenation(parts, _) => {
-            for (part, repeat) in parts {
-                collect_reads(part, reads);
-                if let Some(repeat) = repeat {
-                    collect_reads(repeat, reads);
-                }
-            }
-        }
-        Expression::ArrayLiteral(items, _) => {
-            for item in items {
-                match item {
-                    ArrayLiteralItem::Value(value, repeat) => {
-                        collect_reads(value, reads);
-                        if let Some(repeat) = repeat {
-                            collect_reads(repeat, reads);
-                        }
-                    }
-                    ArrayLiteralItem::Defaul(value) => collect_reads(value, reads),
-                }
-            }
-        }
-        Expression::StructConstructor(_, fields, _) => {
-            for (_, value) in fields {
-                collect_reads(value, reads);
-            }
-        }
+    }
+    for child in children(expression) {
+        collect_reads(child, reads);
     }
 }
 

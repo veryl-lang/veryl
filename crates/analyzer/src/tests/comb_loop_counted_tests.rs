@@ -1152,3 +1152,40 @@ counted_case!(
      }",
     false
 );
+
+/// Whether a counted loop whose iterators divide into `n` progressions or
+/// branch arms completes within `limit` units of procedure work.
+fn divided_loop_completes(case: &str, n: usize, limit: usize) -> bool {
+    let body = match case {
+        // The positions of one `i` form a progression over `j`, but the
+        // progressions of different `i` interleave.
+        "product" => format!(
+            "var x: logic [{}];
+             always_comb {{ for i in 0..{n} {{ for j in 0..{n} {{ x[i * {} + j * 3] = a[0]; }} }} o = {{7'd0, x[5]}}; }}",
+            n * (n + 1) * 3,
+            n + 1
+        ),
+        // Every remainder is its own arm.
+        _ => format!(
+            "var x: logic [{}];
+             always_comb {{ for i in 0..{} {{ if i % {n} == 0 {{ x[i] = a[0]; }} else {{ x[i] = a[1]; }} }} o = {{7'd0, x[5]}}; }}",
+            n * 4,
+            n * 4
+        ),
+    };
+    let code = format!(
+        "module Top (a: input logic<8>, b: input logic<8>, o: output logic<8>) {{ {body} }}"
+    );
+    crate::comb_loop_detect::with_procedure_guard_limit(limit, || {
+        comb_loop_analysis_is_complete(&code)
+    })
+}
+
+#[test]
+fn counted_iterator_divisions_are_charged_to_the_procedure_work() {
+    for case in ["product", "remainder"] {
+        assert!(divided_loop_completes(case, 2, 48), "{case}");
+        assert!(divided_loop_completes(case, 64, 1 << 20), "{case}");
+        assert!(!divided_loop_completes(case, 64, 48), "{case}");
+    }
+}

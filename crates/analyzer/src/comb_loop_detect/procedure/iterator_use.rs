@@ -7,26 +7,49 @@
 //! selects positions that one iteration cannot tell apart, so the loop takes
 //! each iteration's value instead while that stays within the size limit.
 
+use super::children::{children, coordinates, system_inputs};
+use crate::conv::Context;
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CasePattern, Expression, Factor, ForBound, ForRange,
-    ForStatement, Op, Statement, SystemFunctionKind, VarId, VarIndex, VarSelect,
+    ArrayLiteralItem, AssignDestination, CasePattern, CountedIterations, Expression, Factor,
+    ForBound, ForRange, ForStatement, Op, Statement, VarId, VarIndex, VarSelect,
 };
 
-/// Whether a statically known loop takes each iteration's constant value
-/// instead of one symbolic iteration. A loop that breaks, or whose step is not
-/// additive, reaches values a symbolic iterator over `min..=max` cannot
-/// represent; a body may also use its iterator other than affinely.
-pub(in crate::comb_loop_detect) fn loop_needs_values(statement: &ForStatement) -> bool {
-    crate::ir::peel::has_own_break(&statement.body)
-        || matches!(statement.range, ForRange::Stepped { .. })
-        || iterator_needs_values(&statement.body, statement.var_id)
+/// How a loop's iterations are evaluated.
+pub(in crate::comb_loop_detect) enum LoopEvaluation {
+    /// Each statically known iterator value in turn.
+    Enumerated(Vec<usize>),
+    /// Once with a symbolic iterator over the counted iterations.
+    Counted(CountedIterations),
+    /// Neither: a loop beyond the size limit, or with runtime bounds.
+    Other,
 }
 
-/// Whether `statements` use `iterator` in a form a symbolic iteration loses.
-pub(in crate::comb_loop_detect) fn iterator_needs_values(
-    statements: &[Statement],
-    iterator: VarId,
-) -> bool {
+/// How `statement` is evaluated. A loop that breaks, or whose step is not
+/// additive, reaches values a symbolic iterator over `min..=max` cannot
+/// represent, and a body may use its iterator other than affinely; such a
+/// loop takes each iteration's value while that stays within the size limit.
+/// Every other statically known loop is counted symbolically.
+pub(in crate::comb_loop_detect) fn loop_evaluation(
+    statement: &ForStatement,
+    context: &mut Context,
+) -> LoopEvaluation {
+    let breaks = crate::ir::peel::has_own_break(&statement.body);
+    let stepped = matches!(statement.range, ForRange::Stepped { .. });
+    if (breaks || stepped || iterator_needs_values(&statement.body, statement.var_id))
+        && let Some(values) = statement.range.eval_iter(context)
+    {
+        return LoopEvaluation::Enumerated(values);
+    }
+    if !breaks
+        && !stepped
+        && let Some(iterations) = statement.range.eval_counted(context)
+    {
+        return LoopEvaluation::Counted(iterations);
+    }
+    LoopEvaluation::Other
+}
+
+fn iterator_needs_values(statements: &[Statement], iterator: VarId) -> bool {
     statements
         .iter()
         .any(|statement| statement_needs_values(statement, iterator))
@@ -94,16 +117,6 @@ fn destination_needs_values(destination: &AssignDestination, iterator: VarId) ->
     coordinates_need_values(&destination.index, &destination.select, iterator)
 }
 
-fn coordinates<'e>(
-    index: &'e VarIndex,
-    select: &'e VarSelect,
-) -> impl Iterator<Item = &'e Expression> {
-    index
-        .expressions()
-        .chain(select.0.iter())
-        .chain(select.1.as_ref().map(|(_, end)| end))
-}
-
 /// An index or select coordinate keeps its positions when it is affine in
 /// the iterator.
 fn coordinates_need_values(index: &VarIndex, select: &VarSelect, iterator: VarId) -> bool {
@@ -119,7 +132,6 @@ fn coordinates_need_values(index: &VarIndex, select: &VarSelect, iterator: VarId
 /// A value carries no position of its own, so the iterator may appear in it
 /// freely; only the coordinates and conditions inside it matter.
 fn value_needs_values(expression: &Expression, iterator: VarId) -> bool {
-    let recurse = |expression: &Expression| value_needs_values(expression, iterator);
     match expression {
         Expression::Term(factor) => match factor.as_ref() {
             Factor::Variable(_, index, select, _) => {
@@ -129,37 +141,35 @@ fn value_needs_values(expression: &Expression, iterator: VarId) -> bool {
                 .inputs
                 .values()
                 .any(|input| argument_needs_values(input, iterator)),
-            Factor::SystemFunctionCall(call) => system_inputs(&call.kind).any(recurse),
-            Factor::HierVariable(_)
-            | Factor::Value(_)
-            | Factor::Anonymous(_)
-            | Factor::Unknown(_) => false,
+            _ => children(expression)
+                .into_iter()
+                .any(|child| value_needs_values(child, iterator)),
         },
-        Expression::Unary(_, operand, _) => recurse(operand),
-        Expression::Binary(left, _, right, _) => recurse(left) || recurse(right),
         Expression::Ternary(condition, left, right, _) => {
-            condition_needs_values(condition, iterator) || recurse(left) || recurse(right)
+            condition_needs_values(condition, iterator)
+                || value_needs_values(left, iterator)
+                || value_needs_values(right, iterator)
         }
         // A repeat count sets how many positions the value has, so the
         // iterator in it is a coordinate, not a value.
         Expression::Concatenation(parts, _) => parts.iter().any(|(part, repeat)| {
-            recurse(part)
+            value_needs_values(part, iterator)
                 || repeat
                     .as_ref()
                     .is_some_and(|repeat| mentions(repeat, iterator))
         }),
         Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
             ArrayLiteralItem::Value(value, repeat) => {
-                recurse(value)
+                value_needs_values(value, iterator)
                     || repeat
                         .as_deref()
                         .is_some_and(|repeat| mentions(repeat, iterator))
             }
-            ArrayLiteralItem::Defaul(value) => recurse(value),
+            ArrayLiteralItem::Defaul(value) => value_needs_values(value, iterator),
         }),
-        Expression::StructConstructor(_, fields, _) => {
-            fields.iter().any(|(_, value)| recurse(value))
-        }
+        _ => children(expression)
+            .into_iter()
+            .any(|child| value_needs_values(child, iterator)),
     }
 }
 
@@ -182,34 +192,13 @@ fn argument_needs_values(argument: &Expression, iterator: VarId) -> bool {
 
 /// Whether `iterator` appears in `expression` outside every coordinate.
 fn uses_as_value(expression: &Expression, iterator: VarId) -> bool {
-    let recurse = |expression: &Expression| uses_as_value(expression, iterator);
     match expression {
-        Expression::Term(factor) => match factor.as_ref() {
-            Factor::Variable(id, ..) => *id == iterator,
-            Factor::FunctionCall(call) => call.inputs.values().any(recurse),
-            Factor::SystemFunctionCall(call) => system_inputs(&call.kind).any(recurse),
-            Factor::HierVariable(_)
-            | Factor::Value(_)
-            | Factor::Anonymous(_)
-            | Factor::Unknown(_) => false,
-        },
-        Expression::Unary(_, operand, _) => recurse(operand),
-        Expression::Binary(left, _, right, _) => recurse(left) || recurse(right),
-        Expression::Ternary(condition, left, right, _) => {
-            recurse(condition) || recurse(left) || recurse(right)
+        Expression::Term(factor) if matches!(factor.as_ref(), Factor::Variable(..)) => {
+            matches!(factor.as_ref(), Factor::Variable(id, ..) if *id == iterator)
         }
-        Expression::Concatenation(parts, _) => parts
-            .iter()
-            .any(|(part, repeat)| recurse(part) || repeat.as_ref().is_some_and(recurse)),
-        Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
-            ArrayLiteralItem::Value(value, repeat) => {
-                recurse(value) || repeat.as_deref().is_some_and(recurse)
-            }
-            ArrayLiteralItem::Defaul(value) => recurse(value),
-        }),
-        Expression::StructConstructor(_, fields, _) => {
-            fields.iter().any(|(_, value)| recurse(value))
-        }
+        _ => children(expression)
+            .into_iter()
+            .any(|child| uses_as_value(child, iterator)),
     }
 }
 
@@ -285,59 +274,10 @@ fn range_mentions(range: &ForRange, iterator: VarId) -> bool {
     })
 }
 
-fn system_inputs(kind: &SystemFunctionKind) -> impl Iterator<Item = &Expression> {
-    let inputs: Vec<&Expression> = match kind {
-        SystemFunctionKind::Bits(input)
-        | SystemFunctionKind::Clog2(input)
-        | SystemFunctionKind::Onehot(input)
-        | SystemFunctionKind::Signed(input)
-        | SystemFunctionKind::Unsigned(input)
-        | SystemFunctionKind::Readmemh(input, _) => vec![&input.0],
-        SystemFunctionKind::Size(input, dimension) => std::iter::once(&input.0)
-            .chain(dimension.as_ref().map(|x| &x.0))
-            .collect(),
-        SystemFunctionKind::Display(inputs) | SystemFunctionKind::Write(inputs) => {
-            inputs.iter().map(|x| &x.0).collect()
-        }
-        SystemFunctionKind::Assert { cond, args, .. } => std::iter::once(&cond.0)
-            .chain(args.iter().map(|x| &x.0))
-            .collect(),
-        SystemFunctionKind::Finish => Vec::new(),
-    };
-    inputs.into_iter()
-}
-
 /// Whether `iterator` appears anywhere in `expression`.
 fn mentions(expression: &Expression, iterator: VarId) -> bool {
-    let recurse = |expression: &Expression| mentions(expression, iterator);
-    match expression {
-        Expression::Term(factor) => match factor.as_ref() {
-            Factor::Variable(id, index, select, _) => {
-                *id == iterator || coordinates(index, select).any(recurse)
-            }
-            Factor::FunctionCall(call) => call.inputs.values().any(recurse),
-            Factor::SystemFunctionCall(call) => system_inputs(&call.kind).any(recurse),
-            Factor::HierVariable(_)
-            | Factor::Value(_)
-            | Factor::Anonymous(_)
-            | Factor::Unknown(_) => false,
-        },
-        Expression::Unary(_, operand, _) => recurse(operand),
-        Expression::Binary(left, _, right, _) => recurse(left) || recurse(right),
-        Expression::Ternary(condition, left, right, _) => {
-            recurse(condition) || recurse(left) || recurse(right)
-        }
-        Expression::Concatenation(parts, _) => parts
-            .iter()
-            .any(|(part, repeat)| recurse(part) || repeat.as_ref().is_some_and(recurse)),
-        Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
-            ArrayLiteralItem::Value(value, repeat) => {
-                recurse(value) || repeat.as_deref().is_some_and(recurse)
-            }
-            ArrayLiteralItem::Defaul(value) => recurse(value),
-        }),
-        Expression::StructConstructor(_, fields, _) => {
-            fields.iter().any(|(_, value)| recurse(value))
-        }
-    }
+    matches!(expression, Expression::Term(factor) if matches!(factor.as_ref(), Factor::Variable(id, ..) if *id == iterator))
+        || children(expression)
+            .into_iter()
+            .any(|child| mentions(child, iterator))
 }

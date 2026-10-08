@@ -730,8 +730,8 @@ fn collect_statement_spans(
                 // their constant iterations during evaluation, which needs
                 // each iteration's boundaries. Every other loop is evaluated
                 // once with a symbolic iterator.
-                if procedure::loop_needs_values(statement)
-                    && let Some(iterations) = statement.range.eval_iter(ctx)
+                if let procedure::LoopEvaluation::Enumerated(iterations) =
+                    procedure::loop_evaluation(statement, ctx)
                 {
                     for iteration in iterations {
                         let body = crate::ir::peel::specialize_iteration(ctx, statement, iteration);

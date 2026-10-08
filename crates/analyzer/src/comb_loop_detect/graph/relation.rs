@@ -44,7 +44,9 @@
 
 use super::{FeasiblePosition, SearchBudget};
 use crate::comb_loop_detect::model::BitDependency;
-use crate::comb_loop_detect::position::{Link, Map};
+use crate::comb_loop_detect::position::{
+    Link, Map, ceil_div_wide, extended_gcd, first_in_class, floor_div_wide,
+};
 use crate::comb_loop_detect::ssa::PositionDomain;
 
 type AxisRange = Option<(isize, isize)>;
@@ -652,13 +654,7 @@ fn intersect_progressions(left: (isize, isize), right: (isize, isize)) -> Option
 }
 
 fn progression_in_range(residue: isize, modulus: isize, start: isize, end: isize) -> Option<()> {
-    let offset = start.checked_sub(residue)?.rem_euclid(modulus);
-    let first = if offset == 0 {
-        start
-    } else {
-        start.checked_add(modulus - offset)?
-    };
-    (first < end).then_some(())
+    (first_in_class(residue, modulus, start)? < end).then_some(())
 }
 
 /// Integer parameters `u` with `start <= value + slope * u < end`.
@@ -670,12 +666,16 @@ fn parameter_interval(value: isize, slope: isize, range: AxisRange) -> Option<(i
     if slope == 0 {
         return (start <= value && value <= end).then_some((i128::MIN, i128::MAX));
     }
-    let floor = |a: i128, b: i128| a.div_euclid(b) - i128::from(b < 0 && a.rem_euclid(b) != 0);
-    let ceil = |a: i128, b: i128| -floor(-a, b);
     let (first, last) = if slope > 0 {
-        (ceil(start - value, slope), floor(end - value, slope))
+        (
+            ceil_div_wide(start - value, slope),
+            floor_div_wide(end - value, slope),
+        )
     } else {
-        (ceil(end - value, slope), floor(start - value, slope))
+        (
+            ceil_div_wide(end - value, slope),
+            floor_div_wide(start - value, slope),
+        )
     };
     (first <= last).then_some((first, last))
 }
@@ -865,7 +865,7 @@ fn swapped_identity(array: Map, packed: Map, anchor: [AxisRange; 2]) -> Option<(
     }
     // Dependent equations: solve the first, then require the second.
     // a t0 + b t1 = c with b != 0 because every modulus is positive.
-    let (gcd, x, _) = extended_gcd_i128(a, b);
+    let (gcd, x, _) = extended_gcd(a, b);
     if c % gcd != 0 {
         return None;
     }
@@ -897,23 +897,6 @@ fn swapped_identity(array: Map, packed: Map, anchor: [AxisRange; 2]) -> Option<(
     let base1 = narrow(array.residue as i128 + array.modulus as i128 * t0p)?;
     let slope1 = narrow(array.modulus as i128 * s0)?;
     parameter_exists(&[(base0, slope0, anchor[0]), (base1, slope1, anchor[1])]).then_some(())
-}
-
-fn extended_gcd_i128(a: i128, b: i128) -> (i128, i128, i128) {
-    let (mut old_r, mut r) = (a, b);
-    let (mut old_s, mut s) = (1i128, 0i128);
-    let (mut old_t, mut t) = (0i128, 1i128);
-    while r != 0 {
-        let quotient = old_r / r;
-        (old_r, r) = (r, old_r - quotient * r);
-        (old_s, s) = (s, old_s - quotient * s);
-        (old_t, t) = (t, old_t - quotient * t);
-    }
-    if old_r < 0 {
-        (-old_r, -old_s, -old_t)
-    } else {
-        (old_r, old_s, old_t)
-    }
 }
 
 fn linked_repetition_count(

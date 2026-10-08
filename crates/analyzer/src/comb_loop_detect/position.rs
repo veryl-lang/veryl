@@ -304,12 +304,7 @@ impl Link {
 
     /// Whether the destination coordinate can lie in `[start, end)`.
     fn class_meets(modulus: isize, residue: isize, start: isize, end: isize) -> bool {
-        let Some(offset) = residue.checked_sub(start) else {
-            return true;
-        };
-        start
-            .checked_add(offset.rem_euclid(modulus))
-            .is_none_or(|first| first < end)
+        first_in_class(residue, modulus, start).is_none_or(|first| first < end)
     }
 }
 
@@ -493,28 +488,37 @@ impl Relation {
     }
 }
 
-fn div_floor(numerator: isize, denominator: isize) -> Option<isize> {
-    if denominator == 0 {
-        return None;
-    }
-    let quotient = numerator.checked_div(denominator)?;
+/// `numerator / denominator` rounded toward negative infinity.
+pub(super) fn floor_div_wide(numerator: i128, denominator: i128) -> i128 {
+    let quotient = numerator / denominator;
     if numerator % denominator != 0 && ((numerator < 0) != (denominator < 0)) {
-        quotient.checked_sub(1)
+        quotient - 1
     } else {
-        Some(quotient)
+        quotient
     }
 }
 
+/// `numerator / denominator` rounded toward positive infinity.
+pub(super) fn ceil_div_wide(numerator: i128, denominator: i128) -> i128 {
+    -floor_div_wide(-numerator, denominator)
+}
+
+fn div_floor(numerator: isize, denominator: isize) -> Option<isize> {
+    (denominator != 0)
+        .then(|| floor_div_wide(numerator as i128, denominator as i128))
+        .and_then(|quotient| isize::try_from(quotient).ok())
+}
+
 fn div_ceil(numerator: isize, denominator: isize) -> Option<isize> {
-    if denominator == 0 {
-        return None;
-    }
-    let quotient = numerator.checked_div(denominator)?;
-    if numerator % denominator != 0 && ((numerator < 0) == (denominator < 0)) {
-        quotient.checked_add(1)
-    } else {
-        Some(quotient)
-    }
+    (denominator != 0)
+        .then(|| ceil_div_wide(numerator as i128, denominator as i128))
+        .and_then(|quotient| isize::try_from(quotient).ok())
+}
+
+/// The first coordinate from `start` in the class `residue` modulo
+/// `modulus`. `None` on overflow.
+pub(super) fn first_in_class(residue: isize, modulus: isize, start: isize) -> Option<isize> {
+    start.checked_add(residue.checked_sub(start)?.rem_euclid(modulus))
 }
 
 /// Solutions of `coefficient * x = constant (mod modulus)` as
@@ -533,7 +537,7 @@ pub(super) fn solve_congruence(
     let coefficient = coefficient.rem_euclid(modulus) as i128;
     let constant = constant.rem_euclid(modulus) as i128;
     let modulus = modulus as i128;
-    let (gcd, inverse) = gcd_inverse(coefficient, modulus);
+    let (gcd, inverse, _) = extended_gcd(coefficient, modulus);
     if constant % gcd != 0 {
         return Some(None);
     }
@@ -549,16 +553,22 @@ pub(super) fn greatest_common_divisor(mut left: usize, mut right: usize) -> usiz
     left
 }
 
-/// `(gcd, x)` with `a * x = gcd (mod b)` for `0 <= a < b`.
-fn gcd_inverse(a: i128, b: i128) -> (i128, i128) {
+/// `(gcd, x, y)` with `a * x + b * y = gcd` and `gcd >= 0`.
+pub(super) fn extended_gcd(a: i128, b: i128) -> (i128, i128, i128) {
     let (mut old_r, mut r) = (a, b);
     let (mut old_s, mut s) = (1i128, 0i128);
+    let (mut old_t, mut t) = (0i128, 1i128);
     while r != 0 {
         let quotient = old_r / r;
         (old_r, r) = (r, old_r - quotient * r);
         (old_s, s) = (s, old_s - quotient * s);
+        (old_t, t) = (t, old_t - quotient * t);
     }
-    (old_r, old_s)
+    if old_r < 0 {
+        (-old_r, -old_s, -old_t)
+    } else {
+        (old_r, old_s, old_t)
+    }
 }
 
 #[cfg(test)]

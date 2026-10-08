@@ -22,8 +22,7 @@ use super::{AffineIndex, CountedCoverage, CountedIterator, ProcedureAnalysis};
 use crate::HashMap;
 use crate::comb_loop_detect::region::{ArraySpan, PackedSpan};
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CasePattern, Expression, Factor, Statement, VarId,
-    VarIndex, VarSelect,
+    AssignDestination, CasePattern, Expression, Factor, Statement, VarId, VarIndex, VarSelect,
 };
 
 /// Consecutive array positions accessed from an affine base position.
@@ -414,68 +413,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn expression_accesses(&mut self, expression: &Expression, accesses: &mut LoopAccesses) {
-        match expression {
-            Expression::Term(factor) => match factor.as_ref() {
+        if let Expression::Term(factor) = expression {
+            match factor.as_ref() {
                 Factor::Variable(id, index, select, _) => {
                     let footprint = self.variable_read(*id, index, select);
                     accesses.read(*id, footprint);
-                    for expression in index.expressions().chain(select.0.iter()) {
-                        self.expression_accesses(expression, accesses);
-                    }
-                    if let Some((_, expression)) = &select.1 {
-                        self.expression_accesses(expression, accesses);
-                    }
                 }
-                Factor::FunctionCall(call) => {
-                    accesses.opaque = true;
-                    for input in call.inputs.values() {
-                        self.expression_accesses(input, accesses);
-                    }
-                }
+                Factor::FunctionCall(_) => accesses.opaque = true,
                 Factor::SystemFunctionCall(_)
                 | Factor::HierVariable(_)
                 | Factor::Anonymous(_)
-                | Factor::Unknown(_) => accesses.opaque = true,
+                | Factor::Unknown(_) => {
+                    accesses.opaque = true;
+                    return;
+                }
                 Factor::Value(_) => {}
-            },
-            Expression::Unary(_, operand, _) => self.expression_accesses(operand, accesses),
-            Expression::Binary(left, _, right, _) => {
-                self.expression_accesses(left, accesses);
-                self.expression_accesses(right, accesses);
             }
-            Expression::Ternary(condition, left, right, _) => {
-                self.expression_accesses(condition, accesses);
-                self.expression_accesses(left, accesses);
-                self.expression_accesses(right, accesses);
-            }
-            Expression::Concatenation(parts, _) => {
-                for (part, repeat) in parts {
-                    self.expression_accesses(part, accesses);
-                    if let Some(repeat) = repeat {
-                        self.expression_accesses(repeat, accesses);
-                    }
-                }
-            }
-            Expression::ArrayLiteral(items, _) => {
-                for item in items {
-                    match item {
-                        ArrayLiteralItem::Value(value, repeat) => {
-                            self.expression_accesses(value, accesses);
-                            if let Some(repeat) = repeat {
-                                self.expression_accesses(repeat, accesses);
-                            }
-                        }
-                        ArrayLiteralItem::Defaul(value) => {
-                            self.expression_accesses(value, accesses)
-                        }
-                    }
-                }
-            }
-            Expression::StructConstructor(_, fields, _) => {
-                for (_, value) in fields {
-                    self.expression_accesses(value, accesses);
-                }
-            }
+        }
+        for child in super::children::children(expression) {
+            self.expression_accesses(child, accesses);
         }
     }
 }

@@ -417,11 +417,12 @@ fn project_repeated_span(
 #[cfg(test)]
 use std::cell::Cell;
 
+mod children;
 mod footprint;
 mod iterator_use;
 mod last_writer;
 use footprint::{LoopAccesses, for_range_step};
-pub(super) use iterator_use::{iterator_needs_values, loop_needs_values};
+pub(super) use iterator_use::{LoopEvaluation, loop_evaluation};
 use last_writer::{Step, WriterId, WriterScope};
 
 #[derive(Clone)]
@@ -1452,6 +1453,14 @@ struct CountedCoverage {
     step: isize,
 }
 
+/// One side of a two-way branch: a block, or an assignment of one operand of
+/// a ternary.
+#[derive(Clone, Copy)]
+enum Side<'s> {
+    Block(&'s [Statement]),
+    Assign(&'s AssignStatement, &'s Expression),
+}
+
 /// Iterations of the counted iterator at `position` on which a condition
 /// holds and fails, each as disjoint progressions; empty when no iteration
 /// takes that side.
@@ -2383,9 +2392,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// iterators, as progressions: each span with the step between its
     /// positions, starting at its first position. A progression is one entry
     /// however many positions it has.
-    fn affine_progressions(&self, index: &AffineIndex) -> Option<Vec<(ArraySpan, usize)>> {
+    fn affine_progressions(&mut self, index: &AffineIndex) -> Option<Vec<(ArraySpan, usize)>> {
         let mut progressions = Vec::new();
-        for assignment in self.index_progressions(index) {
+        for assignment in self.index_progressions(index)? {
             let mut progression = AffineIndex {
                 terms: Vec::new(),
                 constant: index.constant,
@@ -2427,7 +2436,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     /// `value` at the positions of `region` that are `step` apart from its
     /// start. A stride keeps one relation, restricted to its residue, rather
-    /// than one projection per position.
+    /// than one projection per position. Each is charged to the procedure's
+    /// work; `None` means it is exhausted.
     fn progression_value(
         &mut self,
         value: VersionId,
@@ -2435,6 +2445,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         axis: Axis,
         step: usize,
     ) -> Option<VersionId> {
+        if !self.reserve_guard_work(1) {
+            return None;
+        }
         let value = if step > 1 {
             let modulus = isize::try_from(step).ok()?;
             let start = match axis {
@@ -2550,47 +2563,60 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// The iterator values that divide the positions of `index` into
     /// progressions: every counted iterator but the one with the most values
     /// is fixed to each of its values in turn, unless the positions already
-    /// form one progression. One empty assignment means no division.
-    fn index_progressions(&self, index: &AffineIndex) -> Vec<Vec<(VarId, isize)>> {
+    /// form one progression. One empty assignment means no division. Each
+    /// assignment is charged to the procedure's work, so `None` means the
+    /// division would exceed it and the analysis stops.
+    fn index_progressions(&mut self, index: &AffineIndex) -> Option<Vec<Vec<(VarId, isize)>>> {
         let Some(terms) = self.iterator_terms(index) else {
-            return vec![Vec::new()];
+            return Some(vec![Vec::new()]);
         };
         if Self::forms_one_progression(&terms) {
-            return vec![Vec::new()];
+            return Some(vec![Vec::new()]);
         }
         let kept = terms
             .iter()
             .max_by_key(|&&(_, _, count)| count)
             .map(|&(id, _, _)| id);
+        let fixed = terms
+            .iter()
+            .filter(|term| Some(term.0) != kept)
+            .filter_map(|&(id, _, _)| self.counted_iterator(id))
+            .collect::<Vec<_>>();
+        let count = fixed.iter().try_fold(1usize, |count, iterator| {
+            let values =
+                usize::try_from((iterator.max - iterator.min) / iterator.modulus + 1).ok()?;
+            count.checked_mul(values)
+        });
+        if !count.is_some_and(|count| self.reserve_guard_work(count)) {
+            self.exhaust_work();
+            return None;
+        }
         let mut assignments = vec![Vec::new()];
-        for &(id, _, _) in terms.iter().filter(|term| Some(term.0) != kept) {
-            let Some(iterator) = self.counted_iterator(id) else {
-                continue;
-            };
+        for iterator in fixed {
             let values = (iterator.min..=iterator.max).step_by(iterator.modulus as usize);
             assignments = assignments
                 .into_iter()
                 .flat_map(|assignment: Vec<(VarId, isize)>| {
                     values.clone().map(move |value| {
                         let mut assignment = assignment.clone();
-                        assignment.push((id, value));
+                        assignment.push((iterator.id, value));
                         assignment
                     })
                 })
                 .collect();
         }
-        assignments
+        Some(assignments)
     }
 
     /// The links from a source coordinate to a destination coordinate, one
     /// per progression of the source positions, each with its source index.
     fn affine_links(
-        &self,
+        &mut self,
         destination: &SampledAffineIndex,
         source: &SampledAffineIndex,
         crossed: bool,
     ) -> Option<Vec<(Link, SampledAffineIndex)>> {
-        self.index_progressions(&source.index)
+        self.index_progressions(&source.index)?
             .into_iter()
             .map(|assignment| {
                 let fixed = |sampled: &SampledAffineIndex| {
@@ -3807,66 +3833,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         STATEMENT_EVALUATIONS.set(STATEMENT_EVALUATIONS.get() + 1);
         match statement {
             Statement::Assign(assign) => {
-                if let Some(statement) = self.iterator_ternary(assign) {
-                    return self.eval_if(&statement, controls);
+                // An iterator condition confines each value to the
+                // iterations that select it.
+                if let Expression::Ternary(condition, true_value, false_value, _) = &assign.expr
+                    && let Some(split) = self.iterator_condition_split(condition)
+                {
+                    return self.eval_sides(
+                        condition,
+                        Some(split),
+                        [
+                            Side::Assign(assign, true_value),
+                            Side::Assign(assign, false_value),
+                        ],
+                        controls,
+                    );
                 }
-                let previous_assignment = self.active_assignment;
-                self.active_assignment = self.tracing.then_some(assign.token);
-                self.call_caches.push(Some(EvaluationCache {
-                    variables: Some(HashMap::default()),
-                    ..EvaluationCache::default()
-                }));
-                // Evaluate RHS reads in expression order before destination
-                // selectors or any region writes. Keep each occurrence's value
-                // and index versions even if a later call or write changes them.
-                let sources = if let [destination] = assign.dst.as_slice() {
-                    let packed = destination_packed_shape(destination);
-                    self.eval_expr_shaped(
-                        &assign.expr,
-                        true,
-                        EvaluationShape {
-                            array: destination.comptime.r#type.array.as_slice(),
-                            packed: packed.as_ref(),
-                        },
-                    )
-                } else {
-                    self.eval_expr(&assign.expr)
-                };
-                let widths: Vec<_> = assign
-                    .dst
-                    .iter()
-                    .map(|destination| self.destination_width(destination))
-                    .collect();
-                if widths.iter().all(Option::is_some) {
-                    let total_width = widths.iter().flatten().sum();
-                    let mut offset = total_width;
-                    for (index, (destination, width)) in assign.dst.iter().zip(widths).enumerate() {
-                        let width = width.expect("checked above");
-                        offset -= width;
-                        self.current_writer = Some((assign.token, index));
-                        self.write_assignment_destination(
-                            destination,
-                            &assign.expr,
-                            offset,
-                            total_width,
-                            controls,
-                        );
-                    }
-                } else {
-                    for (index, destination) in assign.dst.iter().enumerate() {
-                        self.current_writer = Some((assign.token, index));
-                        self.write_destination(destination, &sources, controls);
-                    }
-                }
-                self.current_writer = None;
-                self.call_caches.pop();
-                self.active_assignment = previous_assignment;
-                if self.is_return_assignment(&assign.dst) {
-                    self.record_return();
-                    FlowResult::new(ProcedureFlow::Return)
-                } else {
-                    FlowResult::new(ProcedureFlow::Continue)
-                }
+                self.eval_assign(assign, &assign.expr, controls)
             }
             Statement::If(statement) => self.eval_if(statement, controls),
             Statement::Case(statement) => self.eval_case(statement, controls),
@@ -3957,28 +3939,115 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
+    /// Assign `expression` to the destinations of `assign`.
+    fn eval_assign(
+        &mut self,
+        assign: &AssignStatement,
+        expression: &Expression,
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let previous_assignment = self.active_assignment;
+        self.active_assignment = self.tracing.then_some(assign.token);
+        self.call_caches.push(Some(EvaluationCache {
+            variables: Some(HashMap::default()),
+            ..EvaluationCache::default()
+        }));
+        // Evaluate RHS reads in expression order before destination
+        // selectors or any region writes. Keep each occurrence's value
+        // and index versions even if a later call or write changes them.
+        let sources = if let [destination] = assign.dst.as_slice() {
+            let packed = destination_packed_shape(destination);
+            self.eval_expr_shaped(
+                expression,
+                true,
+                EvaluationShape {
+                    array: destination.comptime.r#type.array.as_slice(),
+                    packed: packed.as_ref(),
+                },
+            )
+        } else {
+            self.eval_expr(expression)
+        };
+        let widths: Vec<_> = assign
+            .dst
+            .iter()
+            .map(|destination| self.destination_width(destination))
+            .collect();
+        if widths.iter().all(Option::is_some) {
+            let total_width = widths.iter().flatten().sum();
+            let mut offset = total_width;
+            for (index, (destination, width)) in assign.dst.iter().zip(widths).enumerate() {
+                let width = width.expect("checked above");
+                offset -= width;
+                self.current_writer = Some((assign.token, index));
+                self.write_assignment_destination(
+                    destination,
+                    expression,
+                    offset,
+                    total_width,
+                    controls,
+                );
+            }
+        } else {
+            for (index, destination) in assign.dst.iter().enumerate() {
+                self.current_writer = Some((assign.token, index));
+                self.write_destination(destination, &sources, controls);
+            }
+        }
+        self.current_writer = None;
+        self.call_caches.pop();
+        self.active_assignment = previous_assignment;
+        if self.is_return_assignment(&assign.dst) {
+            self.record_return();
+            FlowResult::new(ProcedureFlow::Return)
+        } else {
+            FlowResult::new(ProcedureFlow::Continue)
+        }
+    }
+
     fn eval_if(&mut self, statement: &IfStatement, controls: &[VersionId]) -> FlowResult {
-        let condition = self.eval_control_condition(&statement.cond);
-        let mut nested_controls = controls.to_vec();
-        nested_controls.extend_from_slice(&condition);
-        let truth = self.constant_truth(&statement.cond);
-        let split = truth
+        let split = self
+            .constant_truth(&statement.cond)
             .is_none()
             .then(|| self.iterator_condition_split(&statement.cond))
             .flatten();
+        self.eval_sides(
+            &statement.cond,
+            split,
+            [
+                Side::Block(&statement.true_side),
+                Side::Block(&statement.false_side),
+            ],
+            controls,
+        )
+    }
+
+    /// Evaluate the true and false sides of `condition`, given its iterator
+    /// split if it has one.
+    fn eval_sides(
+        &mut self,
+        condition: &Expression,
+        split: Option<IteratorSplit>,
+        [true_side, false_side]: [Side<'_>; 2],
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let sources = self.eval_control_condition(condition);
+        let mut nested_controls = controls.to_vec();
+        nested_controls.extend_from_slice(&sources);
+        let truth = self.constant_truth(condition);
         // Each arm is a side with the iterations that take it. A side that no
         // iteration takes is never evaluated, and a side whose iterations form
         // several progressions is evaluated once per progression.
-        let true_side = statement.true_side.as_slice();
-        let false_side = statement.false_side.as_slice();
         let arms = match (split, truth) {
+            (_, Some(true)) => vec![(true_side, None)],
+            (_, Some(false)) => vec![(false_side, None)],
             (
                 Some(IteratorSplit {
                     position,
                     holds,
                     fails,
                 }),
-                _,
+                None,
             ) => holds
                 .into_iter()
                 .map(|iterator| (true_side, Some((position, iterator))))
@@ -3988,26 +4057,45 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .map(|iterator| (false_side, Some((position, iterator)))),
                 )
                 .collect::<Vec<_>>(),
-            (None, Some(true)) => vec![(true_side, None)],
-            (None, Some(false)) => vec![(false_side, None)],
             (None, None) => vec![(true_side, None), (false_side, None)],
         };
-        if let [(statements, confinement)] = arms.as_slice() {
-            return self.eval_confined_block(*confinement, statements, &nested_controls);
+        if let [(side, confinement)] = arms.as_slice() {
+            return self.eval_confined_side(*confinement, *side, &nested_controls);
         }
 
         let branch = self.next_branch_id(arms.len());
         let parent_condition = self.path_condition.clone();
         let mut branches = Vec::with_capacity(arms.len());
-        for (arm, (statements, confinement)) in arms.into_iter().enumerate() {
+        for (arm, (side, confinement)) in arms.into_iter().enumerate() {
             self.choose_path(&parent_condition, branch, arm);
             let checkpoint = self.ssa.checkpoint();
-            let flow = self.eval_confined_block(confinement, statements, &nested_controls);
+            let flow = self.eval_confined_side(confinement, side, &nested_controls);
             let state = self.ssa.capture_and_rollback(checkpoint);
             branches.push((flow, state, self.path_condition.clone()));
         }
         self.path_condition = parent_condition;
-        self.merge_branches(branches, &condition)
+        self.merge_branches(branches, &sources)
+    }
+
+    fn eval_confined_side(
+        &mut self,
+        confinement: Option<(usize, CountedIterator)>,
+        side: Side<'_>,
+        controls: &[VersionId],
+    ) -> FlowResult {
+        match side {
+            Side::Block(statements) => self.eval_confined_block(confinement, statements, controls),
+            Side::Assign(assign, expression) => {
+                let Some((position, confined)) = confinement else {
+                    return self.eval_assign(assign, expression, controls);
+                };
+                let iterator = self.counted_iterators[position];
+                self.counted_iterators[position] = confined;
+                let flow = self.eval_assign(assign, expression, controls);
+                self.counted_iterators[position] = iterator;
+                flow
+            }
+        }
     }
 
     /// Evaluate a block with one counted iterator confined to the iterations
@@ -4168,7 +4256,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         // Consecutive iterations leave every remainder they can within one
         // period of their own progression, so no more than there are
-        // iterations.
+        // iterations. Each remainder is one arm, charged to the procedure's
+        // work before any is built.
+        let iterations = (iterator.max - iterator.min) / iterator.modulus + 1;
+        if !self.reserve_guard_work(usize::try_from(divisor.min(iterations)).ok()?) {
+            return None;
+        }
         let mut equal = Vec::new();
         let mut unequal = Vec::new();
         let mut current = iterator.min;
@@ -4195,28 +4288,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             position,
             holds,
             fails,
-        })
-    }
-
-    fn iterator_ternary(&mut self, assign: &AssignStatement) -> Option<IfStatement> {
-        let Expression::Ternary(condition, true_value, false_value, _) = &assign.expr else {
-            return None;
-        };
-        self.iterator_condition_split(condition)?;
-        let side = |value: &Expression| {
-            vec![Statement::Assign(AssignStatement {
-                dst: assign.dst.clone(),
-                hier_dst: assign.hier_dst.clone(),
-                width: assign.width,
-                expr: value.clone(),
-                token: assign.token,
-            })]
-        };
-        Some(IfStatement {
-            cond: (**condition).clone(),
-            true_side: side(true_value),
-            false_side: side(false_value),
-            token: assign.token,
         })
     }
 
@@ -4321,21 +4392,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return FlowResult::new(ProcedureFlow::Continue);
         }
 
-        // A loop that needs its iterator's values takes each iteration's
-        // value while the iterations stay within the size limit.
-        if loop_needs_values(statement)
-            && let Some(values) = statement.range.eval_iter(&mut self.ctx)
-        {
-            self.eval_known_for_iterations(statement, &range_controls, values)
-        } else if !crate::ir::peel::has_own_break(&statement.body)
-            && !matches!(statement.range, ForRange::Stepped { .. })
-            && let Some(iterations) = statement.range.eval_counted(&mut self.ctx)
-        {
-            if iterations.count == 0 {
+        match loop_evaluation(statement, &mut self.ctx) {
+            LoopEvaluation::Enumerated(values) => {
+                return self.eval_known_for_iterations(statement, &range_controls, values);
+            }
+            LoopEvaluation::Counted(iterations) if iterations.count == 0 => {
                 return FlowResult::new(ProcedureFlow::Continue);
             }
-            self.eval_counted_for(statement, &range_controls, iterations)
-        } else if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
+            LoopEvaluation::Counted(iterations) => {
+                return self.eval_counted_for(statement, &range_controls, iterations);
+            }
+            LoopEvaluation::Other => {}
+        }
+        if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
             self.eval_known_for_iterations(statement, &range_controls, iterations)
         } else if statement.range.is_over_size_limit(&mut self.ctx) {
             // A resource limit must not turn a finite, statically known loop
@@ -5929,11 +5998,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let recurse = |expression: &Expression| pure_expression(analysis, expression, depth);
             match expression {
                 Expression::Term(factor) => match factor.as_ref() {
-                    Factor::Variable(id, index, select, _) => {
+                    Factor::Variable(id, ..) => {
                         analysis.is_function_variable(*id)
-                            && index.expressions().all(recurse)
-                            && select.0.iter().all(recurse)
-                            && select.1.as_ref().is_none_or(|(_, x)| recurse(x))
+                            && children::children(expression).into_iter().all(recurse)
                     }
                     Factor::Value(_) => true,
                     Factor::FunctionCall(call) => {
@@ -5943,23 +6010,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                     _ => false,
                 },
-                Expression::Unary(_, operand, _) => recurse(operand),
-                Expression::Binary(left, _, right, _) => recurse(left) && recurse(right),
-                Expression::Ternary(condition, left, right, _) => {
-                    recurse(condition) && recurse(left) && recurse(right)
-                }
-                Expression::Concatenation(parts, _) => parts
-                    .iter()
-                    .all(|(part, repeat)| recurse(part) && repeat.as_ref().is_none_or(recurse)),
-                Expression::ArrayLiteral(items, _) => items.iter().all(|item| match item {
-                    ArrayLiteralItem::Value(value, repeat) => {
-                        recurse(value) && repeat.as_deref().is_none_or(recurse)
-                    }
-                    ArrayLiteralItem::Defaul(value) => recurse(value),
-                }),
-                Expression::StructConstructor(_, fields, _) => {
-                    fields.iter().all(|(_, value)| recurse(value))
-                }
+                _ => children::children(expression).into_iter().all(recurse),
             }
         }
         fn pure_statements(
