@@ -10,7 +10,8 @@ use crate::ir::expression::{
 };
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::variable::{
-    VarOffset, native_bytes as calc_native_bytes, read_native_value, write_native_value,
+    VarOffset, clip_select_to_width, native_bytes as calc_native_bytes, read_native_value,
+    write_native_value,
 };
 use crate::ir::write_log::{
     event_write_log_push_static, event_write_log_push_wide_range, static_field_byte_span,
@@ -2908,16 +2909,6 @@ pub struct AssignStatement {
     pub rhs_sign_extend: bool,
 }
 
-/// Clip a dynamic part-select write to the destination's declared width.
-///
-/// The runtime index is clamped to the last ELEMENT, not the last legal
-/// window start, so `dst[i +: w]` can overhang `dst_width`.  SystemVerilog
-/// does not write those bits; `Value::assign` would OR them into the storage
-/// padding.  `None` = the whole window is out of range.
-fn clip_window_to_width(beg: usize, end: usize, dst_width: usize) -> Option<(usize, usize)> {
-    (end < dst_width).then(|| (beg.min(dst_width - 1), end))
-}
-
 impl AssignStatement {
     pub fn eval_step(&self, mask_cache: &mut MaskCache) {
         let value = self.expr.eval(mask_cache);
@@ -2938,7 +2929,7 @@ impl AssignStatement {
             }
             let end = idx * dyn_sel.elem_width;
             let beg = end + dyn_sel.window - 1;
-            let Some((beg, end)) = clip_window_to_width(beg, end, self.dst_width) else {
+            let Some((beg, end)) = clip_select_to_width(beg, end, self.dst_width) else {
                 return;
             };
             let mut current = unsafe {
@@ -3093,7 +3084,7 @@ impl AssignDynamicStatement {
             }
             let end = dyn_idx * dyn_sel.elem_width;
             let beg = end + dyn_sel.window - 1;
-            let Some((beg, end)) = clip_window_to_width(beg, end, self.dst_width) else {
+            let Some((beg, end)) = clip_select_to_width(beg, end, self.dst_width) else {
                 return;
             };
             let mut current = unsafe {

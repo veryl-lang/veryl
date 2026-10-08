@@ -4328,7 +4328,7 @@ fn emit_event_ff_assign_wide_select(
 
 /// `dst[idx*ew +: win] = src` in place over `nb` bytes.  Mirrors `eval_step`'s
 /// `Value::assign(_sh+win-1, _sh)`; the width-mask intersection is
-/// `clip_window_to_width`, so a top-index overhang is dropped, not wrapped.
+/// `clip_select_to_width`, so a top-index overhang is dropped, not wrapped.
 fn emit_wide_dynsel_merge(
     dst: &str,
     src: &str,
@@ -4381,7 +4381,7 @@ fn emit_event_ff_assign_wide_dynsel_field(
     let nw = wide_words(nb);
     // The limb form has no width mask, so a window that can reach past
     // `dst_width` goes to the general path below, which clips like
-    // `clip_window_to_width`.
+    // `clip_select_to_width`.
     if (ne - 1).checked_mul(ew)?.checked_add(win)? > a.dst_width {
         return None;
     }
@@ -4484,7 +4484,7 @@ fn emit_event_ff_assign_wide_dynsel_general(
     inner.push_str(&emit_wide_ff_rmw_tail(
         &reg, nb, packed, dst_raw, cur_off, None,
     ));
-    // `clip_window_to_width` drops the write outright once the window's LOW
+    // `clip_select_to_width` drops the write outright once the window's LOW
     // bit is past the width, so the guard covers the log push too: an
     // out-of-range index must leave no entry, not re-log the old value.
     let (g0, g1) = oob_guard("_di_raw", ds.index_expr.width(), ne);
@@ -8584,7 +8584,7 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
                     (1u64 << dyn_sel.window) - 1
                 };
                 // A window on the clamped last element can run past
-                // `dst_width`; clip the field mask as `clip_window_to_width`
+                // `dst_width`; clip the field mask as `clip_select_to_width`
                 // does.
                 let dwmask = width_mask(a.dst_width);
                 let (g0, g1) =
@@ -12528,7 +12528,7 @@ mod tests {
 
     #[test]
     fn emit_event_ff_wide_dynamic_index_past_the_width_writes_nothing() {
-        // `clip_window_to_width` drops the write entirely rather than clamping,
+        // `clip_select_to_width` drops the write entirely rather than clamping,
         // so nothing may reach the log -- re-logging would clobber an earlier
         // field write.
         if !cc_available() {

@@ -8,7 +8,7 @@ use crate::HashMap;
 use crate::ir::ProtoStatement;
 use crate::ir::context::Context;
 use crate::ir::event::Event;
-use crate::ir::expression::ProtoExpression;
+use crate::ir::expression::{ProtoExpression, storage_bounded_read};
 use crate::ir::statement::{ProtoForBound, ProtoForRange, ProtoSystemFunctionCall};
 use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableMeta};
 use crate::simulator_error::SimulatorError;
@@ -438,14 +438,21 @@ pub(crate) fn resolve_expr(
                     .get(elem_index)
                     .ok_or_else(|| SimulatorError::unsupported_description(token))?;
 
-                *expr = ProtoExpression::Variable {
-                    var_offset: element.current,
-                    select: select_val,
-                    dynamic_select,
-                    width: hier.width,
+                *expr = storage_bounded_read(
+                    select_val,
                     var_full_width,
-                    expr_context: hier.expr_context,
-                };
+                    hier.width,
+                    hier.expr_context,
+                    context.config.use_4state,
+                    |select, width, expr_context| ProtoExpression::Variable {
+                        var_offset: element.current,
+                        select,
+                        dynamic_select,
+                        width,
+                        var_full_width,
+                        expr_context,
+                    },
+                );
             } else {
                 // Runtime index: mirror the non-hierarchical dynamic path.
                 let (base_current, stride, is_ff) = meta
@@ -455,6 +462,7 @@ pub(crate) fn resolve_expr(
                 let num_elements = meta.elements.len();
                 let element_native_bytes = meta.native_bytes;
                 let array_shape = meta.r#type.array.clone();
+                let element_width = meta.width;
                 let mut index_proto = crate::ir::expression::build_linear_index_expr(
                     context,
                     &array_shape,
@@ -464,18 +472,26 @@ pub(crate) fn resolve_expr(
                 // reference nested in the index (`mem[dut.other.sig]`) is
                 // resolved explicitly here.
                 resolve_expr(&mut index_proto, context, children)?;
+                let use_4state = context.config.use_4state;
 
-                *expr = ProtoExpression::DynamicVariable {
-                    base_offset: VarOffset::new(is_ff, base_current),
-                    stride,
-                    element_native_bytes,
-                    index_expr: Box::new(index_proto),
-                    num_elements,
-                    select: select_val,
-                    dynamic_select,
-                    width: hier.width,
-                    expr_context: hier.expr_context,
-                };
+                *expr = storage_bounded_read(
+                    select_val,
+                    element_width,
+                    hier.width,
+                    hier.expr_context,
+                    use_4state,
+                    |select, width, expr_context| ProtoExpression::DynamicVariable {
+                        base_offset: VarOffset::new(is_ff, base_current),
+                        stride,
+                        element_native_bytes,
+                        index_expr: Box::new(index_proto),
+                        num_elements,
+                        select,
+                        dynamic_select,
+                        width,
+                        expr_context,
+                    },
+                );
             }
         }
         ProtoExpression::Variable { dynamic_select, .. } => {

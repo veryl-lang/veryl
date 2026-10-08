@@ -1547,7 +1547,7 @@ impl ProtoAssignStatement {
             let (shift, in_range) = build_dynamic_select_shift_checked(dyn_sel, context, builder)?;
 
             // Clip mask and payload to the declared width: a last-element
-            // window can overhang, and `clip_window_to_width` drops those
+            // window can overhang, and `clip_select_to_width` drops those
             // bits on the interpreter side.
             let elem_mask = gen_mask_for_width(dyn_sel.window);
             let mask_val = if wide {

@@ -63,6 +63,14 @@ pub fn native_bytes(width: usize) -> usize {
     }
 }
 
+/// Clip a part-select to the width the variable declares; `None` once the
+/// whole window is past it.  Windows do overhang: a runtime index is clamped
+/// to the last ELEMENT rather than the last legal window start, and a constant
+/// one can name a position the analyzer's bounds check never evaluated.
+pub fn clip_select_to_width(beg: usize, end: usize, width: usize) -> Option<(usize, usize)> {
+    (end < width && beg >= end).then(|| (beg.min(width - 1), end))
+}
+
 /// The single authority for register-vs-pointer representation: a value wider
 /// than a native register (`native_bytes > 16`, i.e. > 128 bit) is materialised
 /// as a pointer into flat LE-u64 storage rather than an I64/I128 scalar.  Both
