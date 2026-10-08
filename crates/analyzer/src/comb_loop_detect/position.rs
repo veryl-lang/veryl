@@ -469,6 +469,13 @@ pub(super) fn solve_congruence(
     Some(Some((first as isize, period as isize)))
 }
 
+pub(super) fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
+    while right != 0 {
+        (left, right) = (right, left % right);
+    }
+    left
+}
+
 /// `(gcd, x)` with `a * x = gcd (mod b)` for `0 <= a < b`.
 fn gcd_inverse(a: i128, b: i128) -> (i128, i128) {
     let (mut old_r, mut r) = (a, b);

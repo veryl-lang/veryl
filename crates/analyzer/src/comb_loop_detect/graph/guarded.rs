@@ -34,7 +34,7 @@
 use super::relation::PositionRelationSet;
 use super::{FeasiblePosition, SearchBudget, insert_cycle_state, intersect_axis};
 use crate::comb_loop_detect::model::BitDependency;
-use crate::comb_loop_detect::position::Link;
+use crate::comb_loop_detect::position::{Link, greatest_common_divisor};
 use crate::comb_loop_detect::ssa::PathCondition;
 use crate::{HashMap, HashSet};
 use daggy::petgraph::Graph;
@@ -739,13 +739,6 @@ fn opposing_repetition_counts(
     }
     let divisor = greatest_common_divisor(left, right);
     Some((right / divisor, left / divisor))
-}
-
-fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
-    while right != 0 {
-        (left, right) = (right, left % right);
-    }
-    left
 }
 
 fn repeat_guarded_cycle(

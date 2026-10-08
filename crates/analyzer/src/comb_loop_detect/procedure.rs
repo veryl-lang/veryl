@@ -1,7 +1,7 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::model::SummaryRegion;
-use super::position::Link;
+use super::position::{Link, greatest_common_divisor};
 use super::region::{
     ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference, var_reads,
 };
@@ -126,17 +126,16 @@ impl AffineIndex {
         Some(self)
     }
 
-    /// Smallest and largest values over the iterator and variable ranges.
-    fn extent(&self, ctx: &Context, iterators: &[CountedIterator]) -> Option<(i128, i128)> {
+    /// Smallest and largest values when each term's variable ranges over
+    /// `range`.
+    fn extent_with(
+        &self,
+        mut range: impl FnMut(VarId) -> Option<(i128, i128)>,
+    ) -> Option<(i128, i128)> {
         let mut min = self.constant as i128;
         let mut max = min;
         for &(id, coefficient) in &self.terms {
-            let (low, high) = if let Some(iterator) = iterators.iter().find(|x| x.id == id) {
-                (iterator.min as i128, iterator.max as i128)
-            } else {
-                let ty = &ctx.variables.get(&id)?.r#type;
-                integer_range(ty.total_width()?, ty.signed)?
-            };
+            let (low, high) = range(id)?;
             let coefficient = coefficient as i128;
             let low = low.checked_mul(coefficient)?;
             let high = high.checked_mul(coefficient)?;
@@ -144,6 +143,18 @@ impl AffineIndex {
             max = max.checked_add(low.max(high))?;
         }
         Some((min, max))
+    }
+
+    /// Smallest and largest values over the iterator and variable ranges.
+    fn extent(&self, ctx: &Context, iterators: &[CountedIterator]) -> Option<(i128, i128)> {
+        self.extent_with(|id| {
+            // A counted iterator takes only the values of its iteration space.
+            if let Some(iterator) = iterators.iter().find(|x| x.id == id) {
+                return Some((iterator.min as i128, iterator.max as i128));
+            }
+            let ty = &ctx.variables.get(&id)?.r#type;
+            integer_range(ty.total_width()?, ty.signed)
+        })
     }
 
     fn fits(
@@ -154,22 +165,7 @@ impl AffineIndex {
         iterators: &[CountedIterator],
     ) -> Option<()> {
         let (allowed_min, allowed_max) = integer_range(width, signed)?;
-        let mut min = self.constant as i128;
-        let mut max = min;
-        for &(id, coefficient) in &self.terms {
-            // A counted iterator takes only the values of its iteration space.
-            let (low, high) = if let Some(iterator) = iterators.iter().find(|x| x.id == id) {
-                (iterator.min as i128, iterator.max as i128)
-            } else {
-                let ty = &ctx.variables.get(&id)?.r#type;
-                integer_range(ty.total_width()?, ty.signed)?
-            };
-            let coefficient = coefficient as i128;
-            let low = low.checked_mul(coefficient)?;
-            let high = high.checked_mul(coefficient)?;
-            min = min.checked_add(low.min(high))?;
-            max = max.checked_add(low.max(high))?;
-        }
+        let (min, max) = self.extent(ctx, iterators)?;
         (allowed_min <= min && max <= allowed_max).then_some(())
     }
 }
@@ -2333,16 +2329,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     /// Inclusive extent of an affine position over the counted iterators.
     fn affine_hull(&self, index: &AffineIndex) -> Option<(isize, isize)> {
-        let mut min = index.constant;
-        let mut max = index.constant;
-        for &(id, coefficient) in &index.terms {
+        let (min, max) = index.extent_with(|id| {
             let iterator = self.counted_iterators.iter().find(|x| x.id == id)?;
-            let low = iterator.min.checked_mul(coefficient)?;
-            let high = iterator.max.checked_mul(coefficient)?;
-            min = min.checked_add(low.min(high))?;
-            max = max.checked_add(low.max(high))?;
-        }
-        Some((min, max))
+            Some((iterator.min as i128, iterator.max as i128))
+        })?;
+        Some((isize::try_from(min).ok()?, isize::try_from(max).ok()?))
     }
 
     /// Nonnegative positions an affine index takes over the counted
@@ -5550,15 +5541,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     .filter(|sampled| !sampled.index.terms.is_empty())
             })?;
         sampled.index.constant = 0;
-        let mut min = 0isize;
-        let mut max = 0isize;
-        for &(id, coefficient) in &sampled.index.terms {
-            let iterator = self.counted_iterators.iter().find(|x| x.id == id)?;
-            let low = iterator.min.checked_mul(coefficient)?;
-            let high = iterator.max.checked_mul(coefficient)?;
-            min = min.checked_add(low.min(high))?;
-            max = max.checked_add(low.max(high))?;
-        }
+        let (min, max) = self.affine_hull(&sampled.index)?;
         let region = ArraySpan {
             start: usize::try_from(min).ok()?,
             length: usize::try_from(max.checked_sub(min)?.checked_add(1)?).ok()?,
@@ -7124,13 +7107,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
     }
-}
-
-fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
-    while right != 0 {
-        (left, right) = (right, left % right);
-    }
-    left
 }
 
 fn first_indexed_variable(expression: &Expression) -> Option<(VarId, VarIndex, VarSelect)> {

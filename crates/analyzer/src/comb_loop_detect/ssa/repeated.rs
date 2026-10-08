@@ -9,7 +9,7 @@
 //! bit positions, displacement sums, or dependency paths are enumerated.
 
 use super::*;
-use crate::comb_loop_detect::position::Link;
+use crate::comb_loop_detect::position::{Link, greatest_common_divisor};
 use daggy::petgraph::Graph;
 use daggy::petgraph::algo::kosaraju_scc;
 use daggy::petgraph::graph::NodeIndex;
@@ -854,13 +854,6 @@ impl AxisTranslation {
             Self::Uniform(_) => Self::Unlinked,
         }
     }
-}
-
-fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
-    while right != 0 {
-        (left, right) = (right, left % right);
-    }
-    left
 }
 
 /// A recurrence that advances along a single axis in one direction is a

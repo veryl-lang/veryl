@@ -144,16 +144,7 @@ impl Footprint {
         if advance > self.length {
             return None;
         }
-        let mut base = self.without_iterator(iterator.id);
-        let first = coefficient.checked_mul(iterator.min)?;
-        let last = coefficient.checked_mul(iterator.max)?;
-        base.constant = base.constant.checked_add(first.min(last))?;
-        let span = first.max(last).checked_sub(first.min(last))?.unsigned_abs();
-        Some(Self {
-            base,
-            length: span.checked_add(self.length)?,
-            packed: self.packed,
-        })
+        self.close_may(iterator)
     }
 
     /// A may-read covers the hull of all iterations.
