@@ -152,6 +152,14 @@ pub struct Ir {
     /// something happened, in `dataflow_any`.
     pub(crate) dataflow_unmarked: std::cell::Cell<bool>,
     pub(crate) dataflow_any: std::cell::Cell<bool>,
+    /// Compare every Nth dataflow settle against a full rerun (0: never);
+    /// from `VERYL_DATAFLOW_CHECK`.
+    pub(crate) dataflow_check: std::cell::Cell<u64>,
+    dataflow_check_settles: std::cell::Cell<u64>,
+    /// Panic on a mismatching check; from `VERYL_DATAFLOW_CHECK_PANIC`.
+    pub(crate) dataflow_check_panic: std::cell::Cell<bool>,
+    /// Variables the checks found different, summed over checks.
+    pub(crate) dataflow_check_mismatches: std::cell::Cell<u64>,
     /// Whole-module compile of the derived-clock closure; `partial_settle`
     /// invokes it in place of stepping `derived_clock_eval_stmts`.
     pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
@@ -335,6 +343,10 @@ impl Ir {
             dataflow_always_mask: std::cell::OnceCell::new(),
             dataflow_unmarked: std::cell::Cell::new(false),
             dataflow_any: std::cell::Cell::new(false),
+            dataflow_check: std::cell::Cell::new(dataflow_check_stride()),
+            dataflow_check_settles: std::cell::Cell::new(0),
+            dataflow_check_panic: std::cell::Cell::new(dataflow_check_panic()),
+            dataflow_check_mismatches: std::cell::Cell::new(0),
             dataflow: module.dataflow,
             dataflow_interp: module.dataflow_interp.into_iter().collect(),
             whole_derived_clock: module.whole_derived_clock,
@@ -1042,6 +1054,23 @@ impl Ir {
         let ff_ptr = self.ff_values.as_ptr();
         let comb_ptr = self.comb_values.as_ptr();
         let log_ptr = (&*self.write_log_buffer as *const _ as *const u8) as *mut u8;
+        // A sampled check sees a missed mark only while the stale value
+        // lasts: a later mark of the same cell can repair it between samples.
+        let stride = self.dataflow_check.get();
+        let check = stride != 0 && {
+            let n = self.dataflow_check_settles.get();
+            self.dataflow_check_settles.set(n.wrapping_add(1));
+            n.is_multiple_of(stride)
+        };
+        let pre = if check {
+            Some((
+                gather_ranges(&self.comb_values, &df.plan.written),
+                gather_ranges(&self.ff_values, &df.plan.written_ff),
+                dirty.clone(),
+            ))
+        } else {
+            None
+        };
         // SAFETY: the dataflow entry has the whole-comb ABI, reading and
         // writing the same buffers; `ff_delta` carries the dirty words,
         // which it clears as it runs.
@@ -1107,6 +1136,13 @@ impl Ir {
                 );
             }
         }
+        // The buffer now holds the reference values, which the `.so` cells'
+        // boundary shadows have not seen.
+        if let Some((pre, pre_ff, bits)) = pre
+            && self.check_dataflow(df, &pre, &pre_ff, &bits) != 0
+        {
+            self.dataflow_live.set(false);
+        }
         true
     }
 
@@ -1145,6 +1181,138 @@ impl Ir {
                 unsafe { *bits.add(w as usize) |= m };
             }
         }
+    }
+
+    /// `VERYL_DATAFLOW_CHECK=N`: rerun every comb statement after putting
+    /// back the settle's starting values of the ranges the plan says it
+    /// writes (other bytes stay as the settle left them), and report each
+    /// variable a cell writes that came out different.  The reference result
+    /// is kept.  Returns the number of differing variables.
+    #[cfg(not(target_family = "wasm"))]
+    fn check_dataflow(
+        &self,
+        df: &crate::ir::opt::dataflow::DataflowRt,
+        pre: &[u8],
+        pre_ff: &[u8],
+        bits: &[u64],
+    ) -> u64 {
+        let mut mismatches = 0u64;
+        static REPORTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        static CHECKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        // A settle writes only the ranges the plan tracks (anything else is a
+        // declined plan), so those are all that go back and get compared.
+        let (written, written_ff) = (&df.plan.written, &df.plan.written_ff);
+        let got = gather_ranges(&self.comb_values, written);
+        let got_ff = gather_ranges(&self.ff_values, written_ff);
+        // SAFETY: the ranges lie inside the buffers they were gathered from.
+        unsafe {
+            scatter_ranges(self.comb_values.as_ptr() as *mut u8, written, pre);
+            scatter_ranges(self.ff_values.as_ptr() as *mut u8, written_ff, pre_ff);
+        }
+        // The settle already ran the effect cells; the rerun is for values.
+        let mute = crate::output_buffer::Mute::begin();
+        let mut mc = MaskCache::default();
+        for x in &self.comb_statements {
+            dispatch_stmt_fast(x, &mut mc);
+        }
+        drop(mute);
+        let mut pos = 0usize;
+        for &(a, b) in written_ff {
+            let (a, b) = (a as usize, b as usize);
+            let mine = &got_ff[pos..pos + (b - a)];
+            pos += b - a;
+            if mine != &self.ff_values[a..b] {
+                mismatches += 1;
+                let n = REPORTS.fetch_add(1, Ordering::Relaxed);
+                if n < 20 {
+                    eprintln!(
+                        "[dataflow] CHECK MISMATCH {} [ff {a:#x}..{b:#x}) dataflow={:02x?} reference={:02x?}",
+                        self.var_name_at(VarOffset::new(true, a as isize))
+                            .unwrap_or_default(),
+                        &mine[..mine.len().min(16)],
+                        &self.ff_values[a..b.min(a + 16)],
+                    );
+                }
+            }
+        }
+        let local = |a: usize, b: usize| {
+            df.localized
+                .iter()
+                .any(|&(o, w)| o >= 0 && (o as usize) < b && a < o as usize + w)
+        };
+        // A byte's value when the settle began: the saved copy where the
+        // settle wrote, the buffer itself everywhere else.
+        let at_start = |is_ff: bool, ia: usize, ib: usize| -> Vec<u8> {
+            let (ranges, saved, buf) = if is_ff {
+                (written_ff, pre_ff, &self.ff_values[..])
+            } else {
+                (written, pre, &self.comb_values[..])
+            };
+            let mut p = 0usize;
+            for &(a, b) in ranges.iter() {
+                let (a, b) = (a as usize, b as usize);
+                if a <= ia && ib <= b {
+                    return saved[p + ia - a..p + ib - a].to_vec();
+                }
+                p += b - a;
+            }
+            buf[ia..ib].to_vec()
+        };
+        let mut pos = 0usize;
+        for (wi, &(a, b)) in written.iter().enumerate() {
+            let (a, b) = (a as usize, b as usize);
+            let mine = &got[pos..pos + (b - a)];
+            pos += b - a;
+            if mine != &self.comb_values[a..b] && !local(a, b) {
+                mismatches += 1;
+                let n = REPORTS.fetch_add(1, Ordering::Relaxed);
+                if n < 20 {
+                    let wc = df.plan.writer_cell[wi] as usize;
+                    eprintln!(
+                        "[dataflow] CHECK MISMATCH {} [{a:#x}..{b:#x}) dataflow={:02x?} reference={:02x?} writer cell {wc} dirty_at_start={}",
+                        self.var_name_at(VarOffset::new(false, a as isize))
+                            .unwrap_or_default(),
+                        &mine[..mine.len().min(16)],
+                        &self.comb_values[a..b.min(a + 16)],
+                        bits[wc / 64] >> (wc % 64) & 1,
+                    );
+                    // Which of the writer cell's inputs differ from the last
+                    // settle's end?  A changed input nobody marked is the hole.
+                    if n < 3 {
+                        for &(is_ff, ia, ib) in &df.plan.cell_inputs[wc] {
+                            let (ia, ib) = (ia as usize, ib as usize);
+                            let cur = if is_ff {
+                                &self.ff_values[ia..ib]
+                            } else {
+                                &self.comb_values[ia..ib]
+                            };
+                            let prev = at_start(is_ff, ia, ib);
+                            eprintln!(
+                                "[dataflow]     input {} {} [{ia:#x}..{ib:#x}) at_start={:02x?} reference_end={:02x?}",
+                                if is_ff { "ff" } else { "comb" },
+                                self.var_name_at(VarOffset::new(is_ff, ia as isize))
+                                    .unwrap_or_default(),
+                                &prev[..prev.len().min(8)],
+                                &cur[..cur.len().min(8)],
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        self.dataflow_check_mismatches
+            .set(self.dataflow_check_mismatches.get() + mismatches);
+        if mismatches != 0 && self.dataflow_check_panic.get() {
+            panic!("[dataflow] CHECK MISMATCH");
+        }
+        let c = CHECKS.fetch_add(1, Ordering::Relaxed) + 1;
+        if c.is_power_of_two() {
+            eprintln!(
+                "[dataflow] checked {c} settles, {} mismatching variables",
+                REPORTS.load(Ordering::Relaxed)
+            );
+        }
+        mismatches
     }
 
     /// Mark the cells reading or writing comb bytes `[a, b)`.
@@ -1623,6 +1791,20 @@ fn settle_converge_check() -> bool {
     *ON.get_or_init(|| env::var("VERYL_SETTLE_CONVERGE_CHECK").as_deref() == Ok("1"))
 }
 
+/// `VERYL_DATAFLOW_CHECK[=N]`: every Nth settle, every 64th without a number.
+fn dataflow_check_stride() -> u64 {
+    static CHECK: OnceLock<u64> = OnceLock::new();
+    *CHECK.get_or_init(|| match env::var("VERYL_DATAFLOW_CHECK") {
+        Ok(v) => v.parse().unwrap_or(64),
+        Err(_) => 0,
+    })
+}
+
+fn dataflow_check_panic() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| env::var("VERYL_DATAFLOW_CHECK_PANIC").as_deref() == Ok("1"))
+}
+
 /// Build a single top in an isolated session. Use `BuildSession` to share DUT
 /// conversion across multiple tops from the same analysis IR.
 pub fn build_ir(ir: &air::Ir, top: StrId, config: &Config) -> Result<Ir, SimulatorError> {
@@ -1778,6 +1960,29 @@ impl Config {
 }
 
 // `lookup_comb_offset` has moved to `backend::validate`.
+
+/// The bytes of `ranges` in `buf`, back to back.
+fn gather_ranges(buf: &[u8], ranges: &[(u32, u32)]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(ranges.iter().map(|&(a, b)| (b - a) as usize).sum());
+    for &(a, b) in ranges {
+        out.extend_from_slice(&buf[a as usize..b as usize]);
+    }
+    out
+}
+
+/// The inverse of `gather_ranges`.
+///
+/// # Safety
+/// Every range lies inside the buffer `buf` points to.
+unsafe fn scatter_ranges(buf: *mut u8, ranges: &[(u32, u32)], data: &[u8]) {
+    let mut p = 0usize;
+    for &(a, b) in ranges {
+        let n = (b - a) as usize;
+        // SAFETY: the caller guarantees the range is in bounds.
+        unsafe { std::ptr::copy_nonoverlapping(data[p..p + n].as_ptr(), buf.add(a as usize), n) };
+        p += n;
+    }
+}
 
 pub(crate) fn mark_readers(
     table: &crate::ir::opt::dataflow::Readers,
