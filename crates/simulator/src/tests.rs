@@ -306,7 +306,7 @@ impl DualSimulator {
     fn step(&mut self, jit_event: &Event, interp_event: &Event) {
         // A reset step is a clock edge with the net asserted; these fixtures
         // have one clock, so call sites keep passing just the reset event.
-        if matches!(jit_event, Event::Reset(_)) {
+        if matches!(jit_event, Event::Reset(..)) {
             let jit_clock = sole_clock_event(&self.jit);
             let interp_clock = sole_clock_event(&self.interp);
             self.jit.step_reset(&jit_clock, jit_event);
@@ -339,7 +339,7 @@ impl DualSimulator {
     /// Step with a synthetic clock event (for modules without a real clock port).
     #[track_caller]
     fn step_synthetic(&mut self) {
-        let ev = Event::Clock(VarId::SYNTHETIC);
+        let ev = Event::clock(VarId::SYNTHETIC);
         self.step(&ev, &ev);
     }
 
@@ -502,11 +502,11 @@ fn sole_clock_event(sim: &Simulator) -> Event {
         .event_statements
         .keys()
         .filter_map(|x| match x {
-            Event::Clock(id) => Some(*id),
+            Event::Clock(id, elem) => Some((*id, *elem)),
             _ => None,
         })
         .min()
-        .map(Event::Clock)
+        .map(|(id, elem)| Event::Clock(id, elem))
         .expect("fixture has no clock event to take the reset step on")
 }
 

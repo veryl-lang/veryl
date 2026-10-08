@@ -561,10 +561,10 @@ pub fn build_components(
             // `create`, from how it resolved the port.
             if let (Some(var_id), Some(in_idx)) = (connect.event_var, in_idx) {
                 if connect.is_clock {
-                    clock_events.push((Event::Clock(var_id), in_idx));
+                    clock_events.push((Event::clock(var_id), in_idx));
                 }
                 if connect.is_reset {
-                    reset_events.push((Event::Reset(var_id), in_idx));
+                    reset_events.push((Event::reset(var_id), in_idx));
                 }
             }
         }
@@ -829,7 +829,7 @@ impl RuntimeComponent {
     pub fn fire(&mut self, event: &Event, time: u64) {
         self.host.time = time;
         match event {
-            Event::Reset(_) => {
+            Event::Reset(..) => {
                 let in_idx = self
                     .reset_events
                     .iter()
@@ -840,7 +840,7 @@ impl RuntimeComponent {
                     self.run_hook("on_reset", |i, h| i.on_reset(h));
                 }
             }
-            Event::Clock(_) => {
+            Event::Clock(..) => {
                 let in_idx = self
                     .clock_events
                     .iter()
@@ -873,8 +873,8 @@ impl RuntimeComponent {
 
     pub fn listens_to(&self, event: &Event) -> bool {
         match event {
-            Event::Clock(_) => self.clock_events.iter().any(|(e, _)| e == event),
-            Event::Reset(_) => self.reset_events.iter().any(|(e, _)| e == event),
+            Event::Clock(..) => self.clock_events.iter().any(|(e, _)| e == event),
+            Event::Reset(..) => self.reset_events.iter().any(|(e, _)| e == event),
             _ => false,
         }
     }

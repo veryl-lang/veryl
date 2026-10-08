@@ -96,7 +96,7 @@ impl Backend for AotCBackend {
         let cell = emit::prepare_event(
             stmts,
             self.async_mode,
-            matches!(event, Event::Clock(_)),
+            matches!(event, Event::Clock(..)),
             gates,
         )?;
         Some(Arc::new(AotCWhole {
