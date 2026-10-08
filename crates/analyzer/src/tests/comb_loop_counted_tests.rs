@@ -336,6 +336,66 @@ counted_case!(
 );
 
 counted_case!(
+    counted_strided_bits_are_feed_forward,
+    "every fourth bit reads y, and the bits after them of y read x",
+    "var x: logic<16>; var y: logic<16>;
+     always_comb { x = 0; for i in 0..4 { x[i * 4] = y[i * 4]; } }
+     always_comb { y = 0; for i in 0..4 { y[i * 4 + 1] = x[i * 4 + 1]; } }
+     assign o = y[7:0];",
+    false
+);
+
+counted_case!(
+    counted_strided_bits_close_through_one_stride,
+    "every fourth bit of x and of y read each other",
+    "var x: logic<16>; var y: logic<16>;
+     always_comb { x = 0; for i in 0..4 { x[i * 4] = y[i * 4]; } }
+     always_comb { y = 0; for i in 0..4 { y[i * 4] = x[i * 4]; } }
+     assign o = y[7:0];",
+    true
+);
+
+counted_case!(
+    counted_inner_iterator_branches_are_feed_forward,
+    "the first bit of each row reads y, and the other bits of y read x",
+    "var x: logic<16>; var y: logic<16>;
+     always_comb { for i in 0..4 { for j in 0..4 { if j == 0 { x[i * 4 + j] = y[i * 4 + j]; } else { x[i * 4 + j] = a[0]; } } } }
+     always_comb { for i in 0..4 { for j in 0..4 { if j == 0 { y[i * 4 + j] = b[0]; } else { y[i * 4 + j] = x[i * 4 + j]; } } } }
+     assign o = y[7:0];",
+    false
+);
+
+counted_case!(
+    counted_inner_iterator_ranges_are_feed_forward,
+    "the first two bits of each row read y, and the others of y read x",
+    "var x: logic<16>; var y: logic<16>;
+     always_comb { for i in 0..4 { for j in 0..4 { if j <: 2 { x[i * 4 + j] = y[i * 4 + j]; } else { x[i * 4 + j] = a[0]; } } } }
+     always_comb { for i in 0..4 { for j in 0..4 { if j <: 2 { y[i * 4 + j] = b[0]; } else { y[i * 4 + j] = x[i * 4 + j]; } } } }
+     assign o = y[7:0];",
+    false
+);
+
+counted_case!(
+    counted_inner_iterator_ranges_close_through_one_column,
+    "the second bit of each row of x and of y read each other",
+    "var x: logic<16>; var y: logic<16>;
+     always_comb { for i in 0..4 { for j in 0..4 { if j <: 2 { x[i * 4 + j] = y[i * 4 + j]; } else { x[i * 4 + j] = a[0]; } } } }
+     always_comb { for i in 0..4 { for j in 0..4 { if j == 1 { y[i * 4 + j] = x[i * 4 + j]; } else { y[i * 4 + j] = b[0]; } } } }
+     assign o = y[7:0];",
+    true
+);
+
+counted_case!(
+    counted_inner_iterator_elements_are_feed_forward,
+    "the first element of each row reads y, and the others of y read x",
+    "var x: logic [4, 4]; var y: logic [4, 4];
+     always_comb { for i in 0..4 { for j in 0..4 { if j == 0 { x[i][j] = y[i][j]; } else { x[i][j] = a[0]; } } } }
+     always_comb { for i in 0..4 { for j in 0..4 { if j == 0 { y[i][j] = b[0]; } else { y[i][j] = x[i][j]; } } } }
+     assign o = {7'd0, y[0][0]};",
+    false
+);
+
+counted_case!(
     counted_reversed_arrays_are_feed_forward,
     "two reversals form a chain from the first element",
     "var x: logic<8> [4]; var y: logic<8> [4];

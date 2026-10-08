@@ -2316,21 +2316,124 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some((min, max))
     }
 
-    /// Whether `index` reads a counted iterator that takes only the values
-    /// congruent to a residue.
-    fn reads_confined_iterator(&self, index: &AffineIndex) -> bool {
-        index.terms.iter().any(|(id, _)| {
-            self.counted_iterators
-                .iter()
-                .rev()
-                .find(|iterator| iterator.id == *id)
-                .is_some_and(|iterator| iterator.modulus > 1)
+    fn counted_iterator(&self, id: VarId) -> Option<CountedIterator> {
+        self.counted_iterators
+            .iter()
+            .rev()
+            .find(|iterator| iterator.id == id)
+            .copied()
+    }
+
+    /// For an index over counted iterators only, each term with the step
+    /// between the positions it takes and the number of its values.
+    fn iterator_terms(&self, index: &AffineIndex) -> Option<Vec<(VarId, isize, isize)>> {
+        let mut terms = index
+            .terms
+            .iter()
+            .map(|&(id, coefficient)| {
+                let iterator = self.counted_iterator(id)?;
+                let step = coefficient.checked_abs()?.checked_mul(iterator.modulus)?;
+                let count = (iterator.max - iterator.min) / iterator.modulus + 1;
+                Some((id, step, count))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        terms.sort_unstable_by_key(|&(_, step, _)| step);
+        Some(terms)
+    }
+
+    /// Whether the positions of an index over counted iterators form one
+    /// progression: each step is the span of the finer terms below it.
+    fn forms_one_progression(terms: &[(VarId, isize, isize)]) -> bool {
+        terms
+            .windows(2)
+            .all(|pair| pair[0].1.checked_mul(pair[0].2) == Some(pair[1].1))
+    }
+
+    /// Whether every position from the first to the last that an index over
+    /// counted iterators addresses is one it takes.
+    fn index_has_gaps(&self, index: &AffineIndex) -> bool {
+        self.iterator_terms(index).is_some_and(|terms| {
+            !Self::forms_one_progression(&terms) || terms.first().is_some_and(|term| term.1 > 1)
         })
+    }
+
+    /// The iterator values that divide the positions of `index` into
+    /// progressions: every counted iterator but the one with the most values
+    /// is fixed to each of its values in turn, unless the positions already
+    /// form one progression. One empty assignment means no division.
+    fn index_progressions(&self, index: &AffineIndex) -> Vec<Vec<(VarId, isize)>> {
+        let Some(terms) = self.iterator_terms(index) else {
+            return vec![Vec::new()];
+        };
+        if Self::forms_one_progression(&terms) {
+            return vec![Vec::new()];
+        }
+        let kept = terms
+            .iter()
+            .max_by_key(|&&(_, _, count)| count)
+            .map(|&(id, _, _)| id);
+        let mut assignments = vec![Vec::new()];
+        for &(id, _, _) in terms.iter().filter(|term| Some(term.0) != kept) {
+            let Some(iterator) = self.counted_iterator(id) else {
+                continue;
+            };
+            let values = (iterator.min..=iterator.max).step_by(iterator.modulus as usize);
+            assignments = assignments
+                .into_iter()
+                .flat_map(|assignment: Vec<(VarId, isize)>| {
+                    values.clone().map(move |value| {
+                        let mut assignment = assignment.clone();
+                        assignment.push((id, value));
+                        assignment
+                    })
+                })
+                .collect();
+        }
+        assignments
+    }
+
+    /// The links from a source coordinate to a destination coordinate, one
+    /// per progression of the source positions, each with its source index.
+    fn affine_links(
+        &self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+    ) -> Option<Vec<(Link, SampledAffineIndex)>> {
+        self.index_progressions(&source.index)
+            .into_iter()
+            .map(|assignment| {
+                let fixed = |sampled: &SampledAffineIndex| {
+                    let mut index = AffineIndex {
+                        terms: Vec::new(),
+                        constant: sampled.index.constant,
+                    };
+                    for &(id, coefficient) in &sampled.index.terms {
+                        match assignment.iter().find(|(fixed, _)| *fixed == id) {
+                            Some(&(_, value)) => {
+                                index.constant = index
+                                    .constant
+                                    .checked_add(coefficient.checked_mul(value)?)?;
+                            }
+                            None => index.terms.push((id, coefficient)),
+                        }
+                    }
+                    Some(SampledAffineIndex {
+                        index,
+                        versions: sampled.versions.clone(),
+                    })
+                };
+                let destination = fixed(destination)?;
+                let source = fixed(source)?;
+                let link = self.affine_link(&destination, &source, crossed)?;
+                Some((link, source))
+            })
+            .collect()
     }
 
     /// The link from a source coordinate to a destination coordinate when both
     /// are affine in the same symbolic values, restricted to the source
-    /// coordinates that the values of a confined iterator reach.
+    /// coordinates that the iterator values reach.
     fn affine_link(
         &self,
         destination: &SampledAffineIndex,
@@ -2341,26 +2444,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Link::Map(map) = link else {
             return Some(link);
         };
-        // With one symbolic value, the source is `coefficient * i + constant`
-        // and `i = residue (mod modulus)`.
-        let [(id, coefficient)] = source.index.terms.as_slice() else {
+        // Source positions are congruent to their constant plus each term at
+        // its iterator's residue, modulo the finest step between them, when
+        // they form one progression.
+        let Some(terms) = self.iterator_terms(&source.index) else {
             return Some(link);
         };
-        let Some(iterator) = self
-            .counted_iterators
-            .iter()
-            .rev()
-            .find(|iterator| iterator.id == *id)
-            .filter(|iterator| iterator.modulus > 1)
-        else {
+        let Some(&(_, modulus, _)) = terms.first() else {
             return Some(link);
         };
-        let modulus = coefficient.checked_abs()?.checked_mul(iterator.modulus)?;
-        let residue = coefficient
-            .checked_mul(iterator.residue)?
-            .checked_add(source.index.constant)?
-            .rem_euclid(modulus);
-        map.restricted(modulus, residue)
+        if modulus <= 1 || !Self::forms_one_progression(&terms) {
+            return Some(link);
+        }
+        let mut residue = source.index.constant;
+        for &(id, coefficient) in &source.index.terms {
+            let iterator = self.counted_iterator(id)?;
+            residue = residue.checked_add(coefficient.checked_mul(iterator.residue)?)?;
+        }
+        map.restricted(modulus, residue.rem_euclid(modulus))
     }
 
     /// The link from a source coordinate to a destination coordinate when both
@@ -3097,16 +3198,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if width != 1 || source.index.terms.is_empty() {
             return None;
         }
-        let link = self.affine_link(anchor, &source, false)?;
-        let source_span = match link.translation_offset() {
-            // Positions before the first bit do not exist.
-            Some(offset) => translate_span_clipped(requested, offset.checked_neg()?)?,
-            None => {
-                let (low, high) = self.affine_hull(&source.index)?;
-                let low = usize::try_from(low).ok()?;
-                PackedSpan::new(low, usize::try_from(high).ok()?.checked_sub(low)? + 1)?
+        // Each progression of the source bits has its own map to the
+        // destination bit.
+        let mut links = Vec::new();
+        for (link, source) in self.affine_links(anchor, &source, false)? {
+            let source_span = match link.translation_offset() {
+                // Positions before the first bit do not exist.
+                Some(offset) => translate_span_clipped(requested, offset.checked_neg()?),
+                None => {
+                    let (low, high) = self.affine_hull(&source.index)?;
+                    let low = usize::try_from(low).ok()?;
+                    PackedSpan::new(low, usize::try_from(high).ok()?.checked_sub(low)? + 1)
+                }
+            };
+            if let Some(source_span) = source_span {
+                links.push((link, source_span));
             }
-        };
+        }
         let mut reads = ExpressionSources::default();
         let variable = self.ctx.variables.get(&id).cloned();
         let accesses = var_reads(id, receiver, &VarSelect::default(), None, &mut self.ctx);
@@ -3117,38 +3225,43 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
-        for (idx, access) in &accesses {
-            let source_array = if let Some(selection) = selected_array {
-                requested_array
-                    .intersection(ArraySpan {
-                        start: selection.result_start,
-                        length: selection.length,
-                    })
-                    .and_then(|requested| {
-                        requested.translated(selection.result_start, selection.source_start)
-                    })
-                    .and_then(|requested| requested.intersection(*idx))
-            } else {
-                Some(*idx)
-            };
-            if let (Some(source_array), Some(source_span)) =
-                (source_array, source_span.intersection(*access))
-            {
-                for key in self
-                    .bit_part
-                    .overlapping_access(id, source_array, source_span)
+        for &(link, source_span) in &links {
+            for (idx, access) in &accesses {
+                let source_array = if let Some(selection) = selected_array {
+                    requested_array
+                        .intersection(ArraySpan {
+                            start: selection.result_start,
+                            length: selection.length,
+                        })
+                        .and_then(|requested| {
+                            requested.translated(selection.result_start, selection.source_start)
+                        })
+                        .and_then(|requested| requested.intersection(*idx))
+                } else {
+                    Some(*idx)
+                };
+                if let (Some(source_array), Some(source_span)) =
+                    (source_array, source_span.intersection(*access))
                 {
-                    let version = self.read_key(key);
-                    let version = self.project_read(key, version, source_array, source_span);
-                    reads.push(
-                        version,
-                        PositionRelation {
-                            array: Link::from_offset(selected_array.and_then(|selection| {
-                                signed_difference(selection.result_start, selection.source_start)
-                            })),
-                            packed: link,
-                        },
-                    );
+                    for key in self
+                        .bit_part
+                        .overlapping_access(id, source_array, source_span)
+                    {
+                        let version = self.read_key(key);
+                        let version = self.project_read(key, version, source_array, source_span);
+                        reads.push(
+                            version,
+                            PositionRelation {
+                                array: Link::from_offset(selected_array.and_then(|selection| {
+                                    signed_difference(
+                                        selection.result_start,
+                                        selection.source_start,
+                                    )
+                                })),
+                                packed: link,
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -4417,7 +4530,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         return sources;
                     }
                     if let Some((_, low)) = selected {
-                        let mut reads = Vec::new();
                         let receiver = self.receiver_index(*id, index);
                         let accesses = var_reads(
                             *id,
@@ -4433,7 +4545,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             .as_ref()
                             .filter(|destination| {
                                 !destination.index.terms.is_empty()
-                                    && !self.reads_confined_iterator(&destination.index)
+                                    && !self.index_has_gaps(&destination.index)
                             })
                             .and_then(|destination| {
                                 let source = if let Some(sampled) = &sampled {
@@ -4441,12 +4553,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 } else {
                                     self.sample_affine_index(*id, index)
                                 }?;
+                                if self.index_has_gaps(&source.index) {
+                                    return None;
+                                }
                                 destination.destination_offset_from(&source)
                             });
                         // Another affine relation to the anchored destination
                         // element, such as a stride or a reversal, reads the
                         // positions the source index takes.
-                        let mapped_array = if projection.anchor && dynamic_array_offset.is_none() {
+                        // Each progression of the source positions has its own
+                        // map to the destination.
+                        let mapped_arrays = if projection.anchor && dynamic_array_offset.is_none() {
                             let source = if let Some(sampled) = &sampled {
                                 sampled.index.clone()
                             } else {
@@ -4455,25 +4572,30 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             source
                                 .filter(|source| !source.index.terms.is_empty())
                                 .and_then(|source| {
-                                    let link = self.affine_link(
+                                    self.affine_links(
                                         projection.destination_index.as_ref()?,
                                         &source,
                                         false,
-                                    )?;
-                                    let (first, last) = self.affine_hull(&source.index)?;
-                                    let first = usize::try_from(first).ok()?;
-                                    let length =
-                                        usize::try_from(last).ok()?.checked_sub(first)? + 1;
-                                    Some((
-                                        link,
-                                        ArraySpan {
-                                            start: first,
-                                            length,
-                                        },
-                                    ))
+                                    )?
+                                    .into_iter()
+                                    .map(|(link, source)| {
+                                        let (first, last) = self.affine_hull(&source.index)?;
+                                        let first = usize::try_from(first).ok()?;
+                                        let length =
+                                            usize::try_from(last).ok()?.checked_sub(first)? + 1;
+                                        Some((
+                                            link,
+                                            ArraySpan {
+                                                start: first,
+                                                length,
+                                            },
+                                        ))
+                                    })
+                                    .collect::<Option<Vec<_>>>()
                                 })
+                                .unwrap_or_default()
                         } else {
-                            None
+                            Vec::new()
                         };
                         // Anchored array coordinates are destination positions,
                         // not positions of an array-valued expression.
@@ -4485,85 +4607,94 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             } else {
                                 None
                             };
-                        if let Some(source_span) = requested.translated(0, low) {
-                            for (idx, access) in &accesses {
-                                let source_array = if let Some((_, hull)) = mapped_array {
-                                    hull.intersection(*idx)
-                                } else if let Some(offset) = dynamic_array_offset {
-                                    offset
-                                        .checked_neg()
-                                        .and_then(|offset| {
-                                            // Positions before the first
-                                            // element do not exist.
-                                            translate_array_span_clipped(
-                                                projection
-                                                    .destination_array
-                                                    .unwrap_or(requested_array),
-                                                offset,
-                                            )
-                                        })
-                                        .and_then(|requested| requested.intersection(*idx))
-                                } else if let Some(selection) = selected_array {
-                                    requested_array
-                                        .intersection(ArraySpan {
-                                            start: selection.result_start,
-                                            length: selection.length,
-                                        })
-                                        .and_then(|requested| {
-                                            requested.translated(
-                                                selection.result_start,
-                                                selection.source_start,
-                                            )
-                                        })
-                                        .and_then(|requested| requested.intersection(*idx))
-                                } else {
-                                    Some(*idx)
-                                };
-                                if let (Some(source_array), Some(source_span)) =
-                                    (source_array, source_span.intersection(*access))
-                                {
-                                    for key in self.bit_part.overlapping_access(
-                                        *id,
-                                        source_array,
-                                        source_span,
-                                    ) {
-                                        let version = if let Some(sampled) = &sampled {
-                                            sampled.values.get(&key).copied()
-                                        } else {
-                                            Some(self.read_key(key))
-                                        };
-                                        if let Some(version) = version {
-                                            reads.push(self.project_read(
-                                                key,
-                                                version,
-                                                source_array,
-                                                source_span,
-                                            ));
+                        let variants = if mapped_arrays.is_empty() {
+                            vec![None]
+                        } else {
+                            mapped_arrays.into_iter().map(Some).collect()
+                        };
+                        let mut sources = ExpressionSources::default();
+                        for mapped_array in variants {
+                            let mut reads = Vec::new();
+                            if let Some(source_span) = requested.translated(0, low) {
+                                for (idx, access) in &accesses {
+                                    let source_array = if let Some((_, hull)) = mapped_array {
+                                        hull.intersection(*idx)
+                                    } else if let Some(offset) = dynamic_array_offset {
+                                        offset
+                                            .checked_neg()
+                                            .and_then(|offset| {
+                                                // Positions before the first
+                                                // element do not exist.
+                                                translate_array_span_clipped(
+                                                    projection
+                                                        .destination_array
+                                                        .unwrap_or(requested_array),
+                                                    offset,
+                                                )
+                                            })
+                                            .and_then(|requested| requested.intersection(*idx))
+                                    } else if let Some(selection) = selected_array {
+                                        requested_array
+                                            .intersection(ArraySpan {
+                                                start: selection.result_start,
+                                                length: selection.length,
+                                            })
+                                            .and_then(|requested| {
+                                                requested.translated(
+                                                    selection.result_start,
+                                                    selection.source_start,
+                                                )
+                                            })
+                                            .and_then(|requested| requested.intersection(*idx))
+                                    } else {
+                                        Some(*idx)
+                                    };
+                                    if let (Some(source_array), Some(source_span)) =
+                                        (source_array, source_span.intersection(*access))
+                                    {
+                                        for key in self.bit_part.overlapping_access(
+                                            *id,
+                                            source_array,
+                                            source_span,
+                                        ) {
+                                            let version = if let Some(sampled) = &sampled {
+                                                sampled.values.get(&key).copied()
+                                            } else {
+                                                Some(self.read_key(key))
+                                            };
+                                            if let Some(version) = version {
+                                                reads.push(self.project_read(
+                                                    key,
+                                                    version,
+                                                    source_array,
+                                                    source_span,
+                                                ));
+                                            }
                                         }
                                     }
                                 }
                             }
+                            // An unknown array selector loses only the array
+                            // correspondence, not the selected packed positions.
+                            let offset = PositionRelation {
+                                array: mapped_array.map(|(link, _)| link).unwrap_or_else(|| {
+                                    Link::from_offset(dynamic_array_offset.or_else(|| {
+                                        selected_array.and_then(|selection| {
+                                            signed_difference(
+                                                selection.result_start,
+                                                selection.source_start,
+                                            )
+                                        })
+                                    }))
+                                }),
+                                packed: Link::from_offset(
+                                    isize::try_from(low).ok().and_then(isize::checked_neg),
+                                ),
+                            };
+                            for version in reads {
+                                sources.push(version, offset);
+                            }
                         }
-                        // An unknown array selector loses only the array
-                        // correspondence, not the selected packed positions.
-                        let offset = PositionRelation {
-                            array: mapped_array.map(|(link, _)| link).unwrap_or_else(|| {
-                                Link::from_offset(dynamic_array_offset.or_else(|| {
-                                    selected_array.and_then(|selection| {
-                                        signed_difference(
-                                            selection.result_start,
-                                            selection.source_start,
-                                        )
-                                    })
-                                }))
-                            }),
-                            packed: Link::from_offset(
-                                isize::try_from(low).ok().and_then(isize::checked_neg),
-                            ),
-                        };
-                        let mut sources = ExpressionSources {
-                            sources: reads.into_iter().map(|version| (version, offset)).collect(),
-                        };
                         sources.extend_whole(selector_sources);
                         sources
                     } else {
