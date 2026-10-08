@@ -4064,3 +4064,39 @@ fn comb_loop_runtime_loop_return_sees_earlier_iterations() {
         assert!(comb_loop_analysis_is_complete(&code), "{body}");
     }
 }
+
+#[test]
+fn comb_loop_nested_runtime_loop_returns_close_without_reevaluation() {
+    // Each runtime loop closes the returns of its body with its transfer, so
+    // nesting loops that return does not evaluate their bodies repeatedly.
+    let depth = 16;
+    let mut body = "if a[0] { return acc; } acc = acc ^ b[0];".to_string();
+    for level in 0..depth {
+        body = format!("for it{level} in 0..n {{ {body} }}");
+    }
+    let code = format!(
+        r#"
+        module Top (a: input logic<4>, n: input logic<3>, o: output logic) {{
+            var b: logic<4>;
+            function f (a: input logic<4>, b: input logic<4>, n: input logic<3>) -> logic {{
+                var acc: logic;
+                acc = 0;
+                {body}
+                return 0;
+            }}
+            assign o = f(a, b, n);
+            assign b = {{o, o, o, o}};
+        }}
+    "#
+    );
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    assert_comb_loop("a deeply nested return", &code, true);
+    // Re-evaluating each body from its closed state doubles the work at every
+    // level; closing the observed returns keeps it linear in the depth.
+    let evaluations = crate::comb_loop_detect::statement_evaluation_count();
+    assert!(
+        evaluations < 8 * (depth + 1),
+        "nested returns evaluated {evaluations} statements"
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
+}

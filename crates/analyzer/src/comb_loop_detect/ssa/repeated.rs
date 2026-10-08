@@ -273,15 +273,46 @@ pub(in crate::comb_loop_detect) struct TransferCoverage {
     pub(in crate::comb_loop_detect) exposed: Option<Vec<PositionDomain>>,
 }
 
+/// One abstract iteration of a runtime loop and the states recorded in it.
+pub(in crate::comb_loop_detect) struct RepeatedIteration<'s, K> {
+    /// The output of each written key after the iteration.
+    pub(in crate::comb_loop_detect) state: &'s BranchState<K>,
+    /// Versions that predate it are the iteration's inputs.
+    pub(in crate::comb_loop_detect) checkpoint: Checkpoint,
+    /// The loop may run zero times and retain each key's entry version.
+    pub(in crate::comb_loop_detect) may_skip: bool,
+    /// States recorded inside the iteration, such as return paths.
+    pub(in crate::comb_loop_detect) observed: &'s mut [BranchState<K>],
+}
+
+impl<'s, K> RepeatedIteration<'s, K> {
+    pub(in crate::comb_loop_detect) fn new(
+        state: &'s BranchState<K>,
+        checkpoint: Checkpoint,
+        may_skip: bool,
+    ) -> Self {
+        Self {
+            state,
+            checkpoint,
+            may_skip,
+            observed: &mut [],
+        }
+    }
+}
+
 pub(super) fn try_close<K: Copy + Eq + Hash>(
     ssa: &mut SsaStore<K>,
-    iteration: &BranchState<K>,
-    checkpoint: Checkpoint,
-    may_skip: bool,
+    iteration: RepeatedIteration<K>,
     import_work: &mut usize,
     domain: impl Fn(K) -> Option<PositionDomain>,
     coverage: impl Fn(K) -> TransferCoverage,
 ) -> Option<()> {
+    let RepeatedIteration {
+        state: iteration,
+        checkpoint,
+        may_skip,
+        observed,
+    } = iteration;
     let mut builder = TransferBuilder::default();
     let outputs = iteration
         .bindings
@@ -300,6 +331,45 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             Some((key, entry, input, root, domains))
         })
         .collect::<Option<Vec<_>>>()?;
+    // A state observed inside the body, such as a return path, sees what any
+    // number of earlier iterations left. Each of its values that the body can
+    // change is an output of the transfer that does not feed the next
+    // iteration. A written key it does not bind still holds its entry. Other
+    // keys keep pre-loop or body-local entry values that no iteration changes.
+    let entries = outputs
+        .iter()
+        .map(|&(key, entry, ..)| (key, entry))
+        .collect::<HashMap<_, _>>();
+    let mut observers = Vec::new();
+    for (index, state) in observed.iter().enumerate() {
+        let unbound = entries
+            .iter()
+            .filter(|(key, _)| !state.bindings.contains_key(key))
+            .map(|(&key, &entry)| (key, entry));
+        for (key, version) in state
+            .bindings
+            .iter()
+            .map(|(&key, &version)| (key, version))
+            .chain(unbound)
+        {
+            let changed = if let Some(&entry) = entries.get(&key) {
+                version == entry || version >= checkpoint.version_start
+            } else {
+                version >= checkpoint.version_start
+                    && !matches!(ssa.versions[version], Version::Entry(_))
+            };
+            if !changed {
+                continue;
+            }
+            let value = builder.version(ssa, version, checkpoint.version_start, import_work)?;
+            let root = builder.graph.add_node(TransferNode {
+                is_output: true,
+                ..TransferNode::default()
+            });
+            builder.graph.add_edge(value, root, TransferEdge::RETAIN);
+            observers.push((index, key, root));
+        }
+    }
     builder.copy_iteration(ssa, checkpoint.version_start, import_work)?;
 
     let mut unrestricted = HashSet::default();
@@ -351,6 +421,12 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
         }
     }
     let layers = condense(ssa, &builder.graph, &views);
+    for (index, key, root) in observers {
+        let retained = layers.retained_value(ssa, &builder.graph, root);
+        let data = layers.data[root.index()];
+        let value = full(ssa, retained, data);
+        observed[index].bindings.insert(key, value);
+    }
     for ((key, entry, _, root, _), coverage) in outputs.into_iter().zip(coverage) {
         let retained = layers.retained_value(ssa, &builder.graph, root);
         let data = layers.data[root.index()];
@@ -1041,9 +1117,7 @@ mod tests {
         let iteration = ssa.capture_and_rollback(inner);
         let mut work = 0;
         ssa.try_close_repeated_transfer(
-            &iteration,
-            inner,
-            true,
+            RepeatedIteration::new(&iteration, inner, true),
             &mut work,
             |_| Some(domain),
             |_| TransferCoverage::default(),
@@ -1055,9 +1129,7 @@ mod tests {
         let mut work = 64;
         assert!(
             ssa.try_close_repeated_transfer(
-                &iteration,
-                outer,
-                true,
+                RepeatedIteration::new(&iteration, outer, true),
                 &mut work,
                 |_| Some(domain),
                 |_| { TransferCoverage::default() }
@@ -1069,9 +1141,7 @@ mod tests {
 
         let mut work = 1024;
         ssa.try_close_repeated_transfer(
-            &iteration,
-            outer,
-            true,
+            RepeatedIteration::new(&iteration, outer, true),
             &mut work,
             |_| Some(domain),
             |_| TransferCoverage::default(),
@@ -1082,6 +1152,43 @@ mod tests {
             ssa.root_source_relations(output),
             HashMap::from_iter([("input", PositionRelation::default())])
         );
+    }
+
+    #[test]
+    fn repeated_transfer_observes_only_the_keys_it_can_change() {
+        let mut ssa = SsaStore::default();
+        let function = ssa.checkpoint();
+        let seed = ssa.read("seed");
+        let shared = ssa.definition(vec![seed]);
+        ssa.bind("written", shared);
+        ssa.bind("kept", shared);
+        let body = ssa.checkpoint();
+        let mut observed = [ssa.snapshot_since(function)];
+        let mut work = usize::MAX;
+        let previous = ssa.read("written");
+        let input = ssa.read("input");
+        let output = ssa.definition(vec![previous, input]);
+        ssa.bind("written", output);
+        let iteration = ssa.capture_and_rollback(body);
+        ssa.try_close_repeated_transfer(
+            RepeatedIteration {
+                observed: &mut observed,
+                ..RepeatedIteration::new(&iteration, body, true)
+            },
+            &mut work,
+            |_| None,
+            |_| TransferCoverage::default(),
+        )
+        .expect("unlimited runtime transfer construction");
+        let [observed] = observed;
+        // A later iteration sees what earlier ones wrote, but a key that only
+        // shares the written key's entry version still holds that version.
+        assert_eq!(
+            ssa.root_sources(observed.bindings[&"written"]),
+            HashSet::from_iter(["seed", "input"])
+        );
+        assert_eq!(observed.bindings[&"kept"], shared);
+        ssa.capture_and_rollback(function);
     }
 
     #[test]

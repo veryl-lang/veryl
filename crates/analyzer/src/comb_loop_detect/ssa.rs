@@ -3,7 +3,7 @@
 mod dag;
 mod repeated;
 
-pub(super) use repeated::TransferCoverage;
+pub(super) use repeated::{RepeatedIteration, TransferCoverage};
 
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
@@ -841,30 +841,22 @@ where
     /// Apply the transitive closure of a runtime loop's may-dependency
     /// transfer without enumerating runtime iterator values or iterations.
     ///
-    /// `single_iteration` maps each written key to its output after one
-    /// abstract iteration. Versions that predate `iteration_checkpoint` are
-    /// that iteration's inputs, so they form the nodes of a finite transfer
-    /// graph. Condensing its recurrence components models arbitrary positive
+    /// The iteration's state maps each written key to its output after one
+    /// abstract iteration. Versions that predate its checkpoint are that
+    /// iteration's inputs, so they form the nodes of a finite transfer graph.
+    /// Condensing its recurrence components models arbitrary positive
     /// iteration counts without enumerating positions or paths. `may_skip`
-    /// additionally retains each key's loop-entry version.
+    /// additionally retains each key's loop-entry version. Each `observed`
+    /// state, recorded inside the iteration such as a return path, is
+    /// rebound to read what any number of earlier iterations left.
     pub(super) fn try_close_repeated_transfer(
         &mut self,
-        single_iteration: &BranchState<K>,
-        iteration_checkpoint: Checkpoint,
-        may_skip: bool,
+        iteration: RepeatedIteration<K>,
         import_work: &mut usize,
         domain: impl Fn(K) -> Option<PositionDomain>,
         coverage: impl Fn(K) -> TransferCoverage,
     ) -> Option<()> {
-        repeated::try_close(
-            self,
-            single_iteration,
-            iteration_checkpoint,
-            may_skip,
-            import_work,
-            domain,
-            coverage,
-        )
+        repeated::try_close(self, iteration, import_work, domain, coverage)
     }
 
     #[cfg(test)]
@@ -877,9 +869,7 @@ where
     ) {
         let mut import_work = usize::MAX;
         self.try_close_repeated_transfer(
-            single_iteration,
-            iteration_checkpoint,
-            may_skip,
+            RepeatedIteration::new(single_iteration, iteration_checkpoint, may_skip),
             &mut import_work,
             domain,
             |_| TransferCoverage::default(),

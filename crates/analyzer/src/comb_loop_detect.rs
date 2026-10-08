@@ -28,7 +28,8 @@ pub(crate) use procedure::{
     function_summary_graph_edge_count, function_summary_graph_node_count, module_context_entries,
     reset_function_evaluation_count, reset_module_context_entries,
     reset_traced_procedure_evaluation_count, reset_visible_source_probes,
-    traced_procedure_evaluation_count, visible_source_probes, write_footprint_statement_visits,
+    statement_evaluation_count, traced_procedure_evaluation_count, visible_source_probes,
+    write_footprint_statement_visits,
 };
 
 use diagnostics::{DiagnosticReplayCache, TraceKind, check_graph};

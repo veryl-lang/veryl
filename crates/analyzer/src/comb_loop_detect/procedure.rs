@@ -7,7 +7,8 @@ use super::region::{
 };
 use super::ssa::{
     BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
-    PositionDomain, PositionRelation, Replication, SsaStore, TransferCoverage, VersionId,
+    PositionDomain, PositionRelation, RepeatedIteration, Replication, SsaStore, TransferCoverage,
+    VersionId,
 };
 use crate::conv::Context;
 use crate::ir::VarId;
@@ -1096,6 +1097,7 @@ thread_local! {
     static VISIBLE_SOURCE_PROBES: Cell<usize> = const { Cell::new(0) };
     static TRACED_PROCEDURE_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static WRITE_FOOTPRINT_STATEMENT_VISITS: Cell<usize> = const { Cell::new(0) };
+    static STATEMENT_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -1108,6 +1110,7 @@ pub(crate) fn reset_function_evaluation_count() {
     FUNCTION_SUMMARY_GRAPH_EDGES.set(0);
     MODULE_CONTEXT_ENTRIES.set(0);
     WRITE_FOOTPRINT_STATEMENT_VISITS.set(0);
+    STATEMENT_EVALUATIONS.set(0);
 }
 
 #[cfg(test)]
@@ -1143,6 +1146,11 @@ pub(crate) fn function_summary_graph_edge_count() -> usize {
 #[cfg(test)]
 pub(crate) fn write_footprint_statement_visits() -> usize {
     WRITE_FOOTPRINT_STATEMENT_VISITS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn statement_evaluation_count() -> usize {
+    STATEMENT_EVALUATIONS.get()
 }
 
 #[cfg(test)]
@@ -3795,6 +3803,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         statement: &Statement,
         controls: &[VersionId],
     ) -> FlowResult {
+        #[cfg(test)]
+        STATEMENT_EVALUATIONS.set(STATEMENT_EVALUATIONS.get() + 1);
         match statement {
             Statement::Assign(assign) => {
                 if let Some(statement) = self.iterator_ternary(assign) {
@@ -4550,7 +4560,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         });
         let returns = self.recorded_returns();
         let flow = self.eval_block(&statement.body, range_controls);
-        let returns_in_body = self.recorded_returns() != returns;
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
         if self.guard_work.is_none() {
@@ -4573,12 +4582,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let coverage = coverage
             .map(|coverage| self.counted_transfer_coverage(coverage, &transfer))
             .unwrap_or_default();
+        // A return inside the body exits from some later iteration, which
+        // reads the state that earlier iterations left.
+        let observed = match (self.function_flows.last_mut(), returns) {
+            (Some(function), Some(start)) => &mut function.returns[start..],
+            _ => &mut [],
+        };
         if self
             .ssa
             .try_close_repeated_transfer(
-                &transfer,
-                checkpoint,
-                may_execute_zero_times,
+                RepeatedIteration {
+                    observed,
+                    ..RepeatedIteration::new(&transfer, checkpoint, may_execute_zero_times)
+                },
                 &mut self.import_work,
                 |key| {
                     let domain = bit_part
@@ -4597,8 +4613,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .is_none()
         {
             self.exhaust_work();
-        } else if returns_in_body {
-            self.record_later_iteration_returns(&statement.body, range_controls);
         }
         FlowResult::new(ProcedureFlow::Continue)
     }
@@ -4607,23 +4621,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.function_flows
             .last()
             .map(|function| function.returns.len())
-    }
-
-    /// The single symbolic iteration records its returns with the loop entry
-    /// state, but a later iteration returns with the state that earlier
-    /// iterations left. Evaluate the body again from the closed loop state and
-    /// keep only the return paths it records.
-    fn record_later_iteration_returns(&mut self, body: &[Statement], controls: &[VersionId]) {
-        let parent_condition = self.path_condition.clone();
-        let checkpoint = self.ssa.checkpoint();
-        self.loop_flows.push(LoopFlow {
-            checkpoint,
-            breaks: Vec::new(),
-        });
-        self.eval_block(body, controls);
-        self.loop_flows.pop();
-        self.ssa.capture_and_rollback(checkpoint);
-        self.path_condition = parent_condition;
     }
 
     fn merge_flow_state_bindings(&mut self, states: &[FlowState]) -> BranchState<SsaKey> {
