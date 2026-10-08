@@ -75,7 +75,7 @@ impl FfOwner {
 
     /// The element span covering `x`.  `None` also when `x` lands in the
     /// padding a stride wider than the element leaves behind each one.
-    fn span(&self, x: usize) -> Option<(usize, usize)> {
+    pub(crate) fn span(&self, x: usize) -> Option<(usize, usize)> {
         let i = self
             .runs
             .partition_point(|&(s, ..)| s <= x)

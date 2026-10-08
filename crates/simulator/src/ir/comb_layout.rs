@@ -344,15 +344,11 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
                 index_expr,
                 ..
             } => {
-                if let VarOffset::Comb(o) = base_offset {
-                    let span = stride.unsigned_abs() * num_elements.saturating_sub(1)
-                        + element_native_bytes;
-                    let base = if *stride < 0 {
-                        *o + *stride * (num_elements.saturating_sub(1) as isize)
-                    } else {
-                        *o
-                    };
-                    out.push((base, base + span as isize));
+                if let VarOffset::Comb(o) = base_offset
+                    && let Some(span) =
+                        crate::ir::strided_span(*o, *stride, *num_elements, *element_native_bytes)
+                {
+                    out.push(span);
                 }
                 expr(index_expr, out);
             }
@@ -406,15 +402,15 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
                 expr(&a.expr, out);
             }
             ProtoStatement::AssignDynamic(a) => {
-                if let VarOffset::Comb(o) = a.dst_base {
-                    let span = a.dst_stride.unsigned_abs() * a.dst_num_elements.saturating_sub(1)
-                        + crate::ir::native_bytes(a.dst_width).max(1);
-                    let base = if a.dst_stride < 0 {
-                        o + a.dst_stride * (a.dst_num_elements.saturating_sub(1) as isize)
-                    } else {
-                        o
-                    };
-                    out.push((base, base + span as isize));
+                if let VarOffset::Comb(o) = a.dst_base
+                    && let Some(span) = crate::ir::strided_span(
+                        o,
+                        a.dst_stride,
+                        a.dst_num_elements,
+                        crate::ir::native_bytes(a.dst_width).max(1),
+                    )
+                {
+                    out.push(span);
                 }
                 expr(&a.dst_index_expr, out);
                 expr(&a.expr, out);

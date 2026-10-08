@@ -48,7 +48,7 @@ pub use statement::{
 pub(crate) use statement::{extend_to_i64, for_bound_reached};
 pub use variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableElement, VariableMeta,
-    create_variable_meta, native_bytes, read_native_value, read_payload, value_size,
+    create_variable_meta, native_bytes, read_native_value, read_payload, strided_span, value_size,
     write_native_value, write_payload,
 };
 pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
