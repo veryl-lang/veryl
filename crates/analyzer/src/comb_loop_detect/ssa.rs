@@ -635,6 +635,22 @@ where
         version
     }
 
+    /// A value seen only at the union of `domains`; no domain leaves it whole.
+    pub(super) fn projected_union(
+        &mut self,
+        source: VersionId,
+        domains: &[PositionDomain],
+    ) -> VersionId {
+        if domains.is_empty() {
+            return source;
+        }
+        let alternatives = domains
+            .iter()
+            .map(|&domain| self.projected(source, domain))
+            .collect();
+        self.phi(alternatives)
+    }
+
     /// Export into a destination that already enforces `domain`. Other SSA
     /// readers retain the original projection and its intermediate bounds.
     pub(super) fn root_in_domain(&self, version: VersionId, domain: PositionDomain) -> VersionId {

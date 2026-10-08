@@ -659,3 +659,63 @@ fn counted_iterator_branches_write_only_their_iterations() {
         assert!(comb_loop_analysis_is_complete(&code), "{case}");
     }
 }
+
+#[test]
+fn counted_scalar_writes_reach_only_their_positions() {
+    // A scalar written through an iterator-affine index reaches only the
+    // positions the index takes, including the gaps between its steps.
+    for (case, body, expected) in [
+        (
+            "column",
+            "for i in 0..2 { w[i][1] = o; } p = w[1][0];",
+            false,
+        ),
+        (
+            "column reaches its element",
+            "for i in 0..2 { w[i][1] = o; } p = w[1][1];",
+            true,
+        ),
+        ("stride", "for i in 0..2 { y[2 * i] = o; } p = y[1];", false),
+        (
+            "stride reaches its element",
+            "for i in 0..2 { y[2 * i] = o; } p = y[2];",
+            true,
+        ),
+        (
+            "descending stride",
+            "for i in 0..2 { y[4 - 2 * i] = o; } p = y[3];",
+            false,
+        ),
+        (
+            "inner iterator branch",
+            "for i in 0..2 { for j in 0..2 { w[i][j] = if j == 1 ? o : a; } } p = w[1][0];",
+            false,
+        ),
+        (
+            "inner iterator branch reaches its element",
+            "for i in 0..2 { for j in 0..2 { w[i][j] = if j == 1 ? o : a; } } p = w[0][1];",
+            true,
+        ),
+        (
+            "remainder branch",
+            "for i in 0..5 { y[i] = if i % 2 == 1 ? o : a; } p = y[2];",
+            false,
+        ),
+        (
+            "remainder branch reaches its element",
+            "for i in 0..5 { y[i] = if i % 2 == 1 ? o : a; } p = y[3];",
+            true,
+        ),
+    ] {
+        let code = format!(
+            "module Top (a: input logic<8>, o: output logic<8>) {{
+                var y: logic<8> [5]; var w: logic<8> [2, 2]; var p: logic<8>;
+                always_comb {{ {body} }}
+                assign o = p;
+            }}"
+        );
+        let loops = comb_loops(&code);
+        assert_eq!(!loops.is_empty(), expected, "{case}: {loops:?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{case}");
+    }
+}

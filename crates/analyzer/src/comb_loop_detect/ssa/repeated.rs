@@ -345,7 +345,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             let view = if exposed.is_empty() {
                 ssa.phi(Vec::new())
             } else {
-                project(ssa, *entry, exposed)
+                ssa.projected_union(*entry, exposed)
             };
             views.insert(initial, view);
         }
@@ -371,21 +371,6 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             .push(generated_start..ssa.versions.len());
     }
     Some(())
-}
-
-fn project<K: Copy + Eq + Hash>(
-    ssa: &mut SsaStore<K>,
-    value: VersionId,
-    domains: &[PositionDomain],
-) -> VersionId {
-    if domains.is_empty() {
-        return value;
-    }
-    let alternatives = domains
-        .iter()
-        .map(|&domain| ssa.projected(value, domain))
-        .collect();
-    ssa.phi(alternatives)
 }
 
 /// Retained and data layers of every transfer node.
@@ -543,7 +528,7 @@ fn condense<'v, K: Copy + Eq + Hash>(
                 if internal_data[component] || edge.weight().data {
                     let value = layers.read(ssa, graph, edge.source());
                     let value = ssa.related_definition(vec![(value, edge.weight().relation)]);
-                    let value = project(ssa, value, &graph[edge.target()].domains);
+                    let value = ssa.projected_union(value, &graph[edge.target()].domains);
                     sources.push((value, stable[component]));
                 }
                 if !edge.weight().data {
@@ -562,7 +547,7 @@ fn condense<'v, K: Copy + Eq + Hash>(
                     layers.retain_from(node, source);
                 }
                 layers.data[node.index()] =
-                    data_value.map(|value| project(ssa, value, &graph[node].domains));
+                    data_value.map(|value| ssa.projected_union(value, &graph[node].domains));
             }
         } else {
             let node = nodes[0];
@@ -589,7 +574,7 @@ fn condense<'v, K: Copy + Eq + Hash>(
                         .collect();
                     ssa.phi(alternatives)
                 } else {
-                    project(ssa, value, &graph[node].domains)
+                    ssa.projected_union(value, &graph[node].domains)
                 }
             });
         }
@@ -809,7 +794,7 @@ impl UniformRecurrence {
                     let value = layers.read(ssa, graph, edge.source());
                     let value = ssa.related_definition(vec![(value, edge.weight().relation)]);
                     (
-                        project(ssa, value, &graph[edge.target()].domains),
+                        ssa.projected_union(value, &graph[edge.target()].domains),
                         self.stable,
                     )
                 })
@@ -837,7 +822,7 @@ impl UniformRecurrence {
                 layers.retain_from(node, source);
             }
             layers.data[node.index()] = join(ssa, std::mem::take(&mut data_inputs[index]))
-                .map(|value| project(ssa, value, &graph[node].domains));
+                .map(|value| ssa.projected_union(value, &graph[node].domains));
         }
     }
 }

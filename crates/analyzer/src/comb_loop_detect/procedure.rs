@@ -2316,6 +2316,64 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some((min, max))
     }
 
+    /// Nonnegative positions an affine index takes over the counted
+    /// iterators, as disjoint ascending spans of consecutive positions. Its
+    /// progressions are taken whole when consecutive and position by
+    /// position otherwise.
+    fn affine_spans(&self, index: &AffineIndex) -> Option<Vec<ArraySpan>> {
+        let mut runs = Vec::new();
+        if self.index_has_gaps(index) {
+            for assignment in self.index_progressions(index) {
+                let mut progression = AffineIndex {
+                    terms: Vec::new(),
+                    constant: index.constant,
+                };
+                for &(id, coefficient) in &index.terms {
+                    match assignment.iter().find(|(fixed, _)| *fixed == id) {
+                        Some(&(_, value)) => {
+                            progression.constant = progression
+                                .constant
+                                .checked_add(coefficient.checked_mul(value)?)?;
+                        }
+                        None => progression.terms.push((id, coefficient)),
+                    }
+                }
+                let terms = self.iterator_terms(&progression)?;
+                let (first, last) = self.affine_hull(&progression)?;
+                match terms.first() {
+                    Some(&(_, step, _)) if step > 1 => {
+                        let mut position = first;
+                        while position <= last {
+                            runs.push((position, position));
+                            position = position.checked_add(step)?;
+                        }
+                    }
+                    _ => runs.push((first, last)),
+                }
+            }
+        } else {
+            runs.push(self.affine_hull(index)?);
+        }
+        runs.sort_unstable();
+        let mut spans: Vec<ArraySpan> = Vec::new();
+        for (first, last) in runs {
+            let Ok(last) = usize::try_from(last) else {
+                continue;
+            };
+            let first = usize::try_from(first.max(0)).ok()?;
+            match spans.last_mut() {
+                Some(span) if span.start + span.length >= first => {
+                    span.length = span.length.max(last + 1 - span.start);
+                }
+                _ => spans.push(ArraySpan {
+                    start: first,
+                    length: last + 1 - first,
+                }),
+            }
+        }
+        Some(spans)
+    }
+
     fn counted_iterator(&self, id: VarId) -> Option<CountedIterator> {
         self.counted_iterators
             .iter()
@@ -2803,16 +2861,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // An anchored destination addresses only the positions its index
         // takes over the iterations that reach this write.
         let reachable = anchor
-            .then(|| {
-                let (low, high) = self.affine_hull(&destination_index.as_ref()?.index)?;
-                let low = usize::try_from(low.max(0)).ok()?;
-                let high = usize::try_from(high).ok()?;
-                Some(ArraySpan {
-                    start: low,
-                    length: high.checked_sub(low)?.checked_add(1)?,
-                })
-            })
+            .then(|| self.affine_spans(&destination_index.as_ref()?.index))
             .flatten();
+        let reachable_hull = reachable.as_ref().map(|spans| match spans.as_slice() {
+            [first, .., last] => ArraySpan {
+                start: first.start,
+                length: last.start + last.length - first.start,
+            },
+            [only] => *only,
+            [] => ArraySpan {
+                start: 0,
+                length: 0,
+            },
+        });
         // Controls anchored at the destination's frame keep its displacement.
         let mut anchored_controls = Vec::new();
         let mut whole_controls = Vec::new();
@@ -2845,8 +2906,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let destination_region =
                     key.1
                         .intersection(destination_array)
-                        .and_then(|region| match reachable {
-                            Some(reachable) => region.intersection(reachable),
+                        .and_then(|region| match reachable_hull {
+                            Some(hull) => region.intersection(hull),
                             None => Some(region),
                         });
                 let expression_array = destination_region.and_then(|array| {
@@ -2921,14 +2982,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             if let Some(token) = self.active_assignment {
                 self.ssa.record_site(version, token, controls);
             }
-            if let (Some(reachable), Some(packed)) = (reachable, self.key_span(key))
-                && key.1.intersection(reachable) != Some(key.1)
-            {
+            if let (Some(reachable), Some(packed)) = (&reachable, self.key_span(key)) {
+                let regions = reachable
+                    .iter()
+                    .filter_map(|span| key.1.intersection(*span))
+                    .collect::<Vec<_>>();
                 // Positions outside the reachable ones keep their value.
-                version = match key.1.intersection(reachable) {
-                    Some(region) => self.ssa.projected(version, position_domain(region, packed)),
-                    None => continue,
-                };
+                if regions.is_empty() {
+                    continue;
+                }
+                if regions != [key.1] {
+                    let domains = regions
+                        .into_iter()
+                        .map(|region| position_domain(region, packed))
+                        .collect::<Vec<_>>();
+                    version = self.ssa.projected_union(version, &domains);
+                }
             }
             self.bind_destination(key, version, dynamic);
         }
