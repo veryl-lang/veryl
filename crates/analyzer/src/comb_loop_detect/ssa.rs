@@ -1159,6 +1159,19 @@ where
         Some(builder.graph)
     }
 
+    /// The versions `version` takes its value from when it only selects
+    /// among them: the inputs of a merge, or the source of a guard or a
+    /// projection. `None` for any other version.
+    pub(super) fn selected_from(&self, version: VersionId) -> Option<Vec<VersionId>> {
+        match self.versions.get(version)? {
+            Version::Phi(inputs) => Some(inputs.clone()),
+            Version::Guarded { source, .. } | Version::Projected { source, .. } => {
+                Some(vec![*source])
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
         inputs.sort_unstable();
         inputs.dedup();

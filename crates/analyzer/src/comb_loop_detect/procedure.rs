@@ -248,11 +248,6 @@ fn affine_index(
     result.representative(context.width, context.signed, ctx, iterators)
 }
 
-/// A storage coordinate into a dimension of `size` positions. A wrapped
-/// unsigned value that would be negative as an integer selects no element,
-/// exactly like the negative integer, as long as it wraps past the last
-/// position and no positive value wraps. The selected positions of the
-/// integer form and of the bit vector then agree.
 /// Progressions as spans with the step between their positions, from the
 /// first, merged where they overlap or touch: a merged progression steps by
 /// the steps of both and the distance between their starts.
@@ -306,6 +301,11 @@ fn iterator_assignments(iterators: Vec<CountedIterator>) -> Vec<Vec<(VarId, isiz
     assignments
 }
 
+/// A storage coordinate into a dimension of `size` positions. A wrapped
+/// unsigned value that would be negative as an integer selects no element,
+/// exactly like the negative integer, as long as it wraps past the last
+/// position and no positive value wraps. The selected positions of the
+/// integer form and of the bit vector then agree.
 fn affine_position(
     expression: &Expression,
     ctx: &mut Context,
@@ -488,6 +488,108 @@ use footprint::{LoopAccesses, for_range_step};
 pub(super) use iterator_use::{LoopEvaluation, loop_evaluation};
 use last_writer::{Step, WriterId, WriterScope};
 
+/// A copy of `expression` and the entries of `cache` for its variable
+/// occurrences, calls and branches, keyed by the copy's.
+fn copied_with_cache(
+    expression: &Expression,
+    cache: &EvaluationCache,
+) -> (Rc<Expression>, EvaluationCache) {
+    fn rekey(
+        original: &Expression,
+        copy: &Expression,
+        cache: &EvaluationCache,
+        copied: &mut EvaluationCache,
+    ) {
+        if let Some(&branch) = cache.expression_branches.get(&std::ptr::from_ref(original)) {
+            copied
+                .expression_branches
+                .insert(std::ptr::from_ref(copy), branch);
+        }
+        if let (Expression::Term(original), Expression::Term(copy)) = (original, copy) {
+            let (original, copy) = (original.as_ref(), copy.as_ref());
+            if let Some(sampled) = cache
+                .variables
+                .as_ref()
+                .and_then(|variables| variables.get(&std::ptr::from_ref(original)))
+            {
+                copied
+                    .variables
+                    .get_or_insert_with(HashMap::default)
+                    .insert(std::ptr::from_ref(copy), Rc::clone(sampled));
+            }
+            if let (Factor::FunctionCall(original), Factor::FunctionCall(copy)) = (original, copy)
+                && let Some(result) = cache.calls.get(&std::ptr::from_ref(original))
+            {
+                copied
+                    .calls
+                    .insert(std::ptr::from_ref(copy), Rc::clone(result));
+            }
+        }
+        for (original, copy) in children::children(original)
+            .into_iter()
+            .zip(children::children(copy))
+        {
+            rekey(original, copy, cache, copied);
+        }
+    }
+    let copy = Rc::new(expression.clone());
+    let mut copied = EvaluationCache {
+        variables: Some(HashMap::default()),
+        ..EvaluationCache::default()
+    };
+    rekey(expression, &copy, cache, &mut copied);
+    (copy, copied)
+}
+
+/// A read of a key whose value may come from definitions.
+struct DefinedRead<'p> {
+    bits: PackedSpan,
+    low: usize,
+    requested_array: ArraySpan,
+    /// The destination bit, for a projection anchored at one.
+    anchored_bits: Option<PackedSpan>,
+    projection: &'p ProjectionContext,
+}
+
+/// What a read through definitions takes: the definitions evaluated again,
+/// the other versions it may be, and whether each version passed leads to a
+/// definition.
+struct DefinedSources {
+    defined: ExpressionSources,
+    plain: Vec<VersionId>,
+    reached: HashMap<VersionId, bool>,
+}
+
+/// The expression a whole key was last assigned inside a counted loop, with
+/// what it read then. Read at a destination that moves with the iterators,
+/// the key takes the expression again: a value kept in a scalar, a constant
+/// element or a field keeps the positions it was read from, as it would
+/// written in place.
+struct Definition {
+    /// The assigned expression, or the inputs of a call whose output it is.
+    expressions: Vec<Rc<Expression>>,
+    /// Whether each bit is the expression's bit, rather than a call output
+    /// that may depend on every bit of its inputs.
+    bitwise: bool,
+    /// The values each variable occurrence of the expressions read, and
+    /// their calls and branches, keyed by these copies.
+    cache: EvaluationCache,
+    /// What decided that the assignment ran or where it wrote.
+    controls: Vec<VersionId>,
+    /// The iterations that reached the assignment.
+    iterators: Vec<CountedIterator>,
+    /// The last iteration of each finished loop inside those, innermost
+    /// last, when the value is what that iteration left.
+    fixed: Vec<CountedIterator>,
+    /// The key and the version it was bound, which a loop left as it is
+    /// when it still holds it.
+    key: NodeKey,
+    bound: VersionId,
+    /// The bit of the variable that bit 0 of the expression was written to.
+    shift: isize,
+    context_width: usize,
+}
+
 #[derive(Clone)]
 struct CallResult {
     region_groups: Vec<(ArraySpan, Vec<(PackedSpan, VersionId)>)>,
@@ -503,7 +605,7 @@ struct SampledVariable {
 // Region-split writes query one RHS several times, but a function call in that
 // RHS is one procedural evaluation. `None` is an invocation barrier: temporary
 // call nodes in a cloned callee body must never enter the caller's cache.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct EvaluationCache {
     calls: HashMap<*const FunctionCall, Rc<CallResult>>,
     expression_branches: HashMap<*const Expression, BranchId>,
@@ -1504,11 +1606,18 @@ struct ProcedureAnalysis<'a, 's> {
     writer_scope: Option<Rc<WriterScope>>,
     /// The places of the statements being evaluated in that loop.
     statement_places: Vec<Vec<Step>>,
+    /// The values each writer stored in its table for each key in this
+    /// evaluation of the loop.
+    table_writes: HashMap<(NodeKey, WriterId), Vec<VersionId>>,
     /// The statement each statement of a specialized iteration body being
     /// evaluated comes from.
     statement_origins: HashMap<*const Statement, *const Statement>,
     /// The runtime loops being evaluated in the scope of the last writers.
     runtime_loop_depth: usize,
+    /// The definition of each version bound by a whole-key assignment, and
+    /// the versions in the order they were recorded.
+    definitions: HashMap<VersionId, Rc<Definition>>,
+    definition_log: Vec<VersionId>,
     /// The destination being written by the current assignment.
     current_writer: Option<WriterId>,
     /// A statement being evaluated once per set of iterations.
@@ -1686,8 +1795,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             pure_functions: HashMap::default(),
             writer_scope: None,
             statement_places: Vec::new(),
+            table_writes: HashMap::default(),
             statement_origins: HashMap::default(),
             runtime_loop_depth: 0,
+            definitions: HashMap::default(),
+            definition_log: Vec::new(),
             current_writer: None,
             split_statement: None,
         }
@@ -2887,7 +2999,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some(SampledAffineIndex { index, versions })
     }
 
-    fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
+    /// Bind `version` to `key`, returning the version bound.
+    fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) -> VersionId {
         self.record_table_write(key, version);
         // Later statements read this version without passing through the
         // circuit graph's variable node. Keep its storage bounds in SSA so
@@ -2904,6 +3017,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.bind_key(key, version);
         }
         self.written.insert(key);
+        version
     }
 
     fn receiver_index(&self, id: VarId, index: &VarIndex) -> VarIndex {
@@ -3410,8 +3524,331 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 };
                 version = confined;
             }
-            self.bind_destination(key, version, dynamic);
+            let bound = self.bind_destination(key, version, dynamic);
+            // The storage and any last writer table hold projections of it.
+            if !dynamic && let Some((_, low)) = selected {
+                let mut definition_controls = whole_controls.clone();
+                definition_controls.extend_from_slice(&selectors);
+                definition_controls.extend(anchored_controls.iter().map(|&(control, _)| control));
+                self.record_definition(
+                    key,
+                    version,
+                    bound,
+                    expression,
+                    definition_controls,
+                    signed_difference(low, expression_offset),
+                    expression_context_width,
+                );
+            }
         }
+    }
+
+    /// Record that `version` holds `expression`, written with its bit 0 at
+    /// bit `shift` of the variable. Only inside a counted loop, where a
+    /// destination can move with the iterators, and only while the
+    /// assignment's reads are sampled.
+    #[allow(clippy::too_many_arguments)]
+    fn record_definition(
+        &mut self,
+        key: NodeKey,
+        version: VersionId,
+        bound: VersionId,
+        expression: &Expression,
+        controls: Vec<VersionId>,
+        shift: Option<isize>,
+        context_width: usize,
+    ) {
+        if self.counted_iterators.is_empty() {
+            return;
+        }
+        let Some(shift) = shift else {
+            return;
+        };
+        let Some(Some(cache)) = self.call_caches.last() else {
+            return;
+        };
+        if cache.variables.is_none() {
+            return;
+        }
+        let (copy, cache) = copied_with_cache(expression, cache);
+        let definition = Definition {
+            expressions: vec![copy],
+            bitwise: true,
+            cache,
+            controls,
+            iterators: self.counted_iterators.clone(),
+            fixed: Vec::new(),
+            key,
+            bound,
+            shift,
+            context_width,
+        };
+        self.definitions.insert(version, Rc::new(definition));
+        self.definition_log.push(version);
+    }
+
+    /// Record that each output of a call that reads only its inputs, written
+    /// at constant coordinates, holds a value of those inputs.
+    fn record_output_definitions(&mut self, call: &FunctionCall, controls: &[VersionId]) {
+        if self.counted_iterators.is_empty() || !self.function_is_pure(call) {
+            return;
+        }
+        let Some(Some(cache)) = self.call_caches.last() else {
+            return;
+        };
+        let mut expressions = Vec::new();
+        let mut copied = EvaluationCache::default();
+        for input in call.inputs.values() {
+            let (copy, cache) = copied_with_cache(input, cache);
+            expressions.push(copy);
+            copied.calls.extend(cache.calls);
+            copied.expression_branches.extend(cache.expression_branches);
+            copied
+                .variables
+                .get_or_insert_with(HashMap::default)
+                .extend(cache.variables.into_iter().flatten());
+        }
+        let cache = copied;
+        for destination in call.outputs.values().flatten() {
+            if !destination.index.is_const()
+                || !(destination.select.is_empty() || destination.select.is_const_with_range())
+            {
+                continue;
+            }
+            let mut selectors = controls.to_vec();
+            selectors.extend(self.eval_destination_selectors(destination));
+            for key in self.write_keys(destination) {
+                let version = self.ssa.read(self.ssa_key(key));
+                let definition = Definition {
+                    expressions: expressions.clone(),
+                    bitwise: false,
+                    cache: cache.clone(),
+                    controls: selectors.clone(),
+                    iterators: self.counted_iterators.clone(),
+                    fixed: Vec::new(),
+                    key,
+                    bound: version,
+                    shift: 0,
+                    context_width: 1,
+                };
+                self.definitions.insert(version, Rc::new(definition));
+                self.definition_log.push(version);
+            }
+        }
+    }
+
+    /// The sources of `bits` of a key holding `version`, read as a value whose
+    /// bit 0 is bit `low` of the variable, through the definitions it is
+    /// selected from: each definition taken again for the destination of
+    /// `projection`, and each other version it may be read as it is. A
+    /// version leading to no definition is read whole, never through the
+    /// versions it selects from. `None` when no definition is reached.
+    fn defined_sources(
+        &mut self,
+        version: VersionId,
+        bits: PackedSpan,
+        low: usize,
+        requested_array: ArraySpan,
+        anchored_bits: Option<PackedSpan>,
+        projection: &ProjectionContext,
+    ) -> Option<(ExpressionSources, Vec<VersionId>)> {
+        let mut found = DefinedSources {
+            defined: ExpressionSources::default(),
+            plain: Vec::new(),
+            reached: HashMap::default(),
+        };
+        let read = DefinedRead {
+            bits,
+            low,
+            requested_array,
+            anchored_bits,
+            projection,
+        };
+        self.collect_defined_sources(version, &read, &mut found)?
+            .then_some((found.defined, found.plain))
+    }
+
+    /// Whether `version` leads to a definition, collecting into `found` what
+    /// it is taken from. Each version passed is charged to the procedure's
+    /// work; `None` when it is exhausted.
+    fn collect_defined_sources(
+        &mut self,
+        version: VersionId,
+        read: &DefinedRead<'_>,
+        found: &mut DefinedSources,
+    ) -> Option<bool> {
+        if let Some(&reached) = found.reached.get(&version) {
+            return Some(reached);
+        }
+        if !self.reserve_guard_work(1) {
+            return None;
+        }
+        let reached = if let Some(definition) = self.definitions.get(&version).cloned()
+            && let Some(sources) = self.definition_sources(
+                &definition,
+                read.bits,
+                read.low,
+                read.requested_array,
+                read.anchored_bits,
+                read.projection,
+            ) {
+            found.defined.extend(sources);
+            true
+        } else if let Some(inputs) = self.ssa.selected_from(version) {
+            let mut reached = false;
+            let mut others = Vec::new();
+            for input in inputs {
+                if self.collect_defined_sources(input, read, found)? {
+                    reached = true;
+                } else {
+                    others.push(input);
+                }
+            }
+            if reached {
+                found.plain.extend(others);
+            }
+            reached
+        } else {
+            false
+        };
+        found.reached.insert(version, reached);
+        Some(reached)
+    }
+
+    /// The sources of `bits` of `key`, which holds `definition`, read as a
+    /// value whose bit 0 is bit `low` of the variable: the definition's
+    /// expression evaluated again for the destination of `projection`, with
+    /// the values it read when it was assigned. `None` when its iterations
+    /// do not lead those being evaluated, or the work is exhausted.
+    fn definition_sources(
+        &mut self,
+        definition: &Definition,
+        bits: PackedSpan,
+        low: usize,
+        requested_array: ArraySpan,
+        anchored_bits: Option<PackedSpan>,
+        projection: &ProjectionContext,
+    ) -> Option<ExpressionSources> {
+        let depth = definition.iterators.len();
+        if depth > self.counted_iterators.len()
+            || definition
+                .iterators
+                .iter()
+                .zip(&self.counted_iterators)
+                .any(|(defined, current)| defined.id != current.id)
+        {
+            return None;
+        }
+        // Bit `b` of the variable is bit `b - shift` of the expression and
+        // bit `b - low` of the value read.
+        let start = isize::try_from(bits.start)
+            .ok()?
+            .checked_sub(definition.shift)?;
+        let (requested, displacement) = if !definition.bitwise {
+            // Every bit of a call output may come from any bit of its inputs.
+            if projection.packed_anchor.is_some() {
+                return None;
+            }
+            (PackedSpan::new(0, 1)?, 0)
+        } else if projection.packed_anchor.is_some() {
+            // Packed coordinates are the destination bit, which a one-bit
+            // value takes from bit 0 of the expression.
+            if start != 0 || bits.length != 1 || isize::try_from(low).ok()? != definition.shift {
+                return None;
+            }
+            (anchored_bits?, 0)
+        } else {
+            (
+                PackedSpan::new(usize::try_from(start).ok()?, bits.length)?,
+                definition.shift.checked_sub(isize::try_from(low).ok()?)?,
+            )
+        };
+        if !self.reserve_guard_work(1) {
+            return None;
+        }
+        // The iterations being evaluated that reached the assignment.
+        let current = self.counted_iterators[..depth].to_vec();
+        let mut iterators = Vec::with_capacity(depth);
+        for (defined, current) in definition.iterators.iter().zip(&current) {
+            match current.confined(defined.min, defined.max, defined.modulus, defined.residue) {
+                Ok(Some(iterator)) => iterators.push(iterator),
+                Ok(None) => return Some(ExpressionSources::default()),
+                Err(_) => return None,
+            }
+        }
+        self.counted_iterators[..depth].copy_from_slice(&iterators);
+        self.counted_iterators.extend_from_slice(&definition.fixed);
+        self.call_caches.push(Some(definition.cache.clone()));
+        let mut sources = ExpressionSources::default();
+        for expression in &definition.expressions {
+            if definition.bitwise {
+                sources.extend(self.eval_expr_requested_in(
+                    expression,
+                    requested_array,
+                    requested,
+                    definition.context_width,
+                    projection,
+                ));
+                continue;
+            }
+            let width = expression.comptime().expr_context.width;
+            let Some(whole) = PackedSpan::new(0, width) else {
+                continue;
+            };
+            let mut input =
+                self.eval_expr_requested_in(expression, requested_array, whole, width, projection);
+            for (_, relation) in &mut input.sources {
+                relation.packed = Link::Unlinked;
+            }
+            sources.extend(input);
+        }
+        // On only some iterations, the definition reaches only the
+        // destination positions they take.
+        let reached = (current != iterators)
+            .then(|| {
+                let destination = projection.destination_index.as_ref()?;
+                let (first, last) = self.affine_hull(&destination.index)?;
+                let start = usize::try_from(first.max(0)).ok()?;
+                let length = usize::try_from(last)
+                    .ok()?
+                    .checked_sub(start)?
+                    .checked_add(1)?;
+                Some(ArraySpan { start, length })
+            })
+            .flatten();
+        self.call_caches.pop();
+        let inner = self.counted_iterators.len() - definition.fixed.len();
+        self.counted_iterators.truncate(inner);
+        self.counted_iterators[..depth].copy_from_slice(&current);
+        for (_, relation) in &mut sources.sources {
+            *relation = relation.compose(PositionRelation {
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(displacement)),
+            });
+        }
+        sources.extend_whole(definition.controls.iter().copied());
+        if current != iterators {
+            // Positions the confined iterations cannot take, or that cannot
+            // be told, leave the definition whole within its value.
+            let value = self.ssa.related_definition(sources.sources);
+            let Some(reached) = reached.filter(|_| projection.packed_anchor.is_none()) else {
+                return Some(ExpressionSources::whole(vec![value]));
+            };
+            let bits = PackedSpan::new(
+                usize::try_from(
+                    isize::try_from(bits.start)
+                        .ok()?
+                        .checked_sub(isize::try_from(low).ok()?)?,
+                )
+                .ok()?,
+                bits.length,
+            )?;
+            let value = self.ssa.projected(value, position_domain(reached, bits));
+            return Some(ExpressionSources {
+                sources: vec![(value, PositionRelation::identity())],
+            });
+        }
+        Some(sources)
     }
 
     /// Write one bit selected by an affine position inside a counted loop.
@@ -3638,6 +4075,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         requested_array: ArraySpan,
         requested: PackedSpan,
         anchor: &SampledAffineIndex,
+        projection: &ProjectionContext,
     ) -> ExpressionSources {
         let Factor::Variable(id, index, select, comptime) = factor else {
             unreachable!("only variable reads are anchored");
@@ -3681,6 +4119,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             reads.extend_whole(selector_sources);
             return reads;
         }
+        // A one-bit value kept where no position relates it to the
+        // destination bit takes its definition again.
+        if let Some(mut reads) = self.packed_anchored_definition(
+            factor,
+            requested_array,
+            requested,
+            projection,
+            last_writers.as_mut(),
+        ) {
+            reads.extend_whole(selector_sources);
+            return reads;
+        }
         selector_sources.extend(self.read_variable(
             *id,
             index,
@@ -3688,6 +4138,66 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             comptime.member_select_domain,
         ));
         ExpressionSources::whole(selector_sources)
+    }
+
+    /// The sources of a one-bit read at constant coordinates for a
+    /// destination bit that moves with the iterators, through the
+    /// definitions its key holds. `None` when it reaches none.
+    fn packed_anchored_definition(
+        &mut self,
+        factor: &Factor,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        projection: &ProjectionContext,
+        last_writers: Option<&mut last_writer::LastWriterRead>,
+    ) -> Option<ExpressionSources> {
+        let Factor::Variable(id, index, select, comptime) = factor else {
+            return None;
+        };
+        if !index.is_const() || !(select.is_empty() || select.is_const_with_range()) {
+            return None;
+        }
+        let variable = self.ctx.variables.get(id)?.clone();
+        let (high, low) = if select.is_empty() {
+            (variable.r#type.total_width()?.checked_sub(1)?, 0)
+        } else {
+            select.eval_value(&mut self.ctx, &variable.r#type, false)?
+        };
+        if high != low {
+            return None;
+        }
+        let receiver = self.receiver_index(*id, index);
+        let accesses = var_reads(
+            *id,
+            &receiver,
+            select,
+            comptime.member_select_domain,
+            &mut self.ctx,
+        );
+        let [(array, packed)] = accesses.as_slice() else {
+            return None;
+        };
+        let keys = self.bit_part.overlapping_access(*id, *array, *packed);
+        let [key] = keys.as_slice() else {
+            return None;
+        };
+        let key = *key;
+        let version = self.read_source_key(key, last_writers);
+        let bits = packed.intersection(self.key_span(key)?)?;
+        let (defined, plain) = self.defined_sources(
+            version,
+            bits,
+            low,
+            requested_array,
+            Some(requested),
+            projection,
+        )?;
+        let mut reads = defined;
+        for version in plain {
+            let version = self.project_read(key, version, *array, *packed);
+            reads.push(version, PositionRelation::whole());
+        }
+        Some(reads)
     }
 
     /// One bit at an affine packed position of a constant element.
@@ -4039,7 +4549,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Statement::Case(statement) => self.eval_case(statement, controls),
             Statement::For(statement) => self.eval_for(statement, controls),
             Statement::FunctionCall(call) => {
+                // The inputs keep the values they read, as an assignment's
+                // expression does, for the definitions of the outputs.
+                self.call_caches.push(Some(EvaluationCache {
+                    variables: Some(HashMap::default()),
+                    ..EvaluationCache::default()
+                }));
                 self.eval_call(call, controls);
+                self.record_output_definitions(call, controls);
+                self.call_caches.pop();
                 FlowResult::new(ProcedureFlow::Continue)
             }
             Statement::SystemFunctionCall(call) => {
@@ -4785,6 +5303,55 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         result
     }
 
+    /// The definitions recorded since `mark` that the keys they were bound
+    /// to still hold.
+    fn held_definitions(&mut self, mark: usize) -> Vec<Rc<Definition>> {
+        let mut held = Vec::new();
+        for index in mark..self.definition_log.len() {
+            let Some(definition) = self.definitions.get(&self.definition_log[index]).cloned()
+            else {
+                continue;
+            };
+            if self.ssa.read(self.ssa_key(definition.key)) == definition.bound {
+                held.push(definition);
+            }
+        }
+        held
+    }
+
+    /// After the innermost counted loop, whose last value is `last`, each
+    /// key that the end of its body left holding a definition holds what
+    /// the last iteration assigned: the definition at that value, when that
+    /// iteration reaches it.
+    fn leave_definitions(&mut self, held: Vec<Rc<Definition>>, last: isize) {
+        let depth = self.counted_iterators.len();
+        for definition in held {
+            if definition.iterators.len() != depth {
+                continue;
+            }
+            let Ok(Some(last)) = definition.iterators[depth - 1].confined(last, last, 1, 0) else {
+                continue;
+            };
+            let after = self.ssa.read(self.ssa_key(definition.key));
+            let mut fixed = vec![last];
+            fixed.extend_from_slice(&definition.fixed);
+            let left = Definition {
+                expressions: definition.expressions.clone(),
+                bitwise: definition.bitwise,
+                cache: definition.cache.clone(),
+                controls: definition.controls.clone(),
+                iterators: definition.iterators[..depth - 1].to_vec(),
+                fixed,
+                key: definition.key,
+                bound: after,
+                shift: definition.shift,
+                context_width: definition.context_width,
+            };
+            self.definitions.insert(after, Rc::new(left));
+            self.definition_log.push(after);
+        }
+    }
+
     fn counted_transfer_coverage(
         &self,
         coverage: &CountedCoverage,
@@ -4852,7 +5419,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             breaks: Vec::new(),
         });
         let returns = self.recorded_returns();
+        let definitions = self.definition_log.len();
         let flow = self.eval_block(&statement.body, range_controls);
+        // A counted loop runs its body at least once, so a key its end
+        // leaves holding a definition holds the last iteration's.
+        let held = if coverage.is_some() && !may_execute_zero_times {
+            self.held_definitions(definitions)
+        } else {
+            Vec::new()
+        };
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
         if self.guard_work.is_none() {
@@ -4872,6 +5447,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
         let bit_part = self.bit_part;
         let tables = self.writer_scope.clone();
+        let last = coverage.map(|coverage| {
+            if coverage.step < 0 {
+                coverage.iterator.min
+            } else {
+                coverage.iterator.max
+            }
+        });
         let coverage = coverage
             .map(|coverage| self.counted_transfer_coverage(coverage, &transfer))
             .unwrap_or_default();
@@ -4906,6 +5488,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .is_none()
         {
             self.exhaust_work();
+        } else if let Some(last) = last {
+            self.leave_definitions(held, last);
         }
         FlowResult::new(ProcedureFlow::Continue)
     }
@@ -5233,6 +5817,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let mut sources = ExpressionSources::default();
                         for mapped_array in variants {
                             let mut reads = Vec::new();
+                            let mut substituted = ExpressionSources::default();
                             if let Some(source_span) = requested.translated(0, low) {
                                 for (idx, access) in &accesses {
                                     let source_array = if let Some((_, hull)) = mapped_array {
@@ -5292,12 +5877,44 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                                 )
                                             };
                                             if let Some(version) = version {
-                                                reads.push(self.project_read(
-                                                    key,
-                                                    version,
-                                                    source_array,
-                                                    source_span,
-                                                ));
+                                                // A value kept where no position
+                                                // relates it to the destination
+                                                // takes its definition again.
+                                                let defined = (projection.anchor
+                                                    && mapped_array.is_none()
+                                                    && dynamic_array_offset.is_none())
+                                                .then(|| {
+                                                    let bits = source_span
+                                                        .intersection(self.key_span(key)?)?;
+                                                    self.defined_sources(
+                                                        version,
+                                                        bits,
+                                                        low,
+                                                        requested_array,
+                                                        None,
+                                                        projection,
+                                                    )
+                                                })
+                                                .flatten();
+                                                match defined {
+                                                    Some((defined, plain)) => {
+                                                        substituted.extend(defined);
+                                                        for version in plain {
+                                                            reads.push(self.project_read(
+                                                                key,
+                                                                version,
+                                                                source_array,
+                                                                source_span,
+                                                            ));
+                                                        }
+                                                    }
+                                                    None => reads.push(self.project_read(
+                                                        key,
+                                                        version,
+                                                        source_array,
+                                                        source_span,
+                                                    )),
+                                                }
                                             }
                                         }
                                     }
@@ -5323,6 +5940,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             for version in reads {
                                 sources.push(version, offset);
                             }
+                            sources.extend(substituted);
                         }
                         sources.extend_whole(selector_sources);
                         sources
@@ -6085,9 +6703,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) -> ExpressionSources {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
-                Factor::Variable(..) => {
-                    self.eval_packed_anchored_read(factor, requested_array, requested, anchor)
-                }
+                Factor::Variable(..) => self.eval_packed_anchored_read(
+                    factor,
+                    requested_array,
+                    requested,
+                    anchor,
+                    projection,
+                ),
                 Factor::Value(_) => ExpressionSources::default(),
                 _ => ExpressionSources::whole(self.eval_expr(expression)),
             },

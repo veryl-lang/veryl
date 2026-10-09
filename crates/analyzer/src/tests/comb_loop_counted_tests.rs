@@ -1709,3 +1709,217 @@ counted_case!(
      assign o = {7'd0, c};",
     true
 );
+
+counted_case!(
+    counted_shift_through_a_scalar_is_feed_forward,
+    "an element moves to the one before it through a scalar",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; for i in 0..3 { c = y[i + 1]; y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_a_constant_element_is_feed_forward,
+    "an element moves through a constant element of another array",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     var t: logic [4];
+     always_comb { y[3] = x[0]; t = '{0, 0, 0, 0}; for i in 0..3 { t[0] = y[i + 1]; y[i] = t[0]; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_a_struct_member_is_feed_forward,
+    "an element moves through a struct member",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     var r: pkg::Req;
+     always_comb { y[3] = x[0]; r = 0; for i in 0..3 { r.go = y[i + 1]; y[i] = r.go; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_a_call_and_a_scalar_is_feed_forward,
+    "an element moves through a call into a scalar",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; for i in 0..3 { c = g(y[i + 1]); y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_a_call_output_is_feed_forward,
+    "an element moves through the output of a call",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; for i in 0..3 { f(y[i + 1], c); y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_a_conditional_scalar_is_feed_forward,
+    "an element moves through a scalar assigned on a branch",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; for i in 0..3 { if a[0] { c = y[i + 1]; } else { c = 0; } y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_scalars_in_turn_is_feed_forward,
+    "an element moves through a chain of scalars, one reassigned",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; for i in 0..3 { c = y[i + 1]; c = c ^ x[i]; e = c; y[i] = e; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_a_scalar_on_iterator_branches_is_feed_forward,
+    "an element moves through a scalar each iterator branch assigns",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; for i in 0..3 { if i == 0 { c = y[1]; } else { c = y[i + 1]; } y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_a_scalar_keeps_the_value_it_read,
+    "a scalar keeps what it read though the element is written after",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; for i in 0..3 { c = y[i + 1]; y[i + 1] = 0; y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_bit_shift_through_a_scalar_is_feed_forward,
+    "a bit moves to the one below it through a scalar",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     var b8: logic<8>;
+     always_comb { b8[7] = 0; for i in 0..7 { c = b8[i + 1]; b8[i] = c; } }
+     assign p = b8;
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_scalar_assigned_in_an_inner_loop_keeps_its_last_value,
+    "what an inner loop leaves in a scalar is its last iteration's",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; for i in 0..3 { for j in 0..2 { c = y[i + 1] ^ x[j]; } y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    false
+);
+
+counted_case!(
+    counted_shift_through_a_scalar_keeps_a_closing_loop,
+    "an element moved through a scalar into the first closes a loop",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { for i in 0..3 { c = y[i + 1]; y[i] = c; } y[3] = y[0]; }
+     assign o = {6'd0, c, e};",
+    true
+);
+
+counted_case!(
+    counted_scalar_from_the_first_iteration_keeps_its_loop,
+    "a scalar assigned on the first iteration only feeds later elements",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; c = 0; for i in 0..3 { if i == 0 { c = y[1]; } y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    true
+);
+
+counted_case!(
+    counted_scalar_read_before_it_is_assigned_keeps_its_loop,
+    "a scalar read before its assignment takes the previous iteration's",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; c = 0; for i in 0..3 { y[i] = c; c = y[i + 1]; } }
+     assign o = {6'd0, c, e};",
+    true
+);
+
+counted_case!(
+    counted_scalar_assigned_on_a_varying_branch_keeps_its_loop,
+    "a scalar a data branch may skip keeps an earlier iteration's value",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     var e: logic;
+     function g (v: input logic) -> logic { return !v; }
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb { y[3] = x[0]; c = 0; for i in 0..3 { if a[i] { c = y[i + 1]; } y[i] = c; } }
+     assign o = {6'd0, c, e};",
+    true
+);

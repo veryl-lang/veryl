@@ -104,6 +104,10 @@ impl Bits {
     }
 }
 
+/// The last writers of the bits of a key, each with whether it writes on the
+/// read's own iteration.
+pub(super) type KeySources = Vec<(Source, bool)>;
+
 /// A read whose last writers are solved for the bits of each key it takes.
 pub(super) struct LastWriterRead {
     id: VarId,
@@ -111,8 +115,8 @@ pub(super) struct LastWriterRead {
     select: VarSelect,
     member_select_domain: Option<MemberSelectDomain>,
     /// The last writers solved for each span of bits, `None` for a key
-    /// without one.
-    solved: HashMap<Option<(usize, usize)>, Option<Vec<Source>>>,
+    /// without one, each with whether it writes on the read's own iteration.
+    solved: HashMap<Option<(usize, usize)>, Option<KeySources>>,
 }
 
 /// Affine element coordinates and bits of an access.
@@ -504,6 +508,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     pub(super) fn close_writer_scope(&mut self) {
         self.writer_scope = None;
+        self.table_writes.clear();
         self.statement_places.clear();
     }
 
@@ -1141,7 +1146,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         read: &mut LastWriterRead,
         key: NodeKey,
-    ) -> Option<Vec<Source>> {
+    ) -> Option<KeySources> {
         let span = self.key_span(key);
         let bits = span.map(|span| (span.start, span.length));
         if let Some(solved) = read.solved.get(&bits) {
@@ -1156,11 +1161,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 span,
             )
             .map(|cells| {
-                let mut sources = Vec::new();
-                for (_, cell_sources) in cells {
+                let mut sources: Vec<(Source, bool)> = Vec::new();
+                for (cell, cell_sources) in cells {
+                    let own = self.written_on_each_iteration(read.id, &cell_sources, &cell);
                     for source in cell_sources {
-                        if !sources.contains(&source) {
-                            sources.push(source);
+                        let own = own.contains(&source);
+                        match sources.iter_mut().find(|(other, _)| *other == source) {
+                            Some((_, both)) => *both &= own,
+                            None => sources.push((source, own)),
                         }
                     }
                 }
@@ -1168,6 +1176,73 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             });
         read.solved.insert(bits, solved.clone());
         solved
+    }
+
+    /// The last writers `sources` of a read of `id` on the iterations of
+    /// `cell` whose values are written on the read's own iteration: those
+    /// that always write before the read, when on each iteration of the cell
+    /// one of them does, so no value of an earlier iteration is the last.
+    /// Each then holds the value of its own iterations, which the
+    /// definitions it holds keep to.
+    fn written_on_each_iteration(&self, id: VarId, sources: &[Source], cell: &Cell) -> Vec<Source> {
+        let (Some(scope), Some(place)) = (self.active_writer_scope(), self.statement_places.last())
+        else {
+            return Vec::new();
+        };
+        let loops = place_loops(place);
+        let Some(subs) = scope.writers.get(&id) else {
+            return Vec::new();
+        };
+        let before = subs
+            .iter()
+            .filter(|sub| {
+                sources.contains(&Some(sub.id))
+                    && sub.branches.is_empty()
+                    && sub.loops == loops
+                    && relation(place, &sub.path) == Relation::Before
+            })
+            .collect::<Vec<_>>();
+        // The iterations of each writer within the cell, which differ from
+        // the cell's on at most one level, and together cover it there.
+        let covers = (0..cell.len()).any(|level| {
+            let mut counted = 0isize;
+            let mut pieces: Vec<CountedIterator> = Vec::new();
+            for sub in &before {
+                let mut piece = None;
+                for (at, (read, reached)) in cell.iter().zip(&sub.domains).enumerate() {
+                    let inside =
+                        read.confined(reached.min, reached.max, reached.modulus, reached.residue);
+                    match inside {
+                        Ok(Some(inside)) if at == level => piece = Some(inside),
+                        Ok(Some(inside)) if inside == *read => {}
+                        _ => {
+                            piece = None;
+                            break;
+                        }
+                    }
+                }
+                let Some(piece) = piece else {
+                    continue;
+                };
+                // Pieces of exclusive writers never meet.
+                if pieces
+                    .iter()
+                    .any(|other| matches!(intersect(other, &piece), Ok(Some(_)) | Err(_)))
+                {
+                    return false;
+                }
+                let Some(count) = piece.count().and_then(|count| counted.checked_add(count)) else {
+                    return false;
+                };
+                counted = count;
+                pieces.push(piece);
+            }
+            Some(counted) == cell[level].count()
+        });
+        if !covers {
+            return Vec::new();
+        }
+        before.iter().map(|sub| Some(sub.id)).collect()
     }
 
     /// The last writers of a read on each set of its iterations, of the bits
@@ -1194,16 +1269,33 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// The value of `key` from the last writers `sources`.
-    pub(super) fn last_writer_value(&mut self, key: NodeKey, sources: &[Source]) -> VersionId {
+    /// A value written on an earlier iteration is kept apart from the
+    /// assignment that wrote it, which the read's iteration did not run.
+    pub(super) fn last_writer_value(
+        &mut self,
+        key: NodeKey,
+        sources: &[(Source, bool)],
+    ) -> VersionId {
         let Some(scope) = self.writer_scope.clone() else {
             return self.read_key(key);
         };
         let mut versions = Vec::new();
-        for source in sources {
+        for &(source, own) in sources {
             match source {
+                // The value written on the read's own iteration is one this
+                // evaluation wrote, not what the table kept from before.
+                Some(writer) if own && self.table_writes.contains_key(&(key, writer)) => {
+                    versions.extend(self.table_writes[&(key, writer)].iter().copied());
+                }
                 Some(writer) => {
-                    let table = self.writer_key(key, *writer);
-                    versions.push(self.ssa.read(table));
+                    let table = self.writer_key(key, writer);
+                    let value = self.ssa.read(table);
+                    versions.push(if own {
+                        value
+                    } else {
+                        self.ssa
+                            .related_definition(vec![(value, super::PositionRelation::identity())])
+                    });
                 }
                 None => match scope.snapshots.get(&key) {
                     Some(&snapshot) => versions.push(snapshot),
@@ -1238,6 +1330,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 };
                 let table = self.writer_key(key, writer);
                 self.ssa.bind(table, version);
+                self.table_writes
+                    .entry((key, writer))
+                    .or_default()
+                    .push(version);
             }
             _ => self.status = self.status.max(AnalysisStatus::Barrier),
         }
