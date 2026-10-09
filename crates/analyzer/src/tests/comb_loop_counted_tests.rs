@@ -2208,3 +2208,64 @@ counted_case!(
      assign o = {4'd0, y[0], y[1], y[2], y[3]};",
     false
 );
+
+counted_case!(
+    counted_other_write_on_a_later_iteration_hides_an_earlier_one,
+    "another write on a later iteration of a loop around both overwrites an earlier one",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..2 { if a[1] {} else { for j in 0..3 { y[2 * j] = t[2]; y[j] = a[2]; } } } t[2] = y[2]; }
+     assign o = {4'd0, y[0], y[1], t[0], t[1]};",
+    false
+);
+
+counted_case!(
+    counted_later_write_on_a_branch_of_its_iteration_keeps_an_earlier_one,
+    "a later write a branch inside the loop may skip leaves the earlier one",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..2 { for j in 0..3 { y[2 * j] = t[2]; if a[j] { y[j] = a[2]; } } } t[2] = y[2]; }
+     assign o = {4'd0, y[0], y[1], t[0], t[1]};",
+    true
+);
+
+counted_case!(
+    counted_earlier_iteration_of_a_reversed_loop_keeps_its_write,
+    "a write on an earlier iteration of a reversed loop does not overwrite a later one",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..2 { for j in rev 0..3 { y[2 * j] = t[2]; y[j] = a[2]; } } t[2] = y[2]; }
+     assign o = {4'd0, y[0], y[1], t[0], t[1]};",
+    true
+);
+
+counted_case!(
+    counted_write_after_a_break_keeps_an_earlier_one,
+    "a write after a break may not run after an earlier one",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..2 { for j in 0..3 { y[2 * j] = t[2]; if a[3] { break; } y[j] = a[2]; } } t[2] = y[2]; }
+     assign o = {4'd0, y[0], y[1], t[0], t[1]};",
+    true
+);
+
+counted_case!(
+    counted_loop_through_no_arm_closes_with_arms_elsewhere,
+    "a loop that takes no arm of a branch on instances closes",
+    "var y: logic [8];
+     var t: logic [8];
+     var c: logic;
+     always_comb { for i in 0..2 { c = a[3] ^ c; if a[1] { t[i] = y[i]; } else { y[i] = c; } } }
+     assign o = {c, 3'd0, y[0], y[1], t[0], t[1]};",
+    true
+);
+
+counted_case!(
+    counted_arm_instance_fixed_later_on_the_path_excludes_the_other_arm,
+    "an arm whose instance a later read fixes excludes the other arm there",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..2 { if a[3] { t[i] = y[1]; } else { y[i] = t[1]; } } }
+     assign o = {4'd0, y[0], y[1], t[0], t[1]};",
+    false
+);

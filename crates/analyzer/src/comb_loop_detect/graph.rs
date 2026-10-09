@@ -486,6 +486,16 @@ pub(super) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Op
         if found != Some(true) {
             break;
         }
+        // A closed walk that takes no arm closes whatever the arms are.
+        if !arms
+            && armed
+            && diagnostic_cycle(graph, scc).is_some_and(|path| {
+                path.iter()
+                    .all(|edge| !graph.instance_arms.contains_key(edge))
+            })
+        {
+            break;
+        }
     }
     found
 }
@@ -675,6 +685,44 @@ fn has_compatible_cycle_with_budget(
                         continue;
                     }
                 }
+                // So is an arm taken earlier whose instance the positions the
+                // path reaches now give.
+                let mut arms = arms;
+                if let Some(hull) = next_relation.array_hull() {
+                    let mut excluded = false;
+                    arms.retain(|arm| {
+                        let Some(choice) = (!excluded)
+                            .then(|| arm.current.single_anchor_reaching(hull))
+                            .flatten()
+                            .and_then(|instance| {
+                                InstanceArm {
+                                    branch: arm.branch,
+                                    arm: arm.arm,
+                                    arms: arm.arms,
+                                    instance: crate::comb_loop_detect::position::Map::translation(
+                                        0,
+                                    ),
+                                }
+                                .choice(instance)
+                            })
+                        else {
+                            return true;
+                        };
+                        match next_condition.conjoin_if_compatible(&choice) {
+                            Some(condition) => {
+                                next_condition = condition;
+                                false
+                            }
+                            None => {
+                                excluded = true;
+                                true
+                            }
+                        }
+                    });
+                    if excluded {
+                        continue;
+                    }
+                }
                 if next == start {
                     let Some(closes) = budget.checked(next_relation.intersects_identity()) else {
                         return false;
@@ -692,7 +740,43 @@ fn has_compatible_cycle_with_budget(
                     let Some(back) = budget.checked(back) else {
                         return false;
                     };
-                    let next_relation = if back.is_none() {
+                    // Arms whose instances the anchor's position gives.
+                    let conflicting = next_relation
+                        .anchor_array_hull()
+                        .zip(next_relation.array_hull())
+                        .map(|(anchor, current)| (anchor.0.max(current.0), anchor.1.min(current.1)))
+                        .filter(|hull| hull.0 < hull.1)
+                        .is_some_and(|hull| {
+                            let mut condition = next_condition.clone();
+                            arms.iter().any(|arm| {
+                                let Some(choice) = arm
+                                    .current
+                                    .single_anchor_reaching(hull)
+                                    .and_then(|instance| {
+                                        InstanceArm {
+                                            branch: arm.branch,
+                                            arm: arm.arm,
+                                            arms: arm.arms,
+                                            instance:
+                                                crate::comb_loop_detect::position::Map::translation(
+                                                    0,
+                                                ),
+                                        }
+                                        .choice(instance)
+                                    })
+                                else {
+                                    return false;
+                                };
+                                match condition.conjoin_if_compatible(&choice) {
+                                    Some(next) => {
+                                        condition = next;
+                                        false
+                                    }
+                                    None => true,
+                                }
+                            })
+                        });
+                    let next_relation = if back.is_none() || conflicting {
                         let returns = next_relation.without_array_diagonal();
                         if returns.is_empty() {
                             continue;
@@ -786,6 +870,7 @@ struct ArmedRelation {
 struct TakenArm {
     branch: InstanceBranch,
     arm: usize,
+    arms: usize,
     current: PositionRelationSet,
     anchor: PositionRelationSet,
 }
@@ -891,6 +976,7 @@ impl ArmedRelation {
             let entry = TakenArm {
                 branch: arm.branch,
                 arm: arm.arm,
+                arms: arm.arms,
                 current,
                 anchor,
             };

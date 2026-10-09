@@ -3200,8 +3200,8 @@ fn lin_extent(lin: &Lin, cell: &Cell) -> Option<(i128, i128)> {
 }
 
 /// Whether `after` overwrites every bit the read takes whenever `before`
-/// writes it: on the same iterations of the loops around both, after it,
-/// and on every path that reaches it.
+/// writes it: after it on the same iterations of the loops around both, or
+/// on a later iteration of one of them, on every path that reaches `before`.
 fn follows(
     scope: &WriterScope,
     after: &Candidate<'_>,
@@ -3212,13 +3212,29 @@ fn follows(
     if !after.covers {
         return false;
     }
+    let common = common_loops(&after.writer.path, &before.writer.path);
+    let (Some(after_instance), Some(before_instance)) =
+        (after.instance_map(levels), before.instance_map(levels))
+    else {
+        return false;
+    };
+    if follows_later(
+        scope,
+        after,
+        before,
+        &after_instance,
+        &before_instance,
+        common,
+        cell,
+    ) {
+        return true;
+    }
     if after.writer.path == before.writer.path {
-        return follows_itself(scope, after, before, levels, cell);
+        return false;
     }
     if relation(&after.writer.path, &before.writer.path) != Relation::Before {
         return false;
     }
-    let common = common_loops(&after.writer.path, &before.writer.path);
     // Earlier instances of `before` at loops `after` is not in all precede
     // the one of `after`; at a loop around both, only earlier instances of
     // `after` from the same level follow each.
@@ -3227,11 +3243,6 @@ fn follows(
     {
         return false;
     }
-    let (Some(after_instance), Some(before_instance)) =
-        (after.instance_map(levels), before.instance_map(levels))
-    else {
-        return false;
-    };
     // The extent over the cell of the instance of `after` less that of
     // `before` at a level, scaled by their positive denominators.
     let difference = |level: usize| {
@@ -3277,26 +3288,29 @@ fn follows(
         .all(|branch| before.writer.branches.contains(branch))
 }
 
-/// Whether a later instance of the same write always follows `before`:
-/// they are the same instance outside the first loop at which `after` is
-/// later, and no branch inside that loop can skip `after`'s iteration.
-fn follows_itself(
+/// Whether `after` always runs on a later iteration than `before`: they
+/// are the same instance outside the first loop around both at which
+/// `after` is later, and every branch around `after` is outside that loop.
+/// Such a branch is around the loop, so around `before` on the same arm,
+/// and none skips `after`'s iteration when `before` runs.
+#[allow(clippy::too_many_arguments)]
+fn follows_later(
     scope: &WriterScope,
     after: &Candidate<'_>,
     before: &Candidate<'_>,
-    levels: usize,
+    after_instance: &[(Lin, i128)],
+    before_instance: &[(Lin, i128)],
+    common: usize,
     cell: &Cell,
 ) -> bool {
     if after.earlier.is_some() || before.earlier.is_some() {
         return false;
     }
-    let (Some(after_instance), Some(before_instance)) =
-        (after.instance_map(levels), before.instance_map(levels))
-    else {
-        return false;
-    };
-    for (level, ((left, left_denominator), (right, right_denominator))) in
-        after_instance.iter().zip(&before_instance).enumerate()
+    for (level, ((left, left_denominator), (right, right_denominator))) in after_instance
+        .iter()
+        .zip(before_instance)
+        .enumerate()
+        .take(common)
     {
         let Some(extent) = left
             .scaled(*right_denominator)

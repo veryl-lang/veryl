@@ -450,6 +450,87 @@ impl PositionRelationSet {
         })
     }
 
+    /// The one anchor array position that relates to some current array
+    /// position in the half-open `range`, `None` when there are several,
+    /// none, or they are not bounded.
+    pub(super) fn single_anchor_reaching(&self, range: (isize, isize)) -> Option<isize> {
+        // Floor and ceiling of `a / b` for a positive `b`.
+        let floor = |a: i128, b: i128| a.div_euclid(b);
+        let ceil = |a: i128, b: i128| -(-a).div_euclid(b);
+        let mut found = None;
+        let mut take = |anchor: isize| -> bool {
+            if found.is_some_and(|found| found != anchor) {
+                return false;
+            }
+            found = Some(anchor);
+            true
+        };
+        for piece in &self.pieces {
+            let (start, end) = piece.anchor[0]?;
+            match piece.current[0] {
+                Current::Unlinked(class, current) => {
+                    let current = match current {
+                        Some((low, high)) => (low.max(range.0), high.min(range.1)),
+                        None => range,
+                    };
+                    if current.0 >= current.1 || !class_meets(class, Some(current)).ok()? {
+                        continue;
+                    }
+                    if end.checked_sub(start)? != 1 || !take(start) {
+                        return None;
+                    }
+                }
+                Current::Linked(map) if !map.crossed => {
+                    let Some((first, last)) = map.source_parameters(start, end).ok()? else {
+                        continue;
+                    };
+                    // Parameters whose image `base + step * t` lies in `range`.
+                    let (base, step) = (map.base as i128, map.step as i128);
+                    let (low, high) = (range.0 as i128, range.1 as i128 - 1);
+                    let (first, last) = if step == 0 {
+                        if base < low || base > high {
+                            continue;
+                        }
+                        (first as i128, last as i128)
+                    } else {
+                        let (a, b) = if step > 0 {
+                            (ceil(low - base, step), floor(high - base, step))
+                        } else {
+                            (ceil(base - high, -step), floor(base - low, -step))
+                        };
+                        ((first as i128).max(a), (last as i128).min(b))
+                    };
+                    if first > last {
+                        continue;
+                    }
+                    if first != last {
+                        return None;
+                    }
+                    let anchor = map.residue as i128 + map.modulus as i128 * first;
+                    if !take(isize::try_from(anchor).ok()?) {
+                        return None;
+                    }
+                }
+                Current::Linked(_) => return None,
+            }
+        }
+        found
+    }
+
+    /// The half-open hull of the anchor array positions of `self`, `None`
+    /// when they are not bounded.
+    pub(super) fn anchor_array_hull(&self) -> Option<(isize, isize)> {
+        let mut hull: Option<(isize, isize)> = None;
+        for piece in &self.pieces {
+            let (start, end) = piece.anchor[0]?;
+            hull = Some(match hull {
+                Some((low, high)) => (low.min(start), high.max(end)),
+                None => (start, end),
+            });
+        }
+        hull
+    }
+
     /// The half-open hull of the array positions `self` reaches, `None`
     /// when they are not bounded.
     pub(super) fn array_hull(&self) -> Option<(isize, isize)> {
