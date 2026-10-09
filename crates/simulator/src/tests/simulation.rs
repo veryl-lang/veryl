@@ -2075,7 +2075,7 @@ fn dynsel_window_overrun_clips_to_the_vector() {
 #[test]
 fn dynsel_spill_past_width_is_clipped_not_kept() {
     // `ff72[idx +: 8]` at idx = 71: the window's low bit is inside the 72-bit
-    // vector but its top 7 bits are not.  `clip_window_to_width` clamps the
+    // vector but its top 7 bits are not.  `clip_select_to_width` clamps the
     // high end, so exactly one bit lands.  The emitter's own register may keep
     // more in the 72..127 spare of the 128-bit size class, but no read can see
     // it — this pins what the DESIGN observes, on both backends.
@@ -26974,7 +26974,7 @@ fn wide_dynamic_bit_select_store_gate() {
     // Pin the predicate: a span wider than a register is compiled once the
     // destination is a flat wide buffer, whatever the window does — the wide
     // RMW masks its result to `dst_width`, which is what
-    // `clip_window_to_width` does on the interpreter.
+    // `clip_select_to_width` does on the interpreter.
     use crate::ir::{
         ExpressionContext, ProtoAssignStatement, ProtoDynamicBitSelect, ProtoExpression, VarOffset,
     };
@@ -34477,5 +34477,157 @@ fn dynamic_struct_member_range_select_keeps_width() {
             Value::new(0x34, 8, false),
             "config={config:?}"
         );
+    }
+}
+
+/// A select built from a `for` variable compiles clean and still names bits
+/// the variable does not have.  Every backend must read it the same way.
+#[test]
+fn select_past_the_variable_from_a_loop() {
+    let code = r#"
+    module Top (
+        d  : input  logic<80> ,
+        idx: input  logic<2>  ,
+        o0 : output logic<24> ,
+        o2 : output logic<24> ,
+        o3 : output logic<24> ,
+        o4 : output logic<24> ,
+        p1 : output logic<4>  ,
+        p2 : output logic<4>  ,
+    ) {
+        var arr: logic<8> [4];
+        var w  : logic<24> [8];
+        var v  : logic<4>  [4];
+        always_comb {
+            arr[0] = 8'h11;
+            arr[1] = 8'h22;
+            arr[2] = 8'h33;
+            arr[3] = 8'h44;
+        }
+        always_comb {
+            // The fill tells a statement that never ran apart from one that
+            // read the out-of-range value.
+            for i in 0..8 {
+                w[i] = 24'hffffff;
+            }
+            for i in 0..8 {
+                w[i] = d[24 * i+:24];
+            }
+        }
+        always_comb {
+            for i in 0..4 {
+                v[i] = 4'hf;
+            }
+            for i in 0..4 {
+                v[i] = arr[idx][4 * i+:4];
+            }
+        }
+        assign o0 = w[0];
+        assign o2 = w[2];
+        assign o3 = w[3];
+        assign o4 = w[4];
+        assign p1 = v[1];
+        assign p2 = v[2];
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    use veryl_analyzer::value::ValueU64;
+    let d = BigUint::from(0xab_u32) << 72u32;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("d", Value::new_biguint(d.clone(), 80, false));
+        sim.set("idx", Value::new(1, 2, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        let oor = |width: usize| {
+            if config.use_4state {
+                Value::new_x(width, false)
+            } else {
+                Value::new(0, width, false)
+            }
+        };
+        // `d[95:72]` keeps bits 72..79 and loses the eight above them.
+        let o3 = if config.use_4state {
+            Value::U64(ValueU64 {
+                payload: 0xab,
+                mask_xz: ValueU64::gen_mask(24) & !0xff,
+                width: 24,
+                signed: false,
+            })
+        } else {
+            Value::new(0xab, 24, false)
+        };
+        for (name, expected) in [
+            // In range, and proof the loop ran at all.
+            ("o0", Value::new(0, 24, false)),
+            ("o2", Value::new(0, 24, false)),
+            ("o3", o3),
+            ("o4", oor(24)),
+            // An element of `arr` has eight bits; `v[2]` selects from bit 8.
+            ("p1", Value::new(2, 4, false)),
+            ("p2", oor(4)),
+        ] {
+            assert_eq!(sim.get(name).unwrap(), expected, "{name} config={config:?}");
+        }
+    }
+}
+
+/// The same clipping on a variable wide enough to be held as a pointer, where
+/// the read and the fill are both wide operands.
+#[test]
+fn select_past_a_wide_variable_from_a_loop() {
+    let code = r#"
+    module Top (
+        d : input  logic<200>,
+        o0: output logic<150>,
+        o1: output logic<150>,
+        o2: output logic<150>,
+    ) {
+        var w: logic<150> [3];
+        always_comb {
+            for i in 0..3 {
+                w[i] = '1;
+            }
+            for i in 0..3 {
+                w[i] = d[150 * i+:150];
+            }
+        }
+        assign o0 = w[0];
+        assign o1 = w[1];
+        assign o2 = w[2];
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let d = BigUint::from(0xab_u32) << 192u32;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("d", Value::new_biguint(d.clone(), 200, false));
+        sim.step(&Event::Clock(VarId::SYNTHETIC));
+        // `d[299:150]` keeps bits 150..199 and loses the hundred above them.
+        let kept = BigUint::from(0xab_u32) << 42u32;
+        let expected = |payload: BigUint, kept_bits: u32| {
+            if config.use_4state {
+                let all = (BigUint::from(1u32) << 150u32) - BigUint::from(1u32);
+                let known = (BigUint::from(1u32) << kept_bits) - BigUint::from(1u32);
+                Value::BigUint(veryl_analyzer::value::ValueBigUint {
+                    payload: Box::new(payload),
+                    mask_xz: Box::new(all - known),
+                    width: 150,
+                    signed: false,
+                })
+            } else {
+                Value::new_biguint(payload, 150, false)
+            }
+        };
+        for (name, expected) in [
+            ("o0", expected(BigUint::from(0u32), 150)),
+            ("o1", expected(kept, 50)),
+            ("o2", expected(BigUint::from(0u32), 0)),
+        ] {
+            assert_eq!(sim.get(name).unwrap(), expected, "{name} config={config:?}");
+        }
     }
 }

@@ -2,7 +2,8 @@ use crate::HashMap;
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::context::{Context, Conv};
 use crate::ir::variable::{
-    VarOffset, is_wide_ptr, native_bytes as calc_native_bytes, read_native_value, value_size,
+    VarOffset, clip_select_to_width, is_wide_ptr, native_bytes as calc_native_bytes,
+    read_native_value, value_size,
 };
 use crate::ir::{Op, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
@@ -24,6 +25,58 @@ pub fn out_of_range_read(width: usize, signed: bool, use_4state: bool) -> Value 
         Value::new_x(width, signed)
     } else {
         Value::new(0, width, signed)
+    }
+}
+
+/// Build a variable read with its constant select clipped to the variable it
+/// names.  `invalid_select` is an error, but an index built from a `for`
+/// variable gets past it: the bounds check does not unroll the loop, and the
+/// simulator does.  The bits past the variable read x (IEEE 1800-2023 11.5.1),
+/// and answering that here, where a user-written select becomes a read, is
+/// what stops the three backends answering it differently.
+///
+/// `beg >= end` throughout: a reversed range is `wrong index order`.
+pub fn storage_bounded_read(
+    select: Option<(usize, usize)>,
+    var_width: usize,
+    width: usize,
+    expr_context: ExpressionContext,
+    use_4state: bool,
+    build: impl FnOnce(Option<(usize, usize)>, usize, ExpressionContext) -> ProtoExpression,
+) -> ProtoExpression {
+    let Some((beg, end)) = select.filter(|&(beg, _)| beg >= var_width) else {
+        return build(select, width, expr_context);
+    };
+    // A select's result is its own span wide, whatever width the caller
+    // carried in for the unclipped read.
+    let span = beg - end + 1;
+    let Some((clipped_beg, clipped_end)) = clip_select_to_width(beg, end, var_width) else {
+        return ProtoExpression::Value {
+            value: out_of_range_read(span, expr_context.signed, use_4state),
+            width: span,
+            expr_context,
+        };
+    };
+    // Only the top overhangs, so the fill is the high element.
+    let kept = clipped_beg - clipped_end + 1;
+    let inner_context = ExpressionContext {
+        width: kept,
+        signed: false,
+    };
+    let inner = build(Some((clipped_beg, clipped_end)), kept, inner_context);
+    let lost = span - kept;
+    let fill = ProtoExpression::Value {
+        value: out_of_range_read(lost, false, use_4state),
+        width: lost,
+        expr_context: ExpressionContext {
+            width: lost,
+            signed: false,
+        },
+    };
+    ProtoExpression::Concatenation {
+        elements: vec![(Box::new(fill), 1, lost), (Box::new(inner), 1, kept)],
+        width: span,
+        expr_context,
     }
 }
 
@@ -2780,6 +2833,7 @@ impl Conv<&air::Expression> for ProtoExpression {
                             index_is_absolute_bits,
                         )
                     };
+                    let use_4state = context.config.use_4state;
                     let dynamic_select = if need_dynamic_select {
                         Some(build_dynamic_bit_select(
                             context,
@@ -2799,23 +2853,34 @@ impl Conv<&air::Expression> for ProtoExpression {
                             SimulatorError::unsupported_description(&comptime.token)
                         })?;
                         let element = &meta.elements[index];
-                        let var_full_width = kind_width
-                            * width_shape
-                                .iter()
-                                .map(|d| d.unwrap_or(1))
-                                .product::<usize>();
+                        let var_full_width = meta.width;
 
-                        Ok(ProtoExpression::Variable {
-                            var_offset: element.current,
-                            select: select_val,
-                            dynamic_select,
-                            width,
+                        Ok(storage_bounded_read(
+                            select_val,
                             var_full_width,
+                            width,
                             expr_context,
-                        })
+                            use_4state,
+                            |select, width, expr_context| ProtoExpression::Variable {
+                                var_offset: element.current,
+                                select,
+                                dynamic_select,
+                                width,
+                                var_full_width,
+                                expr_context,
+                            },
+                        ))
                     } else {
                         // Dynamic index: build linear index ProtoExpression directly
-                        let (array_shape, num_elements, base_offset, stride, is_ff, element_nb) = {
+                        let (
+                            array_shape,
+                            num_elements,
+                            base_offset,
+                            stride,
+                            is_ff,
+                            element_nb,
+                            element_width,
+                        ) = {
                             let scope = context.scope();
                             let meta = scope.variable_meta.get(id).unwrap();
                             let dyn_info = meta.dynamic_index_info().ok_or_else(|| {
@@ -2828,22 +2893,30 @@ impl Conv<&air::Expression> for ProtoExpression {
                                 dyn_info.2,
                                 dyn_info.3,
                                 meta.native_bytes,
+                                meta.width,
                             )
                         };
 
                         let index_proto = build_linear_index_expr(context, &array_shape, index)?;
 
-                        Ok(ProtoExpression::DynamicVariable {
-                            base_offset: VarOffset::new(is_ff, base_offset),
-                            stride,
-                            element_native_bytes: element_nb,
-                            index_expr: Box::new(index_proto),
-                            num_elements,
-                            select: select_val,
-                            dynamic_select,
+                        Ok(storage_bounded_read(
+                            select_val,
+                            element_width,
                             width,
                             expr_context,
-                        })
+                            use_4state,
+                            |select, width, expr_context| ProtoExpression::DynamicVariable {
+                                base_offset: VarOffset::new(is_ff, base_offset),
+                                stride,
+                                element_native_bytes: element_nb,
+                                index_expr: Box::new(index_proto),
+                                num_elements,
+                                select,
+                                dynamic_select,
+                                width,
+                                expr_context,
+                            },
+                        ))
                     }
                 }
                 air::Factor::Value(comptime) => {
@@ -3300,6 +3373,93 @@ impl Conv<&air::Expression> for ProtoExpression {
                 })
             }
             _ => panic!("unhandled Expression variant"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VAR_WIDTH: usize = 80;
+
+    fn build(
+        select: Option<(usize, usize)>,
+        width: usize,
+        expr_context: ExpressionContext,
+    ) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(0),
+            select,
+            dynamic_select: None,
+            width,
+            var_full_width: VAR_WIDTH,
+            expr_context,
+        }
+    }
+
+    /// Pinned here rather than through Veryl source: every source that
+    /// reaches the out-of-range arms has to stay illegal to be interesting,
+    /// so a tighter bounds check would silently retire the coverage.
+    #[test]
+    fn storage_bounded_read_clips_to_the_variable() {
+        let context = ExpressionContext {
+            width: 24,
+            signed: false,
+        };
+        let read = |select, use_4state| {
+            storage_bounded_read(Some(select), VAR_WIDTH, 24, context, use_4state, build)
+        };
+
+        let kept = read((71, 48), true);
+        assert!(
+            matches!(
+                kept,
+                ProtoExpression::Variable {
+                    select: Some((71, 48)),
+                    width: 24,
+                    ..
+                }
+            ),
+            "{kept:?}"
+        );
+
+        let partial = read((95, 72), true);
+        let ProtoExpression::Concatenation {
+            elements, width, ..
+        } = &partial
+        else {
+            panic!("expected a concatenation: {partial:?}");
+        };
+        assert_eq!(*width, 24);
+        assert_eq!(
+            elements.iter().map(|x| x.2).collect::<Vec<_>>(),
+            vec![16, 8]
+        );
+        let ProtoExpression::Value { value, .. } = elements[0].0.as_ref() else {
+            panic!("expected an x fill: {:?}", elements[0].0);
+        };
+        assert!(value.is_xz(), "{value:?}");
+        assert!(
+            matches!(
+                elements[1].0.as_ref(),
+                ProtoExpression::Variable {
+                    select: Some((79, 72)),
+                    ..
+                }
+            ),
+            "{:?}",
+            elements[1].0
+        );
+
+        // Nothing of the variable survives in either state.
+        for (use_4state, xz) in [(true, true), (false, false)] {
+            let gone = read((119, 96), use_4state);
+            let ProtoExpression::Value { value, width, .. } = &gone else {
+                panic!("expected a folded value: {gone:?}");
+            };
+            assert_eq!(*width, 24);
+            assert_eq!(value.is_xz(), xz, "{value:?}");
         }
     }
 }
