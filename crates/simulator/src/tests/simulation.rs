@@ -17722,6 +17722,7 @@ fn runtime_loops(code: &str, module: &str) -> usize {
             .map(|s| match s {
                 air::Statement::For(x) => 1 + count(&x.body),
                 air::Statement::If(x) => count(&x.true_side) + count(&x.false_side),
+                air::Statement::IfReset(x) => count(&x.true_side) + count(&x.false_side),
                 air::Statement::Case(x) => {
                     x.arms.iter().map(|a| count(&a.body)).sum::<usize>() + count(&x.default)
                 }
@@ -17747,21 +17748,46 @@ fn runtime_loops(code: &str, module: &str) -> usize {
         .sum()
 }
 
-/// Native scheduling may lower small constant loops, but its private copy
-/// must stay bounded even when the shared IR has a large constant range.
+/// A reset network is not worth an unrolled copy.
 #[test]
 fn constant_loop_lowering_keeps_an_over_budget_loop() {
     let code = r#"
-    module Top (a: input logic<32>, y: output logic<32>) {
-        always_comb {
-            y = 0;
-            for i in 0..40000 {
-                y = y + a;
+    module Top (clk: input clock, rst: input reset, a: input logic<32>, y: output logic<32>) {
+        var mem: logic<32> [40000];
+        always_ff {
+            if_reset {
+                for i in 0..40000 {
+                    mem[i] = 0;
+                }
+            } else {
+                mem[0] = a;
             }
         }
+        assign y = mem[0];
     }
     "#;
     assert_eq!(runtime_loops(code, "Top"), 1);
+}
+
+/// Outside reset an `always_ff` loop is logic, like a comb loop.
+#[test]
+fn constant_loop_lowering_unrolls_an_over_budget_loop_outside_reset() {
+    let code = r#"
+    module Top (clk: input clock, rst: input reset, a: input logic<32>, y: output logic<32>) {
+        var mem: logic<32> [5000];
+        always_ff {
+            if_reset {
+                mem[0] = 0;
+            } else {
+                for i in 0..5000 {
+                    mem[i] = a + i as 32;
+                }
+            }
+        }
+        assign y = mem[4999];
+    }
+    "#;
+    assert_eq!(runtime_loops(code, "Top"), 0);
 }
 
 /// A carry-save adder tree whose step loop breaks on a local initialised from
@@ -34377,6 +34403,46 @@ fn a_loop_skips_the_index_of_its_untaken_branch() {
                 "t={t} under {config:?}"
             );
         }
+    }
+}
+
+/// Kept whole, the two loops read each other's arrays: a cycle no element has.
+#[test]
+fn a_comb_loop_past_the_statement_limit_still_settles_in_one_pass() {
+    let code = r#"
+    module Top (
+        i: input  logic<2100>,
+        o: output logic<2100>,
+    ) {
+        var a: logic [2100];
+        var b: logic [2100];
+        always_comb {
+            for k in 0..2100 {
+                b[k] = a[k];
+            }
+        }
+        always_comb {
+            for k in 0..2100 {
+                a[k] = i[k];
+                o[k] = b[k];
+            }
+        }
+    }
+    "#;
+
+    use num_bigint::BigUint;
+    let v = (BigUint::from(1u32) << 2099u32) | BigUint::from(0b1011u32);
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        assert_eq!(ir.required_comb_passes, 1, "{config:?}");
+        let mut sim = Simulator::new(ir, None);
+        sim.set("i", Value::new_biguint(v.clone(), 2100, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("o").unwrap(),
+            Value::new_biguint(v.clone(), 2100, false),
+            "{config:?}"
+        );
     }
 }
 
