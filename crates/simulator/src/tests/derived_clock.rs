@@ -1656,3 +1656,338 @@ fn fall_partial_is_compared_under_validate() {
         "a validate run compared no falling-edge settle"
     );
 }
+
+/// An unpacked `clock [N]` is N independent nets: each element's edge must
+/// reach only the `always_ff` written on that element.
+#[test]
+fn clock_array_elements_are_separate_nets() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input  '_ logic<2>,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var clk_g: '_ clock [2];
+        assign clk_g[0] = i_clk & i_en[0];
+        assign clk_g[1] = i_clk & i_en[1];
+
+        always_ff (clk_g[0], i_rst) {
+            if_reset {
+                o_a = 0;
+            } else {
+                o_a += 1;
+            }
+        }
+        always_ff (clk_g[1], i_rst) {
+            if_reset {
+                o_b = 0;
+            } else {
+                o_b += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_en", Value::new(0b11, 2, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("i_en", Value::new(0b01, 2, false));
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(0, 8, false),
+            "clk_g[1] is gated off, so its counter must not follow clk_g[0]",
+        );
+
+        sim.set("i_en", Value::new(0b10, 2, false));
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(3, 8, false));
+    }
+}
+
+/// The same, with each element handed to a child instance's clock port:
+/// the element has to survive the port connection.
+#[test]
+fn clock_array_element_through_an_instance_port() {
+    let code = r#"
+    module Counter (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        o_cnt: output    logic<8>,
+    ) {
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                o_cnt = 0;
+            } else {
+                o_cnt += 1;
+            }
+        }
+    }
+
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input  '_ logic<2>,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var clk_g: '_ clock [2];
+        assign clk_g[0] = i_clk & i_en[0];
+        assign clk_g[1] = i_clk & i_en[1];
+
+        inst u_a: Counter (
+            i_clk: clk_g[0],
+            i_rst: i_rst   ,
+            o_cnt: o_a     ,
+        );
+        inst u_b: Counter (
+            i_clk: clk_g[1],
+            i_rst: i_rst   ,
+            o_cnt: o_b     ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_en", Value::new(0b11, 2, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("i_en", Value::new(0b10, 2, false));
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(0, 8, false),
+            "clk_g[0] is gated off",
+        );
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(4, 8, false));
+    }
+}
+
+/// A whole `clock [N]` handed to a child's `clock [N]` port keeps the
+/// element correspondence across the boundary.
+#[test]
+fn clock_array_port_keeps_its_elements() {
+    let code = r#"
+    module Sub (
+        i_clk: input  '_ clock [2],
+        i_rst: input  '_ reset,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        always_ff (i_clk[0], i_rst) {
+            if_reset {
+                o_a = 0;
+            } else {
+                o_a += 1;
+            }
+        }
+        always_ff (i_clk[1], i_rst) {
+            if_reset {
+                o_b = 0;
+            } else {
+                o_b += 1;
+            }
+        }
+    }
+
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input  '_ logic<2>,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var clk_g: '_ clock [2];
+        assign clk_g[0] = i_clk & i_en[0];
+        assign clk_g[1] = i_clk & i_en[1];
+
+        inst u_sub: Sub (
+            i_clk: clk_g,
+            i_rst: i_rst,
+            o_a  : o_a  ,
+            o_b  : o_b  ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.set("i_en", Value::new(0b11, 2, false));
+        sim.step_reset(&clk, &rst);
+
+        sim.set("i_en", Value::new(0b01, 2, false));
+        for _ in 0..6 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(6, 8, false));
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(0, 8, false));
+    }
+}
+
+/// An unpacked `reset [N]` splits the same way: asserting one element must
+/// not reset the registers held by another.
+#[test]
+fn reset_array_elements_are_separate_nets() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ logic<2>,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var rst_n: '_ reset_async_low [2];
+        assign rst_n[0] = ~i_rst[0];
+        assign rst_n[1] = ~i_rst[1];
+
+        always_ff (i_clk, rst_n[0]) {
+            if_reset {
+                o_a = 0;
+            } else {
+                o_a += 1;
+            }
+        }
+        always_ff (i_clk, rst_n[1]) {
+            if_reset {
+                o_b = 0;
+            } else {
+                o_b += 1;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+
+        sim.set("i_rst", Value::new(0b11, 2, false));
+        sim.step(&clk);
+        sim.set("i_rst", Value::new(0b00, 2, false));
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(5, 8, false));
+
+        // Only rst_n[0] asserts: the other counter keeps running.
+        sim.set("i_rst", Value::new(0b01, 2, false));
+        sim.step(&clk);
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(0, 8, false));
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(6, 8, false),
+            "rst_n[1] stayed deasserted",
+        );
+    }
+}
+
+/// A PORT array of the TOP module has no parent to take its element from,
+/// so every element's `always_ff` has to ride the one edge `get_clock`
+/// names, or it never runs at all.
+#[test]
+fn top_clock_array_port_folds_onto_one_edge() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock [2],
+        i_rst: input  '_ reset    ,
+        o_a  : output    logic<8> ,
+        o_b  : output    logic<8> ,
+    ) {
+        always_ff (i_clk[0], i_rst) {
+            if_reset { o_a = 0; } else { o_a += 1; }
+        }
+        always_ff (i_clk[1], i_rst) {
+            if_reset { o_b = 0; } else { o_b += 1; }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+
+        sim.step_reset(&clk, &rst);
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        // The second element is the one that silently stops.
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(4, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(4, 8, false),
+            "{config:?}"
+        );
+    }
+}
+
+/// The reset side folds the same way, but `set_reset_level` names the
+/// variable rather than an element, so there is no way to assert one from
+/// outside and watch it.  Pin the identity instead.
+#[test]
+fn top_reset_array_port_leaves_no_unreachable_event() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock    ,
+        i_rst: input  '_ reset [2],
+        o_a  : output    logic<8> ,
+        o_b  : output    logic<8> ,
+    ) {
+        always_ff (i_clk, i_rst[0]) {
+            if_reset { o_a = 0; } else { o_a += 1; }
+        }
+        always_ff (i_clk, i_rst[1]) {
+            if_reset { o_b = 0; } else { o_b += 1; }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let resets: Vec<Event> = ir
+            .event_statements
+            .keys()
+            .filter(|e| matches!(e, Event::Reset(..)))
+            .cloned()
+            .collect();
+        let named = Simulator::new(ir, None).get_reset("i_rst").unwrap();
+        // An element that lands anywhere else -- on its own index, or on an
+        // id synthesized for an internal net -- is one no caller can assert.
+        assert_eq!(resets, vec![named], "{config:?}");
+    }
+}

@@ -1172,10 +1172,10 @@ pub fn build_inputs(
     let mut master_clocks: Vec<(VarOffset, usize)> = Vec::new();
     if !trigger_events.is_empty() {
         for (off, vid) in masters {
-            let bit = match trigger_events.iter().position(|e| *e == Event::Clock(vid)) {
+            let bit = match trigger_events.iter().position(|e| *e == Event::clock(vid)) {
                 Some(i) => i,
                 None => {
-                    trigger_events.push(Event::Clock(vid));
+                    trigger_events.push(Event::clock(vid));
                     event_writes.push(EventWrites::default());
                     trigger_events.len() - 1
                 }
@@ -3141,8 +3141,8 @@ mod tests {
             ff_node: Vec::new(),
             event_written_comb: vec![(0, 8)],
             trigger_events: vec![
-                Event::Clock(VarId::from_raw(1)),
-                Event::Clock(VarId::from_raw(2)),
+                Event::clock(VarId::from_raw(1)),
+                Event::clock(VarId::from_raw(2)),
                 Event::InitialBlock(1),
             ],
             event_writes: vec![

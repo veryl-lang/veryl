@@ -4,7 +4,7 @@
 //! produced inside the module — by a comb expression (`let clk_g: clock
 //! = i_clk & i_en;`) or an `always_ff` write.  The simulator detects
 //! 0→1 transitions after each `step()` and synthesizes
-//! `Event::Clock(VarId)` for downstream `always_ff(derived_clk)`.
+//! `Event::Clock` for downstream `always_ff(derived_clk)`.
 //!
 //! Derived-clock values are refreshed by a dedicated
 //! `derived_clock_eval` ProtoStatements chunk (dependency closure only),
@@ -13,7 +13,7 @@
 //! A non-port ASYNC RESET the design produces itself rides the same
 //! machinery: no testbench drives it, so its assertion is a transition of
 //! an internal net just like a derived clock's rising edge, and firing
-//! `Event::Reset(VarId)` there is what keeps `if_reset` from waiting for
+//! `Event::Reset` there is what keeps `if_reset` from waiting for
 //! the next clock edge.
 
 use crate::HashMap;

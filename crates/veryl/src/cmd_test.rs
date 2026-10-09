@@ -1334,7 +1334,7 @@ fn run_doc_test(
         sim.ir
             .event_statements
             .keys()
-            .find(|e| matches!(e, veryl_simulator::ir::Event::Clock(_)))
+            .find(|e| matches!(e, veryl_simulator::ir::Event::Clock(..)))
             .cloned()
             .unwrap_or(veryl_simulator::ir::Event::Initial)
     };
@@ -1362,7 +1362,7 @@ fn run_doc_test(
             sim.ir
                 .reset_ports()
                 .first()
-                .map(|id| veryl_simulator::ir::Event::Reset(*id))
+                .map(|id| veryl_simulator::ir::Event::reset(*id))
         });
 
     remap_signal_names(&mut scenario, ports);

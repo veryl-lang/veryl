@@ -807,7 +807,7 @@ fn build_fall_partial(
     let (cap, budget) = fall_partial_caps(pre_jit_stmts.len());
     let event_stmts = |clk: &crate::ir::DerivedClock| -> &[ProtoStatement] {
         events
-            .get(&Event::Clock(clk.var_id))
+            .get(&Event::clock(clk.var_id))
             .map_or(&[], |v| v.as_slice())
     };
     let candidates: Vec<usize> = sched
@@ -6947,8 +6947,62 @@ impl Conv<&air::Module> for ProtoModule {
                 // reset-typed variable, making the condition mutable between
                 // two dispatches.  `always_ff` cannot (`invalid_clock_assignment`).
                 for (event, stmts) in all_event_statements.iter_mut() {
-                    if matches!(event, Event::Clock(_)) {
+                    if matches!(event, Event::Clock(..)) {
                         merge_reset_dispatch(stmts, &reset_offsets);
+                    }
+                }
+            }
+        }
+
+        // The schedule below identifies a net by id alone, so this is where
+        // an array's elements stop sharing one.  It has to run before
+        // `event_comb_writes` snapshots the key set.
+        let mut edge_elem_ids: HashMap<(VarId, u32), VarId> = HashMap::default();
+        {
+            let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
+            for (vid, var) in &src.variables {
+                let is_reset = var.r#type.is_reset();
+                if !var.r#type.is_clock() && !is_reset {
+                    continue;
+                }
+                let Some(meta) = variable_meta.get(vid) else {
+                    continue;
+                };
+                // A PORT array has no parent to take an element from, and
+                // the caller drives all of it with the single edge
+                // `get_clock` / `get_reset` names.  Fold onto that, or the
+                // elements past the first hold statements nothing can fire.
+                if port_var_set.contains(vid) {
+                    let whole = if is_reset {
+                        Event::reset(*vid)
+                    } else {
+                        Event::clock(*vid)
+                    };
+                    for elem in 1..meta.elements.len() as u32 {
+                        let part = if is_reset {
+                            Event::Reset(*vid, elem)
+                        } else {
+                            Event::Clock(*vid, elem)
+                        };
+                        if let Some(stmts) = all_event_statements.remove(&part) {
+                            all_event_statements
+                                .entry(whole.clone())
+                                .or_default()
+                                .extend(stmts);
+                        }
+                    }
+                    continue;
+                }
+                for elem in 1..meta.elements.len() as u32 {
+                    let unique_id = context.alloc_internal_event_id();
+                    edge_elem_ids.insert((*vid, elem), unique_id);
+                    let (old, new) = if is_reset {
+                        (Event::Reset(*vid, elem), Event::reset(unique_id))
+                    } else {
+                        (Event::Clock(*vid, elem), Event::clock(unique_id))
+                    };
+                    if let Some(stmts) = all_event_statements.remove(&old) {
+                        all_event_statements.insert(new, stmts);
                     }
                 }
             }
@@ -6989,15 +7043,28 @@ impl Conv<&air::Module> for ProtoModule {
         } else {
             // O(V+P) port lookup via HashSet.
             let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
+            let edge_id = |vid: &VarId, elem: usize| -> VarId {
+                edge_elem_ids
+                    .get(&(*vid, elem as u32))
+                    .copied()
+                    .unwrap_or(*vid)
+            };
             let mut dc_vars: Vec<crate::ir::EdgeCandidate> = src
                 .variables
                 .iter()
                 .filter(|(vid, var)| var.r#type.is_clock() && !port_var_set.contains(*vid))
-                .filter_map(|(vid, var)| {
-                    let meta = variable_meta.get(vid)?;
-                    let elem = meta.elements.first()?;
+                .filter_map(|(vid, var)| Some((vid, var, variable_meta.get(vid)?)))
+                .flat_map(|(vid, var, meta)| {
                     let negedge = matches!(var.r#type.kind, air::TypeKind::ClockNegedge);
-                    Some((*vid, elem.current, elem.native_bytes, None, negedge))
+                    meta.elements.iter().enumerate().map(move |(i, elem)| {
+                        (
+                            edge_id(vid, i),
+                            elem.current,
+                            elem.native_bytes,
+                            None,
+                            negedge,
+                        )
+                    })
                 })
                 .collect();
             // The top module's own async resets, for the same reason the
@@ -7006,30 +7073,36 @@ impl Conv<&air::Module> for ProtoModule {
             // on — a reset with no `if_reset` has nothing to fire.
             let mut top_inst_reset_kinds = None;
             for (vid, var) in &src.variables {
-                if !var.r#type.is_reset()
-                    || port_var_set.contains(vid)
-                    || !all_event_statements.contains_key(&Event::Reset(*vid))
-                {
+                if !var.r#type.is_reset() || port_var_set.contains(vid) {
                     continue;
                 }
-                let inst_kinds = top_inst_reset_kinds
-                    .get_or_insert_with(|| collect_inst_reset_kinds(declarations));
-                let (active_low, is_async) = resolved_reset_kind(
-                    &var.r#type.kind,
-                    inst_kinds.get(vid).copied().flatten(),
-                    &context.config,
-                );
-                if is_async
-                    && let Some(meta) = variable_meta.get(vid)
-                    && let Some(elem) = meta.elements.first()
-                {
-                    dc_vars.push((
-                        *vid,
-                        elem.current,
-                        elem.native_bytes,
-                        Some(active_low),
-                        false,
-                    ));
+                let Some(meta) = variable_meta.get(vid) else {
+                    continue;
+                };
+                let mut reset_kind = None;
+                for (i, elem) in meta.elements.iter().enumerate() {
+                    let id = edge_id(vid, i);
+                    if !all_event_statements.contains_key(&Event::reset(id)) {
+                        continue;
+                    }
+                    let (active_low, is_async) = *reset_kind.get_or_insert_with(|| {
+                        let inst_kinds = top_inst_reset_kinds
+                            .get_or_insert_with(|| collect_inst_reset_kinds(declarations));
+                        resolved_reset_kind(
+                            &var.r#type.kind,
+                            inst_kinds.get(vid).copied().flatten(),
+                            &context.config,
+                        )
+                    });
+                    if is_async {
+                        dc_vars.push((
+                            id,
+                            elem.current,
+                            elem.native_bytes,
+                            Some(active_low),
+                            false,
+                        ));
+                    }
                 }
             }
             // Nested candidates already carry absolute (parent-rebased)
@@ -7057,10 +7130,10 @@ impl Conv<&air::Module> for ProtoModule {
                 if !var.r#type.is_clock() {
                     continue;
                 }
-                if let Some(meta) = variable_meta.get(vid)
-                    && let Some(elem) = meta.elements.first()
-                {
-                    pc_offsets.insert(elem.current, *vid);
+                if let Some(meta) = variable_meta.get(vid) {
+                    for (i, elem) in meta.elements.iter().enumerate() {
+                        pc_offsets.insert(elem.current, edge_id(vid, i));
+                    }
                 }
             }
             (dc_vars, pc_offsets)
@@ -7221,7 +7294,7 @@ impl Conv<&air::Module> for ProtoModule {
             // The comb walk dwarfs planning one event, so share it.
             let mut comb_context = None;
             for (event, stmts) in all_event_statements.iter() {
-                if !matches!(event, Event::Clock(_)) {
+                if !matches!(event, Event::Clock(..)) {
                     continue;
                 }
                 let comb_context = comb_context.get_or_insert_with(|| {

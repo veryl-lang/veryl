@@ -822,7 +822,7 @@ impl Simulator {
                     clk.master_gated,
                     ret.ir
                         .event_statements
-                        .contains_key(&Event::Clock(clk.var_id)),
+                        .contains_key(&Event::clock(clk.var_id)),
                 );
             }
             eprintln!(
@@ -994,7 +994,7 @@ impl Simulator {
                 return None;
             }
             // Staging reads a component's inputs, which no group was built from.
-            let event = Event::Clock(self.ir.derived_clock_schedule.clocks[i].var_id);
+            let event = Event::clock(self.ir.derived_clock_schedule.clocks[i].var_id);
             if self.components.iter().any(|c| c.listens_to(&event)) {
                 return None;
             }
@@ -1012,7 +1012,7 @@ impl Simulator {
         for &i in batch {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
             if has_components {
-                self.stage_components(&Event::Clock(vid));
+                self.stage_components(&Event::clock(vid));
             }
         }
         if watch_enabled {
@@ -1020,7 +1020,7 @@ impl Simulator {
         }
         for &i in batch {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
-            self.eval_event_stmts(&Event::Clock(vid));
+            self.eval_event_stmts(&Event::clock(vid));
         }
         self.commit_event_log();
         if watch_enabled {
@@ -1029,7 +1029,7 @@ impl Simulator {
         for &i in batch {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
             if has_components {
-                self.fire_components(&Event::Clock(vid));
+                self.fire_components(&Event::clock(vid));
             }
         }
     }
@@ -1056,18 +1056,18 @@ impl Simulator {
             if has_components {
                 for &i in &fired {
                     let vid = self.ir.derived_clock_schedule.resets[i].var_id;
-                    self.stage_components(&Event::Reset(vid));
+                    self.stage_components(&Event::reset(vid));
                 }
             }
             for &i in &fired {
                 let vid = self.ir.derived_clock_schedule.resets[i].var_id;
-                self.eval_event_stmts(&Event::Reset(vid));
+                self.eval_event_stmts(&Event::reset(vid));
             }
             self.commit_event_log();
             for &i in &fired {
                 let vid = self.ir.derived_clock_schedule.resets[i].var_id;
                 if has_components {
-                    self.fire_components(&Event::Reset(vid));
+                    self.fire_components(&Event::reset(vid));
                 }
             }
             self.settle_comb_if_stale();
@@ -1125,7 +1125,7 @@ impl Simulator {
         // Set outside any event's statements; the analysis gives every master
         // clock its own bit.
         if !self.trigger_pending.is_empty() {
-            let bit = self.trigger_index[&Event::Clock(var_id)];
+            let bit = self.trigger_index[&Event::clock(var_id)];
             self.trigger_pending[bit / 64] |= 1u64 << (bit % 64);
         }
     }
@@ -1524,14 +1524,14 @@ impl Simulator {
 
     pub fn get_clock(&self, port: &str) -> Option<Event> {
         let port = VarPath::from_str(port).unwrap();
-        self.ir.ports.get(&port).map(|id| Event::Clock(*id))
+        self.ir.ports.get(&port).map(|id| Event::clock(*id))
     }
 
     pub fn get_reset(&self, port: &str) -> Option<Event> {
         let port = VarPath::from_str(port).unwrap();
         let id = self.ir.ports.get(&port)?;
         let var = self.ir.module_variables.variables.get(id)?;
-        var.r#type.is_reset().then_some(Event::Reset(*id))
+        var.r#type.is_reset().then_some(Event::reset(*id))
     }
 
     /// Drives a reset net to its asserted or deasserted level — all it takes
@@ -1655,8 +1655,8 @@ impl Simulator {
 
         if !self.watch_vars.is_empty() {
             let tag = match events.first() {
-                Some(Event::Clock(_)) => "clk",
-                Some(Event::Reset(_)) => "rst",
+                Some(Event::Clock(..)) => "clk",
+                Some(Event::Reset(..)) => "rst",
                 _ => "evt",
             };
             self.dump_watch_changes(tag);
@@ -1853,7 +1853,7 @@ impl Simulator {
     /// committing, so simultaneous events (master + gated clocks) share
     /// one pre-commit state and one commit.
     fn eval_event_stmts(&mut self, event: &Event) {
-        if !matches!(event, Event::Clock(_)) {
+        if !matches!(event, Event::Clock(..)) {
             self.invalidate_event_gates();
         }
         #[cfg(feature = "profile")]
@@ -2196,7 +2196,7 @@ impl Simulator {
         let masters: SmallVec<[VarId; 2]> = events
             .iter()
             .filter_map(|event| match event {
-                Event::Clock(id) | Event::Reset(id)
+                Event::Clock(id, _) | Event::Reset(id, _)
                     if self
                         .ir
                         .derived_clock_schedule
@@ -2256,7 +2256,7 @@ impl Simulator {
         }
         for &i in &pre_fire {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
-            self.stage_components(&Event::Clock(vid));
+            self.stage_components(&Event::clock(vid));
         }
         for event in events {
             self.eval_event_stmts(event);
@@ -2266,7 +2266,7 @@ impl Simulator {
             if watch_enabled {
                 self.dump_watch(&format!("pre_fire[{i}]"));
             }
-            self.eval_event_stmts(&Event::Clock(vid));
+            self.eval_event_stmts(&Event::clock(vid));
             fired_mask[i] = true;
         }
         // Rides the master event's commit so a domain whose clock is gated off
@@ -2278,7 +2278,7 @@ impl Simulator {
         }
         for &i in &pre_fire {
             let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
-            self.fire_components(&Event::Clock(vid));
+            self.fire_components(&Event::clock(vid));
         }
         if watch_enabled {
             self.dump_watch("after_master_event");
@@ -2397,13 +2397,13 @@ impl Simulator {
             for &i in &batch {
                 let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
                 if has_components {
-                    self.stage_components(&Event::Clock(vid));
+                    self.stage_components(&Event::clock(vid));
                 }
             }
             if has_components {
                 for &i in &rst_batch {
                     let vid = self.ir.derived_clock_schedule.resets[i].var_id;
-                    self.stage_components(&Event::Reset(vid));
+                    self.stage_components(&Event::reset(vid));
                 }
             }
             for &i in &batch {
@@ -2411,25 +2411,25 @@ impl Simulator {
                 if watch_enabled {
                     self.dump_watch(&format!("before_derived[{i}]"));
                 }
-                self.eval_event_stmts(&Event::Clock(vid));
+                self.eval_event_stmts(&Event::clock(vid));
             }
             // Resets last, so a net that both clocks and resets this
             // instant takes the reset value SV gives it.
             for &i in &rst_batch {
                 let vid = self.ir.derived_clock_schedule.resets[i].var_id;
-                self.eval_event_stmts(&Event::Reset(vid));
+                self.eval_event_stmts(&Event::reset(vid));
             }
             self.commit_event_log();
             for &i in &rst_batch {
                 let vid = self.ir.derived_clock_schedule.resets[i].var_id;
                 if has_components {
-                    self.fire_components(&Event::Reset(vid));
+                    self.fire_components(&Event::reset(vid));
                 }
             }
             for &i in &batch {
                 let vid = self.ir.derived_clock_schedule.clocks[i].var_id;
                 if has_components {
-                    self.fire_components(&Event::Clock(vid));
+                    self.fire_components(&Event::clock(vid));
                 }
                 if watch_enabled {
                     self.dump_watch(&format!("after_derived[{i}]"));
