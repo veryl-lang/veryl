@@ -2517,21 +2517,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// positions, starting at its first position. A progression is one entry
     /// however many positions it has.
     fn affine_progressions(&mut self, index: &AffineIndex) -> Option<Vec<(ArraySpan, usize)>> {
-        let assignments = self.index_progressions(index)?;
-        self.progressions_of(index, assignments, true)
-    }
-
-    /// The progressions of an affine index under each of `assignments`. A
-    /// division that is not `exact` keeps positions the index may not take,
-    /// so each progression steps by one position.
-    fn progressions_of(
-        &mut self,
-        index: &AffineIndex,
-        assignments: Vec<Vec<(VarId, isize)>>,
-        exact: bool,
-    ) -> Option<Vec<(ArraySpan, usize)>> {
         let mut progressions = Vec::new();
-        for assignment in assignments {
+        for assignment in self.index_progressions(index)? {
             let mut progression = AffineIndex {
                 terms: Vec::new(),
                 constant: index.constant,
@@ -2546,14 +2533,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     None => progression.terms.push((id, coefficient)),
                 }
             }
-            let step = if exact {
-                self.iterator_terms(&progression)
-                    .and_then(|terms| terms.first().map(|&(_, step, _)| step))
-                    .unwrap_or(1)
-                    .max(1)
-            } else {
-                1
-            };
+            let step = self
+                .iterator_terms(&progression)
+                .and_then(|terms| terms.first().map(|&(_, step, _)| step))
+                .unwrap_or(1)
+                .max(1);
             let (first, last) = self.affine_hull(&progression)?;
             if last < 0 {
                 continue;
@@ -2713,20 +2697,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let (fixed, count) = self.progression_division(index);
         if count != Some(0) && !count.is_some_and(|count| self.reserve_guard_work(count)) {
             self.exhaust_work();
-            return None;
-        }
-        Some(iterator_assignments(fixed))
-    }
-
-    /// The division of `index_progressions` when the procedure's work
-    /// affords it. `None` leaves the work as it was.
-    fn affordable_index_progressions(
-        &mut self,
-        index: &AffineIndex,
-    ) -> Option<Vec<Vec<(VarId, isize)>>> {
-        let (fixed, count) = self.progression_division(index);
-        let count = count.filter(|&count| self.guard_work.is_some_and(|work| work >= count))?;
-        if !self.reserve_guard_work(count) {
             return None;
         }
         Some(iterator_assignments(fixed))
@@ -3026,9 +2996,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// takes over their iterations: each access narrowed to each progression
     /// of those positions, as its span and the step between its positions.
     /// Overlapping progressions merge, and a position outside the array
-    /// reads nothing. When dividing the positions into progressions would
-    /// exceed the procedure's work, the access keeps the hull of the
-    /// positions instead.
+    /// reads nothing. A division beyond the procedure's work stops the
+    /// analysis, as for a write.
     fn reachable_reads(
         &mut self,
         flat: Option<&AffineIndex>,
@@ -3043,11 +3012,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Some(flat) = flat.filter(|flat| !flat.terms.is_empty()) else {
             return whole(accesses);
         };
-        let progressions = match self.affordable_index_progressions(flat) {
-            Some(assignments) => self.progressions_of(flat, assignments, true),
-            None => self.progressions_of(flat, vec![Vec::new()], false),
-        };
-        let Some(progressions) = progressions else {
+        let Some(progressions) = self.affine_progressions(flat) else {
             return whole(accesses);
         };
         let progressions = merge_progressions(progressions);
@@ -4717,7 +4682,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut iteration_controls = range_controls.to_vec();
         // Inside the scope of the last writers, which scans this loop as one
         // over its iterations, each iteration is the one of its value.
-        let in_scope = self.scans_enumerated_loop(statement);
+        let in_scope = self.scans_enumerated_loop();
         for (ordinal, value) in iterations.into_iter().enumerate() {
             self.set_known_iterator_value(statement, value);
             let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
@@ -7427,6 +7392,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             for ((destination, width), selectors) in destinations.iter().zip(widths).zip(selectors)
             {
                 offset -= width;
+                let previous = self
+                    .current_writer
+                    .replace(last_writer::output_writer(destination));
                 self.write_formal_output(
                     destination,
                     formal_versions,
@@ -7434,11 +7402,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     total_width,
                     &selectors,
                 );
+                self.current_writer = previous;
             }
         } else {
             for (destination, mut sources) in destinations.iter().zip(selectors) {
                 sources.extend(formal_versions.iter().map(|(_, version)| *version));
+                let previous = self
+                    .current_writer
+                    .replace(last_writer::output_writer(destination));
                 self.bind_whole_destination(destination, sources, controls);
+                self.current_writer = previous;
             }
         }
     }

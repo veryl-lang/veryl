@@ -34,8 +34,8 @@ use crate::comb_loop_detect::position::{
 use crate::comb_loop_detect::region::NodeKey;
 use crate::comb_loop_detect::ssa::VersionId;
 use crate::ir::{
-    CasePattern, Expression, Factor, ForRange, ForStatement, MemberSelectDomain, Statement,
-    SystemFunctionKind, VarId, VarIndex, VarSelect,
+    AssignDestination, CasePattern, Expression, Factor, ForRange, ForStatement, MemberSelectDomain,
+    Statement, SystemFunctionKind, VarId, VarIndex, VarSelect,
 };
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -129,6 +129,9 @@ struct Scan {
     confined: crate::HashSet<VarId>,
     /// Whether the statements scanned are on only some iterations.
     confining: bool,
+    /// Each enclosing loop that breaks, at its place, and whether a break of
+    /// it has been scanned: what follows a break may not run.
+    breaking: Vec<(Vec<Step>, bool)>,
 }
 
 /// An affine expression over the read's iterators.
@@ -471,15 +474,58 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// Whether a loop that takes each of its values is evaluated in the
-    /// active scope, which scans it as one over its iterations unless it
-    /// breaks.
-    pub(super) fn scans_enumerated_loop(&self, statement: &ForStatement) -> bool {
-        self.active_writer_scope().is_some() && !crate::ir::peel::has_own_break(&statement.body)
+    /// active scope, which scans it as one over its iterations.
+    pub(super) fn scans_enumerated_loop(&self) -> bool {
+        self.active_writer_scope().is_some()
     }
 
     fn active_writer_scope(&self) -> Option<Rc<WriterScope>> {
         let scope = self.writer_scope.as_ref()?;
         (self.call_frames.len() == scope.call_depth).then(|| Rc::clone(scope))
+    }
+
+    /// Record each of `writes` at `path` on the current iterations.
+    fn record_writers<'d>(
+        &mut self,
+        scan: &mut Scan,
+        path: &[Step],
+        branches: &[DataBranch],
+        writes: impl Iterator<Item = (WriterId, &'d AssignDestination)>,
+    ) {
+        for (id, destination) in writes {
+            let elements = self.affine_elements(destination.id, &destination.index);
+            let access = self.access_forms(
+                destination.id,
+                elements.as_ref(),
+                &destination.select,
+                destination.comptime.member_select_domain,
+            );
+            let Some(access) = access else {
+                scan.unknown.insert(destination.id);
+                continue;
+            };
+            // A write after a break runs only when the loop did not break,
+            // as on an arm of a branch on data.
+            let mut branches = branches.to_vec();
+            branches.extend(scan.breaking.iter().filter(|(_, broken)| *broken).map(
+                |(place, _)| DataBranch {
+                    place: place.clone(),
+                    arm: 0,
+                    arms: 2,
+                },
+            ));
+            scan.writers
+                .entry(destination.id)
+                .or_default()
+                .push(SubWriter {
+                    id,
+                    path: path.to_vec(),
+                    loops: place_loops(path),
+                    domains: self.counted_iterators.clone(),
+                    access,
+                    branches,
+                });
+        }
     }
 
     /// Scan each iteration of a loop over `values` as the one numbered by
@@ -579,31 +625,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                 }
                 let record = |this: &mut Self, scan: &mut Scan, path: &[Step]| {
-                    for (index, destination) in assign.dst.iter().enumerate() {
-                        let elements = this.affine_elements(destination.id, &destination.index);
-                        let access = this.access_forms(
-                            destination.id,
-                            elements.as_ref(),
-                            &destination.select,
-                            destination.comptime.member_select_domain,
-                        );
-                        let Some(access) = access else {
-                            scan.unknown.insert(destination.id);
-                            continue;
-                        };
-                        let loops = place_loops(path);
-                        scan.writers
-                            .entry(destination.id)
-                            .or_default()
-                            .push(SubWriter {
-                                id: (assign.token, index),
-                                path: path.to_vec(),
-                                loops,
-                                domains: this.counted_iterators.clone(),
-                                access,
-                                branches: branches.clone(),
-                            });
-                    }
+                    let writes = assign
+                        .dst
+                        .iter()
+                        .enumerate()
+                        .map(|(index, destination)| ((assign.token, index), destination));
+                    this.record_writers(scan, path, branches, writes);
                 };
                 if let Expression::Ternary(condition, ..) = &assign.expr
                     && let Some(split) = self.iterator_condition_split(condition)
@@ -706,11 +733,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     return Some(());
                 }
                 // A loop evaluated with a symbolic iterator is scanned, and so
-                // is one that takes each of its values without breaking: its
-                // iterations still all run in order, each evaluated as the one
-                // of its value. A loop whose step multiplies has few values,
-                // so each is scanned as its own iteration, with the positions
-                // its value gives.
+                // is one that takes each of its values: its iterations run in
+                // order, each evaluated as the one of its value. A loop whose
+                // step multiplies or that breaks is scanned value by value,
+                // each as its own iteration with the positions its value
+                // gives; after a break, nothing is certain to run.
                 let mut ordinals = None;
                 let iterator = match super::loop_evaluation(statement, &mut self.ctx) {
                     super::LoopEvaluation::Counted(iterations) => {
@@ -719,9 +746,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         }
                         CountedIterator::of(statement, iterations)?
                     }
-                    super::LoopEvaluation::Enumerated(values)
-                        if !crate::ir::peel::has_own_break(&statement.body) =>
-                    {
+                    super::LoopEvaluation::Enumerated(values) => {
                         if values.is_empty() {
                             return Some(());
                         }
@@ -740,7 +765,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             )?,
                         }
                     }
-                    _ => return None,
+                    super::LoopEvaluation::OverLimit | super::LoopEvaluation::Runtime => {
+                        return None;
+                    }
                 };
                 let next = scan.loops.len();
                 let id = *scan.loop_ids.entry(original).or_insert(next);
@@ -750,6 +777,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         ascending: iterator.id == VarId::SYNTHETIC
                             || !matches!(statement.range, ForRange::Reverse { .. }),
                     });
+                }
+                let breaks = crate::ir::peel::has_own_break(&statement.body);
+                if breaks {
+                    scan.breaking.push((path.clone(), false));
                 }
                 path.push(Step::Loop(id));
                 self.forget_runtime_iterator_value(statement.var_id);
@@ -763,7 +794,42 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                 };
                 path.pop();
+                if breaks {
+                    scan.breaking.pop();
+                }
                 scanned
+            }
+            // A break belongs to the innermost loop, which breaks.
+            Statement::Break => {
+                scan.breaking.last_mut()?.1 = true;
+                Some(())
+            }
+            // A call that writes nothing but its own variables and outputs
+            // writes each output as an assignment would.
+            Statement::FunctionCall(call) => {
+                if !self.function_is_pure(call)
+                    || !call.inputs.values().all(|input| self.reads_only(input))
+                {
+                    return None;
+                }
+                let destinations = call.outputs.values().flatten().collect::<Vec<_>>();
+                for destination in &destinations {
+                    let selectors = destination
+                        .index
+                        .expressions()
+                        .chain(destination.select.0.iter())
+                        .chain(destination.select.1.as_ref().map(|(_, end)| end));
+                    for expression in selectors {
+                        if !self.reads_only(expression) {
+                            return None;
+                        }
+                    }
+                }
+                let writes = destinations
+                    .into_iter()
+                    .map(|destination| (output_writer(destination), destination));
+                self.record_writers(scan, path, branches, writes);
+                Some(())
             }
             Statement::SystemFunctionCall(call) => {
                 let inputs = match &call.kind {
@@ -778,11 +844,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     .then_some(())
             }
             Statement::Null => Some(()),
-            Statement::FunctionCall(_)
-            | Statement::Break
-            | Statement::IfReset(_)
-            | Statement::TbMethodCall(_)
-            | Statement::Unsupported(_) => None,
+            Statement::IfReset(_) | Statement::TbMethodCall(_) | Statement::Unsupported(_) => None,
         }
     }
 
@@ -1088,7 +1150,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         if !matches!(
             statement,
-            Statement::Assign(_) | Statement::If(_) | Statement::Case(_)
+            Statement::Assign(_)
+                | Statement::If(_)
+                | Statement::Case(_)
+                | Statement::FunctionCall(_)
         ) {
             return None;
         }
@@ -1639,16 +1704,17 @@ fn restrict(cell: &mut Cell, constraint: Constraint) -> Option<bool> {
 
 type Read = (VarId, VarIndex, VarSelect, Option<MemberSelectDomain>);
 
-/// For a loop whose values do not step additively, the iterator over the
-/// order of its iterations, at the one numbered `ordinal`. No expression
-/// reads it, so a position that moves with the loop's own values is not
-/// affine in it.
+/// For a loop whose values do not step additively or that breaks, the
+/// iterator over the order of its iterations, at the one numbered `ordinal`.
+/// No expression reads it, so a position that moves with the loop's own
+/// values is not affine in it.
 pub(super) fn ordinal_iterator(
     statement: &ForStatement,
     ordinal: isize,
 ) -> Option<CountedIterator> {
-    matches!(statement.range, ForRange::Stepped { .. })
-        .then(|| CountedIterator::new(VarId::SYNTHETIC, ordinal, ordinal))
+    (matches!(statement.range, ForRange::Stepped { .. })
+        || crate::ir::peel::has_own_break(&statement.body))
+    .then(|| CountedIterator::new(VarId::SYNTHETIC, ordinal, ordinal))
 }
 
 /// Each statement of `specialized`, a body specialized from `original`
@@ -1687,6 +1753,12 @@ pub(super) fn statement_origins(
     }
 }
 
+/// The writer of a call output: the output's own place, as each output of a
+/// call is one lvalue.
+pub(super) fn output_writer(destination: &AssignDestination) -> WriterId {
+    (destination.token, 0)
+}
+
 /// The variable reads a statement makes before its nested statements.
 fn statement_reads(statement: &Statement) -> Vec<Read> {
     let mut reads = Vec::new();
@@ -1695,6 +1767,21 @@ fn statement_reads(statement: &Statement) -> Vec<Read> {
         Statement::Assign(assign) => {
             collect(&assign.expr);
             for destination in &assign.dst {
+                for expression in destination
+                    .index
+                    .expressions()
+                    .chain(destination.select.0.iter())
+                    .chain(destination.select.1.as_ref().map(|(_, end)| end))
+                {
+                    collect(expression);
+                }
+            }
+        }
+        Statement::FunctionCall(call) => {
+            for input in call.inputs.values() {
+                collect(input);
+            }
+            for destination in call.outputs.values().flatten() {
                 for expression in destination
                     .index
                     .expressions()
@@ -1730,8 +1817,19 @@ fn statement_accesses(statement: &Statement) -> Vec<VarId> {
         .into_iter()
         .map(|(id, ..)| id)
         .collect::<Vec<_>>();
-    if let Statement::Assign(assign) = statement {
-        ids.extend(assign.dst.iter().map(|destination| destination.id));
+    match statement {
+        Statement::Assign(assign) => {
+            ids.extend(assign.dst.iter().map(|destination| destination.id));
+        }
+        Statement::FunctionCall(call) => {
+            ids.extend(
+                call.outputs
+                    .values()
+                    .flatten()
+                    .map(|destination| destination.id),
+            );
+        }
+        _ => {}
     }
     ids
 }

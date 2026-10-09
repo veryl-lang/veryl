@@ -1476,3 +1476,91 @@ counted_case!(
      assign o = {7'd0, c};",
     false
 );
+
+counted_case!(
+    counted_breaking_inner_loop_write_before_its_break_reaches_a_later_iteration,
+    "a write before an inner loop can break is what a later iteration reads",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[0]; }
+             for j in 0..4 { y[j] = x[j] ^ c; if x[j] { break; } }
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_breaking_inner_loop_write_after_a_break_may_not_run,
+    "a write an inner loop reaches only past a break leaves the earlier value",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[1]; }
+             for j in 0..4 { y[j] = x[j] ^ c; if x[j] { break; } }
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_call_output_reaches_a_later_iteration_read,
+    "a later iteration reads what a call wrote to its output",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[0]; }
+             f(x[0] ^ c, y[0]);
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_call_output_misses_a_first_iteration_read,
+    "the first iteration reads the value from before a call writes its output",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 0 { c = y[0]; }
+             f(x[0] ^ c, y[0]);
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_call_output_moving_with_the_iterator_reaches_the_next_iteration,
+    "each iteration reads the element a call wrote on the one before",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     function f (v: input logic, w: output logic) { w = v; }
+     always_comb {
+         c = 0;
+         for i in 0..4 {
+             if i >= 1 { c = y[i - 1]; }
+             f(x[0] ^ c, y[i]);
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
