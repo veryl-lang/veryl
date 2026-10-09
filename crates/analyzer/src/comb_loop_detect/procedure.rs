@@ -179,6 +179,14 @@ fn integer_range(width: usize, signed: bool) -> Option<(i128, i128)> {
     (magnitude > 0).then(|| (if signed { -magnitude } else { 0 }, magnitude - 1))
 }
 
+/// The coordinates of an access to each element dimension, outermost
+/// first, and the position they give in the flattened array.
+#[derive(Clone)]
+struct AffineElements {
+    elements: Vec<AffineIndex>,
+    flat: AffineIndex,
+}
+
 #[derive(Clone)]
 struct SampledAffineIndex {
     index: AffineIndex,
@@ -245,6 +253,59 @@ fn affine_index(
 /// exactly like the negative integer, as long as it wraps past the last
 /// position and no positive value wraps. The selected positions of the
 /// integer form and of the bit vector then agree.
+/// Progressions as spans with the step between their positions, from the
+/// first, merged where they overlap or touch: a merged progression steps by
+/// the steps of both and the distance between their starts.
+fn merge_progressions(mut progressions: Vec<(ArraySpan, usize)>) -> Vec<(ArraySpan, usize)> {
+    progressions.sort_unstable_by_key(|(span, _)| span.start);
+    let mut merged: Vec<(ArraySpan, usize)> = Vec::new();
+    for (span, step) in progressions {
+        if let Some((last, last_step)) = merged.last_mut()
+            && span.start <= last.start + last.length
+        {
+            let end = (last.start + last.length).max(span.start + span.length);
+            *last_step = greatest_common_divisor(
+                greatest_common_divisor(*last_step, step),
+                span.start - last.start,
+            );
+            last.length = end - last.start;
+            continue;
+        }
+        merged.push((span, step));
+    }
+    merged
+}
+
+/// Whether a position of the progression from the start of `span`, `step`
+/// apart, lies in both `span` and `key`.
+fn progression_meets(span: ArraySpan, step: usize, key: ArraySpan) -> bool {
+    let from = span.start.max(key.start);
+    let end = (span.start + span.length).min(key.start + key.length);
+    (from - span.start)
+        .checked_next_multiple_of(step)
+        .is_some_and(|offset| span.start + offset < end)
+}
+
+/// Every assignment of values to `iterators`, one empty assignment when
+/// there are none.
+fn iterator_assignments(iterators: Vec<CountedIterator>) -> Vec<Vec<(VarId, isize)>> {
+    let mut assignments = vec![Vec::new()];
+    for iterator in iterators {
+        let values = (iterator.min..=iterator.max).step_by(iterator.modulus.unsigned_abs());
+        assignments = assignments
+            .into_iter()
+            .flat_map(|assignment: Vec<(VarId, isize)>| {
+                values.clone().map(move |value| {
+                    let mut assignment = assignment.clone();
+                    assignment.push((iterator.id, value));
+                    assignment
+                })
+            })
+            .collect();
+    }
+    assignments
+}
+
 fn affine_position(
     expression: &Expression,
     ctx: &mut Context,
@@ -1525,16 +1586,30 @@ impl CountedIterator {
         if min > max {
             return Ok(None);
         }
-        let min = checked(first_in_class(residue, modulus, min))?;
-        let offset = checked(max.checked_sub(residue))?.rem_euclid(modulus);
-        let max = checked(max.checked_sub(offset))?;
-        Ok((min <= max).then_some(Self {
+        // The first and last values of the class within the bounds, taken
+        // wide: a value of the class past `isize` lies beyond the bounds,
+        // so the class is empty there rather than overflowing.
+        let (wide_min, wide_max, residue_wide, modulus_wide) =
+            (min as i128, max as i128, residue as i128, modulus as i128);
+        let first = wide_min + (residue_wide - wide_min).rem_euclid(modulus_wide);
+        let last = wide_max - (wide_max - residue_wide).rem_euclid(modulus_wide);
+        if first > last {
+            return Ok(None);
+        }
+        // Both lie within the bounds, so within `isize`.
+        let (min, max) = (first as isize, last as isize);
+        Ok(Some(Self {
             min,
             max,
             modulus,
             residue,
             ..self
         }))
+    }
+
+    /// The number of values, `None` when it does not fit in `isize`.
+    fn count(&self) -> Option<isize> {
+        Some(self.max.checked_sub(self.min)? / self.modulus + 1)
     }
 
     /// The values in `min..=max`, `None` when there are none.
@@ -2283,13 +2358,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn flattened_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<AffineIndex> {
+        self.affine_elements(id, index)
+            .map(|elements| elements.flat)
+    }
+
+    /// The coordinates of an access to every element dimension, each affine
+    /// in the counted iterators, and the position they give in the
+    /// flattened array.
+    fn affine_elements(&mut self, id: VarId, index: &VarIndex) -> Option<AffineElements> {
         let index = self.receiver_index(id, index);
         let variable = self.ctx.variables.get(&id)?;
         if index.is_range() || index.dimension() != variable.r#type.array.dims() {
             return None;
         }
         let dimensions = variable.r#type.array.clone();
-        let mut result = AffineIndex::default();
+        let mut elements = Vec::new();
+        let mut flat = AffineIndex::default();
         let mut stride = 1isize;
         // Validate the original bit-vector expressions before flattening.
         // Layout strides are integer coordinate arithmetic, not synthetic
@@ -2302,10 +2386,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 &self.counted_iterators,
                 dimension,
             )?;
-            result.add_scaled(&coordinate, stride)?;
+            flat.add_scaled(&coordinate, stride)?;
             stride = stride.checked_mul(isize::try_from(dimension).ok()?)?;
+            elements.push(coordinate);
         }
-        Some(result)
+        elements.reverse();
+        Some(AffineElements { elements, flat })
     }
 
     /// Lowest bit and width of a packed select whose coordinates are affine.
@@ -2427,8 +2513,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// positions, starting at its first position. A progression is one entry
     /// however many positions it has.
     fn affine_progressions(&mut self, index: &AffineIndex) -> Option<Vec<(ArraySpan, usize)>> {
+        let assignments = self.index_progressions(index)?;
+        self.progressions_of(index, assignments, true)
+    }
+
+    /// The progressions of an affine index under each of `assignments`. A
+    /// division that is not `exact` keeps positions the index may not take,
+    /// so each progression steps by one position.
+    fn progressions_of(
+        &mut self,
+        index: &AffineIndex,
+        assignments: Vec<Vec<(VarId, isize)>>,
+        exact: bool,
+    ) -> Option<Vec<(ArraySpan, usize)>> {
         let mut progressions = Vec::new();
-        for assignment in self.index_progressions(index)? {
+        for assignment in assignments {
             let mut progression = AffineIndex {
                 terms: Vec::new(),
                 constant: index.constant,
@@ -2443,11 +2542,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     None => progression.terms.push((id, coefficient)),
                 }
             }
-            let step = self
-                .iterator_terms(&progression)
-                .and_then(|terms| terms.first().map(|&(_, step, _)| step))
-                .unwrap_or(1)
-                .max(1);
+            let step = if exact {
+                self.iterator_terms(&progression)
+                    .and_then(|terms| terms.first().map(|&(_, step, _)| step))
+                    .unwrap_or(1)
+                    .max(1)
+            } else {
+                1
+            };
             let (first, last) = self.affine_hull(&progression)?;
             if last < 0 {
                 continue;
@@ -2574,8 +2676,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .map(|&(id, coefficient)| {
                 let iterator = self.counted_iterator(id)?;
                 let step = coefficient.checked_abs()?.checked_mul(iterator.modulus)?;
-                let count = (iterator.max - iterator.min) / iterator.modulus + 1;
-                Some((id, step, count))
+                Some((id, step, iterator.count()?))
             })
             .collect::<Option<Vec<_>>>()?;
         terms.sort_unstable_by_key(|&(_, step, _)| step);
@@ -2605,11 +2706,37 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// assignment is charged to the procedure's work, so `None` means the
     /// division would exceed it and the analysis stops.
     fn index_progressions(&mut self, index: &AffineIndex) -> Option<Vec<Vec<(VarId, isize)>>> {
+        let (fixed, count) = self.progression_division(index);
+        if count != Some(0) && !count.is_some_and(|count| self.reserve_guard_work(count)) {
+            self.exhaust_work();
+            return None;
+        }
+        Some(iterator_assignments(fixed))
+    }
+
+    /// The division of `index_progressions` when the procedure's work
+    /// affords it. `None` leaves the work as it was.
+    fn affordable_index_progressions(
+        &mut self,
+        index: &AffineIndex,
+    ) -> Option<Vec<Vec<(VarId, isize)>>> {
+        let (fixed, count) = self.progression_division(index);
+        let count = count.filter(|&count| self.guard_work.is_some_and(|work| work >= count))?;
+        if !self.reserve_guard_work(count) {
+            return None;
+        }
+        Some(iterator_assignments(fixed))
+    }
+
+    /// The counted iterators `index_progressions` fixes and the number of
+    /// assignments of their values, `None` when it does not fit in `usize`.
+    /// No iterators and zero assignments mean no division.
+    fn progression_division(&self, index: &AffineIndex) -> (Vec<CountedIterator>, Option<usize>) {
         let Some(terms) = self.iterator_terms(index) else {
-            return Some(vec![Vec::new()]);
+            return (Vec::new(), Some(0));
         };
         if Self::forms_one_progression(&terms) {
-            return Some(vec![Vec::new()]);
+            return (Vec::new(), Some(0));
         }
         let kept = terms
             .iter()
@@ -2621,29 +2748,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .filter_map(|&(id, _, _)| self.counted_iterator(id))
             .collect::<Vec<_>>();
         let count = fixed.iter().try_fold(1usize, |count, iterator| {
-            let values =
-                usize::try_from((iterator.max - iterator.min) / iterator.modulus + 1).ok()?;
-            count.checked_mul(values)
+            count.checked_mul(usize::try_from(iterator.count()?).ok()?)
         });
-        if !count.is_some_and(|count| self.reserve_guard_work(count)) {
-            self.exhaust_work();
-            return None;
-        }
-        let mut assignments = vec![Vec::new()];
-        for iterator in fixed {
-            let values = (iterator.min..=iterator.max).step_by(iterator.modulus as usize);
-            assignments = assignments
-                .into_iter()
-                .flat_map(|assignment: Vec<(VarId, isize)>| {
-                    values.clone().map(move |value| {
-                        let mut assignment = assignment.clone();
-                        assignment.push((iterator.id, value));
-                        assignment
-                    })
-                })
-                .collect();
-        }
-        Some(assignments)
+        (fixed, count)
     }
 
     /// The links from a source coordinate to a destination coordinate, one
@@ -2874,16 +2981,36 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .map(|key| (key, self.read_key(key)))
                 .collect();
         }
-        let sources = self.last_writer_sources(id, index, select, member_select_domain);
+        // The affine coordinates both the last writers and the reachable
+        // positions take, derived once.
+        let elements = if self.writer_scope.is_some()
+            || (!self.counted_iterators.is_empty() && !index.is_const())
+        {
+            self.affine_elements(id, index)
+        } else {
+            None
+        };
+        let sources =
+            self.last_writer_sources_of(id, elements.as_ref(), select, member_select_domain);
         let receiver = self.receiver_index(id, index);
         let accesses = var_reads(id, &receiver, select, member_select_domain, &mut self.ctx);
         if accesses.is_empty() && !(receiver.is_const() && select.is_const_with_range()) {
             self.status = self.status.max(AnalysisStatus::Partial);
         }
-        let accesses = self.reachable_reads(id, index, accesses);
+        let accesses = if index.is_const() {
+            accesses
+                .into_iter()
+                .map(|(array, packed)| (array, packed, 1))
+                .collect()
+        } else {
+            self.reachable_reads(elements.as_ref().map(|elements| &elements.flat), accesses)
+        };
         let mut values = Vec::new();
-        for (array, packed) in accesses {
+        for (array, packed, step) in accesses {
             for key in self.bit_part.overlapping_access(id, array, packed) {
+                if !progression_meets(array, step, key.1) {
+                    continue;
+                }
                 let version = self.read_source_key(key, sources.as_deref());
                 values.push((key, self.project_read(key, version, array, packed)));
             }
@@ -2892,31 +3019,47 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// An index affine in the counted iterators reads only the elements it
-    /// takes over their iterations: each access narrowed to the span of each
-    /// progression of those positions. A position outside the array reads
-    /// nothing.
+    /// takes over their iterations: each access narrowed to each progression
+    /// of those positions, as its span and the step between its positions.
+    /// Overlapping progressions merge, and a position outside the array
+    /// reads nothing. When dividing the positions into progressions would
+    /// exceed the procedure's work, the access keeps the hull of the
+    /// positions instead.
     fn reachable_reads(
         &mut self,
-        id: VarId,
-        index: &VarIndex,
+        flat: Option<&AffineIndex>,
         accesses: Vec<(ArraySpan, PackedSpan)>,
-    ) -> Vec<(ArraySpan, PackedSpan)> {
-        if self.counted_iterators.is_empty() || index.is_const() {
-            return accesses;
-        }
-        let Some(progressions) = self
-            .flattened_affine_index(id, index)
-            .filter(|affine| !affine.terms.is_empty())
-            .and_then(|affine| self.affine_progressions(&affine))
-        else {
-            return accesses;
+    ) -> Vec<(ArraySpan, PackedSpan, usize)> {
+        let whole = |accesses: Vec<(ArraySpan, PackedSpan)>| {
+            accesses
+                .into_iter()
+                .map(|(array, packed)| (array, packed, 1))
+                .collect()
         };
+        let Some(flat) = flat.filter(|flat| !flat.terms.is_empty()) else {
+            return whole(accesses);
+        };
+        let progressions = match self.affordable_index_progressions(flat) {
+            Some(assignments) => self.progressions_of(flat, assignments, true),
+            None => self.progressions_of(flat, vec![Vec::new()], false),
+        };
+        let Some(progressions) = progressions else {
+            return whole(accesses);
+        };
+        let progressions = merge_progressions(progressions);
         accesses
             .into_iter()
             .flat_map(|(array, packed)| {
-                progressions
-                    .iter()
-                    .filter_map(move |&(span, _)| Some((array.intersection(span)?, packed)))
+                progressions.iter().filter_map(move |&(span, step)| {
+                    let first = span.start.max(array.start);
+                    // The first position of the progression in the access.
+                    let first = span.start + (first - span.start).checked_next_multiple_of(step)?;
+                    let span = ArraySpan {
+                        start: first,
+                        length: (span.start + span.length).checked_sub(first)?,
+                    };
+                    Some((array.intersection(span)?, packed, step))
+                })
             })
             .collect()
     }
@@ -4247,9 +4390,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // Arithmetic beyond `isize` leaves the condition unsplit, so both
         // sides take every iteration.
         let within = |min: isize, max: isize| iterator.within(min, max).ok();
-        // Iterations below and from `bound`.
-        let below =
-            |bound: isize| Some((within(min, bound.saturating_sub(1))?, within(bound, max)?));
+        // Iterations below and above `bound`, none past the iterator's
+        // ends, so the bound moves by one only inside them.
+        let before = |bound: isize| {
+            if bound > min {
+                within(min, bound - 1)
+            } else {
+                Some(None)
+            }
+        };
+        let after = |bound: isize| {
+            if bound < max {
+                within(bound + 1, max)
+            } else {
+                Some(None)
+            }
+        };
+        // Iterations below `bound` and from it, and up to it and above it.
+        let below = |bound: isize| Some((before(bound)?, within(bound, max)?));
+        let up_to = |bound: isize| Some((within(min, bound)?, after(bound)?));
         let pair = |(holds, fails)| (vec![holds], vec![fails]);
         let (holds, fails) = match op {
             Op::Eq | Op::Ne => {
@@ -4257,10 +4416,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // The other values lie below and above the constant, each
                 // one progression.
                 let unequal = if equal.is_some() {
-                    vec![
-                        within(min, constant.saturating_sub(1))?,
-                        within(constant.saturating_add(1), max)?,
-                    ]
+                    vec![before(constant)?, after(constant)?]
                 } else {
                     vec![Some(iterator)]
                 };
@@ -4272,9 +4428,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
             }
             Op::Less => pair(below(constant)?),
-            Op::LessEq => pair(below(constant.saturating_add(1))?),
+            Op::LessEq => pair(up_to(constant)?),
             Op::Greater => {
-                let (lower, upper) = below(constant.saturating_add(1))?;
+                let (lower, upper) = up_to(constant)?;
                 (vec![upper], vec![lower])
             }
             Op::GreaterEq => {
@@ -4333,7 +4489,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // period of their own progression, so no more than there are
         // iterations. Each remainder is one arm, charged to the procedure's
         // work before any is built.
-        let iterations = (iterator.max - iterator.min) / iterator.modulus + 1;
+        let iterations = iterator.count()?;
         if !self.reserve_guard_work(usize::try_from(divisor.min(iterations)).ok()?) {
             return None;
         }
@@ -7534,5 +7690,38 @@ mod tests {
         assert_eq!(iterator.within(isize::MAX, 3), Ok(None));
         let within = iterator.within(2, isize::MAX).unwrap().expect("3 remains");
         assert_eq!((within.min, within.max), (3, 3));
+    }
+
+    #[test]
+    fn counted_iterator_class_past_the_bounds_is_empty() {
+        let iterator = CountedIterator {
+            id: VarId::default(),
+            min: isize::MAX - 2,
+            max: isize::MAX,
+            modulus: 1,
+            residue: 0,
+        };
+        // The next value of the class lies past `isize::MAX`, so there is
+        // none rather than an overflow.
+        let residue = (isize::MAX - 3).rem_euclid(8);
+        assert_eq!(
+            iterator.confined(isize::MIN, isize::MAX, 8, residue),
+            Ok(None)
+        );
+        let iterator = CountedIterator {
+            min: isize::MIN,
+            max: isize::MIN + 2,
+            ..iterator
+        };
+        let residue = (isize::MIN + 3).rem_euclid(8);
+        assert_eq!(
+            iterator.confined(isize::MIN, isize::MAX, 8, residue),
+            Ok(None)
+        );
+        let last = iterator
+            .confined(isize::MIN, isize::MAX, 8, isize::MIN.rem_euclid(8))
+            .unwrap()
+            .expect("the first value remains");
+        assert_eq!((last.min, last.max), (isize::MIN, isize::MIN));
     }
 }

@@ -24,7 +24,7 @@
 
 use super::children::children;
 use super::{
-    AffineIndex, AnalysisStatus, CountedIterator, ProcedureAnalysis, SsaKey, affine_position,
+    AffineElements, AffineIndex, AnalysisStatus, CountedIterator, ProcedureAnalysis, SsaKey,
     position_domain,
 };
 use crate::HashMap;
@@ -124,6 +124,10 @@ struct Scan {
     writers: HashMap<VarId, Vec<SubWriter>>,
     places: HashMap<*const Statement, Vec<Step>>,
     unknown: crate::HashSet<VarId>,
+    /// Storage read or written on only some iterations of its loops.
+    confined: crate::HashSet<VarId>,
+    /// Whether the statements scanned are on only some iterations.
+    confining: bool,
 }
 
 /// An affine expression over the read's iterators.
@@ -245,10 +249,6 @@ fn place_loops(place: &[Step]) -> Vec<usize> {
         .collect()
 }
 
-fn count(iterator: &CountedIterator) -> isize {
-    (iterator.max - iterator.min) / iterator.modulus + 1
-}
-
 fn intersect(
     left: &CountedIterator,
     right: &CountedIterator,
@@ -352,17 +352,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             mut writers,
             places,
             unknown,
+            confined,
             ..
         } = scan;
+        // Storage whose writes stay in place is strongly updated by the
+        // symbolic iteration, which reads the right instance unless the read
+        // or the write is on only some iterations: an earlier iteration's
+        // write is then all a later read can see, never the value from
+        // before the loop.
         writers.retain(|id, subs| {
             !unknown.contains(id)
-                && subs.iter().any(|sub| {
+                && (confined.contains(id) || subs.iter().any(|sub| {
                     sub.access
                         .elements
                         .iter()
                         .any(|element| !element.terms.is_empty())
                         || matches!(&sub.access.bits, Bits::Range(low, _) if !low.terms.is_empty())
-                })
+                }))
         });
         let mut snapshots = HashMap::default();
         let mut tracked = HashMap::default();
@@ -480,6 +486,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             path.push(Step::Statement(index));
             scan.places
                 .insert(std::ptr::from_ref(statement), path.clone());
+            if scan.confining {
+                scan.confined.extend(statement_accesses(statement));
+            }
             let scanned = self.scan_statement(scan, statement, path, branches);
             path.pop();
             scanned?;
@@ -517,9 +526,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
                 let record = |this: &mut Self, scan: &mut Scan, path: &[Step]| {
                     for (index, destination) in assign.dst.iter().enumerate() {
+                        let elements = this.affine_elements(destination.id, &destination.index);
                         let access = this.access_forms(
                             destination.id,
-                            &destination.index,
+                            elements.as_ref(),
                             &destination.select,
                             destination.comptime.member_select_domain,
                         );
@@ -544,6 +554,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if let Expression::Ternary(condition, ..) = &assign.expr
                     && let Some(split) = self.iterator_condition_split(condition)
                 {
+                    scan.confined.extend(statement_accesses(statement));
                     for (arm, iterators) in self.exact_arms(&split)? {
                         let previous = self.counted_iterators[split.position];
                         for iterator in iterators {
@@ -572,6 +583,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     return scanned;
                 }
                 if let Some(split) = self.iterator_condition_split(&statement.cond) {
+                    let confining = std::mem::replace(&mut scan.confining, true);
                     for (arm, iterators) in self.exact_arms(&split)? {
                         let previous = self.counted_iterators[split.position];
                         for iterator in iterators {
@@ -583,6 +595,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         }
                         self.counted_iterators[split.position] = previous;
                     }
+                    scan.confining = confining;
                     return Some(());
                 }
                 for (arm, side) in sides.into_iter().enumerate() {
@@ -696,9 +709,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         split: &super::IteratorSplit,
     ) -> Option<[(usize, Vec<CountedIterator>); 2]> {
         let domain = self.counted_iterators[split.position];
-        let total = |side: &[CountedIterator]| side.iter().map(count).sum::<isize>();
+        let total = |side: &[CountedIterator]| {
+            side.iter()
+                .try_fold(0isize, |total, piece| total.checked_add(piece.count()?))
+        };
         let (holds, fails) = (split.holds.clone(), split.fails.clone());
-        if total(&holds) + total(&fails) == count(&domain) {
+        let (hold_count, fail_count) = (total(&holds)?, total(&fails)?);
+        if hold_count.checked_add(fail_count)? == domain.count()? {
             return Some([(0, holds), (1, fails)]);
         }
         let mut others = |side: &[CountedIterator]| {
@@ -715,7 +732,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
             Some(pieces)
         };
-        Some(if total(&holds) <= total(&fails) {
+        Some(if hold_count <= fail_count {
             let fails = others(&holds)?;
             [(0, holds), (1, fails)]
         } else {
@@ -736,10 +753,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let ratio = part.modulus / whole.modulus;
         self.charge_last_writer_work(usize::try_from(ratio).ok()?.saturating_add(1))?;
         let mut pieces = Vec::new();
-        pieces.extend(whole.within(whole.min, part.min.saturating_sub(1)).ok()?);
-        pieces.extend(whole.within(part.max.saturating_add(1), whole.max).ok()?);
+        // `part` lies within `whole`, so a piece before or after it is
+        // there only when `part` stops short of that end.
+        if whole.min < part.min {
+            pieces.extend(whole.within(whole.min, part.min - 1).ok()?);
+        }
+        if part.max < whole.max {
+            pieces.extend(whole.within(part.max + 1, whole.max).ok()?);
+        }
         for step in 1..ratio {
-            let residue = (part.residue + whole.modulus * step).rem_euclid(part.modulus);
+            // `whole.modulus * step` is below `part.modulus`.
+            let residue = part
+                .residue
+                .checked_add(whole.modulus * step)?
+                .rem_euclid(part.modulus);
             pieces.extend(
                 whole
                     .confined(part.min, part.max, part.modulus, residue)
@@ -799,7 +826,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn access_forms(
         &mut self,
         id: VarId,
-        index: &VarIndex,
+        elements: Option<&AffineElements>,
         select: &VarSelect,
         member_select_domain: Option<MemberSelectDomain>,
     ) -> Option<Access> {
@@ -807,34 +834,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return None;
         }
         let variable = self.ctx.variables.get(&id)?.clone();
-        let index = self.receiver_index(id, index);
-        if index.is_range() || index.dimension() != variable.r#type.array.dims() {
-            return None;
-        }
         let iterators = |terms: &AffineIndex, counted: &[CountedIterator]| {
             terms
                 .terms
                 .iter()
                 .all(|(id, _)| counted.iter().any(|iterator| iterator.id == *id))
         };
-        let mut elements = Vec::new();
-        for (expression, dimension) in index.indices.iter().zip(variable.r#type.array.iter()) {
-            let position = affine_position(
-                expression,
-                &mut self.ctx,
-                &self.counted_iterators,
-                (*dimension)?,
-            )?;
-            if !iterators(&position, &self.counted_iterators) {
-                return None;
-            }
-            elements.push(position);
-        }
-        let mut flat = AffineIndex::default();
-        let mut stride = 1isize;
-        for (element, dimension) in elements.iter().zip(variable.r#type.array.iter()).rev() {
-            flat.add_scaled(element, stride)?;
-            stride = stride.checked_mul(isize::try_from((*dimension)?).ok()?)?;
+        let AffineElements { elements, flat } = elements?.clone();
+        if !elements
+            .iter()
+            .all(|element| iterators(element, &self.counted_iterators))
+        {
+            return None;
         }
         let bits = if select.is_empty() {
             Bits::Whole
@@ -889,7 +900,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         select: &VarSelect,
         member_select_domain: Option<MemberSelectDomain>,
     ) -> Option<Vec<Source>> {
-        let cells = self.last_writer_cells(id, index, select, member_select_domain)?;
+        self.active_writer_scope()?;
+        let elements = self.affine_elements(id, index);
+        self.last_writer_sources_of(id, elements.as_ref(), select, member_select_domain)
+    }
+
+    /// `last_writer_sources` of an access with the affine coordinates
+    /// `elements`.
+    pub(super) fn last_writer_sources_of(
+        &mut self,
+        id: VarId,
+        elements: Option<&AffineElements>,
+        select: &VarSelect,
+        member_select_domain: Option<MemberSelectDomain>,
+    ) -> Option<Vec<Source>> {
+        let cells = self.last_writer_cells(id, elements, select, member_select_domain)?;
         let mut sources = Vec::new();
         for (_, cell_sources) in cells {
             for source in cell_sources {
@@ -904,14 +929,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn last_writer_cells(
         &mut self,
         id: VarId,
-        index: &VarIndex,
+        elements: Option<&AffineElements>,
         select: &VarSelect,
         member_select_domain: Option<MemberSelectDomain>,
     ) -> Option<Vec<(Cell, Vec<Source>)>> {
         let scope = self.active_writer_scope()?;
         let writers = scope.writers.get(&id)?;
         let place = self.statement_places.last()?.clone();
-        let access = self.access_forms(id, index, select, member_select_domain)?;
+        let access = self.access_forms(id, elements, select, member_select_domain)?;
         self.solve_last_writers(&scope, writers, &place, &access)
     }
 
@@ -973,37 +998,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if self.split_statement == Some(std::ptr::from_ref(statement)) {
             return None;
         }
-        let mut reads = Vec::new();
-        let mut collect = |expression: &Expression| collect_reads(expression, &mut reads);
-        match statement {
-            Statement::Assign(assign) => {
-                collect(&assign.expr);
-                for destination in &assign.dst {
-                    for expression in destination
-                        .index
-                        .expressions()
-                        .chain(destination.select.0.iter())
-                        .chain(destination.select.1.as_ref().map(|(_, end)| end))
-                    {
-                        collect(expression);
-                    }
-                }
-            }
-            Statement::If(statement) => collect(&statement.cond),
-            Statement::Case(statement) => {
-                collect(&statement.case_target);
-                for pattern in statement.arms.iter().flat_map(|arm| &arm.patterns) {
-                    match pattern {
-                        CasePattern::Eq(value) => collect(value),
-                        CasePattern::Range { lo, hi, .. } => {
-                            collect(lo);
-                            collect(hi);
-                        }
-                    }
-                }
-            }
-            _ => return None,
+        if !matches!(
+            statement,
+            Statement::Assign(_) | Statement::If(_) | Statement::Case(_)
+        ) {
+            return None;
         }
+        let mut reads = statement_reads(statement);
         reads.retain(|(id, ..)| scope.writers.contains_key(id));
         if reads.is_empty() {
             return None;
@@ -1011,8 +1012,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut cells: Vec<(Cell, Vec<Vec<Source>>)> =
             vec![(self.counted_iterators.clone(), Vec::new())];
         for (id, index, select, member_select_domain) in reads {
+            let elements = self.affine_elements(id, &index);
             let Some(read_cells) =
-                self.last_writer_cells(id, &index, &select, member_select_domain)
+                self.last_writer_cells(id, elements.as_ref(), &select, member_select_domain)
             else {
                 continue;
             };
@@ -1548,6 +1550,55 @@ fn restrict(cell: &mut Cell, constraint: Constraint) -> Option<bool> {
 }
 
 type Read = (VarId, VarIndex, VarSelect, Option<MemberSelectDomain>);
+
+/// The variable reads a statement makes before its nested statements.
+fn statement_reads(statement: &Statement) -> Vec<Read> {
+    let mut reads = Vec::new();
+    let mut collect = |expression: &Expression| collect_reads(expression, &mut reads);
+    match statement {
+        Statement::Assign(assign) => {
+            collect(&assign.expr);
+            for destination in &assign.dst {
+                for expression in destination
+                    .index
+                    .expressions()
+                    .chain(destination.select.0.iter())
+                    .chain(destination.select.1.as_ref().map(|(_, end)| end))
+                {
+                    collect(expression);
+                }
+            }
+        }
+        Statement::If(statement) => collect(&statement.cond),
+        Statement::Case(statement) => {
+            collect(&statement.case_target);
+            for pattern in statement.arms.iter().flat_map(|arm| &arm.patterns) {
+                match pattern {
+                    CasePattern::Eq(value) => collect(value),
+                    CasePattern::Range { lo, hi, .. } => {
+                        collect(lo);
+                        collect(hi);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    reads
+}
+
+/// The variables a statement reads before its nested statements and those
+/// it writes.
+fn statement_accesses(statement: &Statement) -> Vec<VarId> {
+    let mut ids = statement_reads(statement)
+        .into_iter()
+        .map(|(id, ..)| id)
+        .collect::<Vec<_>>();
+    if let Statement::Assign(assign) = statement {
+        ids.extend(assign.dst.iter().map(|destination| destination.id));
+    }
+    ids
+}
 
 /// The variable reads of an expression, including those in coordinates.
 fn collect_reads(expression: &Expression, reads: &mut Vec<Read>) {

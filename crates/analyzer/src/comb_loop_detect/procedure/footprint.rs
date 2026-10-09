@@ -18,10 +18,7 @@
 //! restriction. Both facts only remove dependencies that cannot occur, and
 //! each fallback keeps the conservative one-iteration closure.
 
-use super::{
-    AffineIndex, CountedCoverage, CountedIterator, LoopEvaluation, ProcedureAnalysis,
-    loop_evaluation,
-};
+use super::{AffineIndex, CountedCoverage, CountedIterator, ProcedureAnalysis};
 use crate::HashMap;
 use crate::comb_loop_detect::region::{ArraySpan, PackedSpan};
 use crate::ir::{
@@ -289,13 +286,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         self.expression_accesses(expression, &mut accesses);
                     }
                 }
-                // Only a loop evaluated with a symbolic iterator closes over
-                // it; the others are read conservatively below.
-                let counted = match loop_evaluation(statement, &mut self.ctx) {
-                    LoopEvaluation::Counted(iterations) if iterations.count > 0 => Some(iterations),
-                    _ => None,
-                };
+                // A loop over counted iterations closes over its iterator
+                // however its evaluation takes the values: a footprint the
+                // iterator does not reach affinely is already a whole read.
+                // A loop that breaks or steps other than additively has no
+                // such iterator and is read conservatively below.
                 let step = for_range_step(&statement.range);
+                let counted = step
+                    .filter(|_| !crate::ir::peel::has_own_break(&statement.body))
+                    .and_then(|_| statement.range.eval_counted(&mut self.ctx))
+                    .filter(|iterations| iterations.count > 0);
                 if let Some((iterations, step)) = counted.zip(step) {
                     let Some(iterator) = CountedIterator::of(statement, iterations) else {
                         accesses.opaque = true;
@@ -312,8 +312,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                     accesses.extend_reads(closed);
                 } else {
-                    // A loop that may execute zero times or break writes
-                    // nothing for certain; its reads are not affine here.
+                    // A loop that may execute zero times, breaks or steps
+                    // other than additively writes nothing for certain; its
+                    // reads are not affine here.
                     let mut nested_exits = false;
                     let body = self.loop_accesses_nested(&statement.body, &mut nested_exits);
                     *exits |= nested_exits;

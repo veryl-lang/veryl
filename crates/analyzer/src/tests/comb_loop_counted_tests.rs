@@ -1236,3 +1236,110 @@ counted_case!(
      assign o = {7'd0, c};",
     false
 );
+
+counted_case!(
+    counted_strided_scalar_reads_skip_the_elements_between,
+    "a strided scalar read takes none of the elements between its positions",
+    "var x: logic [4];
+     var c: logic;
+     always_comb {
+         for i in 0..2 { c = x[2 * i]; }
+         x[1] = c;
+         c = x[3];
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_strided_scalar_reads_keep_their_positions,
+    "a strided scalar read that feeds one of its positions closes a loop",
+    "var x: logic [4];
+     var c: logic;
+     always_comb {
+         for i in 0..2 { c = x[2 * i]; }
+         x[2] = c;
+         c = x[3];
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_overlapping_scalar_reads_reach_only_their_positions,
+    "overlapping progressions of a scalar read stay within their positions",
+    "var x: logic [4];
+     var c: logic;
+     always_comb {
+         for i in 0..2 { for j in 0..2 { c = x[i + j]; } }
+         x[3] = c;
+         c = x[0];
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_overlapping_scalar_reads_keep_their_positions,
+    "overlapping progressions of a scalar read keep every position they take",
+    "var x: logic [4];
+     var c: logic;
+     always_comb {
+         for i in 0..2 { for j in 0..2 { c = x[i + j]; } }
+         x[2] = c;
+         c = x[0];
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_in_place_write_reaches_a_later_iteration_read,
+    "a read on later iterations sees an earlier iteration's write in place",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[0]; }
+             y[0] = x[0] ^ c;
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_in_place_write_misses_a_first_iteration_read,
+    "a read on the first iteration sees the value from before the loop",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 0 { c = y[0]; }
+             y[0] = x[0] ^ c;
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_in_place_write_on_an_earlier_iteration_reaches_later_reads,
+    "a write on the first iteration is what later iterations read",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 0 { y[0] = x[0] ^ c; }
+             c = y[0];
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
