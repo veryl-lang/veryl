@@ -29,7 +29,7 @@ use super::{
 };
 use crate::HashMap;
 use crate::comb_loop_detect::position::{
-    ceil_div_wide, extended_gcd, floor_div_wide, solve_congruence,
+    Overflow, ceil_div_wide, extended_gcd, floor_div_wide, solve_congruence,
 };
 use crate::comb_loop_detect::region::NodeKey;
 use crate::comb_loop_detect::ssa::VersionId;
@@ -249,46 +249,23 @@ fn count(iterator: &CountedIterator) -> isize {
     (iterator.max - iterator.min) / iterator.modulus + 1
 }
 
-fn intersect(left: &CountedIterator, right: &CountedIterator) -> Option<CountedIterator> {
+fn intersect(
+    left: &CountedIterator,
+    right: &CountedIterator,
+) -> Result<Option<CountedIterator>, Overflow> {
     left.confined(right.min, right.max, right.modulus, right.residue)
 }
 
-fn intersect_cells(left: &Cell, right: &Cell) -> Option<Cell> {
-    left.iter()
-        .zip(right)
-        .map(|(left, right)| intersect(left, right))
-        .collect()
-}
-
-/// The values of `whole` outside `part`, which lies within it, as disjoint
-/// progressions.
-fn complement(whole: &CountedIterator, part: &CountedIterator) -> Vec<CountedIterator> {
-    let mut pieces = Vec::new();
-    pieces.extend(whole.within(whole.min, part.min - 1));
-    pieces.extend(whole.within(part.max + 1, whole.max));
-    let ratio = part.modulus / whole.modulus;
-    for step in 1..ratio {
-        let residue = (part.residue + whole.modulus * step).rem_euclid(part.modulus);
-        pieces.extend(whole.confined(part.min, part.max, part.modulus, residue));
+/// The cell both cells take, `None` when they share no iteration.
+fn intersect_cells(left: &Cell, right: &Cell) -> Result<Option<Cell>, Overflow> {
+    let mut cell = Vec::with_capacity(left.len());
+    for (left, right) in left.iter().zip(right) {
+        let Some(iterator) = intersect(left, right)? else {
+            return Ok(None);
+        };
+        cell.push(iterator);
     }
-    pieces
-}
-
-/// The cells of `cell` inside `set` and outside it.
-fn split_cell(cell: &Cell, set: &Cell) -> (Option<Cell>, Vec<Cell>) {
-    let Some(inside) = intersect_cells(cell, set) else {
-        return (None, vec![cell.clone()]);
-    };
-    let mut outside = Vec::new();
-    for level in 0..cell.len() {
-        for piece in complement(&cell[level], &inside[level]) {
-            let mut part = inside[..level].to_vec();
-            part.push(piece);
-            part.extend_from_slice(&cell[level + 1..]);
-            outside.push(part);
-        }
-    }
-    (Some(inside), outside)
+    Ok(Some(cell))
 }
 
 impl ScopeLoop {
@@ -567,7 +544,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if let Expression::Ternary(condition, ..) = &assign.expr
                     && let Some(split) = self.iterator_condition_split(condition)
                 {
-                    for (arm, iterators) in self.exact_arms(&split) {
+                    for (arm, iterators) in self.exact_arms(&split)? {
                         let previous = self.counted_iterators[split.position];
                         for iterator in iterators {
                             self.counted_iterators[split.position] = iterator;
@@ -595,7 +572,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     return scanned;
                 }
                 if let Some(split) = self.iterator_condition_split(&statement.cond) {
-                    for (arm, iterators) in self.exact_arms(&split) {
+                    for (arm, iterators) in self.exact_arms(&split)? {
                         let previous = self.counted_iterators[split.position];
                         for iterator in iterators {
                             self.counted_iterators[split.position] = iterator;
@@ -670,7 +647,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if iterations.count == 0 {
                     return Some(());
                 }
-                let iterator = self.counted_iterator_of(statement, iterations)?;
+                let iterator = CountedIterator::of(statement, iterations)?;
                 let next = scan.loops.len();
                 let id = *scan
                     .loop_ids
@@ -713,52 +690,81 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     /// The arms of an iterator split, each with the iterations that take it
     /// as disjoint progressions. One side may be given as all iterations;
-    /// it is then the complement of the other.
-    fn exact_arms(&self, split: &super::IteratorSplit) -> [(usize, Vec<CountedIterator>); 2] {
+    /// it is then the complement of the other. `None` when the scan gives up.
+    fn exact_arms(
+        &mut self,
+        split: &super::IteratorSplit,
+    ) -> Option<[(usize, Vec<CountedIterator>); 2]> {
         let domain = self.counted_iterators[split.position];
         let total = |side: &[CountedIterator]| side.iter().map(count).sum::<isize>();
         let (holds, fails) = (split.holds.clone(), split.fails.clone());
         if total(&holds) + total(&fails) == count(&domain) {
-            return [(0, holds), (1, fails)];
+            return Some([(0, holds), (1, fails)]);
         }
-        let others = |side: &[CountedIterator]| {
+        let mut others = |side: &[CountedIterator]| {
             let mut pieces = vec![domain];
             for part in side {
-                pieces = pieces
-                    .into_iter()
-                    .flat_map(|piece| match intersect(&piece, part) {
-                        Some(inside) => complement(&piece, &inside),
-                        None => vec![piece],
-                    })
-                    .collect();
+                let mut outside = Vec::new();
+                for piece in pieces {
+                    match intersect(&piece, part).ok()? {
+                        Some(inside) => outside.extend(self.complement(&piece, &inside)?),
+                        None => outside.push(piece),
+                    }
+                }
+                pieces = outside;
             }
-            pieces
+            Some(pieces)
         };
-        if total(&holds) <= total(&fails) {
-            let fails = others(&holds);
+        Some(if total(&holds) <= total(&fails) {
+            let fails = others(&holds)?;
             [(0, holds), (1, fails)]
         } else {
-            let holds = others(&fails);
+            let holds = others(&fails)?;
             [(0, holds), (1, fails)]
-        }
+        })
     }
 
-    /// The iterator of a counted loop as its evaluation confines it.
-    fn counted_iterator_of(
-        &self,
-        statement: &ForStatement,
-        iterations: crate::ir::CountedIterations,
-    ) -> Option<CountedIterator> {
-        let min = isize::try_from(iterations.min).ok()?;
-        let max = isize::try_from(iterations.max).ok()?;
-        let mut iterator = CountedIterator::new(statement.var_id, min, max);
-        if let Some(modulus) = super::for_range_step(&statement.range).and_then(isize::checked_abs)
-            && modulus > 1
-        {
-            iterator.modulus = modulus;
-            iterator.residue = min.rem_euclid(modulus);
+    /// The values of `whole` outside `part`, which lies within it, as
+    /// disjoint progressions: those before and after it, and one for each
+    /// other residue between. They are charged to the procedure's work
+    /// before they are built. `None` when the scan gives up.
+    fn complement(
+        &mut self,
+        whole: &CountedIterator,
+        part: &CountedIterator,
+    ) -> Option<Vec<CountedIterator>> {
+        let ratio = part.modulus / whole.modulus;
+        self.charge_last_writer_work(usize::try_from(ratio).ok()?.saturating_add(1))?;
+        let mut pieces = Vec::new();
+        pieces.extend(whole.within(whole.min, part.min.saturating_sub(1)).ok()?);
+        pieces.extend(whole.within(part.max.saturating_add(1), whole.max).ok()?);
+        for step in 1..ratio {
+            let residue = (part.residue + whole.modulus * step).rem_euclid(part.modulus);
+            pieces.extend(
+                whole
+                    .confined(part.min, part.max, part.modulus, residue)
+                    .ok()?,
+            );
         }
-        Some(iterator)
+        Some(pieces)
+    }
+
+    /// The cells of `cell` inside `set` and outside it. `None` when the scan
+    /// gives up.
+    fn split_cell(&mut self, cell: &Cell, set: &Cell) -> Option<(Option<Cell>, Vec<Cell>)> {
+        let Some(inside) = intersect_cells(cell, set).ok()? else {
+            return Some((None, vec![cell.clone()]));
+        };
+        let mut outside = Vec::new();
+        for level in 0..cell.len() {
+            for piece in self.complement(&cell[level], &inside[level])? {
+                let mut part = inside[..level].to_vec();
+                part.push(piece);
+                part.extend_from_slice(&cell[level + 1..]);
+                outside.push(part);
+            }
+        }
+        Some((Some(inside), outside))
     }
 
     /// Whether evaluating `expression` writes nothing: every call in it
@@ -1013,7 +1019,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let mut refined = Vec::new();
             for (cell, sources) in &cells {
                 for (read_cell, read_sources) in &read_cells {
-                    if let Some(inside) = intersect_cells(cell, read_cell) {
+                    if let Some(inside) = intersect_cells(cell, read_cell).ok()? {
                         let mut sources = sources.clone();
                         sources.push(read_sources.clone());
                         refined.push((inside, sources));
@@ -1120,7 +1126,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         for candidate in &candidates {
             let mut refined = Vec::new();
             for cell in cells {
-                let (inside, outside) = split_cell(&cell, &candidate.cell);
+                let (inside, outside) = self.split_cell(&cell, &candidate.cell)?;
                 refined.extend(inside);
                 refined.extend(outside);
             }
@@ -1132,11 +1138,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let mut sources = Vec::new();
             let mut covered = false;
             for group in &order {
-                let present = group
-                    .iter()
-                    .map(|&index| &candidates[index])
-                    .filter(|candidate| intersect_cells(&cell, &candidate.cell).is_some())
-                    .collect::<Vec<_>>();
+                let mut present = Vec::new();
+                for &index in group {
+                    let candidate = &candidates[index];
+                    if intersect_cells(&cell, &candidate.cell).ok()?.is_some() {
+                        present.push(candidate);
+                    }
+                }
                 if present.is_empty() {
                     continue;
                 }
@@ -1224,7 +1232,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut cell = domain.clone();
         // The read's iterations of the known loops reach the write.
         for (iterator, reached) in cell.iter_mut().zip(&writer.domains).take(first_unknown) {
-            match intersect(iterator, reached) {
+            match intersect(iterator, reached).ok()? {
                 Some(confined) => *iterator = confined,
                 None => return Some(None),
             }
@@ -1511,7 +1519,7 @@ fn restrict(cell: &mut Cell, constraint: Constraint) -> Option<bool> {
                     };
                     let low = low.map_or(iterator.min, clamp);
                     let high = high.map_or(iterator.max, clamp);
-                    iterator.within(low, high)
+                    iterator.within(low, high).ok()?
                 }
                 Constraint::Mod(lin, modulus, residue) => {
                     let modulus = isize::try_from(modulus).ok()?;
@@ -1520,9 +1528,9 @@ fn restrict(cell: &mut Cell, constraint: Constraint) -> Option<bool> {
                     let constant =
                         isize::try_from((residue - lin.c).rem_euclid(modulus as i128)).ok()?;
                     match solve_congruence(coefficient, Some(constant), modulus)? {
-                        Some((first, period)) => {
-                            iterator.confined(iterator.min, iterator.max, period, first)
-                        }
+                        Some((first, period)) => iterator
+                            .confined(iterator.min, iterator.max, period, first)
+                            .ok()?,
                         None => None,
                     }
                 }

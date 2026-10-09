@@ -316,8 +316,11 @@ impl ForRange {
                     // emitted `for (i = hi; i >= lo; i -= step)`.
                     let hi = if *inclusive {
                         end
+                    } else if let Some(hi) = end.checked_sub(1) {
+                        hi
                     } else {
-                        end.saturating_sub(1)
+                        // An exclusive end of 0 leaves no value.
+                        return Some(Vec::new());
                     };
                     let mut ret = vec![];
                     let mut i = hi as i64;
@@ -1619,6 +1622,32 @@ impl fmt::Display for CasePattern {
                 let op = if *inclusive { "..=" } else { ".." };
                 write!(f, "{lo}{op}{hi}")
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reverse_range_to_an_exclusive_zero_is_empty() {
+        let mut context = Context::default();
+        for step in [1, 2] {
+            let range = ForRange::Reverse {
+                start: ForBound::Const(0, false),
+                end: ForBound::Const(0, false),
+                inclusive: false,
+                step,
+            };
+            assert_eq!(range.eval_iter(&mut context), Some(Vec::new()), "{step}");
+            assert_eq!(
+                range
+                    .eval_counted(&mut context)
+                    .map(|iterations| iterations.count),
+                Some(0),
+                "{step}"
+            );
         }
     }
 }

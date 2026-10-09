@@ -1197,3 +1197,42 @@ counted_case!(
      always_comb { for i in 0..4194304 { y[i >> 20] = y[1]; } o = {7'd0, y[0]}; }",
     true
 );
+
+counted_case!(
+    counted_scalar_reads_reach_only_their_iterations,
+    "a scalar reads only the elements its iterations take",
+    "var x: logic [4];
+     var c: logic;
+     always_comb {
+         for i in 0..2 { c = x[i]; }
+         x[2] = c;
+         for i in 3..4 { c = x[i]; }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_scalar_reads_keep_the_elements_they_take,
+    "a scalar that reads the element it feeds closes a loop",
+    "var x: logic [4];
+     var c: logic;
+     always_comb {
+         for i in 0..4 { c = x[i]; }
+         x[3] = c;
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_iterator_inequality_excludes_its_value,
+    "the side that differs from an inner value never takes it",
+    "var x: logic [4];
+     var c: logic;
+     always_comb {
+         for i in 0..4 { if i == 2 { x[2] = c; } else { c = x[i]; } }
+     }
+     assign o = {7'd0, c};",
+    false
+);

@@ -18,7 +18,10 @@
 //! restriction. Both facts only remove dependencies that cannot occur, and
 //! each fallback keeps the conservative one-iteration closure.
 
-use super::{AffineIndex, CountedCoverage, CountedIterator, ProcedureAnalysis};
+use super::{
+    AffineIndex, CountedCoverage, CountedIterator, LoopEvaluation, ProcedureAnalysis,
+    loop_evaluation,
+};
 use crate::HashMap;
 use crate::comb_loop_detect::region::{ArraySpan, PackedSpan};
 use crate::ir::{
@@ -286,20 +289,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         self.expression_accesses(expression, &mut accesses);
                     }
                 }
-                let counted = (!crate::ir::peel::has_own_break(&statement.body))
-                    .then(|| statement.range.eval_counted(&mut self.ctx))
-                    .flatten()
-                    .filter(|iterations| iterations.count > 0);
+                // Only a loop evaluated with a symbolic iterator closes over
+                // it; the others are read conservatively below.
+                let counted = match loop_evaluation(statement, &mut self.ctx) {
+                    LoopEvaluation::Counted(iterations) if iterations.count > 0 => Some(iterations),
+                    _ => None,
+                };
                 let step = for_range_step(&statement.range);
                 if let Some((iterations, step)) = counted.zip(step) {
-                    let (Ok(min), Ok(max)) = (
-                        isize::try_from(iterations.min),
-                        isize::try_from(iterations.max),
-                    ) else {
+                    let Some(iterator) = CountedIterator::of(statement, iterations) else {
                         accesses.opaque = true;
                         return accesses;
                     };
-                    let iterator = CountedIterator::new(statement.var_id, min, max);
                     self.counted_iterators.push(iterator);
                     let mut nested_exits = false;
                     let body = self.loop_accesses_nested(&statement.body, &mut nested_exits);

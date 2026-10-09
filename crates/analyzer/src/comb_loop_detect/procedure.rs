@@ -1,7 +1,9 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::model::SummaryRegion;
-use super::position::{Axis, Link, first_in_class, greatest_common_divisor, intersect_classes};
+use super::position::{
+    Axis, Link, Overflow, checked, first_in_class, greatest_common_divisor, intersect_classes,
+};
 use super::region::{
     ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference, var_reads,
 };
@@ -1480,7 +1482,7 @@ struct IteratorSplit {
 
 /// The values a counted iterator takes: those in `min..=max` that are
 /// congruent to `residue` modulo `modulus`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CountedIterator {
     id: VarId,
     min: isize,
@@ -1501,31 +1503,59 @@ impl CountedIterator {
     }
 
     /// The values in `min..=max` congruent to `residue` modulo `modulus` as
-    /// well, or `None` when there are none. `min` and `max` are values.
-    fn confined(self, min: isize, max: isize, modulus: isize, residue: isize) -> Option<Self> {
-        let (residue, modulus) =
-            intersect_classes((self.residue, self.modulus), (residue, modulus))??;
+    /// well, `None` when there are none. `min` and `max` are values.
+    fn confined(
+        self,
+        min: isize,
+        max: isize,
+        modulus: isize,
+        residue: isize,
+    ) -> Result<Option<Self>, Overflow> {
+        let Some((residue, modulus)) = checked(intersect_classes(
+            (self.residue, self.modulus),
+            (residue, modulus),
+        ))?
+        else {
+            return Ok(None);
+        };
         // Within the iterator's own values, so a request beyond them, such
         // as `i < isize::MIN`, is empty before any arithmetic.
         let min = min.max(self.min);
         let max = max.min(self.max);
         if min > max {
-            return None;
+            return Ok(None);
         }
-        let min = first_in_class(residue, modulus, min)?;
-        let max = max.checked_sub(max.checked_sub(residue)?.rem_euclid(modulus))?;
-        (min <= max).then_some(Self {
+        let min = checked(first_in_class(residue, modulus, min))?;
+        let offset = checked(max.checked_sub(residue))?.rem_euclid(modulus);
+        let max = checked(max.checked_sub(offset))?;
+        Ok((min <= max).then_some(Self {
             min,
             max,
             modulus,
             residue,
             ..self
-        })
+        }))
     }
 
-    /// The values in `min..=max`, or `None` when there are none.
-    fn within(self, min: isize, max: isize) -> Option<Self> {
+    /// The values in `min..=max`, `None` when there are none.
+    fn within(self, min: isize, max: isize) -> Result<Option<Self>, Overflow> {
         self.confined(min, max, 1, 0)
+    }
+
+    /// The iterator of a counted loop over `iterations`. An additive step
+    /// takes every `|step|`-th value from the first one. `None` when its
+    /// values do not fit in `isize`.
+    fn of(statement: &ForStatement, iterations: CountedIterations) -> Option<Self> {
+        let min = isize::try_from(iterations.min).ok()?;
+        let max = isize::try_from(iterations.max).ok()?;
+        let mut iterator = Self::new(statement.var_id, min, max);
+        if let Some(modulus) = for_range_step(&statement.range).and_then(isize::checked_abs)
+            && modulus > 1
+        {
+            iterator.modulus = modulus;
+            iterator.residue = min.rem_euclid(modulus);
+        }
+        Some(iterator)
     }
 }
 
@@ -2845,11 +2875,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .collect();
         }
         let sources = self.last_writer_sources(id, index, select, member_select_domain);
-        let index = self.receiver_index(id, index);
-        let accesses = var_reads(id, &index, select, member_select_domain, &mut self.ctx);
-        if accesses.is_empty() && !(index.is_const() && select.is_const_with_range()) {
+        let receiver = self.receiver_index(id, index);
+        let accesses = var_reads(id, &receiver, select, member_select_domain, &mut self.ctx);
+        if accesses.is_empty() && !(receiver.is_const() && select.is_const_with_range()) {
             self.status = self.status.max(AnalysisStatus::Partial);
         }
+        let accesses = self.reachable_reads(id, index, accesses);
         let mut values = Vec::new();
         for (array, packed) in accesses {
             for key in self.bit_part.overlapping_access(id, array, packed) {
@@ -2858,6 +2889,36 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
         values
+    }
+
+    /// An index affine in the counted iterators reads only the elements it
+    /// takes over their iterations: each access narrowed to the span of each
+    /// progression of those positions. A position outside the array reads
+    /// nothing.
+    fn reachable_reads(
+        &mut self,
+        id: VarId,
+        index: &VarIndex,
+        accesses: Vec<(ArraySpan, PackedSpan)>,
+    ) -> Vec<(ArraySpan, PackedSpan)> {
+        if self.counted_iterators.is_empty() || index.is_const() {
+            return accesses;
+        }
+        let Some(progressions) = self
+            .flattened_affine_index(id, index)
+            .filter(|affine| !affine.terms.is_empty())
+            .and_then(|affine| self.affine_progressions(&affine))
+        else {
+            return accesses;
+        };
+        accesses
+            .into_iter()
+            .flat_map(|(array, packed)| {
+                progressions
+                    .iter()
+                    .filter_map(move |&(span, _)| Some((array.intersection(span)?, packed)))
+            })
+            .collect()
     }
 
     fn read_variable(
@@ -4183,46 +4244,49 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let constant = constant_integer(constant, &mut self.ctx)?;
         let iterator = self.counted_iterators[position];
         let (min, max) = (iterator.min, iterator.max);
+        // Arithmetic beyond `isize` leaves the condition unsplit, so both
+        // sides take every iteration.
+        let within = |min: isize, max: isize| iterator.within(min, max).ok();
         // Iterations below and from `bound`.
-        let below = |bound: isize| {
-            (
-                iterator.within(min, bound.saturating_sub(1)),
-                iterator.within(bound, max),
-            )
-        };
+        let below =
+            |bound: isize| Some((within(min, bound.saturating_sub(1))?, within(bound, max)?));
+        let pair = |(holds, fails)| (vec![holds], vec![fails]);
         let (holds, fails) = match op {
             Op::Eq | Op::Ne => {
-                let equal = iterator.within(constant, constant);
-                // The other values form one progression unless the constant
-                // is an inner value.
-                let unequal = match equal {
-                    None => Some(iterator),
-                    Some(_) if constant == min => iterator.within(min + 1, max),
-                    Some(_) if constant == max => iterator.within(min, max - 1),
-                    Some(_) => Some(iterator),
+                let equal = within(constant, constant)?;
+                // The other values lie below and above the constant, each
+                // one progression.
+                let unequal = if equal.is_some() {
+                    vec![
+                        within(min, constant.saturating_sub(1))?,
+                        within(constant.saturating_add(1), max)?,
+                    ]
+                } else {
+                    vec![Some(iterator)]
                 };
+                let equal = vec![equal];
                 if op == Op::Eq {
                     (equal, unequal)
                 } else {
                     (unequal, equal)
                 }
             }
-            Op::Less => below(constant),
-            Op::LessEq => below(constant.saturating_add(1)),
+            Op::Less => pair(below(constant)?),
+            Op::LessEq => pair(below(constant.saturating_add(1))?),
             Op::Greater => {
-                let (lower, upper) = below(constant.saturating_add(1));
-                (upper, lower)
+                let (lower, upper) = below(constant.saturating_add(1))?;
+                (vec![upper], vec![lower])
             }
             Op::GreaterEq => {
-                let (lower, upper) = below(constant);
-                (upper, lower)
+                let (lower, upper) = below(constant)?;
+                (vec![upper], vec![lower])
             }
             _ => return None,
         };
         Some(IteratorSplit {
             position,
-            holds: holds.into_iter().collect(),
-            fails: fails.into_iter().collect(),
+            holds: holds.into_iter().flatten().collect(),
+            fails: fails.into_iter().flatten().collect(),
         })
     }
 
@@ -4282,7 +4346,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             if !seen.insert(remainder) {
                 break;
             }
-            let class = iterator.confined(iterator.min, iterator.max, divisor, remainder)?;
+            let class = iterator
+                .confined(iterator.min, iterator.max, divisor, remainder)
+                .ok()??;
             if remainder == value {
                 equal.push(class);
             } else {
@@ -4537,21 +4603,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         range_controls: &[VersionId],
         iterations: CountedIterations,
     ) -> FlowResult {
-        let (Ok(min), Ok(max)) = (
-            isize::try_from(iterations.min),
-            isize::try_from(iterations.max),
-        ) else {
+        let Some(iterator) = CountedIterator::of(statement, iterations) else {
             self.status = AnalysisStatus::Barrier;
             return FlowResult::new(ProcedureFlow::Continue);
         };
-        let mut iterator = CountedIterator::new(statement.var_id, min, max);
-        // An additive step takes every `|step|`-th value from the first one.
-        if let Some(modulus) = for_range_step(&statement.range).and_then(isize::checked_abs)
-            && modulus > 1
-        {
-            iterator.modulus = modulus;
-            iterator.residue = min.rem_euclid(modulus);
-        }
         self.counted_iterators.push(iterator);
         let opened = self.writer_scope.is_none();
         if opened {
@@ -7475,9 +7530,9 @@ mod tests {
         };
         // `i < isize::MIN` leaves no value, without subtracting the residue
         // from that bound.
-        assert!(iterator.within(1, isize::MIN).is_none());
-        assert!(iterator.within(isize::MAX, 3).is_none());
-        let within = iterator.within(2, isize::MAX).expect("3 remains");
+        assert_eq!(iterator.within(1, isize::MIN), Ok(None));
+        assert_eq!(iterator.within(isize::MAX, 3), Ok(None));
+        let within = iterator.within(2, isize::MAX).unwrap().expect("3 remains");
         assert_eq!((within.min, within.max), (3, 3));
     }
 }
