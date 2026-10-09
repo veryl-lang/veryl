@@ -15,11 +15,13 @@ use crate::ir::external::{ExternalComponentInst, ProtoExternalComponent};
 use crate::ir::inst_layout::InstLayout;
 use crate::ir::opt::comb_fusion;
 use crate::ir::opt::cone_gate;
+use crate::ir::opt::cone_order;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
 use crate::ir::opt::field_unfuse;
 use crate::ir::opt::multi_write_analysis::analyze_multi_write;
 use crate::ir::opt::multi_write_analysis::collect_dyn_indexed_vars;
+use crate::ir::opt::owners;
 use crate::ir::opt::version_split;
 use crate::ir::site_table::{SiteInfo, SiteKind, SiteTable};
 #[cfg(not(target_family = "wasm"))]
@@ -1574,7 +1576,7 @@ fn collect_event_written_comb(
                     // element owns a span and has to be named.  The fold weighs
                     // elements, not the range they stride over.
                     let least_bytes = a.dst_num_elements * MIN_ELEMENT_BYTES;
-                    if least_bytes > cone_gate::MAX_ELEMENT_OWNER_BYTES {
+                    if least_bytes > owners::MAX_ELEMENT_OWNER_BYTES {
                         let last = a.dst_num_elements.saturating_sub(1) as isize;
                         out.insert(a.dst_base.raw());
                         out.insert(a.dst_base.raw() + a.dst_stride * last);
@@ -1628,7 +1630,7 @@ fn collect_event_written_comb(
                     let lo = comb().map(|e| e.current.raw()).min();
                     let hi = comb().map(|e| e.current.raw()).max();
                     if let (Some(lo), Some(hi)) = (lo, hi) {
-                        if least_bytes > cone_gate::MAX_ELEMENT_OWNER_BYTES {
+                        if least_bytes > owners::MAX_ELEMENT_OWNER_BYTES {
                             out.insert(lo);
                             out.insert(hi);
                         } else {
@@ -1675,11 +1677,11 @@ fn trigger_event_order(events: &HashMap<Event, Vec<ProtoStatement>>) -> Vec<Even
     keys
 }
 
-/// What each event can write (`cone_gate::EventWrites`); an event whose
+/// What each event can write (`owners::EventWrites`); an event whose
 /// writes cannot be bounded is `wild`.
 fn collect_event_writes_each(
     events: &HashMap<Event, Vec<ProtoStatement>>,
-) -> (Vec<Event>, Vec<cone_gate::EventWrites>) {
+) -> (Vec<Event>, Vec<owners::EventWrites>) {
     use crate::ir::statement::ProtoTbMethodKind;
     /// Elements past this a dynamic write leaves unbounded rather than named.
     const MAX_NAMED_ELEMENTS: usize = 1 << 20;
@@ -1761,13 +1763,13 @@ fn collect_event_writes_each(
             comb.dedup();
             ff.sort_unstable();
             ff.dedup();
-            cone_gate::EventWrites {
+            owners::EventWrites {
                 comb,
                 ff,
                 wild: false,
             }
         } else {
-            cone_gate::EventWrites {
+            owners::EventWrites {
                 wild: true,
                 ..Default::default()
             }
@@ -1917,6 +1919,29 @@ impl StageTimer {
     }
 }
 
+/// The cone planner's verdict: the reorder alone under a dataflow settle, the
+/// full gate plan otherwise.
+enum ConeSchedule {
+    Order(cone_order::ConeOrder),
+    Gate(cone_gate::ConePlan),
+}
+
+impl ConeSchedule {
+    fn order(&self) -> &[u32] {
+        match self {
+            ConeSchedule::Order(o) => &o.order,
+            ConeSchedule::Gate(p) => &p.order,
+        }
+    }
+
+    fn segments(&self) -> usize {
+        match self {
+            ConeSchedule::Order(o) => o.segments,
+            ConeSchedule::Gate(p) => p.segments.len(),
+        }
+    }
+}
+
 /// `all_event_statements` in place with the dead-var drop (mirroring the miss
 /// path); the returned `dead_offsets` let a cache hit reproduce that drop.
 #[allow(clippy::too_many_arguments)]
@@ -1927,7 +1952,7 @@ fn run_comb_pipeline(
     protect: &HashSet<VarOffset>,
     layout_inputs: Option<&comb_layout::LayoutInputs>,
     fusion_extra: Option<&[VarOffset]>,
-    cone_inputs: Option<&cone_gate::ConeGateInputs>,
+    cone_inputs: Option<&owners::OwnerInputs>,
     module_name: StrId,
     helpers: bool,
 ) -> Result<comb_pipeline_cache::CombPipeline, SimulatorError> {
@@ -1946,7 +1971,7 @@ fn run_comb_pipeline(
     let temps_before = context.comb_total_bytes;
     // The temps allocated below have no `VariableMeta`; the cone plan adopts
     // each as storage of the variable it stands in for (see
-    // `ConeGateInputs::adopt_relocations`).
+    // `OwnerInputs::adopt_relocations`).
     let mut temp_reloc: Vec<(isize, isize, usize)> = Vec::new();
     let unified = {
         let mut unified = unified;
@@ -2159,18 +2184,25 @@ fn run_comb_pipeline(
         ci
     });
     let cone_inputs = adopted_inputs.as_ref().or(cone_inputs);
-    // A dataflow settle runs no cone gate but keeps the plan's order: it lays
+    // A dataflow settle runs no cone gate but keeps the cone order: it lays
     // each block's sequential chain out contiguously, and a dataflow node
     // takes in whatever a chain spans.
     let dataflow = crate::ir::opt::dataflow::enabled();
     let plan_inputs = cone_inputs.filter(|_| cone_gate::enabled() || dataflow);
+    let plan_at = |stmts: &[ProtoStatement], ci: &owners::OwnerInputs| {
+        if dataflow {
+            cone_order::cone_order(stmts, ci).map(ConeSchedule::Order)
+        } else {
+            cone_gate::plan(stmts, ci).map(ConeSchedule::Gate)
+        }
+    };
     // The outer `Option` is whether the rule ran at all; a decision whose plan
     // is `None` is still a decision, and re-planning it would be a third plan.
-    let mut chosen_plan: Option<Option<cone_gate::ConePlan>> = None;
+    let mut chosen_plan: Option<Option<ConeSchedule>> = None;
     if let (Some(ci), Some((base_stmts, base_off))) = (plan_inputs, fusion_alt.take()) {
-        let segs = |p: &Option<cone_gate::ConePlan>| p.as_ref().map(|x| x.segments.len());
-        let p_sel = cone_gate::plan(&unified_sorted, ci);
-        let p_base = cone_gate::plan(&base_stmts, ci);
+        let segs = |p: &Option<ConeSchedule>| p.as_ref().map(ConeSchedule::segments);
+        let p_sel = plan_at(&unified_sorted, ci);
+        let p_base = plan_at(&base_stmts, ci);
         let retired = base_stmts.len().saturating_sub(unified_sorted.len());
         let retired_frac = retired as f64 / base_stmts.len().max(1) as f64;
         let keep_sel = comb_fusion::adopt_field_defs(segs(&p_sel), segs(&p_base), retired_frac);
@@ -2185,15 +2217,16 @@ fn run_comb_pipeline(
     let (unified_sorted, cone_plan) = match plan_inputs {
         Some(ci) => match chosen_plan
             .take()
-            .unwrap_or_else(|| cone_gate::plan(&unified_sorted, ci))
+            .unwrap_or_else(|| plan_at(&unified_sorted, ci))
         {
             Some(plan) => {
-                let mut new_of = vec![0usize; plan.order.len()];
-                for (new, &old) in plan.order.iter().enumerate() {
+                let plan_order = plan.order();
+                let mut new_of = vec![0usize; plan_order.len()];
+                for (new, &old) in plan_order.iter().enumerate() {
                     new_of[old as usize] = new;
                 }
                 cone_kept_edge_directions = preserves_edge_directions(&unified_sorted, &new_of);
-                let order: Vec<usize> = plan.order.iter().map(|&oi| oi as usize).collect();
+                let order: Vec<usize> = plan_order.iter().map(|&oi| oi as usize).collect();
                 let mut reordered = unified_sorted;
                 permute_in_place(&mut reordered, &order);
                 (reordered, Some(plan))
@@ -2203,12 +2236,15 @@ fn run_comb_pipeline(
         None => (unified_sorted, None),
     };
     let reordered = cone_plan.is_some();
-    let cone_plan = cone_plan.filter(|_| !dataflow);
+    let cone_plan = match cone_plan {
+        Some(ConeSchedule::Gate(p)) => Some(p),
+        _ => None,
+    };
     // An exact hint for the OLD order carries only if no edge changed
     // direction; otherwise re-take the positional metric, never lower.
     let required_comb_passes = if reordered {
         let repositioned = compute_required_passes("comb-after-cone-reorder", &unified_sorted);
-        if cone_gate::diag() {
+        if owners::diag() {
             eprintln!(
                 "[cone_gate] passes: pre-reorder {required_comb_passes} positional {repositioned}"
             );
@@ -6456,7 +6492,7 @@ impl Conv<&air::Module> for ProtoModule {
                 None
             };
         // Part of the pipeline key: the masks they yield live in the cached plan.
-        let trigger_inputs: cone_gate::TriggerInputs = if cone_event_written.is_some()
+        let trigger_inputs: owners::TriggerInputs = if cone_event_written.is_some()
             && cone_gate::trigger_enabled()
         {
             let (trigger_events, event_writes) = collect_event_writes_each(&all_event_statements);
@@ -6469,7 +6505,7 @@ impl Conv<&air::Module> for ProtoModule {
                     Some((el.current, *vid))
                 })
                 .collect();
-            cone_gate::TriggerInputs {
+            owners::TriggerInputs {
                 trigger_events,
                 event_writes,
                 master_clocks,
@@ -6601,18 +6637,17 @@ impl Conv<&air::Module> for ProtoModule {
                         meta_units,
                         extra_offsets: aux_extra_offsets.clone().unwrap_or_default(),
                     });
-                let cone_inputs: Option<cone_gate::ConeGateInputs> =
-                    cone_event_written.map(|evt| {
-                        cone_gate::build_inputs(
-                            &src.name.to_string(),
-                            &variable_meta,
-                            &all_child_modules,
-                            &evt,
-                            &context.comb_reloc,
-                            context.config.use_4state,
-                            trigger_inputs,
-                        )
-                    });
+                let cone_inputs: Option<owners::OwnerInputs> = cone_event_written.map(|evt| {
+                    owners::build_inputs(
+                        &src.name.to_string(),
+                        &variable_meta,
+                        &all_child_modules,
+                        &evt,
+                        &context.comb_reloc,
+                        context.config.use_4state,
+                        trigger_inputs,
+                    )
+                });
 
                 // Compute holds the claim its peers are blocked on, so their
                 // cores are free; Disabled blocks nobody.

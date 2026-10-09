@@ -23,7 +23,7 @@
 //! running much extra.  A node joins a cell only when that keeps the cell
 //! order topological.
 
-use super::cone_gate::{ConeGateInputs, has_side_effects};
+use super::owners::{OwnerInputs, has_side_effects};
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::expression::ProtoExpression;
 use crate::ir::statement::ProtoStatement;
@@ -423,7 +423,7 @@ impl StmtIo {
 
 /// `None` when a statement falls outside what the plan can track: an access
 /// outside every owner span or a side effect.
-fn stmt_io(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<Vec<StmtIo>> {
+fn stmt_io(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<Vec<StmtIo>> {
     // A byte must belong to one span, or a writer would mark the readers of
     // one span while a reader of the same bytes is keyed on another.  Owner
     // spans can nest (a folded array's span over bytes another entry also
@@ -604,7 +604,15 @@ fn splitmix(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-pub fn plan(stmts: &[ProtoStatement], inputs: &ConeGateInputs) -> Option<DataflowPlan> {
+/// Groups `stmts` into cells, or `None` when the comb falls outside what the
+/// plan can track.
+///
+/// The rule for reads between two writers assumes no bit is read in a pass
+/// before its first write there, so a read of bits no later writer changes
+/// sees their final value.  The analyzer rejects a read of an unassigned
+/// variable in `always_comb` (`UnassignVariable`), and the scheduler orders a
+/// separate assign after the writers of what it reads.
+pub fn plan(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<DataflowPlan> {
     let n = stmts.len();
     if n == 0 {
         return None;
@@ -1337,7 +1345,7 @@ pub fn stores_all_marked(stmts: &[ProtoStatement], marks: &StoreMarks) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::opt::cone_gate::FfOwner;
+    use crate::ir::opt::owners::FfOwner;
     use crate::ir::{ExpressionContext, ProtoAssignDynamicStatement, ProtoAssignStatement};
     use veryl_analyzer::value::{Value, ValueU64};
     use veryl_parser::token_range::TokenRange;
@@ -1487,8 +1495,8 @@ mod tests {
     }
 
     /// One-byte comb variables at offsets `0, 8, 16, ...`.
-    fn inputs(vars: usize) -> ConeGateInputs {
-        ConeGateInputs {
+    fn inputs(vars: usize) -> OwnerInputs {
+        OwnerInputs {
             node_parent: vec![u32::MAX],
             node_path: vec![String::new()],
             comb_owner: (0..vars).map(|i| (i * 8, i * 8 + 1, 0)).collect(),

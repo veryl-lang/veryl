@@ -19,7 +19,7 @@
 //! (a variable's full width, an array's whole extent), so storage the
 //! variable tables do not describe (split fields, temps) is covered too.
 
-use super::cone_gate::{ConeGateInputs, Tour, has_side_effects};
+use super::owners::{OwnerInputs, Tour, has_side_effects};
 use crate::ir::ProtoExpression;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::{VarOffset, native_bytes};
@@ -388,7 +388,7 @@ struct CombInfo {
 /// list, which dwarfs any one event's statements, so a module builds it once
 /// and plans each event over it.
 pub struct CombContext<'a> {
-    inputs: &'a ConeGateInputs,
+    inputs: &'a OwnerInputs,
     /// Sorted by the owner's tour entry number, so a subtree is one slice.
     combs: Vec<CombInfo>,
     comb_touched_comb: Spans,
@@ -421,7 +421,7 @@ impl<'a> CombContext<'a> {
     /// the derived-clock closure reads or writes, `comb_touched` every offset
     /// the comb touches.
     pub fn new(
-        inputs: &'a ConeGateInputs,
+        inputs: &'a OwnerInputs,
         comb_stmts: &[ProtoStatement],
         closure_touched: &HashSet<VarOffset>,
         comb_touched: &HashSet<VarOffset>,
@@ -553,7 +553,7 @@ pub fn plan(stmts: &[ProtoStatement], ctx: &mut CombContext, label: &str) -> Vec
         reads: reads_by_node,
         candidate,
     } = ctx;
-    let inputs: &ConeGateInputs = inputs;
+    let inputs: &OwnerInputs = inputs;
     let tour = inputs.tour();
     let diag_on = diag();
     // Event statements: owning node (by the FFs written), reads, writes, and
@@ -1188,7 +1188,7 @@ impl RtEventGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::opt::cone_gate::FfOwner;
+    use crate::ir::opt::owners::FfOwner;
     use crate::ir::{ExpressionContext, ProtoAssignStatement};
     use veryl_analyzer::value::{Value, ValueU64};
     use veryl_parser::token_range::TokenRange;
@@ -1275,7 +1275,7 @@ mod tests {
     #[test]
     fn a_subtree_slice_names_what_an_ancestor_test_names() {
         // top { a { p, q }, b }, one comb variable per node.
-        let inputs = ConeGateInputs {
+        let inputs = OwnerInputs {
             node_parent: vec![u32::MAX, 0, 1, 1, 0],
             node_path: ["top", "top.a", "top.a.p", "top.a.q", "top.b"]
                 .iter()
@@ -1331,7 +1331,7 @@ mod tests {
         // root 0 { 1, 2 }.  An event-scoped scratch write between the two
         // siblings' blocks belongs to neither run: taking it would make the
         // runs overlap, and the emitter can only nest gates.
-        let inputs = ConeGateInputs {
+        let inputs = OwnerInputs {
             node_parent: vec![u32::MAX, 0, 0],
             node_path: ["top", "top.a", "top.b"]
                 .iter()
@@ -1409,9 +1409,9 @@ mod tests {
         })
     }
 
-    fn two_leaf_inputs() -> ConeGateInputs {
+    fn two_leaf_inputs() -> OwnerInputs {
         // top { a, b }: `a` owns comb 0x100.. and FF 0..0x40, `b` FF 0x40..0x80.
-        ConeGateInputs {
+        OwnerInputs {
             node_parent: vec![u32::MAX, 0, 0],
             node_path: ["top", "top.a", "top.b"]
                 .iter()
@@ -1451,7 +1451,7 @@ mod tests {
         (comb, event)
     }
 
-    fn a_context<'a>(inputs: &'a ConeGateInputs, comb: &[ProtoStatement]) -> CombContext<'a> {
+    fn a_context<'a>(inputs: &'a OwnerInputs, comb: &[ProtoStatement]) -> CombContext<'a> {
         use VarOffset::{Comb, Ff};
         let closure: HashSet<VarOffset> = [Comb(0x300), Comb(0x108), Ff(0x20)]
             .into_iter()

@@ -86,7 +86,7 @@ pub struct CombPipeline {
     /// The instance tree and storage owners the cone plan was built over,
     /// in the FINAL storage space; the event gates attribute `always_ff`
     /// statements to subtrees with it.
-    pub cone_inputs: Option<Arc<crate::ir::opt::cone_gate::ConeGateInputs>>,
+    pub cone_inputs: Option<Arc<crate::ir::opt::owners::OwnerInputs>>,
 }
 
 enum Slot {
