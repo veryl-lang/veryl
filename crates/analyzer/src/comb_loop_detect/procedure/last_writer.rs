@@ -120,7 +120,8 @@ type Cell = Vec<CountedIterator>;
 #[derive(Default)]
 struct Scan {
     loops: Vec<ScopeLoop>,
-    loop_ids: HashMap<*const ForStatement, usize>,
+    /// The loops nested in the outermost one, by their statements.
+    loop_ids: HashMap<*const Statement, usize>,
     writers: HashMap<VarId, Vec<SubWriter>>,
     places: HashMap<*const Statement, Vec<Step>>,
     unknown: crate::HashSet<VarId>,
@@ -338,7 +339,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             iterator: statement.var_id,
             ascending: !matches!(statement.range, ForRange::Reverse { .. }),
         });
-        scan.loop_ids.insert(std::ptr::from_ref(statement), 0);
         let mut path = Vec::new();
         let mut branches = Vec::new();
         let scanned = self.scan_block(&mut scan, &statement.body, &mut path, &mut branches);
@@ -482,6 +482,52 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         (self.call_frames.len() == scope.call_depth).then(|| Rc::clone(scope))
     }
 
+    /// Scan each iteration of a loop over `values` as the one numbered by
+    /// its order, its body specialized to its value. Charged to the
+    /// procedure's work, one for each value.
+    fn scan_ordinals(
+        &mut self,
+        scan: &mut Scan,
+        statement: &ForStatement,
+        values: Vec<usize>,
+        path: &mut Vec<Step>,
+        branches: &mut Vec<DataBranch>,
+    ) -> Option<()> {
+        self.charge_last_writer_work(values.len())?;
+        for (ordinal, value) in values.into_iter().enumerate() {
+            let iterator = ordinal_iterator(statement, isize::try_from(ordinal).ok()?)?;
+            let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
+            self.forget_runtime_iterator_value(statement.var_id);
+            let mut origins = Vec::new();
+            if let Some(body) = &body {
+                statement_origins(&statement.body, body, &mut origins);
+                self.statement_origins.extend(origins.iter().copied());
+            }
+            self.counted_iterators.push(iterator);
+            let scanned = self.scan_block(
+                scan,
+                body.as_deref().unwrap_or(&statement.body),
+                path,
+                branches,
+            );
+            self.counted_iterators.pop();
+            for (specialized, _) in origins {
+                self.statement_origins.remove(&specialized);
+            }
+            scanned?;
+        }
+        Some(())
+    }
+
+    /// The statement a statement of a specialized iteration body comes from.
+    pub(super) fn original_statement(&self, statement: &Statement) -> *const Statement {
+        let mut statement = std::ptr::from_ref(statement);
+        while let Some(&original) = self.statement_origins.get(&statement) {
+            statement = original;
+        }
+        statement
+    }
+
     fn scan_block(
         &mut self,
         scan: &mut Scan,
@@ -492,7 +538,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         for (index, statement) in statements.iter().enumerate() {
             path.push(Step::Statement(index));
             scan.places
-                .insert(std::ptr::from_ref(statement), path.clone());
+                .insert(self.original_statement(statement), path.clone());
             if scan.confining {
                 scan.confined.extend(statement_accesses(statement));
             }
@@ -510,6 +556,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         path: &mut Vec<Step>,
         branches: &mut Vec<DataBranch>,
     ) -> Option<()> {
+        let original = self.original_statement(statement);
         match statement {
             Statement::Assign(assign) => {
                 // A return ends the iterations early.
@@ -661,7 +708,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // A loop evaluated with a symbolic iterator is scanned, and so
                 // is one that takes each of its values without breaking: its
                 // iterations still all run in order, each evaluated as the one
-                // of its value.
+                // of its value. A loop whose step multiplies has few values,
+                // so each is scanned as its own iteration, with the positions
+                // its value gives.
+                let mut ordinals = None;
                 let iterator = match super::loop_evaluation(statement, &mut self.ctx) {
                     super::LoopEvaluation::Counted(iterations) => {
                         if iterations.count == 0 {
@@ -677,10 +727,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         }
                         let last = isize::try_from(values.len() - 1).ok()?;
                         match ordinal_iterator(statement, 0) {
-                            Some(ordinal) => CountedIterator {
-                                max: last,
-                                ..ordinal
-                            },
+                            Some(ordinal) => {
+                                ordinals = Some(values);
+                                CountedIterator {
+                                    max: last,
+                                    ..ordinal
+                                }
+                            }
                             None => CountedIterator::of(
                                 statement,
                                 statement.range.eval_counted(&mut self.ctx)?,
@@ -690,10 +743,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     _ => return None,
                 };
                 let next = scan.loops.len();
-                let id = *scan
-                    .loop_ids
-                    .entry(std::ptr::from_ref(statement))
-                    .or_insert(next);
+                let id = *scan.loop_ids.entry(original).or_insert(next);
                 if id == next {
                     scan.loops.push(ScopeLoop {
                         iterator: iterator.id,
@@ -703,9 +753,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
                 path.push(Step::Loop(id));
                 self.forget_runtime_iterator_value(statement.var_id);
-                self.counted_iterators.push(iterator);
-                let scanned = self.scan_block(scan, &statement.body, path, branches);
-                self.counted_iterators.pop();
+                let scanned = match ordinals {
+                    Some(values) => self.scan_ordinals(scan, statement, values, path, branches),
+                    None => {
+                        self.counted_iterators.push(iterator);
+                        let scanned = self.scan_block(scan, &statement.body, path, branches);
+                        self.counted_iterators.pop();
+                        scanned
+                    }
+                };
                 path.pop();
                 scanned
             }
@@ -908,10 +964,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Some(scope) = self.active_writer_scope() else {
             return false;
         };
-        let mut statement = std::ptr::from_ref(statement);
-        while let Some(&original) = self.statement_origins.get(&statement) {
-            statement = original;
-        }
+        let statement = self.original_statement(statement);
         let place = scope
             .places
             .get(&statement)

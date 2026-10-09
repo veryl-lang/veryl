@@ -1427,3 +1427,52 @@ counted_case!(
      assign o = {7'd0, c};",
     true
 );
+
+counted_case!(
+    counted_multiplied_inner_loop_positions_reach_a_later_iteration_read,
+    "a later iteration reads the element a loop over multiplied values wrote at its value",
+    "var x: logic [9];
+     var y: logic [9];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[2]; }
+             for j in 1..9 step *= 2 { y[j] = x[j] ^ c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_multiplied_inner_loop_positions_keep_their_order,
+    "an iteration over multiplied values that reads a later one's element closes a loop",
+    "var x: logic [9];
+     var y: logic [9];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..1 {
+             for j in 1..9 step *= 2 { c = y[9 - j]; y[j] = x[j] ^ c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_multiplied_inner_loop_positions_read_earlier_iterations,
+    "an iteration over multiplied values reads what the earlier ones wrote",
+    "var x: logic [9];
+     var y: logic [9];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..1 {
+             for j in 1..9 step *= 2 { c = y[j >> 1]; y[j] = x[j] ^ c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
