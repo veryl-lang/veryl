@@ -1564,3 +1564,148 @@ counted_case!(
      assign o = {7'd0, c};",
     false
 );
+
+counted_case!(
+    counted_constant_bit_writes_reach_a_later_iteration_read,
+    "a later iteration reads the bits an earlier one wrote beside others",
+    "var x: logic [4];
+     var e: logic<8>;
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = e[7]; }
+             e[7] = x[0] ^ c;
+             e[6:0] = 0;
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_member_writes_reach_a_later_whole_read,
+    "a later iteration reads the whole struct an earlier one wrote member by member",
+    "var x: logic [4];
+     var r: pkg::Req;
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = ^r; }
+             r.go = x[0] ^ c;
+             r.arm = 0;
+             r.pad = 0;
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_member_writes_miss_a_first_iteration_read,
+    "the first iteration reads the struct from before the loop",
+    "var x: logic [4];
+     var r: pkg::Req;
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 0 { c = ^r; }
+             r.go = x[0] ^ c;
+             r.arm = 0;
+             r.pad = 0;
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_unwritten_bit_read_keeps_its_loop,
+    "a bit the loop never writes is read from what follows it",
+    "var x: logic [4];
+     var e: logic<8>;
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = ^e[7:6]; }
+             e[7] = x[0];
+             e[5:0] = 0;
+         }
+         e[6] = c;
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_runtime_inner_loop_leaves_other_reads_solved,
+    "a runtime inner loop does not unsolve the reads of what it does not write",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[0]; }
+             y[0] = x[0] ^ c;
+             for j in 0..a { y[1] = c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_runtime_inner_loop_writes_may_not_run,
+    "a write in a runtime inner loop may leave the value from before the loop",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[1]; }
+             y[0] = x[0] ^ c;
+             for j in 0..a { y[1] = c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_call_reading_other_variables_leaves_reads_solved,
+    "a call that reads other variables but writes none keeps the reads solved",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     function k () -> logic { return x[1]; }
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[0]; }
+             y[0] = k() ^ c;
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_call_reading_the_written_storage_keeps_its_loop,
+    "a call that reads the storage the loop writes closes the loop",
+    "var y: logic [4];
+     var c: logic;
+     function k () -> logic { return y[0]; }
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             y[0] = k() ^ c;
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);

@@ -1496,7 +1496,9 @@ struct ProcedureAnalysis<'a, 's> {
     control_frames: HashMap<VersionId, SampledAffineIndex>,
     /// Whether each called function specialization depends only on its
     /// inputs. Anchored expressions ask this once per occurrence.
-    pure_functions: HashMap<(VarId, Option<Vec<usize>>), bool>,
+    /// Whether each function reads only its inputs (`true` in the key) or
+    /// writes nothing but its own variables (`false`).
+    pure_functions: HashMap<(VarId, Option<Vec<usize>>, bool), bool>,
     /// The writes of the outermost counted loop being evaluated, when its
     /// reads take their last writers.
     writer_scope: Option<Rc<WriterScope>>,
@@ -1505,6 +1507,8 @@ struct ProcedureAnalysis<'a, 's> {
     /// The statement each statement of a specialized iteration body being
     /// evaluated comes from.
     statement_origins: HashMap<*const Statement, *const Statement>,
+    /// The runtime loops being evaluated in the scope of the last writers.
+    runtime_loop_depth: usize,
     /// The destination being written by the current assignment.
     current_writer: Option<WriterId>,
     /// A statement being evaluated once per set of iterations.
@@ -1683,6 +1687,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             writer_scope: None,
             statement_places: Vec::new(),
             statement_origins: HashMap::default(),
+            runtime_loop_depth: 0,
             current_writer: None,
             split_statement: None,
         }
@@ -1940,10 +1945,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn read_source_key(
         &mut self,
         node: NodeKey,
-        sources: Option<&[last_writer::Source]>,
+        read: Option<&mut last_writer::LastWriterRead>,
     ) -> VersionId {
-        match sources {
-            Some(sources) => self.last_writer_value(node, sources),
+        match read.and_then(|read| self.key_last_writers(read, node)) {
+            Some(sources) => self.last_writer_value(node, &sources),
             None => self.read_key(node),
         }
     }
@@ -2964,8 +2969,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         } else {
             None
         };
-        let sources =
-            self.last_writer_sources_of(id, elements.as_ref(), select, member_select_domain);
+        let mut sources = self.last_writer_read(id, elements.clone(), select, member_select_domain);
         let receiver = self.receiver_index(id, index);
         let accesses = var_reads(id, &receiver, select, member_select_domain, &mut self.ctx);
         if accesses.is_empty() && !(receiver.is_const() && select.is_const_with_range()) {
@@ -2985,7 +2989,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if !progression_meets(array, step, key.1) {
                     continue;
                 }
-                let version = self.read_source_key(key, sources.as_deref());
+                let version = self.read_source_key(key, sources.as_mut());
                 values.push((key, self.project_read(key, version, array, packed)));
             }
         }
@@ -3576,7 +3580,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return None;
         };
         let destination = projection.destination_index.as_ref()?;
-        let last_writers =
+        let mut last_writers =
             self.last_writer_sources(*id, index, select, comptime.member_select_domain);
         let receiver = self.receiver_index(*id, index);
         if !receiver.is_const() {
@@ -3618,7 +3622,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     continue;
                 };
                 for key in self.bit_part.overlapping_access(*id, *array, span) {
-                    let version = self.read_source_key(key, last_writers.as_deref());
+                    let version = self.read_source_key(key, last_writers.as_mut());
                     reads.push(self.project_read(key, version, *array, span), relation);
                 }
             }
@@ -3645,7 +3649,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if let Some((_, expression)) = &select.1 {
             selector_sources.extend(self.eval_expr(expression));
         }
-        let last_writers =
+        let mut last_writers =
             self.last_writer_sources(*id, index, select, comptime.member_select_domain);
         let receiver = self.receiver_index(*id, index);
         if receiver.is_const()
@@ -3656,7 +3660,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 requested_array,
                 requested,
                 anchor,
-                last_writers.as_deref(),
+                last_writers.as_mut(),
             )
         {
             let mut reads = reads;
@@ -3670,7 +3674,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 select,
                 requested_array,
                 anchor,
-                last_writers.as_deref(),
+                last_writers.as_mut(),
             )
         {
             let mut reads = reads;
@@ -3696,7 +3700,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         requested_array: ArraySpan,
         requested: PackedSpan,
         anchor: &SampledAffineIndex,
-        last_writers: Option<&[last_writer::Source]>,
+        mut last_writers: Option<&mut last_writer::LastWriterRead>,
     ) -> Option<ExpressionSources> {
         let (source, width) = self.sample_packed_select(id, select)?;
         if width != 1 || source.index.terms.is_empty() {
@@ -3751,7 +3755,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .bit_part
                         .overlapping_access(id, source_array, source_span)
                     {
-                        let version = self.read_source_key(key, last_writers);
+                        let version = self.read_source_key(key, last_writers.as_deref_mut());
                         let version = self.project_read(key, version, source_array, source_span);
                         reads.push(
                             version,
@@ -3781,7 +3785,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         select: &VarSelect,
         requested_array: ArraySpan,
         anchor: &SampledAffineIndex,
-        last_writers: Option<&[last_writer::Source]>,
+        mut last_writers: Option<&mut last_writer::LastWriterRead>,
     ) -> Option<ExpressionSources> {
         let source = self.sample_affine_index(id, index)?;
         if source.index.terms.is_empty() {
@@ -3819,7 +3823,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 continue;
             };
             for key in self.bit_part.overlapping_access(id, array, packed) {
-                let version = self.read_source_key(key, last_writers);
+                let version = self.read_source_key(key, last_writers.as_deref_mut());
                 reads.push(self.project_read(key, version, array, packed), relation);
             }
         }
@@ -4682,7 +4686,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut iteration_controls = range_controls.to_vec();
         // Inside the scope of the last writers, which scans this loop as one
         // over its iterations, each iteration is the one of its value.
-        let in_scope = self.scans_enumerated_loop();
+        let in_scope = self.in_writer_scope();
         for (ordinal, value) in iterations.into_iter().enumerate() {
             self.set_known_iterator_value(statement, value);
             let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
@@ -4819,7 +4823,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         range_controls: &[VersionId],
     ) -> FlowResult {
         let may_execute_zero_times = for_range_has_dynamic_bounds(&statement.range);
-        self.eval_repeated_for(statement, range_controls, may_execute_zero_times, None)
+        // Its reads may see a write of its previous run, which the last
+        // writers of the scope do not order.
+        let in_scope = self.in_writer_scope();
+        self.runtime_loop_depth += usize::from(in_scope);
+        let result =
+            self.eval_repeated_for(statement, range_controls, may_execute_zero_times, None);
+        self.runtime_loop_depth -= usize::from(in_scope);
+        result
     }
 
     fn eval_repeated_for(
@@ -5264,21 +5275,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                             source_array,
                                             source_span,
                                         ) {
-                                            let version =
-                                                if let Some(sampled) = &sampled {
-                                                    sampled.values.get(&key).copied()
-                                                } else {
-                                                    let last_writers = self.last_writer_sources(
-                                                        *id,
-                                                        index,
-                                                        select,
-                                                        comptime.member_select_domain,
-                                                    );
-                                                    Some(self.read_source_key(
+                                            let version = if let Some(sampled) = &sampled {
+                                                sampled.values.get(&key).copied()
+                                            } else {
+                                                let mut last_writers = self.last_writer_sources(
+                                                    *id,
+                                                    index,
+                                                    select,
+                                                    comptime.member_select_domain,
+                                                );
+                                                Some(
+                                                    self.read_source_key(
                                                         key,
-                                                        last_writers.as_deref(),
-                                                    ))
-                                                };
+                                                        last_writers.as_mut(),
+                                                    ),
+                                                )
+                                            };
                                             if let Some(version) = version {
                                                 reads.push(self.project_read(
                                                     key,
@@ -6199,7 +6211,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// Whether a call depends only on its inputs: its body reads and writes
     /// nothing but function variables and calls only such functions.
     fn function_is_pure(&mut self, call: &FunctionCall) -> bool {
-        let key = (call.id, call.index.clone());
+        self.function_effects_within(call, true)
+    }
+
+    /// Whether a call writes nothing but its own variables and outputs. It
+    /// may read anything.
+    fn function_writes_only_its_own(&mut self, call: &FunctionCall) -> bool {
+        self.function_effects_within(call, false)
+    }
+
+    /// Whether a call writes nothing but its own variables and outputs and,
+    /// when `inputs_only`, reads nothing but its inputs and own variables.
+    fn function_effects_within(&mut self, call: &FunctionCall, inputs_only: bool) -> bool {
+        let key = (call.id, call.index.clone(), inputs_only);
         if let Some(&pure) = self.pure_functions.get(&key) {
             return pure;
         }
@@ -6207,19 +6231,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             analysis: &ProcedureAnalysis<'_, '_>,
             expression: &Expression,
             depth: usize,
+            inputs_only: bool,
         ) -> bool {
-            let recurse = |expression: &Expression| pure_expression(analysis, expression, depth);
+            let recurse =
+                |expression: &Expression| pure_expression(analysis, expression, depth, inputs_only);
             match expression {
                 Expression::Term(factor) => match factor.as_ref() {
                     Factor::Variable(id, ..) => {
-                        analysis.is_function_variable(*id)
+                        (!inputs_only || analysis.is_function_variable(*id))
                             && children::children(expression).into_iter().all(recurse)
                     }
                     Factor::Value(_) => true,
                     Factor::FunctionCall(call) => {
                         call.outputs.is_empty()
                             && call.inputs.values().all(recurse)
-                            && pure_call(analysis, call, depth + 1)
+                            && pure_call(analysis, call, depth + 1, inputs_only)
                     }
                     _ => false,
                 },
@@ -6230,7 +6256,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             analysis: &ProcedureAnalysis<'_, '_>,
             statements: &[Statement],
             depth: usize,
+            inputs_only: bool,
         ) -> bool {
+            let pure_expression = |analysis, expression, depth| {
+                pure_expression(analysis, expression, depth, inputs_only)
+            };
+            let pure_statements = |analysis, statements, depth| {
+                pure_statements(analysis, statements, depth, inputs_only)
+            };
             statements.iter().all(|statement| match statement {
                 Statement::Assign(assign) => {
                     assign.hier_dst.is_none()
@@ -6286,6 +6319,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             analysis: &ProcedureAnalysis<'_, '_>,
             call: &FunctionCall,
             depth: usize,
+            inputs_only: bool,
         ) -> bool {
             if depth > 16 {
                 return false;
@@ -6301,9 +6335,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 Some(index) => function.get_function(index),
                 None => function.get_function(&[]),
             };
-            body.is_some_and(|body| pure_statements(analysis, &body.statements, depth))
+            body.is_some_and(|body| pure_statements(analysis, &body.statements, depth, inputs_only))
         }
-        let pure = pure_call(self, call, 0);
+        let pure = pure_call(self, call, 0, inputs_only);
         self.pure_functions.insert(key, pure);
         pure
     }

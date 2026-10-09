@@ -31,7 +31,7 @@ use crate::HashMap;
 use crate::comb_loop_detect::position::{
     Overflow, ceil_div_wide, extended_gcd, floor_div_wide, solve_congruence,
 };
-use crate::comb_loop_detect::region::NodeKey;
+use crate::comb_loop_detect::region::{NodeKey, PackedSpan};
 use crate::comb_loop_detect::ssa::VersionId;
 use crate::ir::{
     AssignDestination, CasePattern, Expression, Factor, ForRange, ForStatement, MemberSelectDomain,
@@ -73,6 +73,46 @@ enum Bits {
     Whole,
     /// The lowest bit and the width.
     Range(AffineIndex, usize),
+}
+
+impl Bits {
+    /// The bits within `span`, which they overlap. Bits that move with the
+    /// iterators stay as they are.
+    fn within(&self, span: PackedSpan) -> Self {
+        let constant = |low: usize, width: usize| {
+            Some(Self::Range(
+                AffineIndex {
+                    terms: Vec::new(),
+                    constant: isize::try_from(low).ok()?,
+                },
+                width,
+            ))
+        };
+        let narrowed = match self {
+            Self::Whole => constant(span.start, span.length),
+            Self::Range(low, width) if low.terms.is_empty() => (|| {
+                let low = usize::try_from(low.constant).ok()?;
+                let start = low.max(span.start);
+                let end = (low.checked_add(*width)?).min(span.start.checked_add(span.length)?);
+                (start < end)
+                    .then(|| constant(start, end - start))
+                    .flatten()
+            })(),
+            Self::Range(..) => None,
+        };
+        narrowed.unwrap_or_else(|| self.clone())
+    }
+}
+
+/// A read whose last writers are solved for the bits of each key it takes.
+pub(super) struct LastWriterRead {
+    id: VarId,
+    elements: Option<AffineElements>,
+    select: VarSelect,
+    member_select_domain: Option<MemberSelectDomain>,
+    /// The last writers solved for each span of bits, `None` for a key
+    /// without one.
+    solved: HashMap<Option<(usize, usize)>, Option<Vec<Source>>>,
 }
 
 /// Affine element coordinates and bits of an access.
@@ -130,7 +170,8 @@ struct Scan {
     /// Whether the statements scanned are on only some iterations.
     confining: bool,
     /// Each enclosing loop that breaks, at its place, and whether a break of
-    /// it has been scanned: what follows a break may not run.
+    /// it has been scanned: what follows a break may not run. A runtime loop
+    /// is one from its start.
     breaking: Vec<(Vec<Step>, bool)>,
 }
 
@@ -473,9 +514,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    /// Whether a loop that takes each of its values is evaluated in the
-    /// active scope, which scans it as one over its iterations.
-    pub(super) fn scans_enumerated_loop(&self) -> bool {
+    /// Whether statements are evaluated in the active scope.
+    pub(super) fn in_writer_scope(&self) -> bool {
         self.active_writer_scope().is_some()
     }
 
@@ -765,9 +805,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             )?,
                         }
                     }
-                    super::LoopEvaluation::OverLimit | super::LoopEvaluation::Runtime => {
-                        return None;
+                    // A runtime loop may run its body any number of times, so
+                    // none of its writes is certain, and its reads, which may
+                    // see a later write of its previous run, are not solved.
+                    super::LoopEvaluation::Runtime => {
+                        let (start, end) = statement.range.bounds();
+                        for bound in [start, end] {
+                            if let crate::ir::ForBound::Expression(expression) = bound
+                                && !self.reads_only(expression)
+                            {
+                                return None;
+                            }
+                        }
+                        scan.breaking.push((path.clone(), true));
+                        let scanned = self.scan_block(scan, &statement.body, path, branches);
+                        scan.breaking.pop();
+                        return scanned;
                     }
+                    super::LoopEvaluation::OverLimit => return None,
                 };
                 let next = scan.loops.len();
                 let id = *scan.loop_ids.entry(original).or_insert(next);
@@ -807,7 +862,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             // A call that writes nothing but its own variables and outputs
             // writes each output as an assignment would.
             Statement::FunctionCall(call) => {
-                if !self.function_is_pure(call)
+                if !self.function_writes_only_its_own(call)
                     || !call.inputs.values().all(|input| self.reads_only(input))
                 {
                     return None;
@@ -942,12 +997,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// Whether evaluating `expression` writes nothing: every call in it
-    /// depends only on its inputs.
+    /// writes only its own variables. What a call reads is evaluated in its
+    /// own frame, outside the scope, so it reads the weakly updated storage.
     fn reads_only(&mut self, expression: &Expression) -> bool {
         if let Expression::Term(factor) = expression {
             match factor.as_ref() {
                 Factor::FunctionCall(call)
-                    if !call.outputs.is_empty() || !self.function_is_pure(call) =>
+                    if !call.outputs.is_empty() || !self.function_writes_only_its_own(call) =>
                 {
                     return false;
                 }
@@ -1041,52 +1097,99 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    /// The last writers of a read on its iterations, or `None` when they are
-    /// not solved exactly and the read takes the weakly updated storage.
+    /// A read whose last writers are solved for each key it takes, or `None`
+    /// when no storage it reads is covered.
     pub(super) fn last_writer_sources(
         &mut self,
         id: VarId,
         index: &VarIndex,
         select: &VarSelect,
         member_select_domain: Option<MemberSelectDomain>,
-    ) -> Option<Vec<Source>> {
-        self.active_writer_scope()?;
+    ) -> Option<LastWriterRead> {
+        if !self.active_writer_scope()?.writers.contains_key(&id) {
+            return None;
+        }
         let elements = self.affine_elements(id, index);
-        self.last_writer_sources_of(id, elements.as_ref(), select, member_select_domain)
+        self.last_writer_read(id, elements, select, member_select_domain)
     }
 
     /// `last_writer_sources` of an access with the affine coordinates
     /// `elements`.
-    pub(super) fn last_writer_sources_of(
+    pub(super) fn last_writer_read(
         &mut self,
         id: VarId,
-        elements: Option<&AffineElements>,
+        elements: Option<AffineElements>,
         select: &VarSelect,
         member_select_domain: Option<MemberSelectDomain>,
-    ) -> Option<Vec<Source>> {
-        let cells = self.last_writer_cells(id, elements, select, member_select_domain)?;
-        let mut sources = Vec::new();
-        for (_, cell_sources) in cells {
-            for source in cell_sources {
-                if !sources.contains(&source) {
-                    sources.push(source);
-                }
-            }
-        }
-        Some(sources)
+    ) -> Option<LastWriterRead> {
+        self.active_writer_scope()?
+            .writers
+            .contains_key(&id)
+            .then(|| LastWriterRead {
+                id,
+                elements,
+                select: select.clone(),
+                member_select_domain,
+                solved: HashMap::default(),
+            })
     }
 
+    /// The last writers of the bits of `key` that `read` takes on its
+    /// iterations, or `None` when they are not solved exactly and the read
+    /// takes the weakly updated storage. Keys of the same bits share them.
+    pub(super) fn key_last_writers(
+        &mut self,
+        read: &mut LastWriterRead,
+        key: NodeKey,
+    ) -> Option<Vec<Source>> {
+        let span = self.key_span(key);
+        let bits = span.map(|span| (span.start, span.length));
+        if let Some(solved) = read.solved.get(&bits) {
+            return solved.clone();
+        }
+        let solved = self
+            .last_writer_cells(
+                read.id,
+                read.elements.as_ref(),
+                &read.select,
+                read.member_select_domain,
+                span,
+            )
+            .map(|cells| {
+                let mut sources = Vec::new();
+                for (_, cell_sources) in cells {
+                    for source in cell_sources {
+                        if !sources.contains(&source) {
+                            sources.push(source);
+                        }
+                    }
+                }
+                sources
+            });
+        read.solved.insert(bits, solved.clone());
+        solved
+    }
+
+    /// The last writers of a read on each set of its iterations, of the bits
+    /// within `key_bits` when given.
     fn last_writer_cells(
         &mut self,
         id: VarId,
         elements: Option<&AffineElements>,
         select: &VarSelect,
         member_select_domain: Option<MemberSelectDomain>,
+        key_bits: Option<PackedSpan>,
     ) -> Option<Vec<(Cell, Vec<Source>)>> {
+        if self.runtime_loop_depth > 0 {
+            return None;
+        }
         let scope = self.active_writer_scope()?;
         let writers = scope.writers.get(&id)?;
         let place = self.statement_places.last()?.clone();
-        let access = self.access_forms(id, elements, select, member_select_domain)?;
+        let mut access = self.access_forms(id, elements, select, member_select_domain)?;
+        if let Some(span) = key_bits {
+            access.bits = access.bits.within(span);
+        }
         self.solve_last_writers(&scope, writers, &place, &access)
     }
 
@@ -1167,7 +1270,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         for (id, index, select, member_select_domain) in reads {
             let elements = self.affine_elements(id, &index);
             let Some(read_cells) =
-                self.last_writer_cells(id, elements.as_ref(), &select, member_select_domain)
+                self.last_writer_cells(id, elements.as_ref(), &select, member_select_domain, None)
             else {
                 continue;
             };
@@ -1374,14 +1477,33 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let covers = match (&writer.access.bits, &access.bits) {
             (Bits::Whole, _) => true,
             (Bits::Range(..), Bits::Whole) => false,
+            // Constant bits are compared directly: a write elsewhere is not
+            // a candidate, and one over all the read's bits overwrites them.
+            (Bits::Range(written, written_width), Bits::Range(read, read_width))
+                if written.terms.is_empty() && read.terms.is_empty() =>
+            {
+                let last = |low: &AffineIndex, width: usize| {
+                    low.constant
+                        .checked_add(isize::try_from(width).ok()?.checked_sub(1)?)
+                };
+                let (written_last, read_last) =
+                    (last(written, *written_width)?, last(read, *read_width)?);
+                if written_last < read.constant || read_last < written.constant {
+                    return Some(None);
+                }
+                written.constant <= read.constant && read_last <= written_last
+            }
+            // Bits that do not move together may write some of the read's,
+            // as a part of the element does.
             (Bits::Range(written, written_width), Bits::Range(read, read_width)) => {
                 if written_width != read_width
                     || (*written_width != 1 && !aligned(written, read, *written_width))
                 {
-                    return None;
+                    false
+                } else {
+                    equations.push(equation(written, read)?);
+                    true
                 }
-                equations.push(equation(written, read)?);
-                true
             }
         };
         let mut cell = domain.clone();
