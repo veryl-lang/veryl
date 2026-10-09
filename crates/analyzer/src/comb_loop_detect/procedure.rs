@@ -487,6 +487,8 @@ mod footprint;
 mod iterator_use;
 mod last_writer;
 use footprint::{LoopAccesses, for_range_step};
+#[cfg(test)]
+pub(crate) use iterator_use::with_enumerated_loops;
 pub(super) use iterator_use::{LoopEvaluation, loop_evaluation};
 use last_writer::{Step, WriterId, WriterScope};
 
@@ -770,6 +772,10 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 // Distinct invocation guards can require genuinely different subgraphs.
 // Bound their materialization before cycle search gets a chance to run.
 const FUNCTION_SUMMARY_WORK: usize = 100_000;
+
+/// The first identifier of the tables that are circuit nodes, see
+/// `ProcedureAnalysis::table_node`.
+pub(super) const TABLE_IDS: u32 = u32::MAX / 4;
 
 // Ordinary procedures can import many individually bounded summaries. Limit
 // their combined expansion, including repeated copies of runtime-loop
@@ -1370,6 +1376,9 @@ pub(super) struct ProcedureResult {
     pub(super) graph: DependencyDag<NodeKey>,
     pub(super) destinations: Vec<(NodeKey, Option<usize>)>,
     pub(super) status: AnalysisStatus,
+    /// The tables that are circuit nodes of their own, each with its
+    /// positions: written by the procedure and read by it.
+    pub(super) tables: Vec<(NodeKey, PositionDomain)>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -1547,6 +1556,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             graph,
             destinations,
             status: inner.status,
+            tables: Vec::new(),
         }
     }
 
@@ -1613,9 +1623,19 @@ struct ProcedureAnalysis<'a, 's> {
     writer_scope: Option<Rc<WriterScope>>,
     /// The places of the statements being evaluated in that loop.
     statement_places: Vec<Vec<Step>>,
-    /// The values each writer stored in its table for each key in this
-    /// evaluation of the loop.
-    table_writes: HashMap<(NodeKey, WriterId), Vec<VersionId>>,
+    /// The writes of each writer to each key's table that hold the value
+    /// at element positions rather than at instances.
+    imprecise_tables: HashMap<(NodeKey, WriterId), usize>,
+    /// What each table held before the latest write's value at element
+    /// positions, which the write's value at instances replaces.
+    held_tables: HashMap<(NodeKey, WriterId), VersionId>,
+    /// Whether tables are nodes of the circuit: each read takes the table
+    /// the loops leave, which the procedure writes, so that the circuit
+    /// relates its instances to one another instead of the loop transfer.
+    external_tables: bool,
+    /// The tables that are circuit nodes, each with its positions.
+    tables: Vec<(SsaKey, PositionDomain)>,
+    table_indices: HashMap<SsaKey, usize>,
     /// The statement each statement of a specialized iteration body being
     /// evaluated comes from.
     statement_origins: HashMap<*const Statement, *const Statement>,
@@ -1802,7 +1822,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             pure_functions: HashMap::default(),
             writer_scope: None,
             statement_places: Vec::new(),
-            table_writes: HashMap::default(),
+            imprecise_tables: HashMap::default(),
+            held_tables: HashMap::default(),
+            external_tables: false,
+            tables: Vec::new(),
+            table_indices: HashMap::default(),
             statement_origins: HashMap::default(),
             runtime_loop_depth: 0,
             definitions: HashMap::default(),
@@ -1824,6 +1848,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut this = Self::from_context(bit_part, summaries.module, ctx, module_scope_ids);
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
+        this.external_tables = true;
         #[cfg(test)]
         if this.tracing {
             TRACED_PROCEDURE_EVALUATIONS.set(TRACED_PROCEDURE_EVALUATIONS.get() + 1);
@@ -1832,10 +1857,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.branch_namespace = branch_namespace;
         this.eval_block(statements, &[]);
         let (graph, destinations) = this.dependency_graph();
+        let tables = (0..this.tables.len())
+            .filter_map(|index| Some((this.table_node(index)?, this.tables[index].1)))
+            .collect();
         let result = ProcedureResult {
             graph,
             destinations,
             status: this.status,
+            tables,
         };
         this.ctx.rollback_analysis_transaction();
         context.restore(this.ctx);
@@ -2016,7 +2045,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .filter(|key| self.is_module_scope_key(*key))
             .collect::<Vec<_>>();
         destinations.sort_unstable();
-        let roots = destinations
+        let mut roots = destinations
             .iter()
             .map(|destination| {
                 let version = self.read_key(*destination);
@@ -2029,6 +2058,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 })
             })
             .collect::<Vec<_>>();
+        // Each table holds what the loops wrote at its instances.
+        for index in 0..self.tables.len() {
+            let (key, domain) = self.tables[index];
+            let Some(node) = self.table_node(index) else {
+                continue;
+            };
+            let value = self.ssa.read(key);
+            destinations.push(node);
+            roots.push(self.ssa.root_in_domain(value, domain));
+        }
         let graph = self.dependency_dag_for_nodes(&roots, usize::MAX);
         let destinations = destinations
             .into_iter()
@@ -2109,9 +2148,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         call_frame: None,
                         writer: None,
                     }) => DependencyDagNode::External(node),
-                    DependencyDagNode::External(SsaKey { .. }) => {
-                        unreachable!("call-frame storage and tables are not visible DAG sources")
-                    }
+                    DependencyDagNode::External(key) => DependencyDagNode::External(
+                        self.table_indices
+                            .get(&key)
+                            .and_then(|&index| self.table_node(index))
+                            .expect("call-frame storage is not a visible DAG source"),
+                    ),
                     DependencyDagNode::Internal => DependencyDagNode::Internal,
                     DependencyDagNode::Replicated { replication } => {
                         DependencyDagNode::Replicated { replication }
@@ -2130,7 +2172,32 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // module partition for every declaration makes sparse writes quadratic.
         #[cfg(test)]
         VISIBLE_SOURCE_PROBES.set(VISIBLE_SOURCE_PROBES.get() + 1);
-        key.call_frame.is_none() && key.writer.is_none() && self.is_module_scope_key(key.node)
+        if key.writer.is_some() {
+            return self.table_indices.contains_key(key);
+        }
+        key.call_frame.is_none() && self.is_module_scope_key(key.node)
+    }
+
+    /// The circuit node of the table `index`.
+    fn table_node(&self, index: usize) -> Option<NodeKey> {
+        let (_, domain) = self.tables.get(index)?;
+        let id = u32::try_from(index).ok()?.checked_add(TABLE_IDS)?;
+        Some((
+            VarId::from_raw(id),
+            ArraySpan {
+                start: domain.array_start,
+                length: domain.array_length,
+            },
+            0,
+        ))
+    }
+
+    /// Make the table `key` a circuit node over `domain`.
+    pub(super) fn register_table(&mut self, key: SsaKey, domain: PositionDomain) {
+        if !self.table_indices.contains_key(&key) {
+            self.table_indices.insert(key, self.tables.len());
+            self.tables.push((key, domain));
+        }
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
@@ -2624,6 +2691,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// Inclusive extent of an affine position over the counted iterators.
+    /// The iterators being evaluated, outermost first.
+    fn iterator_ids(&self) -> Vec<VarId> {
+        self.counted_iterators
+            .iter()
+            .map(|iterator| iterator.id)
+            .collect()
+    }
+
     fn affine_hull(&self, index: &AffineIndex) -> Option<(isize, isize)> {
         let (min, max) = index.extent_with(|id| {
             let iterator = self.counted_iterators.iter().find(|x| x.id == id)?;
@@ -2940,6 +3015,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         source: &SampledAffineIndex,
         crossed: bool,
     ) -> Option<Link> {
+        // One position to one position: a translation between them.
+        if !crossed && destination.index.terms.is_empty() && source.index.terms.is_empty() {
+            return Some(Link::translation(
+                destination
+                    .index
+                    .constant
+                    .checked_sub(source.index.constant)?,
+            ));
+        }
         let link = self.unconfined_affine_link(destination, source, crossed)?;
         let Link::Map(map) = link else {
             return Some(link);
@@ -3031,6 +3115,53 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             offset,
             denominator,
         ))
+    }
+
+    /// `index` with each iterator confined to one value folded into its
+    /// constant, so that indices over different such iterators relate.
+    fn fold_single_values(&self, index: &SampledAffineIndex) -> SampledAffineIndex {
+        let mut folded = AffineIndex {
+            terms: Vec::new(),
+            constant: index.index.constant,
+        };
+        for &(id, coefficient) in &index.index.terms {
+            match self.counted_iterator(id) {
+                Some(iterator) if iterator.min == iterator.max => {
+                    match coefficient
+                        .checked_mul(iterator.min)
+                        .and_then(|value| folded.constant.checked_add(value))
+                    {
+                        Some(constant) => folded.constant = constant,
+                        None => return index.clone(),
+                    }
+                }
+                _ => folded.terms.push((id, coefficient)),
+            }
+        }
+        let versions = index
+            .versions
+            .iter()
+            .filter(|(id, _)| folded.terms.iter().any(|(term, _)| term == id))
+            .cloned()
+            .collect();
+        SampledAffineIndex {
+            index: folded,
+            versions,
+        }
+    }
+
+    /// `index`, over iterators, with the values its variables are read at.
+    fn sample_iterator_index(&mut self, index: AffineIndex) -> SampledAffineIndex {
+        let mut versions = Vec::new();
+        for &(id, _) in &index.terms {
+            let read = if self.ctx.variables.contains_key(&id) {
+                self.read_variable(id, &VarIndex::default(), &VarSelect::default(), None)
+            } else {
+                Vec::new()
+            };
+            versions.push((id, read));
+        }
+        SampledAffineIndex { index, versions }
     }
 
     fn sample_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<SampledAffineIndex> {
@@ -3569,6 +3700,46 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 version = confined;
             }
             let bound = self.bind_destination(key, version, dynamic);
+            // A value no instance tells apart is the same at each of them,
+            // as the table already holds it.
+            if !self.reads_instances(expression) && self.record_uniform_write(key) {
+            }
+            // The table of the write holds each instance's value at the
+            // instance's position, taken again for that position.
+            else if let (Some((_, low)), Some(key_span)) = (selected, self.key_span(key))
+                && expression.comptime().r#type.array.total().unwrap_or(1) == 1
+                && let Some(packed) = key_span.translated(low, expression_offset)
+                && let Some((writer, anchor_index, hull, _)) = self.instance_anchor(key)
+            {
+                let mut sources = self.eval_expr_requested_in(
+                    expression,
+                    hull,
+                    packed,
+                    expression_context_width,
+                    &ProjectionContext {
+                        destination_index: Some(anchor_index.clone()),
+                        destination_array: Some(hull),
+                        array_shape: Some(destination.comptime.r#type.array.clone()),
+                        anchor: true,
+                        packed_anchor: None,
+                    },
+                );
+                sources.extend_whole(whole_controls.iter().copied());
+                sources.extend_whole(selectors.iter().copied());
+                sources.extend_whole(anchored_controls.iter().map(|&(control, _)| control));
+                sources.normalize();
+                let shift = Link::from_offset(signed_difference(low, expression_offset));
+                for (_, relation) in &mut sources.sources {
+                    *relation = relation.compose(PositionRelation {
+                        array: Link::from_offset(Some(0)),
+                        packed: shift,
+                    });
+                }
+                let value = self
+                    .ssa
+                    .related_definition_guarded(sources.sources, &self.path_condition);
+                self.record_instance_write(key, writer, value, &anchor_index.index);
+            }
             // The storage and any last writer table hold projections of it.
             let moving = destination_index
                 .as_ref()
@@ -3640,6 +3811,69 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.definition_log.push(version);
     }
 
+    /// Bind the table of each output of a call that reads only its inputs,
+    /// written at constant coordinates, to the inputs taken again at each
+    /// instance: every bit of an output may come from any bit of them.
+    fn record_output_instances(&mut self, call: &FunctionCall, controls: &[VersionId]) {
+        if !self.in_writer_scope() || !self.function_is_pure(call) {
+            return;
+        }
+        for destination in call.outputs.values().flatten() {
+            if !destination.index.is_const()
+                || !(destination.select.is_empty() || destination.select.is_const_with_range())
+            {
+                continue;
+            }
+            let previous = self
+                .current_writer
+                .replace(last_writer::output_writer(destination));
+            let uniform = !call
+                .inputs
+                .values()
+                .any(|input| self.reads_instances(input));
+            for key in self.write_keys(destination) {
+                // Outputs of inputs no instance tells apart are the same at
+                // each of them, as the table already holds them.
+                if uniform && self.record_uniform_write(key) {
+                    continue;
+                }
+                let Some((writer, anchor_index, hull, _)) = self.instance_anchor(key) else {
+                    continue;
+                };
+                let Some(packed) = self.key_span(key) else {
+                    continue;
+                };
+                let projection = ProjectionContext {
+                    destination_index: Some(anchor_index.clone()),
+                    destination_array: Some(hull),
+                    array_shape: None,
+                    anchor: true,
+                    packed_anchor: None,
+                };
+                let mut sources = ExpressionSources::default();
+                for input in call.inputs.values() {
+                    let width = input.comptime().expr_context.width;
+                    let Some(whole) = PackedSpan::new(0, width) else {
+                        continue;
+                    };
+                    let mut read =
+                        self.eval_expr_requested_in(input, hull, whole, width, &projection);
+                    for (_, relation) in &mut read.sources {
+                        relation.packed = Link::Unlinked;
+                    }
+                    sources.extend(read);
+                }
+                sources.extend_whole(controls.iter().copied());
+                let _ = packed;
+                let value = self
+                    .ssa
+                    .related_definition_guarded(sources.sources, &self.path_condition);
+                self.record_instance_write(key, writer, value, &anchor_index.index);
+            }
+            self.current_writer = previous;
+        }
+    }
+
     /// Record that each output of a call that reads only its inputs, written
     /// at constant coordinates, holds a value of those inputs.
     fn record_output_definitions(&mut self, call: &FunctionCall, controls: &[VersionId]) {
@@ -3689,6 +3923,170 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 self.definition_log.push(version);
             }
         }
+    }
+
+    /// Whether `expression` reads a counted iterator or storage whose
+    /// writes the scope's tables hold, so that its value may differ from
+    /// one instance to another.
+    fn reads_instances(&self, expression: &Expression) -> bool {
+        if let Expression::Term(factor) = expression
+            && let Factor::Variable(id, ..) = factor.as_ref()
+            && (self.counted_iterator(*id).is_some() || self.covers_writes_of(*id))
+        {
+            return true;
+        }
+        children::children(expression)
+            .into_iter()
+            .any(|child| self.reads_instances(child))
+    }
+
+    /// The sources of `bits` of `key` that `read`, a value whose bit 0 is bit
+    /// `low` of the variable, takes from the tables of its last writes, for
+    /// the destination of `projection`: each table at the position of the
+    /// instance it reads, related to the destination by the iterators they
+    /// both move with. Whether the value from before the loop is also a last
+    /// write is left to the caller. `None` when the last writes are not
+    /// solved.
+    fn instance_read_sources(
+        &mut self,
+        read: &last_writer::LastWriterRead,
+        key: NodeKey,
+        bits: PackedSpan,
+        low: usize,
+        requested_array: ArraySpan,
+        projection: &ProjectionContext,
+    ) -> Option<(ExpressionSources, bool)> {
+        let destination = projection.destination_index.clone()?;
+        let cells = self.key_last_writes(read, key)?;
+        let current = self.counted_iterators.clone();
+        let packed = Link::from_offset(isize::try_from(low).ok().and_then(isize::checked_neg));
+        let value_bits = PackedSpan::new(bits.start.checked_sub(low)?, bits.length)?;
+        let mut sources = ExpressionSources::default();
+        let mut snapshot = false;
+        for (cell, writes) in cells {
+            if cell.len() != current.len() {
+                return None;
+            }
+            self.counted_iterators.clone_from(&cell);
+            let pieces = self.instance_pieces(
+                read,
+                key,
+                bits,
+                packed,
+                &destination,
+                &writes,
+                &mut snapshot,
+            );
+            let reached = (cell != current)
+                .then(|| {
+                    let (first, last) = self.affine_hull(&destination.index)?;
+                    let start = usize::try_from(first.max(0)).ok()?;
+                    let length = usize::try_from(last)
+                        .ok()?
+                        .checked_sub(start)?
+                        .checked_add(1)?;
+                    Some(ArraySpan { start, length })
+                })
+                .flatten();
+            self.counted_iterators.clone_from(&current);
+            let pieces = pieces?;
+            if cell == current {
+                sources.extend(pieces);
+                continue;
+            }
+            // On only some iterations, these writes reach only the
+            // destination positions those take.
+            let value = self.ssa.related_definition(pieces.sources);
+            let value = match reached {
+                Some(reached) => self
+                    .ssa
+                    .projected(value, position_domain(reached, value_bits)),
+                None => value,
+            };
+            let _ = requested_array;
+            sources.push(value, PositionRelation::identity());
+        }
+        Some((sources, snapshot))
+    }
+
+    /// The tables of `writes`, each at the position of the instance it holds,
+    /// on the iterations being evaluated.
+    #[allow(clippy::too_many_arguments)]
+    fn instance_pieces(
+        &mut self,
+        read: &last_writer::LastWriterRead,
+        key: NodeKey,
+        bits: PackedSpan,
+        packed: Link,
+        destination: &SampledAffineIndex,
+        writes: &[last_writer::LastWrite],
+        snapshot: &mut bool,
+    ) -> Option<ExpressionSources> {
+        let mut pieces = ExpressionSources::default();
+        for write in writes {
+            let Some(writer) = write.source else {
+                *snapshot = true;
+                continue;
+            };
+            let table = self.read_table(key, writer);
+            if write.earlier.is_some() {
+                // Any of the instances may be the last.
+                let iterators = self.iterator_ids();
+                let value = match self.earlier_region(read.id(), write, &iterators) {
+                    Some(region) => self.ssa.projected(table, position_domain(region, bits)),
+                    None => table,
+                };
+                pieces.push(
+                    value,
+                    PositionRelation {
+                        array: Link::Unlinked,
+                        packed,
+                    },
+                );
+                continue;
+            }
+            let position = write
+                .instance
+                .as_ref()
+                .and_then(|instance| self.table_position(read.id(), writer, instance));
+            let Some(position) = position else {
+                // An instance not known exactly may be any of them.
+                pieces.push(
+                    table,
+                    PositionRelation {
+                        array: Link::Unlinked,
+                        packed,
+                    },
+                );
+                continue;
+            };
+            let sampled = self.sample_iterator_index(position);
+            let source = self.fold_single_values(&sampled);
+            let destination = &self.fold_single_values(destination);
+            let links = match destination.destination_offset_from(&source) {
+                Some(offset) => vec![(Link::from_offset(Some(offset)), source)],
+                None => self.affine_links(destination, &source, false)?,
+            };
+            for (link, part) in links {
+                let (first, last) = self.affine_hull(&part.index)?;
+                let start = usize::try_from(first).ok()?;
+                let length = usize::try_from(last)
+                    .ok()?
+                    .checked_sub(start)?
+                    .checked_add(1)?;
+                let value = self
+                    .ssa
+                    .projected(table, position_domain(ArraySpan { start, length }, bits));
+                pieces.push(
+                    value,
+                    PositionRelation {
+                        array: link,
+                        packed,
+                    },
+                );
+            }
+        }
+        Some(pieces)
     }
 
     /// The sources of `bits` of a key holding `version`, read as a value whose
@@ -3776,14 +4174,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         definition: &Definition,
         read: &DefinedRead<'_>,
     ) -> Option<ExpressionSources> {
-        let DefinedRead {
-            bits,
-            low,
-            requested_array,
-            anchored_bits,
-            elements,
-            projection,
-        } = *read;
         let depth = definition.iterators.len().min(self.counted_iterators.len());
         if definition
             .iterators
@@ -3793,40 +4183,114 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         {
             return None;
         }
-        // A write at a moving element, in a loop that has finished, is the
-        // one of the iteration that wrote the element read.
-        let mut fixed = Vec::new();
+        // The iterations being evaluated that reached the assignment.
+        let current = self.counted_iterators[..depth].to_vec();
+        let mut reached = Vec::with_capacity(depth);
+        for (defined, current) in definition.iterators.iter().zip(&current) {
+            match current.confined(defined.min, defined.max, defined.modulus, defined.residue) {
+                Ok(Some(iterator)) => reached.push(iterator),
+                Ok(None) => return Some(ExpressionSources::default()),
+                Err(_) => return None,
+            }
+        }
         let inner = &definition.iterators[depth..];
+        let mut points = Vec::new();
         match &definition.destination {
+            // A write at a moving element, in a loop that has finished, is
+            // the one of the iteration that wrote the element read: the
+            // inner iterator solved for each value of the others it moves
+            // with.
             Some(destination) => {
-                if elements.length != 1 {
+                if read.elements.length != 1 {
                     return None;
                 }
-                let [(id, coefficient)] = destination.terms.as_slice() else {
+                let [inner] = inner else {
                     return None;
                 };
-                let [iterator] = inner else {
-                    return None;
-                };
-                if iterator.id != *id {
-                    return None;
+                let mut coefficient = None;
+                let mut outer = Vec::new();
+                for &(id, factor) in &destination.terms {
+                    if id == inner.id {
+                        coefficient = Some(factor);
+                    } else {
+                        outer.push((
+                            current.iter().position(|iterator| iterator.id == id)?,
+                            factor,
+                        ));
+                    }
                 }
-                let offset = isize::try_from(elements.start)
+                let coefficient = coefficient?;
+                let target = isize::try_from(read.elements.start)
                     .ok()?
                     .checked_sub(destination.constant)?;
-                if offset % coefficient != 0 {
-                    return Some(ExpressionSources::default());
+                let count = outer.iter().try_fold(1usize, |count, &(level, _)| {
+                    count.checked_mul(usize::try_from(reached[level].count()?).ok()?)
+                })?;
+                if !self.reserve_guard_work(count) {
+                    return None;
                 }
-                match iterator.within(offset / coefficient, offset / coefficient) {
-                    Ok(Some(value)) => fixed.push(value),
-                    Ok(None) => return Some(ExpressionSources::default()),
-                    Err(_) => return None,
+                let mut assignments = vec![(reached.clone(), target)];
+                for &(level, factor) in &outer {
+                    let mut next = Vec::new();
+                    for (iterators, target) in assignments {
+                        let iterator = iterators[level];
+                        let step = iterator.modulus.unsigned_abs();
+                        for value in (iterator.min..=iterator.max).step_by(step) {
+                            let mut iterators = iterators.clone();
+                            iterators[level] = iterator.within(value, value).ok()??;
+                            next.push((iterators, target.checked_sub(factor.checked_mul(value)?)?));
+                        }
+                    }
+                    assignments = next;
+                }
+                for (iterators, target) in assignments {
+                    if target % coefficient != 0 {
+                        continue;
+                    }
+                    let value = target / coefficient;
+                    if let Ok(Some(value)) = inner.within(value, value) {
+                        points.push((iterators, vec![value]));
+                    }
                 }
             }
-            None if !inner.is_empty() => return None,
-            None => {}
+            // A value an assignment left after the loops it was in, on the
+            // one iteration of each that reached it.
+            None => {
+                if inner.iter().any(|iterator| iterator.min != iterator.max) {
+                    return None;
+                }
+                points.push((reached, inner.to_vec()));
+            }
         }
-        fixed.extend_from_slice(&definition.fixed);
+        let mut sources = ExpressionSources::default();
+        for (iterators, mut fixed) in points {
+            fixed.extend_from_slice(&definition.fixed);
+            sources.extend(
+                self.definition_sources_at(definition, read, &current, &iterators, &fixed)?,
+            );
+        }
+        Some(sources)
+    }
+
+    /// `definition_sources` on the iterations `iterators` of those being
+    /// evaluated, `current`, with the finished loops inside them at `fixed`.
+    fn definition_sources_at(
+        &mut self,
+        definition: &Definition,
+        read: &DefinedRead<'_>,
+        current: &[CountedIterator],
+        iterators: &[CountedIterator],
+        fixed: &[CountedIterator],
+    ) -> Option<ExpressionSources> {
+        let DefinedRead {
+            bits,
+            low,
+            requested_array,
+            anchored_bits,
+            projection,
+            ..
+        } = *read;
+        let depth = current.len();
         // Bit `b` of the variable is bit `b - shift` of the expression and
         // bit `b - low` of the value read.
         let start = isize::try_from(bits.start)
@@ -3854,18 +4318,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if !self.reserve_guard_work(1) {
             return None;
         }
-        // The iterations being evaluated that reached the assignment.
-        let current = self.counted_iterators[..depth].to_vec();
-        let mut iterators = Vec::with_capacity(depth);
-        for (defined, current) in definition.iterators.iter().zip(&current) {
-            match current.confined(defined.min, defined.max, defined.modulus, defined.residue) {
-                Ok(Some(iterator)) => iterators.push(iterator),
-                Ok(None) => return Some(ExpressionSources::default()),
-                Err(_) => return None,
-            }
-        }
-        self.counted_iterators[..depth].copy_from_slice(&iterators);
-        self.counted_iterators.extend_from_slice(&fixed);
+        self.counted_iterators[..depth].copy_from_slice(iterators);
+        self.counted_iterators.extend_from_slice(fixed);
         self.call_caches.push(Some(definition.cache.clone()));
         let mut sources = ExpressionSources::default();
         for expression in &definition.expressions {
@@ -3892,7 +4346,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         // On only some iterations, the definition reaches only the
         // destination positions they take.
-        let reached = (current != iterators)
+        let confined = current != iterators;
+        let reached = confined
             .then(|| {
                 let destination = projection.destination_index.as_ref()?;
                 let (first, last) = self.affine_hull(&destination.index)?;
@@ -3907,7 +4362,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.call_caches.pop();
         let outer = self.counted_iterators.len() - fixed.len();
         self.counted_iterators.truncate(outer);
-        self.counted_iterators[..depth].copy_from_slice(&current);
+        self.counted_iterators[..depth].copy_from_slice(current);
         for (_, relation) in &mut sources.sources {
             *relation = relation.compose(PositionRelation {
                 array: Link::from_offset(Some(0)),
@@ -3915,7 +4370,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             });
         }
         sources.extend_whole(definition.controls.iter().copied());
-        if current != iterators {
+        if confined {
             // Positions the confined iterations cannot take, or that cannot
             // be told, leave the definition whole within its value.
             let value = self.ssa.related_definition(sources.sources);
@@ -4207,6 +4662,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             reads.extend_whole(selector_sources);
             return reads;
         }
+        // A one-bit value the scope's tables hold is taken at the instance
+        // it reads.
+        if let Some(mut reads) =
+            self.packed_anchored_instance(factor, requested_array, anchor, last_writers.as_mut())
+        {
+            reads.extend_whole(selector_sources);
+            return reads;
+        }
         // A one-bit value kept where no position relates it to the
         // destination bit takes its definition again.
         if let Some(mut reads) = self.packed_anchored_definition(
@@ -4226,6 +4689,133 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             comptime.member_select_domain,
         ));
         ExpressionSources::whole(selector_sources)
+    }
+
+    /// The sources of a one-bit read at constant coordinates of storage the
+    /// scope's tables hold, for a destination bit at `anchor` that moves
+    /// with the iterators: each table at the position of the instance it
+    /// reads, related to the destination bit across the axes. `None` when
+    /// the last writes are not solved.
+    fn packed_anchored_instance(
+        &mut self,
+        factor: &Factor,
+        requested_array: ArraySpan,
+        anchor: &SampledAffineIndex,
+        last_writers: Option<&mut last_writer::LastWriterRead>,
+    ) -> Option<ExpressionSources> {
+        let Factor::Variable(id, index, select, comptime) = factor else {
+            return None;
+        };
+        if !index.is_const() || !(select.is_empty() || select.is_const_with_range()) {
+            return None;
+        }
+        let read = last_writers?;
+        let variable = self.ctx.variables.get(id)?.clone();
+        let (high, low) = if select.is_empty() {
+            (variable.r#type.total_width()?.checked_sub(1)?, 0)
+        } else {
+            select.eval_value(&mut self.ctx, &variable.r#type, false)?
+        };
+        if high != low {
+            return None;
+        }
+        let receiver = self.receiver_index(*id, index);
+        let accesses = var_reads(
+            *id,
+            &receiver,
+            select,
+            comptime.member_select_domain,
+            &mut self.ctx,
+        );
+        let [(array, packed)] = accesses.as_slice() else {
+            return None;
+        };
+        let keys = self.bit_part.overlapping_access(*id, *array, *packed);
+        let [key] = keys.as_slice() else {
+            return None;
+        };
+        let key = *key;
+        let bits = packed.intersection(self.key_span(key)?)?;
+        let cells = self.key_last_writes(read, key)?;
+        let current = self.counted_iterators.clone();
+        let mut sources = ExpressionSources::default();
+        for (cell, writes) in cells {
+            if cell.len() != current.len() {
+                return None;
+            }
+            self.counted_iterators.clone_from(&cell);
+            let destination = self.fold_single_values(anchor);
+            let reached = self.affine_hull(&destination.index);
+            let mut pieces = ExpressionSources::default();
+            for write in writes {
+                let Some(writer) = write.source else {
+                    if let Some(snapshot) = self.scope_snapshot(key) {
+                        let value = self.project_read(key, snapshot, *array, *packed);
+                        pieces.push(value, PositionRelation::whole());
+                    }
+                    continue;
+                };
+                let table = self.read_table(key, writer);
+                if write.earlier.is_some() {
+                    // Any of the instances may be the last.
+                    let iterators = self.iterator_ids();
+                    let value = match self.earlier_region(*id, &write, &iterators) {
+                        Some(region) => self.ssa.projected(table, position_domain(region, bits)),
+                        None => table,
+                    };
+                    pieces.push(value, PositionRelation::whole());
+                    continue;
+                }
+                let position = write
+                    .instance
+                    .as_ref()
+                    .and_then(|instance| self.table_position(*id, writer, instance));
+                let link = position.and_then(|position| {
+                    let sampled = self.sample_iterator_index(position);
+                    let source = self.fold_single_values(&sampled);
+                    let link = self.affine_link(&destination, &source, true)?;
+                    let (first, last) = self.affine_hull(&source.index)?;
+                    let start = usize::try_from(first).ok()?;
+                    let length = usize::try_from(last).ok()?.checked_sub(start)? + 1;
+                    Some((link, ArraySpan { start, length }))
+                });
+                match link {
+                    Some((link, region)) => {
+                        let value = self.ssa.projected(table, position_domain(region, bits));
+                        pieces.push(
+                            value,
+                            PositionRelation {
+                                array: Link::Unlinked,
+                                packed: link,
+                            },
+                        );
+                    }
+                    None => pieces.push(table, PositionRelation::whole()),
+                }
+            }
+            self.counted_iterators.clone_from(&current);
+            if cell == current {
+                sources.extend(pieces);
+                continue;
+            }
+            // On only some iterations, these writes reach only the
+            // destination bits those take.
+            let value = self.ssa.related_definition(pieces.sources);
+            let value = match reached {
+                Some((first, last)) => {
+                    let start = usize::try_from(first.max(0)).ok()?;
+                    let length = usize::try_from(last).ok()?.checked_sub(start)? + 1;
+                    self.ssa.projected(
+                        value,
+                        position_domain(requested_array, PackedSpan::new(start, length)?),
+                    )
+                }
+                None => value,
+            };
+            sources.push(value, PositionRelation::identity());
+        }
+        let _ = low;
+        Some(sources)
     }
 
     /// The sources of a one-bit read at constant coordinates for a
@@ -4646,6 +5236,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }));
                 self.eval_call(call, controls);
                 self.record_output_definitions(call, controls);
+                self.record_output_instances(call, controls);
                 self.call_caches.pop();
                 FlowResult::new(ProcedureFlow::Continue)
             }
@@ -5301,7 +5892,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let iterator = in_scope
                 .then(|| {
                     let ordinal = isize::try_from(ordinal).ok()?;
-                    last_writer::ordinal_iterator(statement, ordinal).or_else(|| {
+                    let level = self.counted_iterators.len();
+                    last_writer::ordinal_iterator(statement, level, ordinal).or_else(|| {
                         let value = isize::try_from(value).ok()?;
                         Some(CountedIterator::new(statement.var_id, value, value))
                     })
@@ -5386,6 +5978,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         });
         let result = self.eval_repeated_for(statement, range_controls, false, coverage.as_ref());
         if opened {
+            // After the loop, storage holds what the last write instance at
+            // each position left.
+            let last = if matches!(statement.range, ForRange::Reverse { .. }) {
+                iterator.min
+            } else {
+                iterator.max
+            };
+            if self.guard_work.is_some()
+                && let Ok(Some(last)) = iterator.within(last, last)
+            {
+                self.bind_exit_values(statement.body.len(), last);
+            }
             self.close_writer_scope();
         }
         self.counted_iterators.pop();
@@ -5449,6 +6053,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) -> HashMap<SsaKey, TransferCoverage> {
         transfer
             .keys()
+            // A write's table is indexed by its instances, not by the
+            // positions the coverage tells; it keeps what it held.
+            .filter(|key| key.writer.is_none())
             .filter_map(|&key| {
                 let packed = *self
                     .bit_part
@@ -5534,7 +6141,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // Break and fallthrough paths jointly describe one abstract
         // iteration. Close that finite transfer instead of re-evaluating the
         // body or enumerating runtime iterator values.
-        let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
+        let mut transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
+        // A table that is a circuit node is read as what the loops leave, so
+        // what each iteration writes there does not feed the next: it is
+        // observed as a value of any iteration.
+        let produced = if self.external_tables {
+            let tables = &self.table_indices;
+            transfer.split_off(|key| tables.contains_key(key))
+        } else {
+            BranchState::unchanged()
+        };
         let bit_part = self.bit_part;
         let tables = self.writer_scope.clone();
         let last = coverage.map(|coverage| {
@@ -5549,15 +6165,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .unwrap_or_default();
         // A return inside the body exits from some later iteration, which
         // reads the state that earlier iterations left.
-        let observed = match (self.function_flows.last_mut(), returns) {
+        let returns = match (self.function_flows.last_mut(), returns) {
             (Some(function), Some(start)) => &mut function.returns[start..],
             _ => &mut [],
         };
-        if self
+        let mut observed = returns
+            .iter_mut()
+            .map(|state| std::mem::replace(state, BranchState::unchanged()))
+            .collect::<Vec<_>>();
+        let produces = produced.len() > 0;
+        if produces {
+            observed.push(produced);
+        }
+        let closed = self
             .ssa
             .try_close_repeated_transfer(
                 RepeatedIteration {
-                    observed,
+                    observed: &mut observed,
+                    bound_only: usize::from(produces),
                     ..RepeatedIteration::new(&transfer, checkpoint, may_execute_zero_times)
                 },
                 &mut self.import_work,
@@ -5575,11 +6200,38 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 },
                 |key| coverage.get(&key).cloned().unwrap_or_default(),
             )
-            .is_none()
-        {
+            .is_some();
+        let produced = produces.then(|| observed.pop()).flatten();
+        for (slot, state) in returns.iter_mut().zip(observed) {
+            *slot = state;
+        }
+        if !closed {
             self.exhaust_work();
-        } else if let Some(last) = last {
-            self.leave_definitions(held, last);
+        } else {
+            // The closure takes no branch of the iterations apart, but the
+            // loop runs only on the paths that reach it, as each of its
+            // values does.
+            let mut keys = transfer.keys().copied().collect::<Vec<_>>();
+            keys.sort_unstable();
+            for key in keys {
+                let value = self.ssa.read(key);
+                let value = self.ssa.guarded(value, &self.path_condition);
+                self.ssa.bind(key, value);
+            }
+            if let Some(produced) = produced {
+                let mut keys = produced.keys().copied().collect::<Vec<_>>();
+                keys.sort_unstable();
+                for key in keys {
+                    let Some(value) = produced.get(&key) else {
+                        continue;
+                    };
+                    let value = self.ssa.guarded(value, &self.path_condition);
+                    self.ssa.bind(key, value);
+                }
+            }
+            if let Some(last) = last {
+                self.leave_definitions(held, last);
+            }
         }
         FlowResult::new(ProcedureFlow::Continue)
     }
@@ -5848,7 +6500,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 if self.index_has_gaps(&source.index) {
                                     return None;
                                 }
-                                destination.destination_offset_from(&source)
+                                // An iterator with one value on the
+                                // iterations being evaluated is that value,
+                                // whichever version of it each side read.
+                                let destination = self.fold_single_values(destination);
+                                let source = self.fold_single_values(&source);
+                                if destination
+                                    .index
+                                    .terms
+                                    .iter()
+                                    .all(|(id, _)| self.counted_iterator(*id).is_some())
+                                {
+                                    destination.index.destination_offset_from(&source.index)
+                                } else {
+                                    destination.destination_offset_from(&source)
+                                }
                             });
                         // Another affine relation to the anchored destination
                         // element, such as a stride or a reversal, reads the
@@ -5862,28 +6528,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 self.sample_affine_index(*id, index)
                             };
                             source
+                                .map(|source| self.fold_single_values(&source))
                                 .filter(|source| !source.index.terms.is_empty())
                                 .and_then(|source| {
-                                    self.affine_links(
-                                        projection.destination_index.as_ref()?,
-                                        &source,
-                                        false,
-                                    )?
-                                    .into_iter()
-                                    .map(|(link, source)| {
-                                        let (first, last) = self.affine_hull(&source.index)?;
-                                        let first = usize::try_from(first).ok()?;
-                                        let length =
-                                            usize::try_from(last).ok()?.checked_sub(first)? + 1;
-                                        Some((
-                                            link,
-                                            ArraySpan {
-                                                start: first,
-                                                length,
-                                            },
-                                        ))
-                                    })
-                                    .collect::<Option<Vec<_>>>()
+                                    let destination = self
+                                        .fold_single_values(projection.destination_index.as_ref()?);
+                                    self.affine_links(&destination, &source, false)?
+                                        .into_iter()
+                                        .map(|(link, source)| {
+                                            let (first, last) = self.affine_hull(&source.index)?;
+                                            let first = usize::try_from(first).ok()?;
+                                            let length =
+                                                usize::try_from(last).ok()?.checked_sub(first)? + 1;
+                                            Some((
+                                                link,
+                                                ArraySpan {
+                                                    start: first,
+                                                    length,
+                                                },
+                                            ))
+                                        })
+                                        .collect::<Option<Vec<_>>>()
                                 })
                                 .unwrap_or_default()
                         } else {
@@ -5904,7 +6569,43 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         } else {
                             mapped_arrays.into_iter().map(Some).collect()
                         };
+                        // The positions the index takes on the iterations
+                        // being evaluated; a key elsewhere is not read.
+                        let index_hull = projection
+                            .anchor
+                            .then(|| {
+                                let source = match &sampled {
+                                    Some(sampled) => sampled.index.clone()?,
+                                    None => self.sample_affine_index(*id, index)?,
+                                };
+                                let (first, last) = self.affine_hull(&source.index)?;
+                                let start = usize::try_from(first.max(0)).ok()?;
+                                let length = usize::try_from(last)
+                                    .ok()?
+                                    .checked_sub(start)?
+                                    .checked_add(1)?;
+                                Some(ArraySpan { start, length })
+                            })
+                            .flatten();
                         let mut sources = ExpressionSources::default();
+                        // A read of storage the scope's writes cover takes
+                        // their tables at the positions of the instances it
+                        // reads, once for each key.
+                        let mut instance_read = projection
+                            .anchor
+                            .then(|| {
+                                self.last_writer_sources(
+                                    *id,
+                                    index,
+                                    select,
+                                    comptime.member_select_domain,
+                                )
+                            })
+                            .flatten();
+                        // Whether each key's last writes include the value
+                        // from before the loop, which each variant relates
+                        // by its own map.
+                        let mut instance_keys: HashMap<NodeKey, Option<bool>> = HashMap::default();
                         for mapped_array in variants {
                             let mut reads = Vec::new();
                             let mut substituted = ExpressionSources::default();
@@ -5939,6 +6640,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                                 )
                                             })
                                             .and_then(|requested| requested.intersection(*idx))
+                                    } else if let Some(hull) = index_hull {
+                                        hull.intersection(*idx)
                                     } else {
                                         Some(*idx)
                                     };
@@ -5950,6 +6653,48 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                             source_array,
                                             source_span,
                                         ) {
+                                            if let Some(read) = instance_read.as_mut() {
+                                                let snapshot = match instance_keys.get(&key) {
+                                                    Some(&snapshot) => snapshot,
+                                                    None => {
+                                                        let bits =
+                                                            self.key_span(key).and_then(|span| {
+                                                                source_span.intersection(span)
+                                                            });
+                                                        let solved = bits.and_then(|bits| {
+                                                            self.instance_read_sources(
+                                                                read,
+                                                                key,
+                                                                bits,
+                                                                low,
+                                                                requested_array,
+                                                                projection,
+                                                            )
+                                                        });
+                                                        let snapshot =
+                                                            solved.map(|(instance, snapshot)| {
+                                                                substituted.extend(instance);
+                                                                snapshot
+                                                            });
+                                                        instance_keys.insert(key, snapshot);
+                                                        snapshot
+                                                    }
+                                                };
+                                                if let Some(snapshot) = snapshot {
+                                                    if snapshot
+                                                        && let Some(value) =
+                                                            self.scope_snapshot(key)
+                                                    {
+                                                        reads.push(self.project_read(
+                                                            key,
+                                                            value,
+                                                            source_array,
+                                                            source_span,
+                                                        ));
+                                                    }
+                                                    continue;
+                                                }
+                                            }
                                             let version = if let Some(sampled) = &sampled {
                                                 sampled.values.get(&key).copied()
                                             } else {

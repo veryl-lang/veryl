@@ -37,6 +37,12 @@ pub(in crate::comb_loop_detect) fn loop_evaluation(
     statement: &ForStatement,
     context: &mut Context,
 ) -> LoopEvaluation {
+    #[cfg(test)]
+    if ENUMERATE_LOOPS.get()
+        && let Some(values) = statement.range.eval_iter(context)
+    {
+        return LoopEvaluation::Enumerated(values);
+    }
     let breaks = crate::ir::peel::has_own_break(&statement.body);
     let stepped = matches!(statement.range, ForRange::Stepped { .. });
     if (breaks || stepped || iterator_needs_values(&statement.body, statement.var_id))
@@ -48,6 +54,13 @@ pub(in crate::comb_loop_detect) fn loop_evaluation(
         && !stepped
         && let Some(iterations) = statement.range.eval_counted(context)
     {
+        // A single iteration is the body once, with no other iteration
+        // to take its branches apart from.
+        if iterations.count == 1
+            && let Some(values) = statement.range.eval_iter(context)
+        {
+            return LoopEvaluation::Enumerated(values);
+        }
         return LoopEvaluation::Counted(iterations);
     }
     if statement.range.is_over_size_limit(context) {
@@ -55,6 +68,26 @@ pub(in crate::comb_loop_detect) fn loop_evaluation(
     } else {
         LoopEvaluation::Runtime
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static ENUMERATE_LOOPS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Evaluate `f` taking each value of every statically known loop in turn,
+/// as an unrolled loop would: the reference the symbolic evaluation of
+/// counted loops is compared with.
+#[cfg(test)]
+pub(crate) fn with_enumerated_loops<T>(f: impl FnOnce() -> T) -> T {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            ENUMERATE_LOOPS.set(self.0);
+        }
+    }
+    let _reset = Reset(ENUMERATE_LOOPS.replace(true));
+    f()
 }
 
 fn iterator_needs_values(statements: &[Statement], iterator: VarId) -> bool {

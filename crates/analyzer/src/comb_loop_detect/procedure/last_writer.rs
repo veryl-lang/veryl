@@ -31,7 +31,7 @@ use crate::HashMap;
 use crate::comb_loop_detect::position::{
     Overflow, ceil_div_wide, extended_gcd, floor_div_wide, solve_congruence,
 };
-use crate::comb_loop_detect::region::{NodeKey, PackedSpan};
+use crate::comb_loop_detect::region::{ArraySpan, NodeKey, PackedSpan};
 use crate::comb_loop_detect::ssa::VersionId;
 use crate::ir::{
     AssignDestination, CasePattern, Expression, Factor, ForRange, ForStatement, MemberSelectDomain,
@@ -110,6 +110,12 @@ impl Bits {
 /// read's own iteration.
 pub(super) type KeySources = Vec<(Source, bool)>;
 
+impl LastWriterRead {
+    pub(super) fn id(&self) -> VarId {
+        self.id
+    }
+}
+
 /// A read whose last writers are solved for the bits of each key it takes.
 pub(super) struct LastWriterRead {
     id: VarId,
@@ -175,15 +181,82 @@ struct Scan {
     confined: crate::HashSet<VarId>,
     /// Whether the statements scanned are on only some iterations.
     confining: bool,
+    /// The variables each write reads, with those of the branches on data
+    /// around it, by the variable written.
+    feeds: HashMap<VarId, crate::HashSet<VarId>>,
+    /// The variables the branches on data around the statements scanned
+    /// read.
+    guards: Vec<VarId>,
     /// Each enclosing loop that breaks, at its place, and whether a break of
     /// it has been scanned: what follows a break may not run. A runtime loop
     /// is one from its start.
     breaking: Vec<(Vec<Step>, bool)>,
 }
 
+impl Scan {
+    /// Record that writes of each of `written` read what `statement` and
+    /// the branches on data around it read.
+    fn feed(&mut self, written: impl Iterator<Item = VarId>, statement: &Statement) {
+        let reads = statement_reads(statement)
+            .into_iter()
+            .map(|(id, ..)| id)
+            .chain(self.guards.iter().copied())
+            .collect::<Vec<_>>();
+        for id in written {
+            self.feeds
+                .entry(id)
+                .or_default()
+                .extend(reads.iter().copied());
+        }
+    }
+
+    /// The variables whose values differ between instances of their writes:
+    /// written at positions that move with the iterators, on only some
+    /// iterations, or from what reads an iterator or such a variable.
+    /// Every other variable takes the same value on each iteration that
+    /// writes it, from the same sources, which the iteration's closure
+    /// relates exactly.
+    fn instance_dependent(&self) -> crate::HashSet<VarId> {
+        let iterators = self
+            .loops
+            .iter()
+            .map(|scope_loop| scope_loop.iterator)
+            .collect::<crate::HashSet<_>>();
+        let moves = |sub: &SubWriter| {
+            sub.access
+                .elements
+                .iter()
+                .chain([&sub.access.flat])
+                .any(|element| !element.terms.is_empty())
+                || matches!(&sub.access.bits, Bits::Range(low, _) if !low.terms.is_empty())
+        };
+        let mut dependent = self
+            .writers
+            .iter()
+            .filter(|(id, subs)| self.confined.contains(*id) || subs.iter().any(moves))
+            .map(|(&id, _)| id)
+            .collect::<crate::HashSet<_>>();
+        loop {
+            let before = dependent.len();
+            for (&id, reads) in &self.feeds {
+                if !dependent.contains(&id)
+                    && reads
+                        .iter()
+                        .any(|read| iterators.contains(read) || dependent.contains(read))
+                {
+                    dependent.insert(id);
+                }
+            }
+            if dependent.len() == before {
+                return dependent;
+            }
+        }
+    }
+}
+
 /// An affine expression over the read's iterators.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Lin {
+pub(super) struct Lin {
     k: Vec<i128>,
     c: i128,
 }
@@ -224,13 +297,14 @@ impl Lin {
             c: self.c.checked_add(other.c.checked_mul(factor)?)?,
         })
     }
-
-    fn as_constant(&self) -> Option<i128> {
-        self.k.iter().all(|&x| x == 0).then_some(self.c)
-    }
 }
 
+/// Each unknown solved as an affine value of the read's iterators, over a
+/// denominator, with the constraints the solution leaves.
+type Solution = (Vec<Option<(Lin, i128)>>, Vec<Constraint>);
+
 /// `sum(u[j] * unknown[j]) == rhs`.
+#[derive(Clone)]
 struct Equation {
     u: Vec<i128>,
     rhs: Lin,
@@ -254,6 +328,39 @@ struct Candidate<'s> {
     cell: Cell,
     instance: Vec<Option<(Lin, i128)>>,
     covers: bool,
+    /// The level from which the candidate is every instance up to the one
+    /// at that level, at any iterations of the loops inside it.
+    earlier: Option<usize>,
+}
+
+impl Candidate<'_> {
+    /// The write instance as the value of each of the writer's loops over the
+    /// read's iterators: the read's own iteration on the loops before
+    /// `first_unknown`. `None` when one is not a whole affine value.
+    /// Each value is a numerator over a denominator.
+    fn instance_map(&self, levels: usize) -> Option<Vec<(Lin, i128)>> {
+        (0..self.writer.loops.len())
+            .map(|level| {
+                if level < self.first_unknown {
+                    return Some((Lin::iterator(levels, level), 1));
+                }
+                self.instance[level].clone()
+            })
+            .collect()
+    }
+}
+
+/// A last write of a read: the write, or the value from before the outermost
+/// loop when `None`, and the instance as the value of each of the writer's
+/// loops over the read's iterators, when it is known exactly.
+#[derive(Clone, Debug)]
+pub(super) struct LastWrite {
+    pub(super) source: Source,
+    pub(super) instance: Option<Vec<(Lin, i128)>>,
+    /// The level from which the write is every instance up to `instance`
+    /// there, at any iterations of the loops inside it: the instances a
+    /// write that may not take place leaves to earlier ones.
+    pub(super) earlier: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -337,38 +444,132 @@ impl WriterScope {
             .is_some_and(|writers| writers.iter().any(|sub| sub.id == writer))
     }
 
-    /// The positions of `domain` that the table of `writer` can hold: a
-    /// table has no value where its write never stores.
+    /// The positions of the table of `writer` for a key with `domain`: one
+    /// for each of its instances on the array axis, and on the packed axis
+    /// the key's bits that it can write. A table has no value where its write
+    /// never stores.
     pub(super) fn table_domain(
         &self,
         id: VarId,
         writer: WriterId,
         domain: crate::comb_loop_detect::ssa::PositionDomain,
     ) -> crate::comb_loop_detect::ssa::PositionDomain {
-        let Some(&((first, last), bits)) = self.extents.get(&(id, writer)) else {
+        let Some((_, positions)) = self.table_index(id, writer) else {
             return domain;
         };
+        let bits = self.extents.get(&(id, writer)).and_then(|(_, bits)| *bits);
         let clip = |start: usize, length: usize, (low, high): (isize, isize)| {
             let low = usize::try_from(low.max(0)).ok()?.max(start);
             let high = usize::try_from(high).ok()?.min(start + length - 1);
             (low <= high).then(|| (low, high - low + 1))
         };
-        let array = clip(domain.array_start, domain.array_length, (first, last));
         let packed = match bits {
             Some(bits) => clip(domain.packed_start, domain.packed_length, bits),
             None => Some((domain.packed_start, domain.packed_length)),
         };
-        match (array, packed) {
-            (Some((array_start, array_length)), Some((packed_start, packed_length))) => {
-                crate::comb_loop_detect::ssa::PositionDomain {
-                    array_start,
-                    array_length,
-                    packed_start,
-                    packed_length,
-                }
-            }
-            _ => domain,
+        match packed {
+            Some((packed_start, packed_length)) => crate::comb_loop_detect::ssa::PositionDomain {
+                array_start: positions.start,
+                array_length: positions.length,
+                packed_start,
+                packed_length,
+            },
+            None => domain,
         }
+    }
+
+    /// The index of the tables of `writer` over the iterators of its loops,
+    /// and the positions it takes. A write whose element tells its instance
+    /// apart is indexed by the element, as storage is; any other, such as a
+    /// write in place or one an inner loop repeats, by its instance.
+    pub(super) fn table_index(
+        &self,
+        id: VarId,
+        writer: WriterId,
+    ) -> Option<(AffineIndex, ArraySpan)> {
+        let sub = self.writers.get(&id)?.iter().find(|sub| sub.id == writer)?;
+        if self.tells_instances_apart(&sub.access.flat, &sub.loops)
+            && let Some(&((first, last), _)) = self.extents.get(&(id, writer))
+        {
+            let start = usize::try_from(first).ok()?;
+            let length = usize::try_from(last)
+                .ok()?
+                .checked_sub(start)?
+                .checked_add(1)?;
+            return Some((sub.access.flat.clone(), ArraySpan { start, length }));
+        }
+        let (index, instances) = self.instance_index(id, writer)?;
+        Some((
+            index,
+            ArraySpan {
+                start: 0,
+                length: instances,
+            },
+        ))
+    }
+
+    /// The positions the tables of `writer` take.
+    pub(super) fn table_domain_span(&self, id: VarId, writer: WriterId) -> Option<ArraySpan> {
+        self.table_index(id, writer).map(|(_, span)| span)
+    }
+
+    /// Whether `index` takes a different position on each iteration of
+    /// `loops`: every loop with more than one value moves it, each by a
+    /// step beyond the positions of the finer ones.
+    fn tells_instances_apart(&self, index: &AffineIndex, loops: &[usize]) -> bool {
+        let mut terms = Vec::new();
+        for &level in loops {
+            let scope_loop = &self.loops[level];
+            let values = scope_loop.values;
+            if values.min == values.max {
+                continue;
+            }
+            let Some(&(_, coefficient)) = index
+                .terms
+                .iter()
+                .find(|(id, _)| *id == scope_loop.iterator)
+            else {
+                return false;
+            };
+            let coefficient = (coefficient as i128).abs();
+            terms.push((
+                coefficient * values.modulus as i128,
+                coefficient * (values.max as i128 - values.min as i128),
+            ));
+        }
+        terms.sort_unstable();
+        let mut covered = 0i128;
+        for (step, range) in terms {
+            if step <= covered {
+                return false;
+            }
+            covered += range;
+        }
+        true
+    }
+
+    /// The position of each instance of `writer` in its tables, as an affine
+    /// index over the iterators of its loops, and the number of positions.
+    /// Each loop's values take consecutive positions within one value of the
+    /// loops around it, so a stride leaves positions no instance takes.
+    pub(super) fn instance_index(
+        &self,
+        id: VarId,
+        writer: WriterId,
+    ) -> Option<(AffineIndex, usize)> {
+        let sub = self.writers.get(&id)?.iter().find(|sub| sub.id == writer)?;
+        let mut index = AffineIndex::default();
+        let mut stride = 1isize;
+        for &level in sub.loops.iter().rev() {
+            let scope_loop = &self.loops[level];
+            let values = scope_loop.values;
+            let mut term = AffineIndex::default();
+            term.add_scaled(&AffineIndex::variable(scope_loop.iterator), stride)?;
+            term.constant = values.min.checked_mul(stride)?.checked_neg()?;
+            index.add_scaled(&term, 1)?;
+            stride = stride.checked_mul(values.max.checked_sub(values.min)?.checked_add(1)?)?;
+        }
+        Some((index, usize::try_from(stride).ok()?))
     }
 }
 
@@ -399,12 +600,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if scanned.is_none() {
             return;
         }
+        let dependent = scan.instance_dependent();
         let Scan {
             loops,
             mut writers,
             places,
             unknown,
-            confined,
             ..
         } = scan;
         // Storage whose writes stay in place is strongly updated by the
@@ -412,16 +613,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // or the write is on only some iterations: an earlier iteration's
         // write is then all a later read can see, never the value from
         // before the loop.
-        writers.retain(|id, subs| {
-            !unknown.contains(id)
-                && (confined.contains(id) || subs.iter().any(|sub| {
-                    sub.access
-                        .elements
-                        .iter()
-                        .any(|element| !element.terms.is_empty())
-                        || matches!(&sub.access.bits, Bits::Range(low, _) if !low.terms.is_empty())
-                }))
-        });
+        // Every write whose instances differ keeps a table of them, so
+        // that a read or the storage after the loops takes the instance it
+        // reaches.
+        writers.retain(|id, _| !unknown.contains(id) && dependent.contains(id));
         let mut snapshots = HashMap::default();
         let mut tracked = HashMap::default();
         let mut extents: HashMap<_, Extent> = HashMap::default();
@@ -485,10 +680,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             ids.dedup();
             for (key, span) in spans {
                 let value = self.read_key(key);
-                snapshots.insert(key, self.ssa.projected(value, position_domain(key.1, span)));
+                // What the key holds before the loop, as state: a read of it
+                // takes it as data.
+                snapshots.insert(key, self.ssa.retained(value, position_domain(key.1, span)));
                 for &writer in &ids {
                     // Each table starts empty, as its own value: tables are
-                    // separate inputs of the loop transfer.
+                    // separate inputs of the loop transfer. A table that is
+                    // a circuit node is read as what the loops leave there.
+                    if self.external_tables {
+                        continue;
+                    }
                     let empty = self.ssa.phi(Vec::new());
                     let table = self.writer_key(key, writer);
                     self.ssa.bind(table, empty);
@@ -500,23 +701,59 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return;
         }
         extents.retain(|(id, _), _| tracked.contains_key(id));
-        self.writer_scope = Some(Rc::new(WriterScope {
+        let scope = Rc::new(WriterScope {
             loops,
             writers: tracked,
             extents,
             places,
             snapshots,
             call_depth: self.call_frames.len(),
-        }));
+        });
+        if self.external_tables {
+            let mut ids = scope.writers.keys().copied().collect::<Vec<_>>();
+            ids.sort_unstable();
+            for id in ids {
+                let mut writers = scope.writers[&id]
+                    .iter()
+                    .map(|sub| sub.id)
+                    .collect::<Vec<_>>();
+                writers.sort_unstable();
+                writers.dedup();
+                for key in self.keys_for_id(id) {
+                    let Some(span) = self.key_span(key) else {
+                        continue;
+                    };
+                    for &writer in &writers {
+                        let domain = scope.table_domain(id, writer, position_domain(key.1, span));
+                        let table = self.writer_key(key, writer);
+                        self.register_table(table, domain);
+                    }
+                }
+            }
+        }
+        self.writer_scope = Some(scope);
     }
 
     pub(super) fn close_writer_scope(&mut self) {
         self.writer_scope = None;
-        self.table_writes.clear();
+        self.imprecise_tables.clear();
+        self.held_tables.clear();
         self.statement_places.clear();
     }
 
-    fn writer_key(&self, key: NodeKey, writer: WriterId) -> SsaKey {
+    /// The table of `writer` for `key` as a read takes it: what the loops
+    /// leave there when the table is a circuit node, else what the
+    /// iterations evaluated so far left.
+    pub(super) fn read_table(&mut self, key: NodeKey, writer: WriterId) -> VersionId {
+        let table = self.writer_key(key, writer);
+        if self.table_indices.contains_key(&table) {
+            self.ssa.entry(table)
+        } else {
+            self.ssa.read(table)
+        }
+    }
+
+    pub(super) fn writer_key(&self, key: NodeKey, writer: WriterId) -> SsaKey {
         SsaKey {
             writer: Some(writer),
             ..self.ssa_key(key)
@@ -590,7 +827,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) -> Option<()> {
         self.charge_last_writer_work(values.len())?;
         for (ordinal, value) in values.into_iter().enumerate() {
-            let iterator = ordinal_iterator(statement, isize::try_from(ordinal).ok()?)?;
+            let level = self.counted_iterators.len();
+            let iterator = ordinal_iterator(statement, level, isize::try_from(ordinal).ok()?)?;
             let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
             self.forget_runtime_iterator_value(statement.var_id);
             let mut origins = Vec::new();
@@ -652,6 +890,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         branches: &mut Vec<DataBranch>,
     ) -> Option<()> {
         let original = self.original_statement(statement);
+        let guards = match statement {
+            Statement::If(_) | Statement::Case(_) => statement_reads(statement)
+                .into_iter()
+                .map(|(id, ..)| id)
+                .collect(),
+            _ => Vec::new(),
+        };
         match statement {
             Statement::Assign(assign) => {
                 // A return ends the iterations early.
@@ -673,6 +918,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         }
                     }
                 }
+                scan.feed(
+                    assign.dst.iter().map(|destination| destination.id),
+                    statement,
+                );
                 let record = |this: &mut Self, scan: &mut Scan, path: &[Step]| {
                     let writes = assign
                         .dst
@@ -728,6 +977,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     scan.confining = confining;
                     return Some(());
                 }
+                let guarded = scan.guards.len();
+                scan.guards.extend(guards.iter().copied());
                 for (arm, side) in sides.into_iter().enumerate() {
                     branches.push(DataBranch {
                         place: path.clone(),
@@ -740,6 +991,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     branches.pop();
                     scanned?;
                 }
+                scan.guards.truncate(guarded);
                 Some(())
             }
             Statement::Case(statement) => {
@@ -758,6 +1010,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                 }
                 let arms = statement.arms.len() + 1;
+                let guarded = scan.guards.len();
+                scan.guards.extend(guards.iter().copied());
                 let sides = statement
                     .arms
                     .iter()
@@ -775,6 +1029,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     branches.pop();
                     scanned?;
                 }
+                scan.guards.truncate(guarded);
                 Some(())
             }
             Statement::For(statement) => {
@@ -800,7 +1055,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             return Some(());
                         }
                         let last = isize::try_from(values.len() - 1).ok()?;
-                        match ordinal_iterator(statement, 0) {
+                        match ordinal_iterator(statement, self.counted_iterators.len(), 0) {
                             Some(ordinal) => {
                                 ordinals = Some(values);
                                 CountedIterator {
@@ -838,7 +1093,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if id == next {
                     scan.loops.push(ScopeLoop {
                         iterator: iterator.id,
-                        ascending: iterator.id == VarId::SYNTHETIC
+                        ascending: is_ordinal(iterator.id)
                             || !matches!(statement.range, ForRange::Reverse { .. }),
                         values: iterator,
                     });
@@ -890,6 +1145,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         }
                     }
                 }
+                scan.feed(
+                    destinations.iter().map(|destination| destination.id),
+                    statement,
+                );
                 let writes = destinations
                     .into_iter()
                     .map(|destination| (output_writer(destination), destination));
@@ -1168,7 +1427,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .map(|cells| {
                 let mut sources: Vec<(Source, bool)> = Vec::new();
                 for (cell, cell_sources) in cells {
-                    let own = self.written_on_each_iteration(read.id, &cell_sources, &cell);
+                    let flat = read.elements.as_ref().map(|elements| &elements.flat);
+                    let own = self.written_on_each_iteration(read.id, flat, &cell_sources, &cell);
                     for source in cell_sources {
                         let own = own.contains(&source);
                         match sources.iter_mut().find(|(other, _)| *other == source) {
@@ -1189,7 +1449,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     /// one of them does, so no value of an earlier iteration is the last.
     /// Each then holds the value of its own iterations, which the
     /// definitions it holds keep to.
-    fn written_on_each_iteration(&self, id: VarId, sources: &[Source], cell: &Cell) -> Vec<Source> {
+    fn written_on_each_iteration(
+        &self,
+        id: VarId,
+        read: Option<&AffineIndex>,
+        sources: &[Source],
+        cell: &Cell,
+    ) -> Vec<Source> {
         let (Some(scope), Some(place)) = (self.active_writer_scope(), self.statement_places.last())
         else {
             return Vec::new();
@@ -1200,27 +1466,40 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         };
         // A write in loops that finished before the read, on every one of
         // their iterations, at positions they alone move, writes the same
-        // positions on each iteration of the read's loops.
+        // positions on each iteration of the read's loops. One that also
+        // moves with those writes the element read on each of them when
+        // one inner value reaches it.
         let finished = |sub: &SubWriter| {
             let inner = &sub.loops[loops.len()..];
             let iterators = inner
                 .iter()
                 .map(|&id| scope.loops[id].iterator)
                 .collect::<Vec<_>>();
-            inner
+            if !inner
                 .iter()
                 .zip(&sub.domains[loops.len()..])
                 .all(|(&id, reached)| *reached == scope.loops[id].values)
-                && sub
-                    .access
-                    .elements
-                    .iter()
-                    .chain(match &sub.access.bits {
-                        Bits::Range(low, _) => Some(low),
-                        Bits::Whole => None,
-                    })
-                    .flat_map(|index| &index.terms)
-                    .all(|(id, _)| iterators.contains(id))
+            {
+                return false;
+            }
+            let terms = sub
+                .access
+                .elements
+                .iter()
+                .chain(match &sub.access.bits {
+                    Bits::Range(low, _) => Some(low),
+                    Bits::Whole => None,
+                })
+                .flat_map(|index| &index.terms)
+                .collect::<Vec<_>>();
+            if terms.iter().all(|(id, _)| iterators.contains(id)) {
+                return true;
+            }
+            let (Some(read), Bits::Whole | Bits::Range(..)) = (read, &sub.access.bits) else {
+                return false;
+            };
+            matches!(&sub.access.bits, Bits::Whole)
+                && reaches_each_iteration(&sub.access.flat, read, cell, &loops, &scope, inner)
         };
         let before = subs
             .iter()
@@ -1298,6 +1577,457 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.solve_last_writers(&scope, writers, &place, &access)
     }
 
+    /// The last write instances of the bits of `key` that `read` takes, on
+    /// each set of its iterations.
+    pub(super) fn key_last_writes(
+        &mut self,
+        read: &LastWriterRead,
+        key: NodeKey,
+    ) -> Option<Vec<(Cell, Vec<LastWrite>)>> {
+        if self.runtime_loop_depth > 0 {
+            return None;
+        }
+        let scope = self.active_writer_scope()?;
+        let writers = scope.writers.get(&read.id)?;
+        let place = self.statement_places.last()?.clone();
+        let mut access = self.access_forms(
+            read.id,
+            read.elements.as_ref(),
+            &read.select,
+            read.member_select_domain,
+        )?;
+        if let Some(span) = self.key_span(key) {
+            access.bits = access.bits.within(span);
+        }
+        self.solve_last_writes(&scope, writers, &place, &access, &[])
+    }
+
+    /// The position in the tables of `writer` of `instance`, the value of
+    /// each of its loops over the read's iterators, as an affine index over
+    /// those iterators.
+    pub(super) fn table_position(
+        &self,
+        id: VarId,
+        writer: WriterId,
+        instance: &[(Lin, i128)],
+    ) -> Option<AffineIndex> {
+        let iterators = self
+            .counted_iterators
+            .iter()
+            .map(|iterator| iterator.id)
+            .collect::<Vec<_>>();
+        self.table_position_over(id, writer, instance, &iterators)
+    }
+
+    /// The positions in the tables of `writer` that `write` takes on the
+    /// iterations being evaluated, when it is every instance up to its own
+    /// from a level: the hull of those instances' positions. `None` for a
+    /// write of one instance or one not known exactly.
+    pub(super) fn earlier_region(
+        &mut self,
+        id: VarId,
+        write: &LastWrite,
+        iterators: &[VarId],
+    ) -> Option<ArraySpan> {
+        let level = write.earlier?;
+        let writer = write.source?;
+        let instance = write.instance.as_ref()?;
+        let scope = self.active_writer_scope()?;
+        let sub = scope
+            .writers
+            .get(&id)?
+            .iter()
+            .find(|sub| sub.id == writer)?;
+        let levels = iterators.len();
+        let (latest, 1) = instance.get(level)? else {
+            return None;
+        };
+        let mut latest_index = AffineIndex {
+            terms: Vec::new(),
+            constant: isize::try_from(latest.c).ok()?,
+        };
+        for (position, &coefficient) in latest.k.iter().enumerate() {
+            if coefficient != 0 {
+                let term = AffineIndex::variable(*iterators.get(position)?);
+                latest_index.add_scaled(&term, isize::try_from(coefficient).ok()?)?;
+            }
+        }
+        let (low, high) = self.affine_hull(&latest_index)?;
+        // Each level from `level` is a free iterator over the values its
+        // instances may take.
+        let free = sub.loops.len().checked_sub(level)?;
+        let mut extended = iterators.to_vec();
+        let mut ranges = Vec::new();
+        for (offset, domain) in sub.domains[level..].iter().enumerate() {
+            let id = ordinal_id(u32::MAX as usize / 2 + 1 + offset)?;
+            let mut range = CountedIterator { id, ..*domain };
+            if offset == 0 {
+                if scope.loops[sub.loops[level]].ascending {
+                    range.max = high.min(domain.max);
+                } else {
+                    range.min = low.max(domain.min);
+                }
+                if range.min > range.max {
+                    return None;
+                }
+            }
+            extended.push(id);
+            ranges.push(range);
+        }
+        let widen = |lin: &Lin| Lin {
+            k: lin
+                .k
+                .iter()
+                .copied()
+                .chain(std::iter::repeat_n(0, free))
+                .collect(),
+            c: lin.c,
+        };
+        let mut spread = instance[..level]
+            .iter()
+            .map(|(value, denominator)| (widen(value), *denominator))
+            .collect::<Vec<_>>();
+        for offset in 0..free {
+            spread.push((Lin::iterator(levels + free, levels + offset), 1));
+        }
+        let position = self.table_position_over(id, writer, &spread, &extended)?;
+        let saved = self.counted_iterators.len();
+        self.counted_iterators.extend(ranges);
+        let hull = self.affine_hull(&position);
+        self.counted_iterators.truncate(saved);
+        let (first, last) = hull?;
+        let start = usize::try_from(first).ok()?;
+        let length = usize::try_from(last)
+            .ok()?
+            .checked_sub(start)?
+            .checked_add(1)?;
+        Some(ArraySpan { start, length })
+    }
+
+    /// `table_position` over the read's iterators `iterators`.
+    fn table_position_over(
+        &self,
+        id: VarId,
+        writer: WriterId,
+        instance: &[(Lin, i128)],
+        iterators: &[VarId],
+    ) -> Option<AffineIndex> {
+        let scope = self.active_writer_scope()?;
+        let sub = scope
+            .writers
+            .get(&id)?
+            .iter()
+            .find(|sub| sub.id == writer)?;
+        let (index, _) = scope.table_index(id, writer)?;
+        let levels = iterators.len();
+        // An iterator with one value on the iterations being evaluated is
+        // that value.
+        let fixed = iterators
+            .iter()
+            .map(|&iterator| {
+                self.counted_iterator(iterator)
+                    .filter(|values| values.min == values.max)
+                    .map(|values| values.min as i128)
+            })
+            .collect::<Vec<_>>();
+        let instance = instance
+            .iter()
+            .map(|(value, denominator)| {
+                let mut value = value.clone();
+                for (level, fixed) in fixed.iter().enumerate() {
+                    if let (Some(fixed), Some(coefficient)) = (fixed, value.k.get(level).copied()) {
+                        value.c = value.c.checked_add(coefficient.checked_mul(*fixed)?)?;
+                        value.k[level] = 0;
+                    }
+                }
+                Some((value, *denominator))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let instance = instance.as_slice();
+        // The position over a common denominator, which must divide it.
+        let mut position = Lin::constant(levels, index.constant as i128);
+        let mut denominator = 1i128;
+        for &(iterator, stride) in &index.terms {
+            let level = sub
+                .loops
+                .iter()
+                .position(|&lp| scope.loops[lp].iterator == iterator)?;
+            let (value, value_denominator) = instance.get(level)?;
+            position = position
+                .scaled(*value_denominator)?
+                .plus(&value.scaled(denominator)?, stride as i128)?;
+            denominator = denominator.checked_mul(*value_denominator)?;
+        }
+        if position.c % denominator != 0 || position.k.iter().any(|k| k % denominator != 0) {
+            return None;
+        }
+        let position = Lin {
+            k: position.k.iter().map(|k| k / denominator).collect(),
+            c: position.c / denominator,
+        };
+        let mut affine = AffineIndex {
+            terms: Vec::new(),
+            constant: isize::try_from(position.c).ok()?,
+        };
+        for (level, &coefficient) in position.k.iter().enumerate() {
+            if coefficient != 0 {
+                let term = AffineIndex::variable(*iterators.get(level)?);
+                affine.add_scaled(&term, isize::try_from(coefficient).ok()?)?;
+            }
+        }
+        Some(affine)
+    }
+
+    /// Bind each storage key the scope covers to what its outermost loop
+    /// leaves there, on its last iteration `last`, after its `statements`:
+    /// at each position, the table of the last write instance there, or the
+    /// value from before the loop. A key whose last writes are not solved
+    /// keeps the value the loop's evaluation left.
+    pub(super) fn bind_exit_values(&mut self, statements: usize, last: CountedIterator) {
+        let Some(scope) = self.active_writer_scope() else {
+            return;
+        };
+        let Some(position_id) = ordinal_id(u32::MAX as usize / 2) else {
+            return;
+        };
+        let saved = std::mem::replace(&mut self.counted_iterators, vec![last]);
+        let place = vec![Step::Statement(statements)];
+        let mut ids = scope.writers.keys().copied().collect::<Vec<_>>();
+        ids.sort_unstable();
+        for id in ids {
+            let subs = &scope.writers[&id];
+            for key in self.keys_for_id(id) {
+                // A table a write could not take at its instances does not
+                // tell which instance left a position.
+                if subs.iter().any(|sub| {
+                    self.imprecise_tables
+                        .get(&(key, sub.id))
+                        .is_some_and(|&count| count > 0)
+                }) {
+                    continue;
+                }
+                if let Some(value) = self.exit_value(&scope, subs, &place, key, position_id) {
+                    self.bind_key(key, value);
+                }
+            }
+        }
+        self.counted_iterators = saved;
+    }
+
+    fn exit_value(
+        &mut self,
+        scope: &WriterScope,
+        subs: &[SubWriter],
+        place: &[Step],
+        key: NodeKey,
+        position_id: VarId,
+    ) -> Option<VersionId> {
+        let packed = self.key_span(key)?;
+        let first = isize::try_from(key.1.start).ok()?;
+        let positions = CountedIterator::new(
+            position_id,
+            first,
+            first.checked_add(isize::try_from(key.1.length).ok()?)? - 1,
+        );
+        let access = Access {
+            elements: Vec::new(),
+            flat: AffineIndex::variable(position_id),
+            bits: Bits::Range(
+                AffineIndex {
+                    terms: Vec::new(),
+                    constant: isize::try_from(packed.start).ok()?,
+                },
+                packed.length,
+            ),
+        };
+        let cells = self.solve_last_writes(scope, subs, place, &access, &[positions])?;
+        let iterators = [self.counted_iterators[0].id, position_id];
+        let destination = super::SampledAffineIndex {
+            index: AffineIndex::variable(position_id),
+            versions: vec![(position_id, Vec::new())],
+        };
+        // The pieces of the key: each source, the map to the key's positions
+        // and the positions it reaches there with those it is read at.
+        // Each span with the step between the positions the cell takes.
+        type Spans = Vec<(ArraySpan, usize, ArraySpan)>;
+        let mut groups: Vec<(Source, super::PositionRelation, Spans)> = Vec::new();
+        for (cell, writes) in cells {
+            let span = ArraySpan {
+                start: usize::try_from(cell[1].min).ok()?,
+                length: usize::try_from(cell[1].max - cell[1].min + 1).ok()?,
+            };
+            // Positions a step apart are those of an iterator `u` over
+            // consecutive values, `residue + modulus * u`, at which an
+            // instance taken at a fraction of them is whole.
+            let stepped = cell[1].modulus > 1;
+            let (cell_iterators, destination, iterators) = if stepped {
+                let (modulus, residue) = (cell[1].modulus, cell[1].residue);
+                let id = ordinal_id(u32::MAX as usize / 2 + 64)?;
+                let consecutive = CountedIterator::new(
+                    id,
+                    (cell[1].min - residue) / modulus,
+                    (cell[1].max - residue) / modulus,
+                );
+                let mut index = AffineIndex {
+                    terms: Vec::new(),
+                    constant: residue,
+                };
+                index.add_scaled(&AffineIndex::variable(id), modulus)?;
+                (
+                    vec![cell[0], consecutive],
+                    super::SampledAffineIndex {
+                        index,
+                        versions: vec![(id, Vec::new())],
+                    },
+                    [iterators[0], id],
+                )
+            } else {
+                (cell.clone(), destination.clone(), iterators)
+            };
+            let over_cell = |lin: &Lin| -> Option<Lin> {
+                if !stepped {
+                    return Some(lin.clone());
+                }
+                let (modulus, residue) = (cell[1].modulus as i128, cell[1].residue as i128);
+                let mut lin = lin.clone();
+                lin.c = lin.c.checked_add(lin.k[1].checked_mul(residue)?)?;
+                lin.k[1] = lin.k[1].checked_mul(modulus)?;
+                Some(lin)
+            };
+            let saved = std::mem::replace(&mut self.counted_iterators, cell_iterators);
+            let mut pieces = Vec::new();
+            for mut write in writes {
+                let Some(writer) = write.source else {
+                    pieces.push((None, super::PositionRelation::identity(), span));
+                    continue;
+                };
+                write.instance = write.instance.and_then(|instance| {
+                    instance
+                        .iter()
+                        .map(|(value, denominator)| Some((over_cell(value)?, *denominator)))
+                        .collect()
+                });
+                if write.earlier.is_some() {
+                    // Any of the instances may be the last.
+                    let region = match self.earlier_region(key.0, &write, &iterators) {
+                        Some(region) => region,
+                        None => scope.table_domain_span(key.0, writer)?,
+                    };
+                    pieces.push((
+                        Some(writer),
+                        super::PositionRelation {
+                            array: super::Link::Unlinked,
+                            packed: super::Link::IDENTITY,
+                        },
+                        region,
+                    ));
+                    continue;
+                }
+                let position = write.instance.as_ref().and_then(|instance| {
+                    self.table_position_over(key.0, writer, instance, &iterators)
+                });
+                let link = position.and_then(|position| {
+                    let source = super::SampledAffineIndex {
+                        versions: position
+                            .terms
+                            .iter()
+                            .map(|&(id, _)| (id, Vec::new()))
+                            .collect(),
+                        index: position,
+                    };
+                    let source = self.fold_single_values(&source);
+                    let destination = self.fold_single_values(&destination);
+                    let link = self.affine_link(&destination, &source, false)?;
+                    let (low, high) = self.affine_hull(&source.index)?;
+                    let start = usize::try_from(low).ok()?;
+                    let length = usize::try_from(high).ok()?.checked_sub(start)? + 1;
+                    Some((link, ArraySpan { start, length }))
+                });
+                pieces.push(match link {
+                    Some((link, region)) => (
+                        Some(writer),
+                        super::PositionRelation {
+                            array: link,
+                            packed: super::Link::IDENTITY,
+                        },
+                        region,
+                    ),
+                    // An instance not known exactly may be any of them.
+                    None => (
+                        Some(writer),
+                        super::PositionRelation {
+                            array: super::Link::Unlinked,
+                            packed: super::Link::IDENTITY,
+                        },
+                        scope.table_domain_span(key.0, writer)?,
+                    ),
+                });
+            }
+            self.counted_iterators = saved;
+            let step = usize::try_from(cell[1].modulus).ok()?;
+            for (source, relation, region) in pieces {
+                match groups.iter_mut().find(|(other, other_relation, _)| {
+                    *other == source && *other_relation == relation
+                }) {
+                    Some((_, _, spans)) => spans.push((span, step, region)),
+                    None => groups.push((source, relation, vec![(span, step, region)])),
+                }
+            }
+        }
+        let mut values = Vec::new();
+        for (source, relation, mut spans) in groups {
+            let base = match source {
+                Some(writer) => self.read_table(key, writer),
+                None => *scope.snapshots.get(&key)?,
+            };
+            // Positions next to one another read the same way as one piece.
+            spans.sort_unstable_by_key(|(span, step, _)| (span.start, *step));
+            let mut merged: Spans = Vec::new();
+            for (span, step, region) in spans {
+                if let Some((last, 1, last_region)) = merged.last_mut()
+                    && step == 1
+                    && span.start <= last.start + last.length
+                {
+                    let end = (last.start + last.length).max(span.start + span.length);
+                    last.length = end - last.start;
+                    let low = last_region.start.min(region.start);
+                    let high =
+                        (last_region.start + last_region.length).max(region.start + region.length);
+                    *last_region = ArraySpan {
+                        start: low,
+                        length: high - low,
+                    };
+                    continue;
+                }
+                merged.push((span, step, region));
+            }
+            for (span, step, region) in merged {
+                // A position no write reaches keeps its value, which is state,
+                // not a value computed from itself.
+                if source.is_none() {
+                    values.push(self.ssa.retained(base, position_domain(span, packed)));
+                    continue;
+                }
+                let read = self.ssa.projected(base, position_domain(region, packed));
+                let value = self.ssa.related_definition(vec![(read, relation)]);
+                // Only the positions of the progression take the value.
+                let value = self.progression_value(
+                    value,
+                    position_domain(span, packed),
+                    super::Axis::Array,
+                    step,
+                )?;
+                values.push(value);
+            }
+        }
+        Some(self.ssa.phi(values))
+    }
+
+    /// The value of `key` before the outermost loop of the scope.
+    pub(super) fn scope_snapshot(&self, key: NodeKey) -> Option<VersionId> {
+        self.active_writer_scope()?.snapshots.get(&key).copied()
+    }
+
     /// The value of `key` from the last writers `sources`.
     /// A value written on an earlier iteration is kept apart from the
     /// assignment that wrote it, which the read's iteration did not run.
@@ -1312,20 +2042,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut versions = Vec::new();
         for &(source, own) in sources {
             match source {
-                // The value written on the read's own iteration is one this
-                // evaluation wrote, not what the table kept from before.
-                Some(writer) if own && self.table_writes.contains_key(&(key, writer)) => {
-                    versions.extend(self.table_writes[&(key, writer)].iter().copied());
-                }
+                // A table is indexed by instances, which a read that takes
+                // no instance cannot tell apart.
                 Some(writer) => {
-                    let table = self.writer_key(key, writer);
-                    let value = self.ssa.read(table);
-                    versions.push(if own {
-                        value
-                    } else {
-                        self.ssa
-                            .related_definition(vec![(value, super::PositionRelation::identity())])
-                    });
+                    let _ = own;
+                    let value = self.read_table(key, writer);
+                    versions.push(self.ssa.related_definition(vec![(
+                        value,
+                        super::PositionRelation {
+                            array: super::Link::Unlinked,
+                            packed: super::Link::IDENTITY,
+                        },
+                    )]));
                 }
                 None => match scope.snapshots.get(&key) {
                     Some(&snapshot) => versions.push(snapshot),
@@ -1348,24 +2076,165 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         match self.current_writer {
             Some(writer) if scope.has_writer(key.0, writer) => {
-                // A table keeps its own bounds: the storage's projection is
-                // also what the weak update reads.
+                // A table is indexed by the write's instances, which a value
+                // at element positions does not tell apart: each instance
+                // may hold any of its elements. A write that can be taken
+                // again at its instance replaces this, see
+                // `record_instance_write`.
+                let version = self.ssa.related_definition(vec![(
+                    version,
+                    super::PositionRelation {
+                        array: super::Link::Unlinked,
+                        packed: super::Link::IDENTITY,
+                    },
+                )]);
+                let table = self.writer_key(key, writer);
+                let held = self.ssa.read(table);
+                // On only some of the write's iterations, the others keep
+                // what the table held.
+                let version = if self.writes_partially(&scope, key.0, writer) {
+                    self.ssa.phi(vec![held, version])
+                } else {
+                    version
+                };
+                // The table's positions bound what it holds.
                 let version = match self.key_span(key) {
                     Some(packed) => {
                         let domain =
                             scope.table_domain(key.0, writer, position_domain(key.1, packed));
-                        self.ssa.projected(version, domain)
+                        self.ssa.retained(version, domain)
                     }
                     None => version,
                 };
-                let table = self.writer_key(key, writer);
                 self.ssa.bind(table, version);
-                self.table_writes
-                    .entry((key, writer))
-                    .or_default()
-                    .push(version);
+                self.held_tables.insert((key, writer), held);
+                *self.imprecise_tables.entry((key, writer)).or_default() += 1;
             }
             _ => self.status = self.status.max(AnalysisStatus::Barrier),
+        }
+    }
+
+    /// Whether the iterations being evaluated are only some of those of
+    /// `writer`'s loops.
+    fn writes_partially(&self, scope: &WriterScope, id: VarId, writer: WriterId) -> bool {
+        scope
+            .writers
+            .get(&id)
+            .and_then(|subs| subs.iter().find(|sub| sub.id == writer))
+            .is_none_or(|sub| {
+                sub.loops.iter().any(|&lp| {
+                    let scope_loop = &scope.loops[lp];
+                    self.counted_iterator(scope_loop.iterator) != Some(scope_loop.values)
+                })
+            })
+    }
+
+    /// Whether the active scope keeps tables of the writes to `id`.
+    pub(super) fn covers_writes_of(&self, id: VarId) -> bool {
+        self.active_writer_scope()
+            .is_some_and(|scope| scope.writers.contains_key(&id))
+    }
+
+    /// The current write's value at element positions, which the table
+    /// holds, is the same at each instance, so the table holds it exactly.
+    /// `false` when the write is on only some of its iterations, whose
+    /// positions the value at element positions does not tell.
+    pub(super) fn record_uniform_write(&mut self, key: NodeKey) -> bool {
+        let (Some(writer), Some(scope)) = (self.current_writer, self.active_writer_scope()) else {
+            return true;
+        };
+        if self.writes_partially(&scope, key.0, writer) {
+            return false;
+        }
+        self.held_tables.remove(&(key, writer));
+        if let Some(count) = self.imprecise_tables.get_mut(&(key, writer)) {
+            *count = count.saturating_sub(1);
+        }
+        true
+    }
+
+    /// The writer being recorded for `key` and the index of its instance in
+    /// its table, sampled at the iterators being evaluated, with the
+    /// positions those take. `None` outside a scope that covers the key.
+    pub(super) fn instance_anchor(
+        &mut self,
+        key: NodeKey,
+    ) -> Option<(WriterId, super::SampledAffineIndex, ArraySpan, usize)> {
+        let scope = self.active_writer_scope()?;
+        let writer = self.current_writer?;
+        if !scope.has_writer(key.0, writer) {
+            return None;
+        }
+        let (index, positions) = scope.table_index(key.0, writer)?;
+        let sampled = self.sample_iterator_index(index);
+        let (first, last) = self.affine_hull(&sampled.index)?;
+        let start = usize::try_from(first).ok()?;
+        let length = usize::try_from(last)
+            .ok()?
+            .checked_sub(start)?
+            .checked_add(1)?;
+        Some((
+            writer,
+            sampled,
+            ArraySpan { start, length },
+            positions.length,
+        ))
+    }
+
+    /// Bind the table of the current writer for `key` to `version`, a value
+    /// taken again at its instance index.
+    /// The write reaches only the table positions `reached` that the
+    /// iterations being evaluated take; on only some of the write's
+    /// iterations, the others keep what the table held.
+    pub(super) fn record_instance_write(
+        &mut self,
+        key: NodeKey,
+        writer: WriterId,
+        version: VersionId,
+        anchor: &super::AffineIndex,
+    ) {
+        let Some(scope) = self.active_writer_scope() else {
+            return;
+        };
+        let table = self.writer_key(key, writer);
+        let partial = self.writes_partially(&scope, key.0, writer);
+        let version = match self.key_span(key) {
+            Some(packed) => {
+                let domain = scope.table_domain(key.0, writer, position_domain(key.1, packed));
+                if partial {
+                    // The positions those iterations take, each progression
+                    // of them exactly.
+                    let progressions = self.affine_progressions(anchor).unwrap_or_default();
+                    let pieces = progressions
+                        .into_iter()
+                        .filter_map(|(span, step)| {
+                            self.progression_value(
+                                version,
+                                position_domain(span, packed),
+                                super::Axis::Array,
+                                step,
+                            )
+                        })
+                        .collect();
+                    let written = self.ssa.phi(pieces);
+                    // What the table held before this write's value at
+                    // element positions replaced it.
+                    let held = match self.held_tables.remove(&(key, writer)) {
+                        Some(held) => held,
+                        None => self.ssa.read(table),
+                    };
+                    let merged = self.ssa.phi(vec![held, written]);
+                    self.ssa.retained(merged, domain)
+                } else {
+                    self.ssa.retained(version, domain)
+                }
+            }
+            None => version,
+        };
+        self.ssa.bind(table, version);
+        // The same write's value at element positions is replaced.
+        if let Some(count) = self.imprecise_tables.get_mut(&(key, writer)) {
+            *count = count.saturating_sub(1);
         }
     }
 
@@ -1434,9 +2303,37 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         place: &[Step],
         access: &Access,
     ) -> Option<Vec<(Cell, Vec<Source>)>> {
+        let cells = self.solve_last_writes(scope, writers, place, access, &[])?;
+        Some(
+            cells
+                .into_iter()
+                .map(|(cell, writes)| {
+                    let mut sources = Vec::new();
+                    for write in writes {
+                        if !sources.contains(&write.source) {
+                            sources.push(write.source);
+                        }
+                    }
+                    (cell, sources)
+                })
+                .collect(),
+        )
+    }
+
+    /// The last write instances of a read on each set of its iterations,
+    /// latest first.
+    /// `extra` are iterators of the read beyond those of its loops, such as
+    /// the positions of a read after the loops.
+    fn solve_last_writes(
+        &mut self,
+        scope: &WriterScope,
+        writers: &[SubWriter],
+        place: &[Step],
+        access: &Access,
+        extra: &[CountedIterator],
+    ) -> Option<Vec<(Cell, Vec<LastWrite>)>> {
         let read_loops = place_loops(place);
-        let levels = read_loops.len();
-        if self.counted_iterators.len() != levels
+        if self.counted_iterators.len() != read_loops.len()
             || read_loops
                 .iter()
                 .zip(&self.counted_iterators)
@@ -1444,7 +2341,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         {
             return None;
         }
-        let domain = self.counted_iterators.clone();
+        let mut domain = self.counted_iterators.clone();
+        domain.extend_from_slice(extra);
+        let levels = domain.len();
         let read_iterators = domain.iter().map(|x| x.id).collect::<Vec<_>>();
         let read_lin = |index: &AffineIndex| -> Option<Lin> {
             let mut lin = Lin::constant(levels, index.constant as i128);
@@ -1479,29 +2378,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
         self.charge_last_writer_work(candidates.len().saturating_add(1))?;
-        // Latest first, with ties in one group.
-        let mut order: Vec<Vec<usize>> = Vec::new();
-        for index in 0..candidates.len() {
-            let mut position = order.len();
-            let mut tie = None;
-            for (group, members) in order.iter().enumerate() {
-                match self.compare(scope, &candidates[index], &candidates[members[0]])? {
-                    Ordering::Greater => {
-                        position = group;
-                        break;
-                    }
-                    Ordering::Equal => {
-                        tie = Some(group);
-                        break;
-                    }
-                    Ordering::Less => {}
-                }
-            }
-            match tie {
-                Some(group) => order[group].push(index),
-                None => order.insert(position, vec![index]),
-            }
-        }
         let mut cells = vec![domain];
         for candidate in &candidates {
             let mut refined = Vec::new();
@@ -1514,9 +2390,66 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.charge_last_writer_work(cells.len())?;
         }
         let mut result = Vec::new();
-        for cell in cells {
-            let mut sources = Vec::new();
+        let mut pending = cells;
+        while let Some(cell) = pending.pop() {
+            // The candidates on the cell, latest first, with ties in one
+            // group. Where the order of two depends on the iteration, the
+            // cell is split where it changes.
+            let mut order: Vec<Vec<usize>> = Vec::new();
+            let mut split = None;
+            'ordering: for index in 0..candidates.len() {
+                if intersect_cells(&cell, &candidates[index].cell)
+                    .ok()?
+                    .is_none()
+                {
+                    continue;
+                }
+                let mut position = order.len();
+                let mut tie = None;
+                for (group, members) in order.iter().enumerate() {
+                    let ordering = match self.compare(
+                        scope,
+                        &candidates[index],
+                        &candidates[members[0]],
+                        &cell,
+                    )? {
+                        Ok(ordering) => ordering,
+                        Err(difference) => {
+                            split = Some(difference);
+                            break 'ordering;
+                        }
+                    };
+                    match ordering {
+                        Ordering::Greater => {
+                            position = group;
+                            break;
+                        }
+                        Ordering::Equal => {
+                            tie = Some(group);
+                            break;
+                        }
+                        Ordering::Less => {}
+                    }
+                }
+                match tie {
+                    Some(group) => order[group].push(index),
+                    None => order.insert(position, vec![index]),
+                }
+            }
+            if let Some(difference) = split {
+                for constraint in [
+                    Constraint::Range(difference.clone(), None, Some(-1)),
+                    Constraint::Range(difference.clone(), Some(0), Some(0)),
+                    Constraint::Range(difference, Some(1), None),
+                ] {
+                    pending.extend(self.restrict_split(cell.clone(), &constraint)?);
+                }
+                self.charge_last_writer_work(pending.len())?;
+                continue;
+            }
+            let mut writes = Vec::new();
             let mut covered = false;
+            let mut later: Vec<&Candidate<'_>> = Vec::new();
             for group in &order {
                 let mut present = Vec::new();
                 for &index in group {
@@ -1528,21 +2461,35 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if present.is_empty() {
                     continue;
                 }
-                for candidate in &present {
-                    let source = Some(candidate.writer.id);
-                    if !sources.contains(&source) {
-                        sources.push(source);
-                    }
+                // A write that a later present one always follows in the
+                // same iterations is never the last.
+                present.retain(|candidate| {
+                    !later.iter().any(|after| follows(after, candidate, levels))
+                });
+                later.extend(present.iter().copied());
+                if present.is_empty() {
+                    continue;
                 }
-                if overwrites(&present) {
+                for candidate in &present {
+                    writes.push(LastWrite {
+                        source: Some(candidate.writer.id),
+                        instance: candidate.instance_map(levels),
+                        earlier: candidate.earlier,
+                    });
+                }
+                if overwrites(&present, place) {
                     covered = true;
                     break;
                 }
             }
             if !covered {
-                sources.push(None);
+                writes.push(LastWrite {
+                    source: None,
+                    instance: None,
+                    earlier: None,
+                });
             }
-            result.push((cell, sources));
+            result.push((cell, writes));
         }
         Some(result)
     }
@@ -1587,16 +2534,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
             Some(Equation { u, rhs })
         };
-        if writer.access.elements.len() != access.elements.len() {
-            return None;
-        }
-        let mut equations = writer
-            .access
-            .elements
-            .iter()
-            .zip(&access.elements)
-            .map(|(written, read)| equation(written, read))
-            .collect::<Option<Vec<_>>>()?;
+        // A read without element coordinates takes positions of the
+        // flattened array.
+        let mut equations = if access.elements.is_empty() {
+            vec![equation(&writer.access.flat, &access.flat)?]
+        } else {
+            if writer.access.elements.len() != access.elements.len() {
+                return None;
+            }
+            writer
+                .access
+                .elements
+                .iter()
+                .zip(&access.elements)
+                .map(|(written, read)| equation(written, read))
+                .collect::<Option<Vec<_>>>()?
+        };
         let covers = match (&writer.access.bits, &access.bits) {
             (Bits::Whole, _) => true,
             (Bits::Range(..), Bits::Whole) => false,
@@ -1637,91 +2590,215 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 None => return Some(Vec::new()),
             }
         }
-        let mut constraints = Vec::new();
-        let determined = eliminate(&mut equations, unknowns, levels, &mut constraints)?;
-        let mut instance = vec![None; unknowns];
-        for level in first_unknown..unknowns {
-            let iterator = &writer.domains[level];
-            let ascending = scope.loops[writer.loops[level]].ascending;
-            match &determined[level] {
-                Some((numerator, denominator)) => {
-                    constraints.push(Constraint::Range(
-                        numerator.clone(),
-                        Some(denominator * iterator.min as i128),
-                        Some(denominator * iterator.max as i128),
-                    ));
-                    let modulus = denominator * iterator.modulus as i128;
-                    if modulus > 1 {
-                        constraints.push(Constraint::Mod(
+        let systems = self.solved_systems(equations, writer, first_unknown, levels)?;
+        let mut found = Vec::new();
+        for (determined, mut constraints) in systems {
+            let mut instance = vec![None; unknowns];
+            let mut alternatives = Vec::new();
+            let mut carried_level = None;
+            for level in first_unknown..unknowns {
+                let iterator = &writer.domains[level];
+                let ascending = scope.loops[writer.loops[level]].ascending;
+                match &determined[level] {
+                    Some((numerator, denominator)) => {
+                        constraints.push(Constraint::Range(
                             numerator.clone(),
-                            modulus,
-                            denominator * iterator.residue as i128,
+                            Some(denominator * iterator.min as i128),
+                            Some(denominator * iterator.max as i128),
                         ));
+                        let modulus = denominator * iterator.modulus as i128;
+                        if modulus > 1 {
+                            constraints.push(Constraint::Mod(
+                                numerator.clone(),
+                                modulus,
+                                denominator * iterator.residue as i128,
+                            ));
+                        }
+                        if carried == Some(level) {
+                            // An earlier iteration of the carried loop.
+                            let difference =
+                                numerator.plus(&Lin::iterator(levels, level), -denominator)?;
+                            constraints.push(if ascending {
+                                Constraint::Range(difference, None, Some(-1))
+                            } else {
+                                Constraint::Range(difference, Some(1), None)
+                            });
+                        }
+                        instance[level] = Some((numerator.clone(), *denominator));
                     }
-                    if carried == Some(level) {
-                        // An earlier iteration of the carried loop.
-                        let difference =
-                            numerator.plus(&Lin::iterator(levels, level), -denominator)?;
+                    None if carried == Some(level) => {
+                        // Some value of the write's iterations precedes the read's.
+                        let lin = Lin::iterator(levels, level);
                         constraints.push(if ascending {
-                            Constraint::Range(difference, None, Some(-1))
+                            Constraint::Range(lin, Some(iterator.min as i128 + 1), None)
                         } else {
-                            Constraint::Range(difference, Some(1), None)
+                            Constraint::Range(lin, None, Some(iterator.max as i128 - 1))
                         });
+                        // The latest of them is the previous iteration when the
+                        // read takes the same values and that iteration is
+                        // one the write takes, else the write's last.
+                        // Every value the read takes is one the write's
+                        // iterations take as well.
+                        let read = &domain[level];
+                        let modulus = iterator.modulus.max(1);
+                        if (read.min == read.max || read.modulus % modulus == 0)
+                            && read.min.rem_euclid(modulus) == iterator.residue.rem_euclid(modulus)
+                        {
+                            let modulus = iterator.modulus as i128;
+                            let lin = Lin::iterator(levels, level);
+                            let mut previous = lin.clone();
+                            previous.c = if ascending { -modulus } else { modulus };
+                            let (near, beyond, last) = if ascending {
+                                let bound = iterator.max as i128 + modulus;
+                                (
+                                    Constraint::Range(lin.clone(), None, Some(bound)),
+                                    Constraint::Range(lin, Some(bound + 1), None),
+                                    iterator.max,
+                                )
+                            } else {
+                                let bound = iterator.min as i128 - modulus;
+                                (
+                                    Constraint::Range(lin.clone(), Some(bound), None),
+                                    Constraint::Range(lin, None, Some(bound - 1)),
+                                    iterator.min,
+                                )
+                            };
+                            alternatives = vec![
+                                (near, (previous, 1)),
+                                (beyond, (Lin::constant(levels, last as i128), 1)),
+                            ];
+                            carried_level = Some(level);
+                        }
                     }
-                    instance[level] = Some((numerator.clone(), *denominator));
+                    None => {
+                        let last = scope.loops[writer.loops[level]].last(iterator);
+                        instance[level] = Some((Lin::constant(levels, last as i128), 1));
+                    }
                 }
-                None if carried == Some(level) => {
-                    // Some value of the write's iterations precedes the read's.
-                    let lin = Lin::iterator(levels, level);
-                    constraints.push(if ascending {
-                        Constraint::Range(lin, Some(iterator.min as i128 + 1), None)
-                    } else {
-                        Constraint::Range(lin, None, Some(iterator.max as i128 - 1))
-                    });
-                    // The latest of them is the previous iteration when the
-                    // read takes the same values.
-                    let read = &domain[level];
-                    if read.modulus == iterator.modulus
-                        && read.residue.rem_euclid(read.modulus)
-                            == iterator.residue.rem_euclid(iterator.modulus)
-                    {
-                        let step = if ascending {
-                            -(iterator.modulus as i128)
-                        } else {
-                            iterator.modulus as i128
+            }
+            // Each way the latest instance of the carried loop is taken.
+            let ways = match carried_level {
+                Some(level) => alternatives
+                    .into_iter()
+                    .map(|(constraint, value)| {
+                        let mut instance = instance.clone();
+                        instance[level] = Some(value);
+                        let mut constraints = constraints.clone();
+                        constraints.push(constraint);
+                        (constraints, instance)
+                    })
+                    .collect(),
+                None => vec![(constraints, instance)],
+            };
+            // A write that may not take place leaves the instances before
+            // its latest to be the last: at each level its instance is not
+            // given by the read, every earlier value of that level.
+            let skips = !covers || !writer.branches.is_empty();
+            let mut ranges = Vec::new();
+            if skips {
+                for (constraints, instance) in &ways {
+                    for level in first_unknown..unknowns {
+                        if determined[level].is_some() {
+                            continue;
+                        }
+                        let Some((value, 1)) = &instance[level] else {
+                            continue;
                         };
-                        let mut previous = Lin::iterator(levels, level);
-                        previous.c = step;
-                        instance[level] = Some((previous, 1));
+                        let iterator = &writer.domains[level];
+                        let modulus = iterator.modulus as i128;
+                        let mut constraints = constraints.clone();
+                        let mut instance = instance.clone();
+                        let mut latest = value.clone();
+                        if scope.loops[writer.loops[level]].ascending {
+                            latest.c -= modulus;
+                            constraints.push(Constraint::Range(
+                                latest.clone(),
+                                Some(iterator.min as i128),
+                                None,
+                            ));
+                        } else {
+                            latest.c += modulus;
+                            constraints.push(Constraint::Range(
+                                latest.clone(),
+                                None,
+                                Some(iterator.max as i128),
+                            ));
+                        }
+                        instance[level] = Some((latest, 1));
+                        ranges.push((constraints, instance, Some(level)));
                     }
                 }
-                None => {
-                    let last = scope.loops[writer.loops[level]].last(iterator);
-                    instance[level] = Some((Lin::constant(levels, last as i128), 1));
-                }
             }
-        }
-        let mut cells = vec![cell];
-        for constraint in constraints {
-            let mut restricted = Vec::new();
-            for cell in cells {
-                restricted.extend(self.restrict_split(cell, &constraint)?);
-            }
-            cells = restricted;
-        }
-        Some(
-            cells
+            let ways = ways
                 .into_iter()
-                .map(|cell| Candidate {
+                .map(|(constraints, instance)| (constraints, instance, None))
+                .chain(ranges);
+            for (constraints, instance, earlier) in ways {
+                let mut cells = vec![cell.clone()];
+                for constraint in constraints {
+                    let mut restricted = Vec::new();
+                    for cell in cells {
+                        restricted.extend(self.restrict_split(cell, &constraint)?);
+                    }
+                    cells = restricted;
+                }
+                found.extend(cells.into_iter().map(|cell| Candidate {
                     writer,
                     rank,
                     first_unknown,
                     cell,
                     instance: instance.clone(),
                     covers,
-                })
-                .collect(),
-        )
+                    earlier,
+                }));
+            }
+        }
+        Some(found)
+    }
+
+    /// The unknowns of `equations` each solved as an affine value of the
+    /// read's iterators, with the constraints they leave. Unknowns that the
+    /// equations leave related to one another are fixed to each value the
+    /// writer takes, outermost first, charged to the procedure's work; each
+    /// assignment is its own solution. `None` when they cannot be solved.
+    fn solved_systems(
+        &mut self,
+        equations: Vec<Equation>,
+        writer: &SubWriter,
+        first_unknown: usize,
+        levels: usize,
+    ) -> Option<Vec<Solution>> {
+        let unknowns = writer.loops.len();
+        let mut pending = vec![(equations, Vec::<usize>::new())];
+        let mut solved = Vec::new();
+        while let Some((system, fixed)) = pending.pop() {
+            let mut equations = system.clone();
+            let mut constraints = Vec::new();
+            if let Some(determined) = eliminate(&mut equations, unknowns, levels, &mut constraints)
+            {
+                solved.push((determined, constraints));
+                continue;
+            }
+            let level = (first_unknown..unknowns).find(|level| {
+                !fixed.contains(level) && system.iter().any(|equation| equation.u[*level] != 0)
+            })?;
+            let domain = writer.domains[level];
+            self.charge_last_writer_work(usize::try_from(domain.count()?).ok()?)?;
+            let step = domain.modulus.unsigned_abs();
+            for value in (domain.min..=domain.max).step_by(step) {
+                let mut u = vec![0i128; unknowns];
+                u[level] = 1;
+                let mut system = system.clone();
+                system.push(Equation {
+                    u,
+                    rhs: Lin::constant(levels, value as i128),
+                });
+                let mut fixed = fixed.clone();
+                fixed.push(level);
+                pending.push((system, fixed));
+            }
+        }
+        Some(solved)
     }
 
     /// The parts of `cell` that satisfy `constraint`. A constraint over
@@ -1786,54 +2863,123 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// Whether `left` is a later write instance than `right`.
+    /// The order of two candidates on the iterations of `cell`, or the
+    /// difference of their instances whose sign the cell does not fix.
+    /// `None` when they cannot be ordered.
     fn compare(
         &self,
         scope: &WriterScope,
         left: &Candidate<'_>,
         right: &Candidate<'_>,
-    ) -> Option<Ordering> {
+        cell: &Cell,
+    ) -> Option<Result<Ordering, Lin>> {
         if left.rank != right.rank {
-            return Some(left.rank.cmp(&right.rank));
+            return Some(Ok(left.rank.cmp(&right.rank)));
         }
-        if left.writer.path == right.writer.path {
-            return Some(Ordering::Equal);
-        }
+        // Instances of one write are ordered where their difference is
+        // known, and are otherwise taken together.
+        let same = left.writer.path == right.writer.path;
         let shared = common_loops(&left.writer.path, &right.writer.path);
         for level in left.first_unknown.max(right.first_unknown)..shared {
-            let (Some((left_value, left_denominator)), Some((right_value, right_denominator))) =
-                (&left.instance[level], &right.instance[level])
-            else {
-                return None;
+            let difference = match (&left.instance[level], &right.instance[level]) {
+                (Some((left_value, left_denominator)), Some((right_value, right_denominator))) => {
+                    left_value
+                        .scaled(*right_denominator)
+                        .and_then(|left| left.plus(right_value, -*left_denominator))
+                }
+                _ => None,
             };
-            let difference = left_value
-                .scaled(*right_denominator)?
-                .plus(right_value, -*left_denominator)?
-                .as_constant()?;
+            let Some(difference) = difference else {
+                return same.then_some(Ok(Ordering::Equal));
+            };
+            // Denominators are positive, so the sign is that of the
+            // difference of the values.
+            let sign = match lin_extent(&difference, cell) {
+                Some((low, _)) if low > 0 => Ordering::Greater,
+                Some((_, high)) if high < 0 => Ordering::Less,
+                Some((0, 0)) => Ordering::Equal,
+                _ if same => return Some(Ok(Ordering::Equal)),
+                Some(_) => return Some(Err(difference)),
+                None => return None,
+            };
             let ascending = scope.loops[left.writer.loops[level]].ascending;
-            match (difference.cmp(&0), ascending) {
+            match (sign, ascending) {
                 (Ordering::Equal, _) => {}
-                (ordering, true) => return Some(ordering),
-                (ordering, false) => return Some(ordering.reverse()),
+                (ordering, true) => return Some(Ok(ordering)),
+                (ordering, false) => return Some(Ok(ordering.reverse())),
             }
         }
-        Some(match relation(&left.writer.path, &right.writer.path) {
+        if same {
+            return Some(Ok(Ordering::Equal));
+        }
+        Some(Ok(match relation(&left.writer.path, &right.writer.path) {
             Relation::Before => Ordering::Greater,
             Relation::After => Ordering::Less,
             Relation::Exclusive => Ordering::Equal,
-        })
+        }))
     }
+}
+
+/// The least and greatest values of `lin` over the iterations of `cell`.
+fn lin_extent(lin: &Lin, cell: &Cell) -> Option<(i128, i128)> {
+    let (mut low, mut high) = (lin.c, lin.c);
+    for (&coefficient, iterator) in lin.k.iter().zip(cell) {
+        let (first, last) = (
+            coefficient.checked_mul(iterator.min as i128)?,
+            coefficient.checked_mul(iterator.max as i128)?,
+        );
+        low = low.checked_add(first.min(last))?;
+        high = high.checked_add(first.max(last))?;
+    }
+    Some((low, high))
+}
+
+/// Whether `after` overwrites every bit the read takes whenever `before`
+/// writes it: on the same iterations of the loops around both, after it,
+/// and on every path that reaches it.
+fn follows(after: &Candidate<'_>, before: &Candidate<'_>, levels: usize) -> bool {
+    if !after.covers || after.earlier.is_some() || before.earlier.is_some() {
+        return false;
+    }
+    if relation(&after.writer.path, &before.writer.path) != Relation::Before {
+        return false;
+    }
+    let common = common_loops(&after.writer.path, &before.writer.path);
+    let (Some(after_instance), Some(before_instance)) =
+        (after.instance_map(levels), before.instance_map(levels))
+    else {
+        return false;
+    };
+    if after_instance[..common] != before_instance[..common] {
+        return false;
+    }
+    after
+        .writer
+        .branches
+        .iter()
+        .all(|branch| before.writer.branches.contains(branch))
 }
 
 /// Whether the latest present writers overwrite every bit the read takes on
 /// each of its iterations: one of them always writes, or they are the arms of
 /// one branch that write on every path through it.
-fn overwrites(present: &[&Candidate<'_>]) -> bool {
+fn overwrites(present: &[&Candidate<'_>], place: &[Step]) -> bool {
     if !present.iter().all(|candidate| candidate.covers) {
         return false;
     }
+    // A write on the read's iteration, on arms the read is on, runs
+    // whenever the read does.
+    let runs_with_read = |candidate: &Candidate<'_>| {
+        candidate.rank % 2 == 1
+            && candidate.earlier.is_none()
+            && candidate.writer.branches.iter().all(|branch| {
+                place.starts_with(&branch.place)
+                    && place.get(branch.place.len()) == Some(&Step::Arm(branch.arm))
+            })
+    };
     if present
         .iter()
-        .any(|candidate| candidate.writer.branches.is_empty())
+        .any(|candidate| candidate.writer.branches.is_empty() || runs_with_read(candidate))
     {
         return true;
     }
@@ -2017,17 +3163,108 @@ fn restrict(cell: &mut Cell, constraint: Constraint) -> Option<bool> {
 
 type Read = (VarId, VarIndex, VarSelect, Option<MemberSelectDomain>);
 
+/// Whether a write at `written`, moving with one inner loop of `inner` and
+/// with the read's loops, takes the element `read` takes at one value of
+/// the inner iterator on each iteration of `cell`: `written` is
+/// `coefficient * inner + outer`, so the inner value is
+/// `(read - outer) / coefficient`, an affine value over the cell that must
+/// be whole and within the inner loop's values everywhere.
+fn reaches_each_iteration(
+    written: &AffineIndex,
+    read: &AffineIndex,
+    cell: &Cell,
+    loops: &[usize],
+    scope: &WriterScope,
+    inner: &[usize],
+) -> bool {
+    let [inner] = inner else {
+        return false;
+    };
+    let inner = &scope.loops[*inner];
+    if inner.values.modulus != 1 {
+        return false;
+    }
+    let level_of = |id: VarId| loops.iter().position(|&lp| scope.loops[lp].iterator == id);
+    let mut coefficient = 0i128;
+    let mut numerator = vec![0i128; cell.len()];
+    let mut constant = read.constant as i128 - written.constant as i128;
+    for &(id, factor) in &read.terms {
+        let Some(level) = level_of(id) else {
+            return false;
+        };
+        numerator[level] += factor as i128;
+    }
+    for &(id, factor) in &written.terms {
+        if id == inner.iterator {
+            coefficient += factor as i128;
+            continue;
+        }
+        let Some(level) = level_of(id) else {
+            return false;
+        };
+        numerator[level] -= factor as i128;
+    }
+    if coefficient == 0 {
+        return false;
+    }
+    // Whole at the first iteration and at each step of every level.
+    for (level, iterator) in cell.iter().enumerate() {
+        constant += numerator[level] * iterator.min as i128;
+        if iterator.min != iterator.max
+            && (numerator[level] * iterator.modulus as i128) % coefficient != 0
+        {
+            return false;
+        }
+    }
+    if constant % coefficient != 0 {
+        return false;
+    }
+    // Within the inner values at the extremes of the cell.
+    let (mut low, mut high) = (constant, constant);
+    for (level, iterator) in cell.iter().enumerate() {
+        let span = numerator[level] * (iterator.max as i128 - iterator.min as i128);
+        if span < 0 {
+            low += span;
+        } else {
+            high += span;
+        }
+    }
+    let (low, high) = if coefficient > 0 {
+        (low / coefficient, high / coefficient)
+    } else {
+        (high / coefficient, low / coefficient)
+    };
+    inner.values.min as i128 <= low && high <= inner.values.max as i128
+}
+
 /// For a loop whose values do not step additively or that breaks, the
 /// iterator over the order of its iterations, at the one numbered `ordinal`.
 /// No expression reads it, so a position that moves with the loop's own
 /// values is not affine in it.
 pub(super) fn ordinal_iterator(
     statement: &ForStatement,
+    level: usize,
     ordinal: isize,
 ) -> Option<CountedIterator> {
     (matches!(statement.range, ForRange::Stepped { .. })
         || crate::ir::peel::has_own_break(&statement.body))
-    .then(|| CountedIterator::new(VarId::SYNTHETIC, ordinal, ordinal))
+    .then(|| Some(CountedIterator::new(ordinal_id(level)?, ordinal, ordinal)))
+    .flatten()
+}
+
+/// The iterator over the order of the iterations of the loop at `level` of
+/// a nest, which no variable is.
+fn ordinal_id(level: usize) -> Option<VarId> {
+    Some(VarId::from_raw(
+        u32::MAX
+            .checked_sub(1)?
+            .checked_sub(u32::try_from(level).ok()?)?,
+    ))
+}
+
+/// Whether `id` is the iterator over the order of the iterations of a loop.
+fn is_ordinal(id: VarId) -> bool {
+    (0..64).any(|level| ordinal_id(level) == Some(id))
 }
 
 /// Each statement of `specialized`, a body specialized from `original`

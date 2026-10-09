@@ -1184,9 +1184,9 @@ fn divided_loop_completes(case: &str, n: usize, limit: usize) -> bool {
 #[test]
 fn counted_iterator_divisions_are_charged_to_the_procedure_work() {
     for case in ["product", "remainder"] {
-        assert!(divided_loop_completes(case, 2, 48), "{case}");
+        assert!(divided_loop_completes(case, 2, 64), "{case}");
         assert!(divided_loop_completes(case, 64, 1 << 20), "{case}");
-        assert!(!divided_loop_completes(case, 64, 48), "{case}");
+        assert!(!divided_loop_completes(case, 64, 64), "{case}");
     }
 }
 
@@ -2026,5 +2026,38 @@ counted_case!(
      var c: logic;
      always_comb { t = '{0, 0, 0, 0}; for i in 0..3 { for j in 0..2 { if a[j] { t[j] = y[i + 1]; } } y[i] = t[1]; } y[3] = x[0]; }
      assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    true
+);
+
+counted_case!(
+    counted_array_filled_at_outer_and_inner_positions_is_feed_forward,
+    "an array the inner loop fills at positions both iterators move is feed-forward",
+    "var x: logic [4];
+     var y: logic [4];
+     var t: logic [4];
+     always_comb { t = '{0, 0, 0, 0}; for i in 0..2 { for j in 0..2 { t[i + j] = y[i + 1]; } y[i] = t[1]; } y[2] = x[0]; y[3] = x[1]; }
+     assign o = {4'd0, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_array_filled_at_outer_and_inner_positions_keeps_a_closing_loop,
+    "such an array that feeds back closes a loop",
+    "var x: logic [4];
+     var y: logic [4];
+     var t: logic [4];
+     always_comb { t = '{0, 0, 0, 0}; for i in 0..2 { for j in 0..2 { t[i + j] = y[i + 1]; } y[i] = t[1]; } y[2] = y[0]; y[3] = x[1]; }
+     assign o = {4'd0, y[0], y[1], y[2], y[3]};",
+    true
+);
+
+counted_case!(
+    counted_array_element_no_inner_value_reaches_keeps_its_loop,
+    "an element the inner loop reaches on only some iterations keeps an earlier value",
+    "var x: logic [4];
+     var y: logic [4];
+     var t: logic [4];
+     always_comb { t = '{0, 0, 0, 0}; for i in 0..3 { for j in 0..1 { t[i + j] = y[i + 1]; } y[i] = t[1]; } y[3] = x[1]; }
+     assign o = {4'd0, y[0], y[1], y[2], y[3]};",
     true
 );

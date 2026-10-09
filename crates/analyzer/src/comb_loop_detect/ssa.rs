@@ -76,6 +76,9 @@ enum Version<K> {
     Projected {
         source: VersionId,
         domain: PositionDomain,
+        /// Whether the source is only kept at those positions, as state,
+        /// rather than read there.
+        retains: bool,
     },
     Replicated {
         source: VersionId,
@@ -498,6 +501,31 @@ impl<K> BranchState<K> {
             bindings: HashMap::default(),
         }
     }
+
+    pub(super) fn get(&self, key: &K) -> Option<VersionId>
+    where
+        K: Eq + Hash,
+    {
+        self.bindings.get(key).copied()
+    }
+
+    /// The bindings of the keys `taken` selects, removed from this state.
+    pub(super) fn split_off(&mut self, taken: impl Fn(&K) -> bool) -> Self
+    where
+        K: Copy + Eq + Hash,
+    {
+        let keys = self
+            .bindings
+            .keys()
+            .copied()
+            .filter(|key| taken(key))
+            .collect::<Vec<_>>();
+        let bindings = keys
+            .into_iter()
+            .filter_map(|key| Some((key, self.bindings.remove(&key)?)))
+            .collect();
+        Self { bindings }
+    }
 }
 
 struct Undo<K> {
@@ -553,7 +581,7 @@ where
             .insert(version, DefinitionSite { token, data_inputs });
     }
 
-    fn entry(&mut self, key: K) -> VersionId {
+    pub(super) fn entry(&mut self, key: K) -> VersionId {
         if let Some(version) = self.entries.get(&key) {
             return *version;
         }
@@ -631,7 +659,23 @@ where
 
     pub(super) fn projected(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
         let version = self.versions.len();
-        self.versions.push(Version::Projected { source, domain });
+        self.versions.push(Version::Projected {
+            source,
+            domain,
+            retains: false,
+        });
+        version
+    }
+
+    /// `source` kept only at `domain`: state there, as a merge keeps it,
+    /// not a value read there.
+    pub(super) fn retained(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
+        let version = self.versions.len();
+        self.versions.push(Version::Projected {
+            source,
+            domain,
+            retains: true,
+        });
         version
     }
 
@@ -658,6 +702,7 @@ where
             Version::Projected {
                 source,
                 domain: projected,
+                retains: false,
             } if *projected == domain => *source,
             _ => version,
         }
@@ -849,6 +894,20 @@ where
     /// additionally retains each key's loop-entry version. Each `observed`
     /// state, recorded inside the iteration such as a return path, is
     /// rebound to read what any number of earlier iterations left.
+    /// `source` seen only on the paths `condition` takes: an alias, not a
+    /// read.
+    pub(super) fn guarded(&mut self, source: VersionId, condition: &PathCondition) -> VersionId {
+        if condition.is_unconditional() {
+            return source;
+        }
+        let version = self.versions.len();
+        self.versions.push(Version::Guarded {
+            source,
+            condition: condition.clone(),
+        });
+        version
+    }
+
     pub(super) fn try_close_repeated_transfer(
         &mut self,
         iteration: RepeatedIteration<K>,
@@ -1033,9 +1092,10 @@ where
                         }
                     }
                 }
-                Version::Projected { source, .. } | Version::Replicated { source, .. } => {
-                    enqueue((*source, true))
-                }
+                Version::Projected {
+                    source, retains, ..
+                } => enqueue((*source, include_entry || !retains)),
+                Version::Replicated { source, .. } => enqueue((*source, true)),
             }
         }
 
@@ -1121,8 +1181,12 @@ where
                     import_work -= spent;
                     node
                 }
-                Version::Projected { source, domain } => {
-                    let inputs = mapped[&(*source, true)]
+                Version::Projected {
+                    source,
+                    domain,
+                    retains,
+                } => {
+                    let inputs = mapped[&(*source, include_entry || !retains)]
                         .map(|source| {
                             (
                                 source,
@@ -1317,8 +1381,14 @@ where
                         }
                     }
                 }
-                Version::Projected { source, .. } => {
-                    enqueue((*source, true, relation), condition, work)?;
+                Version::Projected {
+                    source, retains, ..
+                } => {
+                    enqueue(
+                        (*source, include_entry || !retains, relation),
+                        condition,
+                        work,
+                    )?;
                 }
                 Version::Replicated {
                     source,

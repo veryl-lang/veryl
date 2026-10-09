@@ -67,6 +67,8 @@ pub(crate) use summary::{
 };
 
 #[cfg(test)]
+pub(crate) use procedure::with_enumerated_loops;
+#[cfg(test)]
 pub(crate) use procedure::{with_procedure_guard_limit, with_procedure_import_limit};
 
 use crate::AnalyzerError;
@@ -1206,6 +1208,27 @@ fn add_dependency_dag(
     internal_region: SummaryRegion,
     allowed: impl Fn(NodeKey) -> bool,
 ) -> Vec<Option<NodeIndex>> {
+    add_dependency_dag_with(
+        graph,
+        node_map,
+        bit_part,
+        dag,
+        internal_region,
+        allowed,
+        &HashMap::default(),
+    )
+}
+
+/// `add_dependency_dag`, with the nodes `own` gives for some external keys.
+fn add_dependency_dag_with(
+    graph: &mut DependencyGraph,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    bit_part: &BitPartition,
+    dag: ssa::DependencyDag<NodeKey>,
+    internal_region: SummaryRegion,
+    allowed: impl Fn(NodeKey) -> bool,
+    own: &HashMap<NodeKey, NodeIndex>,
+) -> Vec<Option<NodeIndex>> {
     // These are parent expression/procedure edges, even when insertion
     // was triggered by projecting an individual child summary edge.
     let active_summary = graph.active_summary.take();
@@ -1214,6 +1237,7 @@ fn add_dependency_dag(
         .iter()
         .enumerate()
         .map(|(index, node)| match node {
+            DependencyDagNode::External(key) if own.contains_key(key) => Some(own[key]),
             DependencyDagNode::External(key) if allowed(*key) => {
                 ensure_node(graph, node_map, bit_part, *key)
             }
@@ -1297,7 +1321,8 @@ fn add_procedure_graph(
 ) {
     let destinations = analysis
         .destinations
-        .into_iter()
+        .iter()
+        .copied()
         .filter_map(|(key, root)| {
             (is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables))
                 .then_some((key, root))
@@ -1309,19 +1334,43 @@ fn add_procedure_graph(
         return;
     };
 
-    let mapped = add_dependency_dag(
+    // Each table of the procedure is a node of its own, written and read
+    // by it alone.
+    let tables = analysis
+        .tables
+        .iter()
+        .map(|&(key, domain)| {
+            let node = graph.add_node(GraphNode {
+                region: internal_region,
+                domains: vec![domain],
+                diagnostic: None,
+            });
+            graph.recurrences.insert(node);
+            (key, node)
+        })
+        .collect::<HashMap<_, _>>();
+    let table_destinations = analysis
+        .destinations
+        .iter()
+        .filter(|(key, _)| tables.contains_key(key))
+        .copied()
+        .collect::<Vec<_>>();
+    let mapped = add_dependency_dag_with(
         graph,
         node_map,
         bit_part,
         analysis.graph,
         internal_region,
         |key| is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables),
+        &tables,
     );
-    for (destination, root) in destinations {
-        let (Some(root), Some(destination)) = (
-            root.and_then(|root| mapped[root]),
-            ensure_node(graph, node_map, bit_part, destination),
-        ) else {
+    for (destination, root) in destinations.into_iter().chain(table_destinations) {
+        let destination = match tables.get(&destination) {
+            Some(&node) => Some(node),
+            None => ensure_node(graph, node_map, bit_part, destination),
+        };
+        let (Some(root), Some(destination)) = (root.and_then(|root| mapped[root]), destination)
+        else {
             continue;
         };
         add_dependency_edge(

@@ -59,6 +59,9 @@ pub(super) struct DependencyGraph {
     pub(super) sites: HashMap<NodeIndex, DefinitionSite<NodeIndex>>,
     pub(super) summary_causes: HashMap<EdgeIndex, Vec<SummaryEdgeCause>>,
     pub(super) active_summary: Option<SummaryEdgeCause>,
+    /// Nodes that each iteration of a loop reads and writes, such as the
+    /// tables of instances: every recurrence of the loop passes through one.
+    pub(super) recurrences: HashSet<NodeIndex>,
 }
 
 impl DependencyGraph {
@@ -69,6 +72,7 @@ impl DependencyGraph {
             sites: HashMap::default(),
             summary_causes: HashMap::default(),
             active_summary: None,
+            recurrences: HashSet::default(),
         }
     }
 }
@@ -477,8 +481,11 @@ fn has_compatible_cycle_with_budget(
     // path. Among them, broad domains keep wide shifts out of the internal
     // search state. Correctness does not depend on the anchor order.
     let mut starts = scc.to_vec();
+    // A recurrence node first: its iterations close as first returns
+    // instead of being repeated inside the paths of other anchors.
     starts.sort_by_cached_key(|&node| {
         std::cmp::Reverse((
+            graph.recurrences.contains(&node),
             !graph[node].domains.is_empty(),
             graph.edges(node).any(|edge| edge.target() == node),
             domain_area(&graph[node]),

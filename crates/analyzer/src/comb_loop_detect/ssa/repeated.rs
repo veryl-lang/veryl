@@ -155,14 +155,19 @@ impl TransferBuilder {
                     let source = self.version(ssa, *source, start, import_work)?;
                     self.graph.add_edge(source, node, TransferEdge::RETAIN);
                 }
-                Version::Projected { source, domain } => {
+                Version::Projected {
+                    source,
+                    domain,
+                    retains,
+                } => {
                     self.graph[node].domains.push(*domain);
                     let source = self.version(ssa, *source, start, import_work)?;
-                    self.graph.add_edge(
-                        source,
-                        node,
-                        TransferEdge::data(PositionRelation::default()),
-                    );
+                    let edge = if *retains {
+                        TransferEdge::RETAIN
+                    } else {
+                        TransferEdge::data(PositionRelation::default())
+                    };
+                    self.graph.add_edge(source, node, edge);
                 }
                 Version::Replicated {
                     source,
@@ -283,6 +288,9 @@ pub(in crate::comb_loop_detect) struct RepeatedIteration<'s, K> {
     pub(in crate::comb_loop_detect) may_skip: bool,
     /// States recorded inside the iteration, such as return paths.
     pub(in crate::comb_loop_detect) observed: &'s mut [BranchState<K>],
+    /// How many of the last `observed` states observe only the keys they
+    /// bind: values the iterations produce without feeding the next.
+    pub(in crate::comb_loop_detect) bound_only: usize,
 }
 
 impl<'s, K> RepeatedIteration<'s, K> {
@@ -296,6 +304,7 @@ impl<'s, K> RepeatedIteration<'s, K> {
             checkpoint,
             may_skip,
             observed: &mut [],
+            bound_only: 0,
         }
     }
 }
@@ -312,7 +321,9 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
         checkpoint,
         may_skip,
         observed,
+        bound_only,
     } = iteration;
+    let bound_from = observed.len().saturating_sub(bound_only);
     let mut builder = TransferBuilder::default();
     let outputs = iteration
         .bindings
@@ -344,7 +355,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
     for (index, state) in observed.iter().enumerate() {
         let unbound = entries
             .iter()
-            .filter(|(key, _)| !state.bindings.contains_key(key))
+            .filter(|(key, _)| index < bound_from && !state.bindings.contains_key(key))
             .map(|(&key, &entry)| (key, entry));
         for (key, version) in state
             .bindings
@@ -800,6 +811,10 @@ const UNIFORM_RECURRENCE_WORK: usize = 1 << 20;
 struct UniformRecurrence {
     replication: Replication,
     domain: PositionDomain,
+    /// The positions a translation can start from or reach: those the
+    /// sources of the translating edges hold, and where they move them.
+    /// `None` when no translation can take place there.
+    moving: Option<PositionDomain>,
     /// Relation retained by every internal path; the replicated axis is zero.
     stable: PositionRelation,
     members: Vec<NodeIndex>,
@@ -839,6 +854,9 @@ impl UniformRecurrence {
             .map(|(index, &node)| (node, index))
             .collect::<HashMap<_, _>>();
         let mut adjacency = vec![Vec::new(); nodes.len()];
+        // A value moves only through a translating edge, from the positions
+        // its source holds. Unbounded when a source holds every position.
+        let mut moving = Some(Bound::Empty);
         for &node in nodes {
             for edge in graph.edges(node) {
                 let Some(&target) = local.get(&edge.target()) else {
@@ -852,11 +870,35 @@ impl UniformRecurrence {
                 // Uniform translations share the stride's sign and divide by it.
                 let units = usize::try_from(offset / stride).ok()?;
                 adjacency[local[&node]].push((target, units, edge.weight().data));
+                if units != 0 {
+                    moving = moving.and_then(|bound| {
+                        let domains = &graph[node].domains;
+                        if domains.is_empty() {
+                            return None;
+                        }
+                        let mut bound = bound.join(Bound::of(domains));
+                        for domain in domains {
+                            bound =
+                                bound.join(Bound::Hull(translate(*domain, replication, offset)?));
+                        }
+                        Some(bound)
+                    });
+                }
             }
         }
+        // The replicated members also move their values.
+        if nodes.iter().any(|&node| graph[node].replication.is_some()) {
+            moving = None;
+        }
+        let moving = match moving {
+            None | Some(Bound::Unbounded) => Some(domain),
+            Some(Bound::Empty) => None,
+            Some(Bound::Hull(bound)) => intersect(domain, bound, replication),
+        };
         Some(Self {
             replication,
             domain,
+            moving,
             stable,
             members: nodes.to_vec(),
             local,
@@ -972,8 +1014,12 @@ impl UniformRecurrence {
                 })
                 .collect::<Vec<_>>();
             let joined = ssa.related_definition(sources);
-            let joined = ssa.projected(joined, self.domain);
-            let repeated = ssa.replicated(joined, self.domain, self.replication);
+            // A value at a position no translation starts from stays there.
+            let held = ssa.projected(joined, self.domain);
+            let repeated = self.moving.map(|moving| {
+                let moving_value = ssa.projected(joined, moving);
+                ssa.replicated(moving_value, moving, self.replication)
+            });
             for &member in &exits {
                 if retains[member] {
                     for edge in &edges {
@@ -985,7 +1031,16 @@ impl UniformRecurrence {
                     let relation = self
                         .translated(units)
                         .unwrap_or_else(PositionRelation::whole);
-                    data_inputs[member].push(ssa.related_definition(vec![(repeated, relation)]));
+                    // A path that translates starts from a position some
+                    // translation starts from; one that does not may also
+                    // start anywhere else.
+                    let value = match (units, repeated) {
+                        (0, Some(repeated)) => ssa.phi(vec![held, repeated]),
+                        (0, None) => held,
+                        (_, Some(repeated)) => repeated,
+                        (_, None) => continue,
+                    };
+                    data_inputs[member].push(ssa.related_definition(vec![(value, relation)]));
                 }
             }
         }
@@ -997,6 +1052,52 @@ impl UniformRecurrence {
                 .map(|value| ssa.projected_union(value, &graph[node].domains));
         }
     }
+}
+
+/// `domain` moved by `offset` along the replicated axis, `None` when it
+/// leaves the nonnegative positions.
+fn translate(
+    mut domain: PositionDomain,
+    replication: Replication,
+    offset: isize,
+) -> Option<PositionDomain> {
+    let start = match replication {
+        Replication::Array(_) => &mut domain.array_start,
+        Replication::Packed(_) => &mut domain.packed_start,
+    };
+    *start = start.checked_add_signed(offset)?;
+    Some(domain)
+}
+
+/// `domain` with its replicated axis confined to that of `bound`, `None`
+/// when they share no position there.
+fn intersect(
+    mut domain: PositionDomain,
+    bound: PositionDomain,
+    replication: Replication,
+) -> Option<PositionDomain> {
+    let (start, length, bound_start, bound_length) = match replication {
+        Replication::Array(_) => (
+            &mut domain.array_start,
+            &mut domain.array_length,
+            bound.array_start,
+            bound.array_length,
+        ),
+        Replication::Packed(_) => (
+            &mut domain.packed_start,
+            &mut domain.packed_length,
+            bound.packed_start,
+            bound.packed_length,
+        ),
+    };
+    let first = (*start).max(bound_start);
+    let end = (*start + *length).min(bound_start + bound_length);
+    if first >= end {
+        return None;
+    }
+    *start = first;
+    *length = end - first;
+    Some(domain)
 }
 
 /// Translations of the internal edges of one component along one axis.
