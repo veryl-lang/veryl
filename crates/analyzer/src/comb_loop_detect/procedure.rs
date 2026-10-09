@@ -1502,6 +1502,9 @@ struct ProcedureAnalysis<'a, 's> {
     writer_scope: Option<Rc<WriterScope>>,
     /// The places of the statements being evaluated in that loop.
     statement_places: Vec<Vec<Step>>,
+    /// The statement each statement of a specialized iteration body being
+    /// evaluated comes from.
+    statement_origins: HashMap<*const Statement, *const Statement>,
     /// The destination being written by the current assignment.
     current_writer: Option<WriterId>,
     /// A statement being evaluated once per set of iterations.
@@ -1679,6 +1682,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             pure_functions: HashMap::default(),
             writer_scope: None,
             statement_places: Vec::new(),
+            statement_origins: HashMap::default(),
             current_writer: None,
             split_statement: None,
         }
@@ -4711,13 +4715,39 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         });
         let mut flow = ProcedureFlow::Continue;
         let mut iteration_controls = range_controls.to_vec();
-        for value in iterations {
+        // Inside the scope of the last writers, which scans this loop as one
+        // over its iterations, each iteration is the one of its value.
+        let in_scope = self.scans_enumerated_loop(statement);
+        for (ordinal, value) in iterations.into_iter().enumerate() {
             self.set_known_iterator_value(statement, value);
             let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
+            let mut origins = Vec::new();
+            let iterator = in_scope
+                .then(|| {
+                    let ordinal = isize::try_from(ordinal).ok()?;
+                    last_writer::ordinal_iterator(statement, ordinal).or_else(|| {
+                        let value = isize::try_from(value).ok()?;
+                        Some(CountedIterator::new(statement.var_id, value, value))
+                    })
+                })
+                .flatten();
+            if let Some(iterator) = iterator {
+                self.counted_iterators.push(iterator);
+                if let Some(body) = &body {
+                    last_writer::statement_origins(&statement.body, body, &mut origins);
+                    self.statement_origins.extend(origins.iter().copied());
+                }
+            }
             let result = self.eval_block(
                 body.as_deref().unwrap_or(&statement.body),
                 &iteration_controls,
             );
+            if iterator.is_some() {
+                for (specialized, _) in origins {
+                    self.statement_origins.remove(&specialized);
+                }
+                self.counted_iterators.pop();
+            }
             flow = result.flow;
             if flow != ProcedureFlow::Continue || self.guard_work.is_none() {
                 break;

@@ -1343,3 +1343,87 @@ counted_case!(
      assign o = {7'd0, c};",
     false
 );
+
+counted_case!(
+    counted_enumerated_inner_loop_reaches_a_later_iteration_read,
+    "a later iteration reads what an inner loop over its values wrote",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[i]; }
+             for j in 0..4 { y[j] = x[j >> 1] ^ c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_enumerated_inner_loop_misses_a_first_iteration_read,
+    "the first iteration reads the value from before an inner loop over its values",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 0 { c = y[i]; }
+             for j in 0..4 { y[j] = x[j >> 1] ^ c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_multiplied_inner_loop_reaches_a_later_iteration_read,
+    "a later iteration reads what an inner loop over multiplied values wrote",
+    "var x: logic [9];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 1 { c = y[i]; }
+             for j in 1..9 step *= 2 { y[0] = x[j] ^ c; y[1] = x[j] ^ c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_multiplied_inner_loop_keeps_a_first_iteration_read,
+    "a write at the multiplied value read before the loop closes a loop",
+    "var x: logic [9];
+     var y: logic [9];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             if i == 0 { c = y[2]; }
+             for j in 1..9 step *= 2 { y[j] = x[j] ^ c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_enumerated_inner_loop_keeps_a_read_before_its_write,
+    "an inner iteration that reads an element only a later one writes closes a loop",
+    "var x: logic [4];
+     var y: logic [4];
+     var c: logic;
+     always_comb {
+         c = 0;
+         for i in 0..2 {
+             for j in 0..4 { if i == 0 { c = y[1 - (j >> 1)]; } y[j >> 1] = x[j] ^ c; }
+         }
+     }
+     assign o = {7'd0, c};",
+    true
+);

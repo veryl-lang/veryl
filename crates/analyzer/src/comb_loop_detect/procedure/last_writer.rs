@@ -470,6 +470,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
+    /// Whether a loop that takes each of its values is evaluated in the
+    /// active scope, which scans it as one over its iterations unless it
+    /// breaks.
+    pub(super) fn scans_enumerated_loop(&self, statement: &ForStatement) -> bool {
+        self.active_writer_scope().is_some() && !crate::ir::peel::has_own_break(&statement.body)
+    }
+
     fn active_writer_scope(&self) -> Option<Rc<WriterScope>> {
         let scope = self.writer_scope.as_ref()?;
         (self.call_frames.len() == scope.call_depth).then(|| Rc::clone(scope))
@@ -651,16 +658,37 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if self.for_range_is_proven_empty(&statement.range) {
                     return Some(());
                 }
-                // Only a loop evaluated with a symbolic iterator is scanned.
-                let super::LoopEvaluation::Counted(iterations) =
-                    super::loop_evaluation(statement, &mut self.ctx)
-                else {
-                    return None;
+                // A loop evaluated with a symbolic iterator is scanned, and so
+                // is one that takes each of its values without breaking: its
+                // iterations still all run in order, each evaluated as the one
+                // of its value.
+                let iterator = match super::loop_evaluation(statement, &mut self.ctx) {
+                    super::LoopEvaluation::Counted(iterations) => {
+                        if iterations.count == 0 {
+                            return Some(());
+                        }
+                        CountedIterator::of(statement, iterations)?
+                    }
+                    super::LoopEvaluation::Enumerated(values)
+                        if !crate::ir::peel::has_own_break(&statement.body) =>
+                    {
+                        if values.is_empty() {
+                            return Some(());
+                        }
+                        let last = isize::try_from(values.len() - 1).ok()?;
+                        match ordinal_iterator(statement, 0) {
+                            Some(ordinal) => CountedIterator {
+                                max: last,
+                                ..ordinal
+                            },
+                            None => CountedIterator::of(
+                                statement,
+                                statement.range.eval_counted(&mut self.ctx)?,
+                            )?,
+                        }
+                    }
+                    _ => return None,
                 };
-                if iterations.count == 0 {
-                    return Some(());
-                }
-                let iterator = CountedIterator::of(statement, iterations)?;
                 let next = scan.loops.len();
                 let id = *scan
                     .loop_ids
@@ -668,8 +696,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     .or_insert(next);
                 if id == next {
                     scan.loops.push(ScopeLoop {
-                        iterator: statement.var_id,
-                        ascending: !matches!(statement.range, ForRange::Reverse { .. }),
+                        iterator: iterator.id,
+                        ascending: iterator.id == VarId::SYNTHETIC
+                            || !matches!(statement.range, ForRange::Reverse { .. }),
                     });
                 }
                 path.push(Step::Loop(id));
@@ -873,13 +902,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// The place of a statement about to be evaluated in the active scope.
+    /// A statement of an iteration's specialized body takes the place of the
+    /// statement it was specialized from.
     pub(super) fn enter_statement_place(&mut self, statement: &Statement) -> bool {
         let Some(scope) = self.active_writer_scope() else {
             return false;
         };
+        let mut statement = std::ptr::from_ref(statement);
+        while let Some(&original) = self.statement_origins.get(&statement) {
+            statement = original;
+        }
         let place = scope
             .places
-            .get(&std::ptr::from_ref(statement))
+            .get(&statement)
             .cloned()
             .or_else(|| self.statement_places.last().cloned());
         match place {
@@ -1550,6 +1585,54 @@ fn restrict(cell: &mut Cell, constraint: Constraint) -> Option<bool> {
 }
 
 type Read = (VarId, VarIndex, VarSelect, Option<MemberSelectDomain>);
+
+/// For a loop whose values do not step additively, the iterator over the
+/// order of its iterations, at the one numbered `ordinal`. No expression
+/// reads it, so a position that moves with the loop's own values is not
+/// affine in it.
+pub(super) fn ordinal_iterator(
+    statement: &ForStatement,
+    ordinal: isize,
+) -> Option<CountedIterator> {
+    matches!(statement.range, ForRange::Stepped { .. })
+        .then(|| CountedIterator::new(VarId::SYNTHETIC, ordinal, ordinal))
+}
+
+/// Each statement of `specialized`, a body specialized from `original`
+/// with the same shape, paired with the statement it comes from. A side the
+/// specialization dropped pairs nothing.
+pub(super) fn statement_origins(
+    original: &[Statement],
+    specialized: &[Statement],
+    origins: &mut Vec<(*const Statement, *const Statement)>,
+) {
+    for (original, specialized) in original.iter().zip(specialized) {
+        origins.push((
+            std::ptr::from_ref(specialized),
+            std::ptr::from_ref(original),
+        ));
+        match (original, specialized) {
+            (Statement::If(original), Statement::If(specialized)) => {
+                statement_origins(&original.true_side, &specialized.true_side, origins);
+                statement_origins(&original.false_side, &specialized.false_side, origins);
+            }
+            (Statement::IfReset(original), Statement::IfReset(specialized)) => {
+                statement_origins(&original.true_side, &specialized.true_side, origins);
+                statement_origins(&original.false_side, &specialized.false_side, origins);
+            }
+            (Statement::Case(original), Statement::Case(specialized)) => {
+                for (original, specialized) in original.arms.iter().zip(&specialized.arms) {
+                    statement_origins(&original.body, &specialized.body, origins);
+                }
+                statement_origins(&original.default, &specialized.default, origins);
+            }
+            (Statement::For(original), Statement::For(specialized)) => {
+                statement_origins(&original.body, &specialized.body, origins);
+            }
+            _ => {}
+        }
+    }
+}
 
 /// The variable reads a statement makes before its nested statements.
 fn statement_reads(statement: &Statement) -> Vec<Read> {
