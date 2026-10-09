@@ -106,7 +106,7 @@ pub struct Module {
     /// to a one-function compile via `Backend::compile_whole_comb`.
     /// `None` keeps `settle_comb` on the per-chunk Cranelift loop.
     pub whole_comb: Option<Arc<dyn CompiledWhole>>,
-    /// Dataflow settle (`VERYL_DATAFLOW=1`); see `opt::dataflow`.
+    /// Dataflow settle (off under `VERYL_DATAFLOW=0`); see `opt::dataflow`.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// The dataflow cells Cranelift could not compile, lowered onto this
     /// module's buffers for the dispatcher to interpret.

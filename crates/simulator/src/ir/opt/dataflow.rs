@@ -1,4 +1,4 @@
-//! Dataflow settle planning (`VERYL_DATAFLOW=1`).
+//! Dataflow settle planning (on unless `VERYL_DATAFLOW=0`).
 //!
 //! The comb list is regrouped into CELLS that a settle runs only when a byte
 //! they read has changed since their last run.  The change is signalled by
@@ -43,9 +43,21 @@ fn bail<T>(why: std::fmt::Arguments) -> Option<T> {
     None
 }
 
+/// On unless `VERYL_DATAFLOW=0`, which leaves every module on the per-chunk
+/// settle.  That path exists for debugging: it is far slower and is not what
+/// a default run measures, so turning it off warns once.
 pub fn enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("VERYL_DATAFLOW").as_deref() == Ok("1"))
+    *ON.get_or_init(|| {
+        let off = std::env::var("VERYL_DATAFLOW").as_deref() == Ok("0");
+        if off {
+            eprintln!(
+                "warning: VERYL_DATAFLOW=0 selects the per-chunk settle, a debugging \
+                 fallback: slow and not representative of a default run"
+            );
+        }
+        !off
+    })
 }
 
 /// Why a module built under `config` with this pass count gets no dataflow
