@@ -89,6 +89,9 @@ pub fn has_for_loop(decls: &[Declaration]) -> bool {
 /// Lower bounded constant loops for a backend that requires concrete write
 /// lanes. The caller owns a private copy; shared analysis IR stays compact.
 /// Loops containing a break remain available to the decided-loop peeler.
+/// Under `keep_reset` only reset-side loops are bounded: they form a reset
+/// network, while a kept logic loop reads and writes its arrays whole and
+/// costs the settle its one-pass order.
 /// `keep_reset` keeps a reset-side loop, outside the budget, when every array
 /// it indexes at runtime already is outside reset, so no array changes layout.
 pub fn lower_constant_loops(
@@ -103,12 +106,13 @@ pub fn lower_constant_loops(
     }
     let mut changed = false;
     for decl in declarations.iter_mut() {
-        let stmts = match decl {
-            Declaration::Comb(x) => &mut x.statements,
-            Declaration::Ff(x) => &mut x.statements,
+        let (stmts, limit) = match decl {
+            Declaration::Comb(x) => (&mut x.statements, usize::MAX),
+            Declaration::Ff(x) if !keep_reset => (&mut x.statements, statement_limit),
+            Declaration::Ff(x) => (&mut x.statements, usize::MAX),
             _ => continue,
         };
-        changed |= lower_constant_loop_body(context, stmts, statement_limit, keep_reset);
+        changed |= lower_constant_loop_body(context, stmts, limit, keep_reset);
     }
     if keep_reset {
         let mut dynamic = HashSet::default();
