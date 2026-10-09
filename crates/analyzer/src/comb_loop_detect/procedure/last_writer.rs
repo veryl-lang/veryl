@@ -212,10 +212,12 @@ impl Scan {
 
     /// The variables whose values differ between instances of their writes:
     /// written at positions that move with the iterators, on only some
-    /// iterations, or from what reads an iterator or such a variable.
-    /// Every other variable takes the same value on each iteration that
-    /// writes it, from the same sources, which the iteration's closure
-    /// relates exactly.
+    /// iterations, from what reads an iterator or such a variable, or from
+    /// another variable the nest writes, whose first iteration reads what
+    /// the loop entered with and the others what an iteration wrote; and
+    /// that variable too. Every other variable takes, on each iteration
+    /// that writes it, a value of the same sources or of its own previous
+    /// one, which the iteration's closure relates exactly.
     fn instance_dependent(&self) -> crate::HashSet<VarId> {
         let iterators = self
             .loops
@@ -236,6 +238,14 @@ impl Scan {
             .filter(|(id, subs)| self.confined.contains(*id) || subs.iter().any(moves))
             .map(|(&id, _)| id)
             .collect::<crate::HashSet<_>>();
+        for (&id, reads) in &self.feeds {
+            for read in reads {
+                if *read != id && self.writers.contains_key(read) {
+                    dependent.insert(id);
+                    dependent.insert(*read);
+                }
+            }
+        }
         loop {
             let before = dependent.len();
             for (&id, reads) in &self.feeds {
@@ -508,6 +518,59 @@ impl WriterScope {
         ))
     }
 
+    /// The map from the positions of the tables of `writer` to the index
+    /// of the instance each holds, see `instance_index`. `None` when the
+    /// positions are elements that several loops move.
+    fn instance_map(
+        &self,
+        id: VarId,
+        writer: WriterId,
+    ) -> Option<crate::comb_loop_detect::position::Map> {
+        let (index, _) = self.table_index(id, writer)?;
+        let (instances, _) = self.instance_index(id, writer)?;
+        if index == instances {
+            return Some(crate::comb_loop_detect::position::Map {
+                crossed: false,
+                modulus: 1,
+                residue: 0,
+                base: 0,
+                step: 1,
+            });
+        }
+        // An element `coefficient * iterator + constant` of the one loop.
+        let sub = self.writers.get(&id)?.iter().find(|sub| sub.id == writer)?;
+        let [level] = sub.loops.as_slice() else {
+            return None;
+        };
+        let scope_loop = &self.loops[*level];
+        let [(iterator, coefficient)] = index.terms.as_slice() else {
+            return None;
+        };
+        if *iterator != scope_loop.iterator || *coefficient == 0 {
+            return None;
+        }
+        // The element is `residue + modulus * t`, the instance
+        // `iterator - min`.
+        let modulus = coefficient.checked_abs()?;
+        let residue = index.constant.rem_euclid(modulus);
+        let quotient = (index.constant - residue) / modulus;
+        let min = scope_loop.values.min;
+        let (base, step) = if *coefficient > 0 {
+            // t = iterator + quotient.
+            (quotient.checked_neg()?.checked_sub(min)?, 1)
+        } else {
+            // t = quotient - iterator.
+            (quotient.checked_sub(min)?, -1)
+        };
+        Some(crate::comb_loop_detect::position::Map {
+            crossed: false,
+            modulus,
+            residue,
+            base,
+            step,
+        })
+    }
+
     /// The positions the tables of `writer` take.
     pub(super) fn table_domain_span(&self, id: VarId, writer: WriterId) -> Option<ArraySpan> {
         self.table_index(id, writer).map(|(_, span)| span)
@@ -700,6 +763,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if tracked.is_empty() {
             return;
         }
+        self.instance_tables = true;
         extents.retain(|(id, _), _| tracked.contains_key(id));
         let scope = Rc::new(WriterScope {
             loops,
@@ -710,6 +774,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             call_depth: self.call_frames.len(),
         });
         if self.external_tables {
+            self.writer_scopes += 1;
             let mut ids = scope.writers.keys().copied().collect::<Vec<_>>();
             ids.sort_unstable();
             for id in ids {
@@ -725,13 +790,48 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     };
                     for &writer in &writers {
                         let domain = scope.table_domain(id, writer, position_domain(key.1, span));
+                        let arms = self.instance_arms(&scope, id, writer);
                         let table = self.writer_key(key, writer);
-                        self.register_table(table, domain);
+                        self.register_table(table, domain, arms);
                     }
                 }
             }
         }
         self.writer_scope = Some(scope);
+    }
+
+    /// The arms the writes of `writer` take, each on the instance a position
+    /// of its tables holds. A branch around fewer loops than the write, or
+    /// a table whose positions give its instances by no map, takes none.
+    fn instance_arms(
+        &mut self,
+        scope: &WriterScope,
+        id: VarId,
+        writer: WriterId,
+    ) -> Vec<crate::comb_loop_detect::graph::InstanceArm> {
+        let Some(sub) = scope
+            .writers
+            .get(&id)
+            .and_then(|subs| subs.iter().find(|sub| sub.id == writer))
+        else {
+            return Vec::new();
+        };
+        let Some(instance) = scope.instance_map(id, writer) else {
+            return Vec::new();
+        };
+        let mut arms = Vec::new();
+        for branch in &sub.branches {
+            if place_loops(&branch.place).len() != sub.loops.len() {
+                continue;
+            }
+            arms.push(crate::comb_loop_detect::graph::InstanceArm {
+                branch: self.instance_branch(&branch.place),
+                arm: branch.arm,
+                arms: branch.arms,
+                instance,
+            });
+        }
+        arms
     }
 
     pub(super) fn close_writer_scope(&mut self) {
@@ -1099,10 +1199,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     });
                 }
                 let breaks = crate::ir::peel::has_own_break(&statement.body);
+                path.push(Step::Loop(id));
+                // A break skips the later iterations of the loop it breaks.
                 if breaks {
                     scan.breaking.push((path.clone(), false));
                 }
-                path.push(Step::Loop(id));
                 self.forget_runtime_iterator_value(statement.var_id);
                 let scanned = match ordinals {
                     Some(values) => self.scan_ordinals(scan, statement, values, path, branches),
@@ -1984,9 +2085,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             spans.sort_unstable_by_key(|(span, step, _)| (span.start, *step));
             let mut merged: Spans = Vec::new();
             for (span, step, region) in spans {
+                // A map relates each position of the merged span to the
+                // region it read; positions unrelated to their sources read
+                // every position of the region, so only an equal one merges.
                 if let Some((last, 1, last_region)) = merged.last_mut()
                     && step == 1
                     && span.start <= last.start + last.length
+                    && (relation.array != super::Link::Unlinked || *last_region == region)
                 {
                     let end = (last.start + last.length).max(span.start + span.length);
                     last.length = end - last.start;
@@ -2464,7 +2569,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // A write that a later present one always follows in the
                 // same iterations is never the last.
                 present.retain(|candidate| {
-                    !later.iter().any(|after| follows(after, candidate, levels))
+                    !later
+                        .iter()
+                        .any(|after| follows(scope, after, candidate, levels, &cell))
                 });
                 later.extend(present.iter().copied());
                 if present.is_empty() {
@@ -2693,12 +2800,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             // A write that may not take place leaves the instances before
             // its latest to be the last: at each level its instance is not
             // given by the read, every earlier value of that level.
-            let skips = !covers || !writer.branches.is_empty();
+            // An iteration of a loop skips the write only on a branch
+            // inside it; every other iteration of that loop writes once its
+            // enclosing iteration does.
+            let skips = |level: usize| {
+                !covers
+                    || writer
+                        .branches
+                        .iter()
+                        .any(|branch| place_loops(&branch.place).len() > level)
+            };
             let mut ranges = Vec::new();
-            if skips {
+            {
                 for (constraints, instance) in &ways {
                     for level in first_unknown..unknowns {
-                        if determined[level].is_some() {
+                        if determined[level].is_some() || !skips(level) {
                             continue;
                         }
                         let Some((value, 1)) = &instance[level] else {
@@ -2709,13 +2825,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let mut constraints = constraints.clone();
                         let mut instance = instance.clone();
                         let mut latest = value.clone();
-                        if scope.loops[writer.loops[level]].ascending {
+                        let first = if scope.loops[writer.loops[level]].ascending {
                             latest.c -= modulus;
                             constraints.push(Constraint::Range(
                                 latest.clone(),
                                 Some(iterator.min as i128),
                                 None,
                             ));
+                            iterator.min
                         } else {
                             latest.c += modulus;
                             constraints.push(Constraint::Range(
@@ -2723,9 +2840,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 None,
                                 Some(iterator.max as i128),
                             ));
-                        }
+                            iterator.max
+                        };
+                        // Earlier instances that are the first value of the
+                        // innermost loop are that one instance.
+                        let single = level + 1 == unknowns
+                            && latest.k.iter().all(|&k| k == 0)
+                            && latest.c == first as i128;
                         instance[level] = Some((latest, 1));
-                        ranges.push((constraints, instance, Some(level)));
+                        ranges.push((constraints, instance, (!single).then_some(level)));
                     }
                 }
             }
@@ -2937,21 +3060,58 @@ fn lin_extent(lin: &Lin, cell: &Cell) -> Option<(i128, i128)> {
 /// Whether `after` overwrites every bit the read takes whenever `before`
 /// writes it: on the same iterations of the loops around both, after it,
 /// and on every path that reaches it.
-fn follows(after: &Candidate<'_>, before: &Candidate<'_>, levels: usize) -> bool {
-    if !after.covers || after.earlier.is_some() || before.earlier.is_some() {
+fn follows(
+    scope: &WriterScope,
+    after: &Candidate<'_>,
+    before: &Candidate<'_>,
+    levels: usize,
+    cell: &Cell,
+) -> bool {
+    if !after.covers {
         return false;
     }
     if relation(&after.writer.path, &before.writer.path) != Relation::Before {
         return false;
     }
     let common = common_loops(&after.writer.path, &before.writer.path);
+    // Earlier instances of `before` at loops `after` is not in all precede
+    // the one of `after`; at a loop around both, only earlier instances of
+    // `after` from the same level follow each.
+    if let Some(level) = before.earlier.filter(|&level| level < common)
+        && after.earlier != Some(level)
+    {
+        return false;
+    }
     let (Some(after_instance), Some(before_instance)) =
         (after.instance_map(levels), before.instance_map(levels))
     else {
         return false;
     };
-    if after_instance[..common] != before_instance[..common] {
+    // The extent over the cell of the instance of `after` less that of
+    // `before` at a level, scaled by their positive denominators.
+    let difference = |level: usize| {
+        let ((left, left_denominator), (right, right_denominator)) =
+            (&after_instance[level], &before_instance[level]);
+        let difference = left
+            .scaled(*right_denominator)?
+            .plus(right, -*left_denominator)?;
+        lin_extent(&difference, cell)
+    };
+    // The same instance of the loops around both, or for every earlier
+    // instance from a level, one up to the latest there.
+    let same = (0..common.min(after.earlier.unwrap_or(common)))
+        .all(|level| difference(level) == Some((0, 0)));
+    if !same {
         return false;
+    }
+    if let Some(level) = after.earlier.filter(|&level| level < common) {
+        let Some((low, high)) = difference(level) else {
+            return false;
+        };
+        let ascending = scope.loops[after.writer.loops[level]].ascending;
+        if (ascending && low < 0) || (!ascending && high > 0) {
+            return false;
+        }
     }
     after
         .writer
@@ -2967,13 +3127,14 @@ fn overwrites(present: &[&Candidate<'_>], place: &[Step]) -> bool {
     if !present.iter().all(|candidate| candidate.covers) {
         return false;
     }
-    // A write on the read's iteration, on arms the read is on, runs
-    // whenever the read does.
+    // A write runs whenever the read does when each branch around it is
+    // one the read is on, around only loops at which the write is the
+    // read's instance: those before `first_unknown`.
     let runs_with_read = |candidate: &Candidate<'_>| {
-        candidate.rank % 2 == 1
-            && candidate.earlier.is_none()
+        candidate.earlier.is_none()
             && candidate.writer.branches.iter().all(|branch| {
-                place.starts_with(&branch.place)
+                place_loops(&branch.place).len() <= candidate.first_unknown
+                    && place.starts_with(&branch.place)
                     && place.get(branch.place.len()) == Some(&Step::Arm(branch.arm))
             })
     };

@@ -2061,3 +2061,57 @@ counted_case!(
      assign o = {4'd0, y[0], y[1], y[2], y[3]};",
     true
 );
+
+counted_case!(
+    counted_exclusive_arms_of_one_iteration_are_feed_forward,
+    "arms of one branch on the same iteration exclude each other",
+    "var t: logic [8];
+     var y: logic [8];
+     always_comb { for i in 0..3 { if a[6] { t[i] = y[2 * i]; } else { y[2 * i] = t[2]; } } }
+     assign o = {2'd0, t[0], t[1], t[2], y[0], y[2], y[4]};",
+    false
+);
+
+counted_case!(
+    counted_arms_of_different_iterations_close_a_loop,
+    "arms of one branch on different iterations both run",
+    "var t: logic [8];
+     var y: logic [8];
+     always_comb { for i in 0..2 { if a[6] { t[0] = y[0]; } else { y[0] = t[0]; } } }
+     assign o = {6'd0, t[0], y[0]};",
+    true
+);
+
+counted_case!(
+    counted_nested_overwrite_reads_only_its_last_instance,
+    "an element each inner iteration overwrites holds only the last one's value",
+    "var y: logic [8];
+     always_comb { for i in 0..2 { for j in 0..2 { y[0] = y[j]; } } }
+     assign o = {6'd0, y[0], y[1]};",
+    false
+);
+
+counted_case!(
+    counted_inner_loop_runs_whole_on_its_branch,
+    "an inner loop on a branch writes on each of its iterations once the branch runs",
+    "var x: logic [8];
+     var y: logic [8];
+     var c: logic;
+     var e: logic;
+     always_comb {
+         for i in 0..2 { if a[2] { for j in rev 0..2 { y[i + j] = e; e = c; } c = y[2 * i]; } }
+         c = x[3];
+     }
+     assign o = {c, e, y[0], y[1], y[2], y[3], 2'd0};",
+    false
+);
+
+counted_case!(
+    counted_value_carried_between_variables_reads_its_last_instance,
+    "a value read from another variable the loop writes is that of its iteration",
+    "var t: logic [8];
+     var c: logic;
+     always_comb { for i in 0..2 { for j in 0..2 { t[0] = c; c = a[3]; } } c = t[0]; }
+     assign o = {7'd0, t[0]};",
+    false
+);

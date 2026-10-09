@@ -4100,3 +4100,36 @@ fn comb_loop_nested_runtime_loop_returns_close_without_reevaluation() {
     );
     assert!(comb_loop_analysis_is_complete(&code));
 }
+
+#[test]
+fn comb_loop_function_loop_tables_relate_instances_in_each_call() {
+    // A function whose loop keeps tables of instances is evaluated in its
+    // caller, where its tables relate the instances exactly.
+    assert_comb_loop(
+        "the element a function returns holds only the last instance's value",
+        r#"
+        module Top (
+            o: output logic<2>,
+        ) {
+            function g (
+                x: input logic,
+            ) -> logic {
+                var y: logic [4];
+                y[0] = x;
+                y[1] = 0;
+                y[2] = 0;
+                y[3] = 0;
+                for i in 0..2 {
+                    for j in 0..2 {
+                        y[0] = y[j];
+                    }
+                }
+                return y[0];
+            }
+            assign o[0] = g(o[0]);
+            assign o[1] = g(o[0]);
+        }
+        "#,
+        false,
+    );
+}

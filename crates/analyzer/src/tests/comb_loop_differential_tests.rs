@@ -296,7 +296,12 @@ fn counted_loops_agree_with_enumeration() {
     for seed in first..first + cases {
         let statements = Generator::generate(seed);
         match compare(&statements) {
-            None => incomplete += 1,
+            None => {
+                if incomplete < shown {
+                    println!("incomplete, seed {seed}: {}", render(&statements));
+                }
+                incomplete += 1;
+            }
             Some((true, false)) => false_loops.push((seed, statements)),
             Some((false, true)) => missed_loops.push((seed, statements)),
             Some(_) => {}

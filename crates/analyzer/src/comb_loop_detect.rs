@@ -40,8 +40,9 @@ pub(crate) use diagnostics::{
     reset_diagnostic_replay_count,
 };
 use graph::{
-    DependencyGraph, GraphDependency, GraphNode, add_dependency_edge, add_region_dependency,
-    ensure_node, node_regions_overlap_with_dependency,
+    DependencyGraph, GraphDependency, GraphNode, add_dependency_edge,
+    add_dependency_edge_with_arms, add_region_dependency, ensure_node,
+    node_regions_overlap_with_dependency,
 };
 #[cfg(test)]
 pub(crate) use graph::{
@@ -1339,7 +1340,7 @@ fn add_procedure_graph(
     let tables = analysis
         .tables
         .iter()
-        .map(|&(key, domain)| {
+        .map(|&(key, domain, _)| {
             let node = graph.add_node(GraphNode {
                 region: internal_region,
                 domains: vec![domain],
@@ -1364,16 +1365,23 @@ fn add_procedure_graph(
         |key| is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables),
         &tables,
     );
-    for (destination, root) in destinations.into_iter().chain(table_destinations) {
-        let destination = match tables.get(&destination) {
+    // A table's writes take the arms of their branches on the instance of
+    // each position.
+    let arms = analysis
+        .tables
+        .iter()
+        .map(|(key, _, arms)| (*key, arms.as_slice()))
+        .collect::<HashMap<_, _>>();
+    for (key, root) in destinations.into_iter().chain(table_destinations) {
+        let destination = match tables.get(&key) {
             Some(&node) => Some(node),
-            None => ensure_node(graph, node_map, bit_part, destination),
+            None => ensure_node(graph, node_map, bit_part, key),
         };
         let (Some(root), Some(destination)) = (root.and_then(|root| mapped[root]), destination)
         else {
             continue;
         };
-        add_dependency_edge(
+        add_dependency_edge_with_arms(
             graph,
             root,
             destination,
@@ -1381,6 +1389,7 @@ fn add_procedure_graph(
                 array: Link::from_offset(Some(0)),
                 packed: Link::from_offset(Some(0)),
             }),
+            arms.get(&key).copied().unwrap_or_default(),
         );
     }
 }

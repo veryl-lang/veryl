@@ -823,6 +823,9 @@ pub(super) struct FunctionSummaries<'a> {
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
+    /// Functions whose loops keep tables of instances, which only a
+    /// procedure's circuit relates: each call is evaluated in its caller.
+    inlined: HashSet<FunctionSummaryKey>,
     contexts: Vec<ProcedureContext>,
     module_scope_ids: Rc<HashSet<VarId>>,
 }
@@ -1212,6 +1215,7 @@ impl<'a> FunctionSummaries<'a> {
             module,
             bit_part,
             summaries: HashMap::default(),
+            inlined: HashSet::default(),
             // Most modules never need a function summary. Allocate the
             // baseline scratch context lazily so ordinary declarations keep
             // just the reusable top-level procedure context.
@@ -1230,6 +1234,9 @@ impl<'a> FunctionSummaries<'a> {
                 FunctionSummaryLookup::Recursive,
                 FunctionSummaryLookup::Ready,
             );
+        }
+        if self.inlined.contains(&key) {
+            return FunctionSummaryLookup::Missing;
         }
         self.summaries.insert(key.clone(), None);
         let mut context = self
@@ -1378,7 +1385,7 @@ pub(super) struct ProcedureResult {
     pub(super) status: AnalysisStatus,
     /// The tables that are circuit nodes of their own, each with its
     /// positions: written by the procedure and read by it.
-    pub(super) tables: Vec<(NodeKey, PositionDomain)>,
+    pub(super) tables: Vec<(NodeKey, PositionDomain, Vec<super::graph::InstanceArm>)>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -1629,13 +1636,23 @@ struct ProcedureAnalysis<'a, 's> {
     /// What each table held before the latest write's value at element
     /// positions, which the write's value at instances replaces.
     held_tables: HashMap<(NodeKey, WriterId), VersionId>,
+    /// Whether a loop kept tables of instances.
+    instance_tables: bool,
+    /// Whether a function is summarized, which stops at such a loop.
+    summarizing: bool,
     /// Whether tables are nodes of the circuit: each read takes the table
     /// the loops leave, which the procedure writes, so that the circuit
     /// relates its instances to one another instead of the loop transfer.
     external_tables: bool,
-    /// The tables that are circuit nodes, each with its positions.
-    tables: Vec<(SsaKey, PositionDomain)>,
+    /// The tables that are circuit nodes, each with its positions and the
+    /// arms its writes take on their instances.
+    tables: Vec<(SsaKey, PositionDomain, Vec<super::graph::InstanceArm>)>,
     table_indices: HashMap<SsaKey, usize>,
+    /// The branches in the scopes of tables, by scope and place, each
+    /// with its identity among the procedure's.
+    instance_branches: HashMap<(usize, Vec<Step>), u64>,
+    /// The scopes of tables opened so far.
+    writer_scopes: usize,
     /// The statement each statement of a specialized iteration body being
     /// evaluated comes from.
     statement_origins: HashMap<*const Statement, *const Statement>,
@@ -1825,8 +1842,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             imprecise_tables: HashMap::default(),
             held_tables: HashMap::default(),
             external_tables: false,
+            instance_tables: false,
+            summarizing: false,
             tables: Vec::new(),
             table_indices: HashMap::default(),
+            instance_branches: HashMap::default(),
+            writer_scopes: 0,
             statement_origins: HashMap::default(),
             runtime_loop_depth: 0,
             definitions: HashMap::default(),
@@ -1858,7 +1879,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.eval_block(statements, &[]);
         let (graph, destinations) = this.dependency_graph();
         let tables = (0..this.tables.len())
-            .filter_map(|index| Some((this.table_node(index)?, this.tables[index].1)))
+            .filter_map(|index| {
+                let (_, domain, arms) = &this.tables[index];
+                Some((this.table_node(index)?, *domain, arms.clone()))
+            })
             .collect();
         let result = ProcedureResult {
             graph,
@@ -1917,6 +1941,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut this = Self::from_context(bit_part, module, ctx, module_scope_ids);
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
+        this.summarizing = true;
         this.call_caches.push(None);
         this.receiver_indices.push(
             (!function.path.path.0.is_empty())
@@ -1924,6 +1949,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .flatten(),
         );
         this.eval_function_body(&body.statements, body.ret, &[]);
+        if this.instance_tables {
+            if let Some(summaries) = this.summaries.as_deref_mut() {
+                summaries.inlined.insert(FunctionSummaryKey {
+                    id,
+                    index: index.map(<[usize]>::to_vec),
+                });
+            }
+            this.ctx.rollback_analysis_transaction();
+            context.restore(this.ctx);
+            return None;
+        }
         this.receiver_indices.pop();
         this.call_caches.pop();
 
@@ -2060,7 +2096,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect::<Vec<_>>();
         // Each table holds what the loops wrote at its instances.
         for index in 0..self.tables.len() {
-            let (key, domain) = self.tables[index];
+            let (key, domain, _) = self.tables[index].clone();
             let Some(node) = self.table_node(index) else {
                 continue;
             };
@@ -2180,7 +2216,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     /// The circuit node of the table `index`.
     fn table_node(&self, index: usize) -> Option<NodeKey> {
-        let (_, domain) = self.tables.get(index)?;
+        let (_, domain, _) = self.tables.get(index)?;
         let id = u32::try_from(index).ok()?.checked_add(TABLE_IDS)?;
         Some((
             VarId::from_raw(id),
@@ -2193,11 +2229,26 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// Make the table `key` a circuit node over `domain`.
-    pub(super) fn register_table(&mut self, key: SsaKey, domain: PositionDomain) {
+    pub(super) fn register_table(
+        &mut self,
+        key: SsaKey,
+        domain: PositionDomain,
+        arms: Vec<super::graph::InstanceArm>,
+    ) {
         if !self.table_indices.contains_key(&key) {
             self.table_indices.insert(key, self.tables.len());
-            self.tables.push((key, domain));
+            self.tables.push((key, domain, arms));
         }
+    }
+
+    /// The identity of the branch at `place` in the current scope of tables.
+    pub(super) fn instance_branch(&mut self, place: &[Step]) -> u64 {
+        let count = self.instance_branches.len();
+        let namespace = self.branch_namespace as u64;
+        *self
+            .instance_branches
+            .entry((self.writer_scopes, place.to_vec()))
+            .or_insert_with(|| (namespace << 32) | count as u64)
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
@@ -5965,6 +6016,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let opened = self.writer_scope.is_none();
         if opened {
             self.open_writer_scope(statement);
+            // A function whose loop keeps tables is evaluated in its
+            // callers instead of summarized.
+            if self.summarizing && self.instance_tables {
+                self.close_writer_scope();
+                self.counted_iterators.pop();
+                self.exhaust_work();
+                return FlowResult::new(ProcedureFlow::Continue);
+            }
         }
         let coverage = for_range_step(&statement.range).map(|step| {
             let per_iteration = self.loop_accesses(&statement.body);

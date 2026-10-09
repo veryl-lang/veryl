@@ -371,6 +371,173 @@ impl PositionRelationSet {
         self.pieces.len()
     }
 
+    /// `self` without pairs whose array positions are equal, where pieces
+    /// can be cut there; a piece that cannot keeps them.
+    pub(super) fn without_array_diagonal(&self) -> Self {
+        let mut pieces = Vec::new();
+        for piece in &self.pieces {
+            let Some((start, end)) = piece.anchor[0] else {
+                pieces.push(*piece);
+                continue;
+            };
+            // The anchor range without `position`.
+            let mut without_anchor = |position: isize| {
+                for range in [(start, position), (position + 1, end)] {
+                    if range.0 < range.1 {
+                        let mut cut = *piece;
+                        cut.anchor[0] = Some(range);
+                        pieces.push(cut);
+                    }
+                }
+            };
+            match piece.current[0] {
+                // The other axis of the anchor.
+                Current::Linked(map) if map.crossed => pieces.push(*piece),
+                Current::Linked(map) => {
+                    // a = residue + modulus * t = base + step * t.
+                    let slope = map.step - map.modulus;
+                    let offset = map.residue - map.base;
+                    if slope == 0 {
+                        if offset != 0 {
+                            pieces.push(*piece);
+                        }
+                    } else if offset % slope == 0 {
+                        let t = offset / slope;
+                        match map.residue.checked_add(map.modulus.saturating_mul(t)) {
+                            Some(position) if start <= position && position < end => {
+                                without_anchor(position)
+                            }
+                            _ => pieces.push(*piece),
+                        }
+                    } else {
+                        pieces.push(*piece);
+                    }
+                }
+                Current::Unlinked(class, Some((low, high))) => {
+                    let (first, last) = (start.max(low), end.min(high));
+                    if first >= last {
+                        pieces.push(*piece);
+                    } else if end - start == 1 {
+                        for range in [(low, start), (start + 1, high)] {
+                            if let Ok(Some(current)) = unlinked(class, Some(range)) {
+                                let mut cut = *piece;
+                                cut.current[0] = current;
+                                pieces.push(cut);
+                            }
+                        }
+                    } else if high - low == 1 {
+                        without_anchor(low);
+                    } else {
+                        pieces.push(*piece);
+                    }
+                }
+                Current::Unlinked(..) => pieces.push(*piece),
+            }
+        }
+        Self::normalized(pieces)
+    }
+
+    /// Whether each anchor position relates to at most one array position,
+    /// as `array_within_function` can show of a part of a function.
+    pub(super) fn array_is_determined(&self) -> bool {
+        self.pieces.iter().all(|piece| {
+            piece.anchor[0].is_some()
+                && match piece.current[0] {
+                    Current::Linked(map) => !map.crossed,
+                    Current::Unlinked(_, Some((start, end))) => end.checked_sub(start) == Some(1),
+                    Current::Unlinked(..) => false,
+                }
+        })
+    }
+
+    /// The one array position every pair of `self` reaches, if there is one.
+    pub(super) fn single_array_position(&self) -> Option<isize> {
+        let mut found = None;
+        for piece in &self.pieces {
+            let position = match piece.current[0] {
+                Current::Unlinked(_, Some((start, end))) if end.checked_sub(start) == Some(1) => {
+                    start
+                }
+                Current::Linked(map) if map.step == 0 => map.base,
+                Current::Linked(map) => {
+                    let (start, end) = piece.anchor[0]?;
+                    let (first, last) = map.source_parameters(start, end).ok()??;
+                    if first != last {
+                        return None;
+                    }
+                    map.base.checked_add(map.step.checked_mul(first)?)?
+                }
+                Current::Unlinked(..) => return None,
+            };
+            if found.is_some_and(|found| found != position) {
+                return None;
+            }
+            found = Some(position);
+        }
+        found
+    }
+
+    /// Whether every array pair of `self` is one of `function`, a set of
+    /// array maps of the anchor: each anchor position relates only to the
+    /// position `function` maps it to. `false` when that is not shown.
+    pub(super) fn array_within_function(&self, function: &Self) -> bool {
+        // The one map of `function` over all of `range`.
+        let covering = |range: (isize, isize)| -> Option<Map> {
+            let mut maps = function.pieces.iter().filter(|piece| {
+                piece.anchor[0].is_none_or(|(start, end)| start <= range.0 && range.1 <= end)
+            });
+            let piece = maps.next()?;
+            let Current::Linked(map) = piece.current[0] else {
+                return None;
+            };
+            maps.next().is_none().then_some(map)
+        };
+        self.pieces.iter().all(|piece| {
+            let Some(range) = piece.anchor[0] else {
+                return false;
+            };
+            let Some(function) = covering(range) else {
+                return false;
+            };
+            match piece.current[0] {
+                Current::Linked(map) => {
+                    let Ok(parameters) = map.source_parameters(range.0, range.1) else {
+                        return false;
+                    };
+                    let Some((first, last)) = parameters else {
+                        // No anchor position relates to any.
+                        return true;
+                    };
+                    // Affine on the anchor positions of `map`, which
+                    // `function` is defined on, they agree everywhere when
+                    // they agree at the first and the last.
+                    let defined = first == last
+                        || (map.modulus % function.modulus == 0
+                            && (map.residue - function.residue).rem_euclid(function.modulus) == 0);
+                    defined
+                        && [first, last].into_iter().all(|t| {
+                            let agrees = || {
+                                let anchor =
+                                    map.residue.checked_add(map.modulus.checked_mul(t)?)?;
+                                let current = map.base.checked_add(map.step.checked_mul(t)?)?;
+                                Some(function.apply(anchor)? == current)
+                            };
+                            agrees() == Some(true)
+                        })
+                }
+                // One position, the image of every anchor position.
+                Current::Unlinked(_, Some((start, end))) if end.checked_sub(start) == Some(1) => {
+                    if range.1.checked_sub(range.0) == Some(1) {
+                        function.apply(range.0) == Some(start)
+                    } else {
+                        function.modulus == 1 && function.step == 0 && function.base == start
+                    }
+                }
+                Current::Unlinked(..) => false,
+            }
+        })
+    }
+
     pub(super) fn identity(domains: &[PositionDomain]) -> Self {
         let linked = [Current::Linked(Map::translation(0)); 2];
         let pieces = if domains.is_empty() {

@@ -70,6 +70,49 @@ pub(super) enum Link {
 }
 
 impl Map {
+    /// The map from each destination coordinate back to the source
+    /// coordinate it reads. `None` for a constant map or on overflow.
+    pub(super) fn inverse(self) -> Option<Self> {
+        // source = residue + modulus * t, destination = base + step * t.
+        let modulus = self.step.checked_abs()?;
+        if modulus == 0 {
+            return None;
+        }
+        let residue = self.base.rem_euclid(modulus);
+        let quotient = (self.base - residue) / modulus;
+        // destination = residue + modulus * u with u = quotient + sign * t.
+        let (base, step) = if self.step > 0 {
+            (
+                self.residue
+                    .checked_sub(self.modulus.checked_mul(quotient)?)?,
+                self.modulus,
+            )
+        } else {
+            (
+                self.residue
+                    .checked_add(self.modulus.checked_mul(quotient)?)?,
+                self.modulus.checked_neg()?,
+            )
+        };
+        Some(Self {
+            crossed: self.crossed,
+            modulus,
+            residue,
+            base,
+            step,
+        })
+    }
+
+    /// The destination coordinate of `source`, when the map reads it.
+    pub(super) fn apply(self, source: isize) -> Option<isize> {
+        let offset = source.checked_sub(self.residue)?;
+        if offset.rem_euclid(self.modulus) != 0 {
+            return None;
+        }
+        self.base
+            .checked_add(self.step.checked_mul(offset / self.modulus)?)
+    }
+
     pub(super) const fn translation(offset: isize) -> Self {
         Self {
             crossed: false,
