@@ -413,6 +413,30 @@ fn readmemh_in_an_event_reaches_its_comb_readers() {
 }
 
 #[test]
+fn validate_checks_the_dataflow_settle() {
+    if !crate::tests::dataflow_on() || !crate::backend::aot_c::cc_available() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        a: input  logic<8>,
+        o: output logic<8>,
+    ) {
+        assign o = a + 1;
+    }
+    "#;
+    let ir = analyze(code, &aot_config(true));
+    assert!(ir.dataflow_ready());
+    let mut sim = Simulator::new(ir, None);
+    sim.set("a", Value::new(1, 8, false));
+    assert_eq!(sim.get("o").unwrap().payload_u64(), 2);
+    sim.set("a", Value::new(5, 8, false));
+    sim.ir.dataflow_dirty.borrow_mut().fill(0);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.get("o")));
+    assert!(r.is_err(), "a suppressed mark must fail --backend-validate");
+}
+
+#[test]
 fn an_emitter_decline_is_reported() {
     if !crate::tests::dataflow_on() || !crate::backend::aot_c::cc_available() {
         return;

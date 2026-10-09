@@ -18,7 +18,7 @@ fn seen() -> &'static Mutex<HashSet<String>> {
     SEEN.get_or_init(|| Mutex::new(HashSet::default()))
 }
 
-/// `kind` is the dispatch site (`"whole_comb"` / `"whole_event"`).  Repeats
+/// `kind` is the dispatch site (`"whole_comb"`, `"dataflow"`, `"whole_event"`, ...).  Repeats
 /// collapse to one entry per (kind, module).
 pub fn record_fallback(kind: &str, module: &str) {
     let Ok(mut seen) = seen().lock() else { return };

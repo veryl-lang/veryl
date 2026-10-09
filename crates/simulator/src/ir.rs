@@ -230,6 +230,7 @@ pub struct Ir {
     /// A failed compile leaves the cell empty forever, so the fallback is
     /// taken every cycle; the residency table (a mutex) must be touched once.
     whole_comb_fallback_recorded: AtomicBool,
+    dataflow_fallback_recorded: AtomicBool,
     whole_derived_clock_fallback_recorded: AtomicBool,
     whole_derived_clock_master_fallback_recorded: AtomicBool,
     whole_fall_partial_fallback_recorded: AtomicBool,
@@ -238,6 +239,8 @@ pub struct Ir {
     /// above latch on the FIRST fallback and so cannot say how much of a run
     /// was affected; these can.  Published to `residency` on drop.
     pub(crate) whole_comb_dispatch: [AtomicU64; 2],
+    /// Dataflow settles run by the `.so` and by the Cranelift cells.
+    pub(crate) dataflow_dispatch: [AtomicU64; 2],
     pub(crate) whole_derived_clock_dispatch: [AtomicU64; 2],
     pub(crate) whole_derived_clock_master_dispatch: [AtomicU64; 2],
     pub(crate) whole_fall_partial_dispatch: [AtomicU64; 2],
@@ -266,6 +269,7 @@ impl Drop for Ir {
     fn drop(&mut self) {
         for (kind, c) in [
             ("whole_comb", &self.whole_comb_dispatch),
+            ("dataflow", &self.dataflow_dispatch),
             ("whole_derived_clock", &self.whole_derived_clock_dispatch),
             (
                 "whole_derived_clock_master",
@@ -343,9 +347,19 @@ impl Ir {
             dataflow_always_mask: std::cell::OnceCell::new(),
             dataflow_unmarked: std::cell::Cell::new(false),
             dataflow_any: std::cell::Cell::new(false),
-            dataflow_check: std::cell::Cell::new(dataflow_check_stride()),
+            // The dataflow comb has no second backend to dual-run, so
+            // `--backend-validate` checks it against a full rerun instead.
+            // That covers the cells only: the validated AOT-C event runs
+            // without a dirty buffer, so its reader marks go unexercised.
+            dataflow_check: std::cell::Cell::new(if config.aot_c_validate {
+                config.aot_c_validate_stride.max(1)
+            } else {
+                dataflow_check_stride()
+            }),
             dataflow_check_settles: std::cell::Cell::new(0),
-            dataflow_check_panic: std::cell::Cell::new(dataflow_check_panic()),
+            dataflow_check_panic: std::cell::Cell::new(
+                config.aot_c_validate || dataflow_check_panic(),
+            ),
             dataflow_check_mismatches: std::cell::Cell::new(0),
             dataflow: module.dataflow,
             dataflow_interp: module.dataflow_interp.into_iter().collect(),
@@ -377,11 +391,13 @@ impl Ir {
             cone_segments: module.cone_segments,
             cone_gate_state: std::cell::RefCell::new(None),
             whole_comb_fallback_recorded: Default::default(),
+            dataflow_fallback_recorded: Default::default(),
             whole_derived_clock_fallback_recorded: Default::default(),
             whole_derived_clock_master_fallback_recorded: Default::default(),
             whole_fall_partial_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             whole_comb_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
+            dataflow_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_derived_clock_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_derived_clock_master_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_fall_partial_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
@@ -983,6 +999,17 @@ impl Ir {
         if aot.is_none() && jit.is_none() {
             self.dataflow_live.set(false);
             return false;
+        }
+        if aot.is_some() {
+            self.dataflow_dispatch[0].fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.dataflow_dispatch[1].fetch_add(1, Ordering::Relaxed);
+            if !self
+                .dataflow_fallback_recorded
+                .swap(true, Ordering::Relaxed)
+            {
+                residency::record_fallback("dataflow", &self.name.to_string());
+            }
         }
         // The Cranelift cells keep no boundary shadow, so on the switch to the
         // `.so` every shadow is stale: a cell whose new value happens to equal

@@ -235,9 +235,11 @@ pub struct OptTest {
     #[arg(long, value_enum, default_value = "cc")]
     pub backend: Backend,
 
-    /// Dual-run the `cc` backend against Cranelift and panic on divergence.
-    /// Takes an optional stride: dual-run + diff only every Nth cycle (default
-    /// 64 when given with no value); `--backend-validate 1` = every cycle.
+    /// With the `cc` backend only: dual-run its event code against Cranelift
+    /// and check sampled dataflow settles against a full rerun, panicking on
+    /// divergence.  Takes an optional stride: check only every Nth event fire
+    /// and settle (default 64 when given with no value); `--backend-validate 1`
+    /// = every one.
     #[arg(long, num_args = 0..=1, default_missing_value = "64", value_name = "STRIDE")]
     pub backend_validate: Option<u64>,
 
