@@ -1,0 +1,4 @@
+module invalid_select_step_upper {
+    var a : logic<8>;
+    let _b: logic<6> = a[1 step 6];
+}
