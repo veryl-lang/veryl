@@ -341,6 +341,10 @@ struct Candidate<'s> {
     /// The level from which the candidate is every instance up to the one
     /// at that level, at any iterations of the loops inside it.
     earlier: Option<usize>,
+    /// The levels at which the candidate is the instance `instance` gives:
+    /// those the read's iterations give and, inside `earlier`, those of
+    /// loops no branch skips, at their last value.
+    fixed: Vec<bool>,
 }
 
 impl Candidate<'_> {
@@ -371,6 +375,9 @@ pub(super) struct LastWrite {
     /// there, at any iterations of the loops inside it: the instances a
     /// write that may not take place leaves to earlier ones.
     pub(super) earlier: Option<usize>,
+    /// The levels at which the write is the instance `instance` gives; with
+    /// `earlier`, the instances take every value at the others after it.
+    pub(super) fixed: Vec<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -644,6 +651,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if self.writer_scope.is_some() || self.counted_iterators.len() != 1 {
             return;
         }
+        // Each scope keeps tables of its own.
+        self.writer_scopes += 1;
         let iterator = self.counted_iterators[0];
         // The evaluation of each loop forgets the value its iterator may keep
         // from conversion; so does the scan, or branches on it would look
@@ -774,7 +783,6 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             call_depth: self.call_frames.len(),
         });
         if self.external_tables {
-            self.writer_scopes += 1;
             let mut ids = scope.writers.keys().copied().collect::<Vec<_>>();
             ids.sort_unstable();
             for id in ids {
@@ -801,8 +809,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// The arms the writes of `writer` take, each on the instance a position
-    /// of its tables holds. A branch around fewer loops than the write, or
-    /// a table whose positions give its instances by no map, takes none.
+    /// of its tables holds. Inside a branch, loops of instances numbered
+    /// consecutively give each branch instance as many consecutive positions
+    /// as they take values: one map for each of those, over the positions it
+    /// takes, charged to the procedure's work. A table whose positions give
+    /// its instances by no map takes none.
     fn instance_arms(
         &mut self,
         scope: &WriterScope,
@@ -819,17 +830,51 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Some(instance) = scope.instance_map(id, writer) else {
             return Vec::new();
         };
+        let instance_indexed = instance.modulus == 1 && instance.base == 0 && instance.step == 1;
         let mut arms = Vec::new();
         for branch in &sub.branches {
-            if place_loops(&branch.place).len() != sub.loops.len() {
+            let around = place_loops(&branch.place).len();
+            if around > sub.loops.len() {
                 continue;
             }
-            arms.push(crate::comb_loop_detect::graph::InstanceArm {
-                branch: self.instance_branch(&branch.place),
-                arm: branch.arm,
-                arms: branch.arms,
-                instance,
-            });
+            // The positions each branch instance takes.
+            let inside = sub.loops[around..]
+                .iter()
+                .try_fold(1isize, |count, &level| {
+                    let values = scope.loops[level].values;
+                    count.checked_mul(values.max.checked_sub(values.min)?.checked_add(1)?)
+                });
+            let maps = match inside {
+                Some(1) => vec![instance],
+                Some(count) if instance_indexed => {
+                    let Some(work) = usize::try_from(count).ok() else {
+                        continue;
+                    };
+                    if !self.reserve_guard_work(work) {
+                        self.exhaust_work();
+                        return Vec::new();
+                    }
+                    (0..count)
+                        .map(|residue| crate::comb_loop_detect::position::Map {
+                            crossed: false,
+                            modulus: count,
+                            residue,
+                            base: 0,
+                            step: 1,
+                        })
+                        .collect()
+                }
+                _ => continue,
+            };
+            let identity = self.instance_branch(&branch.place);
+            for map in maps {
+                arms.push(crate::comb_loop_detect::graph::InstanceArm {
+                    branch: identity,
+                    arm: branch.arm,
+                    arms: branch.arms,
+                    instance: map,
+                });
+            }
         }
         arms
     }
@@ -855,7 +900,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     pub(super) fn writer_key(&self, key: NodeKey, writer: WriterId) -> SsaKey {
         SsaKey {
-            writer: Some(writer),
+            writer: Some((writer, self.writer_scopes)),
             ..self.ssa_key(key)
         }
     }
@@ -1754,12 +1799,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
         let (low, high) = self.affine_hull(&latest_index)?;
-        // Each level from `level` is a free iterator over the values its
-        // instances may take.
-        let free = sub.loops.len().checked_sub(level)?;
+        // `level` and each level inside it the read does not give are free
+        // iterators over the values their instances may take.
+        let free_levels = (level..sub.loops.len())
+            .filter(|&inner| inner == level || !write.fixed.get(inner).copied().unwrap_or(false))
+            .collect::<Vec<_>>();
+        let free = free_levels.len();
         let mut extended = iterators.to_vec();
         let mut ranges = Vec::new();
-        for (offset, domain) in sub.domains[level..].iter().enumerate() {
+        for (offset, &inner) in free_levels.iter().enumerate() {
+            let domain = &sub.domains[inner];
             let id = ordinal_id(u32::MAX as usize / 2 + 1 + offset)?;
             let mut range = CountedIterator { id, ..*domain };
             if offset == 0 {
@@ -1784,12 +1833,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .collect(),
             c: lin.c,
         };
-        let mut spread = instance[..level]
-            .iter()
-            .map(|(value, denominator)| (widen(value), *denominator))
-            .collect::<Vec<_>>();
-        for offset in 0..free {
-            spread.push((Lin::iterator(levels + free, levels + offset), 1));
+        let mut spread = Vec::with_capacity(sub.loops.len());
+        for (inner, (value, denominator)) in instance.iter().enumerate() {
+            spread.push(match free_levels.iter().position(|&free| free == inner) {
+                Some(offset) => (Lin::iterator(levels + free, levels + offset), 1),
+                None => (widen(value), *denominator),
+            });
         }
         let position = self.table_position_over(id, writer, &spread, &extended)?;
         let saved = self.counted_iterators.len();
@@ -1803,6 +1852,73 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .checked_sub(start)?
             .checked_add(1)?;
         Some(ArraySpan { start, length })
+    }
+
+    /// `table_position` where an iterator taking positions a step apart
+    /// gives an instance at a fraction of them: over the iterator `u` of
+    /// consecutive values with `iterator = residue + modulus * u`. Gives the
+    /// position, `destination` over the same iterators, and those iterators.
+    pub(super) fn stepped_table_position(
+        &self,
+        id: VarId,
+        writer: WriterId,
+        instance: &[(Lin, i128)],
+        destination: &super::SampledAffineIndex,
+    ) -> Option<(AffineIndex, super::SampledAffineIndex, Cell)> {
+        let level = self
+            .counted_iterators
+            .iter()
+            .position(|iterator| iterator.modulus > 1 && iterator.min < iterator.max)?;
+        let stepped = self.counted_iterators[level];
+        let (modulus, residue) = (stepped.modulus, stepped.min);
+        let consecutive = ordinal_id(u32::MAX as usize / 2 + 64)?;
+        let mut cell = self.counted_iterators.clone();
+        cell[level] = CountedIterator::new(consecutive, 0, (stepped.max - residue) / modulus);
+        let instance = instance
+            .iter()
+            .map(|(value, denominator)| {
+                let mut value = value.clone();
+                let coefficient = *value.k.get(level)?;
+                value.c = value
+                    .c
+                    .checked_add(coefficient.checked_mul(residue as i128)?)?;
+                value.k[level] = coefficient.checked_mul(modulus as i128)?;
+                Some((value, *denominator))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let iterators = cell.iter().map(|iterator| iterator.id).collect::<Vec<_>>();
+        let position = self.table_position_over(id, writer, &instance, &iterators)?;
+        // The destination over the same iterators.
+        let mut index = AffineIndex {
+            terms: Vec::new(),
+            constant: destination.index.constant,
+        };
+        for &(term, coefficient) in &destination.index.terms {
+            if term == stepped.id {
+                index.constant = index
+                    .constant
+                    .checked_add(coefficient.checked_mul(residue)?)?;
+                index.add_scaled(
+                    &AffineIndex::variable(consecutive),
+                    coefficient.checked_mul(modulus)?,
+                )?;
+            } else {
+                index.add_scaled(&AffineIndex::variable(term), coefficient)?;
+            }
+        }
+        // The iterator of consecutive values is no variable a read samples.
+        let mut versions = destination.versions.clone();
+        for (term, read) in &mut versions {
+            if *term == stepped.id {
+                *term = consecutive;
+                read.clear();
+            }
+        }
+        Some((
+            position,
+            super::SampledAffineIndex { index, versions },
+            cell,
+        ))
     }
 
     /// `table_position` over the read's iterators `iterators`.
@@ -2568,10 +2684,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
                 // A write that a later present one always follows in the
                 // same iterations is never the last.
+                // Ties are writes no order separates from the group's first,
+                // such as on other arms, which may still follow each other.
+                let group = present.clone();
                 present.retain(|candidate| {
-                    !later
-                        .iter()
-                        .any(|after| follows(scope, after, candidate, levels, &cell))
+                    !later.iter().chain(&group).any(|after| {
+                        !std::ptr::eq(*after, *candidate)
+                            && follows(scope, after, candidate, levels, &cell)
+                    })
                 });
                 later.extend(present.iter().copied());
                 if present.is_empty() {
@@ -2582,6 +2702,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         source: Some(candidate.writer.id),
                         instance: candidate.instance_map(levels),
                         earlier: candidate.earlier,
+                        fixed: candidate.fixed.clone(),
                     });
                 }
                 if overwrites(&present, place) {
@@ -2594,6 +2715,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     source: None,
                     instance: None,
                     earlier: None,
+                    fixed: Vec::new(),
                 });
             }
             result.push((cell, writes));
@@ -2700,6 +2822,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let systems = self.solved_systems(equations, writer, first_unknown, levels)?;
         let mut found = Vec::new();
         for (determined, mut constraints) in systems {
+            let fixed = (0..unknowns)
+                .map(|level| level < first_unknown || determined[level].is_some())
+                .collect::<Vec<_>>();
             let mut instance = vec![None; unknowns];
             let mut alternatives = Vec::new();
             let mut carried_level = None;
@@ -2825,14 +2950,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let mut constraints = constraints.clone();
                         let mut instance = instance.clone();
                         let mut latest = value.clone();
-                        let first = if scope.loops[writer.loops[level]].ascending {
+                        if scope.loops[writer.loops[level]].ascending {
                             latest.c -= modulus;
                             constraints.push(Constraint::Range(
                                 latest.clone(),
                                 Some(iterator.min as i128),
                                 None,
                             ));
-                            iterator.min
                         } else {
                             latest.c += modulus;
                             constraints.push(Constraint::Range(
@@ -2840,23 +2964,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 None,
                                 Some(iterator.max as i128),
                             ));
-                            iterator.max
-                        };
-                        // Earlier instances that are the first value of the
-                        // innermost loop are that one instance.
-                        let single = level + 1 == unknowns
-                            && latest.k.iter().all(|&k| k == 0)
-                            && latest.c == first as i128;
+                        }
                         instance[level] = Some((latest, 1));
-                        ranges.push((constraints, instance, (!single).then_some(level)));
+                        // An inner loop no branch skips writes on each of its
+                        // iterations, so its last one is the latest there.
+                        let range_fixed = (0..unknowns)
+                            .map(|inner| {
+                                inner < level || fixed[inner] || (inner > level && !skips(inner))
+                            })
+                            .collect::<Vec<_>>();
+                        ranges.push((constraints, instance, Some(level), range_fixed));
                     }
                 }
             }
             let ways = ways
                 .into_iter()
-                .map(|(constraints, instance)| (constraints, instance, None))
+                .map(|(constraints, instance)| (constraints, instance, None, fixed.clone()))
                 .chain(ranges);
-            for (constraints, instance, earlier) in ways {
+            for (constraints, instance, earlier, fixed) in ways {
                 let mut cells = vec![cell.clone()];
                 for constraint in constraints {
                     let mut restricted = Vec::new();
@@ -2865,14 +2990,31 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                     cells = restricted;
                 }
-                found.extend(cells.into_iter().map(|cell| Candidate {
-                    writer,
-                    rank,
-                    first_unknown,
-                    cell,
-                    instance: instance.clone(),
-                    covers,
-                    earlier,
+                found.extend(cells.into_iter().map(|cell| {
+                    // Earlier instances that are only the first value on the
+                    // cell, at loops inside given by the read, are that one.
+                    let earlier = earlier.filter(|&level| {
+                        let domain = &writer.domains[level];
+                        let first = if scope.loops[writer.loops[level]].ascending {
+                            domain.min
+                        } else {
+                            domain.max
+                        } as i128;
+                        let single = (level + 1..unknowns).all(|inner| fixed[inner])
+                            && matches!(&instance[level], Some((latest, 1))
+                                if lin_extent(latest, &cell) == Some((first, first)));
+                        !single
+                    });
+                    Candidate {
+                        writer,
+                        rank,
+                        first_unknown,
+                        cell,
+                        instance: instance.clone(),
+                        covers,
+                        earlier,
+                        fixed: fixed.clone(),
+                    }
                 }));
             }
         }
@@ -3070,6 +3212,9 @@ fn follows(
     if !after.covers {
         return false;
     }
+    if after.writer.path == before.writer.path {
+        return follows_itself(scope, after, before, levels, cell);
+    }
     if relation(&after.writer.path, &before.writer.path) != Relation::Before {
         return false;
     }
@@ -3112,12 +3257,71 @@ fn follows(
         if (ascending && low < 0) || (!ascending && high > 0) {
             return false;
         }
+        // Inside it, `after` takes every value only at loops the read does
+        // not give; at the others, its instance must be that of `before`.
+        let fixed = |candidate: &Candidate<'_>, inner: usize| {
+            candidate.fixed.get(inner).copied().unwrap_or(false)
+        };
+        if !(level + 1..common).all(|inner| {
+            !fixed(after, inner)
+                || ((before.earlier.is_none_or(|from| inner < from) || fixed(before, inner))
+                    && difference(inner) == Some((0, 0)))
+        }) {
+            return false;
+        }
     }
     after
         .writer
         .branches
         .iter()
         .all(|branch| before.writer.branches.contains(branch))
+}
+
+/// Whether a later instance of the same write always follows `before`:
+/// they are the same instance outside the first loop at which `after` is
+/// later, and no branch inside that loop can skip `after`'s iteration.
+fn follows_itself(
+    scope: &WriterScope,
+    after: &Candidate<'_>,
+    before: &Candidate<'_>,
+    levels: usize,
+    cell: &Cell,
+) -> bool {
+    if after.earlier.is_some() || before.earlier.is_some() {
+        return false;
+    }
+    let (Some(after_instance), Some(before_instance)) =
+        (after.instance_map(levels), before.instance_map(levels))
+    else {
+        return false;
+    };
+    for (level, ((left, left_denominator), (right, right_denominator))) in
+        after_instance.iter().zip(&before_instance).enumerate()
+    {
+        let Some(extent) = left
+            .scaled(*right_denominator)
+            .and_then(|left| left.plus(right, -*left_denominator))
+            .and_then(|difference| lin_extent(&difference, cell))
+        else {
+            return false;
+        };
+        if extent == (0, 0) {
+            continue;
+        }
+        let ascending = scope.loops[after.writer.loops[level]].ascending;
+        let later = if ascending {
+            extent.0 > 0
+        } else {
+            extent.1 < 0
+        };
+        return later
+            && after
+                .writer
+                .branches
+                .iter()
+                .all(|branch| place_loops(&branch.place).len() <= level);
+    }
+    false
 }
 
 /// Whether the latest present writers overwrite every bit the read takes on

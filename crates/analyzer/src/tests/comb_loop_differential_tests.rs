@@ -32,11 +32,23 @@ impl Random {
     }
 }
 
+/// How a loop takes its values. A step that is not one takes each value
+/// in turn, as do the loops around a counted one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Range {
+    Ascending,
+    Descending,
+    /// `1, 2, 4, ...`
+    Doubling,
+    /// `0, 2, 4, ...`
+    Skipping,
+}
+
 #[derive(Clone, Debug)]
 enum Statement {
     Assign(String, Vec<String>),
     If(String, Vec<Statement>, Vec<Statement>),
-    For(&'static str, usize, bool, Vec<Statement>),
+    For(&'static str, usize, Range, Vec<Statement>),
 }
 
 impl Statement {
@@ -52,9 +64,14 @@ impl Statement {
                 }
                 text
             }
-            Statement::For(iterator, end, reverse, body) => {
-                let reverse = if *reverse { "rev " } else { "" };
-                format!("for {iterator} in {reverse}0..{end} {{ {} }}", render(body))
+            Statement::For(iterator, end, range, body) => {
+                let range = match range {
+                    Range::Ascending => format!("0..{end}"),
+                    Range::Descending => format!("rev 0..{end}"),
+                    Range::Doubling => format!("1..{end} step *= 2"),
+                    Range::Skipping => format!("0..{end} step += 2"),
+                };
+                format!("for {iterator} in {range} {{ {} }}", render(body))
             }
         }
     }
@@ -162,11 +179,16 @@ impl Generator {
     fn for_loop(&mut self, depth: usize) -> Statement {
         let iterator = ["i", "j"][self.iterators.len()];
         let end = 1 + self.random.below(3);
-        let reverse = self.random.chance(25);
+        let range = match self.random.below(8) {
+            0 | 1 => Range::Descending,
+            2 => Range::Doubling,
+            3 => Range::Skipping,
+            _ => Range::Ascending,
+        };
         self.iterators.push(iterator);
         let body = self.block(depth + 1, 3);
         self.iterators.pop();
-        Statement::For(iterator, end, reverse, body)
+        Statement::For(iterator, end, range, body)
     }
 
     fn generate(seed: u64) -> Vec<Statement> {
@@ -225,20 +247,25 @@ fn smaller(statements: &[Statement]) -> Vec<Vec<Statement>> {
                     )]);
                 }
             }
-            Statement::For(iterator, end, reverse, body) => {
+            Statement::For(iterator, end, range, body) => {
                 if *end > 1 {
                     replace(vec![Statement::For(
                         iterator,
                         end - 1,
-                        *reverse,
+                        *range,
                         body.clone(),
                     )]);
                 }
-                if *reverse {
-                    replace(vec![Statement::For(iterator, *end, false, body.clone())]);
+                if *range != Range::Ascending {
+                    replace(vec![Statement::For(
+                        iterator,
+                        *end,
+                        Range::Ascending,
+                        body.clone(),
+                    )]);
                 }
                 for body in smaller(body) {
-                    replace(vec![Statement::For(iterator, *end, *reverse, body)]);
+                    replace(vec![Statement::For(iterator, *end, *range, body)]);
                 }
             }
         }

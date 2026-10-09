@@ -450,31 +450,26 @@ impl PositionRelationSet {
         })
     }
 
-    /// The one array position every pair of `self` reaches, if there is one.
-    pub(super) fn single_array_position(&self) -> Option<isize> {
-        let mut found = None;
+    /// The half-open hull of the array positions `self` reaches, `None`
+    /// when they are not bounded.
+    pub(super) fn array_hull(&self) -> Option<(isize, isize)> {
+        let mut hull: Option<(isize, isize)> = None;
         for piece in &self.pieces {
-            let position = match piece.current[0] {
-                Current::Unlinked(_, Some((start, end))) if end.checked_sub(start) == Some(1) => {
-                    start
-                }
-                Current::Linked(map) if map.step == 0 => map.base,
+            let (start, end) = match piece.current[0] {
+                Current::Unlinked(_, range) => range?,
                 Current::Linked(map) => {
-                    let (start, end) = piece.anchor[0]?;
+                    let (start, end) = piece.anchor[usize::from(map.crossed)]?;
                     let (first, last) = map.source_parameters(start, end).ok()??;
-                    if first != last {
-                        return None;
-                    }
-                    map.base.checked_add(map.step.checked_mul(first)?)?
+                    let (low, high) = map.destination_hull(first, last).ok()?;
+                    (low, high)
                 }
-                Current::Unlinked(..) => return None,
             };
-            if found.is_some_and(|found| found != position) {
-                return None;
-            }
-            found = Some(position);
+            hull = Some(match hull {
+                Some((low, high)) => (low.min(start), high.max(end)),
+                None => (start, end),
+            });
         }
-        found
+        hull
     }
 
     /// Whether every array pair of `self` is one of `function`, a set of

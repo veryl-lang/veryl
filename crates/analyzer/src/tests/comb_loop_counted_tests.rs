@@ -2115,3 +2115,96 @@ counted_case!(
      assign o = {7'd0, t[0]};",
     false
 );
+
+counted_case!(
+    counted_nest_on_each_value_of_an_enumerated_loop_keeps_its_own_tables,
+    "a nest evaluated on each value of a loop around it relates its own instances",
+    "var x: logic [4];
+     var y: logic [4];
+     var t: logic [2];
+     always_comb {
+         y = '{0, 0, 0, 0};
+         for k in 1..3 step *= 2 {
+             for j in 0..2 { t[j] = x[j + k - 1]; }
+             y[k] = t[0];
+         }
+     }
+     assign x[0] = y[1];
+     assign x[1] = a[0];
+     assign x[2] = a[1];
+     assign x[3] = a[2];
+     assign o = {4'd0, y[0], y[1], y[2], y[3]};",
+    true
+);
+
+counted_case!(
+    counted_skipped_inner_write_keeps_the_last_instance_of_each_position,
+    "an element an inner loop writes on a branch keeps the last instance that wrote it",
+    "var t: logic [8];
+     always_comb { for i in 0..3 { for j in 0..2 { if a[2] { t[j + 1] = t[j + 2]; } } } }
+     assign o = {6'd0, t[0], t[1]};",
+    false
+);
+
+counted_case!(
+    counted_branch_around_a_whole_inner_loop_keeps_its_last_write,
+    "an inner loop that runs whole on a branch leaves its last write",
+    "var t: logic [8];
+     always_comb { for i in 0..3 { if a[3] { for j in 0..2 { t[0] = t[i + j]; } } } }
+     assign o = {6'd0, t[0], t[1]};",
+    false
+);
+
+counted_case!(
+    counted_reversed_nest_reads_a_fraction_of_its_positions,
+    "an instance at half the positions of a stepped cell relates exactly",
+    "var y: logic [8];
+     always_comb { for i in rev 0..2 { for j in rev 0..3 { y[2 * j] = y[i + j]; } } }
+     assign o = {4'd0, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_stepped_outer_loop_relates_each_value,
+    "a value read at positions both iterators move relates each outer value apart",
+    "var y: logic [8];
+     var e: logic;
+     always_comb { y[3] = e; for i in 0..3 step += 2 { for j in rev 0..2 { e = y[i + j]; } } }
+     assign o = {e, 3'd0, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_inner_writes_on_a_branch_exclude_its_other_arm,
+    "writes of an inner loop on one arm exclude the other arm of the same iteration",
+    "var y: logic [8];
+     var c: logic;
+     always_comb { for i in 0..2 { if a[1] { for j in 0..2 { y[i + j] = c; } } else { c = y[2 * i]; } } }
+     assign o = {c, 3'd0, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_later_write_on_another_tie_hides_an_earlier_one,
+    "a write that always follows another hides it among writes on other arms",
+    "var y: logic [8];
+     var t: logic [8];
+     var c: logic;
+     var e: logic;
+     always_comb {
+         for i in 0..2 {
+             if a[1] { c = t[i]; } else { if a[2] { y[1] = c; y[i + 2] = y[i + 1]; } else { c = y[2 * i]; } c = e; }
+         }
+     }
+     assign o = {c, e, y[0], y[1], y[2], y[3], t[0], t[1]};",
+    false
+);
+
+counted_case!(
+    counted_later_iteration_of_one_write_hides_an_earlier_one,
+    "a later iteration of a loop on a branch around it overwrites an earlier one",
+    "var y: logic [8];
+     always_comb { for i in 0..2 { if a[4] { for j in 1..3 step *= 2 { y[i + 1] = y[i + j]; } } } }
+     assign o = {4'd0, y[0], y[1], y[2], y[3]};",
+    false
+);

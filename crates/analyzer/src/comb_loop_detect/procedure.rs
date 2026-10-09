@@ -689,8 +689,10 @@ fn destination_packed_shape(destination: &AssignDestination) -> Cow<'_, [Option<
 struct SsaKey {
     node: NodeKey,
     call_frame: Option<usize>,
-    /// The table of one write in a counted loop nest, see `last_writer`.
-    writer: Option<WriterId>,
+    /// The table of one write in a counted loop nest, see `last_writer`,
+    /// with the scope of the nest: a nest evaluated again, as on each value
+    /// of a loop around it, keeps tables of its own.
+    writer: Option<(WriterId, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -772,6 +774,28 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 // Distinct invocation guards can require genuinely different subgraphs.
 // Bound their materialization before cycle search gets a chance to run.
 const FUNCTION_SUMMARY_WORK: usize = 100_000;
+
+/// The operands of a chain of bitwise operators over `left` and `right`,
+/// left to right, without recursion.
+fn bitwise_operands<'e>(left: &'e Expression, right: &'e Expression) -> Vec<&'e Expression> {
+    let mut operands = Vec::new();
+    let mut pending = vec![right, left];
+    while let Some(expression) = pending.pop() {
+        match expression {
+            Expression::Binary(
+                left,
+                Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor,
+                right,
+                _,
+            ) => {
+                pending.push(right);
+                pending.push(left);
+            }
+            _ => operands.push(expression),
+        }
+    }
+    operands
+}
 
 /// The first identifier of the tables that are circuit nodes, see
 /// `ProcedureAnalysis::table_node`.
@@ -1650,7 +1674,7 @@ struct ProcedureAnalysis<'a, 's> {
     table_indices: HashMap<SsaKey, usize>,
     /// The branches in the scopes of tables, by scope and place, each
     /// with its identity among the procedure's.
-    instance_branches: HashMap<(usize, Vec<Step>), u64>,
+    instance_branches: HashMap<(usize, Vec<Step>), usize>,
     /// The scopes of tables opened so far.
     writer_scopes: usize,
     /// The statement each statement of a specialized iteration body being
@@ -2242,13 +2266,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     /// The identity of the branch at `place` in the current scope of tables.
-    pub(super) fn instance_branch(&mut self, place: &[Step]) -> u64 {
+    pub(super) fn instance_branch(&mut self, place: &[Step]) -> super::graph::InstanceBranch {
         let count = self.instance_branches.len();
-        let namespace = self.branch_namespace as u64;
-        *self
+        let index = *self
             .instance_branches
             .entry((self.writer_scopes, place.to_vec()))
-            .or_insert_with(|| (namespace << 32) | count as u64)
+            .or_insert(count);
+        super::graph::InstanceBranch {
+            namespace: self.branch_namespace,
+            index,
+        }
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
@@ -3021,40 +3048,83 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 assignments.push(assignment);
             }
         }
-        assignments
-            .into_iter()
-            .map(|assignment| {
-                let fixed = |sampled: &SampledAffineIndex| {
-                    let mut index = AffineIndex {
-                        terms: Vec::new(),
-                        constant: sampled.index.constant,
-                    };
-                    for &(id, coefficient) in &sampled.index.terms {
-                        match assignment.iter().find(|(fixed, _)| *fixed == id) {
-                            Some(&(_, value)) => {
-                                index.constant = index
-                                    .constant
-                                    .checked_add(coefficient.checked_mul(value)?)?;
-                            }
-                            None => index.terms.push((id, coefficient)),
-                        }
+        // An assignment whose coordinates are not related by one map takes
+        // each value of an iterator they share in turn, the one with the
+        // fewest values first.
+        let mut links = Vec::new();
+        while let Some(assignment) = assignments.pop() {
+            if let Some(link) = self.assigned_link(destination, source, crossed, &assignment) {
+                links.push(link);
+                continue;
+            }
+            let assigned = |id: VarId| assignment.iter().any(|(fixed, _)| *fixed == id);
+            let iterator = self
+                .counted_iterators
+                .iter()
+                .filter(|iterator| {
+                    iterator.min < iterator.max
+                        && !assigned(iterator.id)
+                        && destination
+                            .index
+                            .terms
+                            .iter()
+                            .any(|(id, _)| *id == iterator.id)
+                        && source.index.terms.iter().any(|(id, _)| *id == iterator.id)
+                })
+                .min_by_key(|iterator| iterator.count())
+                .copied()?;
+            let count = usize::try_from(iterator.count()?).ok()?;
+            if !self.reserve_guard_work(count) {
+                self.exhaust_work();
+                return None;
+            }
+            for value in iterator_assignments(vec![iterator]) {
+                let mut assignment = assignment.clone();
+                assignment.extend(value);
+                assignments.push(assignment);
+            }
+        }
+        Some(links)
+    }
+
+    /// The link of `affine_links` with the iterators of `assignment` fixed
+    /// to their values.
+    fn assigned_link(
+        &self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+        assignment: &[(VarId, isize)],
+    ) -> Option<(Link, SampledAffineIndex)> {
+        let fixed = |sampled: &SampledAffineIndex| {
+            let mut index = AffineIndex {
+                terms: Vec::new(),
+                constant: sampled.index.constant,
+            };
+            for &(id, coefficient) in &sampled.index.terms {
+                match assignment.iter().find(|(fixed, _)| *fixed == id) {
+                    Some(&(_, value)) => {
+                        index.constant = index
+                            .constant
+                            .checked_add(coefficient.checked_mul(value)?)?;
                     }
-                    // A variable fixed to a value no longer selects by what
-                    // it read.
-                    let versions = sampled
-                        .versions
-                        .iter()
-                        .filter(|(id, _)| index.terms.iter().any(|(term, _)| term == id))
-                        .cloned()
-                        .collect();
-                    Some(SampledAffineIndex { index, versions })
-                };
-                let destination = fixed(destination)?;
-                let source = fixed(source)?;
-                let link = self.affine_link(&destination, &source, crossed)?;
-                Some((link, source))
-            })
-            .collect()
+                    None => index.terms.push((id, coefficient)),
+                }
+            }
+            // A variable fixed to a value no longer selects by what
+            // it read.
+            let versions = sampled
+                .versions
+                .iter()
+                .filter(|(id, _)| index.terms.iter().any(|(term, _)| term == id))
+                .cloned()
+                .collect();
+            Some(SampledAffineIndex { index, versions })
+        };
+        let destination = fixed(destination)?;
+        let source = fixed(source)?;
+        let link = self.affine_link(&destination, &source, crossed)?;
+        Some((link, source))
     }
 
     /// The link from a source coordinate to a destination coordinate when both
@@ -4100,6 +4170,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .instance
                 .as_ref()
                 .and_then(|instance| self.table_position(read.id(), writer, instance));
+            // An instance at a fraction of positions a step apart is whole
+            // over the consecutive values of their step.
+            let (position, destination, saved) = match position {
+                Some(position) => (Some(position), destination.clone(), None),
+                None => match write.instance.as_ref().and_then(|instance| {
+                    self.stepped_table_position(read.id(), writer, instance, destination)
+                }) {
+                    Some((position, destination, cell)) => (
+                        Some(position),
+                        destination,
+                        Some(std::mem::replace(&mut self.counted_iterators, cell)),
+                    ),
+                    None => (None, destination.clone(), None),
+                },
+            };
             let Some(position) = position else {
                 // An instance not known exactly may be any of them.
                 pieces.push(
@@ -4111,31 +4196,50 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 );
                 continue;
             };
-            let sampled = self.sample_iterator_index(position);
-            let source = self.fold_single_values(&sampled);
-            let destination = &self.fold_single_values(destination);
-            let links = match destination.destination_offset_from(&source) {
-                Some(offset) => vec![(Link::from_offset(Some(offset)), source)],
-                None => self.affine_links(destination, &source, false)?,
-            };
-            for (link, part) in links {
-                let (first, last) = self.affine_hull(&part.index)?;
-                let start = usize::try_from(first).ok()?;
-                let length = usize::try_from(last)
-                    .ok()?
-                    .checked_sub(start)?
-                    .checked_add(1)?;
-                let value = self
-                    .ssa
-                    .projected(table, position_domain(ArraySpan { start, length }, bits));
-                pieces.push(
-                    value,
-                    PositionRelation {
-                        array: link,
-                        packed,
-                    },
-                );
+            let linked = self.instance_links(table, position, &destination, bits, packed);
+            if let Some(saved) = saved {
+                self.counted_iterators = saved;
             }
+            pieces.extend(linked?);
+        }
+        Some(pieces)
+    }
+
+    /// The table at `position`, related to `destination` on the iterations
+    /// being evaluated.
+    fn instance_links(
+        &mut self,
+        table: VersionId,
+        position: AffineIndex,
+        destination: &SampledAffineIndex,
+        bits: PackedSpan,
+        packed: Link,
+    ) -> Option<ExpressionSources> {
+        let mut pieces = ExpressionSources::default();
+        let sampled = self.sample_iterator_index(position);
+        let source = self.fold_single_values(&sampled);
+        let destination = &self.fold_single_values(destination);
+        let links = match destination.destination_offset_from(&source) {
+            Some(offset) => vec![(Link::from_offset(Some(offset)), source)],
+            None => self.affine_links(destination, &source, false)?,
+        };
+        for (link, part) in links {
+            let (first, last) = self.affine_hull(&part.index)?;
+            let start = usize::try_from(first).ok()?;
+            let length = usize::try_from(last)
+                .ok()?
+                .checked_sub(start)?
+                .checked_add(1)?;
+            let value = self
+                .ssa
+                .projected(table, position_domain(ArraySpan { start, length }, bits));
+            pieces.push(
+                value,
+                PositionRelation {
+                    array: link,
+                    packed,
+                },
+            );
         }
         Some(pieces)
     }
@@ -6251,7 +6355,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .get(key.node.2)
                         .map(|packed| position_domain(key.node.1, *packed))?;
                     Some(match (key.writer, &tables) {
-                        (Some(writer), Some(tables)) => {
+                        (Some((writer, _)), Some(tables)) => {
                             tables.table_domain(key.node.0, writer, domain)
                         }
                         _ => domain,
@@ -7055,20 +7159,19 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     reads
                 }
                 Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
-                    let mut reads = self.eval_expr_in_context(
-                        left,
-                        requested_array,
-                        requested,
-                        context,
-                        projection,
-                    );
-                    reads.extend(self.eval_expr_in_context(
-                        right,
-                        requested_array,
-                        requested,
-                        context,
-                        projection,
-                    ));
+                    // Each bit reads the same bit of every operand of a chain
+                    // of bitwise operators, which is taken as one list so that
+                    // a long chain does not nest the evaluation.
+                    let mut reads = ExpressionSources::default();
+                    for operand in bitwise_operands(left, right) {
+                        reads.extend(self.eval_expr_in_context(
+                            operand,
+                            requested_array,
+                            requested,
+                            context,
+                            projection,
+                        ));
+                    }
                     reads
                 }
                 Op::LogicAnd | Op::LogicOr => ExpressionSources::whole(

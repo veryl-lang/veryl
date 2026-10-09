@@ -79,7 +79,7 @@ impl Map {
             return None;
         }
         let residue = self.base.rem_euclid(modulus);
-        let quotient = (self.base - residue) / modulus;
+        let quotient = self.base.checked_sub(residue)? / modulus;
         // destination = residue + modulus * u with u = quotient + sign * t.
         let (base, step) = if self.step > 0 {
             (

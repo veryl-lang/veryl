@@ -41,7 +41,7 @@ pub(super) struct GraphDependency {
 /// they do not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct InstanceArm {
-    pub(super) branch: u64,
+    pub(super) branch: InstanceBranch,
     pub(super) arm: usize,
     pub(super) arms: usize,
     pub(super) instance: crate::comb_loop_detect::position::Map,
@@ -51,13 +51,25 @@ impl InstanceArm {
     /// The arm as a choice of the branch on one instance, which is a
     /// branch of its own: the arms of different instances are independent.
     fn choice(&self, instance: isize) -> Option<PathCondition> {
-        let local = usize::try_from(instance).ok()?;
-        let branch = (usize::MAX / 2).checked_add(usize::try_from(self.branch).ok()?)?;
+        // Procedures number their branches from small namespaces, so the
+        // top of the range is free for the branches of instances.
+        let instance = u32::try_from(instance).ok()?;
+        let index = u32::try_from(self.branch.index).ok()?;
+        let procedure = usize::MAX.checked_sub(self.branch.namespace)?;
+        let local = (usize::try_from(index).ok()? << 32) | usize::try_from(instance).ok()?;
         Some(PathCondition::default().with_choice(
-            crate::comb_loop_detect::ssa::BranchId::new(branch, local, self.arms),
+            crate::comb_loop_detect::ssa::BranchId::new(procedure, local, self.arms),
             self.arm,
         ))
     }
+}
+
+/// A branch of a procedure in a scope of tables: the procedure's namespace
+/// and the branch's index among those of its scopes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct InstanceBranch {
+    pub(super) namespace: usize,
+    pub(super) index: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -449,9 +461,14 @@ pub(super) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Op
     // Arms taken on instances only exclude walks: a component with no walk
     // that ignores them has none, and only one with such a walk is searched
     // again with them.
+    let armed = scc.iter().any(|&node| {
+        graph
+            .edges(node)
+            .any(|edge| graph.instance_arms.contains_key(&edge.id()))
+    });
     let mut found = None;
     for arms in [false, true] {
-        if arms && graph.instance_arms.is_empty() {
+        if arms && !armed {
             break;
         }
         let mut budget = SearchBudget::new();
@@ -637,11 +654,12 @@ fn has_compatible_cycle_with_budget(
                 // other, which every walk through it shares.
                 let mut next_condition = next_condition;
                 if let Some(edge_arms) = instance_arms(edge.id())
-                    && let Some(position) = next_relation.single_array_position()
+                    && let Some(hull) = next_relation.array_hull()
                 {
                     let mut excluded = false;
                     for arm in edge_arms.iter() {
-                        let Some(choice) = arm.instance.apply(position).and_then(|k| arm.choice(k))
+                        let Some(choice) = single_instance(edge_arms, arm, hull)
+                            .and_then(|instance| arm.choice(instance))
                         else {
                             continue;
                         };
@@ -731,6 +749,30 @@ fn has_compatible_cycle_with_budget(
     false
 }
 
+/// The one instance the arms of `arm`'s branch and arm among `arms` give
+/// the positions of `hull`, `None` when they give several or none. Arms
+/// of one write differ only by the positions they map.
+fn single_instance(arms: &[InstanceArm], arm: &InstanceArm, hull: (isize, isize)) -> Option<isize> {
+    let mut found = None;
+    for other in arms
+        .iter()
+        .filter(|other| other.branch == arm.branch && other.arm == arm.arm)
+    {
+        let map = other.instance;
+        let Ok(Some((first, last))) = map.source_parameters(hull.0, hull.1) else {
+            continue;
+        };
+        for t in [first, last] {
+            let instance = map.base.checked_add(map.step.checked_mul(t)?)?;
+            if found.is_some_and(|found| found != instance) {
+                return None;
+            }
+            found = Some(instance);
+        }
+    }
+    found
+}
+
 /// A relation from the anchor with the arms its path took on instances.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ArmedRelation {
@@ -742,7 +784,7 @@ struct ArmedRelation {
 /// current position, and from the anchor to the instance.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TakenArm {
-    branch: u64,
+    branch: InstanceBranch,
     arm: usize,
     current: PositionRelationSet,
     anchor: PositionRelationSet,
@@ -861,7 +903,9 @@ impl ArmedRelation {
 }
 
 /// Recover a feasible first-return path for source diagnostics. Parent indices
-/// keep long paths linear in storage; positions and guards match the decision walk.
+/// keep long paths linear in storage; positions and guards match the decision
+/// walk. Arms taken on instances are not followed: the path shown is one of
+/// the component's, which the decision has already found to close.
 pub(super) fn diagnostic_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
@@ -1122,6 +1166,8 @@ fn has_zero_dependency_cycle_in_component(
                             taken.push(*arm);
                         }
                     }
+                    // One set of arms, whatever order a path took them in.
+                    taken.sort_unstable();
                 }
                 if next == start {
                     return true;
