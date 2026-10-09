@@ -1923,3 +1923,108 @@ counted_case!(
      assign o = {6'd0, c, e};",
     true
 );
+
+counted_case!(
+    counted_inner_iterator_read_reaches_its_own_elements,
+    "an element read at the outer and inner iterators reaches only those",
+    "var x: logic [4];
+     var y: logic [4];
+     var z: logic [4];
+     var t: logic [4];
+     var c: logic;
+     always_comb { y[3] = x[0]; for i in 0..3 { for j in 1..2 { y[i] = y[i + j]; } } }
+     assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_inner_iterator_window_is_feed_forward,
+    "each element takes a window of another array the inner loop moves over",
+    "var x: logic [4];
+     var y: logic [4];
+     var z: logic [4];
+     var t: logic [4];
+     var c: logic;
+     always_comb { z[3] = x[0]; for i in 0..3 { y[i] = 0; for j in 1..2 { y[i] = y[i] ^ z[i + j]; } } }
+     assign p = {4'd0, z[0], z[1], z[2], z[3]};
+     assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_scalar_assigned_at_inner_positions_keeps_its_last_value,
+    "a scalar an inner loop assigns from moving positions keeps the last",
+    "var x: logic [4];
+     var y: logic [4];
+     var z: logic [4];
+     var t: logic [4];
+     var c: logic;
+     always_comb { y[3] = x[0]; for i in 0..3 { for j in 0..2 { c = y[i + j]; } y[i] = c; } }
+     assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_array_filled_by_an_inner_loop_is_feed_forward,
+    "an element moves through an array an inner loop fills",
+    "var x: logic [4];
+     var y: logic [4];
+     var z: logic [4];
+     var t: logic [4];
+     var c: logic;
+     always_comb { y[3] = x[0]; t = '{0, 0, 0, 0}; for i in 0..3 { c = y[i + 1]; for j in 0..2 { t[j] = c; } y[i] = t[1]; } }
+     assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    false
+);
+
+counted_case!(
+    counted_inner_window_into_the_first_element_keeps_its_loop,
+    "a window over later elements that feeds the first closes a loop",
+    "var x: logic [4];
+     var y: logic [4];
+     var z: logic [4];
+     var t: logic [4];
+     var c: logic;
+     always_comb { for i in 0..3 { for j in 0..2 { y[i] = y[i + j]; } } y[3] = y[0]; }
+     assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    true
+);
+
+counted_case!(
+    counted_array_filled_by_an_inner_loop_keeps_a_closing_loop,
+    "an array an inner loop fills from later elements closes a loop",
+    "var x: logic [4];
+     var y: logic [4];
+     var z: logic [4];
+     var t: logic [4];
+     var c: logic;
+     always_comb { for i in 0..3 { for j in 0..2 { t[j] = y[i + 1]; } y[i] = t[1]; } y[3] = y[0]; t[2] = 0; t[3] = 0; }
+     assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    true
+);
+
+counted_case!(
+    counted_array_element_the_inner_loop_skips_keeps_its_loop,
+    "an element the inner loop does not write keeps an earlier iteration's value",
+    "var x: logic [4];
+     var y: logic [4];
+     var z: logic [4];
+     var t: logic [4];
+     var c: logic;
+     always_comb { t = '{0, 0, 0, 0}; for i in 0..3 { if i == 0 { t[1] = y[0]; } for j in 0..1 { t[j] = y[i + 1]; } y[i] = t[1]; } y[3] = x[0]; }
+     assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    true
+);
+
+counted_case!(
+    counted_array_element_written_on_a_data_branch_keeps_its_loop,
+    "an element a data branch may leave keeps an earlier iteration's value",
+    "var x: logic [4];
+     var y: logic [4];
+     var z: logic [4];
+     var t: logic [4];
+     var c: logic;
+     always_comb { t = '{0, 0, 0, 0}; for i in 0..3 { for j in 0..2 { if a[j] { t[j] = y[i + 1]; } } y[i] = t[1]; } y[3] = x[0]; }
+     assign o = {3'd0, c, y[0], y[1], y[2], y[3]};",
+    true
+);

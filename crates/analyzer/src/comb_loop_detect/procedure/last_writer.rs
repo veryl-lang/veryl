@@ -58,6 +58,8 @@ pub(super) enum Step {
 struct ScopeLoop {
     iterator: VarId,
     ascending: bool,
+    /// The values the loop takes.
+    values: CountedIterator,
 }
 
 /// An arm of a branch whose condition does not depend only on iterators.
@@ -234,6 +236,7 @@ struct Equation {
     rhs: Lin,
 }
 
+#[derive(Clone)]
 enum Constraint {
     /// `lin` within inclusive bounds.
     Range(Lin, Option<i128>, Option<i128>),
@@ -386,6 +389,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         scan.loops.push(ScopeLoop {
             iterator: statement.var_id,
             ascending: !matches!(statement.range, ForRange::Reverse { .. }),
+            values: iterator,
         });
         let mut path = Vec::new();
         let mut branches = Vec::new();
@@ -836,6 +840,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         iterator: iterator.id,
                         ascending: iterator.id == VarId::SYNTHETIC
                             || !matches!(statement.range, ForRange::Reverse { .. }),
+                        values: iterator,
                     });
                 }
                 let breaks = crate::ir::peel::has_own_break(&statement.body);
@@ -1193,12 +1198,37 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let Some(subs) = scope.writers.get(&id) else {
             return Vec::new();
         };
+        // A write in loops that finished before the read, on every one of
+        // their iterations, at positions they alone move, writes the same
+        // positions on each iteration of the read's loops.
+        let finished = |sub: &SubWriter| {
+            let inner = &sub.loops[loops.len()..];
+            let iterators = inner
+                .iter()
+                .map(|&id| scope.loops[id].iterator)
+                .collect::<Vec<_>>();
+            inner
+                .iter()
+                .zip(&sub.domains[loops.len()..])
+                .all(|(&id, reached)| *reached == scope.loops[id].values)
+                && sub
+                    .access
+                    .elements
+                    .iter()
+                    .chain(match &sub.access.bits {
+                        Bits::Range(low, _) => Some(low),
+                        Bits::Whole => None,
+                    })
+                    .flat_map(|index| &index.terms)
+                    .all(|(id, _)| iterators.contains(id))
+        };
         let before = subs
             .iter()
             .filter(|sub| {
                 sources.contains(&Some(sub.id))
                     && sub.branches.is_empty()
-                    && sub.loops == loops
+                    && sub.loops.starts_with(&loops)
+                    && (sub.loops.len() == loops.len() || finished(sub))
                     && relation(place, &sub.path) == Relation::Before
             })
             .collect::<Vec<_>>();
@@ -1436,7 +1466,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 groups.push((2 * carried, carried, Some(carried)));
             }
             for (rank, first_unknown, carried) in groups {
-                let Some(candidate) = self.candidate(
+                candidates.extend(self.candidate(
                     scope,
                     writer,
                     access,
@@ -1445,11 +1475,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     rank,
                     first_unknown,
                     carried,
-                )?
-                else {
-                    continue;
-                };
-                candidates.push(candidate);
+                )?);
             }
         }
         self.charge_last_writer_work(candidates.len().saturating_add(1))?;
@@ -1523,11 +1549,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     /// The instances of `writer` before the read in one group: at the read's
     /// iteration of the loops before `first_unknown`, and, for a carried
-    /// group, at an earlier iteration of loop `carried`. `Ok(None)` when no
-    /// instance precedes the read; `None` when they are not solved exactly.
+    /// group, at an earlier iteration of loop `carried`. One for each set of
+    /// the read's iterations the constraints leave, none when no instance
+    /// precedes the read; `None` when they are not solved exactly.
     #[allow(clippy::too_many_arguments)]
     fn candidate<'w>(
-        &self,
+        &mut self,
         scope: &WriterScope,
         writer: &'w SubWriter,
         access: &Access,
@@ -1536,7 +1563,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         rank: usize,
         first_unknown: usize,
         carried: Option<usize>,
-    ) -> Option<Option<Candidate<'w>>> {
+    ) -> Option<Vec<Candidate<'w>>> {
         let levels = domain.len();
         let unknowns = writer.loops.len();
         let writer_iterators = writer
@@ -1585,7 +1612,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let (written_last, read_last) =
                     (last(written, *written_width)?, last(read, *read_width)?);
                 if written_last < read.constant || read_last < written.constant {
-                    return Some(None);
+                    return Some(Vec::new());
                 }
                 written.constant <= read.constant && read_last <= written_last
             }
@@ -1607,7 +1634,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         for (iterator, reached) in cell.iter_mut().zip(&writer.domains).take(first_unknown) {
             match intersect(iterator, reached).ok()? {
                 Some(confined) => *iterator = confined,
-                None => return Some(None),
+                None => return Some(Vec::new()),
             }
         }
         let mut constraints = Vec::new();
@@ -1674,20 +1701,88 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
             }
         }
+        let mut cells = vec![cell];
         for constraint in constraints {
-            match restrict(&mut cell, constraint)? {
-                true => {}
-                false => return Some(None),
+            let mut restricted = Vec::new();
+            for cell in cells {
+                restricted.extend(self.restrict_split(cell, &constraint)?);
+            }
+            cells = restricted;
+        }
+        Some(
+            cells
+                .into_iter()
+                .map(|cell| Candidate {
+                    writer,
+                    rank,
+                    first_unknown,
+                    cell,
+                    instance: instance.clone(),
+                    covers,
+                })
+                .collect(),
+        )
+    }
+
+    /// The parts of `cell` that satisfy `constraint`. A constraint over
+    /// several of its iterators keeps the one with the most values and
+    /// takes each value of the others in turn, charged to the procedure's
+    /// work; `None` when it is exhausted or the arithmetic overflows.
+    fn restrict_split(&mut self, mut cell: Cell, constraint: &Constraint) -> Option<Vec<Cell>> {
+        // An iterator confined to one value is that value.
+        let mut constraint = constraint.clone();
+        let lin = match &mut constraint {
+            Constraint::Range(lin, ..) | Constraint::Mod(lin, ..) => lin,
+        };
+        for (level, iterator) in cell.iter().enumerate() {
+            if iterator.min == iterator.max && lin.k[level] != 0 {
+                lin.c = lin
+                    .c
+                    .checked_add(lin.k[level].checked_mul(iterator.min as i128)?)?;
+                lin.k[level] = 0;
             }
         }
-        Some(Some(Candidate {
-            writer,
-            rank,
-            first_unknown,
-            cell,
-            instance,
-            covers,
-        }))
+        let levels = lin
+            .k
+            .iter()
+            .enumerate()
+            .filter(|(_, coefficient)| **coefficient != 0)
+            .map(|(level, _)| level)
+            .collect::<Vec<_>>();
+        if levels.len() <= 1 {
+            return Some(match restrict(&mut cell, constraint)? {
+                true => vec![cell],
+                false => Vec::new(),
+            });
+        }
+        let kept = *levels.iter().max_by_key(|&&level| cell[level].count())?;
+        let taken = levels
+            .into_iter()
+            .filter(|&level| level != kept)
+            .collect::<Vec<_>>();
+        let count = taken.iter().try_fold(1usize, |count, &level| {
+            count.checked_mul(usize::try_from(cell[level].count()?).ok()?)
+        })?;
+        self.charge_last_writer_work(count)?;
+        let mut pieces = vec![cell];
+        for level in taken {
+            let mut next = Vec::new();
+            for piece in pieces {
+                let iterator = piece[level];
+                let step = iterator.modulus.unsigned_abs();
+                for value in (iterator.min..=iterator.max).step_by(step) {
+                    let mut piece = piece.clone();
+                    piece[level] = iterator.within(value, value).ok()??;
+                    next.push(piece);
+                }
+            }
+            pieces = next;
+        }
+        let mut restricted = Vec::new();
+        for piece in pieces {
+            restricted.extend(self.restrict_split(piece, &constraint)?);
+        }
+        Some(restricted)
     }
 
     /// Whether `left` is a later write instance than `right`.
