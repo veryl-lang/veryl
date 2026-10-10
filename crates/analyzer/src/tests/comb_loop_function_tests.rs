@@ -1429,10 +1429,10 @@ fn comb_loop_split_observation_reuses_one_function_evaluation() {
 }
 
 #[test]
-fn comb_loop_static_loop_reevaluates_nested_function_actuals() {
+fn comb_loop_static_loop_evaluates_nested_function_actuals_once() {
     crate::comb_loop_detect::reset_function_evaluation_count();
     assert_comb_loop(
-        "a nested call is reevaluated when its static-loop actual changes",
+        "a nested call in a static loop sees every iteration's actual",
         r#"
         module Top (
             o: output logic,
@@ -1463,10 +1463,12 @@ fn comb_loop_static_loop_reevaluates_nested_function_actuals() {
         "#,
         true,
     );
+    // A counted loop is evaluated once with a symbolic iterator, so the
+    // nested call covers both iterations' actuals in a single evaluation.
     assert_eq!(
         crate::comb_loop_detect::function_barrier_evaluation_count(),
-        2,
-        "both static-loop invocations must cross the callee cache barrier"
+        1,
+        "a counted loop must not evaluate its body once per iteration"
     );
 }
 
@@ -1753,7 +1755,7 @@ fn function_summary_guard_sharing_separates_static_iterations() {
 }
 
 #[test]
-fn function_summary_distinct_guarded_expansion_is_bounded_and_incomplete() {
+fn function_summary_distinct_guarded_expansion_is_bounded_and_complete() {
     const DEPTH: usize = 24;
     let mut functions = String::from(
         "function f0(x: input logic, sel: input logic) -> logic { return if sel ? x : 0; }\n",
@@ -1772,9 +1774,11 @@ fn function_summary_distinct_guarded_expansion_is_bounded_and_incomplete() {
         "exhaustion must not invent feedback: {errors:#?}"
     );
     let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
-    eprintln!("distinct guarded fanout depth={DEPTH} nodes={nodes}");
-    assert!(nodes < 100_000);
-    assert!(!comb_loop_analysis_is_complete(&code));
+    // Each level calls the previous one with opposite selectors, so calls
+    // cannot share branches. A branch read by one summary edge correlates
+    // nothing and is eliminated exactly instead of doubling per level.
+    assert!(nodes < 4096, "{nodes} summary nodes");
+    assert!(comb_loop_analysis_is_complete(&code));
 }
 
 #[test]
@@ -4022,4 +4026,79 @@ fn function_summary_instance_actual_keeps_shifted_bit_dependencies() {
         );
         assert!(comb_loop_analysis_is_complete(&code));
     }
+}
+
+#[test]
+fn comb_loop_runtime_loop_return_sees_earlier_iterations() {
+    // A return inside a runtime loop exits from some later iteration, which
+    // reads the state that earlier iterations left behind.
+    for (body, expected) in [
+        (
+            "for i in 0..n { if a[i] { return acc; } acc = acc ^ b[i]; } return 0;",
+            true,
+        ),
+        (
+            "for i in 0..n { if a[i] { return acc; } acc = b[0]; } return 0;",
+            true,
+        ),
+        (
+            "for i in 0..n { if a[i] { return acc; } other = b[i]; } return 0;",
+            false,
+        ),
+    ] {
+        let code = format!(
+            r#"
+            module Top (a: input logic<4>, n: input logic<3>, o: output logic) {{
+                var b: logic<4>;
+                function f (a: input logic<4>, b: input logic<4>, n: input logic<3>) -> logic {{
+                    var acc: logic;
+                    var other: logic;
+                    acc = 0;
+                    other = 0;
+                    {body}
+                }}
+                assign o = f(a, b, n);
+                assign b = {{o, o, o, o}};
+            }}
+        "#
+        );
+        assert_comb_loop(body, &code, expected);
+        assert!(comb_loop_analysis_is_complete(&code), "{body}");
+    }
+}
+
+#[test]
+fn comb_loop_nested_runtime_loop_returns_close_without_reevaluation() {
+    // Each runtime loop closes the returns of its body with its transfer, so
+    // nesting loops that return does not evaluate their bodies repeatedly.
+    let depth = 16;
+    let mut body = "if a[0] { return acc; } acc = acc ^ b[0];".to_string();
+    for level in 0..depth {
+        body = format!("for it{level} in 0..n {{ {body} }}");
+    }
+    let code = format!(
+        r#"
+        module Top (a: input logic<4>, n: input logic<3>, o: output logic) {{
+            var b: logic<4>;
+            function f (a: input logic<4>, b: input logic<4>, n: input logic<3>) -> logic {{
+                var acc: logic;
+                acc = 0;
+                {body}
+                return 0;
+            }}
+            assign o = f(a, b, n);
+            assign b = {{o, o, o, o}};
+        }}
+    "#
+    );
+    crate::comb_loop_detect::reset_function_evaluation_count();
+    assert_comb_loop("a deeply nested return", &code, true);
+    // Re-evaluating each body from its closed state doubles the work at every
+    // level; closing the observed returns keeps it linear in the depth.
+    let evaluations = crate::comb_loop_detect::statement_evaluation_count();
+    assert!(
+        evaluations < 8 * (depth + 1),
+        "nested returns evaluated {evaluations} statements"
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
 }

@@ -5,6 +5,7 @@ mod relation;
 
 use super::diagnostics::SummaryEdgeCause;
 use super::model::{BitDependency, SummaryRegion};
+use super::position::{Axis, Link, Overflow};
 #[cfg(test)]
 use super::region::translate_position;
 use super::region::{BitPartition, NodeKey};
@@ -159,61 +160,33 @@ pub(super) fn node_regions_overlap_with_dependency(
     destination: &GraphNode,
     dependency: BitDependency,
 ) -> bool {
-    dependency.array.is_none_or(|array| {
-        spans_overlap_with_offset(
-            source.region.array.start,
-            source.region.array.length,
+    let range = |start: usize, length: usize| {
+        let start = isize::try_from(start).ok()?;
+        Some((start, start.checked_add_unsigned(length)?))
+    };
+    let (
+        Some(source_array),
+        Some(source_packed),
+        Some(destination_array),
+        Some(destination_packed),
+    ) = (
+        range(source.region.array.start, source.region.array.length),
+        range(source.region.packed.start, source.region.packed.length),
+        range(
             destination.region.array.start,
             destination.region.array.length,
-            array,
-        )
-    }) && dependency.packed.is_none_or(|packed| {
-        spans_overlap_with_offset(
-            source.region.packed.start,
-            source.region.packed.length,
+        ),
+        range(
             destination.region.packed.start,
             destination.region.packed.length,
-            packed,
-        )
-    })
-}
-
-fn spans_overlap_with_offset(
-    source_start: usize,
-    source_length: usize,
-    destination_start: usize,
-    destination_length: usize,
-    offset: isize,
-) -> bool {
-    let Some(source_end) = source_start.checked_add(source_length) else {
+        ),
+    )
+    else {
         return false;
     };
-    let Some(destination_end) = destination_start.checked_add(destination_length) else {
-        return false;
-    };
-    if offset >= 0 {
-        let offset = offset.unsigned_abs();
-        let (Some(source_start), Some(source_end)) = (
-            source_start.checked_add(offset),
-            source_end.checked_add(offset),
-        ) else {
-            return false;
-        };
-        source_start < destination_end && destination_start < source_end
-    } else {
-        // `source + offset` overlaps `destination` iff `source` overlaps
-        // `destination - offset`. Shift the destination in the non-negative
-        // direction so a valid source suffix is not lost when source_start +
-        // offset would be negative.
-        let offset = offset.unsigned_abs();
-        let (Some(destination_start), Some(destination_end)) = (
-            destination_start.checked_add(offset),
-            destination_end.checked_add(offset),
-        ) else {
-            return false;
-        };
-        source_start < destination_end && destination_start < source_end
-    }
+    let source = [source_array, source_packed];
+    dependency.may_reach(Axis::Array, source, destination_array)
+        && dependency.may_reach(Axis::Packed, source, destination_packed)
 }
 
 /// Both passes use explicit worklists, including for long acyclic chains.
@@ -304,6 +277,15 @@ impl SearchBudget {
         )
     }
 
+    /// The result of a relation operation, or `None` when its arithmetic
+    /// overflowed. The search then stops as incomplete, as when it runs out
+    /// of work.
+    fn checked<T>(&mut self, result: Result<T, Overflow>) -> Option<T> {
+        let value = result.ok();
+        self.exhausted |= value.is_none();
+        value
+    }
+
     fn spend(&mut self, work: usize) -> bool {
         if self.exhausted || work > self.remaining {
             self.exhausted = true;
@@ -388,7 +370,7 @@ fn insert_cycle_state<R: Clone + Eq>(
     if !budget.spend(relation_size.saturating_add(1)) {
         return None;
     }
-    states.push((relation.clone(), condition.clone()));
+    states.push((relation.clone(), condition));
     Some(condition)
 }
 
@@ -547,11 +529,17 @@ fn has_compatible_cycle_with_budget(
                 }
                 let next_relation =
                     relation.then_dependency(edge.weight().kind, &graph[next].domains);
+                let Some(next_relation) = budget.checked(next_relation) else {
+                    return false;
+                };
                 if next_relation.is_empty() {
                     continue;
                 }
                 if next == start {
-                    if next_relation.intersects_identity() {
+                    let Some(closes) = budget.checked(next_relation.intersects_identity()) else {
+                        return false;
+                    };
+                    if closes {
                         return true;
                     }
                     let inserted = cycles.insert(GuardedCycle {
@@ -650,11 +638,12 @@ pub(super) fn diagnostic_cycle(
                     return None;
                 }
                 let relation = relation.then_dependency(graph[edge].kind, &graph[next].domains);
+                let relation = budget.checked(relation)?;
                 if relation.is_empty() {
                     continue;
                 }
                 if next == start {
-                    if relation.intersects_identity() {
+                    if budget.checked(relation.intersects_identity())? {
                         let mut path = vec![edge];
                         let mut cursor = index;
                         while let Some((parent, edge)) = states[cursor].3 {
@@ -677,7 +666,7 @@ pub(super) fn diagnostic_cycle(
                     continue;
                 }
                 previous.retain(|(r, c)| !relation.piecewise_covers(r) || !condition.covers(c));
-                previous.push((relation.clone(), condition.clone()));
+                previous.push((relation.clone(), condition));
                 queue.push_back(states.len());
                 states.push((next, condition, relation, Some((index, edge))));
             }
@@ -907,11 +896,15 @@ fn feasible_from_domain(
     dependency: BitDependency,
 ) -> Option<FeasiblePosition> {
     Some(FeasiblePosition {
-        array: inverse_translated_axis(domain.array_start, domain.array_length, dependency.array)?,
+        array: inverse_translated_axis(
+            domain.array_start,
+            domain.array_length,
+            dependency.array.translation_offset(),
+        )?,
         packed: inverse_translated_axis(
             domain.packed_start,
             domain.packed_length,
-            dependency.packed,
+            dependency.packed.translation_offset(),
         )?,
     })
 }
@@ -948,7 +941,8 @@ fn intersect_axis(
 }
 
 fn dependency_is_identity(dependency: BitDependency) -> bool {
-    dependency.array == Some(0) && dependency.packed == Some(0)
+    dependency.array == Link::from_offset(Some(0))
+        && dependency.packed == Link::from_offset(Some(0))
 }
 
 #[cfg(test)]
@@ -1025,8 +1019,8 @@ mod tests {
             &source,
             &destination,
             BitDependency {
-                array: Some(-4),
-                packed: Some(-4),
+                array: Link::from_offset(Some(-4)),
+                packed: Link::from_offset(Some(-4)),
             },
         ));
     }
@@ -1042,8 +1036,8 @@ mod tests {
         let b = graph.add_node(test_node(1, region));
         let identity = GraphDependency {
             kind: BitDependency {
-                array: Some(0),
-                packed: Some(0),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(0)),
             },
             condition: PathCondition::default(),
         };
@@ -1082,8 +1076,8 @@ mod tests {
         let high = node(0, 7, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
         graph.add_edge(low, middle, edge(1));
@@ -1108,8 +1102,8 @@ mod tests {
             b,
             GraphDependency {
                 kind: BitDependency {
-                    array: Some(0),
-                    packed: Some(3),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(3)),
                 },
                 condition: PathCondition::default(),
             },
@@ -1119,8 +1113,8 @@ mod tests {
             a,
             GraphDependency {
                 kind: BitDependency {
-                    array: Some(0),
-                    packed: Some(-1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(-1)),
                 },
                 condition: PathCondition::default(),
             },
@@ -1159,8 +1153,8 @@ mod tests {
         let d = node(3);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1204,8 +1198,8 @@ mod tests {
         let high = node(2, 2, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1253,8 +1247,8 @@ mod tests {
         let high = node(2, width - 1, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1302,8 +1296,8 @@ mod tests {
         let high = node(2, width - 1, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1331,8 +1325,8 @@ mod tests {
         let join = graph.add_node(test_node(2, region));
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1372,8 +1366,8 @@ mod tests {
         let low = node(1, 2, 3);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1415,8 +1409,8 @@ mod tests {
         let low = node(1, 0, width - 2);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1457,8 +1451,8 @@ mod tests {
         let low = node(1, 0, width - 2);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1501,8 +1495,8 @@ mod tests {
         let minus_guard = node(2, 1, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1551,8 +1545,8 @@ mod tests {
         let minus_guard = node(2, middle, width - middle - 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1600,8 +1594,8 @@ mod tests {
         let wrap = node(2, 0, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1619,15 +1613,15 @@ mod tests {
         let cycles = [
             (
                 BitDependency {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
-                condition.clone(),
+                condition,
             ),
             (
                 BitDependency {
-                    array: Some(0),
-                    packed: Some(-7),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(-7)),
                 },
                 condition,
             ),
@@ -1647,15 +1641,15 @@ mod tests {
         let cycles = [
             (
                 BitDependency {
-                    array: Some(1),
-                    packed: Some(0),
+                    array: Link::from_offset(Some(1)),
+                    packed: Link::from_offset(Some(0)),
                 },
-                condition.clone(),
+                condition,
             ),
             (
                 BitDependency {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
                 condition,
             ),
@@ -1675,22 +1669,22 @@ mod tests {
         let cycles = [
             (
                 BitDependency {
-                    array: Some(1),
-                    packed: Some(0),
+                    array: Link::from_offset(Some(1)),
+                    packed: Link::from_offset(Some(0)),
                 },
-                condition.clone(),
+                condition,
             ),
             (
                 BitDependency {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
-                condition.clone(),
+                condition,
             ),
             (
                 BitDependency {
-                    array: Some(-1),
-                    packed: Some(-1),
+                    array: Link::from_offset(Some(-1)),
+                    packed: Link::from_offset(Some(-1)),
                 },
                 condition,
             ),
@@ -1764,8 +1758,8 @@ mod tests {
                     arm => Some(arm as usize - 1),
                 };
                 let dependency = BitDependency {
-                    array: Some(0),
-                    packed,
+                    array: Link::IDENTITY,
+                    packed: Link::from_offset(packed),
                 };
                 if node_regions_overlap_with_dependency(
                     &graph[nodes[source]],
@@ -1811,7 +1805,7 @@ mod tests {
                         if !source_allowed {
                             continue;
                         }
-                        let mapped = match dependency.packed {
+                        let mapped = match dependency.packed.translation_offset() {
                             Some(offset) => translate_position(position, offset)
                                 .filter(|&mapped| mapped < width)
                                 .into_iter()
@@ -1902,8 +1896,12 @@ mod tests {
                 let raw_array = random();
                 let raw_packed = random();
                 let dependency = BitDependency {
-                    array: (raw_array % 4 != 0).then_some(raw_array as isize % 5 - 2),
-                    packed: (raw_packed % 4 != 0).then_some(raw_packed as isize % 5 - 2),
+                    array: Link::from_offset(
+                        (raw_array % 4 != 0).then_some(raw_array as isize % 5 - 2),
+                    ),
+                    packed: Link::from_offset(
+                        (raw_packed % 4 != 0).then_some(raw_packed as isize % 5 - 2),
+                    ),
                 };
                 let arm = match random() % 3 {
                     0 => None,
@@ -1957,10 +1955,16 @@ mod tests {
                             {
                                 continue;
                             }
-                            let destination_arrays =
-                                mapped_positions(source_array, dependency.array, array_width);
-                            let destination_packeds =
-                                mapped_positions(source_packed, dependency.packed, packed_width);
+                            let destination_arrays = mapped_positions(
+                                source_array,
+                                dependency.array.translation_offset(),
+                                array_width,
+                            );
+                            let destination_packeds = mapped_positions(
+                                source_packed,
+                                dependency.packed.translation_offset(),
+                                packed_width,
+                            );
                             for destination_array in &destination_arrays {
                                 for destination_packed in &destination_packeds {
                                     if !(destination_domain.0
@@ -1993,6 +1997,147 @@ mod tests {
                 "case {case}, shape [{array_width}, {packed_width}], domains {domain_specs:?}, edges {edge_specs:?}"
             );
         }
+    }
+
+    /// Compare the decision with the expanded graphs of random graphs whose
+    /// edges take links from `link`. Exact when `exact`, else only sound.
+    fn compare_with_expanded_graphs(
+        link: impl Fn(&mut dyn FnMut() -> u32) -> Link,
+        exact: bool,
+    ) -> (usize, usize) {
+        use daggy::petgraph::algo::is_cyclic_directed;
+
+        let mut state = 0x1357_9bdf_u32;
+        let mut random = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            state >> 8
+        };
+        let (mut matched, mut over) = (0, 0);
+        for case in 0..6_000 {
+            let node_count = 1 + random() as usize % 3;
+            let array_width = 1 + random() as usize % 4;
+            let packed_width = 1 + random() as usize % 4;
+            let array = ArraySpan {
+                start: 0,
+                length: array_width,
+            };
+            let mut graph = DependencyGraph::new();
+            let nodes = (0..node_count)
+                .map(|id| {
+                    let id = VarId::from_raw(id as u32);
+                    graph.add_node(GraphNode {
+                        region: SummaryRegion {
+                            id,
+                            array,
+                            packed: PackedSpan::new(0, packed_width).unwrap(),
+                        },
+                        domains: vec![PositionDomain {
+                            array_start: 0,
+                            array_length: array_width,
+                            packed_start: 0,
+                            packed_length: packed_width,
+                        }],
+                        diagnostic: Some((id, array, 0)),
+                    })
+                })
+                .collect::<Vec<_>>();
+            let mut edges = Vec::new();
+            for _ in 0..1 + random() as usize % (node_count * 3) {
+                let source = random() as usize % node_count;
+                let destination = random() as usize % node_count;
+                let dependency = BitDependency {
+                    array: link(&mut random),
+                    packed: link(&mut random),
+                };
+                if dependency.is_empty() {
+                    continue;
+                }
+                edges.push((source, destination, dependency));
+                add_dependency_edge(
+                    &mut graph,
+                    nodes[source],
+                    nodes[destination],
+                    GraphDependency::unconditional(dependency),
+                );
+            }
+            let symbolic = tarjan_scc(&graph.graph)
+                .iter()
+                .any(|scc| has_compatible_cycle(&graph, scc));
+            let mut expanded = Graph::<(), ()>::new();
+            let positions = (0..node_count)
+                .map(|_| {
+                    (0..array_width * packed_width)
+                        .map(|_| expanded.add_node(()))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            for &(source, destination, dependency) in &edges {
+                for from in 0..array_width * packed_width {
+                    for to in 0..array_width * packed_width {
+                        let point = |index: usize| {
+                            (
+                                (index / packed_width) as isize,
+                                (index % packed_width) as isize,
+                            )
+                        };
+                        if dependency.relates(point(from), point(to)) {
+                            expanded.add_edge(
+                                positions[source][from],
+                                positions[destination][to],
+                                (),
+                            );
+                        }
+                    }
+                }
+            }
+            let concrete = is_cyclic_directed(&expanded);
+            assert!(
+                symbolic || !concrete,
+                "case {case}: missed a cycle in [{array_width}, {packed_width}] with {edges:?}"
+            );
+            assert!(
+                !exact || symbolic == concrete,
+                "case {case}: invented a cycle in [{array_width}, {packed_width}] with {edges:?}"
+            );
+            if symbolic == concrete {
+                matched += 1;
+            } else {
+                over += 1;
+            }
+        }
+        (matched, over)
+    }
+
+    #[test]
+    fn affine_cycle_detection_never_misses_an_expanded_cycle() {
+        use crate::comb_loop_detect::position::Map;
+        let link = |random: &mut dyn FnMut() -> u32| match random() % 7 {
+            0 => Link::Unlinked,
+            1 => Link::strided(2 + random() as isize % 2, random() as isize % 3),
+            2 | 3 => Link::translation(random() as isize % 5 - 2),
+            _ => Map::scaled(
+                random().is_multiple_of(3),
+                [-2isize, -1, 1, 2, 3][random() as usize % 5],
+                random() as isize % 7 - 3,
+                1 + random() as isize % 3,
+            ),
+        };
+        let (matched, over) = compare_with_expanded_graphs(link, false);
+        eprintln!("affine cycle detection: {matched} exact, {over} conservative");
+    }
+
+    #[test]
+    fn strided_cycle_detection_matches_expanded_graphs() {
+        // Strided and unlinked coordinates with translations and strides
+        // lose no precision.
+        use crate::comb_loop_detect::position::Map;
+        let link = |random: &mut dyn FnMut() -> u32| match random() % 5 {
+            0 => Link::Unlinked,
+            1 | 2 => Link::strided(2 + random() as isize % 2, random() as isize % 3),
+            3 => Map::scaled(false, 2, random() as isize % 3, 1),
+            _ => Link::translation(random() as isize % 5 - 2),
+        };
+        compare_with_expanded_graphs(link, true);
     }
 
     fn mapped_positions(position: usize, offset: Option<isize>, width: usize) -> Vec<usize> {
@@ -2040,8 +2185,8 @@ mod tests {
                 node,
                 node,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(shift),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(shift)),
                 }),
             );
         }
@@ -2062,8 +2207,8 @@ mod tests {
                 node,
                 node,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(-shift),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(-shift)),
                 }),
             );
         }
@@ -2109,8 +2254,8 @@ mod tests {
                 node,
                 node,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(offset),
-                    packed: Some(1 - offset),
+                    array: Link::from_offset(Some(offset)),
+                    packed: Link::from_offset(Some(1 - offset)),
                 }),
             );
         }

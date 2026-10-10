@@ -9,6 +9,7 @@
 //! bit positions, displacement sums, or dependency paths are enumerated.
 
 use super::*;
+use crate::comb_loop_detect::position::{Link, greatest_common_divisor};
 use daggy::petgraph::Graph;
 use daggy::petgraph::algo::kosaraju_scc;
 use daggy::petgraph::graph::NodeIndex;
@@ -19,9 +20,40 @@ struct TransferNode {
     input: Option<VersionId>,
     domains: Vec<PositionDomain>,
     replication: Option<Replication>,
+    /// The value of a written key at the start of an iteration.
+    is_iteration_input: bool,
+    /// The value of a written key at the end of an iteration.
+    is_output: bool,
 }
 
-type TransferGraph = Graph<TransferNode, PositionRelation>;
+/// `data` distinguishes an explicit read from a retention-only edge. A path
+/// consisting only of retention edges carries the previous value as state,
+/// not as a combinational dependency, exactly as `Phi` and `Guarded` do in
+/// the dependency DAG export.
+#[derive(Clone, Copy)]
+struct TransferEdge {
+    relation: PositionRelation,
+    data: bool,
+}
+
+impl TransferEdge {
+    const RETAIN: Self = Self {
+        relation: PositionRelation {
+            array: Link::IDENTITY,
+            packed: Link::IDENTITY,
+        },
+        data: false,
+    };
+
+    fn data(relation: PositionRelation) -> Self {
+        Self {
+            relation,
+            data: true,
+        }
+    }
+}
+
+type TransferGraph = Graph<TransferNode, TransferEdge>;
 
 /// Index each child once; ancestor traversal is shared by all roots of a call.
 struct ImportIndex {
@@ -109,26 +141,28 @@ impl TransferBuilder {
                 Version::Definition { sources, .. } => {
                     for &(source, relation) in sources {
                         let source = self.version(ssa, source, start, import_work)?;
-                        self.graph.add_edge(source, node, relation);
+                        self.graph
+                            .add_edge(source, node, TransferEdge::data(relation));
                     }
                 }
                 Version::Phi(inputs) => {
                     for &source in inputs {
                         let source = self.version(ssa, source, start, import_work)?;
-                        self.graph
-                            .add_edge(source, node, PositionRelation::default());
+                        self.graph.add_edge(source, node, TransferEdge::RETAIN);
                     }
                 }
                 Version::Guarded { source, .. } => {
                     let source = self.version(ssa, *source, start, import_work)?;
-                    self.graph
-                        .add_edge(source, node, PositionRelation::default());
+                    self.graph.add_edge(source, node, TransferEdge::RETAIN);
                 }
                 Version::Projected { source, domain } => {
                     self.graph[node].domains.push(*domain);
                     let source = self.version(ssa, *source, start, import_work)?;
-                    self.graph
-                        .add_edge(source, node, PositionRelation::default());
+                    self.graph.add_edge(
+                        source,
+                        node,
+                        TransferEdge::data(PositionRelation::default()),
+                    );
                 }
                 Version::Replicated {
                     source,
@@ -138,8 +172,11 @@ impl TransferBuilder {
                     self.graph[node].domains.push(*domain);
                     self.graph[node].replication = Some(*replication);
                     let source = self.version(ssa, *source, start, import_work)?;
-                    self.graph
-                        .add_edge(source, node, PositionRelation::default());
+                    self.graph.add_edge(
+                        source,
+                        node,
+                        TransferEdge::data(PositionRelation::default()),
+                    );
                 }
                 Version::Imported {
                     graph,
@@ -183,6 +220,7 @@ impl TransferBuilder {
                                 DependencyDagNode::Replicated { replication } => Some(replication),
                                 _ => None,
                             },
+                            ..TransferNode::default()
                         });
                         mapped.insert(child, copied);
                         retained.push(child);
@@ -196,7 +234,8 @@ impl TransferBuilder {
                             *import_work = import_work.checked_sub(sources.len())?;
                             for &(source, relation) in sources {
                                 let source = self.version(ssa, source, start, import_work)?;
-                                self.graph.add_edge(source, copied, relation);
+                                self.graph
+                                    .add_edge(source, copied, TransferEdge::data(relation));
                             }
                         }
                     }
@@ -206,12 +245,15 @@ impl TransferBuilder {
                             self.graph.add_edge(
                                 mapped[&edge.source],
                                 mapped[&child],
-                                edge.relation,
+                                TransferEdge::data(edge.relation),
                             );
                         }
                     }
-                    self.graph
-                        .add_edge(mapped[root], node, PositionRelation::default());
+                    self.graph.add_edge(
+                        mapped[root],
+                        node,
+                        TransferEdge::data(PositionRelation::default()),
+                    );
                 }
                 Version::Imported { root: None, .. } => {}
             }
@@ -220,14 +262,57 @@ impl TransferBuilder {
     }
 }
 
+/// What every iteration of a statically counted loop is known to do to one
+/// key, beyond its one-iteration transfer.
+#[derive(Clone, Debug, Default)]
+pub(in crate::comb_loop_detect) struct TransferCoverage {
+    /// Every position of the key is written by some iteration, so the loop
+    /// does not retain its entry value.
+    pub(in crate::comb_loop_detect) killed: bool,
+    /// The only positions at which an iteration can read the entry value.
+    pub(in crate::comb_loop_detect) exposed: Option<Vec<PositionDomain>>,
+}
+
+/// One abstract iteration of a runtime loop and the states recorded in it.
+pub(in crate::comb_loop_detect) struct RepeatedIteration<'s, K> {
+    /// The output of each written key after the iteration.
+    pub(in crate::comb_loop_detect) state: &'s BranchState<K>,
+    /// Versions that predate it are the iteration's inputs.
+    pub(in crate::comb_loop_detect) checkpoint: Checkpoint,
+    /// The loop may run zero times and retain each key's entry version.
+    pub(in crate::comb_loop_detect) may_skip: bool,
+    /// States recorded inside the iteration, such as return paths.
+    pub(in crate::comb_loop_detect) observed: &'s mut [BranchState<K>],
+}
+
+impl<'s, K> RepeatedIteration<'s, K> {
+    pub(in crate::comb_loop_detect) fn new(
+        state: &'s BranchState<K>,
+        checkpoint: Checkpoint,
+        may_skip: bool,
+    ) -> Self {
+        Self {
+            state,
+            checkpoint,
+            may_skip,
+            observed: &mut [],
+        }
+    }
+}
+
 pub(super) fn try_close<K: Copy + Eq + Hash>(
     ssa: &mut SsaStore<K>,
-    iteration: &BranchState<K>,
-    checkpoint: Checkpoint,
-    may_skip: bool,
+    iteration: RepeatedIteration<K>,
     import_work: &mut usize,
     domain: impl Fn(K) -> Option<PositionDomain>,
+    coverage: impl Fn(K) -> TransferCoverage,
 ) -> Option<()> {
+    let RepeatedIteration {
+        state: iteration,
+        checkpoint,
+        may_skip,
+        observed,
+    } = iteration;
     let mut builder = TransferBuilder::default();
     let outputs = iteration
         .bindings
@@ -238,54 +323,122 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             let value = builder.version(ssa, output, checkpoint.version_start, import_work)?;
             let domains = domain(key).into_iter().collect::<Vec<_>>();
             let root = builder.graph.add_node(TransferNode {
-                input: None,
                 domains: domains.clone(),
-                replication: None,
+                is_output: true,
+                ..TransferNode::default()
             });
-            builder
-                .graph
-                .add_edge(value, root, PositionRelation::default());
+            builder.graph.add_edge(value, root, TransferEdge::RETAIN);
             Some((key, entry, input, root, domains))
         })
         .collect::<Option<Vec<_>>>()?;
+    // A state observed inside the body, such as a return path, sees what any
+    // number of earlier iterations left. Each of its values that the body can
+    // change is an output of the transfer that does not feed the next
+    // iteration. A written key it does not bind still holds its entry. Other
+    // keys keep pre-loop or body-local entry values that no iteration changes.
+    let entries = outputs
+        .iter()
+        .map(|&(key, entry, ..)| (key, entry))
+        .collect::<HashMap<_, _>>();
+    let mut observers = Vec::new();
+    for (index, state) in observed.iter().enumerate() {
+        let unbound = entries
+            .iter()
+            .filter(|(key, _)| !state.bindings.contains_key(key))
+            .map(|(&key, &entry)| (key, entry));
+        for (key, version) in state
+            .bindings
+            .iter()
+            .map(|(&key, &version)| (key, version))
+            .chain(unbound)
+        {
+            let changed = if let Some(&entry) = entries.get(&key) {
+                version == entry || version >= checkpoint.version_start
+            } else {
+                version >= checkpoint.version_start
+                    && !matches!(ssa.versions[version], Version::Entry(_))
+            };
+            if !changed {
+                continue;
+            }
+            let value = builder.version(ssa, version, checkpoint.version_start, import_work)?;
+            let root = builder.graph.add_node(TransferNode {
+                is_output: true,
+                ..TransferNode::default()
+            });
+            builder.graph.add_edge(value, root, TransferEdge::RETAIN);
+            observers.push((index, key, root));
+        }
+    }
     builder.copy_iteration(ssa, checkpoint.version_start, import_work)?;
 
     let mut unrestricted = HashSet::default();
+    let mut initials = HashMap::default();
+    let mut sharing: HashMap<NodeIndex, usize> = HashMap::default();
     for (_, entry, input, root, domains) in &outputs {
         // Separate the immutable first-iteration input from the join that
         // also accepts prior iterations. Multiple keys may share a version;
         // their domains are alternatives, not intersecting restrictions.
+        *sharing.entry(*input).or_default() += 1;
         if builder.graph[*input].input.take().is_some() {
             let initial = builder.graph.add_node(TransferNode {
                 input: Some(*entry),
-                domains: Vec::new(),
-                replication: None,
+                ..TransferNode::default()
             });
             builder
                 .graph
-                .add_edge(initial, *input, PositionRelation::default());
+                .add_edge(initial, *input, TransferEdge::RETAIN);
+            initials.insert(*input, initial);
         }
+        builder.graph[*input].is_iteration_input = true;
         if domains.is_empty() {
             unrestricted.insert(*input);
             builder.graph[*input].domains.clear();
         } else if !unrestricted.contains(input) {
             builder.graph[*input].domains.extend_from_slice(domains);
         }
-        builder
-            .graph
-            .add_edge(*root, *input, PositionRelation::default());
+        builder.graph.add_edge(*root, *input, TransferEdge::RETAIN);
     }
 
     let generated_start = ssa.versions.len();
-    let mapped = condense(ssa, &builder.graph);
-    for (key, entry, _, root, domains) in outputs {
-        let mut output = mapped[root.index()];
+    let coverage = outputs
+        .iter()
+        .map(|(key, ..)| coverage(*key))
+        .collect::<Vec<_>>();
+    // Explicit reads of an entry value see only its exposed positions. The
+    // retained state of the entry remains unrestricted.
+    let mut views = HashMap::default();
+    for ((_, entry, input, _, _), coverage) in outputs.iter().zip(&coverage) {
+        if let (Some(exposed), Some(&initial), Some(1)) =
+            (&coverage.exposed, initials.get(input), sharing.get(input))
+        {
+            let view = if exposed.is_empty() {
+                ssa.phi(Vec::new())
+            } else {
+                ssa.projected_union(*entry, exposed)
+            };
+            views.insert(initial, view);
+        }
+    }
+    let layers = condense(ssa, &builder.graph, &views);
+    for (index, key, root) in observers {
+        let retained = layers.retained_value(ssa, &builder.graph, root);
+        let data = layers.data[root.index()];
+        let value = full(ssa, retained, data);
+        observed[index].bindings.insert(key, value);
+    }
+    for ((key, entry, _, root, _), coverage) in outputs.into_iter().zip(coverage) {
+        let retained = layers.retained_value(ssa, &builder.graph, root);
+        let data = layers.data[root.index()];
+        let mut output = if coverage.killed && !may_skip {
+            // Every position is overwritten; the entry is not retained.
+            full(ssa, None, data)
+        } else {
+            full(ssa, retained, data)
+        };
         if may_skip {
-            let entry = project(ssa, entry, &domains);
-            output = ssa.related_definition(vec![
-                (output, PositionRelation::default()),
-                (entry, PositionRelation::default()),
-            ]);
+            // Zero iterations retain the entry value as state.
+            output = ssa.phi(vec![output, entry]);
         }
         ssa.bind(key, output);
     }
@@ -296,25 +449,78 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
     Some(())
 }
 
-fn project<K: Copy + Eq + Hash>(
-    ssa: &mut SsaStore<K>,
-    value: VersionId,
-    domains: &[PositionDomain],
-) -> VersionId {
-    if domains.is_empty() {
-        return value;
+/// Retained and data layers of every transfer node.
+///
+/// The retained layer is the set of initial inputs reachable through
+/// retention edges only. It is emitted as a `Phi`, so it remains state in the
+/// exported DAG. The data layer contains every path with at least one
+/// explicit read. A retained value entering a data edge becomes an ordinary
+/// dependency there, exactly as in straight-line SSA, except that an initial
+/// input with a restricted view is read only at its exposed positions.
+struct Layers<'v> {
+    retained: Vec<Vec<NodeIndex>>,
+    data: Vec<Option<VersionId>>,
+    views: &'v HashMap<NodeIndex, VersionId>,
+}
+
+impl<'v> Layers<'v> {
+    fn new(count: usize, views: &'v HashMap<NodeIndex, VersionId>) -> Self {
+        Self {
+            retained: vec![Vec::new(); count],
+            data: vec![None; count],
+            views,
+        }
     }
-    let alternatives = domains
-        .iter()
-        .map(|&domain| ssa.projected(value, domain))
-        .collect();
-    ssa.phi(alternatives)
+
+    /// The retained state of a node.
+    fn retained_value<K: Copy + Eq + Hash>(
+        &self,
+        ssa: &mut SsaStore<K>,
+        graph: &TransferGraph,
+        node: NodeIndex,
+    ) -> Option<VersionId> {
+        let inputs = self.retained[node.index()]
+            .iter()
+            .filter_map(|initial| graph[*initial].input)
+            .collect();
+        join(ssa, inputs)
+    }
+
+    /// The value of a node as observed by an explicit read.
+    fn read<K: Copy + Eq + Hash>(
+        &self,
+        ssa: &mut SsaStore<K>,
+        graph: &TransferGraph,
+        node: NodeIndex,
+    ) -> VersionId {
+        let mut inputs = self.retained[node.index()]
+            .iter()
+            .filter_map(|initial| self.views.get(initial).copied().or(graph[*initial].input))
+            .collect::<Vec<_>>();
+        inputs.extend(self.data[node.index()]);
+        ssa.phi(inputs)
+    }
+
+    fn retain_from(&mut self, node: NodeIndex, source: NodeIndex) {
+        if node == source {
+            return;
+        }
+        let inherited = self.retained[source.index()].clone();
+        let retained = &mut self.retained[node.index()];
+        retained.extend(inherited);
+        retained.sort_unstable();
+        retained.dedup();
+    }
 }
 
 /// Materialize the SCC condensation as ordinary acyclic SSA. Each graph node
 /// and edge contributes only bounded work and storage, independently of the
 /// declared widths or the number of paths through shared function summaries.
-fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -> Vec<VersionId> {
+fn condense<'v, K: Copy + Eq + Hash>(
+    ssa: &mut SsaStore<K>,
+    graph: &TransferGraph,
+    views: &'v HashMap<NodeIndex, VersionId>,
+) -> Layers<'v> {
     let components = kosaraju_scc(graph);
     let mut component_of = vec![0; graph.node_count()];
     for (index, nodes) in components.iter().enumerate() {
@@ -328,14 +534,27 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
         .iter()
         .map(|nodes| nodes.len() > 1)
         .collect::<Vec<_>>();
+    // A cycle through retention edges only carries state around the loop.
+    // Only an internal explicit read turns every value entering the
+    // component into a data dependency of every member.
+    let mut internal_data = vec![false; components.len()];
     let mut stable = vec![PositionRelation::default(); components.len()];
+    let mut translations = vec![[AxisTranslation::Stable; 2]; components.len()];
     for node in graph.node_indices() {
         if let Some(replication) = graph[node].replication {
             // Replication changes its axis's coordinates if it participates in
             // an actual runtime recurrence. Otherwise keep it as an operation;
             // its finite repetitions are not procedural feedback.
-            let relation = &mut stable[component_of[node.index()]];
+            let component = component_of[node.index()];
+            let relation = &mut stable[component];
             *relation = replication.forget_position(*relation);
+            // Inside a recurrence, the repetition is one more internal
+            // translation of its axis.
+            let [array, packed] = &mut translations[component];
+            match replication {
+                Replication::Array(stride) => *array = array.with(Some(stride)),
+                Replication::Packed(stride) => *packed = packed.with(Some(stride)),
+            }
         }
     }
     for edge in graph.edge_references() {
@@ -343,11 +562,16 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
         let destination = component_of[edge.target().index()];
         if source == destination {
             cyclic[source] = true;
-            if edge.weight().array != Some(0) {
-                stable[source].array = None;
+            internal_data[source] |= edge.weight().data;
+            let relation = edge.weight().relation;
+            let [array, packed] = &mut translations[source];
+            *array = array.with(relation.array.translation_offset());
+            *packed = packed.with(relation.packed.translation_offset());
+            if relation.array != Link::IDENTITY {
+                stable[source].array = Link::from_offset(None);
             }
-            if edge.weight().packed != Some(0) {
-                stable[source].packed = None;
+            if relation.packed != Link::IDENTITY {
+                stable[source].packed = Link::from_offset(None);
             }
         } else {
             incoming[destination].push(edge);
@@ -360,45 +584,80 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
         .enumerate()
         .filter_map(|(index, &count)| (count == 0).then_some(index))
         .collect::<VecDeque<_>>();
-    let mut mapped = vec![0; graph.node_count()];
+    let mut layers = Layers::new(graph.node_count(), views);
     while let Some(component) = queue.pop_front() {
         let nodes = &components[component];
-        if cyclic[component] {
-            let sources = incoming[component]
-                .iter()
-                .map(|edge| {
-                    let value = ssa
-                        .related_definition(vec![(mapped[edge.source().index()], *edge.weight())]);
-                    let value = project(ssa, value, &graph[edge.target()].domains);
-                    (value, stable[component])
-                })
-                .collect();
-            let joined = ssa.related_definition(sources);
-            // Discarding internal path restrictions is conservative; keeping
-            // the entry and exit projections still bounds the affected bits.
+        let recurrence = cyclic[component]
+            .then(|| {
+                UniformRecurrence::new(graph, nodes, &translations[component], &stable[component])
+            })
+            .flatten();
+        if graph[nodes[0]].input.is_some() && nodes.len() == 1 {
+            layers.retained[nodes[0].index()] = vec![nodes[0]];
+        } else if let Some(recurrence) = recurrence {
+            recurrence.materialize(ssa, graph, &incoming[component], &mut layers);
+        } else if cyclic[component] {
+            let mut data_inputs = Vec::new();
+            let mut sources = Vec::new();
+            let mut retained = Vec::new();
+            for edge in &incoming[component] {
+                if internal_data[component] || edge.weight().data {
+                    let value = layers.read(ssa, graph, edge.source());
+                    let value = ssa.related_definition(vec![(value, edge.weight().relation)]);
+                    let value = ssa.projected_union(value, &graph[edge.target()].domains);
+                    sources.push((value, stable[component]));
+                }
+                if !edge.weight().data {
+                    retained.push(edge.source());
+                    data_inputs.extend(layers.data[edge.source().index()]);
+                }
+            }
+            // Retained inputs of members of an SCC with an internal read have
+            // already been added to `sources`; keep them as state as well.
+            if !sources.is_empty() {
+                data_inputs.push(ssa.related_definition(sources));
+            }
+            let data_value = join(ssa, data_inputs);
+            let bounds = member_bounds(graph, nodes);
             for &node in nodes {
-                mapped[node.index()] = project(ssa, joined, &graph[node].domains);
+                for &source in &retained {
+                    layers.retain_from(node, source);
+                }
+                let domains = match bounds.get(&node) {
+                    Some(Bound::Hull(domain)) => std::slice::from_ref(domain),
+                    _ => graph[node].domains.as_slice(),
+                };
+                layers.data[node.index()] =
+                    data_value.map(|value| ssa.projected_union(value, domains));
             }
         } else {
             let node = nodes[0];
-            let value = graph[node].input.unwrap_or_else(|| {
-                ssa.related_definition(
-                    incoming[component]
+            let mut data_inputs = Vec::new();
+            let mut sources = Vec::new();
+            for edge in &incoming[component] {
+                if edge.weight().data {
+                    let value = layers.read(ssa, graph, edge.source());
+                    sources.push((value, edge.weight().relation));
+                } else {
+                    layers.retain_from(node, edge.source());
+                    data_inputs.extend(layers.data[edge.source().index()]);
+                }
+            }
+            if !sources.is_empty() {
+                data_inputs.push(ssa.related_definition(sources));
+            }
+            layers.data[node.index()] = join(ssa, data_inputs).map(|value| {
+                if let Some(replication) = graph[node].replication {
+                    let alternatives = graph[node]
+                        .domains
                         .iter()
-                        .map(|edge| (mapped[edge.source().index()], *edge.weight()))
-                        .collect(),
-                )
+                        .map(|&domain| ssa.replicated(value, domain, replication))
+                        .collect();
+                    ssa.phi(alternatives)
+                } else {
+                    ssa.projected_union(value, &graph[node].domains)
+                }
             });
-            mapped[node.index()] = if let Some(replication) = graph[node].replication {
-                let alternatives = graph[node]
-                    .domains
-                    .iter()
-                    .map(|&domain| ssa.replicated(value, domain, replication))
-                    .collect();
-                ssa.phi(alternatives)
-            } else {
-                project(ssa, value, &graph[node].domains)
-            };
         }
         for &successor in &successors[component] {
             pending[successor] -= 1;
@@ -408,7 +667,427 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
         }
     }
     debug_assert!(pending.iter().all(|&count| count == 0));
-    mapped
+    layers
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bound {
+    Empty,
+    Hull(PositionDomain),
+    Unbounded,
+}
+
+impl Bound {
+    fn of(domains: &[PositionDomain]) -> Self {
+        domains
+            .iter()
+            .fold(Self::Empty, |bound, &domain| bound.join(Self::Hull(domain)))
+    }
+
+    fn join(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Empty, bound) | (bound, Self::Empty) => bound,
+            (Self::Hull(left), Self::Hull(right)) => {
+                let array_start = left.array_start.min(right.array_start);
+                let packed_start = left.packed_start.min(right.packed_start);
+                let array_end = (left.array_start + left.array_length)
+                    .max(right.array_start + right.array_length);
+                let packed_end = (left.packed_start + left.packed_length)
+                    .max(right.packed_start + right.packed_length);
+                Self::Hull(PositionDomain {
+                    array_start,
+                    array_length: array_end - array_start,
+                    packed_start,
+                    packed_length: packed_end - packed_start,
+                })
+            }
+            _ => Self::Unbounded,
+        }
+    }
+}
+
+/// The positions at which each member of a recurrence without domains of its
+/// own can hold a value. A value changes position only through an edge that
+/// moves it, so a member reached only through edges that keep positions
+/// holds values only where its sources do. Data entering the recurrence with
+/// its positions forgotten is then confined to those positions instead of
+/// reaching every position of the member.
+fn member_bounds(graph: &TransferGraph, nodes: &[NodeIndex]) -> HashMap<NodeIndex, Bound> {
+    let members = nodes.iter().copied().collect::<HashSet<_>>();
+    let mut bounds = nodes
+        .iter()
+        .map(|&node| {
+            let bound = if graph[node].domains.is_empty() {
+                Bound::Empty
+            } else {
+                Bound::of(&graph[node].domains)
+            };
+            (node, bound)
+        })
+        .collect::<HashMap<_, _>>();
+    loop {
+        let mut changed = false;
+        for &node in nodes {
+            if !graph[node].domains.is_empty() {
+                continue;
+            }
+            let mut bound = if graph[node].input.is_some() || graph[node].replication.is_some() {
+                Bound::Unbounded
+            } else {
+                Bound::Empty
+            };
+            for edge in graph.edges_directed(node, daggy::petgraph::Direction::Incoming) {
+                let relation = edge.weight().relation;
+                let source =
+                    if relation.array != Link::IDENTITY || relation.packed != Link::IDENTITY {
+                        Bound::Unbounded
+                    } else if members.contains(&edge.source()) {
+                        bounds[&edge.source()]
+                    } else if graph[edge.source()].domains.is_empty() {
+                        Bound::Unbounded
+                    } else {
+                        Bound::of(&graph[edge.source()].domains)
+                    };
+                bound = bound.join(source);
+            }
+            if bounds[&node] != bound {
+                bounds.insert(node, bound);
+                changed = true;
+            }
+        }
+        if !changed {
+            return bounds;
+        }
+    }
+}
+
+fn full<K: Copy + Eq + Hash>(
+    ssa: &mut SsaStore<K>,
+    retained: Option<VersionId>,
+    data: Option<VersionId>,
+) -> VersionId {
+    match (retained, data) {
+        (Some(retained), Some(data)) => ssa.phi(vec![retained, data]),
+        (Some(value), None) | (None, Some(value)) => value,
+        (None, None) => ssa.phi(Vec::new()),
+    }
+}
+
+fn join<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, values: Vec<VersionId>) -> Option<VersionId> {
+    match values.len() {
+        0 => None,
+        _ => Some(ssa.phi(values)),
+    }
+}
+
+type IncomingEdge<'g> = daggy::petgraph::graph::EdgeReference<'g, TransferEdge>;
+
+// Shortest-path work for one recurrence, counted in visited members and
+// edges per distinct entry.
+const UNIFORM_RECURRENCE_WORK: usize = 1 << 20;
+
+/// A recurrence whose internal translations advance along one axis in one
+/// direction while the other axis is preserved.
+///
+/// Every internal path from an entry member `e` to a member `m` translates
+/// by a non-negative multiple of `stride` (the gcd of the internal offsets).
+/// Let `d` be the least translation over the paths with at least one explicit
+/// read. Every such path translates by `d + k * stride` for some `k >= 0`, and
+/// its intermediate positions lie between its endpoints. Replicating a source
+/// within the members' bounding box and translating it by `d` therefore
+/// covers every data path from `e`. Paths through retention edges only keep
+/// their value as state at the same position.
+struct UniformRecurrence {
+    replication: Replication,
+    domain: PositionDomain,
+    /// Relation retained by every internal path; the replicated axis is zero.
+    stable: PositionRelation,
+    members: Vec<NodeIndex>,
+    local: HashMap<NodeIndex, usize>,
+    /// Internal edges as `(target, stride units, explicit read)`.
+    adjacency: Vec<Vec<(usize, usize, bool)>>,
+}
+
+impl UniformRecurrence {
+    fn new(
+        graph: &TransferGraph,
+        nodes: &[NodeIndex],
+        translations: &[AxisTranslation; 2],
+        stable: &PositionRelation,
+    ) -> Option<Self> {
+        let replication = recurrence_replication(translations, stable)?;
+        let domain = component_domain(graph, nodes)?;
+        let (stride, stable) = match replication {
+            Replication::Array(stride) => (
+                stride,
+                PositionRelation {
+                    array: Link::IDENTITY,
+                    packed: stable.packed,
+                },
+            ),
+            Replication::Packed(stride) => (
+                stride,
+                PositionRelation {
+                    array: stable.array,
+                    packed: Link::IDENTITY,
+                },
+            ),
+        };
+        let local = nodes
+            .iter()
+            .enumerate()
+            .map(|(index, &node)| (node, index))
+            .collect::<HashMap<_, _>>();
+        let mut adjacency = vec![Vec::new(); nodes.len()];
+        for &node in nodes {
+            for edge in graph.edges(node) {
+                let Some(&target) = local.get(&edge.target()) else {
+                    continue;
+                };
+                let offset = match replication {
+                    Replication::Array(_) => edge.weight().relation.array,
+                    Replication::Packed(_) => edge.weight().relation.packed,
+                }
+                .translation_offset()?;
+                // Uniform translations share the stride's sign and divide by it.
+                let units = usize::try_from(offset / stride).ok()?;
+                adjacency[local[&node]].push((target, units, edge.weight().data));
+            }
+        }
+        Some(Self {
+            replication,
+            domain,
+            stable,
+            members: nodes.to_vec(),
+            local,
+            adjacency,
+        })
+    }
+
+    fn stride(&self) -> isize {
+        match self.replication {
+            Replication::Array(stride) | Replication::Packed(stride) => stride,
+        }
+    }
+
+    /// Least translation units from `entry` to each member over paths with
+    /// an explicit read, and whether a retention-only path exists.
+    fn distances(&self, entry: usize, data: bool) -> (Vec<Option<usize>>, Vec<bool>) {
+        let count = self.members.len();
+        let mut best = vec![[None::<usize>; 2]; count];
+        let mut heap = std::collections::BinaryHeap::new();
+        best[entry][usize::from(data)] = Some(0);
+        heap.push(std::cmp::Reverse((0usize, entry, data)));
+        while let Some(std::cmp::Reverse((distance, node, seen))) = heap.pop() {
+            if best[node][usize::from(seen)].is_some_and(|best| best < distance) {
+                continue;
+            }
+            for &(target, units, data) in &self.adjacency[node] {
+                let seen = seen || data;
+                let Some(next) = distance.checked_add(units) else {
+                    continue;
+                };
+                let slot = &mut best[target][usize::from(seen)];
+                if slot.is_none_or(|best| next < best) {
+                    *slot = Some(next);
+                    heap.push(std::cmp::Reverse((next, target, seen)));
+                }
+            }
+        }
+        (
+            best.iter().map(|states| states[1]).collect(),
+            best.iter().map(|states| states[0].is_some()).collect(),
+        )
+    }
+
+    fn translated(&self, units: usize) -> Option<PositionRelation> {
+        let offset = isize::try_from(units).ok()?.checked_mul(self.stride())?;
+        Some(match self.replication {
+            Replication::Array(_) => PositionRelation {
+                array: Link::from_offset(Some(offset)),
+                ..self.stable
+            },
+            Replication::Packed(_) => PositionRelation {
+                packed: Link::from_offset(Some(offset)),
+                ..self.stable
+            },
+        })
+    }
+
+    fn materialize<K: Copy + Eq + Hash>(
+        &self,
+        ssa: &mut SsaStore<K>,
+        graph: &TransferGraph,
+        incoming: &[IncomingEdge<'_>],
+        layers: &mut Layers<'_>,
+    ) {
+        // Only members observed outside the component need a value.
+        let exits = self
+            .members
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| {
+                graph[**node].is_output
+                    || graph
+                        .edges(**node)
+                        .any(|edge| !self.local.contains_key(&edge.target()))
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let mut entries: HashMap<(usize, bool), Vec<&IncomingEdge<'_>>> = HashMap::default();
+        for edge in incoming {
+            entries
+                .entry((self.local[&edge.target()], edge.weight().data))
+                .or_default()
+                .push(edge);
+        }
+        let edges = self.adjacency.iter().map(Vec::len).sum::<usize>();
+        let fits = entries
+            .len()
+            .checked_mul(self.members.len().saturating_add(edges))
+            .is_some_and(|work| work <= UNIFORM_RECURRENCE_WORK);
+        let mut retained = vec![Vec::new(); self.members.len()];
+        let mut data_inputs = vec![Vec::new(); self.members.len()];
+        let mut ordered = entries.into_iter().collect::<Vec<_>>();
+        ordered.sort_unstable_by_key(|((entry, data), _)| (*entry, *data));
+        for ((entry, entry_data), edges) in ordered {
+            let (reads, retains) = if fits {
+                self.distances(entry, entry_data)
+            } else {
+                // Without distances, every member may observe every entry.
+                (
+                    vec![Some(0); self.members.len()],
+                    vec![!entry_data; self.members.len()],
+                )
+            };
+            let sources = edges
+                .iter()
+                .map(|edge| {
+                    let value = layers.read(ssa, graph, edge.source());
+                    let value = ssa.related_definition(vec![(value, edge.weight().relation)]);
+                    (
+                        ssa.projected_union(value, &graph[edge.target()].domains),
+                        self.stable,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let joined = ssa.related_definition(sources);
+            let joined = ssa.projected(joined, self.domain);
+            let repeated = ssa.replicated(joined, self.domain, self.replication);
+            for &member in &exits {
+                if retains[member] {
+                    for edge in &edges {
+                        retained[member].push(edge.source());
+                        data_inputs[member].extend(layers.data[edge.source().index()]);
+                    }
+                }
+                if let Some(units) = reads[member] {
+                    let relation = self
+                        .translated(units)
+                        .unwrap_or_else(PositionRelation::whole);
+                    data_inputs[member].push(ssa.related_definition(vec![(repeated, relation)]));
+                }
+            }
+        }
+        for (index, &node) in self.members.iter().enumerate() {
+            for source in std::mem::take(&mut retained[index]) {
+                layers.retain_from(node, source);
+            }
+            layers.data[node.index()] = join(ssa, std::mem::take(&mut data_inputs[index]))
+                .map(|value| ssa.projected_union(value, &graph[node].domains));
+        }
+    }
+}
+
+/// Translations of the internal edges of one component along one axis.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AxisTranslation {
+    Stable,
+    /// Every non-zero translation is a multiple of `stride` with its sign.
+    Uniform(isize),
+    Unlinked,
+}
+
+impl AxisTranslation {
+    fn with(self, offset: Option<isize>) -> Self {
+        let Some(offset) = offset else {
+            return Self::Unlinked;
+        };
+        match self {
+            Self::Unlinked => Self::Unlinked,
+            _ if offset == 0 => self,
+            Self::Stable => Self::Uniform(offset),
+            Self::Uniform(stride) if (stride > 0) == (offset > 0) => {
+                let gcd = greatest_common_divisor(stride.unsigned_abs(), offset.unsigned_abs());
+                isize::try_from(gcd)
+                    .map(|gcd| Self::Uniform(if stride > 0 { gcd } else { -gcd }))
+                    .unwrap_or(Self::Unlinked)
+            }
+            Self::Uniform(_) => Self::Unlinked,
+        }
+    }
+}
+
+/// A recurrence that advances along a single axis in one direction is a
+/// bounded repetition of that translation. The other axis is either preserved
+/// or already unlinked by `stable`, which every entering source receives.
+fn recurrence_replication(
+    translations: &[AxisTranslation; 2],
+    _stable: &PositionRelation,
+) -> Option<Replication> {
+    match translations {
+        [
+            AxisTranslation::Uniform(stride),
+            AxisTranslation::Stable | AxisTranslation::Unlinked,
+        ] => Some(Replication::Array(*stride)),
+        [
+            AxisTranslation::Stable | AxisTranslation::Unlinked,
+            AxisTranslation::Uniform(stride),
+        ] => Some(Replication::Packed(*stride)),
+        _ => None,
+    }
+}
+
+/// The bounding box of every constrained member domain. A larger domain only
+/// admits additional intermediate positions, so it remains a conservative
+/// bound. Every cycle of a transfer passes through an iteration input, so
+/// with constrained inputs and monotone translations along one axis, each
+/// unconstrained intermediate position lies between two bounded positions.
+fn component_domain(graph: &TransferGraph, nodes: &[NodeIndex]) -> Option<PositionDomain> {
+    let mut bounds: Option<(usize, usize, usize, usize)> = None;
+    for &node in nodes {
+        if graph[node].domains.is_empty() {
+            if graph[node].is_iteration_input {
+                return None;
+            }
+            continue;
+        }
+        for domain in &graph[node].domains {
+            let array_end = domain.array_start.checked_add(domain.array_length)?;
+            let packed_end = domain.packed_start.checked_add(domain.packed_length)?;
+            bounds = Some(match bounds {
+                None => (
+                    domain.array_start,
+                    array_end,
+                    domain.packed_start,
+                    packed_end,
+                ),
+                Some((array_start, array_stop, packed_start, packed_stop)) => (
+                    array_start.min(domain.array_start),
+                    array_stop.max(array_end),
+                    packed_start.min(domain.packed_start),
+                    packed_stop.max(packed_end),
+                ),
+            });
+        }
+    }
+    let (array_start, array_end, packed_start, packed_end) = bounds?;
+    Some(PositionDomain {
+        array_start,
+        array_length: array_end - array_start,
+        packed_start,
+        packed_length: packed_end - packed_start,
+    })
 }
 
 #[cfg(test)]
@@ -437,27 +1116,79 @@ mod tests {
         ssa.bind("output", value);
         let iteration = ssa.capture_and_rollback(inner);
         let mut work = 0;
-        ssa.try_close_repeated_transfer(&iteration, inner, true, &mut work, |_| Some(domain))
-            .expect("directly written SSA does not consume the copy budget");
+        ssa.try_close_repeated_transfer(
+            RepeatedIteration::new(&iteration, inner, true),
+            &mut work,
+            |_| Some(domain),
+            |_| TransferCoverage::default(),
+        )
+        .expect("directly written SSA does not consume the copy budget");
 
         let iteration = ssa.capture_and_rollback(outer);
         let before = ssa.versions.len();
         let mut work = 64;
         assert!(
-            ssa.try_close_repeated_transfer(&iteration, outer, true, &mut work, |_| Some(domain))
-                .is_none()
+            ssa.try_close_repeated_transfer(
+                RepeatedIteration::new(&iteration, outer, true),
+                &mut work,
+                |_| Some(domain),
+                |_| { TransferCoverage::default() }
+            )
+            .is_none()
         );
         assert_eq!(ssa.versions.len(), before, "reject before SSA condensation");
         assert_eq!(ssa.read("output"), initial, "no partial output binding");
 
         let mut work = 1024;
-        ssa.try_close_repeated_transfer(&iteration, outer, true, &mut work, |_| Some(domain))
-            .expect("a bounded nested transfer still preserves its dependencies");
+        ssa.try_close_repeated_transfer(
+            RepeatedIteration::new(&iteration, outer, true),
+            &mut work,
+            |_| Some(domain),
+            |_| TransferCoverage::default(),
+        )
+        .expect("a bounded nested transfer still preserves its dependencies");
         let output = ssa.read("output");
         assert_eq!(
             ssa.root_source_relations(output),
             HashMap::from_iter([("input", PositionRelation::default())])
         );
+    }
+
+    #[test]
+    fn repeated_transfer_observes_only_the_keys_it_can_change() {
+        let mut ssa = SsaStore::default();
+        let function = ssa.checkpoint();
+        let seed = ssa.read("seed");
+        let shared = ssa.definition(vec![seed]);
+        ssa.bind("written", shared);
+        ssa.bind("kept", shared);
+        let body = ssa.checkpoint();
+        let mut observed = [ssa.snapshot_since(function)];
+        let mut work = usize::MAX;
+        let previous = ssa.read("written");
+        let input = ssa.read("input");
+        let output = ssa.definition(vec![previous, input]);
+        ssa.bind("written", output);
+        let iteration = ssa.capture_and_rollback(body);
+        ssa.try_close_repeated_transfer(
+            RepeatedIteration {
+                observed: &mut observed,
+                ..RepeatedIteration::new(&iteration, body, true)
+            },
+            &mut work,
+            |_| None,
+            |_| TransferCoverage::default(),
+        )
+        .expect("unlimited runtime transfer construction");
+        let [observed] = observed;
+        // A later iteration sees what earlier ones wrote, but a key that only
+        // shares the written key's entry version still holds that version.
+        assert_eq!(
+            ssa.root_sources(observed.bindings[&"written"]),
+            HashSet::from_iter(["seed", "input"])
+        );
+        assert_eq!(observed.bindings[&"kept"], shared);
+        ssa.capture_and_rollback(function);
     }
 
     #[test]
@@ -495,14 +1226,14 @@ mod tests {
                 .expect("shared imports must fit in a linear budget");
             assert!(builder.graph.node_count() <= size * 4 + 4);
             assert!(builder.graph.edge_count() <= size * 4 + 4);
-            let mapped = condense(&mut ssa, &builder.graph);
+            let views = HashMap::default();
+            let layers = condense(&mut ssa, &builder.graph, &views);
             for actual in 0..actuals.len() {
                 for index in [0, size / 2, size - 1] {
                     let output = outputs[actual * size + index];
-                    assert_eq!(
-                        ssa.root_sources(mapped[output.index()]),
-                        HashSet::from_iter([actual])
-                    );
+                    let retained = layers.retained_value(&mut ssa, &builder.graph, output);
+                    let output = full(&mut ssa, retained, layers.data[output.index()]);
+                    assert_eq!(ssa.root_sources(output), HashSet::from_iter([actual]));
                 }
             }
         }
@@ -616,8 +1347,8 @@ mod tests {
                 let value = ssa.related_definition(vec![(
                     input,
                     PositionRelation {
-                        array: Some(0),
-                        packed: Some(shift),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some(shift)),
                     },
                 )]);
                 ssa.bind("value", value);
@@ -638,8 +1369,8 @@ mod tests {
                     [(
                         "input",
                         PositionRelation {
-                            array: Some(0),
-                            packed: (shift == 0).then_some(0),
+                            array: Link::from_offset(Some(0)),
+                            packed: Link::from_offset((shift == 0).then_some(0)),
                         }
                     )]
                     .into_iter()
@@ -683,8 +1414,8 @@ mod tests {
                     sources.push((
                         entries[source],
                         PositionRelation {
-                            array: Some(0),
-                            packed: offset,
+                            array: Link::from_offset(Some(0)),
+                            packed: Link::from_offset(offset),
                         },
                     ));
                 }
@@ -711,10 +1442,9 @@ mod tests {
                 for bit in 0..WIDTH {
                     // Independent reference: expand the small transfer to
                     // individual bits and compute ordinary reachability.
+                    // Skipping the loop retains the entry value as state,
+                    // which is not a combinational dependency.
                     let mut expected = HashSet::default();
-                    if may_skip {
-                        expected.insert((key, bit));
-                    }
                     let mut visited = HashSet::from_iter([(key, bit)]);
                     let mut queue = VecDeque::from([(key, bit)]);
                     while let Some((current, bit)) = queue.pop_front() {
@@ -739,9 +1469,28 @@ mod tests {
                             queue.push_back((node, bit));
                         }
                     }
+                    let in_domain = |node: usize, bit: usize| {
+                        let domains = &dag.domains[node];
+                        domains.is_empty()
+                            || domains.iter().any(|domain| {
+                                domain.packed_start <= bit
+                                    && bit < domain.packed_start + domain.packed_length
+                            })
+                    };
                     while let Some((node, bit)) = queue.pop_front() {
+                        // A replicated node repeats its translation within
+                        // its domain, as its self edge in the circuit graph.
+                        if let DependencyDagNode::Replicated {
+                            replication: Replication::Packed(stride),
+                        } = dag.nodes[node]
+                            && let Some(next) = bit.checked_add_signed(stride)
+                            && in_domain(node, next)
+                            && reached.insert((node, next))
+                        {
+                            queue.push_back((node, next));
+                        }
                         for edge in &outgoing[node] {
-                            for next in positions(bit, edge.relation.packed) {
+                            for next in positions(bit, edge.relation.packed.translation_offset()) {
                                 let domains = &dag.domains[edge.destination];
                                 if !domains.is_empty()
                                     && !domains.iter().any(|domain| {

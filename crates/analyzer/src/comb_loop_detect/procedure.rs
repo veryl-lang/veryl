@@ -1,34 +1,29 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::model::SummaryRegion;
+use super::position::{Axis, Link, first_in_class, greatest_common_divisor, intersect_classes};
 use super::region::{
-    ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference,
-    translate_position, var_reads,
+    ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference, var_reads,
 };
 use super::ssa::{
     BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
-    PositionDomain, PositionRelation, Replication, SsaStore, VersionId,
+    PositionDomain, PositionRelation, RepeatedIteration, Replication, SsaStore, TransferCoverage,
+    VersionId,
 };
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
-    Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain,
-    Module, Op, Shape, Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex,
-    VarPath, VarSelect, VarSelectOp,
+    ArrayLiteralItem, AssignDestination, AssignStatement, CasePattern, CaseStatement,
+    CountedIterations, Expression, ExpressionContext, Factor, ForBound, ForRange, ForStatement,
+    FunctionCall, IfStatement, MemberSelectDomain, Module, Op, Shape, Statement,
+    SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex, VarPath, VarSelect,
+    VarSelectOp,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
 use std::borrow::Cow;
 use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
-
-fn translate_array_span(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
-    Some(ArraySpan {
-        start: translate_position(span.start, offset)?,
-        length: span.length,
-    })
-}
 
 fn position_domain(array: ArraySpan, packed: PackedSpan) -> PositionDomain {
     PositionDomain {
@@ -39,8 +34,23 @@ fn position_domain(array: ArraySpan, packed: PackedSpan) -> PositionDomain {
     }
 }
 
-fn translate_packed_span(span: PackedSpan, offset: isize) -> Option<PackedSpan> {
-    PackedSpan::new(translate_position(span.start, offset)?, span.length)
+/// `span + offset` restricted to non-negative positions.
+fn translate_array_span_clipped(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
+    let start = isize::try_from(span.start).ok()?.checked_add(offset)?;
+    let end = isize::try_from(span.end()?).ok()?.checked_add(offset)?;
+    let start = usize::try_from(start.max(0)).ok()?;
+    let end = usize::try_from(end).ok()?;
+    let length = end.checked_sub(start)?;
+    (length != 0).then_some(ArraySpan { start, length })
+}
+
+/// `span + offset` restricted to non-negative positions.
+fn translate_span_clipped(span: PackedSpan, offset: isize) -> Option<PackedSpan> {
+    let start = isize::try_from(span.start).ok()?.checked_add(offset)?;
+    let end = isize::try_from(span.end()).ok()?.checked_add(offset)?;
+    let start = usize::try_from(start.max(0)).ok()?;
+    let end = usize::try_from(end).ok()?;
+    PackedSpan::new(start, end.checked_sub(start)?)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -88,19 +98,75 @@ impl AffineIndex {
         (self.terms == source.terms).then(|| self.constant.checked_sub(source.constant))?
     }
 
-    fn fits(&self, width: usize, signed: bool, ctx: &Context) -> Option<()> {
+    /// The congruent form modulo `2^width` whose values all lie in the
+    /// integer range of the width, if there is one.
+    fn representative(
+        mut self,
+        width: usize,
+        signed: bool,
+        ctx: &Context,
+        iterators: &[CountedIterator],
+    ) -> Option<Self> {
+        if self.fits(width, signed, ctx, iterators).is_some() {
+            return Some(self);
+        }
         let (allowed_min, allowed_max) = integer_range(width, signed)?;
+        let modulus = 1i128.checked_shl(u32::try_from(width).ok()?)?;
+        let (min, max) = self.extent(ctx, iterators)?;
+        if max - min > allowed_max - allowed_min {
+            return None;
+        }
+        let shift = (allowed_min - min).div_euclid(modulus)
+            + i128::from((allowed_min - min).rem_euclid(modulus) != 0);
+        let shift = shift.checked_mul(modulus)?;
+        if max + shift > allowed_max {
+            return None;
+        }
+        self.constant = isize::try_from(self.constant as i128 + shift).ok()?;
+        self.fits(width, signed, ctx, iterators)?;
+        Some(self)
+    }
+
+    /// Smallest and largest values when each term's variable ranges over
+    /// `range`.
+    fn extent_with(
+        &self,
+        mut range: impl FnMut(VarId) -> Option<(i128, i128)>,
+    ) -> Option<(i128, i128)> {
         let mut min = self.constant as i128;
         let mut max = min;
         for &(id, coefficient) in &self.terms {
-            let ty = &ctx.variables.get(&id)?.r#type;
-            let (low, high) = integer_range(ty.total_width()?, ty.signed)?;
+            let (low, high) = range(id)?;
             let coefficient = coefficient as i128;
             let low = low.checked_mul(coefficient)?;
             let high = high.checked_mul(coefficient)?;
             min = min.checked_add(low.min(high))?;
             max = max.checked_add(low.max(high))?;
         }
+        Some((min, max))
+    }
+
+    /// Smallest and largest values over the iterator and variable ranges.
+    fn extent(&self, ctx: &Context, iterators: &[CountedIterator]) -> Option<(i128, i128)> {
+        self.extent_with(|id| {
+            // A counted iterator takes only the values of its iteration space.
+            if let Some(iterator) = iterators.iter().find(|x| x.id == id) {
+                return Some((iterator.min as i128, iterator.max as i128));
+            }
+            let ty = &ctx.variables.get(&id)?.r#type;
+            integer_range(ty.total_width()?, ty.signed)
+        })
+    }
+
+    fn fits(
+        &self,
+        width: usize,
+        signed: bool,
+        ctx: &Context,
+        iterators: &[CountedIterator],
+    ) -> Option<()> {
+        let (allowed_min, allowed_max) = integer_range(width, signed)?;
+        let (min, max) = self.extent(ctx, iterators)?;
         (allowed_min <= min && max <= allowed_max).then_some(())
     }
 }
@@ -127,24 +193,96 @@ impl SampledAffineIndex {
 }
 
 fn affine_constant(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
-    let constant = expression
-        .eval_value(ctx)
-        .and_then(|value| value.to_usize())
-        .and_then(|value| isize::try_from(value).ok())?;
     Some(AffineIndex {
         terms: Vec::new(),
-        constant,
+        constant: constant_integer(expression, ctx)?,
     })
 }
 
-fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
-    if expression.comptime().is_const {
-        return affine_constant(expression, ctx);
+/// The integer a constant operand has in its context. A signed context
+/// extends the value's own sign bit; an unsigned one extends with zeros.
+fn constant_integer(expression: &Expression, ctx: &mut Context) -> Option<isize> {
+    let value = expression.eval_value(ctx)?;
+    let bits = value.to_usize()? as i128;
+    let width = u32::try_from(value.width()).ok()?;
+    let negative =
+        expression.comptime().expr_context.signed && width > 0 && (bits >> (width - 1)) & 1 == 1;
+    let integer = if negative {
+        bits - 1i128.checked_shl(width)?
+    } else {
+        bits
+    };
+    isize::try_from(integer).ok()
+}
+
+/// An integer coordinate whose bit-vector evaluation cannot wrap.
+///
+/// Context-determined `+`, `-` and `*` are evaluated modulo `2^width`, which
+/// is a ring, so the affine form of the tree is congruent to its value. The
+/// value equals that form exactly when some representative of the form lies
+/// in the integer range of the context for every iterator value; the form is
+/// shifted to that representative. Subtrees evaluated at another width
+/// (casts and self-determined operands) are checked as their own trees.
+fn affine_index(
+    expression: &Expression,
+    ctx: &mut Context,
+    iterators: &[CountedIterator],
+) -> Option<AffineIndex> {
+    let comptime = expression.comptime();
+    let context = comptime.expr_context;
+    let result = affine_ring(expression, ctx, iterators, context.width)?;
+    // Coordinates synthesized by conversion carry no bit-vector type.
+    if context.width == 0 && comptime.r#type.is_unknown() {
+        return Some(result);
     }
-    if expression.comptime().r#type.kind.is_float() {
+    result.representative(context.width, context.signed, ctx, iterators)
+}
+
+/// A storage coordinate into a dimension of `size` positions. A wrapped
+/// unsigned value that would be negative as an integer selects no element,
+/// exactly like the negative integer, as long as it wraps past the last
+/// position and no positive value wraps. The selected positions of the
+/// integer form and of the bit vector then agree.
+fn affine_position(
+    expression: &Expression,
+    ctx: &mut Context,
+    iterators: &[CountedIterator],
+    size: usize,
+) -> Option<AffineIndex> {
+    if let Some(position) = affine_index(expression, ctx, iterators) {
+        return Some(position);
+    }
+    let comptime = expression.comptime();
+    let context = comptime.expr_context;
+    if context.signed || context.width < 1 {
         return None;
     }
-    let result = match expression {
+    let result = affine_ring(expression, ctx, iterators, context.width)?;
+    let (min, max) = result.extent(ctx, iterators)?;
+    let modulus = 1i128.checked_shl(u32::try_from(context.width).ok()?)?;
+    let wraps_past_last = min
+        .checked_add(modulus)
+        .is_some_and(|wrapped| wrapped >= size as i128);
+    (-modulus <= min && max < modulus && wraps_past_last).then_some(result)
+}
+
+fn affine_ring(
+    expression: &Expression,
+    ctx: &mut Context,
+    iterators: &[CountedIterator],
+    width: usize,
+) -> Option<AffineIndex> {
+    let comptime = expression.comptime();
+    if comptime.expr_context.width != width {
+        return affine_index(expression, ctx, iterators);
+    }
+    if comptime.is_const {
+        return affine_constant(expression, ctx);
+    }
+    if comptime.r#type.kind.is_float() {
+        return None;
+    }
+    match expression {
         Expression::Term(factor) => match factor.as_ref() {
             Factor::Variable(id, index, select, _)
                 if index.indices.is_empty() && select.is_empty() =>
@@ -154,11 +292,13 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
             Factor::Value(_) => affine_constant(expression, ctx),
             _ => None,
         },
-        Expression::Unary(Op::Add, expression, _) => affine_index(expression, ctx),
-        Expression::Unary(Op::Sub, expression, _) => affine_index(expression, ctx)?.scaled(-1),
+        Expression::Unary(Op::Add, operand, _) => affine_ring(operand, ctx, iterators, width),
+        Expression::Unary(Op::Sub, operand, _) => {
+            affine_ring(operand, ctx, iterators, width)?.scaled(-1)
+        }
         Expression::Binary(left, Op::Add | Op::Sub, right, _) => {
-            let mut result = affine_index(left, ctx)?;
-            let right = affine_index(right, ctx)?;
+            let mut result = affine_ring(left, ctx, iterators, width)?;
+            let right = affine_ring(right, ctx, iterators, width)?;
             result.add_scaled(
                 &right,
                 if matches!(expression, Expression::Binary(_, Op::Sub, _, _)) {
@@ -170,8 +310,8 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
             Some(result)
         }
         Expression::Binary(left, Op::Mul, right, _) => {
-            let left = affine_index(left, ctx)?;
-            let right = affine_index(right, ctx)?;
+            let left = affine_ring(left, ctx, iterators, width)?;
+            let right = affine_ring(right, ctx, iterators, width)?;
             if left.terms.is_empty() {
                 right.scaled(left.constant)
             } else if right.terms.is_empty() {
@@ -180,19 +320,15 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
                 None
             }
         }
-        Expression::Binary(left, Op::As, _, comptime) => {
-            let result = affine_index(left, ctx)?;
-            result.fits(comptime.r#type.total_width()?, comptime.r#type.signed, ctx)?;
-            Some(result)
-        }
+        Expression::Binary(left, Op::As, _, comptime) => affine_index(left, ctx, iterators)?
+            .representative(
+                comptime.r#type.total_width()?,
+                comptime.r#type.signed,
+                ctx,
+                iterators,
+            ),
         _ => None,
-    }?;
-    // Affine coordinates use integers. Every intermediate operation and
-    // operand coercion must preserve that interpretation before cancelling
-    // terms or comparing offsets; bit-vector overflow and casts need not.
-    let context = expression.comptime().expr_context;
-    result.fits(context.width, context.signed, ctx)?;
-    Some(result)
+    }
 }
 
 fn affine_bound(bound: &ForBound, ctx: &mut Context) -> Option<AffineIndex> {
@@ -201,7 +337,7 @@ fn affine_bound(bound: &ForBound, ctx: &mut Context) -> Option<AffineIndex> {
             terms: Vec::new(),
             constant: isize::try_from(*value).ok()?,
         }),
-        ForBound::Expression(expression) => affine_index(expression, ctx),
+        ForBound::Expression(expression) => affine_index(expression, ctx, &[]),
     }
 }
 
@@ -280,6 +416,14 @@ fn project_repeated_span(
 
 #[cfg(test)]
 use std::cell::Cell;
+
+mod children;
+mod footprint;
+mod iterator_use;
+mod last_writer;
+use footprint::{LoopAccesses, for_range_step};
+pub(super) use iterator_use::{LoopEvaluation, loop_evaluation};
+use last_writer::{Step, WriterId, WriterScope};
 
 #[derive(Clone)]
 struct CallResult {
@@ -371,6 +515,8 @@ fn destination_packed_shape(destination: &AssignDestination) -> Cow<'_, [Option<
 struct SsaKey {
     node: NodeKey,
     call_frame: Option<usize>,
+    /// The table of one write in a counted loop nest, see `last_writer`.
+    writer: Option<WriterId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -952,6 +1098,7 @@ thread_local! {
     static VISIBLE_SOURCE_PROBES: Cell<usize> = const { Cell::new(0) };
     static TRACED_PROCEDURE_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static WRITE_FOOTPRINT_STATEMENT_VISITS: Cell<usize> = const { Cell::new(0) };
+    static STATEMENT_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -964,6 +1111,7 @@ pub(crate) fn reset_function_evaluation_count() {
     FUNCTION_SUMMARY_GRAPH_EDGES.set(0);
     MODULE_CONTEXT_ENTRIES.set(0);
     WRITE_FOOTPRINT_STATEMENT_VISITS.set(0);
+    STATEMENT_EVALUATIONS.set(0);
 }
 
 #[cfg(test)]
@@ -999,6 +1147,11 @@ pub(crate) fn function_summary_graph_edge_count() -> usize {
 #[cfg(test)]
 pub(crate) fn write_footprint_statement_visits() -> usize {
     WRITE_FOOTPRINT_STATEMENT_VISITS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn statement_evaluation_count() -> usize {
+    STATEMENT_EVALUATIONS.get()
 }
 
 #[cfg(test)]
@@ -1075,6 +1228,18 @@ struct ProjectionContext {
     destination_index: Option<SampledAffineIndex>,
     destination_array: Option<ArraySpan>,
     array_shape: Option<Shape>,
+    /// The destination element is selected by a symbolic affine index, and
+    /// array coordinates of this evaluation are absolute destination
+    /// positions. A read whose affine index has the same symbolic terms keeps
+    /// its constant displacement; every other source reaches each candidate
+    /// destination element.
+    anchor: bool,
+    /// The destination is one bit selected by a symbolic affine position,
+    /// and packed coordinates of this evaluation are absolute destination
+    /// bits. A one-bit read at an affine position with the same symbolic
+    /// terms keeps its constant displacement; every other source reaches the
+    /// destination bit as a whole.
+    packed_anchor: Option<SampledAffineIndex>,
 }
 
 impl ExpressionSources {
@@ -1115,7 +1280,7 @@ impl ExpressionSources {
 
     fn forget_array_position(&mut self) {
         for (_, relation) in &mut self.sources {
-            relation.array = None;
+            relation.array = Link::from_offset(None);
         }
     }
 
@@ -1260,6 +1425,108 @@ struct ProcedureAnalysis<'a, 's> {
     active_assignment: Option<TokenRange>,
     repeatable: bool,
     shared_call_branches: HashMap<SummaryInvocationKey, Rc<HashMap<BranchId, BranchId>>>,
+    /// Iterators of the enclosing statically counted loops with their value
+    /// extents. Their bodies are evaluated once with the iterator symbolic.
+    counted_iterators: Vec<CountedIterator>,
+    /// Control versions whose array coordinates are positions of an affine
+    /// iterator frame rather than of an ordinary value.
+    control_frames: HashMap<VersionId, SampledAffineIndex>,
+    /// Whether each called function specialization depends only on its
+    /// inputs. Anchored expressions ask this once per occurrence.
+    pure_functions: HashMap<(VarId, Option<Vec<usize>>), bool>,
+    /// The writes of the outermost counted loop being evaluated, when its
+    /// reads take their last writers.
+    writer_scope: Option<Rc<WriterScope>>,
+    /// The places of the statements being evaluated in that loop.
+    statement_places: Vec<Vec<Step>>,
+    /// The destination being written by the current assignment.
+    current_writer: Option<WriterId>,
+    /// A statement being evaluated once per set of iterations.
+    split_statement: Option<*const Statement>,
+}
+
+/// Accesses of a counted loop body, per iteration and over all iterations.
+struct CountedCoverage {
+    per_iteration: LoopAccesses,
+    closed: LoopAccesses,
+    iterator: CountedIterator,
+    step: isize,
+}
+
+/// Which side a branch condition takes: always one, each on its own
+/// iterations, or either.
+enum Decision {
+    Constant(bool),
+    Split(IteratorSplit),
+    Unknown,
+}
+
+/// One side of a two-way branch: a block, or an assignment of one operand of
+/// a ternary.
+#[derive(Clone, Copy)]
+enum Side<'s> {
+    Block(&'s [Statement]),
+    Assign(&'s AssignStatement, &'s Expression),
+}
+
+/// Iterations of the counted iterator at `position` on which a condition
+/// holds and fails, each as disjoint progressions; empty when no iteration
+/// takes that side.
+struct IteratorSplit {
+    position: usize,
+    holds: Vec<CountedIterator>,
+    fails: Vec<CountedIterator>,
+}
+
+/// The values a counted iterator takes: those in `min..=max` that are
+/// congruent to `residue` modulo `modulus`.
+#[derive(Clone, Copy, Debug)]
+struct CountedIterator {
+    id: VarId,
+    min: isize,
+    max: isize,
+    modulus: isize,
+    residue: isize,
+}
+
+impl CountedIterator {
+    fn new(id: VarId, min: isize, max: isize) -> Self {
+        Self {
+            id,
+            min,
+            max,
+            modulus: 1,
+            residue: 0,
+        }
+    }
+
+    /// The values in `min..=max` congruent to `residue` modulo `modulus` as
+    /// well, or `None` when there are none. `min` and `max` are values.
+    fn confined(self, min: isize, max: isize, modulus: isize, residue: isize) -> Option<Self> {
+        let (residue, modulus) =
+            intersect_classes((self.residue, self.modulus), (residue, modulus))??;
+        // Within the iterator's own values, so a request beyond them, such
+        // as `i < isize::MIN`, is empty before any arithmetic.
+        let min = min.max(self.min);
+        let max = max.min(self.max);
+        if min > max {
+            return None;
+        }
+        let min = first_in_class(residue, modulus, min)?;
+        let max = max.checked_sub(max.checked_sub(residue)?.rem_euclid(modulus))?;
+        (min <= max).then_some(Self {
+            min,
+            max,
+            modulus,
+            residue,
+            ..self
+        })
+    }
+
+    /// The values in `min..=max`, or `None` when there are none.
+    fn within(self, min: isize, max: isize) -> Option<Self> {
+        self.confined(min, max, 1, 0)
+    }
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
@@ -1302,6 +1569,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             active_assignment: None,
             repeatable: true,
             shared_call_branches: HashMap::default(),
+            counted_iterators: Vec::new(),
+            control_frames: HashMap::default(),
+            pure_functions: HashMap::default(),
+            writer_scope: None,
+            statement_places: Vec::new(),
+            current_writer: None,
+            split_statement: None,
         }
     }
 
@@ -1360,7 +1634,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             })
             .filter(|source| self.is_module_scope_key(source.key))
             .collect::<Vec<_>>();
-        sources.sort_unstable_by_key(|source| (source.key, source.condition.clone()));
+        sources.sort_unstable_by_key(|source| (source.key, source.condition));
         sources.dedup_by(|left, right| left.key == right.key && left.condition == right.condition);
         sources
     }
@@ -1542,11 +1816,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Function)
             .then(|| self.call_frames.last().copied())
             .flatten();
-        SsaKey { node, call_frame }
+        SsaKey {
+            node,
+            call_frame,
+            writer: None,
+        }
     }
 
     fn read_key(&mut self, node: NodeKey) -> VersionId {
         self.ssa.read(self.ssa_key(node))
+    }
+
+    /// The value of `node` from its last writers, when they are known.
+    fn read_source_key(
+        &mut self,
+        node: NodeKey,
+        sources: Option<&[last_writer::Source]>,
+    ) -> VersionId {
+        match sources {
+            Some(sources) => self.last_writer_value(node, sources),
+            None => self.read_key(node),
+        }
     }
 
     fn bind_key(&mut self, node: NodeKey, version: VersionId) {
@@ -1584,11 +1874,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     DependencyDagNode::External(SsaKey {
                         node,
                         call_frame: None,
+                        writer: None,
                     }) => DependencyDagNode::External(node),
-                    DependencyDagNode::External(SsaKey {
-                        call_frame: Some(_),
-                        ..
-                    }) => unreachable!("call-frame storage is not a visible DAG source"),
+                    DependencyDagNode::External(SsaKey { .. }) => {
+                        unreachable!("call-frame storage and tables are not visible DAG sources")
+                    }
                     DependencyDagNode::Internal => DependencyDagNode::Internal,
                     DependencyDagNode::Replicated { replication } => {
                         DependencyDagNode::Replicated { replication }
@@ -1607,7 +1897,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // module partition for every declaration makes sparse writes quadratic.
         #[cfg(test)]
         VISIBLE_SOURCE_PROBES.set(VISIBLE_SOURCE_PROBES.get() + 1);
-        key.call_frame.is_none() && self.is_module_scope_key(key.node)
+        key.call_frame.is_none() && key.writer.is_none() && self.is_module_scope_key(key.node)
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
@@ -1975,11 +2265,496 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // Layout strides are integer coordinate arithmetic, not synthetic
         // expressions with missing width/signedness metadata.
         for (expression, dimension) in index.indices.iter().zip(dimensions.iter()).rev() {
-            let coordinate = affine_index(expression, &mut self.ctx)?;
+            let dimension = (*dimension)?;
+            let coordinate = affine_position(
+                expression,
+                &mut self.ctx,
+                &self.counted_iterators,
+                dimension,
+            )?;
             result.add_scaled(&coordinate, stride)?;
-            stride = stride.checked_mul(isize::try_from((*dimension)?).ok()?)?;
+            stride = stride.checked_mul(isize::try_from(dimension).ok()?)?;
         }
         Some(result)
+    }
+
+    /// Lowest bit and width of a packed select whose coordinates are affine.
+    /// This mirrors `VarSelect::eval_value`, so a struct member rebased to
+    /// base bits and the equivalent bit select have the same position.
+    fn packed_affine_select(
+        &mut self,
+        id: VarId,
+        select: &VarSelect,
+    ) -> Option<(AffineIndex, usize)> {
+        let variable = self.ctx.variables.get(&id)?;
+        if select.is_empty() {
+            return None;
+        }
+        let element_width = if variable.r#type.is_struct_union() {
+            1
+        } else {
+            variable.r#type.kind.width()?
+        };
+        let dimensions = variable.r#type.width().clone();
+        let dimension = select.dimension();
+        // The selected dimension, or the element bits of a value without
+        // packed dimensions.
+        let size = if dimensions.dims() < dimension {
+            element_width
+        } else {
+            dimensions.iter().nth(dimension - 1).copied().flatten()?
+        };
+        let (element, count) = |position: &Expression,
+                                ctx: &mut Context,
+                                iterators: &[CountedIterator]|
+         -> Option<(AffineIndex, usize)> {
+            let x = affine_position(position, ctx, iterators, size)?;
+            let constant =
+                |expression: &Expression, ctx: &mut Context| expression.eval_value(ctx)?.to_usize();
+            Some(match &select.1 {
+                None => (x, 1),
+                Some((VarSelectOp::PlusColon, count)) => (x, constant(count, ctx)?),
+                Some((VarSelectOp::MinusColon, count)) => {
+                    let count = constant(count, ctx)?;
+                    let mut element = x;
+                    element.constant = element
+                        .constant
+                        .checked_sub(isize::try_from(count).ok()?)?
+                        .checked_add(1)?;
+                    (element, count)
+                }
+                Some((VarSelectOp::Colon, end)) => {
+                    let y = affine_position(end, ctx, iterators, size)?;
+                    if x.terms != y.terms {
+                        return None;
+                    }
+                    let count = x.constant.checked_sub(y.constant)?.checked_add(1)?;
+                    (y, usize::try_from(count).ok()?)
+                }
+                Some((VarSelectOp::Step, count)) => {
+                    let count = constant(count, ctx)?;
+                    (x.scaled(isize::try_from(count).ok()?)?, count)
+                }
+            })
+        }(
+            &select.0[dimension - 1],
+            &mut self.ctx,
+            &self.counted_iterators,
+        )?;
+        if dimensions.dims() < dimension {
+            // A bit select of a value without packed dimensions.
+            return (dimension == 1 && dimensions.dims() == 0 && count != 0)
+                .then_some((element, count));
+        }
+        let skip = dimensions.dims() - dimension;
+        let mut low = AffineIndex::default();
+        let mut width = 0usize;
+        let mut base = element_width;
+        for (i, size) in dimensions.iter().rev().enumerate() {
+            let size = (*size)?;
+            if i == skip {
+                low.add_scaled(&element, isize::try_from(base).ok()?)?;
+                width = count.checked_mul(base)?;
+            } else if i > skip {
+                let position = &select.0[dimension - (i - skip) - 1];
+                let x = affine_position(position, &mut self.ctx, &self.counted_iterators, size)?;
+                low.add_scaled(&x, isize::try_from(base).ok()?)?;
+            }
+            base = base.checked_mul(size)?;
+        }
+        (width != 0).then_some((low, width))
+    }
+
+    fn sample_packed_select(
+        &mut self,
+        id: VarId,
+        select: &VarSelect,
+    ) -> Option<(SampledAffineIndex, usize)> {
+        let (index, width) = self.packed_affine_select(id, select)?;
+        let mut versions = Vec::new();
+        for &(id, _) in &index.terms {
+            versions.extend(self.read_variable(
+                id,
+                &VarIndex::default(),
+                &VarSelect::default(),
+                None,
+            ));
+        }
+        Some((SampledAffineIndex { index, versions }, width))
+    }
+
+    /// Inclusive extent of an affine position over the counted iterators.
+    fn affine_hull(&self, index: &AffineIndex) -> Option<(isize, isize)> {
+        let (min, max) = index.extent_with(|id| {
+            let iterator = self.counted_iterators.iter().find(|x| x.id == id)?;
+            Some((iterator.min as i128, iterator.max as i128))
+        })?;
+        Some((isize::try_from(min).ok()?, isize::try_from(max).ok()?))
+    }
+
+    /// Nonnegative positions an affine index takes over the counted
+    /// iterators, as progressions: each span with the step between its
+    /// positions, starting at its first position. A progression is one entry
+    /// however many positions it has.
+    fn affine_progressions(&mut self, index: &AffineIndex) -> Option<Vec<(ArraySpan, usize)>> {
+        let mut progressions = Vec::new();
+        for assignment in self.index_progressions(index)? {
+            let mut progression = AffineIndex {
+                terms: Vec::new(),
+                constant: index.constant,
+            };
+            for &(id, coefficient) in &index.terms {
+                match assignment.iter().find(|(fixed, _)| *fixed == id) {
+                    Some(&(_, value)) => {
+                        progression.constant = progression
+                            .constant
+                            .checked_add(coefficient.checked_mul(value)?)?;
+                    }
+                    None => progression.terms.push((id, coefficient)),
+                }
+            }
+            let step = self
+                .iterator_terms(&progression)
+                .and_then(|terms| terms.first().map(|&(_, step, _)| step))
+                .unwrap_or(1)
+                .max(1);
+            let (first, last) = self.affine_hull(&progression)?;
+            if last < 0 {
+                continue;
+            }
+            // The first nonnegative position of the progression.
+            let first = if first < 0 {
+                first_in_class(first, step, 0)?
+            } else {
+                first
+            };
+            if first > last {
+                continue;
+            }
+            let start = usize::try_from(first).ok()?;
+            let length = usize::try_from(last - first).ok()?.checked_add(1)?;
+            progressions.push((ArraySpan { start, length }, usize::try_from(step).ok()?));
+        }
+        Some(progressions)
+    }
+
+    /// `value` at the positions of `region` that are `step` apart from its
+    /// start. A stride keeps one relation, restricted to its residue, rather
+    /// than one projection per position. Each is charged to the procedure's
+    /// work; `None` means it is exhausted.
+    fn progression_value(
+        &mut self,
+        value: VersionId,
+        domain: PositionDomain,
+        axis: Axis,
+        step: usize,
+    ) -> Option<VersionId> {
+        if !self.reserve_guard_work(1) {
+            return None;
+        }
+        let value = if step > 1 {
+            let modulus = isize::try_from(step).ok()?;
+            let start = match axis {
+                Axis::Array => domain.array_start,
+                Axis::Packed => domain.packed_start,
+            };
+            let residue = isize::try_from(start).ok()?.rem_euclid(modulus);
+            let mut relation = PositionRelation::identity();
+            *relation.link_mut(axis) = Link::Map(super::position::Map {
+                crossed: false,
+                modulus,
+                residue,
+                base: residue,
+                step: modulus,
+            });
+            self.ssa.related_definition(vec![(value, relation)])
+        } else {
+            value
+        };
+        Some(self.ssa.projected(value, domain))
+    }
+
+    /// `version` written to `key` only at the positions of `progressions`
+    /// on `axis`, each `(start, length, step)`. `None` when no position lies
+    /// in the key, so the key keeps its value. A progression that cannot be
+    /// expressed leaves the version whole.
+    fn confine_to_progressions(
+        &mut self,
+        version: VersionId,
+        key: NodeKey,
+        progressions: &[(usize, usize, usize)],
+        axis: Axis,
+    ) -> Option<VersionId> {
+        let packed = self.key_span(key)?;
+        let (key_start, key_length) = match axis {
+            Axis::Array => (key.1.start, key.1.length),
+            Axis::Packed => (packed.start, packed.length),
+        };
+        // The positions of each progression within the key, from its first
+        // position there.
+        let pieces = progressions
+            .iter()
+            .filter_map(|&(start, length, step)| {
+                let end = (start + length).min(key_start + key_length);
+                // The first position of the progression from the key's start.
+                let first = start
+                    + start
+                        .max(key_start)
+                        .checked_sub(start)?
+                        .checked_next_multiple_of(step)?;
+                (first < end).then(|| (first, end - first, step))
+            })
+            .collect::<Vec<_>>();
+        if pieces.is_empty() {
+            return None;
+        }
+        if pieces == [(key_start, key_length, 1)] {
+            return Some(version);
+        }
+        let alternatives = pieces
+            .into_iter()
+            .map(|(start, length, step)| {
+                let domain = match axis {
+                    Axis::Array => position_domain(ArraySpan { start, length }, packed),
+                    Axis::Packed => position_domain(key.1, PackedSpan { start, length }),
+                };
+                self.progression_value(version, domain, axis, step)
+            })
+            .collect::<Option<Vec<_>>>();
+        Some(match alternatives {
+            Some(alternatives) => self.ssa.phi(alternatives),
+            None => version,
+        })
+    }
+
+    fn counted_iterator(&self, id: VarId) -> Option<CountedIterator> {
+        self.counted_iterators
+            .iter()
+            .rev()
+            .find(|iterator| iterator.id == id)
+            .copied()
+    }
+
+    /// For an index over counted iterators only, each term with the step
+    /// between the positions it takes and the number of its values.
+    fn iterator_terms(&self, index: &AffineIndex) -> Option<Vec<(VarId, isize, isize)>> {
+        let mut terms = index
+            .terms
+            .iter()
+            .map(|&(id, coefficient)| {
+                let iterator = self.counted_iterator(id)?;
+                let step = coefficient.checked_abs()?.checked_mul(iterator.modulus)?;
+                let count = (iterator.max - iterator.min) / iterator.modulus + 1;
+                Some((id, step, count))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        terms.sort_unstable_by_key(|&(_, step, _)| step);
+        Some(terms)
+    }
+
+    /// Whether the positions of an index over counted iterators form one
+    /// progression: each step is the span of the finer terms below it.
+    fn forms_one_progression(terms: &[(VarId, isize, isize)]) -> bool {
+        terms
+            .windows(2)
+            .all(|pair| pair[0].1.checked_mul(pair[0].2) == Some(pair[1].1))
+    }
+
+    /// Whether every position from the first to the last that an index over
+    /// counted iterators addresses is one it takes.
+    fn index_has_gaps(&self, index: &AffineIndex) -> bool {
+        self.iterator_terms(index).is_some_and(|terms| {
+            !Self::forms_one_progression(&terms) || terms.first().is_some_and(|term| term.1 > 1)
+        })
+    }
+
+    /// The iterator values that divide the positions of `index` into
+    /// progressions: every counted iterator but the one with the most values
+    /// is fixed to each of its values in turn, unless the positions already
+    /// form one progression. One empty assignment means no division. Each
+    /// assignment is charged to the procedure's work, so `None` means the
+    /// division would exceed it and the analysis stops.
+    fn index_progressions(&mut self, index: &AffineIndex) -> Option<Vec<Vec<(VarId, isize)>>> {
+        let Some(terms) = self.iterator_terms(index) else {
+            return Some(vec![Vec::new()]);
+        };
+        if Self::forms_one_progression(&terms) {
+            return Some(vec![Vec::new()]);
+        }
+        let kept = terms
+            .iter()
+            .max_by_key(|&&(_, _, count)| count)
+            .map(|&(id, _, _)| id);
+        let fixed = terms
+            .iter()
+            .filter(|term| Some(term.0) != kept)
+            .filter_map(|&(id, _, _)| self.counted_iterator(id))
+            .collect::<Vec<_>>();
+        let count = fixed.iter().try_fold(1usize, |count, iterator| {
+            let values =
+                usize::try_from((iterator.max - iterator.min) / iterator.modulus + 1).ok()?;
+            count.checked_mul(values)
+        });
+        if !count.is_some_and(|count| self.reserve_guard_work(count)) {
+            self.exhaust_work();
+            return None;
+        }
+        let mut assignments = vec![Vec::new()];
+        for iterator in fixed {
+            let values = (iterator.min..=iterator.max).step_by(iterator.modulus as usize);
+            assignments = assignments
+                .into_iter()
+                .flat_map(|assignment: Vec<(VarId, isize)>| {
+                    values.clone().map(move |value| {
+                        let mut assignment = assignment.clone();
+                        assignment.push((iterator.id, value));
+                        assignment
+                    })
+                })
+                .collect();
+        }
+        Some(assignments)
+    }
+
+    /// The links from a source coordinate to a destination coordinate, one
+    /// per progression of the source positions, each with its source index.
+    fn affine_links(
+        &mut self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+    ) -> Option<Vec<(Link, SampledAffineIndex)>> {
+        self.index_progressions(&source.index)?
+            .into_iter()
+            .map(|assignment| {
+                let fixed = |sampled: &SampledAffineIndex| {
+                    let mut index = AffineIndex {
+                        terms: Vec::new(),
+                        constant: sampled.index.constant,
+                    };
+                    for &(id, coefficient) in &sampled.index.terms {
+                        match assignment.iter().find(|(fixed, _)| *fixed == id) {
+                            Some(&(_, value)) => {
+                                index.constant = index
+                                    .constant
+                                    .checked_add(coefficient.checked_mul(value)?)?;
+                            }
+                            None => index.terms.push((id, coefficient)),
+                        }
+                    }
+                    Some(SampledAffineIndex {
+                        index,
+                        versions: sampled.versions.clone(),
+                    })
+                };
+                let destination = fixed(destination)?;
+                let source = fixed(source)?;
+                let link = self.affine_link(&destination, &source, crossed)?;
+                Some((link, source))
+            })
+            .collect()
+    }
+
+    /// The link from a source coordinate to a destination coordinate when both
+    /// are affine in the same symbolic values, restricted to the source
+    /// coordinates that the iterator values reach.
+    fn affine_link(
+        &self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+    ) -> Option<Link> {
+        let link = self.unconfined_affine_link(destination, source, crossed)?;
+        let Link::Map(map) = link else {
+            return Some(link);
+        };
+        // Source positions are congruent to their constant plus each term at
+        // its iterator's residue, modulo the finest step between them, when
+        // they form one progression.
+        let Some(terms) = self.iterator_terms(&source.index) else {
+            return Some(link);
+        };
+        let Some(&(_, modulus, _)) = terms.first() else {
+            return Some(link);
+        };
+        if modulus <= 1 || !Self::forms_one_progression(&terms) {
+            return Some(link);
+        }
+        let mut residue = source.index.constant;
+        for &(id, coefficient) in &source.index.terms {
+            let iterator = self.counted_iterator(id)?;
+            residue = residue.checked_add(coefficient.checked_mul(iterator.residue)?)?;
+        }
+        map.restricted(modulus, residue.rem_euclid(modulus))
+    }
+
+    /// The link from a source coordinate to a destination coordinate when both
+    /// are affine in the same symbolic values. Eliminating those values gives
+    /// `destination = lambda * (source - source_base) + destination_base` if
+    /// their coefficient vectors are proportional. A constant destination is
+    /// reached only from the positions the source coordinate can take.
+    fn unconfined_affine_link(
+        &self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+    ) -> Option<Link> {
+        if source.index.terms.is_empty()
+            || destination.versions != source.versions && !destination.index.terms.is_empty()
+        {
+            return None;
+        }
+        if destination.index.terms.is_empty() {
+            let modulus = source
+                .index
+                .terms
+                .iter()
+                .fold(0usize, |gcd, (_, coefficient)| {
+                    greatest_common_divisor(gcd, coefficient.unsigned_abs())
+                });
+            let modulus = isize::try_from(modulus).ok()?;
+            return Some(Link::Map(super::position::Map {
+                crossed,
+                modulus,
+                residue: source.index.constant.rem_euclid(modulus),
+                base: destination.index.constant,
+                step: 0,
+            }));
+        }
+        let ids = |index: &AffineIndex| index.terms.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        if ids(&destination.index) != ids(&source.index) {
+            return None;
+        }
+        let (_, numerator) = destination.index.terms[0];
+        let (_, denominator) = source.index.terms[0];
+        let proportional = destination
+            .index
+            .terms
+            .iter()
+            .zip(&source.index.terms)
+            .all(|(&(_, d), &(_, s))| d.checked_mul(denominator) == s.checked_mul(numerator));
+        if !proportional {
+            return None;
+        }
+        // destination = (numerator * source + offset) / denominator
+        let offset = denominator
+            .checked_mul(destination.index.constant)?
+            .checked_sub(numerator.checked_mul(source.index.constant)?)?;
+        let (numerator, offset, denominator) = if denominator < 0 {
+            (
+                numerator.checked_neg()?,
+                offset.checked_neg()?,
+                denominator.checked_neg()?,
+            )
+        } else {
+            (numerator, offset, denominator)
+        };
+        Some(super::position::Map::scaled(
+            crossed,
+            numerator,
+            offset,
+            denominator,
+        ))
     }
 
     fn sample_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<SampledAffineIndex> {
@@ -1997,6 +2772,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
+        self.record_table_write(key, version);
         // Later statements read this version without passing through the
         // circuit graph's variable node. Keep its storage bounds in SSA so
         // discarded bits cannot reach a subsequent whole-value read.
@@ -2068,6 +2844,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .map(|key| (key, self.read_key(key)))
                 .collect();
         }
+        let sources = self.last_writer_sources(id, index, select, member_select_domain);
         let index = self.receiver_index(id, index);
         let accesses = var_reads(id, &index, select, member_select_domain, &mut self.ctx);
         if accesses.is_empty() && !(index.is_const() && select.is_const_with_range()) {
@@ -2076,7 +2853,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut values = Vec::new();
         for (array, packed) in accesses {
             for key in self.bit_part.overlapping_access(id, array, packed) {
-                let version = self.read_key(key);
+                let version = self.read_source_key(key, sources.as_deref());
                 values.push((key, self.project_read(key, version, array, packed)));
             }
         }
@@ -2180,6 +2957,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn destination_width(&mut self, destination: &AssignDestination) -> Option<usize> {
         let variable = self.ctx.variables.get(&destination.id)?.clone();
+        if !destination.select.is_const_with_range() && !self.counted_iterators.is_empty() {
+            // An affine select inside a counted loop has a constant width.
+            return self
+                .packed_affine_select(destination.id, &destination.select)
+                .map(|(_, width)| width);
+        }
         let (high, low) = destination
             .select
             .eval_value(&mut self.ctx, &variable.r#type, false)?;
@@ -2198,6 +2981,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         expression_context_width: usize,
         controls: &[VersionId],
     ) {
+        if expression_offset == 0
+            && self.write_packed_anchored_destination(
+                destination,
+                expression,
+                expression_context_width,
+                controls,
+            )
+        {
+            return;
+        }
         let selectors = self.eval_destination_selectors(destination);
         let variable = self.ctx.variables.get(&destination.id).cloned();
         let selected = if destination.select.is_const_with_range() {
@@ -2219,8 +3012,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .zip(selected)
             .and_then(|(array, (_, low))| {
                 Some(PositionRelation {
-                    array: Some(isize::try_from(array.start).ok()?),
-                    packed: Some(signed_difference(low, expression_offset)?),
+                    array: Link::from_offset(Some(isize::try_from(array.start).ok()?)),
+                    packed: Link::from_offset(Some(signed_difference(low, expression_offset)?)),
                 })
             });
         let destination_index = self.sample_affine_index(destination.id, &destination.index);
@@ -2228,15 +3021,107 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let dynamic_array = !destination.index.is_const();
         let dynamic_packed = !destination.select.is_const_with_range();
         let dynamic = dynamic_array || dynamic_packed;
+        // A packed select that moves with the counted iterators receives
+        // only its own bits of the expression and writes only the bits its
+        // position takes.
+        let packed_reachable = (dynamic_packed
+            && destination_array.is_some_and(|array| array.length == 1))
+        .then(|| {
+            let (select, width) = self.packed_affine_select(destination.id, &destination.select)?;
+            // The bits of each progression of select positions: one span when
+            // the steps leave no gap, else one progression per bit of the
+            // width.
+            let mut pieces = Vec::new();
+            for (span, step) in self.affine_progressions(&select)? {
+                if step <= width {
+                    pieces.push((
+                        PackedSpan {
+                            start: span.start,
+                            length: span.length - 1 + width,
+                        },
+                        1,
+                    ));
+                } else {
+                    for bit in 0..width {
+                        pieces.push((
+                            PackedSpan {
+                                start: span.start + bit,
+                                length: span.length,
+                            },
+                            step,
+                        ));
+                    }
+                }
+            }
+            Some((pieces, width))
+        })
+        .flatten();
+        let anchor = dynamic_array
+            && destination_index
+                .as_ref()
+                .is_some_and(|index| !index.index.terms.is_empty())
+            && expression.comptime().r#type.array.total().unwrap_or(1) == 1;
+        // An anchored destination addresses only the positions its index
+        // takes over the iterations that reach this write.
+        let reachable = anchor
+            .then(|| self.affine_progressions(&destination_index.as_ref()?.index))
+            .flatten();
+        let reachable_hull = reachable.as_ref().map(|progressions| {
+            let start = progressions
+                .iter()
+                .map(|(span, _)| span.start)
+                .min()
+                .unwrap_or(0);
+            let end = progressions
+                .iter()
+                .map(|(span, _)| span.start + span.length)
+                .max()
+                .unwrap_or(0);
+            ArraySpan {
+                start,
+                length: end.saturating_sub(start),
+            }
+        });
+        // Controls anchored at the destination's frame keep its displacement.
+        let mut anchored_controls = Vec::new();
+        let mut whole_controls = Vec::new();
+        for &control in controls {
+            // A frame's coordinates lie on the array axis of its control.
+            let link = anchor
+                .then(|| {
+                    let frame = self.control_frames.get(&control)?;
+                    self.affine_link(destination_index.as_ref()?, frame, false)
+                })
+                .flatten();
+            if let Some(link) = link {
+                anchored_controls.push((
+                    control,
+                    PositionRelation {
+                        array: link,
+                        packed: Link::Unlinked,
+                    },
+                ));
+            } else {
+                whole_controls.push(control);
+            }
+        }
         for key in keys {
-            let mut whole = controls.to_vec();
+            let mut whole = whole_controls.clone();
             whole.extend_from_slice(&selectors);
             let mut sources = if let (Some(destination_array), Some((_, low)), Some(key_span)) =
                 (destination_array, selected, self.key_span(key))
             {
-                let destination_region = key.1.intersection(destination_array);
+                let destination_region =
+                    key.1
+                        .intersection(destination_array)
+                        .and_then(|region| match reachable_hull {
+                            Some(hull) => region.intersection(hull),
+                            None => Some(region),
+                        });
                 let expression_array = destination_region.and_then(|array| {
-                    if dynamic_array {
+                    if anchor {
+                        Some(array)
+                    } else if dynamic_array {
                         // Each candidate destination receives the scalar RHS,
                         // including when no affine correspondence is proven.
                         Some(ArraySpan {
@@ -2261,17 +3146,51 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             destination_index: destination_index.clone(),
                             destination_array: Some(destination_region),
                             array_shape: Some(destination.comptime.r#type.array.clone()),
+                            anchor,
+                            packed_anchor: None,
                         },
                     )
                 } else {
                     ExpressionSources::default()
                 }
+            } else if let Some((_, width)) = packed_reachable {
+                self.eval_expr_requested_in(
+                    expression,
+                    ArraySpan {
+                        start: 0,
+                        length: 1,
+                    },
+                    PackedSpan {
+                        start: expression_offset,
+                        length: width,
+                    },
+                    expression_context_width,
+                    &ProjectionContext {
+                        array_shape: Some(destination.comptime.r#type.array.clone()),
+                        ..ProjectionContext::default()
+                    },
+                )
             } else {
                 ExpressionSources::whole(self.eval_expr(expression))
             };
             sources.extend_whole(whole);
+            for &(control, relation) in &anchored_controls {
+                sources.push(control, relation);
+            }
             sources.normalize();
             for (_, relation) in &mut sources.sources {
+                if anchor {
+                    // Array coordinates are already destination positions.
+                    *relation = destination_offset
+                        .map(|base| {
+                            relation.compose(PositionRelation {
+                                array: Link::from_offset(Some(0)),
+                                packed: base.packed,
+                            })
+                        })
+                        .unwrap_or_else(PositionRelation::whole);
+                    continue;
+                }
                 *relation = destination_offset
                     .map(|base| relation.compose(base))
                     .unwrap_or_else(PositionRelation::whole);
@@ -2279,17 +3198,459 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     // The LSP's first element is not the runtime destination.
                     // A scalar RHS can reach every candidate array element;
                     // this uncertainty does not widen its packed bit mapping.
-                    relation.array = None;
+                    relation.array = Link::from_offset(None);
                 }
             }
-            let version = self
+            let mut version = self
                 .ssa
                 .related_definition_guarded(sources.sources, &self.path_condition);
             if let Some(token) = self.active_assignment {
                 self.ssa.record_site(version, token, controls);
             }
+            if let Some(reachable) = &reachable {
+                let progressions = reachable
+                    .iter()
+                    .map(|&(span, step)| (span.start, span.length, step))
+                    .collect::<Vec<_>>();
+                // Positions outside the reachable ones keep their value.
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, &progressions, Axis::Array)
+                else {
+                    continue;
+                };
+                version = confined;
+            }
+            if let Some((reachable, _)) = &packed_reachable {
+                let progressions = reachable
+                    .iter()
+                    .map(|&(span, step)| (span.start, span.length, step))
+                    .collect::<Vec<_>>();
+                // Bits outside the reachable ones keep their value.
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, &progressions, Axis::Packed)
+                else {
+                    continue;
+                };
+                version = confined;
+            }
             self.bind_destination(key, version, dynamic);
         }
+    }
+
+    /// Write one bit selected by an affine position inside a counted loop.
+    /// Returns `false` without effects when the destination has another form.
+    fn write_packed_anchored_destination(
+        &mut self,
+        destination: &AssignDestination,
+        expression: &Expression,
+        expression_context_width: usize,
+        controls: &[VersionId],
+    ) -> bool {
+        if self.counted_iterators.is_empty()
+            || !destination.index.is_const()
+            || destination.select.is_const_with_range()
+            || destination.comptime.member_select_domain.is_some()
+        {
+            return false;
+        }
+        let Some((select, 1)) = self.sample_packed_select(destination.id, &destination.select)
+        else {
+            return false;
+        };
+        if select.index.terms.is_empty() {
+            return false;
+        }
+        let Some((low, high)) = self.affine_hull(&select.index) else {
+            return false;
+        };
+        let (Ok(low), Ok(high)) = (usize::try_from(low), usize::try_from(high)) else {
+            return false;
+        };
+        let Some(region) = PackedSpan::new(low, high - low + 1) else {
+            return false;
+        };
+        let progressions = self.affine_progressions(&select.index).map(|progressions| {
+            progressions
+                .into_iter()
+                .map(|(span, step)| (span.start, span.length, step))
+                .collect::<Vec<_>>()
+        });
+        let mut selected_destination = destination.clone();
+        selected_destination.index = self.receiver_index(destination.id, &destination.index);
+        let Some(destination_array) = dst_writes(&selected_destination, &mut self.ctx)
+            .into_iter()
+            .map(|(array, _)| array)
+            .next()
+        else {
+            return false;
+        };
+        let Ok(base) = isize::try_from(destination_array.start) else {
+            return false;
+        };
+        let selectors = self.eval_destination_selectors(destination);
+        let keys = self.write_keys(destination);
+        for key in keys {
+            let Some(key_region) = self
+                .key_span(key)
+                .and_then(|span| span.intersection(region))
+            else {
+                continue;
+            };
+            let Some(array) = key
+                .1
+                .intersection(destination_array)
+                .and_then(|array| array.translated(destination_array.start, 0))
+            else {
+                continue;
+            };
+            let mut sources = self.eval_expr_requested_in(
+                expression,
+                array,
+                key_region,
+                expression_context_width,
+                &ProjectionContext {
+                    array_shape: Some(destination.comptime.r#type.array.clone()),
+                    packed_anchor: Some(select.clone()),
+                    ..ProjectionContext::default()
+                },
+            );
+            for &control in controls {
+                // A frame's coordinates lie on the array axis of its control.
+                let element = SampledAffineIndex {
+                    index: AffineIndex {
+                        terms: Vec::new(),
+                        constant: isize::try_from(array.start).unwrap_or(0),
+                    },
+                    versions: Vec::new(),
+                };
+                let relation = self.control_frames.get(&control).and_then(|frame| {
+                    Some(PositionRelation {
+                        array: self.affine_link(&element, frame, false)?,
+                        packed: self.affine_link(&select, frame, true)?,
+                    })
+                });
+                match relation {
+                    Some(relation) => sources.push(control, relation),
+                    None => sources.extend_whole([control]),
+                }
+            }
+            sources.extend_whole(selectors.iter().copied());
+            sources.normalize();
+            for (_, relation) in &mut sources.sources {
+                // Packed coordinates are already destination bits.
+                *relation = relation.compose(PositionRelation::translation(base, 0));
+            }
+            let mut version = self
+                .ssa
+                .related_definition_guarded(sources.sources, &self.path_condition);
+            if let Some(token) = self.active_assignment {
+                self.ssa.record_site(version, token, controls);
+            }
+            // Bits between the steps of the select keep their value.
+            if let Some(progressions) = &progressions {
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, progressions, Axis::Packed)
+                else {
+                    continue;
+                };
+                version = confined;
+            }
+            self.bind_destination(key, version, true);
+        }
+        true
+    }
+
+    /// Operands whose every bit may reach the anchored destination bit. Their
+    /// leaves are either anchored one-bit reads or whole sources.
+    fn eval_packed_anchored_operands(
+        &mut self,
+        operands: &[&Expression],
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        projection: &ProjectionContext,
+    ) -> ExpressionSources {
+        let mut reads = ExpressionSources::default();
+        for operand in operands {
+            let comptime = operand.comptime();
+            let context = ExpressionContext {
+                width: comptime.r#type.total_width().unwrap_or(1),
+                ..comptime.expr_context
+            };
+            reads.extend(self.eval_expr_bits_in(
+                operand,
+                requested_array,
+                requested,
+                context,
+                projection,
+            ));
+        }
+        reads
+    }
+
+    /// A read at an affine packed position while the destination element is
+    /// selected by an affine array index. Each bit `k` of the read value moves
+    /// with the iterator along the packed axis, so it reaches the destination
+    /// element through a map from the source packed coordinate to the
+    /// destination array coordinate.
+    fn eval_array_anchored_strided_read(
+        &mut self,
+        factor: &Factor,
+        requested: PackedSpan,
+        projection: &ProjectionContext,
+        selectors: &[VersionId],
+    ) -> Option<ExpressionSources> {
+        let Factor::Variable(id, index, select, comptime) = factor else {
+            return None;
+        };
+        let destination = projection.destination_index.as_ref()?;
+        let last_writers =
+            self.last_writer_sources(*id, index, select, comptime.member_select_domain);
+        let receiver = self.receiver_index(*id, index);
+        if !receiver.is_const() {
+            return None;
+        }
+        let (source, width) = self.sample_packed_select(*id, select)?;
+        if source.index.terms.is_empty() {
+            return None;
+        }
+        let (low, high) = self.affine_hull(&source.index)?;
+        let bits = PackedSpan::whole(width)?.intersection(requested)?;
+        let accesses = var_reads(*id, &receiver, &VarSelect::default(), None, &mut self.ctx);
+        let mut reads = ExpressionSources::default();
+        // The destination bit and the source position both move with the
+        // iterator, which no single per-axis map relates; each bit of the
+        // element becomes its own source.
+        for bit in bits.start..bits.end() {
+            let offset = isize::try_from(bit).ok()?;
+            let mut shifted = source.clone();
+            shifted.index.constant = shifted.index.constant.checked_add(offset)?;
+            let constant = SampledAffineIndex {
+                index: AffineIndex {
+                    terms: Vec::new(),
+                    constant: offset,
+                },
+                versions: Vec::new(),
+            };
+            let relation = PositionRelation {
+                array: self.affine_link(destination, &shifted, true)?,
+                packed: self.affine_link(&constant, &shifted, false)?,
+            };
+            let first = usize::try_from(low.checked_add(offset)?).ok()?;
+            let last = usize::try_from(high.checked_add(offset)?).ok()?;
+            let Some(span) = PackedSpan::new(first, last - first + 1) else {
+                continue;
+            };
+            for (array, packed) in &accesses {
+                let Some(span) = span.intersection(*packed) else {
+                    continue;
+                };
+                for key in self.bit_part.overlapping_access(*id, *array, span) {
+                    let version = self.read_source_key(key, last_writers.as_deref());
+                    reads.push(self.project_read(key, version, *array, span), relation);
+                }
+            }
+        }
+        reads.extend_whole(selectors.iter().copied());
+        Some(reads)
+    }
+
+    /// A one-bit variable read in packed-anchor mode.
+    fn eval_packed_anchored_read(
+        &mut self,
+        factor: &Factor,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        anchor: &SampledAffineIndex,
+    ) -> ExpressionSources {
+        let Factor::Variable(id, index, select, comptime) = factor else {
+            unreachable!("only variable reads are anchored");
+        };
+        let mut selector_sources = Vec::new();
+        for expression in index.expressions().chain(select.0.iter()) {
+            selector_sources.extend(self.eval_expr(expression));
+        }
+        if let Some((_, expression)) = &select.1 {
+            selector_sources.extend(self.eval_expr(expression));
+        }
+        let last_writers =
+            self.last_writer_sources(*id, index, select, comptime.member_select_domain);
+        let receiver = self.receiver_index(*id, index);
+        if receiver.is_const()
+            && let Some(reads) = self.eval_packed_anchored_bit(
+                *id,
+                &receiver,
+                select,
+                requested_array,
+                requested,
+                anchor,
+                last_writers.as_deref(),
+            )
+        {
+            let mut reads = reads;
+            reads.extend_whole(selector_sources);
+            return reads;
+        }
+        if select.is_const_with_range()
+            && let Some(reads) = self.eval_packed_anchored_element(
+                *id,
+                index,
+                select,
+                requested_array,
+                anchor,
+                last_writers.as_deref(),
+            )
+        {
+            let mut reads = reads;
+            reads.extend_whole(selector_sources);
+            return reads;
+        }
+        selector_sources.extend(self.read_variable(
+            *id,
+            index,
+            select,
+            comptime.member_select_domain,
+        ));
+        ExpressionSources::whole(selector_sources)
+    }
+
+    /// One bit at an affine packed position of a constant element.
+    #[allow(clippy::too_many_arguments)]
+    fn eval_packed_anchored_bit(
+        &mut self,
+        id: VarId,
+        receiver: &VarIndex,
+        select: &VarSelect,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        anchor: &SampledAffineIndex,
+        last_writers: Option<&[last_writer::Source]>,
+    ) -> Option<ExpressionSources> {
+        let (source, width) = self.sample_packed_select(id, select)?;
+        if width != 1 || source.index.terms.is_empty() {
+            return None;
+        }
+        // Each progression of the source bits has its own map to the
+        // destination bit.
+        let mut links = Vec::new();
+        for (link, source) in self.affine_links(anchor, &source, false)? {
+            let source_span = match link.translation_offset() {
+                // Positions before the first bit do not exist.
+                Some(offset) => translate_span_clipped(requested, offset.checked_neg()?),
+                None => {
+                    let (low, high) = self.affine_hull(&source.index)?;
+                    let low = usize::try_from(low).ok()?;
+                    PackedSpan::new(low, usize::try_from(high).ok()?.checked_sub(low)? + 1)
+                }
+            };
+            if let Some(source_span) = source_span {
+                links.push((link, source_span));
+            }
+        }
+        let mut reads = ExpressionSources::default();
+        let variable = self.ctx.variables.get(&id).cloned();
+        let accesses = var_reads(id, receiver, &VarSelect::default(), None, &mut self.ctx);
+        let selected_array = if accesses.len() == 1 {
+            variable
+                .as_ref()
+                .and_then(|variable| receiver.eval_selection(&mut self.ctx, &variable.r#type.array))
+        } else {
+            None
+        };
+        for &(link, source_span) in &links {
+            for (idx, access) in &accesses {
+                let source_array = if let Some(selection) = selected_array {
+                    requested_array
+                        .intersection(ArraySpan {
+                            start: selection.result_start,
+                            length: selection.length,
+                        })
+                        .and_then(|requested| {
+                            requested.translated(selection.result_start, selection.source_start)
+                        })
+                        .and_then(|requested| requested.intersection(*idx))
+                } else {
+                    Some(*idx)
+                };
+                if let (Some(source_array), Some(source_span)) =
+                    (source_array, source_span.intersection(*access))
+                {
+                    for key in self
+                        .bit_part
+                        .overlapping_access(id, source_array, source_span)
+                    {
+                        let version = self.read_source_key(key, last_writers);
+                        let version = self.project_read(key, version, source_array, source_span);
+                        reads.push(
+                            version,
+                            PositionRelation {
+                                array: Link::from_offset(selected_array.and_then(|selection| {
+                                    signed_difference(
+                                        selection.result_start,
+                                        selection.source_start,
+                                    )
+                                })),
+                                packed: link,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        Some(reads)
+    }
+
+    /// A one-bit element at an affine array position: the destination bit
+    /// moves with the source element along the other axis.
+    fn eval_packed_anchored_element(
+        &mut self,
+        id: VarId,
+        index: &VarIndex,
+        select: &VarSelect,
+        requested_array: ArraySpan,
+        anchor: &SampledAffineIndex,
+        last_writers: Option<&[last_writer::Source]>,
+    ) -> Option<ExpressionSources> {
+        let source = self.sample_affine_index(id, index)?;
+        if source.index.terms.is_empty() {
+            return None;
+        }
+        let variable = self.ctx.variables.get(&id)?.clone();
+        let (high, low) = select.eval_value(&mut self.ctx, &variable.r#type, false)?;
+        if high != low {
+            return None;
+        }
+        let bit = PackedSpan::new(low, 1)?;
+        let (first, last) = self.affine_hull(&source.index)?;
+        let first = usize::try_from(first).ok()?;
+        let elements = ArraySpan {
+            start: first,
+            length: usize::try_from(last).ok()?.checked_sub(first)? + 1,
+        };
+        let element = SampledAffineIndex {
+            index: AffineIndex {
+                terms: Vec::new(),
+                constant: isize::try_from(requested_array.start).ok()?,
+            },
+            versions: Vec::new(),
+        };
+        let relation = PositionRelation {
+            array: self.affine_link(&element, &source, false)?,
+            packed: self.affine_link(anchor, &source, true)?,
+        };
+        let mut reads = ExpressionSources::default();
+        let receiver = self.receiver_index(id, index);
+        for (idx, access) in var_reads(id, &receiver, select, None, &mut self.ctx) {
+            let (Some(array), Some(packed)) =
+                (idx.intersection(elements), access.intersection(bit))
+            else {
+                continue;
+            };
+            for key in self.bit_part.overlapping_access(id, array, packed) {
+                let version = self.read_source_key(key, last_writers);
+                reads.push(self.project_read(key, version, array, packed), relation);
+            }
+        }
+        Some(reads)
     }
 
     fn eval_function_body(
@@ -2298,7 +3659,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         return_id: Option<VarId>,
         controls: &[VersionId],
     ) {
-        let caller_condition = self.path_condition.clone();
+        let caller_condition = self.path_condition;
         let checkpoint = self.ssa.checkpoint();
         self.function_flows.push(FunctionFlow {
             return_id,
@@ -2338,7 +3699,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         };
         let state = FlowState {
             state: self.ssa.snapshot_since(r#loop.checkpoint),
-            condition: self.path_condition.clone(),
+            condition: self.path_condition,
         };
         self.loop_flows
             .last_mut()
@@ -2460,62 +3821,42 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> FlowResult {
+        let entered = self.enter_statement_place(statement);
+        let result = match self.last_writer_split(statement) {
+            Some(cells) => self.eval_split_statement(statement, cells, controls),
+            None => self.eval_statement_inner(statement, controls),
+        };
+        if entered {
+            self.statement_places.pop();
+        }
+        result
+    }
+
+    fn eval_statement_inner(
+        &mut self,
+        statement: &Statement,
+        controls: &[VersionId],
+    ) -> FlowResult {
+        #[cfg(test)]
+        STATEMENT_EVALUATIONS.set(STATEMENT_EVALUATIONS.get() + 1);
         match statement {
             Statement::Assign(assign) => {
-                let previous_assignment = self.active_assignment;
-                self.active_assignment = self.tracing.then_some(assign.token);
-                self.call_caches.push(Some(EvaluationCache {
-                    variables: Some(HashMap::default()),
-                    ..EvaluationCache::default()
-                }));
-                // Evaluate RHS reads in expression order before destination
-                // selectors or any region writes. Keep each occurrence's value
-                // and index versions even if a later call or write changes them.
-                let sources = if let [destination] = assign.dst.as_slice() {
-                    let packed = destination_packed_shape(destination);
-                    self.eval_expr_shaped(
-                        &assign.expr,
-                        true,
-                        EvaluationShape {
-                            array: destination.comptime.r#type.array.as_slice(),
-                            packed: packed.as_ref(),
-                        },
-                    )
-                } else {
-                    self.eval_expr(&assign.expr)
-                };
-                let widths: Vec<_> = assign
-                    .dst
-                    .iter()
-                    .map(|destination| self.destination_width(destination))
-                    .collect();
-                if widths.iter().all(Option::is_some) {
-                    let total_width = widths.iter().flatten().sum();
-                    let mut offset = total_width;
-                    for (destination, width) in assign.dst.iter().zip(widths) {
-                        let width = width.expect("checked above");
-                        offset -= width;
-                        self.write_assignment_destination(
-                            destination,
-                            &assign.expr,
-                            offset,
-                            total_width,
-                            controls,
-                        );
-                    }
-                } else {
-                    for destination in &assign.dst {
-                        self.write_destination(destination, &sources, controls);
-                    }
+                // An iterator condition confines each value to the
+                // iterations that select it.
+                if let Expression::Ternary(condition, true_value, false_value, _) = &assign.expr
+                    && let decision @ Decision::Split(_) = self.decide(condition)
+                {
+                    return self.eval_sides(
+                        condition,
+                        decision,
+                        [
+                            Side::Assign(assign, true_value),
+                            Side::Assign(assign, false_value),
+                        ],
+                        controls,
+                    );
                 }
-                self.call_caches.pop();
-                self.active_assignment = previous_assignment;
-                if self.is_return_assignment(&assign.dst) {
-                    self.record_return();
-                    FlowResult::new(ProcedureFlow::Return)
-                } else {
-                    FlowResult::new(ProcedureFlow::Continue)
-                }
+                self.eval_assign(assign, &assign.expr, controls)
             }
             Statement::If(statement) => self.eval_if(statement, controls),
             Statement::Case(statement) => self.eval_case(statement, controls),
@@ -2606,38 +3947,359 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
+    /// Assign `expression` to the destinations of `assign`.
+    fn eval_assign(
+        &mut self,
+        assign: &AssignStatement,
+        expression: &Expression,
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let previous_assignment = self.active_assignment;
+        self.active_assignment = self.tracing.then_some(assign.token);
+        self.call_caches.push(Some(EvaluationCache {
+            variables: Some(HashMap::default()),
+            ..EvaluationCache::default()
+        }));
+        // Evaluate RHS reads in expression order before destination
+        // selectors or any region writes. Keep each occurrence's value
+        // and index versions even if a later call or write changes them.
+        let sources = if let [destination] = assign.dst.as_slice() {
+            let packed = destination_packed_shape(destination);
+            self.eval_expr_shaped(
+                expression,
+                true,
+                EvaluationShape {
+                    array: destination.comptime.r#type.array.as_slice(),
+                    packed: packed.as_ref(),
+                },
+            )
+        } else {
+            self.eval_expr(expression)
+        };
+        let widths: Vec<_> = assign
+            .dst
+            .iter()
+            .map(|destination| self.destination_width(destination))
+            .collect();
+        if widths.iter().all(Option::is_some) {
+            let total_width = widths.iter().flatten().sum();
+            let mut offset = total_width;
+            for (index, (destination, width)) in assign.dst.iter().zip(widths).enumerate() {
+                let width = width.expect("checked above");
+                offset -= width;
+                self.current_writer = Some((assign.token, index));
+                self.write_assignment_destination(
+                    destination,
+                    expression,
+                    offset,
+                    total_width,
+                    controls,
+                );
+            }
+        } else {
+            for (index, destination) in assign.dst.iter().enumerate() {
+                self.current_writer = Some((assign.token, index));
+                self.write_destination(destination, &sources, controls);
+            }
+        }
+        self.current_writer = None;
+        self.call_caches.pop();
+        self.active_assignment = previous_assignment;
+        if self.is_return_assignment(&assign.dst) {
+            self.record_return();
+            FlowResult::new(ProcedureFlow::Return)
+        } else {
+            FlowResult::new(ProcedureFlow::Continue)
+        }
+    }
+
     fn eval_if(&mut self, statement: &IfStatement, controls: &[VersionId]) -> FlowResult {
-        let condition = self.eval_expr(&statement.cond);
+        let decision = self.decide(&statement.cond);
+        self.eval_sides(
+            &statement.cond,
+            decision,
+            [
+                Side::Block(&statement.true_side),
+                Side::Block(&statement.false_side),
+            ],
+            controls,
+        )
+    }
+
+    /// What is known statically about which side `condition` takes.
+    fn decide(&mut self, condition: &Expression) -> Decision {
+        if let Some(truth) = self.constant_truth(condition) {
+            Decision::Constant(truth)
+        } else if let Some(split) = self.iterator_condition_split(condition) {
+            Decision::Split(split)
+        } else {
+            Decision::Unknown
+        }
+    }
+
+    /// Evaluate the true and false sides of `condition` as `decision`
+    /// selects them.
+    fn eval_sides(
+        &mut self,
+        condition: &Expression,
+        decision: Decision,
+        [true_side, false_side]: [Side<'_>; 2],
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let sources = self.eval_control_condition(condition);
         let mut nested_controls = controls.to_vec();
-        nested_controls.extend_from_slice(&condition);
-        match self.constant_truth(&statement.cond) {
-            Some(true) => return self.eval_block(&statement.true_side, &nested_controls),
-            Some(false) => return self.eval_block(&statement.false_side, &nested_controls),
-            None => {}
+        nested_controls.extend_from_slice(&sources);
+        // Each arm is a side with the iterations that take it. A side that no
+        // iteration takes is never evaluated, and a side whose iterations form
+        // several progressions is evaluated once per progression.
+        let arms = match decision {
+            Decision::Constant(true) => vec![(true_side, None)],
+            Decision::Constant(false) => vec![(false_side, None)],
+            Decision::Split(IteratorSplit {
+                position,
+                holds,
+                fails,
+            }) => holds
+                .into_iter()
+                .map(|iterator| (true_side, Some((position, iterator))))
+                .chain(
+                    fails
+                        .into_iter()
+                        .map(|iterator| (false_side, Some((position, iterator)))),
+                )
+                .collect::<Vec<_>>(),
+            Decision::Unknown => vec![(true_side, None), (false_side, None)],
+        };
+        if let [(side, confinement)] = arms.as_slice() {
+            return self.eval_confined_side(*confinement, *side, &nested_controls);
         }
 
-        let branch = self.next_branch_id(2);
-        let parent_condition = self.path_condition.clone();
-        self.choose_path(&parent_condition, branch, 0);
-        let checkpoint = self.ssa.checkpoint();
-        let true_flow = self.eval_block(&statement.true_side, &nested_controls);
-        let true_state = self.ssa.capture_and_rollback(checkpoint);
-        let true_condition = self.path_condition.clone();
-
-        self.choose_path(&parent_condition, branch, 1);
-        let checkpoint = self.ssa.checkpoint();
-        let false_flow = self.eval_block(&statement.false_side, &nested_controls);
-        let false_state = self.ssa.capture_and_rollback(checkpoint);
-        let false_condition = self.path_condition.clone();
-
+        let branch = self.next_branch_id(arms.len());
+        let parent_condition = self.path_condition;
+        let mut branches = Vec::with_capacity(arms.len());
+        for (arm, (side, confinement)) in arms.into_iter().enumerate() {
+            self.choose_path(&parent_condition, branch, arm);
+            let checkpoint = self.ssa.checkpoint();
+            let flow = self.eval_confined_side(confinement, side, &nested_controls);
+            let state = self.ssa.capture_and_rollback(checkpoint);
+            branches.push((flow, state, self.path_condition));
+        }
         self.path_condition = parent_condition;
-        self.merge_branches(
-            vec![
-                (true_flow, true_state, true_condition),
-                (false_flow, false_state, false_condition),
-            ],
-            &condition,
-        )
+        self.merge_branches(branches, &sources)
+    }
+
+    fn eval_confined_side(
+        &mut self,
+        confinement: Option<(usize, CountedIterator)>,
+        side: Side<'_>,
+        controls: &[VersionId],
+    ) -> FlowResult {
+        match side {
+            Side::Block(statements) => self.eval_confined_block(confinement, statements, controls),
+            Side::Assign(assign, expression) => {
+                let Some((position, confined)) = confinement else {
+                    return self.eval_assign(assign, expression, controls);
+                };
+                let iterator = self.counted_iterators[position];
+                self.counted_iterators[position] = confined;
+                let flow = self.eval_assign(assign, expression, controls);
+                self.counted_iterators[position] = iterator;
+                flow
+            }
+        }
+    }
+
+    /// Evaluate a block with one counted iterator confined to the iterations
+    /// that reach it, so affine accesses inside address only their positions.
+    fn eval_confined_block(
+        &mut self,
+        confinement: Option<(usize, CountedIterator)>,
+        statements: &[Statement],
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let Some((position, confined)) = confinement else {
+            return self.eval_block(statements, controls);
+        };
+        let iterator = self.counted_iterators[position];
+        self.counted_iterators[position] = confined;
+        let flow = self.eval_block(statements, controls);
+        self.counted_iterators[position] = iterator;
+        flow
+    }
+
+    /// The iterations on which a comparison of a counted iterator with a
+    /// constant holds and fails. Such a condition reads no signal.
+    fn iterator_condition_split(&mut self, condition: &Expression) -> Option<IteratorSplit> {
+        if let Expression::Binary(left, op @ (Op::Eq | Op::Ne), right, _) = condition
+            && let Some(split) = self
+                .iterator_remainder_split(left, *op, right)
+                .or_else(|| self.iterator_remainder_split(right, *op, left))
+        {
+            return Some(split);
+        }
+        let (left, op, right) = match condition {
+            Expression::Binary(left, op, right, _) => (left, *op, right),
+            Expression::Unary(Op::LogicNot, operand, _) => {
+                let split = self.iterator_condition_split(operand)?;
+                return Some(IteratorSplit {
+                    position: split.position,
+                    holds: split.fails,
+                    fails: split.holds,
+                });
+            }
+            _ => return None,
+        };
+        let iterator = |expression: &Expression, iterators: &[CountedIterator]| {
+            let Expression::Term(factor) = expression else {
+                return None;
+            };
+            let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+                return None;
+            };
+            if !index.indices.is_empty() || !select.is_empty() {
+                return None;
+            }
+            iterators.iter().rposition(|iterator| iterator.id == *id)
+        };
+        let (position, constant, op) =
+            if let Some(position) = iterator(left, &self.counted_iterators) {
+                (position, right, op)
+            } else {
+                let position = iterator(right, &self.counted_iterators)?;
+                let op = match op {
+                    Op::Less => Op::Greater,
+                    Op::LessEq => Op::GreaterEq,
+                    Op::Greater => Op::Less,
+                    Op::GreaterEq => Op::LessEq,
+                    op => op,
+                };
+                (position, left, op)
+            };
+        let comptime = constant.comptime();
+        if !comptime.is_const {
+            return None;
+        }
+        // The operands are compared at their common context.
+        let constant = constant_integer(constant, &mut self.ctx)?;
+        let iterator = self.counted_iterators[position];
+        let (min, max) = (iterator.min, iterator.max);
+        // Iterations below and from `bound`.
+        let below = |bound: isize| {
+            (
+                iterator.within(min, bound.saturating_sub(1)),
+                iterator.within(bound, max),
+            )
+        };
+        let (holds, fails) = match op {
+            Op::Eq | Op::Ne => {
+                let equal = iterator.within(constant, constant);
+                // The other values form one progression unless the constant
+                // is an inner value.
+                let unequal = match equal {
+                    None => Some(iterator),
+                    Some(_) if constant == min => iterator.within(min + 1, max),
+                    Some(_) if constant == max => iterator.within(min, max - 1),
+                    Some(_) => Some(iterator),
+                };
+                if op == Op::Eq {
+                    (equal, unequal)
+                } else {
+                    (unequal, equal)
+                }
+            }
+            Op::Less => below(constant),
+            Op::LessEq => below(constant.saturating_add(1)),
+            Op::Greater => {
+                let (lower, upper) = below(constant.saturating_add(1));
+                (upper, lower)
+            }
+            Op::GreaterEq => {
+                let (lower, upper) = below(constant);
+                (upper, lower)
+            }
+            _ => return None,
+        };
+        Some(IteratorSplit {
+            position,
+            holds: holds.into_iter().collect(),
+            fails: fails.into_iter().collect(),
+        })
+    }
+
+    /// The iterations on which the remainder of a counted iterator by a
+    /// constant equals (`Eq`) or differs from (`Ne`) a constant. Each
+    /// remainder that an iteration leaves is one progression.
+    fn iterator_remainder_split(
+        &mut self,
+        remainder: &Expression,
+        op: Op,
+        value: &Expression,
+    ) -> Option<IteratorSplit> {
+        let Expression::Binary(dividend, Op::Rem, divisor, _) = remainder else {
+            return None;
+        };
+        let Expression::Term(factor) = dividend.as_ref() else {
+            return None;
+        };
+        let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+            return None;
+        };
+        if !index.indices.is_empty() || !select.is_empty() {
+            return None;
+        }
+        let position = self
+            .counted_iterators
+            .iter()
+            .rposition(|iterator| iterator.id == *id)?;
+        let iterator = self.counted_iterators[position];
+        let mut constant = |expression: &Expression| {
+            if !expression.comptime().is_const {
+                return None;
+            }
+            let value = expression.eval_value(&mut self.ctx)?.to_usize()?;
+            isize::try_from(value).ok()
+        };
+        let divisor = constant(divisor)?;
+        let value = constant(value)?;
+        // A negative dividend would leave a negative remainder.
+        if divisor <= 0 || iterator.min < 0 {
+            return None;
+        }
+        // Consecutive iterations leave every remainder they can within one
+        // period of their own progression, so no more than there are
+        // iterations. Each remainder is one arm, charged to the procedure's
+        // work before any is built.
+        let iterations = (iterator.max - iterator.min) / iterator.modulus + 1;
+        if !self.reserve_guard_work(usize::try_from(divisor.min(iterations)).ok()?) {
+            return None;
+        }
+        let mut equal = Vec::new();
+        let mut unequal = Vec::new();
+        let mut current = iterator.min;
+        let mut seen = HashSet::default();
+        while current <= iterator.max {
+            let remainder = current.rem_euclid(divisor);
+            if !seen.insert(remainder) {
+                break;
+            }
+            let class = iterator.confined(iterator.min, iterator.max, divisor, remainder)?;
+            if remainder == value {
+                equal.push(class);
+            } else {
+                unequal.push(class);
+            }
+            current = current.checked_add(iterator.modulus)?;
+        }
+        let (holds, fails) = if op == Op::Eq {
+            (equal, unequal)
+        } else {
+            (unequal, equal)
+        };
+        Some(IteratorSplit {
+            position,
+            holds,
+            fails,
+        })
     }
 
     fn eval_case(&mut self, statement: &CaseStatement, controls: &[VersionId]) -> FlowResult {
@@ -2692,7 +4354,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
 
             let branch = self.next_branch_id(statement.arms.len() + 1);
-            let parent_condition = self.path_condition.clone();
+            let parent_condition = self.path_condition;
             let mut states = Vec::with_capacity(possible.len() + usize::from(!has_definite_match));
             for index in possible {
                 if !self.choose_path(&parent_condition, branch, index) {
@@ -2701,21 +4363,21 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 let checkpoint = self.ssa.checkpoint();
                 let flow = self.eval_block(&statement.arms[index].body, &nested_controls);
                 let state = self.ssa.capture_and_rollback(checkpoint);
-                states.push((flow, state, self.path_condition.clone()));
+                states.push((flow, state, self.path_condition));
             }
             if !has_definite_match {
                 self.choose_path(&parent_condition, branch, statement.arms.len());
                 let checkpoint = self.ssa.checkpoint();
                 let flow = self.eval_block(&statement.default, &nested_controls);
                 let state = self.ssa.capture_and_rollback(checkpoint);
-                states.push((flow, state, self.path_condition.clone()));
+                states.push((flow, state, self.path_condition));
             }
             self.path_condition = parent_condition;
             return self.merge_branches(states, &condition);
         }
 
         let branch = self.next_branch_id(statement.arms.len() + 1);
-        let parent_condition = self.path_condition.clone();
+        let parent_condition = self.path_condition;
         let mut states = Vec::with_capacity(statement.arms.len() + 1);
         for (index, arm) in statement.arms.iter().enumerate() {
             if !self.choose_path(&parent_condition, branch, index) {
@@ -2724,13 +4386,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let checkpoint = self.ssa.checkpoint();
             let flow = self.eval_block(&arm.body, &nested_controls);
             let state = self.ssa.capture_and_rollback(checkpoint);
-            states.push((flow, state, self.path_condition.clone()));
+            states.push((flow, state, self.path_condition));
         }
         self.choose_path(&parent_condition, branch, statement.arms.len());
         let checkpoint = self.ssa.checkpoint();
         let flow = self.eval_block(&statement.default, &nested_controls);
         let state = self.ssa.capture_and_rollback(checkpoint);
-        states.push((flow, state, self.path_condition.clone()));
+        states.push((flow, state, self.path_condition));
         self.path_condition = parent_condition;
         self.merge_branches(states, &condition)
     }
@@ -2741,17 +4403,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return FlowResult::new(ProcedureFlow::Continue);
         }
 
-        if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
-            self.eval_known_for_iterations(statement, &range_controls, iterations)
-        } else if statement.range.is_over_size_limit(&mut self.ctx) {
+        match loop_evaluation(statement, &mut self.ctx) {
+            LoopEvaluation::Enumerated(values) => {
+                self.eval_known_for_iterations(statement, &range_controls, values)
+            }
+            LoopEvaluation::Counted(iterations) if iterations.count == 0 => {
+                FlowResult::new(ProcedureFlow::Continue)
+            }
+            LoopEvaluation::Counted(iterations) => {
+                self.eval_counted_for(statement, &range_controls, iterations)
+            }
             // A resource limit must not turn a finite, statically known loop
             // into the more conservative runtime-loop semantics. Without an
             // exact finite summary, suppress dependencies from this procedure
             // and report the analysis as incomplete.
-            self.status = AnalysisStatus::Barrier;
-            FlowResult::new(ProcedureFlow::Continue)
-        } else {
-            self.eval_runtime_for(statement, &range_controls)
+            LoopEvaluation::OverLimit => {
+                self.status = AnalysisStatus::Barrier;
+                FlowResult::new(ProcedureFlow::Continue)
+            }
+            LoopEvaluation::Runtime => self.eval_runtime_for(statement, &range_controls),
         }
     }
 
@@ -2811,7 +4481,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         range_controls: &[VersionId],
         iterations: Vec<usize>,
     ) -> FlowResult {
-        let parent_condition = self.path_condition.clone();
+        let parent_condition = self.path_condition;
         let checkpoint = self.ssa.checkpoint();
         self.loop_flows.push(LoopFlow {
             checkpoint,
@@ -2845,7 +4515,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if flow == ProcedureFlow::Continue {
             loop_flow.breaks.push(FlowState {
                 state: fallthrough,
-                condition: self.path_condition.clone(),
+                condition: self.path_condition,
             });
         }
         if loop_flow.breaks.is_empty() {
@@ -2856,23 +4526,115 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         FlowResult::new(ProcedureFlow::Continue)
     }
 
+    /// Evaluate a statically counted loop without enumerating its iterations.
+    /// The body is evaluated once with a symbolic iterator whose value extent
+    /// confines affine accesses, and the one-iteration transfer is closed as a
+    /// finite recurrence. Unlike a runtime loop, the body executes at least
+    /// once, so its unconditional writes are not merged with the entry state.
+    fn eval_counted_for(
+        &mut self,
+        statement: &ForStatement,
+        range_controls: &[VersionId],
+        iterations: CountedIterations,
+    ) -> FlowResult {
+        let (Ok(min), Ok(max)) = (
+            isize::try_from(iterations.min),
+            isize::try_from(iterations.max),
+        ) else {
+            self.status = AnalysisStatus::Barrier;
+            return FlowResult::new(ProcedureFlow::Continue);
+        };
+        let mut iterator = CountedIterator::new(statement.var_id, min, max);
+        // An additive step takes every `|step|`-th value from the first one.
+        if let Some(modulus) = for_range_step(&statement.range).and_then(isize::checked_abs)
+            && modulus > 1
+        {
+            iterator.modulus = modulus;
+            iterator.residue = min.rem_euclid(modulus);
+        }
+        self.counted_iterators.push(iterator);
+        let opened = self.writer_scope.is_none();
+        if opened {
+            self.open_writer_scope(statement);
+        }
+        let coverage = for_range_step(&statement.range).map(|step| {
+            let per_iteration = self.loop_accesses(&statement.body);
+            let closed = per_iteration.clone().close(&iterator, step);
+            CountedCoverage {
+                per_iteration,
+                closed,
+                iterator,
+                step,
+            }
+        });
+        let result = self.eval_repeated_for(statement, range_controls, false, coverage.as_ref());
+        if opened {
+            self.close_writer_scope();
+        }
+        self.counted_iterators.pop();
+        result
+    }
+
+    fn counted_transfer_coverage(
+        &self,
+        coverage: &CountedCoverage,
+        transfer: &BranchState<SsaKey>,
+    ) -> HashMap<SsaKey, TransferCoverage> {
+        transfer
+            .keys()
+            .filter_map(|&key| {
+                let packed = *self
+                    .bit_part
+                    .ranges_of((key.node.0, key.node.1))
+                    .get(key.node.2)?;
+                let array = key.node.1;
+                let key_coverage = coverage.key_coverage(key.node.0, array, packed);
+                let exposed = key_coverage.exposed.map(|spans| {
+                    spans
+                        .into_iter()
+                        .filter_map(|span| span.intersection(array))
+                        .map(|span| position_domain(span, packed))
+                        .collect()
+                });
+                Some((
+                    key,
+                    TransferCoverage {
+                        killed: key_coverage.killed,
+                        exposed,
+                    },
+                ))
+            })
+            .collect()
+    }
+
     fn eval_runtime_for(
         &mut self,
         statement: &ForStatement,
         range_controls: &[VersionId],
+    ) -> FlowResult {
+        let may_execute_zero_times = for_range_has_dynamic_bounds(&statement.range);
+        self.eval_repeated_for(statement, range_controls, may_execute_zero_times, None)
+    }
+
+    fn eval_repeated_for(
+        &mut self,
+        statement: &ForStatement,
+        range_controls: &[VersionId],
+        may_execute_zero_times: bool,
+        coverage: Option<&CountedCoverage>,
     ) -> FlowResult {
         // A runtime iterator is not part of a static prefix. Consequently
         // accesses such as x[i], x[i + 1], and x[j] all may address the same
         // LSP region. Evaluate the body once without binding the iterator so
         // the ordinary dynamic-access rules conservatively retain that alias.
         self.forget_runtime_iterator_value(statement.var_id);
-        let parent_condition = self.path_condition.clone();
-        let may_execute_zero_times = for_range_has_dynamic_bounds(&statement.range);
+        let parent_condition = self.path_condition;
         let checkpoint = self.ssa.checkpoint();
         self.loop_flows.push(LoopFlow {
             checkpoint,
             breaks: Vec::new(),
         });
+        let returns = self.recorded_returns();
         let flow = self.eval_block(&statement.body, range_controls);
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
@@ -2883,7 +4645,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if flow.flow == ProcedureFlow::Continue {
             loop_flow.breaks.push(FlowState {
                 state: body_state,
-                condition: self.path_condition.clone(),
+                condition: self.path_condition,
             });
         }
         self.path_condition = parent_condition;
@@ -2892,25 +4654,49 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // body or enumerating runtime iterator values.
         let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
         let bit_part = self.bit_part;
+        let tables = self.writer_scope.clone();
+        let coverage = coverage
+            .map(|coverage| self.counted_transfer_coverage(coverage, &transfer))
+            .unwrap_or_default();
+        // A return inside the body exits from some later iteration, which
+        // reads the state that earlier iterations left.
+        let observed = match (self.function_flows.last_mut(), returns) {
+            (Some(function), Some(start)) => &mut function.returns[start..],
+            _ => &mut [],
+        };
         if self
             .ssa
             .try_close_repeated_transfer(
-                &transfer,
-                checkpoint,
-                may_execute_zero_times,
+                RepeatedIteration {
+                    observed,
+                    ..RepeatedIteration::new(&transfer, checkpoint, may_execute_zero_times)
+                },
                 &mut self.import_work,
                 |key| {
-                    bit_part
+                    let domain = bit_part
                         .ranges_of((key.node.0, key.node.1))
                         .get(key.node.2)
-                        .map(|packed| position_domain(key.node.1, *packed))
+                        .map(|packed| position_domain(key.node.1, *packed))?;
+                    Some(match (key.writer, &tables) {
+                        (Some(writer), Some(tables)) => {
+                            tables.table_domain(key.node.0, writer, domain)
+                        }
+                        _ => domain,
+                    })
                 },
+                |key| coverage.get(&key).cloned().unwrap_or_default(),
             )
             .is_none()
         {
             self.exhaust_work();
         }
         FlowResult::new(ProcedureFlow::Continue)
+    }
+
+    fn recorded_returns(&self) -> Option<usize> {
+        self.function_flows
+            .last()
+            .map(|function| function.returns.len())
     }
 
     fn merge_flow_state_bindings(&mut self, states: &[FlowState]) -> BranchState<SsaKey> {
@@ -2971,18 +4757,38 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if self.guard_work.is_none() {
             return ExpressionSources::default();
         }
-        let requested_array = if matches!(expression, Expression::ArrayLiteral(_, _)) {
-            requested_array
-        } else {
-            let expression_array = expression.comptime().r#type.array.total().unwrap_or(1);
-            let Some(requested_array) = requested_array.intersection(ArraySpan {
-                start: 0,
-                length: expression_array,
-            }) else {
-                return ExpressionSources::default();
+        if projection.packed_anchor.is_some() {
+            // Packed coordinates are destination bits, not bits of this value.
+            let sources =
+                self.eval_expr_bits_in(expression, requested_array, requested, context, projection);
+            if sources
+                .sources
+                .iter()
+                .any(|(_, relation)| relation.packed.is_unlinked())
+            {
+                let value = self.ssa.related_definition(sources.sources);
+                let value = self
+                    .ssa
+                    .projected(value, position_domain(requested_array, requested));
+                return ExpressionSources {
+                    sources: vec![(value, PositionRelation::default())],
+                };
+            }
+            return sources;
+        }
+        let requested_array =
+            if projection.anchor || matches!(expression, Expression::ArrayLiteral(_, _)) {
+                requested_array
+            } else {
+                let expression_array = expression.comptime().r#type.array.total().unwrap_or(1);
+                let Some(requested_array) = requested_array.intersection(ArraySpan {
+                    start: 0,
+                    length: expression_array,
+                }) else {
+                    return ExpressionSources::default();
+                };
+                requested_array
             };
-            requested_array
-        };
         let natural_width = expression
             .comptime()
             .r#type
@@ -3026,7 +4832,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if sources
                     .sources
                     .iter()
-                    .any(|(_, relation)| relation.packed.is_none())
+                    .any(|(_, relation)| relation.packed.is_unlinked())
                 {
                     let array = projection
                         .destination_index
@@ -3079,6 +4885,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         context: ExpressionContext,
         projection: &ProjectionContext,
     ) -> ExpressionSources {
+        if let Some(anchor) = &projection.packed_anchor {
+            return self.eval_packed_anchored_bits(
+                expression,
+                requested_array,
+                requested,
+                context,
+                projection,
+                anchor,
+            );
+        }
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::Variable(id, index, select, comptime) => {
@@ -3103,8 +4919,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     } else {
                         None
                     };
+                    if projection.anchor
+                        && selected.is_none()
+                        && let Some(sources) = self.eval_array_anchored_strided_read(
+                            factor,
+                            requested,
+                            projection,
+                            &selector_sources,
+                        )
+                    {
+                        return sources;
+                    }
                     if let Some((_, low)) = selected {
-                        let mut reads = Vec::new();
                         let receiver = self.receiver_index(*id, index);
                         let accesses = var_reads(
                             *id,
@@ -3113,96 +4939,173 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             comptime.member_select_domain,
                             &mut self.ctx,
                         );
+                        // A translation would also relate the positions that
+                        // a confined iterator skips; those are mapped below.
                         let dynamic_array_offset = projection
                             .destination_index
                             .as_ref()
-                            .filter(|destination| !destination.index.terms.is_empty())
+                            .filter(|destination| {
+                                !destination.index.terms.is_empty()
+                                    && !self.index_has_gaps(&destination.index)
+                            })
                             .and_then(|destination| {
                                 let source = if let Some(sampled) = &sampled {
                                     sampled.index.clone()
                                 } else {
                                     self.sample_affine_index(*id, index)
                                 }?;
+                                if self.index_has_gaps(&source.index) {
+                                    return None;
+                                }
                                 destination.destination_offset_from(&source)
                             });
-                        let selected_array = if receiver.is_const() && accesses.len() == 1 {
-                            variable.as_ref().and_then(|variable| {
-                                receiver.eval_selection(&mut self.ctx, &variable.r#type.array)
-                            })
+                        // Another affine relation to the anchored destination
+                        // element, such as a stride or a reversal, reads the
+                        // positions the source index takes.
+                        // Each progression of the source positions has its own
+                        // map to the destination.
+                        let mapped_arrays = if projection.anchor && dynamic_array_offset.is_none() {
+                            let source = if let Some(sampled) = &sampled {
+                                sampled.index.clone()
+                            } else {
+                                self.sample_affine_index(*id, index)
+                            };
+                            source
+                                .filter(|source| !source.index.terms.is_empty())
+                                .and_then(|source| {
+                                    self.affine_links(
+                                        projection.destination_index.as_ref()?,
+                                        &source,
+                                        false,
+                                    )?
+                                    .into_iter()
+                                    .map(|(link, source)| {
+                                        let (first, last) = self.affine_hull(&source.index)?;
+                                        let first = usize::try_from(first).ok()?;
+                                        let length =
+                                            usize::try_from(last).ok()?.checked_sub(first)? + 1;
+                                        Some((
+                                            link,
+                                            ArraySpan {
+                                                start: first,
+                                                length,
+                                            },
+                                        ))
+                                    })
+                                    .collect::<Option<Vec<_>>>()
+                                })
+                                .unwrap_or_default()
                         } else {
-                            None
+                            Vec::new()
                         };
-                        if let Some(source_span) = requested.translated(0, low) {
-                            for (idx, access) in &accesses {
-                                let source_array = if let Some(offset) = dynamic_array_offset {
-                                    offset
-                                        .checked_neg()
-                                        .and_then(|offset| {
-                                            translate_array_span(
-                                                projection
-                                                    .destination_array
-                                                    .unwrap_or(requested_array),
-                                                offset,
-                                            )
-                                        })
-                                        .and_then(|requested| requested.intersection(*idx))
-                                } else if let Some(selection) = selected_array {
-                                    requested_array
-                                        .intersection(ArraySpan {
-                                            start: selection.result_start,
-                                            length: selection.length,
-                                        })
-                                        .and_then(|requested| {
-                                            requested.translated(
-                                                selection.result_start,
-                                                selection.source_start,
-                                            )
-                                        })
-                                        .and_then(|requested| requested.intersection(*idx))
-                                } else {
-                                    Some(*idx)
-                                };
-                                if let (Some(source_array), Some(source_span)) =
-                                    (source_array, source_span.intersection(*access))
-                                {
-                                    for key in self.bit_part.overlapping_access(
-                                        *id,
-                                        source_array,
-                                        source_span,
-                                    ) {
-                                        let version = if let Some(sampled) = &sampled {
-                                            sampled.values.get(&key).copied()
-                                        } else {
-                                            Some(self.read_key(key))
-                                        };
-                                        if let Some(version) = version {
-                                            reads.push(self.project_read(
-                                                key,
-                                                version,
-                                                source_array,
-                                                source_span,
-                                            ));
+                        // Anchored array coordinates are destination positions,
+                        // not positions of an array-valued expression.
+                        let selected_array =
+                            if !projection.anchor && receiver.is_const() && accesses.len() == 1 {
+                                variable.as_ref().and_then(|variable| {
+                                    receiver.eval_selection(&mut self.ctx, &variable.r#type.array)
+                                })
+                            } else {
+                                None
+                            };
+                        let variants = if mapped_arrays.is_empty() {
+                            vec![None]
+                        } else {
+                            mapped_arrays.into_iter().map(Some).collect()
+                        };
+                        let mut sources = ExpressionSources::default();
+                        for mapped_array in variants {
+                            let mut reads = Vec::new();
+                            if let Some(source_span) = requested.translated(0, low) {
+                                for (idx, access) in &accesses {
+                                    let source_array = if let Some((_, hull)) = mapped_array {
+                                        hull.intersection(*idx)
+                                    } else if let Some(offset) = dynamic_array_offset {
+                                        offset
+                                            .checked_neg()
+                                            .and_then(|offset| {
+                                                // Positions before the first
+                                                // element do not exist.
+                                                translate_array_span_clipped(
+                                                    projection
+                                                        .destination_array
+                                                        .unwrap_or(requested_array),
+                                                    offset,
+                                                )
+                                            })
+                                            .and_then(|requested| requested.intersection(*idx))
+                                    } else if let Some(selection) = selected_array {
+                                        requested_array
+                                            .intersection(ArraySpan {
+                                                start: selection.result_start,
+                                                length: selection.length,
+                                            })
+                                            .and_then(|requested| {
+                                                requested.translated(
+                                                    selection.result_start,
+                                                    selection.source_start,
+                                                )
+                                            })
+                                            .and_then(|requested| requested.intersection(*idx))
+                                    } else {
+                                        Some(*idx)
+                                    };
+                                    if let (Some(source_array), Some(source_span)) =
+                                        (source_array, source_span.intersection(*access))
+                                    {
+                                        for key in self.bit_part.overlapping_access(
+                                            *id,
+                                            source_array,
+                                            source_span,
+                                        ) {
+                                            let version =
+                                                if let Some(sampled) = &sampled {
+                                                    sampled.values.get(&key).copied()
+                                                } else {
+                                                    let last_writers = self.last_writer_sources(
+                                                        *id,
+                                                        index,
+                                                        select,
+                                                        comptime.member_select_domain,
+                                                    );
+                                                    Some(self.read_source_key(
+                                                        key,
+                                                        last_writers.as_deref(),
+                                                    ))
+                                                };
+                                            if let Some(version) = version {
+                                                reads.push(self.project_read(
+                                                    key,
+                                                    version,
+                                                    source_array,
+                                                    source_span,
+                                                ));
+                                            }
                                         }
                                     }
                                 }
                             }
+                            // An unknown array selector loses only the array
+                            // correspondence, not the selected packed positions.
+                            let offset = PositionRelation {
+                                array: mapped_array.map(|(link, _)| link).unwrap_or_else(|| {
+                                    Link::from_offset(dynamic_array_offset.or_else(|| {
+                                        selected_array.and_then(|selection| {
+                                            signed_difference(
+                                                selection.result_start,
+                                                selection.source_start,
+                                            )
+                                        })
+                                    }))
+                                }),
+                                packed: Link::from_offset(
+                                    isize::try_from(low).ok().and_then(isize::checked_neg),
+                                ),
+                            };
+                            for version in reads {
+                                sources.push(version, offset);
+                            }
                         }
-                        // An unknown array selector loses only the array
-                        // correspondence, not the selected packed positions.
-                        let offset = PositionRelation {
-                            array: dynamic_array_offset.or_else(|| {
-                                selected_array.and_then(|selection| {
-                                    signed_difference(
-                                        selection.result_start,
-                                        selection.source_start,
-                                    )
-                                })
-                            }),
-                            packed: isize::try_from(low).ok().and_then(isize::checked_neg),
-                        };
-                        let mut sources = ExpressionSources {
-                            sources: reads.into_iter().map(|version| (version, offset)).collect(),
-                        };
                         sources.extend_whole(selector_sources);
                         sources
                     } else {
@@ -3230,6 +5133,40 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         ),
                     _ => ExpressionSources::whole(self.eval_system_call(call, &[], true)),
                 },
+                Factor::FunctionCall(call)
+                    if projection.anchor
+                        && call.outputs.is_empty()
+                        && self.function_is_pure(call) =>
+                {
+                    // A call that reads only its inputs maps each destination
+                    // element from the same elements of its actuals.
+                    let inputs = call.inputs.values().collect::<Vec<_>>();
+                    self.eval_anchored_operands(&inputs, requested_array, projection)
+                }
+                Factor::FunctionCall(call) if projection.anchor => {
+                    // A call result has its own array coordinates. Request
+                    // the selected bits of every result element and let them
+                    // reach each candidate destination element.
+                    let all = ArraySpan {
+                        start: 0,
+                        length: isize::MAX.unsigned_abs(),
+                    };
+                    ExpressionSources {
+                        sources: self
+                            .eval_call_requested(call, &[], Some((all, requested)))
+                            .into_iter()
+                            .map(|version| {
+                                (
+                                    version,
+                                    PositionRelation {
+                                        array: Link::from_offset(None),
+                                        packed: Link::from_offset(Some(0)),
+                                    },
+                                )
+                            })
+                            .collect(),
+                    }
+                }
                 Factor::FunctionCall(call) => ExpressionSources {
                     sources: self
                         .eval_call_requested(call, &[], Some((requested_array, requested)))
@@ -3258,6 +5195,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     context,
                     projection,
                 ),
+                _ if projection.anchor => {
+                    self.eval_anchored_operands(&[operand], requested_array, projection)
+                }
                 _ => ExpressionSources::whole(self.eval_expr(operand)),
             },
             Expression::Binary(left, op, right, comptime) => match op {
@@ -3302,14 +5242,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             );
                             if let Ok(shift) = isize::try_from(shift) {
                                 input.translate(PositionRelation {
-                                    array: Some(0),
-                                    packed: Some(shift),
+                                    array: Link::from_offset(Some(0)),
+                                    packed: Link::from_offset(Some(shift)),
                                 });
                             } else {
                                 input.widen_all();
                             }
                             reads.extend(input);
                         }
+                    } else if projection.anchor {
+                        reads.extend(self.eval_anchored_operands(
+                            &[left],
+                            requested_array,
+                            projection,
+                        ));
                     } else {
                         reads.extend_whole(self.eval_expr(left));
                     }
@@ -3335,8 +5281,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             );
                             if let Ok(shift) = isize::try_from(shift) {
                                 input.translate(PositionRelation {
-                                    array: Some(0),
-                                    packed: Some(-shift),
+                                    array: Link::from_offset(Some(0)),
+                                    packed: Link::from_offset(Some(-shift)),
                                 });
                             } else {
                                 input.widen_all();
@@ -3366,6 +5312,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 self.project_sign_extension(sign, requested_array, sign_span, fill);
                             reads.push(filled, PositionRelation::default());
                         }
+                    } else if projection.anchor {
+                        reads.extend(self.eval_anchored_operands(
+                            &[left],
+                            requested_array,
+                            projection,
+                        ));
                     } else {
                         reads.extend_whole(self.eval_expr(left));
                     }
@@ -3391,12 +5343,30 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 Op::LogicAnd | Op::LogicOr => ExpressionSources::whole(
                     self.eval_short_circuit(expression, left, *op, right, true),
                 ),
+                _ if projection.anchor => {
+                    self.eval_anchored_operands(&[left, right], requested_array, projection)
+                }
                 _ => ExpressionSources::whole(self.eval_expr(expression)),
             },
             Expression::Ternary(condition, left, right, _) => {
-                let controls = self.eval_expr(condition);
                 let mut reads = ExpressionSources::default();
-                reads.extend_whole(controls.iter().copied());
+                let controls = if projection.anchor {
+                    // An elementwise condition selects at the same destination
+                    // element; its bits all reach the selected value.
+                    let condition =
+                        self.eval_anchored_operands(&[condition], requested_array, projection);
+                    let controls = condition
+                        .sources
+                        .iter()
+                        .map(|(version, _)| *version)
+                        .collect();
+                    reads.extend(condition);
+                    controls
+                } else {
+                    let controls = self.eval_expr(condition);
+                    reads.extend_whole(controls.iter().copied());
+                    controls
+                };
                 match self.constant_truth(condition) {
                     Some(true) => reads.extend(self.eval_expr_in_context(
                         left,
@@ -3414,11 +5384,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     )),
                     None => {
                         let branch = self.expression_branch_id(expression);
-                        let parent_condition = self.path_condition.clone();
+                        let parent_condition = self.path_condition;
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 0);
-                        let left_condition = self.path_condition.clone();
+                        let left_condition = self.path_condition;
                         let left = self.eval_expr_in_context(
                             left,
                             requested_array,
@@ -3431,7 +5401,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 1);
-                        let right_condition = self.path_condition.clone();
+                        let right_condition = self.path_condition;
                         let right = self.eval_expr_in_context(
                             right,
                             requested_array,
@@ -3498,8 +5468,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 );
                                 if let Ok(output_start) = isize::try_from(output_start) {
                                     part.translate(PositionRelation {
-                                        array: Some(0),
-                                        packed: Some(output_start),
+                                        array: Link::from_offset(Some(0)),
+                                        packed: Link::from_offset(Some(output_start)),
                                     });
                                 } else {
                                     part.widen_all();
@@ -3535,8 +5505,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 reads.push(
                                     repeated,
                                     PositionRelation {
-                                        array: Some(0),
-                                        packed: Some(offset),
+                                        array: Link::from_offset(Some(0)),
+                                        packed: Link::from_offset(Some(offset)),
                                     },
                                 );
                             } else {
@@ -3553,6 +5523,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     low = next;
                 }
                 reads
+            }
+            Expression::ArrayLiteral(..) if projection.anchor => {
+                ExpressionSources::whole(self.eval_expr(expression))
             }
             Expression::ArrayLiteral(items, _) => {
                 let Some(requested_end) = requested_array.end() else {
@@ -3628,8 +5601,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             );
                             if let Ok(output_start) = isize::try_from(output_start) {
                                 item.translate(PositionRelation {
-                                    array: Some(output_start),
-                                    packed: Some(0),
+                                    array: Link::from_offset(Some(output_start)),
+                                    packed: Link::from_offset(Some(0)),
                                 });
                             } else {
                                 item.widen_all();
@@ -3700,8 +5673,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             );
                             if let Ok(output_start) = isize::try_from(output_start) {
                                 item.translate(PositionRelation {
-                                    array: Some(output_start),
-                                    packed: Some(0),
+                                    array: Link::from_offset(Some(output_start)),
+                                    packed: Link::from_offset(Some(0)),
                                 });
                             } else {
                                 item.widen_all();
@@ -3770,8 +5743,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         };
                         if let Ok(low) = isize::try_from(low) {
                             field.translate(PositionRelation {
-                                array: Some(0),
-                                packed: Some(low),
+                                array: Link::from_offset(Some(0)),
+                                packed: Link::from_offset(Some(low)),
                             });
                         } else {
                             field.widen_all();
@@ -3786,6 +5759,354 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 reads
             }
         }
+    }
+
+    /// Evaluate operands whose every bit may reach every result bit, keeping
+    /// their anchored array correspondence with the destination element.
+    fn eval_anchored_operands(
+        &mut self,
+        operands: &[&Expression],
+        requested_array: ArraySpan,
+        projection: &ProjectionContext,
+    ) -> ExpressionSources {
+        let mut reads = ExpressionSources::default();
+        for operand in operands {
+            let comptime = operand.comptime();
+            let Some(width) = comptime.r#type.total_width().and_then(PackedSpan::whole) else {
+                reads.extend_whole(self.eval_expr(operand));
+                continue;
+            };
+            let mut sources = self.eval_expr_in_context(
+                operand,
+                requested_array,
+                width,
+                ExpressionContext {
+                    width: width.length,
+                    ..comptime.expr_context
+                },
+                projection,
+            );
+            for (_, relation) in &mut sources.sources {
+                relation.packed = Link::from_offset(None);
+            }
+            reads.extend(sources);
+        }
+        reads
+    }
+
+    /// The affine coordinate frame of a condition evaluated once per symbolic
+    /// iteration: the symbolic terms of its first affine variable access.
+    fn condition_frame(
+        &mut self,
+        expression: &Expression,
+    ) -> Option<(SampledAffineIndex, ArraySpan)> {
+        if self.counted_iterators.is_empty() {
+            return None;
+        }
+        let (id, index, select) = first_indexed_variable(expression)?;
+        // The frame is an abstract coordinate: the symbolic part of the first
+        // position that moves with the iterators, on either axis.
+        let mut sampled = self
+            .sample_affine_index(id, &index)
+            .filter(|sampled| !sampled.index.terms.is_empty())
+            .or_else(|| {
+                self.sample_packed_select(id, &select)
+                    .map(|(sampled, _)| sampled)
+                    .filter(|sampled| !sampled.index.terms.is_empty())
+            })?;
+        sampled.index.constant = 0;
+        let (min, max) = self.affine_hull(&sampled.index)?;
+        let region = ArraySpan {
+            start: usize::try_from(min).ok()?,
+            length: usize::try_from(max.checked_sub(min)?.checked_add(1)?).ok()?,
+        };
+        Some((sampled, region))
+    }
+
+    /// Evaluate a control condition. Inside a counted loop, an elementwise
+    /// condition is anchored to its iterator frame, so a write at the same
+    /// frame keeps the displacement instead of reaching every element.
+    fn eval_control_condition(&mut self, expression: &Expression) -> Vec<VersionId> {
+        let Some((frame, region)) = self.condition_frame(expression) else {
+            return self.eval_expr(expression);
+        };
+        let projection = ProjectionContext {
+            destination_index: Some(frame.clone()),
+            destination_array: Some(region),
+            array_shape: None,
+            anchor: true,
+            packed_anchor: None,
+        };
+        let sources = self.eval_anchored_operands(&[expression], region, &projection);
+        if sources.is_empty() {
+            return Vec::new();
+        }
+        let version = self.ssa.related_definition(sources.sources);
+        let version = self.ssa.projected(
+            version,
+            position_domain(
+                region,
+                PackedSpan {
+                    start: 0,
+                    length: 1,
+                },
+            ),
+        );
+        self.control_frames.insert(version, frame);
+        vec![version]
+    }
+
+    fn eval_packed_anchored_bits(
+        &mut self,
+        expression: &Expression,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        context: ExpressionContext,
+        projection: &ProjectionContext,
+        anchor: &SampledAffineIndex,
+    ) -> ExpressionSources {
+        match expression {
+            Expression::Term(factor) => match factor.as_ref() {
+                Factor::Variable(..) => {
+                    self.eval_packed_anchored_read(factor, requested_array, requested, anchor)
+                }
+                Factor::Value(_) => ExpressionSources::default(),
+                _ => ExpressionSources::whole(self.eval_expr(expression)),
+            },
+            Expression::Unary(Op::BitNot | Op::Add, operand, _) => {
+                self.eval_expr_bits_in(operand, requested_array, requested, context, projection)
+            }
+            Expression::Unary(_, operand, _) => self.eval_packed_anchored_operands(
+                &[operand],
+                requested_array,
+                requested,
+                projection,
+            ),
+            Expression::Binary(left, op, right, _) => match op {
+                Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                    let mut reads = self.eval_expr_bits_in(
+                        left,
+                        requested_array,
+                        requested,
+                        context,
+                        projection,
+                    );
+                    reads.extend(self.eval_expr_bits_in(
+                        right,
+                        requested_array,
+                        requested,
+                        context,
+                        projection,
+                    ));
+                    reads
+                }
+                Op::As
+                | Op::LogicShiftL
+                | Op::ArithShiftL
+                | Op::LogicShiftR
+                | Op::ArithShiftR
+                | Op::LogicAnd
+                | Op::LogicOr => ExpressionSources::whole(self.eval_expr(expression)),
+                _ => self.eval_packed_anchored_operands(
+                    &[left, right],
+                    requested_array,
+                    requested,
+                    projection,
+                ),
+            },
+            Expression::Ternary(condition, left, right, _) => {
+                let mut reads = self.eval_packed_anchored_operands(
+                    &[condition],
+                    requested_array,
+                    requested,
+                    projection,
+                );
+                let controls = reads
+                    .sources
+                    .iter()
+                    .map(|(version, _)| *version)
+                    .collect::<Vec<_>>();
+                match self.constant_truth(condition) {
+                    Some(true) => reads.extend(self.eval_expr_bits_in(
+                        left,
+                        requested_array,
+                        requested,
+                        context,
+                        projection,
+                    )),
+                    Some(false) => reads.extend(self.eval_expr_bits_in(
+                        right,
+                        requested_array,
+                        requested,
+                        context,
+                        projection,
+                    )),
+                    None => {
+                        let branch = self.expression_branch_id(expression);
+                        let parent_condition = self.path_condition;
+                        let checkpoint = self.ssa.checkpoint();
+                        self.choose_path(&parent_condition, branch, 0);
+                        let left_condition = self.path_condition;
+                        let left = self.eval_expr_bits_in(
+                            left,
+                            requested_array,
+                            requested,
+                            context,
+                            projection,
+                        );
+                        let left = self.guard_expression_sources(left);
+                        let left_state = self.ssa.capture_and_rollback(checkpoint);
+                        let checkpoint = self.ssa.checkpoint();
+                        self.choose_path(&parent_condition, branch, 1);
+                        let right_condition = self.path_condition;
+                        let right = self.eval_expr_bits_in(
+                            right,
+                            requested_array,
+                            requested,
+                            context,
+                            projection,
+                        );
+                        let right = self.guard_expression_sources(right);
+                        let right_state = self.ssa.capture_and_rollback(checkpoint);
+                        self.merge_expression_states(
+                            [
+                                (&left_state, &left_condition),
+                                (&right_state, &right_condition),
+                            ],
+                            &controls,
+                        );
+                        self.path_condition = parent_condition;
+                        reads.extend(left);
+                        reads.extend(right);
+                    }
+                }
+                reads
+            }
+            Expression::Concatenation(..)
+            | Expression::ArrayLiteral(..)
+            | Expression::StructConstructor(..) => {
+                ExpressionSources::whole(self.eval_expr(expression))
+            }
+        }
+    }
+
+    /// Whether a call depends only on its inputs: its body reads and writes
+    /// nothing but function variables and calls only such functions.
+    fn function_is_pure(&mut self, call: &FunctionCall) -> bool {
+        let key = (call.id, call.index.clone());
+        if let Some(&pure) = self.pure_functions.get(&key) {
+            return pure;
+        }
+        fn pure_expression(
+            analysis: &ProcedureAnalysis<'_, '_>,
+            expression: &Expression,
+            depth: usize,
+        ) -> bool {
+            let recurse = |expression: &Expression| pure_expression(analysis, expression, depth);
+            match expression {
+                Expression::Term(factor) => match factor.as_ref() {
+                    Factor::Variable(id, ..) => {
+                        analysis.is_function_variable(*id)
+                            && children::children(expression).into_iter().all(recurse)
+                    }
+                    Factor::Value(_) => true,
+                    Factor::FunctionCall(call) => {
+                        call.outputs.is_empty()
+                            && call.inputs.values().all(recurse)
+                            && pure_call(analysis, call, depth + 1)
+                    }
+                    _ => false,
+                },
+                _ => children::children(expression).into_iter().all(recurse),
+            }
+        }
+        fn pure_statements(
+            analysis: &ProcedureAnalysis<'_, '_>,
+            statements: &[Statement],
+            depth: usize,
+        ) -> bool {
+            statements.iter().all(|statement| match statement {
+                Statement::Assign(assign) => {
+                    assign.hier_dst.is_none()
+                        && pure_expression(analysis, &assign.expr, depth)
+                        && assign.dst.iter().all(|destination| {
+                            analysis.is_function_variable(destination.id)
+                                && destination
+                                    .index
+                                    .expressions()
+                                    .all(|x| pure_expression(analysis, x, depth))
+                                && destination
+                                    .select
+                                    .0
+                                    .iter()
+                                    .all(|x| pure_expression(analysis, x, depth))
+                                && destination
+                                    .select
+                                    .1
+                                    .as_ref()
+                                    .is_none_or(|(_, x)| pure_expression(analysis, x, depth))
+                        })
+                }
+                Statement::If(statement) => {
+                    pure_expression(analysis, &statement.cond, depth)
+                        && pure_statements(analysis, &statement.true_side, depth)
+                        && pure_statements(analysis, &statement.false_side, depth)
+                }
+                Statement::Case(statement) => {
+                    pure_expression(analysis, &statement.case_target, depth)
+                        && statement.arms.iter().all(|arm| {
+                            arm.patterns.iter().all(|pattern| match pattern {
+                                CasePattern::Eq(x) => pure_expression(analysis, x, depth),
+                                CasePattern::Range { lo, hi, .. } => {
+                                    pure_expression(analysis, lo, depth)
+                                        && pure_expression(analysis, hi, depth)
+                                }
+                            }) && pure_statements(analysis, &arm.body, depth)
+                        })
+                        && pure_statements(analysis, &statement.default, depth)
+                }
+                Statement::For(statement) => {
+                    let (start, end, _) = for_range_bounds(&statement.range);
+                    [start, end].into_iter().all(|bound| match bound {
+                        ForBound::Expression(x) => pure_expression(analysis, x, depth),
+                        ForBound::Const(..) => true,
+                    }) && pure_statements(analysis, &statement.body, depth)
+                }
+                Statement::Break | Statement::Null => true,
+                _ => false,
+            })
+        }
+        fn pure_call(
+            analysis: &ProcedureAnalysis<'_, '_>,
+            call: &FunctionCall,
+            depth: usize,
+        ) -> bool {
+            if depth > 16 {
+                return false;
+            }
+            let Some(function) = analysis.ctx.functions.get(&call.id) else {
+                return false;
+            };
+            if !function.path.path.0.is_empty() {
+                // Interface methods read their receiver.
+                return false;
+            }
+            let body = match &call.index {
+                Some(index) => function.get_function(index),
+                None => function.get_function(&[]),
+            };
+            body.is_some_and(|body| pure_statements(analysis, &body.statements, depth))
+        }
+        let pure = pure_call(self, call, 0);
+        self.pure_functions.insert(key, pure);
+        pure
+    }
+
+    fn is_function_variable(&self, id: VarId) -> bool {
+        self.ctx
+            .variables
+            .get(&id)
+            .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Function)
     }
 
     fn expression_array_extent(&mut self, expression: &Expression) -> Option<usize> {
@@ -3892,17 +6213,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Some(true) => reads.extend(self.eval_expr_inner(right, prune_constant_branches)),
             None => {
                 let branch = self.expression_branch_id(expression);
-                let parent_condition = self.path_condition.clone();
+                let parent_condition = self.path_condition;
                 if !self.choose_path(&parent_condition, branch, 0) {
                     return reads;
                 }
-                let taken = self.path_condition.clone();
+                let taken = self.path_condition;
                 let checkpoint = self.ssa.checkpoint();
                 let right = self.eval_expr_inner(right, prune_constant_branches);
                 let right = self.ssa.definition_guarded(right, &self.path_condition);
                 let evaluated_state = self.ssa.capture_and_rollback(checkpoint);
                 if self.choose_path(&parent_condition, branch, 1) {
-                    let skipped = self.path_condition.clone();
+                    let skipped = self.path_condition;
                     self.merge_expression_states(
                         [
                             (&evaluated_state, &taken),
@@ -4027,18 +6348,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                     None => {
                         let branch = self.expression_branch_id(expression);
-                        let parent_condition = self.path_condition.clone();
+                        let parent_condition = self.path_condition;
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 0);
-                        let left_condition = self.path_condition.clone();
+                        let left_condition = self.path_condition;
                         let left = self.eval_expr_shaped(left, prune_constant_branches, shape);
                         let left = self.ssa.definition_guarded(left, &self.path_condition);
                         let left_state = self.ssa.capture_and_rollback(checkpoint);
 
                         let checkpoint = self.ssa.checkpoint();
                         self.choose_path(&parent_condition, branch, 1);
-                        let right_condition = self.path_condition.clone();
+                        let right_condition = self.path_condition;
                         let right = self.eval_expr_shaped(right, prune_constant_branches, shape);
                         let right = self.ssa.definition_guarded(right, &self.path_condition);
                         let right_state = self.ssa.capture_and_rollback(checkpoint);
@@ -4600,17 +6921,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         summary: &FunctionSummary,
     ) -> HashMap<BranchId, BranchId> {
-        let mut branches = summary
-            .graph
-            .edges
-            .iter()
-            .flat_map(|edge| edge.condition.branches())
-            .collect::<Vec<_>>();
-        branches.sort_unstable();
-        branches.dedup();
-        branches
+        // Each call instantiates fresh branches so that calls taking
+        // different arms stay independent.
+        super::summary_branches(summary.graph.edges.iter().map(|edge| &edge.condition))
             .into_iter()
-            .map(|branch| (branch, self.next_branch_id(branch.arms())))
+            .map(|(branch, shared)| {
+                let target = if shared {
+                    self.next_branch_id(branch.arms())
+                } else {
+                    BranchId::ERASED
+                };
+                (branch, target)
+            })
             .collect()
     }
 
@@ -4660,13 +6982,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         let mut projected = Vec::new();
         for (key, relation, condition) in sources {
-            let array_matches = relation.array.is_none_or(|offset| {
-                translate_array_span(key.node.1, offset)
+            let array_matches = relation.array.translation_offset().is_none_or(|offset| {
+                translate_array_span_clipped(key.node.1, offset)
                     .is_some_and(|span| span.overlaps(requested_array))
             });
-            let packed_matches = relation.packed.is_none_or(|offset| {
+            let packed_matches = relation.packed.translation_offset().is_none_or(|offset| {
                 self.key_span(key.node)
-                    .and_then(|span| translate_packed_span(span, offset))
+                    .and_then(|span| translate_span_clipped(span, offset))
                     .is_some_and(|span| span.overlaps(requested_packed))
             });
             if array_matches && packed_matches {
@@ -4791,8 +7113,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             sources: vec![(
                 repeated,
                 PositionRelation {
-                    array: Some(offset),
-                    packed: Some(0),
+                    array: Link::from_offset(Some(offset)),
+                    packed: Link::from_offset(Some(0)),
                 },
             )],
         })
@@ -4803,10 +7125,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         mut sources: ExpressionSources,
         projection: &ProjectionContext,
     ) -> VersionId {
-        if projection
-            .destination_index
-            .as_ref()
-            .is_some_and(|index| !index.index.terms.is_empty())
+        if !projection.anchor
+            && projection
+                .destination_index
+                .as_ref()
+                .is_some_and(|index| !index.index.terms.is_empty())
         {
             // Affine reads can use destination array coordinates. Dynamic
             // writes already forget array correspondence, so discard only
@@ -4830,8 +7153,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let extended = self.ssa.related_definition(vec![(
             sign,
             PositionRelation {
-                array: Some(0),
-                packed: None,
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(None),
             },
         )]);
         self.ssa
@@ -4923,8 +7246,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // An unknown array selector loses only the array correspondence.
         // Packed bits still copy to their corresponding destination bits.
         let position_offset = PositionRelation {
-            array: destination_array.and_then(|array| isize::try_from(array.start).ok()),
-            packed: selected.and_then(|(_, low)| signed_difference(low, formal_offset)),
+            array: Link::from_offset(
+                destination_array.and_then(|array| isize::try_from(array.start).ok()),
+            ),
+            packed: Link::from_offset(
+                selected.and_then(|(_, low)| signed_difference(low, formal_offset)),
+            ),
         };
         let dynamic = self.destination_is_dynamic(destination);
         for key in self.write_keys(destination) {
@@ -5044,6 +7371,30 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 }
 
+fn first_indexed_variable(expression: &Expression) -> Option<(VarId, VarIndex, VarSelect)> {
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Variable(id, index, select, _)
+                if !index.indices.is_empty() || !select.is_const_with_range() =>
+            {
+                Some((*id, index.clone(), select.clone()))
+            }
+            _ => None,
+        },
+        Expression::Unary(_, operand, _) => first_indexed_variable(operand),
+        Expression::Binary(left, _, right, _) => {
+            first_indexed_variable(left).or_else(|| first_indexed_variable(right))
+        }
+        Expression::Ternary(condition, left, right, _) => first_indexed_variable(condition)
+            .or_else(|| first_indexed_variable(left))
+            .or_else(|| first_indexed_variable(right)),
+        Expression::Concatenation(parts, _) => parts
+            .iter()
+            .find_map(|(part, _)| first_indexed_variable(part)),
+        Expression::ArrayLiteral(..) | Expression::StructConstructor(..) => None,
+    }
+}
+
 fn statements_have_unknown(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
         Statement::Assign(assign) => expression_has_unknown(&assign.expr),
@@ -5107,5 +7458,27 @@ fn expression_has_unknown(expression: &Expression) -> bool {
         Expression::StructConstructor(_, fields, _) => fields
             .iter()
             .any(|(_, expression)| expression_has_unknown(expression)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counted_iterator_is_empty_below_the_most_negative_bound() {
+        let iterator = CountedIterator {
+            id: VarId::default(),
+            min: 1,
+            max: 3,
+            modulus: 2,
+            residue: 1,
+        };
+        // `i < isize::MIN` leaves no value, without subtracting the residue
+        // from that bound.
+        assert!(iterator.within(1, isize::MIN).is_none());
+        assert!(iterator.within(isize::MAX, 3).is_none());
+        let within = iterator.within(2, isize::MAX).expect("3 remains");
+        assert_eq!((within.min, within.max), (3, 3));
     }
 }

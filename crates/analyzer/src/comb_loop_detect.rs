@@ -11,10 +11,12 @@
 //! boxes, `inout` ports, recursive functions) add no edges; the
 //! simulator's `analyze_dependency` is the backup safety net.
 
+mod condition;
 mod diagnostics;
 mod graph;
 mod hierarchy;
 mod model;
+mod position;
 mod procedure;
 mod region;
 mod ssa;
@@ -27,7 +29,8 @@ pub(crate) use procedure::{
     function_summary_graph_edge_count, function_summary_graph_node_count, module_context_entries,
     reset_function_evaluation_count, reset_module_context_entries,
     reset_traced_procedure_evaluation_count, reset_visible_source_probes,
-    traced_procedure_evaluation_count, visible_source_probes, write_footprint_statement_visits,
+    statement_evaluation_count, traced_procedure_evaluation_count, visible_source_probes,
+    write_footprint_statement_visits,
 };
 
 use diagnostics::{DiagnosticReplayCache, TraceKind, check_graph};
@@ -47,6 +50,7 @@ pub(crate) use graph::{
 };
 use hierarchy::{module_postorder, walk_insts};
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
+use position::Link;
 use region::{
     ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
@@ -103,6 +107,8 @@ pub(crate) fn is_complete(ir: &Ir) -> bool {
 }
 
 fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
+    // Branch conditions of a previous analysis are never used again.
+    condition::reset();
     let mut errors = Vec::new();
     let mut complete = true;
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
@@ -374,6 +380,7 @@ struct PackedBoundary {
 // sorting. Charge only emitted atoms, before allocating them. The linear
 // allowance keeps large, non-amplifying source inputs outside this limit.
 const PARTITION_EXTRA_ATOMS: usize = 1_000_000;
+
 const PARTITION_ATOMS_PER_ACCESS: usize = 8;
 
 struct PartitionExpansionBudget {
@@ -723,11 +730,12 @@ fn collect_statement_spans(
                 collect_statement_spans(&statement.default, out, ctx);
             }
             Statement::For(statement) => {
-                // Storage boundaries still belong to this consumer. Keeping
-                // the common IR compact must not turn distinct constant
-                // iterations into one strong-write alias region.
-                if !crate::ir::peel::has_own_break(&statement.body)
-                    && let Some(iterations) = statement.range.eval_iter(ctx)
+                // Loops that need their iterator's values still enumerate
+                // their constant iterations during evaluation, which needs
+                // each iteration's boundaries. Every other loop is evaluated
+                // once with a symbolic iterator.
+                if let procedure::LoopEvaluation::Enumerated(iterations) =
+                    procedure::loop_evaluation(statement, ctx)
                 {
                     for iteration in iterations {
                         let body = crate::ir::peel::specialize_iteration(ctx, statement, iteration);
@@ -953,9 +961,7 @@ impl<'a> ModuleGraphBuilder<'a> {
             if let Some(dependencies) = dependencies {
                 add_procedure_graph(graph, node_map, bit_part, module, dependencies);
             }
-            reads.sort_unstable_by_key(|source| {
-                (source.key, source.offset, source.condition.clone())
-            });
+            reads.sort_unstable_by_key(|source| (source.key, source.offset, source.condition));
             reads.dedup_by(|left, right| {
                 left.key == right.key
                     && left.offset == right.offset
@@ -997,7 +1003,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                             *destination,
                             GraphDependency {
                                 kind: BitDependency::WHOLE,
-                                condition: source.condition.clone(),
+                                condition: source.condition,
                             },
                         );
                     }
@@ -1231,8 +1237,9 @@ fn add_dependency_dag(
         if let DependencyDagNode::Replicated { replication } = node
             && let Some(node) = mapped[index]
         {
-            // A bounded positive translation represents every copy without
-            // expanding bits, repetitions or paths through function imports.
+            // A bounded nonzero translation, forward or backward, represents
+            // every copy without expanding bits, repetitions or paths through
+            // function imports.
             let relation = replication.relation();
             add_dependency_edge(
                 graph,
@@ -1324,8 +1331,8 @@ fn add_procedure_graph(
             root,
             destination,
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(0),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(0)),
             }),
         );
     }
@@ -1765,18 +1772,39 @@ fn remap_module_summary_branches(
     summary: &ModuleCombSummary,
     inst: &InstDeclaration,
 ) -> HashMap<BranchId, BranchId> {
-    let mut branches = summary
-        .edges
-        .iter()
-        .flat_map(|dependency| dependency.condition.branches())
-        .collect::<Vec<_>>();
-    branches.sort_unstable();
-    branches.dedup();
+    let branches = summary_branches(summary.edges.iter().map(|edge| &edge.condition));
     let namespace = std::ptr::from_ref(inst).addr();
     branches
         .into_iter()
         .enumerate()
-        .map(|(local, branch)| (branch, BranchId::new(namespace, local, branch.arms())))
+        .map(|(local, (branch, shared))| {
+            let target = if shared {
+                BranchId::new(namespace, local, branch.arms())
+            } else {
+                BranchId::ERASED
+            };
+            (branch, target)
+        })
+        .collect()
+}
+
+/// The branches read by summary edge `conditions`, each with whether more
+/// than one edge reads it. A branch read by one edge correlates nothing:
+/// every walk through the summary takes that edge under one valuation, so
+/// eliminating the branch from its condition is exact. Only shared branches
+/// need fresh instances, so that separate instances stay independent.
+fn summary_branches<'a>(
+    conditions: impl Iterator<Item = &'a PathCondition>,
+) -> Vec<(BranchId, bool)> {
+    let mut readers: std::collections::BTreeMap<BranchId, usize> = Default::default();
+    for condition in conditions {
+        for branch in condition.branches() {
+            *readers.entry(branch).or_default() += 1;
+        }
+    }
+    readers
+        .into_iter()
+        .map(|(branch, readers)| (branch, readers > 1))
         .collect()
 }
 
@@ -1917,7 +1945,7 @@ fn instance_region_mapping(
             .map(|source| MappedNode {
                 key: source.key,
                 offset: None,
-                condition: source.condition.clone(),
+                condition: source.condition,
             })
             .collect(),
     }
@@ -2122,20 +2150,21 @@ fn add_resolved_dependency_edges(
                 Some((destination_array, destination_packed)),
             ) = (source.offset, destination.offset)
             {
-                BitDependency {
-                    array: dependency.array.map(|array| {
-                        array
-                            .checked_add(destination_array)
-                            .and_then(|offset| offset.checked_sub(source_array))
-                            .expect("mapped array dependency offset must fit in isize")
-                    }),
-                    packed: dependency.packed.map(|packed| {
-                        packed
-                            .checked_add(destination_packed)
-                            .and_then(|offset| offset.checked_sub(source_packed))
-                            .expect("mapped packed dependency offset must fit in isize")
-                    }),
-                }
+                // Parent coordinates are child coordinates displaced by
+                // each region's offset.
+                BitDependency::translation(
+                    source_array
+                        .checked_neg()
+                        .expect("mapped array source offset must fit in isize"),
+                    source_packed
+                        .checked_neg()
+                        .expect("mapped packed source offset must fit in isize"),
+                )
+                .compose(dependency)
+                .compose(BitDependency::translation(
+                    destination_array,
+                    destination_packed,
+                ))
             } else {
                 BitDependency::WHOLE
             };
@@ -2264,7 +2293,7 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
         bool,
     ) {
         self.reads
-            .sort_unstable_by_key(|source| (source.key, source.condition.clone()));
+            .sort_unstable_by_key(|source| (source.key, source.condition));
         self.reads
             .dedup_by(|left, right| left.key == right.key && left.condition == right.condition);
         let (dependencies, complete) = if let Some(mut procedure) = self.procedure.take() {

@@ -188,6 +188,9 @@ pub(super) struct Builder<K> {
     pub(super) graph: DependencyDag<K>,
     interned: HashMap<InternalNode, usize>,
     replicated_sources: HashMap<usize, usize>,
+    /// Unconditional single-input operations without bounds, read through
+    /// as their source and relation.
+    folded: HashMap<usize, (usize, PositionRelation)>,
 }
 
 impl<K> Builder<K> {
@@ -202,6 +205,7 @@ impl<K> Builder<K> {
             },
             interned: HashMap::default(),
             replicated_sources: HashMap::default(),
+            folded: HashMap::default(),
         }
     }
 
@@ -238,6 +242,15 @@ impl<K> Builder<K> {
         mut site: Option<DefinitionSite<usize>>,
         mut replication: Option<Replication>,
     ) -> usize {
+        // Read through an unconditional, unbounded single-input operation by
+        // composing its relation. The value is the same, and equal inputs
+        // reached through different aliases can then be interned together.
+        for input in &mut inputs {
+            if let Some(&(source, relation)) = self.folded.get(&input.0) {
+                *input = (source, relation.compose(input.1), input.2);
+            }
+        }
+        inputs.retain(|(_, relation, _)| !relation.is_empty());
         inputs.sort_unstable();
         inputs.dedup();
         domains.sort_unstable();
@@ -263,8 +276,10 @@ impl<K> Builder<K> {
 
         // Repeating complete adjacent blocks of a repetition is one larger
         // repetition. Retain clipping, array coordinates and diagnostic sites;
-        // use the recorded seed instead of scanning predecessor paths.
+        // use the recorded seed instead of scanning predecessor paths. Only
+        // forward repetitions form blocks from the start of the domain.
         if let Some(Replication::Packed(stride)) = replication
+            && let Ok(stride) = usize::try_from(stride)
             && site.is_none()
             && let [(source, relation, condition)] = inputs.as_slice()
             && *relation == PositionRelation::default()
@@ -274,12 +289,13 @@ impl<K> Builder<K> {
             && let DependencyDagNode::Replicated {
                 replication: Replication::Packed(inner),
             } = self.graph.nodes[*source]
+            && let Ok(inner_stride) = usize::try_from(inner)
             && !self.graph.domains[seed].is_empty()
             && self.graph.domains[seed].iter().all(|domain| {
                 domain
                     .packed_start
                     .checked_add(domain.packed_length)
-                    .is_some_and(|end| end <= inner as usize)
+                    .is_some_and(|end| end <= inner_stride)
             })
             && let [outer_domain] = domains.as_slice()
             && let [inner_domain] = self.graph.domains[*source].as_slice()
@@ -287,8 +303,8 @@ impl<K> Builder<K> {
             && inner_domain.array_length == outer_domain.array_length
             && inner_domain.packed_start == 0
             && outer_domain.packed_start == 0
-            && inner_domain.packed_length == stride as usize
-            && inner_domain.packed_length.is_multiple_of(inner as usize)
+            && inner_domain.packed_length == stride
+            && inner_domain.packed_length.is_multiple_of(inner_stride)
         {
             inputs[0].0 = seed;
             replication = Some(Replication::Packed(inner));
@@ -304,6 +320,14 @@ impl<K> Builder<K> {
             return node;
         }
         let node = self.graph.nodes.len();
+        if replication.is_none()
+            && key.site.is_none()
+            && key.domains.is_empty()
+            && let [(source, relation, condition)] = key.inputs.as_slice()
+            && condition.is_unconditional()
+        {
+            self.folded.insert(node, (*source, *relation));
+        }
         self.graph.nodes.push(match replication {
             Some(replication) => DependencyDagNode::Replicated { replication },
             None => DependencyDagNode::Internal,
@@ -318,7 +342,7 @@ impl<K> Builder<K> {
                         source: *source,
                         destination: node,
                         relation: *relation,
-                        condition: condition.clone(),
+                        condition: *condition,
                     }),
             );
         if let Some(site) = &key.site {
@@ -372,11 +396,17 @@ mod tests {
                         assert!(edge.source < node);
                         for source_array in 0..4 {
                             for source_bit in 0..4 {
-                                if edge.relation.array.is_none_or(|offset| {
-                                    source_array as isize + offset == array as isize
-                                }) && edge.relation.packed.is_none_or(|offset| {
-                                    source_bit as isize + offset == bit as isize
-                                }) {
+                                if edge
+                                    .relation
+                                    .array
+                                    .translation_offset()
+                                    .is_none_or(|offset| {
+                                        source_array as isize + offset == array as isize
+                                    })
+                                    && edge.relation.packed.translation_offset().is_none_or(
+                                        |offset| source_bit as isize + offset == bit as isize,
+                                    )
+                                {
                                     let sources =
                                         values[edge.source][source_array * 4 + source_bit].clone();
                                     values[node][array * 4 + bit].extend(sources);
@@ -458,17 +488,17 @@ mod tests {
                     source,
                     destination: node,
                     relation: PositionRelation {
-                        array: Some(0),
-                        packed: Some((stage % 3) as isize - 1),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some((stage % 3) as isize - 1)),
                     },
-                    condition: condition.clone(),
+                    condition,
                 });
                 raw.edges.push(DependencyDagEdge {
                     source: 1,
                     destination: node,
                     relation: PositionRelation {
-                        array: Some(0),
-                        packed: None,
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(None),
                     },
                     condition: PathCondition::default(),
                 });

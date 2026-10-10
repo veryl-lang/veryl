@@ -1,6 +1,7 @@
 use super::*;
 use crate::comb_loop_detect::graph::{GraphDependency, GraphNode};
 use crate::comb_loop_detect::model::SummaryRegion;
+use crate::comb_loop_detect::position::Link;
 use crate::comb_loop_detect::region::{ArraySpan, PackedSpan};
 use crate::comb_loop_detect::ssa::{BranchId, PathCondition, PositionDomain};
 use crate::ir::VarId;
@@ -71,8 +72,8 @@ fn discarded_cycles_and_exponential_dags_cannot_be_entered_from_a_series_node() 
                 previous,
                 next,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(1isize << bit),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1isize << bit)),
                 }),
             );
             previous = next;
@@ -103,8 +104,8 @@ fn connected_diamonds_keep_exponentially_many_paths_as_a_linear_graph() {
                 destination,
                 GraphDependency {
                     kind: BitDependency {
-                        array: Some(0),
-                        packed: Some(arm as isize),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some(arm as isize)),
                     },
                     condition: PathCondition::default()
                         .with_choice(BranchId::new(0, index, 2), arm),
@@ -116,11 +117,12 @@ fn connected_diamonds_keep_exponentially_many_paths_as_a_linear_graph() {
     }
     let result = summary(&graph, input, previous);
     assert_eq!(module_summary_work().1, graph.edge_count());
+    // Contraction may merge guards, but only into bounded conditions.
     assert!(
         result
             .edges
             .iter()
-            .all(|edge| edge.condition.branch_count() <= 1)
+            .all(|edge| edge.condition.work_size() <= SUMMARY_CONDITION_NODES)
     );
 }
 
@@ -145,13 +147,15 @@ fn long_guarded_chains_do_not_accumulate_quadratic_condition_payloads() {
         previous = next;
     }
     let result = summary(&graph, input, previous);
-    assert_eq!(result.nodes.len(), LENGTH + 1);
-    assert_eq!(result.edges.len(), LENGTH);
+    // Segments of the chain merge into bounded conjunctions; longer ones
+    // remain graph structure instead of one ever longer condition.
+    assert!(result.nodes.len() <= LENGTH + 1);
+    assert!(result.nodes.len() > LENGTH / SUMMARY_CONDITION_NODES);
     assert!(
         result
             .edges
             .iter()
-            .all(|edge| edge.condition.branch_count() == 1)
+            .all(|edge| edge.condition.work_size() <= SUMMARY_CONDITION_NODES)
     );
     assert_eq!(module_summary_work().1, graph.edge_count());
 }
@@ -168,23 +172,21 @@ fn positional_operations_are_not_composed_through_overflowing_prefixes() {
             previous,
             next,
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(offset),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(offset)),
             }),
         );
         previous = next;
     }
     let result = summary(&graph, input, previous);
-    assert_eq!(result.nodes.len(), offsets.len() + 1);
-    assert_eq!(result.edges.len(), offsets.len());
-    assert_eq!(
-        result
-            .edges
-            .iter()
-            .map(|edge| edge.kind.packed.unwrap())
-            .collect::<Vec<_>>(),
-        offsets
-    );
+    // Contraction composes only representable translations: either the
+    // chain remains, or it is replaced by a composition of exact offsets.
+    let total = result
+        .edges
+        .iter()
+        .map(|edge| edge.kind.packed.translation_offset().unwrap() as i128)
+        .sum::<i128>();
+    assert_eq!(total, offsets.iter().map(|&x| x as i128).sum::<i128>());
 }
 
 #[test]
@@ -228,7 +230,7 @@ fn identical_domain_boundaries_contract_without_losing_guards() {
             GraphDependency {
                 kind: BitDependency::identity(),
                 condition: if index == 0 {
-                    condition.clone()
+                    condition
                 } else {
                     PathCondition::default()
                 },
@@ -248,16 +250,16 @@ fn identical_domain_boundaries_contract_without_losing_guards() {
 fn equal_bounds_still_clip_shifted_and_whole_dependencies() {
     for kind in [
         BitDependency {
-            array: Some(1),
-            packed: Some(0),
+            array: Link::from_offset(Some(1)),
+            packed: Link::from_offset(Some(0)),
         },
         BitDependency {
-            array: Some(0),
-            packed: Some(1),
+            array: Link::from_offset(Some(0)),
+            packed: Link::from_offset(Some(1)),
         },
         BitDependency {
-            array: None,
-            packed: None,
+            array: Link::from_offset(None),
+            packed: Link::from_offset(None),
         },
     ] {
         let mut graph = DependencyGraph::new();
@@ -312,6 +314,7 @@ fn bit_reachability(
                 for next_bit in 0..3 {
                     if dependency
                         .packed
+                        .translation_offset()
                         .is_none_or(|offset| bit as isize + offset == next_bit as isize)
                         && visited.insert((*target, next_bit))
                     {
@@ -343,7 +346,20 @@ fn generated_small_graphs_preserve_bit_reachability_for_every_branch_valuation()
     for mask in 0..1usize << candidates.len() {
         for flavor in 0..3 {
             let mut graph = DependencyGraph::new();
-            let nodes = (0..4).map(|_| node(&mut graph)).collect::<Vec<_>>();
+            // The reference expands three bits of every node; bound the graph
+            // nodes the same way so both describe the same positions.
+            let nodes = (0..4)
+                .map(|_| {
+                    let node = node(&mut graph);
+                    graph[node].domains = vec![PositionDomain {
+                        array_start: 0,
+                        array_length: 1,
+                        packed_start: 0,
+                        packed_length: 3,
+                    }];
+                    node
+                })
+                .collect::<Vec<_>>();
             let mut original: Adjacency = vec![Vec::new(); 4];
             for (index, &(source, destination)) in candidates.iter().enumerate() {
                 if mask & (1 << index) == 0 {
@@ -352,10 +368,10 @@ fn generated_small_graphs_preserve_bit_reachability_for_every_branch_valuation()
                 let dependency = match flavor {
                     0 => BitDependency::identity(),
                     _ => BitDependency {
-                        array: Some(0),
+                        array: Link::from_offset(Some(0)),
                         packed: match index % 4 {
-                            0 => None,
-                            value => Some(value as isize - 2),
+                            0 => Link::from_offset(None),
+                            value => Link::translation(value as isize - 2),
                         },
                     },
                 };
@@ -370,7 +386,7 @@ fn generated_small_graphs_preserve_bit_reachability_for_every_branch_valuation()
                     nodes[destination],
                     GraphDependency {
                         kind: dependency,
-                        condition: condition.clone(),
+                        condition,
                     },
                 );
                 original[source].push((destination, dependency, condition));
@@ -378,7 +394,7 @@ fn generated_small_graphs_preserve_bit_reachability_for_every_branch_valuation()
             let result = summary(&graph, nodes[0], nodes[3]);
             let mut summarized: Adjacency = vec![Vec::new(); result.nodes.len()];
             for edge in &result.edges {
-                summarized[edge.source].push((edge.destination, edge.kind, edge.condition.clone()));
+                summarized[edge.source].push((edge.destination, edge.kind, edge.condition));
             }
             let input = result
                 .nodes
