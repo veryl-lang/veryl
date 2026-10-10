@@ -242,6 +242,8 @@ fn comb_loop_runtime_index_reads_keep_their_elements() {
         ("index", "b[0]", "a[1]", "0", true),
         ("index", "{b[index][0], c}", "0", "a[0]", false),
         ("index", "b[index] + 1", "a[1]", "0", true),
+        ("index", "$unsigned(b[index])", "0", "a[0]", false),
+        ("index", "$signed(b[index])", "0", "a[0]", false),
     ] {
         let code = format!(
             r#"

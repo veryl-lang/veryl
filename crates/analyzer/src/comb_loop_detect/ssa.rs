@@ -795,6 +795,57 @@ where
         fresh: bool,
         work: &mut usize,
     ) -> Option<(Vec<PositionDomain>, Vec<PositionDomain>)> {
+        // Joins without a log can nest as deep as the branches that made
+        // them, so they are visited from an explicit stack, each once.
+        let unlogged_join = |version: VersionId| match &self.versions[version] {
+            Version::Phi(inputs)
+                if !(self.logs.contains_key(&version) && version >= self.log_floor) =>
+            {
+                Some(inputs)
+            }
+            _ => None,
+        };
+        let mut results: HashMap<VersionId, (Vec<PositionDomain>, Vec<PositionDomain>)> =
+            HashMap::default();
+        let mut stack = vec![(version, false)];
+        while let Some((current, expanded)) = stack.pop() {
+            if results.contains_key(&current) {
+                continue;
+            }
+            *work = work.checked_sub(1)?;
+            let Some(inputs) = unlogged_join(current) else {
+                let regions = self.unjoined_written_regions(current, extent, fresh, work)?;
+                results.insert(current, regions);
+                continue;
+            };
+            if expanded {
+                let inputs = inputs
+                    .iter()
+                    .map(|input| &results[input])
+                    .collect::<Vec<_>>();
+                let regions = Self::joined_written_regions(&inputs, work)?;
+                results.insert(current, regions);
+            } else {
+                stack.push((current, true));
+                stack.extend(
+                    inputs
+                        .iter()
+                        .filter(|input| !results.contains_key(input))
+                        .map(|&input| (input, false)),
+                );
+            }
+        }
+        results.remove(&version)
+    }
+
+    /// `written_regions` of a version that is not a join without a log.
+    fn unjoined_written_regions(
+        &self,
+        version: VersionId,
+        extent: PositionDomain,
+        fresh: bool,
+        work: &mut usize,
+    ) -> Option<(Vec<PositionDomain>, Vec<PositionDomain>)> {
         let is_entry = |version: VersionId| matches!(self.versions[version], Version::Entry(_));
         // Resolve the whole history: a partial answer would only say that
         // every position may be written.
@@ -803,9 +854,6 @@ where
             .get(&version)
             .filter(|_| version >= self.log_floor)
         else {
-            if let Version::Phi(inputs) = &self.versions[version] {
-                return self.joined_written_regions(inputs, extent, fresh, work);
-            }
             return Some(if is_entry(version) {
                 (Vec::new(), Vec::new())
             } else if !fresh && self.may_retain_entry(version) {
@@ -848,22 +896,26 @@ where
         Some((definite, maybe))
     }
 
-    /// `written_regions` of a join without a log: a position is definitely
-    /// written only where every input definitely writes it.
+    /// `written_regions` of a join without a log, from those of its inputs:
+    /// a position is definitely written only where every input definitely
+    /// writes it.
+    #[allow(clippy::type_complexity)]
     fn joined_written_regions(
-        &self,
-        inputs: &[VersionId],
-        extent: PositionDomain,
-        fresh: bool,
+        inputs: &[&(Vec<PositionDomain>, Vec<PositionDomain>)],
         work: &mut usize,
     ) -> Option<(Vec<PositionDomain>, Vec<PositionDomain>)> {
         let mut definite: Option<Vec<PositionDomain>> = None;
         let mut touched = Vec::new();
-        for &input in inputs {
-            *work = work.checked_sub(1)?;
-            let (input_definite, input_maybe) = self.written_regions(input, extent, fresh, work)?;
+        for (input_definite, input_maybe) in inputs {
+            *work = work.checked_sub(
+                input_definite
+                    .len()
+                    .saturating_add(input_maybe.len())
+                    .saturating_add(1),
+            )?;
             touched.extend(input_definite.iter().copied());
-            touched.extend(input_maybe);
+            touched.extend(input_maybe.iter().copied());
+            let input_definite = input_definite.clone();
             definite = Some(match definite {
                 None => input_definite,
                 Some(definite) => {
@@ -892,6 +944,18 @@ where
                     .collect();
             }
             maybe.extend(parts);
+        }
+        let mut definite = definite;
+        for regions in [&mut definite, &mut maybe] {
+            regions.sort_unstable_by_key(|domain| {
+                (
+                    domain.array_start,
+                    domain.packed_start,
+                    domain.array_length,
+                    domain.packed_length,
+                )
+            });
+            regions.dedup();
         }
         Some((definite, maybe))
     }

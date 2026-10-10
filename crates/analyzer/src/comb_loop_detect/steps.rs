@@ -123,7 +123,10 @@ impl Steps {
         mut run: impl FnMut(usize) -> T,
         ran_out: impl Fn(&T) -> bool,
     ) -> Vec<T> {
-        let available = |remaining: usize| if reserve { remaining / 2 } else { remaining };
+        // Set the reserve aside once, so neither the stages nor their
+        // retries can reach it.
+        let reserved = if reserve { self.remaining() / 2 } else { 0 };
+        self.0.set(self.remaining() - reserved);
         let mut results = (0..stages).map(|_| None).collect::<Vec<Option<T>>>();
         let mut pending = (0..stages).collect::<Vec<_>>();
         let mut allowance = FIRST_ALLOWANCE;
@@ -132,7 +135,7 @@ impl Steps {
             let mut next = Vec::new();
             let mut limited = alone;
             for &stage in &pending {
-                let available = available(self.remaining());
+                let available = self.remaining();
                 limited |= allowance >= available;
                 let share = if alone {
                     available
@@ -151,6 +154,7 @@ impl Steps {
             pending = next;
             allowance = allowance.saturating_mul(2);
         }
+        self.0.set(self.remaining() + reserved);
         results
             .into_iter()
             .map(|result| result.expect("every stage runs"))
@@ -161,5 +165,23 @@ impl Steps {
     fn record(&self, _count: usize) {
         #[cfg(test)]
         TAKEN.set(TAKEN.get().saturating_add(_count));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_stages_leave_the_reserve_untouched() {
+        let steps = Steps(Rc::new(Cell::new(6500)));
+        // Each stage needs 1,500 steps, taken one at a time.
+        let results = steps.share(2, true, |_| (0..1500).all(|_| steps.take(1)), |done| !done);
+        assert_eq!(results.len(), 2);
+        assert!(
+            steps.remaining() >= 3250,
+            "{} steps left",
+            steps.remaining()
+        );
     }
 }

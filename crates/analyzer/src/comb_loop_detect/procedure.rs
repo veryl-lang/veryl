@@ -65,6 +65,13 @@ fn any_variable(expression: &Expression, f: &mut impl FnMut(VarId, &VarIndex) ->
                     || select.0.iter().any(|x| any_variable(x, f))
                     || select.1.as_ref().is_some_and(|(_, x)| any_variable(x, f))
             }
+            // The evaluation passes the projection on to these inputs.
+            Factor::SystemFunctionCall(call) => match &call.kind {
+                SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
+                    any_variable(&input.0, f)
+                }
+                _ => false,
+            },
             _ => false,
         },
         Expression::Unary(_, x, _) => any_variable(x, f),

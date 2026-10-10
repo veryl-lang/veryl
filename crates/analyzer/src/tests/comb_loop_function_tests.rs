@@ -4226,3 +4226,31 @@ fn function_scattered_writes_summarize_in_near_linear_steps() {
     let (small, large) = (steps(1024), steps(4096));
     assert!(large < 8 * small, "{small} -> {large} steps");
 }
+
+#[test]
+fn function_conditional_whole_writes_nest_without_deep_recursion() {
+    // Each iteration joins a whole write with the value before it, so the
+    // joins nest as deep as the loop runs.
+    let code = r#"
+        module Top (s: input logic<4000>, o: output logic) {
+            var x: logic;
+            function f () {
+                for i in 0..4000 {
+                    if s[i] { x = 0; }
+                }
+            }
+            always_comb {
+                x = 1;
+                f();
+            }
+            assign o = x;
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+}
