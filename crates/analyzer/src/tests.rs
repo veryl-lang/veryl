@@ -101,6 +101,29 @@ fn a_long_const_chain_is_not_a_function_instantiation() {
         .unwrap();
 }
 
+/// Whether one analysis of `code` finds a combinational loop, and whether
+/// it was complete.
+fn comb_loop_outcome(code: &str) -> (bool, bool) {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    let (errors, complete) = crate::comb_loop_detect::check_with_completeness(&ir);
+    let found = errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }));
+    (found, complete)
+}
+
 #[track_caller]
 fn comb_loop_analysis_is_complete(code: &str) -> bool {
     symbol_table::clear();

@@ -345,6 +345,8 @@ struct Candidate<'s> {
     /// those the read's iterations give and, inside `earlier`, those of
     /// loops no branch skips, at their last value.
     fixed: Vec<bool>,
+    /// See `LastWrite::earliest`.
+    earliest: Option<isize>,
 }
 
 impl Candidate<'_> {
@@ -378,6 +380,10 @@ pub(super) struct LastWrite {
     /// The levels at which the write is the instance `instance` gives; with
     /// `earlier`, the instances take every value at the others after it.
     pub(super) fixed: Vec<bool>,
+    /// With `earlier`, the first value at that level that may be the last:
+    /// the loop's first, or past those a later write of their own
+    /// iteration always replaces.
+    pub(super) earliest: Option<isize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -544,9 +550,19 @@ impl WriterScope {
                 step: 1,
             });
         }
-        // An element `coefficient * iterator + constant` of the one loop.
+        // An element `coefficient * iterator + constant` of the one loop
+        // with more than one value.
         let sub = self.writers.get(&id)?.iter().find(|sub| sub.id == writer)?;
-        let [level] = sub.loops.as_slice() else {
+        let moving = sub
+            .loops
+            .iter()
+            .copied()
+            .filter(|&level| {
+                let values = self.loops[level].values;
+                values.min != values.max
+            })
+            .collect::<Vec<_>>();
+        let [level] = moving.as_slice() else {
             return None;
         };
         let scope_loop = &self.loops[*level];
@@ -633,6 +649,10 @@ impl WriterScope {
         for &level in sub.loops.iter().rev() {
             let scope_loop = &self.loops[level];
             let values = scope_loop.values;
+            // A loop of one value takes one position.
+            if values.min == values.max {
+                continue;
+            }
             let mut term = AffineIndex::default();
             term.add_scaled(&AffineIndex::variable(scope_loop.iterator), stride)?;
             term.constant = values.min.checked_mul(stride)?.checked_neg()?;
@@ -898,9 +918,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    pub(super) fn writer_key(&self, key: NodeKey, writer: WriterId) -> SsaKey {
+    pub(super) fn writer_key(&mut self, key: NodeKey, writer: WriterId) -> SsaKey {
+        let ordinal = match self.writer_ordinals.get(&writer) {
+            Some(&ordinal) => ordinal,
+            None => {
+                let ordinal = self.writer_ids.len();
+                self.writer_ids.push(writer);
+                self.writer_ordinals.insert(writer, ordinal);
+                ordinal
+            }
+        };
         SsaKey {
-            writer: Some((writer, self.writer_scopes)),
+            writer: Some((ordinal, self.writer_scopes)),
             ..self.ssa_key(key)
         }
     }
@@ -1155,6 +1184,44 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     }
                 }
                 let arms = statement.arms.len() + 1;
+                // A constant target takes one arm, as the evaluation does.
+                if let Some(arm) = self.constant_case_arm(statement) {
+                    let side = statement
+                        .arms
+                        .get(arm)
+                        .map_or(&statement.default, |arm| &arm.body);
+                    path.push(Step::Arm(arm));
+                    let scanned = self.scan_block(scan, side, path, branches);
+                    path.pop();
+                    return scanned;
+                }
+                // A case on a counted iterator takes each arm on the
+                // iterations its patterns give, as a condition on it does.
+                if let Some((position, sets)) = self.iterator_case_arms(statement) {
+                    let sides = statement
+                        .arms
+                        .iter()
+                        .map(|arm| &arm.body)
+                        .chain(std::iter::once(&statement.default));
+                    let confining = std::mem::replace(&mut scan.confining, true);
+                    let previous = self.counted_iterators[position];
+                    for (arm, (side, iterators)) in sides.zip(sets).enumerate() {
+                        for iterator in iterators {
+                            self.counted_iterators[position] = iterator;
+                            path.push(Step::Arm(arm));
+                            let scanned = self.scan_block(scan, side, path, branches);
+                            path.pop();
+                            if scanned.is_none() {
+                                self.counted_iterators[position] = previous;
+                                scan.confining = confining;
+                                return None;
+                            }
+                        }
+                    }
+                    self.counted_iterators[position] = previous;
+                    scan.confining = confining;
+                    return Some(());
+                }
                 let guarded = scan.guards.len();
                 scan.guards.extend(guards.iter().copied());
                 let sides = statement
@@ -1316,6 +1383,95 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             Statement::Null => Some(()),
             Statement::IfReset(_) | Statement::TbMethodCall(_) | Statement::Unsupported(_) => None,
         }
+    }
+
+    /// The iterations on which a case on a counted iterator takes each of
+    /// its arms, the default last, as disjoint progressions, with the
+    /// iterator's position. `None` when the target is no counted iterator or
+    /// a pattern is not constant.
+    fn iterator_case_arms(
+        &mut self,
+        statement: &crate::ir::CaseStatement,
+    ) -> Option<(usize, Vec<Vec<CountedIterator>>)> {
+        let Expression::Term(factor) = statement.case_target.as_ref() else {
+            return None;
+        };
+        let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+            return None;
+        };
+        if !index.indices.is_empty() || !select.is_empty() {
+            return None;
+        }
+        let position = self
+            .counted_iterators
+            .iter()
+            .rposition(|iterator| iterator.id == *id)?;
+        let domain = self.counted_iterators[position];
+        // The values of each pattern, before those of the earlier arms are
+        // taken out.
+        let mut patterns = Vec::new();
+        for arm in &statement.arms {
+            let mut values = Vec::new();
+            for pattern in &arm.patterns {
+                let (low, high) = match pattern {
+                    CasePattern::Eq(value) => {
+                        let value = super::constant_integer(value, &mut self.ctx)?;
+                        (value, value)
+                    }
+                    CasePattern::Range { lo, hi, inclusive } => {
+                        let low = super::constant_integer(lo, &mut self.ctx)?;
+                        let high = super::constant_integer(hi, &mut self.ctx)?;
+                        (
+                            low,
+                            if *inclusive {
+                                high
+                            } else {
+                                high.checked_sub(1)?
+                            },
+                        )
+                    }
+                };
+                if low <= high {
+                    values.extend(domain.within(low, high).ok()?);
+                }
+            }
+            patterns.push(values);
+        }
+        let mut remaining = vec![domain];
+        let mut sets = Vec::new();
+        for values in patterns {
+            let mut set = Vec::new();
+            for value in values {
+                let mut outside = Vec::new();
+                for piece in remaining {
+                    match intersect(&piece, &value).ok()? {
+                        Some(inside) => {
+                            outside.extend(self.complement(&piece, &inside)?);
+                            set.push(inside);
+                        }
+                        None => outside.push(piece),
+                    }
+                }
+                remaining = outside;
+            }
+            sets.push(set);
+        }
+        sets.push(remaining);
+        Some((position, sets))
+    }
+
+    /// The arm a case with a constant target takes for certain, the
+    /// default's after the others, when the patterns tell.
+    fn constant_case_arm(&mut self, statement: &crate::ir::CaseStatement) -> Option<usize> {
+        let target = statement.case_target.eval_value(&mut self.ctx)?;
+        for (index, arm) in statement.arms.iter().enumerate() {
+            for pattern in &arm.patterns {
+                if pattern.matches(&statement.case_target, &target, &mut self.ctx)? {
+                    return Some(index);
+                }
+            }
+        }
+        Some(statement.arms.len())
     }
 
     /// The arms of an iterator split, each with the iterations that take it
@@ -1814,8 +1970,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             if offset == 0 {
                 if scope.loops[sub.loops[level]].ascending {
                     range.max = high.min(domain.max);
+                    range.min = range.min.max(write.earliest.unwrap_or(range.min));
                 } else {
                     range.min = low.max(domain.min);
+                    range.max = range.max.min(write.earliest.unwrap_or(range.max));
                 }
                 if range.min > range.max {
                     return None;
@@ -2040,22 +2198,78 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         position_id: VarId,
     ) -> Option<VersionId> {
         let packed = self.key_span(key)?;
-        let first = isize::try_from(key.1.start).ok()?;
+        // Writes at bits that move with the iterators leave each bit of one
+        // element at its own instance: the positions are the bits.
+        let bitwise = key.1.length == 1
+            && subs.iter().any(
+                |sub| matches!(&sub.access.bits, Bits::Range(low, _) if !low.terms.is_empty()),
+            );
+        let (first, length) = if bitwise {
+            (packed.start, packed.length)
+        } else {
+            (key.1.start, key.1.length)
+        };
+        let first = isize::try_from(first).ok()?;
         let positions = CountedIterator::new(
             position_id,
             first,
-            first.checked_add(isize::try_from(key.1.length).ok()?)? - 1,
+            first.checked_add(isize::try_from(length).ok()?)? - 1,
         );
-        let access = Access {
-            elements: Vec::new(),
-            flat: AffineIndex::variable(position_id),
-            bits: Bits::Range(
-                AffineIndex {
+        let access = if bitwise {
+            Access {
+                elements: Vec::new(),
+                flat: AffineIndex {
                     terms: Vec::new(),
-                    constant: isize::try_from(packed.start).ok()?,
+                    constant: isize::try_from(key.1.start).ok()?,
                 },
-                packed.length,
-            ),
+                bits: Bits::Range(AffineIndex::variable(position_id), 1),
+            }
+        } else {
+            Access {
+                elements: Vec::new(),
+                flat: AffineIndex::variable(position_id),
+                bits: Bits::Range(
+                    AffineIndex {
+                        terms: Vec::new(),
+                        constant: isize::try_from(packed.start).ok()?,
+                    },
+                    packed.length,
+                ),
+            }
+        };
+        // The positions `span` takes of the key, on its axis.
+        let domain = |span: ArraySpan| {
+            if bitwise {
+                position_domain(
+                    key.1,
+                    PackedSpan {
+                        start: span.start,
+                        length: span.length,
+                    },
+                )
+            } else {
+                position_domain(span, packed)
+            }
+        };
+        let axis = if bitwise {
+            super::Axis::Packed
+        } else {
+            super::Axis::Array
+        };
+        // A table's instance on its array axis relates to a position on the
+        // key's axis; on a bit, any bit of the instance's row.
+        let related = |link: super::Link| {
+            if bitwise {
+                super::PositionRelation {
+                    array: super::Link::Unlinked,
+                    packed: link,
+                }
+            } else {
+                super::PositionRelation {
+                    array: link,
+                    packed: super::Link::IDENTITY,
+                }
+            }
         };
         let cells = self.solve_last_writes(scope, subs, place, &access, &[positions])?;
         let iterators = [self.counted_iterators[0].id, position_id];
@@ -2130,14 +2344,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         Some(region) => region,
                         None => scope.table_domain_span(key.0, writer)?,
                     };
-                    pieces.push((
-                        Some(writer),
-                        super::PositionRelation {
-                            array: super::Link::Unlinked,
-                            packed: super::Link::IDENTITY,
-                        },
-                        region,
-                    ));
+                    pieces.push((Some(writer), related(super::Link::Unlinked), region));
                     continue;
                 }
                 let position = write.instance.as_ref().and_then(|instance| {
@@ -2154,28 +2361,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     };
                     let source = self.fold_single_values(&source);
                     let destination = self.fold_single_values(&destination);
-                    let link = self.affine_link(&destination, &source, false)?;
+                    let link = self.affine_link(&destination, &source, bitwise)?;
                     let (low, high) = self.affine_hull(&source.index)?;
                     let start = usize::try_from(low).ok()?;
                     let length = usize::try_from(high).ok()?.checked_sub(start)? + 1;
                     Some((link, ArraySpan { start, length }))
                 });
                 pieces.push(match link {
-                    Some((link, region)) => (
-                        Some(writer),
-                        super::PositionRelation {
-                            array: link,
-                            packed: super::Link::IDENTITY,
-                        },
-                        region,
-                    ),
+                    Some((link, region)) => (Some(writer), related(link), region),
                     // An instance not known exactly may be any of them.
                     None => (
                         Some(writer),
-                        super::PositionRelation {
-                            array: super::Link::Unlinked,
-                            packed: super::Link::IDENTITY,
-                        },
+                        related(super::Link::Unlinked),
                         scope.table_domain_span(key.0, writer)?,
                     ),
                 });
@@ -2207,7 +2404,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if let Some((last, 1, last_region)) = merged.last_mut()
                     && step == 1
                     && span.start <= last.start + last.length
-                    && (relation.array != super::Link::Unlinked || *last_region == region)
+                    && (relation != related(super::Link::Unlinked) || *last_region == region)
                 {
                     let end = (last.start + last.length).max(span.start + span.length);
                     last.length = end - last.start;
@@ -2226,18 +2423,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // A position no write reaches keeps its value, which is state,
                 // not a value computed from itself.
                 if source.is_none() {
-                    values.push(self.ssa.retained(base, position_domain(span, packed)));
+                    values.push(self.ssa.retained(base, domain(span)));
                     continue;
                 }
                 let read = self.ssa.projected(base, position_domain(region, packed));
                 let value = self.ssa.related_definition(vec![(read, relation)]);
                 // Only the positions of the progression take the value.
-                let value = self.progression_value(
-                    value,
-                    position_domain(span, packed),
-                    super::Axis::Array,
-                    step,
-                )?;
+                let value = self.progression_value(value, domain(span), axis, step)?;
                 values.push(value);
             }
         }
@@ -2588,6 +2780,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             for (rank, first_unknown, carried) in groups {
                 candidates.extend(self.candidate(
                     scope,
+                    writers,
                     writer,
                     access,
                     &domain,
@@ -2703,6 +2896,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         instance: candidate.instance_map(levels),
                         earlier: candidate.earlier,
                         fixed: candidate.fixed.clone(),
+                        earliest: candidate.earliest,
                     });
                 }
                 if overwrites(&present, place) {
@@ -2716,6 +2910,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     instance: None,
                     earlier: None,
                     fixed: Vec::new(),
+                    earliest: None,
                 });
             }
             result.push((cell, writes));
@@ -2732,6 +2927,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn candidate<'w>(
         &mut self,
         scope: &WriterScope,
+        writers: &[SubWriter],
         writer: &'w SubWriter,
         access: &Access,
         domain: &Cell,
@@ -3005,6 +3201,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 if lin_extent(latest, &cell) == Some((first, first)));
                         !single
                     });
+                    let earliest = earlier.map(|level| {
+                        let domain = &writer.domains[level];
+                        let ascending = scope.loops[writer.loops[level]].ascending;
+                        let first = if ascending { domain.min } else { domain.max };
+                        // The element the read takes on the cell.
+                        let element = read_lin(&access.flat)
+                            .and_then(|lin| lin_extent(&lin, &cell))
+                            .filter(|(low, high)| low == high)
+                            .and_then(|(value, _)| isize::try_from(value).ok());
+                        match element.and_then(|element| {
+                            replaced_instance(scope, writers, writer, access, element, level)
+                        }) {
+                            Some(value) if value == first && ascending => first + domain.modulus,
+                            Some(value) if value == first => first - domain.modulus,
+                            _ => first,
+                        }
+                    });
                     Candidate {
                         writer,
                         rank,
@@ -3014,6 +3227,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         covers,
                         earlier,
                         fixed: fixed.clone(),
+                        earliest,
                     }
                 }));
             }
@@ -3338,45 +3552,151 @@ fn follows_later(
     false
 }
 
+/// The value at `level` of the one instance of `writer` whose write of what
+/// `access` reads at `element` a later write of its own iteration always
+/// replaces: one
+/// on the same loops, after it, on no branch it is not on, writing all the
+/// read takes at an element moving with `level` alone. `None` when there
+/// is none, or it is not one value.
+fn replaced_instance(
+    scope: &WriterScope,
+    writers: &[SubWriter],
+    writer: &SubWriter,
+    access: &Access,
+    element: isize,
+    level: usize,
+) -> Option<isize> {
+    // The later write takes every bit the read does.
+    let covers = |bits: &Bits| match (bits, &access.bits) {
+        (Bits::Whole, _) => true,
+        (Bits::Range(written, written_width), Bits::Range(read, read_width))
+            if written.terms.is_empty() && read.terms.is_empty() =>
+        {
+            let end = |low: &AffineIndex, width: usize| {
+                low.constant.checked_add(isize::try_from(width).ok()?)
+            };
+            written.constant <= read.constant
+                && end(read, *read_width)
+                    .zip(end(written, *written_width))
+                    .is_some_and(|(read, written)| read <= written)
+        }
+        _ => false,
+    };
+    let iterator = scope.loops[*writer.loops.get(level)?].iterator;
+    // The later write runs on every iteration of the earlier one's loops
+    // but `level`, and on the value it is found at there.
+    let runs_with = |later: &SubWriter, value: isize| {
+        later
+            .domains
+            .iter()
+            .zip(&writer.domains)
+            .enumerate()
+            .all(|(at, (later, earlier))| {
+                if at == level {
+                    later
+                        .within(value, value)
+                        .is_ok_and(|inside| inside.is_some())
+                } else {
+                    intersect(earlier, later).ok().flatten() == Some(*earlier)
+                }
+            })
+    };
+    writers.iter().find_map(|later| {
+        if later.loops != writer.loops
+            || relation(&later.path, &writer.path) != Relation::Before
+            || !later
+                .branches
+                .iter()
+                .all(|branch| writer.branches.contains(branch))
+            || !covers(&later.access.bits)
+        {
+            return None;
+        }
+        let [(id, coefficient)] = later.access.flat.terms.as_slice() else {
+            return None;
+        };
+        if *id != iterator || *coefficient == 0 {
+            return None;
+        }
+        let difference = element.checked_sub(later.access.flat.constant)?;
+        (difference % coefficient == 0)
+            .then(|| difference / coefficient)
+            .filter(|value| {
+                writer.domains[level]
+                    .within(*value, *value)
+                    .is_ok_and(|inside| inside.is_some())
+                    && runs_with(later, *value)
+            })
+    })
+}
+
 /// Whether the latest present writers overwrite every bit the read takes on
-/// each of its iterations: one of them always writes, or they are the arms of
-/// one branch that write on every path through it.
+/// each of its iterations: one of them always writes, or, branch by branch,
+/// they write on every path through the branches around them.
 fn overwrites(present: &[&Candidate<'_>], place: &[Step]) -> bool {
     if !present.iter().all(|candidate| candidate.covers) {
         return false;
     }
-    // A write runs whenever the read does when each branch around it is
-    // one the read is on, around only loops at which the write is the
-    // read's instance: those before `first_unknown`.
-    let runs_with_read = |candidate: &Candidate<'_>| {
-        candidate.earlier.is_none()
-            && candidate.writer.branches.iter().all(|branch| {
-                place_loops(&branch.place).len() <= candidate.first_unknown
-                    && place.starts_with(&branch.place)
-                    && place.get(branch.place.len()) == Some(&Step::Arm(branch.arm))
-            })
-    };
-    if present
-        .iter()
-        .any(|candidate| candidate.writer.branches.is_empty() || runs_with_read(candidate))
-    {
-        return true;
-    }
-    let first = &present[0].writer.branches;
-    let [branch] = first.as_slice() else {
-        return false;
-    };
-    let mut arms = vec![false; branch.arms];
-    for candidate in present {
-        let [other] = candidate.writer.branches.as_slice() else {
-            return false;
-        };
-        if other.place != branch.place || other.arms != branch.arms {
-            return false;
+    // A write runs whenever the read does past a branch the read is on,
+    // around only loops at which the write is the read's instance: those
+    // before `first_unknown`.
+    let skipped = |candidate: &Candidate<'_>, depth: usize| {
+        let branches = &candidate.writer.branches;
+        let mut depth = depth;
+        while let Some(branch) = branches.get(depth)
+            && candidate.earlier.is_none()
+            && place_loops(&branch.place).len() <= candidate.first_unknown
+            && place.starts_with(&branch.place)
+            && place.get(branch.place.len()) == Some(&Step::Arm(branch.arm))
+        {
+            depth += 1;
         }
-        arms[other.arm] = true;
+        depth
+    };
+    // Each write with the depth of the branches around it already passed.
+    // The writes cover the paths below that depth when one of them runs on
+    // all of them, or every arm of one branch has writes covering its paths.
+    // Branches nest, so each level takes a branch of the level above.
+    let mut pending = vec![
+        present
+            .iter()
+            .map(|&candidate| (candidate, skipped(candidate, 0)))
+            .collect::<Vec<_>>(),
+    ];
+    'paths: while let Some(writes) = pending.pop() {
+        if writes
+            .iter()
+            .any(|(candidate, depth)| *depth == candidate.writer.branches.len())
+        {
+            continue;
+        }
+        for (candidate, depth) in &writes {
+            let branch = &candidate.writer.branches[*depth];
+            let mut arms = Vec::new();
+            for arm in 0..branch.arms {
+                let taken = writes
+                    .iter()
+                    .filter_map(|(other, depth)| {
+                        let other_branch = &other.writer.branches[*depth];
+                        (other_branch.place == branch.place
+                            && other_branch.arms == branch.arms
+                            && other_branch.arm == arm)
+                            .then(|| (*other, skipped(other, depth + 1)))
+                    })
+                    .collect::<Vec<_>>();
+                if taken.is_empty() {
+                    break;
+                }
+                arms.push(taken);
+            }
+            if arms.len() == branch.arms {
+                pending.extend(arms);
+                continue 'paths;
+            }
+        }
+        return false;
     }
-    arms.into_iter().all(|arm| arm)
+    true
 }
 
 /// Whether two bit ranges of `width` bits either coincide or are disjoint.

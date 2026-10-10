@@ -4,12 +4,6 @@
 // shrunk to a small procedure that still shows it.
 use super::*;
 
-fn has_comb_loop(code: &str) -> bool {
-    analyze(code)
-        .into_iter()
-        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
-}
-
 /// A small deterministic generator, so that a failing case reproduces from
 /// its seed.
 struct Random(u64);
@@ -46,16 +40,32 @@ enum Range {
 
 #[derive(Clone, Debug)]
 enum Statement {
-    Assign(String, Vec<String>),
+    /// A destination, its operands and the operator between them.
+    Assign(String, Vec<String>, &'static str),
     If(String, Vec<Statement>, Vec<Statement>),
+    /// A selector and the bodies of its values `0`, `1` and the default.
+    Case(String, Vec<Vec<Statement>>),
     For(&'static str, usize, Range, Vec<Statement>),
 }
 
 impl Statement {
     fn render(&self) -> String {
         match self {
-            Statement::Assign(destination, operands) => {
-                format!("{destination} = {};", operands.join(" ^ "))
+            Statement::Assign(destination, operands, operator) => {
+                format!(
+                    "{destination} = {};",
+                    operands.join(&format!(" {operator} "))
+                )
+            }
+            Statement::Case(selector, arms) => {
+                let labels = ["0", "1", "default"];
+                let arms = arms
+                    .iter()
+                    .zip(labels)
+                    .map(|(body, label)| format!("{label}: {{ {} }}", render(body)))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("case {selector} {{ {arms} }}")
             }
             Statement::If(condition, then, otherwise) => {
                 let mut text = format!("if {condition} {{ {} }}", render(then));
@@ -93,14 +103,28 @@ fn module(statements: &[Statement]) -> String {
             var t: logic [8];
             var c: logic;
             var e: logic;
+            var p: logic<8>;
+            function f (v: input logic, w: input logic) -> logic {{
+                var s: logic [4];
+                s[0] = v;
+                for m in 0..3 {{ s[m + 1] = s[m] ^ w; }}
+                return s[3];
+            }}
+            function g (v: input logic, w: input logic) -> logic {{
+                var r: logic;
+                r = w;
+                for m in 0..2 {{ if v {{ r = r ^ w; }} }}
+                return r;
+            }}
             always_comb {{ {} }}
-            assign o = {{c, e, y[0], y[1], y[2], y[3], t[0], t[1]}};
+            assign o = {{c, e, y[0], y[1], y[2], t[0], t[1], p[1]}};
         }}",
         render(statements)
     )
 }
 
-/// Every iterator stays below 3 and every index below 8, the arrays' size.
+/// Every iterator stays below 3 and every index below 8, the arrays' and
+/// `p`'s size.
 struct Generator {
     random: Random,
     iterators: Vec<&'static str>,
@@ -109,32 +133,52 @@ struct Generator {
 impl Generator {
     fn index(&mut self) -> String {
         let constant = self.random.below(3);
-        match (self.iterators.as_slice(), self.random.below(5)) {
+        let iterators = self.iterators.clone();
+        match (iterators.as_slice(), self.random.below(6)) {
             ([], _) | (_, 0) => format!("{}", self.random.below(4)),
             ([.., inner], 1) => format!("{inner} + {constant}"),
             ([outer, ..], 2) => format!("{outer} + {constant}"),
-            ([outer, inner], 3) => format!("{outer} + {inner}"),
-            ([.., inner], 3 | 4) if self.random.chance(50) => format!("2 * {inner}"),
+            ([outer, .., inner], 3) => format!("{outer} + {inner}"),
+            ([first, second, third], 5) => format!("{first} + {second} + {third}"),
+            ([.., inner], 3..=5) if self.random.chance(50) => format!("2 * {inner}"),
             ([.., inner], _) => inner.to_string(),
         }
     }
 
     fn operand(&mut self) -> String {
-        match self.random.below(7) {
+        match self.random.below(10) {
             0 => format!("x[{}]", self.index()),
             1 | 2 => format!("y[{}]", self.index()),
             3 => format!("t[{}]", self.index()),
-            4 => "c".to_string(),
-            5 => "e".to_string(),
+            4 => format!("p[{}]", self.index()),
+            5 => "c".to_string(),
+            6 => "e".to_string(),
+            7 if self.random.chance(50) => {
+                let (left, right) = (self.simple_operand(), self.simple_operand());
+                let function = ["f", "g"][self.random.below(2)];
+                format!("{function}({left}, {right})")
+            }
             _ => format!("a[{}]", self.random.below(8)),
         }
     }
 
+    /// An operand without a call, as a call's actual.
+    fn simple_operand(&mut self) -> String {
+        match self.random.below(5) {
+            0 => format!("y[{}]", self.index()),
+            1 => format!("t[{}]", self.index()),
+            2 => "c".to_string(),
+            3 => "e".to_string(),
+            _ => format!("p[{}]", self.index()),
+        }
+    }
+
     fn destination(&mut self) -> String {
-        match self.random.below(6) {
+        match self.random.below(7) {
             0 | 1 => format!("y[{}]", self.index()),
             2 | 3 => format!("t[{}]", self.index()),
-            4 => "c".to_string(),
+            4 => format!("p[{}]", self.index()),
+            5 => "c".to_string(),
             _ => "e".to_string(),
         }
     }
@@ -148,7 +192,15 @@ impl Generator {
     }
 
     fn statement(&mut self, depth: usize) -> Statement {
-        match self.random.below(10) {
+        match self.random.below(11) {
+            10 if depth < 3 => {
+                let selector = match self.iterators.last() {
+                    Some(iterator) if self.random.chance(30) => iterator.to_string(),
+                    _ => format!("a[{}:{}]", 2 + self.random.below(6), self.random.below(2)),
+                };
+                let arms = (0..3).map(|_| self.block(depth + 1, 2)).collect();
+                Statement::Case(selector, arms)
+            }
             0 | 1 if depth < 3 => {
                 let condition = self.condition();
                 let then = self.block(depth + 1, 2);
@@ -159,14 +211,15 @@ impl Generator {
                 };
                 Statement::If(condition, then, otherwise)
             }
-            2 if self.iterators.len() < 2 => self.for_loop(depth),
+            2 if self.iterators.len() < 3 => self.for_loop(depth),
             _ => {
                 let destination = self.destination();
                 let mut operands = vec![self.operand()];
                 if self.random.chance(60) {
                     operands.push(self.operand());
                 }
-                Statement::Assign(destination, operands)
+                let operator = ["^", "^", "&", "|", "+"][self.random.below(5)];
+                Statement::Assign(destination, operands, operator)
             }
         }
     }
@@ -177,7 +230,7 @@ impl Generator {
     }
 
     fn for_loop(&mut self, depth: usize) -> Statement {
-        let iterator = ["i", "j"][self.iterators.len()];
+        let iterator = ["i", "j", "k"][self.iterators.len()];
         let end = 1 + self.random.below(3);
         let range = match self.random.below(8) {
             0 | 1 => Range::Descending,
@@ -220,15 +273,28 @@ fn smaller(statements: &[Statement]) -> Vec<Vec<Statement>> {
             candidates.push(replaced);
         };
         match statement {
-            Statement::Assign(destination, operands) if operands.len() > 1 => {
+            Statement::Assign(destination, operands, operator) if operands.len() > 1 => {
                 for operand in operands {
                     replace(vec![Statement::Assign(
                         destination.clone(),
                         vec![operand.clone()],
+                        operator,
                     )]);
                 }
             }
             Statement::Assign(..) => {}
+            Statement::Case(selector, arms) => {
+                for arm in arms {
+                    replace(arm.clone());
+                }
+                for (position, arm) in arms.iter().enumerate() {
+                    for smaller_arm in smaller(arm) {
+                        let mut arms = arms.clone();
+                        arms[position] = smaller_arm;
+                        replace(vec![Statement::Case(selector.clone(), arms)]);
+                    }
+                }
+            }
             Statement::If(condition, then, otherwise) => {
                 replace(then.clone());
                 replace(otherwise.clone());
@@ -277,17 +343,12 @@ fn smaller(statements: &[Statement]) -> Vec<Vec<Statement>> {
 /// either is incomplete, else whether each finds a loop.
 fn compare(statements: &[Statement]) -> Option<(bool, bool)> {
     let code = module(statements);
+    // Each side's loops and completeness come from one analysis.
     let outcome = std::panic::catch_unwind(|| {
-        if !comb_loop_analysis_is_complete(&code)
-            || !crate::comb_loop_detect::with_enumerated_loops(|| {
-                comb_loop_analysis_is_complete(&code)
-            })
-        {
-            return None;
-        }
-        let symbolic = has_comb_loop(&code);
-        let enumerated = crate::comb_loop_detect::with_enumerated_loops(|| has_comb_loop(&code));
-        Some((symbolic, enumerated))
+        let (symbolic, complete) = comb_loop_outcome(&code);
+        let (enumerated, enumerated_complete) =
+            crate::comb_loop_detect::with_enumerated_loops(|| comb_loop_outcome(&code));
+        (complete && enumerated_complete).then_some((symbolic, enumerated))
     });
     outcome.ok().flatten()
 }
@@ -354,4 +415,22 @@ fn counted_loops_agree_with_enumeration() {
         false_loops.len(),
         missed_loops.len()
     );
+}
+
+/// The analysis of a procedure does not depend on what was parsed before
+/// it: each analysis of the same code takes new token identities, which
+/// must not change the order the analysis works in, and so neither its
+/// loops nor whether it completes.
+#[test]
+fn analyses_of_one_procedure_agree() {
+    let cases = std::env::var("VERYL_DETERMINISM_CASES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(60u64);
+    for seed in 0..cases {
+        let code = module(&Generator::generate(seed));
+        let first = comb_loop_outcome(&code);
+        let second = comb_loop_outcome(&code);
+        assert_eq!(first, second, "seed {seed}: {code}");
+    }
 }

@@ -50,7 +50,7 @@ use crate::comb_loop_detect::position::{
 };
 use crate::comb_loop_detect::ssa::PositionDomain;
 
-type AxisRange = Option<(isize, isize)>;
+pub(super) type AxisRange = Option<(isize, isize)>;
 
 /// The coordinates congruent to `.1` modulo `.0`; modulus 1 is all of them.
 type Class = (isize, isize);
@@ -761,6 +761,76 @@ impl PositionRelationSet {
 
     pub(super) fn is_empty(&self) -> bool {
         self.pieces.is_empty()
+    }
+
+    /// The hull of the anchor positions on each axis, `None` on an axis
+    /// some piece leaves unbounded; `None` for no pairs.
+    pub(super) fn anchor_hull(&self) -> Option<[AxisRange; 2]> {
+        let mut hull: Option<[AxisRange; 2]> = None;
+        for piece in &self.pieces {
+            hull = Some(match hull {
+                None => piece.anchor,
+                Some(hull) => [0, 1].map(|axis| match (hull[axis], piece.anchor[axis]) {
+                    (Some(left), Some(right)) => Some((left.0.min(right.0), left.1.max(right.1))),
+                    _ => None,
+                }),
+            });
+        }
+        hull
+    }
+
+    /// The hull of the anchor and of the current positions on each axis,
+    /// `None` on one some piece leaves unbounded or that is not known. A
+    /// relation covers another by `piecewise_covers` only where each of its
+    /// hulls contains the other's.
+    pub(super) fn hulls(&self) -> [AxisRange; 4] {
+        let anchor = self.anchor_hull().unwrap_or([Some((0, 0)), Some((0, 0))]);
+        let mut current: [Option<AxisRange>; 2] = [None, None];
+        for piece in &self.pieces {
+            for (axis, hull) in current.iter_mut().enumerate() {
+                // The positions `contains` compares, unbounded when not known.
+                let range = match piece.current[axis] {
+                    Current::Unlinked(_, range) => range,
+                    Current::Linked(map) => {
+                        match map_range(map, piece.anchor[read_axis(axis, map)]) {
+                            Ok(Some(range)) => range,
+                            // No position: the piece adds none to the hull.
+                            Ok(None) => continue,
+                            Err(_) => None,
+                        }
+                    }
+                };
+                *hull = Some(match (*hull, range) {
+                    (None, range) => range,
+                    (Some(Some(left)), Some(right)) => {
+                        Some((left.0.min(right.0), left.1.max(right.1)))
+                    }
+                    _ => None,
+                });
+            }
+        }
+        let current = current.map(|range| range.unwrap_or(Some((0, 0))));
+        [anchor[0], anchor[1], current[0], current[1]]
+    }
+
+    /// Whether hulls `outer` contain hulls `inner`, see `hulls`.
+    pub(super) fn hulls_contain(outer: &[AxisRange; 4], inner: &[AxisRange; 4]) -> bool {
+        outer
+            .iter()
+            .zip(inner)
+            .all(|(outer, inner)| range_contains(*outer, *inner))
+    }
+
+    /// Whether `self` can cover `inner` by `piecewise_covers`: each piece of
+    /// `inner` lies in one of `self`, so its anchor hull in `self`'s.
+    pub(super) fn may_cover(outer: Option<[AxisRange; 2]>, inner: Option<[AxisRange; 2]>) -> bool {
+        match (outer, inner) {
+            (_, None) => true,
+            (None, Some(_)) => false,
+            (Some(outer), Some(inner)) => {
+                (0..2).all(|axis| range_contains(outer[axis], inner[axis]))
+            }
+        }
     }
 
     pub(super) fn piecewise_covers(&self, other: &Self) -> bool {

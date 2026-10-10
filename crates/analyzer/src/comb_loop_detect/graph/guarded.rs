@@ -32,7 +32,9 @@
 //! divisibility and endpoint extrema decide feasibility without enumeration.
 
 use super::relation::PositionRelationSet;
-use super::{FeasiblePosition, SearchBudget, insert_cycle_state, intersect_axis};
+use super::{
+    FeasiblePosition, SearchBudget, insert_bounded_cycle_state, insert_cycle_state, intersect_axis,
+};
 use crate::comb_loop_detect::model::BitDependency;
 use crate::comb_loop_detect::position::{Link, greatest_common_divisor};
 use crate::comb_loop_detect::ssa::PathCondition;
@@ -290,12 +292,17 @@ fn insert_guarded_relation(
     condition: PathCondition,
     budget: &mut SearchBudget,
 ) {
-    if let Some(condition) = insert_cycle_state(
+    if let Some(condition) = insert_bounded_cycle_state(
         reached,
         &relation,
         condition,
         PositionRelationSet::piecewise_covers,
         PositionRelationSet::piece_count,
+        Some(
+            &|outer: &PositionRelationSet, inner: &PositionRelationSet| {
+                PositionRelationSet::may_cover(outer.anchor_hull(), inner.anchor_hull())
+            },
+        ),
         budget,
     ) {
         queue.push_back((relation, condition));

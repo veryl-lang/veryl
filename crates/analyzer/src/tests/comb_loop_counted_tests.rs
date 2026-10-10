@@ -2269,3 +2269,194 @@ counted_case!(
      assign o = {4'd0, y[0], y[1], t[0], t[1]};",
     false
 );
+
+counted_case!(
+    counted_pure_call_keeps_bit_positions,
+    "a call that reads only its inputs reads each actual at the destination bit's position",
+    "var q: logic<8>;
+     var c: logic;
+     function g (v: input logic, w: input logic) -> logic { var r: logic; r = w; for m in 0..2 { if v { r = r ^ w; } } return r; }
+     always_comb { c = a[0]; for i in 0..2 { q[i + 2] = g(c, q[i]); } }
+     assign o = q;",
+    false
+);
+
+counted_case!(
+    counted_pure_call_of_its_own_bit_closes,
+    "a call reading the bit it writes closes",
+    "var q: logic<8>;
+     var c: logic;
+     function g (v: input logic, w: input logic) -> logic { var r: logic; r = w; for m in 0..2 { if v { r = r ^ w; } } return r; }
+     always_comb { c = a[0]; for i in 0..2 { q[i + 2] = g(q[i + 2], c); } }
+     assign o = q;",
+    true
+);
+
+counted_case!(
+    counted_nested_arms_overwrite_on_every_path,
+    "writes on every path through nested branches overwrite the value before the loop",
+    "var c: logic;
+     always_comb { c = c; for i in 0..2 { if a[4] { if a[6] { c = b[i]; } else { c = b[7]; } } else { c = b[6]; } } }
+     assign o = {7'd0, c};",
+    false
+);
+
+counted_case!(
+    counted_nested_arms_with_a_path_without_a_write_keep_the_value,
+    "a path through nested branches without a write keeps the value before the loop",
+    "var c: logic;
+     always_comb { c = c; for i in 0..2 { if a[4] { if a[6] { c = b[i]; } } else { c = b[6]; } } }
+     assign o = {7'd0, c};",
+    true
+);
+
+counted_case!(
+    counted_strided_bit_read_takes_its_own_instances,
+    "a bit read at a stride takes the instance that wrote it, or the bit before the loop",
+    "var q: logic<8>;
+     var c: logic;
+     always_comb { for i in 0..2 { q[i] = c; c = q[2 * i]; } }
+     assign o = {q[7:1], c};",
+    false
+);
+
+counted_case!(
+    counted_packed_chain_through_a_scalar_is_feed_forward,
+    "each bit is written from the previous one through a scalar",
+    "var q: logic<8>;
+     var c: logic;
+     always_comb { for i in 0..2 { c = q[i]; q[i + 1] = c; } }
+     assign o = {q[7:1], c};",
+    false
+);
+
+counted_case!(
+    counted_bits_written_in_an_inner_loop_leave_the_last_instance,
+    "each bit written in an inner loop holds the last outer iteration's value",
+    "var q: logic<8>;
+     var t: logic [8];
+     var c: logic;
+     always_comb { for i in 0..3 { for k in 0..2 { q[k] = t[i + 2]; } } c = q[0]; t[2] = c; }
+     assign o = {c, q[1], t[0], t[1], t[2], t[3], t[4], t[5]};",
+    false
+);
+
+counted_case!(
+    counted_bits_written_in_an_inner_loop_close_through_the_last_instance,
+    "the bit an inner loop writes last reads what it feeds",
+    "var q: logic<8>;
+     var t: logic [8];
+     var c: logic;
+     always_comb { for i in 0..3 { for k in 0..2 { q[k] = t[i + 2]; } } c = q[0]; t[4] = c; }
+     assign o = {c, q[1], t[0], t[1], t[2], t[3], t[4], t[5]};",
+    true
+);
+
+counted_case!(
+    counted_case_on_an_inner_iterator_takes_its_arm_on_its_iterations,
+    "a case on an iterator takes each arm on the iterations its patterns give",
+    "var y: logic [8];
+     var t: logic [8];
+     var c: logic;
+     always_comb { for i in 0..2 { for j in 0..2 { t[i + 2] = c; case j { 0: {} 1: { c = y[i + 1]; } default: {} } } } c = t[3]; }
+     assign o = {c, y[1], y[2], t[0], t[1], t[2], t[3], 1'd0};",
+    false
+);
+
+counted_case!(
+    counted_arms_of_writes_in_single_value_loops_exclude_each_other,
+    "writes in loops of one value inside arms of one branch exclude each other on an instance",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..3 { if a[0] { for j in 0..1 { t[i] = y[i]; } } else { if a[1] { y[i] = t[i + 2]; } else { for j in 0..1 { y[i + 2] = t[j]; } } } } }
+     assign o = {y[0], y[1], y[2], t[0], t[1], t[2], 2'd0};",
+    false
+);
+
+counted_case!(
+    counted_bit_read_of_a_self_recurrence_terminates,
+    "a bit read takes a definition reading its own earlier iteration once",
+    "var q: logic<8>;
+     var c: logic;
+     always_comb { for j in 0..3 { c = c; } for i in 0..3 { q[i] = c; } }
+     assign o = q;",
+    true
+);
+
+counted_case!(
+    counted_value_taken_again_keeps_the_arm_it_was_left_on,
+    "a value a loop left on one arm is taken again only on that arm",
+    "var y: logic [8];
+     var c: logic;
+     var e: logic;
+     always_comb { if a[1] { c = y[3]; } else { for i in 0..2 { e = c; } } for k in 0..2 { y[k + 2] = e; } }
+     assign o = {c, e, y[0], y[1], y[2], y[3], 2'd0};",
+    false
+);
+
+counted_case!(
+    counted_value_taken_again_on_the_same_path_closes,
+    "a value a loop left on the path that feeds it closes",
+    "var y: logic [8];
+     var c: logic;
+     var e: logic;
+     always_comb { c = y[3]; for i in 0..2 { e = c; } for k in 0..2 { y[k + 2] = e; } }
+     assign o = {c, e, y[0], y[1], y[2], y[3], 2'd0};",
+    true
+);
+
+counted_case!(
+    counted_returns_keep_the_instances_their_arms_took,
+    "returns that together take every instance of one arm leave none to the other arm",
+    "var y: logic [8];
+     var t: logic [8];
+     var e: logic;
+     always_comb { for i in 0..2 { if a[0] { t[i + 1] = t[i]; } else { if a[1] { y[i] = t[i]; } else { t[i] = e ^ y[i]; } } } e = t[2]; }
+     assign o = {e, y[0], y[1], t[0], t[1], t[2], 2'd0};",
+    false
+);
+
+counted_case!(
+    counted_earlier_instance_replaced_in_its_iteration_is_not_the_last,
+    "the first instance a later write of its iteration replaces is never the last",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..3 { for j in 0..3 { y[j] = a[0]; if a[1] { y[0] = t[i + j]; y[j] = a[0]; } } t[2] = y[0]; } }
+     assign o = {y[0], y[1], y[2], t[0], t[1], t[2], t[3], t[4]};",
+    false
+);
+
+counted_case!(
+    counted_earlier_instance_kept_in_its_iteration_may_be_the_last,
+    "an earlier instance no later write of its iteration replaces may be the last",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..3 { for j in 0..3 { y[j] = a[0]; if a[1] { y[0] = t[i + j]; y[j + 1] = a[0]; } } t[2] = y[0]; } }
+     assign o = {y[0], y[1], y[2], t[0], t[1], t[2], t[3], t[4]};",
+    true
+);
+
+counted_case!(
+    counted_replaced_first_instance_is_not_the_last_of_a_moving_read,
+    "a read moving with a loop takes no instance a later write of its iteration replaces",
+    "var y: logic [8];
+     var t: logic [8];
+     always_comb { for i in 0..3 { for j in 0..3 { y[j] = a[0]; if a[1] { y[0] = t[i + j]; y[j] = a[0]; } } for k in 0..2 { t[k + 2] = y[k]; } } }
+     assign o = {y[0], y[1], y[2], t[0], t[1], t[2], t[3], t[4]};",
+    false
+);
+
+counted_case!(
+    counted_later_write_confined_to_other_iterations_does_not_replace_the_first,
+    "a later write confined to other iterations does not replace the first instance",
+    "var t: logic [4];
+     var y: logic [4];
+     var c: logic;
+     assign t[0] = c;
+     assign t[1] = a[1];
+     assign t[2] = a[2];
+     assign t[3] = a[3];
+     always_comb { for k in 0..4 { y[k] = b[k]; } for i in 0..4 { if a[i] { y[0] = t[i]; } if i != 0 { y[i] = b[i]; } } c = y[0]; }
+     assign o = {4'd0, y[0], y[1], y[2], c};",
+    true
+);

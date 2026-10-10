@@ -30,25 +30,41 @@ struct TransferNode {
 /// consisting only of retention edges carries the previous value as state,
 /// not as a combinational dependency, exactly as `Phi` and `Guarded` do in
 /// the dependency DAG export.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct TransferEdge {
     relation: PositionRelation,
     data: bool,
+    /// The choices of branches outside the loop the edge holds on. Those
+    /// inside it are taken on each iteration again, so no iteration keeps
+    /// another's.
+    condition: PathCondition,
 }
 
 impl TransferEdge {
-    const RETAIN: Self = Self {
-        relation: PositionRelation {
-            array: Link::IDENTITY,
-            packed: Link::IDENTITY,
-        },
-        data: false,
-    };
+    fn retain() -> Self {
+        Self::retain_on(PathCondition::default())
+    }
+
+    fn retain_on(condition: PathCondition) -> Self {
+        Self {
+            relation: PositionRelation {
+                array: Link::IDENTITY,
+                packed: Link::IDENTITY,
+            },
+            data: false,
+            condition,
+        }
+    }
 
     fn data(relation: PositionRelation) -> Self {
+        Self::data_on(relation, PathCondition::default())
+    }
+
+    fn data_on(relation: PositionRelation, condition: PathCondition) -> Self {
         Self {
             relation,
             data: true,
+            condition,
         }
     }
 }
@@ -78,9 +94,21 @@ struct TransferBuilder {
     graph: TransferGraph,
     versions: HashMap<VersionId, NodeIndex>,
     pending: VecDeque<VersionId>,
+    /// The branches made before the loop, see `RepeatedIteration`.
+    outer_branches: Option<BranchId>,
 }
 
 impl TransferBuilder {
+    /// The choices of `condition` on branches made before the loop.
+    fn outer(&self, condition: &PathCondition) -> PathCondition {
+        match self.outer_branches {
+            Some(first) => condition.restricted(|branch| {
+                branch.procedure == first.procedure && branch.local < first.local
+            }),
+            None => PathCondition::default(),
+        }
+    }
+
     fn version<K>(
         &mut self,
         ssa: &SsaStore<K>,
@@ -138,22 +166,28 @@ impl TransferBuilder {
             // those iterations. Pre-loop input versions keep their guards.
             match &ssa.versions[version] {
                 Version::Entry(_) => unreachable!("entries are handled above"),
-                Version::Definition { sources, .. } => {
+                Version::Definition { sources, condition } => {
+                    let condition = self.outer(condition);
                     for &(source, relation) in sources {
                         let source = self.version(ssa, source, start, import_work)?;
-                        self.graph
-                            .add_edge(source, node, TransferEdge::data(relation));
+                        self.graph.add_edge(
+                            source,
+                            node,
+                            TransferEdge::data_on(relation, condition.clone()),
+                        );
                     }
                 }
                 Version::Phi(inputs) => {
                     for &source in inputs {
                         let source = self.version(ssa, source, start, import_work)?;
-                        self.graph.add_edge(source, node, TransferEdge::RETAIN);
+                        self.graph.add_edge(source, node, TransferEdge::retain());
                     }
                 }
-                Version::Guarded { source, .. } => {
+                Version::Guarded { source, condition } => {
+                    let condition = self.outer(condition);
                     let source = self.version(ssa, *source, start, import_work)?;
-                    self.graph.add_edge(source, node, TransferEdge::RETAIN);
+                    self.graph
+                        .add_edge(source, node, TransferEdge::retain_on(condition));
                 }
                 Version::Projected {
                     source,
@@ -163,7 +197,7 @@ impl TransferBuilder {
                     self.graph[node].domains.push(*domain);
                     let source = self.version(ssa, *source, start, import_work)?;
                     let edge = if *retains {
-                        TransferEdge::RETAIN
+                        TransferEdge::retain()
                     } else {
                         TransferEdge::data(PositionRelation::default())
                     };
@@ -291,6 +325,10 @@ pub(in crate::comb_loop_detect) struct RepeatedIteration<'s, K> {
     /// How many of the last `observed` states observe only the keys they
     /// bind: values the iterations produce without feeding the next.
     pub(in crate::comb_loop_detect) bound_only: usize,
+    /// The first branch made in the loop, of the procedure's numbering: the
+    /// earlier ones of the procedure take one arm on every iteration, so
+    /// the paths through the iterations keep their choices.
+    pub(in crate::comb_loop_detect) outer_branches: Option<BranchId>,
 }
 
 impl<'s, K> RepeatedIteration<'s, K> {
@@ -305,6 +343,7 @@ impl<'s, K> RepeatedIteration<'s, K> {
             may_skip,
             observed: &mut [],
             bound_only: 0,
+            outer_branches: None,
         }
     }
 }
@@ -322,9 +361,13 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
         may_skip,
         observed,
         bound_only,
+        outer_branches,
     } = iteration;
     let bound_from = observed.len().saturating_sub(bound_only);
-    let mut builder = TransferBuilder::default();
+    let mut builder = TransferBuilder {
+        outer_branches,
+        ..TransferBuilder::default()
+    };
     let outputs = iteration
         .bindings
         .iter()
@@ -338,7 +381,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
                 is_output: true,
                 ..TransferNode::default()
             });
-            builder.graph.add_edge(value, root, TransferEdge::RETAIN);
+            builder.graph.add_edge(value, root, TransferEdge::retain());
             Some((key, entry, input, root, domains))
         })
         .collect::<Option<Vec<_>>>()?;
@@ -377,7 +420,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
                 is_output: true,
                 ..TransferNode::default()
             });
-            builder.graph.add_edge(value, root, TransferEdge::RETAIN);
+            builder.graph.add_edge(value, root, TransferEdge::retain());
             observers.push((index, key, root));
         }
     }
@@ -398,7 +441,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             });
             builder
                 .graph
-                .add_edge(initial, *input, TransferEdge::RETAIN);
+                .add_edge(initial, *input, TransferEdge::retain());
             initials.insert(*input, initial);
         }
         builder.graph[*input].is_iteration_input = true;
@@ -408,7 +451,9 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
         } else if !unrestricted.contains(input) {
             builder.graph[*input].domains.extend_from_slice(domains);
         }
-        builder.graph.add_edge(*root, *input, TransferEdge::RETAIN);
+        builder
+            .graph
+            .add_edge(*root, *input, TransferEdge::retain());
     }
 
     let generated_start = ssa.versions.len();
@@ -469,7 +514,8 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
 /// dependency there, exactly as in straight-line SSA, except that an initial
 /// input with a restricted view is read only at its exposed positions.
 struct Layers<'v> {
-    retained: Vec<Vec<NodeIndex>>,
+    /// Each initial input with the path it is retained on.
+    retained: Vec<Vec<(NodeIndex, PathCondition)>>,
     data: Vec<Option<VersionId>>,
     views: &'v HashMap<NodeIndex, VersionId>,
 }
@@ -492,7 +538,7 @@ impl<'v> Layers<'v> {
     ) -> Option<VersionId> {
         let inputs = self.retained[node.index()]
             .iter()
-            .filter_map(|initial| graph[*initial].input)
+            .filter_map(|(initial, condition)| Some(ssa.guarded(graph[*initial].input?, condition)))
             .collect();
         join(ssa, inputs)
     }
@@ -506,17 +552,24 @@ impl<'v> Layers<'v> {
     ) -> VersionId {
         let mut inputs = self.retained[node.index()]
             .iter()
-            .filter_map(|initial| self.views.get(initial).copied().or(graph[*initial].input))
+            .filter_map(|(initial, condition)| {
+                let input = self.views.get(initial).copied().or(graph[*initial].input)?;
+                Some(ssa.guarded(input, condition))
+            })
             .collect::<Vec<_>>();
         inputs.extend(self.data[node.index()]);
         ssa.phi(inputs)
     }
 
-    fn retain_from(&mut self, node: NodeIndex, source: NodeIndex) {
+    /// Retain at `node` what `source` retains, on the path `condition`.
+    fn retain_from(&mut self, node: NodeIndex, source: NodeIndex, condition: &PathCondition) {
         if node == source {
             return;
         }
-        let inherited = self.retained[source.index()].clone();
+        let inherited = self.retained[source.index()]
+            .iter()
+            .filter_map(|(initial, held)| Some((*initial, held.conjoin_if_compatible(condition)?)))
+            .collect::<Vec<_>>();
         let retained = &mut self.retained[node.index()];
         retained.extend(inherited);
         retained.sort_unstable();
@@ -604,7 +657,7 @@ fn condense<'v, K: Copy + Eq + Hash>(
             })
             .flatten();
         if graph[nodes[0]].input.is_some() && nodes.len() == 1 {
-            layers.retained[nodes[0].index()] = vec![nodes[0]];
+            layers.retained[nodes[0].index()] = vec![(nodes[0], PathCondition::default())];
         } else if let Some(recurrence) = recurrence {
             recurrence.materialize(ssa, graph, &incoming[component], &mut layers);
         } else if cyclic[component] {
@@ -612,15 +665,21 @@ fn condense<'v, K: Copy + Eq + Hash>(
             let mut sources = Vec::new();
             let mut retained = Vec::new();
             for edge in &incoming[component] {
+                let condition = &edge.weight().condition;
                 if internal_data[component] || edge.weight().data {
                     let value = layers.read(ssa, graph, edge.source());
-                    let value = ssa.related_definition(vec![(value, edge.weight().relation)]);
+                    let value = ssa.related_definition_guarded(
+                        vec![(value, edge.weight().relation)],
+                        condition,
+                    );
                     let value = ssa.projected_union(value, &graph[edge.target()].domains);
                     sources.push((value, stable[component]));
                 }
                 if !edge.weight().data {
-                    retained.push(edge.source());
-                    data_inputs.extend(layers.data[edge.source().index()]);
+                    retained.push((edge.source(), condition.clone()));
+                    if let Some(data) = layers.data[edge.source().index()] {
+                        data_inputs.push(ssa.guarded(data, condition));
+                    }
                 }
             }
             // Retained inputs of members of an SCC with an internal read have
@@ -631,8 +690,8 @@ fn condense<'v, K: Copy + Eq + Hash>(
             let data_value = join(ssa, data_inputs);
             let bounds = member_bounds(graph, nodes);
             for &node in nodes {
-                for &source in &retained {
-                    layers.retain_from(node, source);
+                for (source, condition) in &retained {
+                    layers.retain_from(node, *source, condition);
                 }
                 let domains = match bounds.get(&node) {
                     Some(Bound::Hull(domain)) => std::slice::from_ref(domain),
@@ -646,12 +705,16 @@ fn condense<'v, K: Copy + Eq + Hash>(
             let mut data_inputs = Vec::new();
             let mut sources = Vec::new();
             for edge in &incoming[component] {
+                let condition = &edge.weight().condition;
                 if edge.weight().data {
                     let value = layers.read(ssa, graph, edge.source());
+                    let value = ssa.guarded(value, condition);
                     sources.push((value, edge.weight().relation));
                 } else {
-                    layers.retain_from(node, edge.source());
-                    data_inputs.extend(layers.data[edge.source().index()]);
+                    layers.retain_from(node, edge.source(), condition);
+                    if let Some(data) = layers.data[edge.source().index()] {
+                        data_inputs.push(ssa.guarded(data, condition));
+                    }
                 }
             }
             if !sources.is_empty() {
@@ -1006,7 +1069,10 @@ impl UniformRecurrence {
                 .iter()
                 .map(|edge| {
                     let value = layers.read(ssa, graph, edge.source());
-                    let value = ssa.related_definition(vec![(value, edge.weight().relation)]);
+                    let value = ssa.related_definition_guarded(
+                        vec![(value, edge.weight().relation)],
+                        &edge.weight().condition,
+                    );
                     (
                         ssa.projected_union(value, &graph[edge.target()].domains),
                         self.stable,
@@ -1023,8 +1089,11 @@ impl UniformRecurrence {
             for &member in &exits {
                 if retains[member] {
                     for edge in &edges {
-                        retained[member].push(edge.source());
-                        data_inputs[member].extend(layers.data[edge.source().index()]);
+                        let condition = &edge.weight().condition;
+                        retained[member].push((edge.source(), condition.clone()));
+                        if let Some(data) = layers.data[edge.source().index()] {
+                            data_inputs[member].push(ssa.guarded(data, condition));
+                        }
                     }
                 }
                 if let Some(units) = reads[member] {
@@ -1045,8 +1114,8 @@ impl UniformRecurrence {
             }
         }
         for (index, &node) in self.members.iter().enumerate() {
-            for source in std::mem::take(&mut retained[index]) {
-                layers.retain_from(node, source);
+            for (source, condition) in std::mem::take(&mut retained[index]) {
+                layers.retain_from(node, source, &condition);
             }
             layers.data[node.index()] = join(ssa, std::mem::take(&mut data_inputs[index]))
                 .map(|value| ssa.projected_union(value, &graph[node].domains));

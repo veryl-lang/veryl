@@ -106,6 +106,11 @@ impl BranchId {
     pub(super) const fn arms(self) -> usize {
         self.arms
     }
+
+    /// The numbering of the procedure that made the branch.
+    pub(super) const fn procedure(self) -> usize {
+        self.procedure
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -208,6 +213,26 @@ impl PathCondition {
 
     pub(super) fn is_unconditional(&self) -> bool {
         self.constraints.is_empty()
+    }
+
+    /// The choices on the branches `keep` accepts.
+    pub(super) fn restricted(&self, keep: impl Fn(BranchId) -> bool) -> Self {
+        if self
+            .constraints
+            .iter()
+            .all(|constraint| keep(constraint.branch))
+        {
+            return self.clone();
+        }
+        Self {
+            constraints: Rc::new(
+                self.constraints
+                    .iter()
+                    .filter(|constraint| keep(constraint.branch))
+                    .cloned()
+                    .collect(),
+            ),
+        }
     }
 
     pub(super) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
@@ -1229,10 +1254,35 @@ where
     pub(super) fn selected_from(&self, version: VersionId) -> Option<Vec<VersionId>> {
         match self.versions.get(version)? {
             Version::Phi(inputs) => Some(inputs.clone()),
-            Version::Guarded { source, .. } | Version::Projected { source, .. } => {
-                Some(vec![*source])
-            }
             _ => None,
+        }
+    }
+
+    /// The version `version` holds, with the path it holds it on when it
+    /// holds it on one: what a projection holds is at positions of the
+    /// version's own key.
+    pub(super) fn held(&self, version: VersionId) -> Option<(VersionId, Option<PathCondition>)> {
+        match self.versions.get(version)? {
+            Version::Guarded { source, condition } => Some((*source, Some(condition.clone()))),
+            Version::Projected { source, .. } => Some((*source, None)),
+            _ => None,
+        }
+    }
+
+    /// The paths `version` and the versions it holds are held on.
+    pub(super) fn holding_conditions(&self, mut version: VersionId) -> Vec<PathCondition> {
+        let mut conditions = Vec::new();
+        loop {
+            if let Some(Version::Definition { condition, .. }) = self.versions.get(version)
+                && !condition.is_unconditional()
+            {
+                conditions.push(condition.clone());
+            }
+            let Some((source, condition)) = self.held(version) else {
+                return conditions;
+            };
+            conditions.extend(condition);
+            version = source;
         }
     }
 

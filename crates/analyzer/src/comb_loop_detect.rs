@@ -108,6 +108,12 @@ pub(crate) fn is_complete(ir: &Ir) -> bool {
     check_inner(ir).1
 }
 
+/// The diagnostics of one analysis with whether it was complete.
+#[cfg(test)]
+pub(crate) fn check_with_completeness(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
+    check_inner(ir)
+}
+
 fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut errors = Vec::new();
     let mut complete = true;
