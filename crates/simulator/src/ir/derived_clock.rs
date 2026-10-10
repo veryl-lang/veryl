@@ -75,14 +75,11 @@ impl DerivedClockSchedule {
     }
 }
 
-/// Returns `(schedule, eval_indices)` where `eval_indices` are
-/// dependency-closure stmt indices into `pre_jit_stmts` (already topo-sorted
-/// by `analyze_dependency`).
 pub fn build_schedule(
     candidates: &[EdgeCandidate],
     pre_jit_stmts: &[ProtoStatement],
     input_clock_offsets: &HashMap<VarOffset, VarId>,
-) -> (DerivedClockSchedule, Vec<usize>) {
+) -> DerivedClockSchedule {
     // FF outputs go through the event/commit path.  Every writer, not the
     // last: an offset written by sibling conditional arms has one fragment
     // per arm, and keeping only the last drops the others from the closure.
@@ -156,7 +153,6 @@ pub fn build_schedule(
         }
     });
 
-    let mut dep_set: HashSet<usize> = HashSet::default();
     let mut master_set: HashSet<VarId> = HashSet::default();
     for clk in &mut clocks {
         if clk.current_offset.is_ff() {
@@ -175,100 +171,18 @@ pub fn build_schedule(
             &mut local_master,
         );
         clk.master_gated = !local_master.is_empty();
-        dep_set.extend(local_dep);
         master_set.extend(local_master);
     }
-    for rst in &resets {
-        if rst.current_offset.is_ff() {
-            continue;
-        }
-        // Same closure, but a reset has no ICG reading, so its master
-        // inputs stay out of `master_input_clocks` (toggling one would
-        // fabricate a clock edge nothing asked for).
-        let mut local_dep: HashSet<usize> = HashSet::default();
-        let mut local_master: HashSet<VarId> = HashSet::default();
-        collect_comb_closure(
-            rst.current_offset,
-            pre_jit_stmts,
-            &output_to_writer,
-            input_clock_offsets,
-            &mut local_dep,
-            &mut local_master,
-        );
-        dep_set.extend(local_dep);
-    }
-
-    let mut eval_indices: Vec<usize> = dep_set.into_iter().collect();
-    absorb_forwarders(&mut eval_indices, pre_jit_stmts);
-    eval_indices.sort_unstable();
-
     let mut master_input_clocks: SmallVec<[VarId; 4]> = SmallVec::new();
     for vid in master_set {
         master_input_clocks.push(vid);
     }
 
-    (
-        DerivedClockSchedule {
-            clocks,
-            resets,
-            master_input_clocks,
-        },
-        eval_indices,
-    )
-}
-
-/// Extend the closure with the plain comb assigns outside it that read only
-/// what it already holds (its inputs and outputs, transitively), such as a
-/// clock net copied onto a port nobody reads.  Bounded so the closure stays
-/// small.
-fn absorb_forwarders(eval_indices: &mut Vec<usize>, pre_jit_stmts: &[ProtoStatement]) {
-    const CAP: usize = 64;
-    let mut in_closure: HashSet<usize> = eval_indices.iter().copied().collect();
-    let mut visible: HashSet<VarOffset> = HashSet::default();
-    let (mut ins, mut outs) = (Vec::new(), Vec::new());
-    for &i in eval_indices.iter() {
-        ins.clear();
-        outs.clear();
-        pre_jit_stmts[i].gather_variable_offsets(&mut ins, &mut outs);
-        visible.extend(ins.iter().copied());
-        visible.extend(outs.iter().copied());
+    DerivedClockSchedule {
+        clocks,
+        resets,
+        master_input_clocks,
     }
-    let mut absorbed = 0usize;
-    let mut grew = true;
-    while grew && absorbed < CAP {
-        grew = false;
-        for (i, stmt) in pre_jit_stmts.iter().enumerate() {
-            if in_closure.contains(&i)
-                || !matches!(stmt, ProtoStatement::Assign(a) if !a.dst.is_ff())
-            {
-                continue;
-            }
-            ins.clear();
-            outs.clear();
-            stmt.gather_variable_offsets(&mut ins, &mut outs);
-            if ins.is_empty() || !ins.iter().all(|o| visible.contains(o)) {
-                continue;
-            }
-            in_closure.insert(i);
-            eval_indices.push(i);
-            visible.extend(outs.iter().copied());
-            absorbed += 1;
-            grew = true;
-            if absorbed == CAP {
-                break;
-            }
-        }
-    }
-}
-
-pub fn extract_eval_proto_stmts(
-    eval_indices: &[usize],
-    pre_jit_stmts: &[ProtoStatement],
-) -> Vec<ProtoStatement> {
-    eval_indices
-        .iter()
-        .filter_map(|i| pre_jit_stmts.get(*i).cloned())
-        .collect()
 }
 
 /// Walks back from `target_offset` through `output_to_writer`.  FF inputs

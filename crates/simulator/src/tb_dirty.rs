@@ -23,14 +23,13 @@ use crate::HashSet;
 use crate::ir::{Event, Ir, Statement, VarOffset};
 use crate::testbench::TestbenchStatement;
 
-/// Everything the settle filter derives from a module's storage layout and
+/// Everything the dataflow settle derives from a module's storage layout and
 /// event classification.  All of it is offset-based, hence identical for
-/// every instantiation of one `ProtoModule` — built once on first use and
-/// cached through `Ir::settle_info`.
+/// every instantiation of one `ProtoModule`, so it is built once on first use
+/// and cached through `Ir::settle_info`.
 pub(crate) struct SettleInfo {
     /// Span table template; re-target per `Ir` with `SpanTable::rebased`.
     pub(crate) table: SpanTable,
-    pub(crate) clock_toggle_dirties: bool,
     pub(crate) dirty_events: HashSet<Event>,
     pub(crate) event_comb_watch: crate::HashMap<Event, (u32, u32)>,
     pub(crate) watch_pool: Vec<(u32, u32)>,
@@ -95,8 +94,8 @@ impl TbDirtyFilter {
         if !enabled() {
             return filter;
         }
-        // Reuse the settle filter's cached table when it armed (the usual
-        // case); a fresh build only on its opt-out path.
+        // Reuse the dataflow settle's cached table; a fresh build only when
+        // the dataflow settle is off.
         let spans = match ir.settle_info.get() {
             Some(info) => info.table.rebased(ir),
             None => SpanTable::build(ir, &ir.comb_touched_offsets),
@@ -134,9 +133,9 @@ impl TbDirtyFilter {
 /// The buffer bases are captured by address: both are `Box<[u8]>` owned by the
 /// `Ir`, so they stay put for its lifetime.
 ///
-/// Besides classifying testbench statements, the table backs the simulator's
-/// settle filter, which asks the same question of committed FF writes by
-/// byte offset (`ff_change_may_reach_comb`).
+/// Besides classifying testbench statements, the table backs the dataflow
+/// settle's classification of the comb writes an event makes directly
+/// (`comb_change_may_reach_comb`).
 #[derive(Clone)]
 pub(crate) struct SpanTable {
     ff: std::sync::Arc<[Span]>,
@@ -145,14 +144,12 @@ pub(crate) struct SpanTable {
     ff_len: usize,
     comb_base: usize,
     comb_len: usize,
-    /// Precomputed `ff_never_reaches_comb` verdict (span layout only).
-    ff_untouched_cover: bool,
 }
 
 impl SpanTable {
-    /// The span vectors and verdicts are offset-based, hence identical for
-    /// every instantiation of one `ProtoModule` — only the buffer bases
-    /// change.  `Ir::settle_info` caches a built table; this re-targets it.
+    /// The span vectors are offset-based, hence identical for every
+    /// instantiation of one `ProtoModule`: only the buffer bases change.
+    /// `Ir::settle_info` caches a built table; this re-targets it.
     pub(crate) fn rebased(&self, ir: &Ir) -> Self {
         SpanTable {
             ff: std::sync::Arc::clone(&self.ff),
@@ -161,7 +158,6 @@ impl SpanTable {
             ff_len: ir.ff_values.len(),
             comb_base: ir.comb_values.as_ptr() as usize,
             comb_len: ir.comb_values.len(),
-            ff_untouched_cover: self.ff_untouched_cover,
         }
     }
 
@@ -275,22 +271,13 @@ impl SpanTable {
                 stack.push(child);
             }
         }
-        let ff = disjoint_cover(ff);
-        let ff_len = ir.ff_values.len();
-        let mut next = 0usize;
-        let ff_untouched_cover = ff.iter().all(|s| {
-            let contiguous = !s.touched && s.start <= next;
-            next = s.end;
-            contiguous
-        }) && next >= ff_len;
         SpanTable {
-            ff: ff.into(),
+            ff: disjoint_cover(ff).into(),
             comb: disjoint_cover(comb).into(),
             ff_base,
-            ff_len,
+            ff_len: ir.ff_values.len(),
             comb_base,
             comb_len: ir.comb_values.len(),
-            ff_untouched_cover,
         }
     }
 
@@ -310,24 +297,6 @@ impl SpanTable {
             return true;
         };
         range_may_reach(spans, off, len)
-    }
-
-    /// `write_may_reach_comb` for a committed FF write given by byte offset
-    /// into `ff_values`: `true` when a CHANGE of those bytes may be read by
-    /// the comb (out-of-table bytes answer `true`).
-    pub(crate) fn ff_change_may_reach_comb(&self, off: usize, len: usize) -> bool {
-        if off >= self.ff_len {
-            return true;
-        }
-        range_may_reach(&self.ff, off, len)
-    }
-
-    /// `true` when no committed FF write can ever reach a comb read —
-    /// every byte of `ff_values` lies in a known, untouched span.  The
-    /// commit then skips its per-entry compares outright (a design whose
-    /// comb reads no FF, e.g. a pure-FF benchmark harness).
-    pub(crate) fn ff_never_reaches_comb(&self) -> bool {
-        self.ff_untouched_cover
     }
 
     /// Same question for a write into `comb_values` (an event writing comb

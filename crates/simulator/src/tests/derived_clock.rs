@@ -1339,7 +1339,7 @@ fn negedge_flop_reads_a_runtime_indexed_write() {
 }
 
 /// A negedge flop still samples the settled comb once the design wakes up
-/// after edges on which the settle filter found the comb clean.
+/// after idle edges.
 #[test]
 fn negedge_flop_after_a_clean_comb() {
     let code = r#"

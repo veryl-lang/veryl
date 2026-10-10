@@ -4,7 +4,7 @@ use crate::component::runtime::{RuntimeComponent, build_components};
 use crate::ir::opt::event_gate::{GateEntry, RtEventGates};
 use crate::ir::write_log::{
     WriteLogBuffer, clear_event_write_log, ff_commit_from_log, ff_commit_from_log_marking,
-    ff_commit_from_log_watched, set_event_write_log,
+    set_event_write_log,
 };
 use crate::ir::{
     Event, Ir, ModuleVariables, Statement, Value, VarId, VarPath, dispatch_stmt_fast,
@@ -111,28 +111,16 @@ pub struct Simulator {
     /// Waveform handles for component trace variables:
     /// (handle, component index, trace variable index).
     trace_dump_vars: Vec<(crate::wave_dumper::VarHandle, usize, usize)>,
-    /// Settle filter (`VERYL_SETTLE_FILTER=0` opts out): variable spans of
-    /// FF storage annotated with whether the comb can read them.  With it,
-    /// `comb_dirty` is maintained precisely, so a step that changes no comb
-    /// input (a divided clock's empty base tick) skips its settle.  `None`
-    /// keeps the legacy conservative dirtying.
-    settle_filter: Option<crate::tb_dirty::SpanTable>,
-    /// Whether `set_input_clock_bit` must dirty the comb: true when the
-    /// filter is off, or when a comb statement can read an input clock's
-    /// level (the master toggle would then be visible to the settle).
-    clock_toggle_dirties: bool,
-    /// Events whose writes outside the FF log can reach a comb read AND
-    /// cannot be value-compared (unboundable, unresolvable, or over the
-    /// watch cap) — a fire of one dirties the comb.  Classified once in
-    /// `new` from `Ir::event_comb_writes` against the span table; empty
-    /// when the filter is off.
+    /// Dataflow: events whose writes outside the FF log can reach a comb
+    /// read and cannot be value-compared (unboundable, unresolvable, or over
+    /// the watch cap), classified from `Ir::event_comb_writes` against the
+    /// span table.
     dirty_events: crate::HashSet<Event>,
-    /// Per event, the comb byte ranges `(offset, len)` its statements can
-    /// write AND the comb can read — mostly FF-like registers held in comb
-    /// storage (divided clock waves, misclassified FFs).  Snapshotted
-    /// before the event fires and compared after: a changed byte dirties
-    /// the comb, an unchanged fire stays invisible.  Disjoint from
-    /// `dirty_events`.
+    /// Dataflow: per event, the comb byte ranges `(offset, len)` its
+    /// statements can write and the comb can read, mostly FF-like registers
+    /// held in comb storage (divided clock waves, misclassified FFs).
+    /// Snapshotted before the event fires and compared after, so only a
+    /// changed range marks its readers.  Disjoint from `dirty_events`.
     event_comb_watch: crate::HashMap<Event, (u32, u32)>,
     /// Flat storage behind `event_comb_watch`: each entry is a
     /// `(start, len)` slice of this pool.  Immutable after `new`, and the
@@ -159,35 +147,7 @@ pub struct Simulator {
     /// `VERYL_STATE_DIGEST=1`: a running hash of the FF storage after every
     /// step, printed on drop, to compare two runs' whole flop history.
     state_digest: Option<(u64, u64)>,
-    /// `VERYL_SETTLE_FILTER_DIAG=1`: print settle counts on drop.
-    settle_diag: bool,
-    settles_run: u64,
-    settles_skipped: u64,
-    /// Diag attribution: how often each source dirtied a clean comb.
-    dirty_from_event: u64,
-    dirty_from_commit: u64,
-    /// First few watched FF offsets the commit compare flagged (diag).
-    dirty_commit_offsets: Vec<(usize, usize)>,
-    /// Consecutive armed settles no skip interrupted; drives the auto-off
-    /// in `filter_note_settle`.
-    filter_miss_streak: u32,
-    /// Settles remaining until a disarmed filter re-arms.
-    filter_rearm_countdown: u32,
-    /// Adaptive gate over `settle_filter`: false suspends the commit
-    /// compares and event watches, dirtying every commit unconditionally.
-    filter_armed: bool,
-    /// `SpanTable::ff_never_reaches_comb`: the commit then keeps the comb
-    /// clean without any per-entry compare.
-    ff_unreachable: bool,
 }
-
-/// A design whose settles are never skipped pays the filter's commit
-/// compares and event-watch snapshots for nothing — after this many
-/// consecutive unskipped settles the filter disarms.
-const SETTLE_FILTER_AUTO_OFF_STREAK: u32 = 1024;
-/// A disarmed filter re-arms after this many settles, so a workload that
-/// enters a skippable phase (an idle loop) gets its skips back.
-const SETTLE_FILTER_REARM: u32 = 1 << 20;
 
 /// Disjoint cover of comb-buffer element byte ranges, as runs of equally
 /// sized elements `(start, end, elem_len)`, for resolving an event's
@@ -237,8 +197,8 @@ fn comb_element_cover(ir: &Ir) -> Vec<(usize, usize, usize)> {
     out
 }
 
-/// Beyond this many compared bytes, an event is cheaper to settle than to
-/// compare.
+/// Beyond this many compared bytes, an event gate's compare costs more per
+/// fire than a skip saves.
 pub(crate) const WATCH_CAP_BYTES: usize = 1024;
 
 /// `VERYL_DATAFLOW_DIAG=1`: count the runtime paths where Rust stands in for
@@ -261,30 +221,15 @@ fn dataflow_fallback(kind: usize) {
 /// so it pays a larger one.
 const DATAFLOW_WATCH_CAP_BYTES: usize = 64 * 1024;
 
-/// The settle filter's instantiation-invariant products: span table,
-/// clock-toggle verdict, and the per-event comb-write classification
-/// (scratch no comb statement reads is invisible; a bounded comb-reaching
-/// write is value-compared per fire; everything else dirties every fire).
-/// The filter caches it in `Ir::settle_info`, one build per module; the
-/// dataflow settle builds its own per simulator.
-fn build_settle_info(ir: &Ir, diag: bool, cap: usize) -> crate::tb_dirty::SettleInfo {
+/// The dataflow settle's instantiation-invariant products: span table and
+/// the per-event comb-write classification (scratch no comb statement reads
+/// is invisible; a bounded comb-reaching write is value-compared per fire;
+/// everything else marks its readers, or all of the comb, on every fire).
+/// Cached in `Ir::settle_info`, one build per module.
+fn build_settle_info(ir: &Ir) -> crate::tb_dirty::SettleInfo {
+    let diag = crate::ir::opt::dataflow::diag();
+    let cap = DATAFLOW_WATCH_CAP_BYTES;
     let table = crate::tb_dirty::SpanTable::build(ir, &ir.comb_touched_offsets);
-    // The master toggle always returns to its baseline within the step,
-    // but the mid-step settles run while it is high — so it is invisible
-    // to the settle only when no comb statement can read an input clock's
-    // level.
-    let use_4state = ir.use_4state;
-    let clock_toggle_dirties = ir
-        .derived_clock_schedule
-        .master_input_clocks
-        .iter()
-        .any(|id| match ir.module_variables.variables.get(id) {
-            Some(v) => {
-                let len = crate::ir::value_size(v.native_bytes, use_4state);
-                table.write_may_reach_comb(v.current_values[0], len)
-            }
-            None => true,
-        });
     let cover = comb_element_cover(ir);
     let elem_of = |off: usize| -> Option<(usize, usize)> {
         let i = cover.partition_point(|&(s, _, _)| s <= off);
@@ -325,14 +270,14 @@ fn build_settle_info(ir: &Ir, diag: bool, cap: usize) -> crate::tb_dirty::Settle
         }
         if unresolved {
             if diag {
-                eprintln!("[settle_filter] event {event:?}: DIRTY (unresolved offset)");
+                eprintln!("[dataflow] event {event:?}: DIRTY (unresolved offset)");
             }
             dirty_events.insert(event.clone());
             continue;
         }
         if ranges.is_empty() {
             if diag {
-                eprintln!("[settle_filter] event {event:?}: CLEAN");
+                eprintln!("[dataflow] event {event:?}: CLEAN");
             }
             continue;
         }
@@ -347,7 +292,7 @@ fn build_settle_info(ir: &Ir, diag: bool, cap: usize) -> crate::tb_dirty::Settle
         let total: usize = merged.iter().map(|&(s, e)| e - s).sum();
         if total > cap {
             if diag {
-                eprintln!("[settle_filter] event {event:?}: DIRTY (watch {total} bytes over cap)");
+                eprintln!("[dataflow] event {event:?}: DIRTY (watch {total} bytes over cap)");
             }
             dirty_events.insert(event.clone());
             continue;
@@ -355,7 +300,7 @@ fn build_settle_info(ir: &Ir, diag: bool, cap: usize) -> crate::tb_dirty::Settle
         max_watch = max_watch.max(total);
         if diag {
             eprintln!(
-                "[settle_filter] event {event:?}: WATCH {total} bytes in {} ranges",
+                "[dataflow] event {event:?}: WATCH {total} bytes in {} ranges",
                 merged.len()
             );
         }
@@ -365,7 +310,6 @@ fn build_settle_info(ir: &Ir, diag: bool, cap: usize) -> crate::tb_dirty::Settle
     }
     crate::tb_dirty::SettleInfo {
         table,
-        clock_toggle_dirties,
         dirty_events,
         event_comb_watch,
         watch_pool,
@@ -551,8 +495,6 @@ impl Simulator {
             components: Vec::new(),
             components_pending,
             trace_dump_vars: Vec::new(),
-            settle_filter: None,
-            clock_toggle_dirties: true,
             dirty_events: Default::default(),
             event_comb_watch: Default::default(),
             watch_pool: Vec::new(),
@@ -566,31 +508,19 @@ impl Simulator {
             last_event_watch: None,
             state_digest: (env::var("VERYL_STATE_DIGEST").as_deref() == Ok("1"))
                 .then_some((0xcbf2_9ce4_8422_2325, 0)),
-            settle_diag: env::var("VERYL_SETTLE_FILTER_DIAG").as_deref() == Ok("1"),
-            settles_run: 0,
-            settles_skipped: 0,
-            dirty_from_event: 0,
-            dirty_from_commit: 0,
-            dirty_commit_offsets: Vec::new(),
-            filter_miss_streak: 0,
-            filter_rearm_countdown: 0,
-            filter_armed: true,
-            ff_unreachable: false,
         };
 
-        // A comb statement writing FF storage (a dual-driven variable under
-        // `#[allow(multiple_assign)]`) needs no standdown: comb outs are in
-        // `comb_touched_offsets`, so those FF bytes lie in touched spans and
-        // any event-side change to them dirties the comb through the commit
-        // compare.  `--disable-ff-opt` does stand down — its comb-scope FF
-        // writes bypass the compare.
         if ret.ir.dataflow.is_some() {
-            // The dataflow settle has no filter: an event's comb writes are
-            // compared per fire to mark their readers instead.
-            let info = build_settle_info(&ret.ir, ret.settle_diag, DATAFLOW_WATCH_CAP_BYTES);
-            ret.dirty_events = info.dirty_events;
-            ret.event_comb_watch = info.event_comb_watch;
-            ret.watch_pool = info.watch_pool;
+            // An event's comb writes are compared per fire to mark their
+            // readers.
+            let info = Arc::clone(
+                ret.ir
+                    .settle_info
+                    .get_or_init(|| Arc::new(build_settle_info(&ret.ir))),
+            );
+            ret.dirty_events = info.dirty_events.clone();
+            ret.event_comb_watch = info.event_comb_watch.clone();
+            ret.watch_pool = info.watch_pool.clone();
             ret.comb_watch_scratch = vec![0u8; info.max_watch];
             if let Some(df) = ret.ir.dataflow.clone() {
                 let words = df.plan.words();
@@ -622,64 +552,6 @@ impl Simulator {
                         .insert(event.clone(), std::sync::Arc::new(list));
                 }
             }
-        } else if env::var("VERYL_SETTLE_FILTER").as_deref() != Ok("0") && !ret.ir.disable_ff_opt {
-            let diag = ret.settle_diag;
-            let info = Arc::clone(
-                ret.ir
-                    .settle_info
-                    .get_or_init(|| Arc::new(build_settle_info(&ret.ir, diag, WATCH_CAP_BYTES))),
-            );
-            ret.clock_toggle_dirties = info.clock_toggle_dirties;
-            ret.dirty_events = info.dirty_events.clone();
-            ret.event_comb_watch = info.event_comb_watch.clone();
-            ret.watch_pool = info.watch_pool.clone();
-            ret.comb_watch_scratch = vec![0u8; info.max_watch];
-            let spans = info.table.rebased(&ret.ir);
-            if ret.settle_diag {
-                fn find_var_by_ptr(module: &ModuleVariables, ptr: *const u8) -> Option<String> {
-                    for v in module.variables.values() {
-                        if v.current_values.first().copied() == Some(ptr as *mut u8) {
-                            return Some(v.path.to_string());
-                        }
-                    }
-                    for child in &module.children {
-                        if let Some(n) = find_var_by_ptr(child, ptr) {
-                            return Some(format!("{}.{n}", child.name));
-                        }
-                    }
-                    None
-                }
-                for (e, writes) in &ret.ir.event_comb_writes {
-                    let Some(offs) = writes else {
-                        eprintln!("[settle_filter] event {e:?}: UNBOUNDED writes");
-                        continue;
-                    };
-                    let hits: Vec<String> = offs
-                        .iter()
-                        .filter(|&&(lo, hi)| {
-                            lo < 0
-                                || hi < lo
-                                || spans
-                                    .comb_change_may_reach_comb(lo as usize, (hi - lo) as usize + 1)
-                        })
-                        .take(6)
-                        .map(|&(lo, _)| {
-                            let name = if lo >= 0 {
-                                let ptr = unsafe { ret.ir.comb_values.as_ptr().add(lo as usize) };
-                                find_var_by_ptr(&ret.ir.module_variables, ptr)
-                            } else {
-                                None
-                            };
-                            format!("{lo:#x}={}", name.unwrap_or_else(|| "?".into()))
-                        })
-                        .collect();
-                    if !hits.is_empty() {
-                        eprintln!("[settle_filter] event {e:?}: comb-reaching writes {hits:?}");
-                    }
-                }
-            }
-            ret.ff_unreachable = spans.ff_never_reaches_comb();
-            ret.settle_filter = Some(spans);
         }
 
         // Reset nets start DEASSERTED: zeroed storage reads as ASSERTED on an
@@ -798,7 +670,6 @@ impl Simulator {
         // Seed prev values from the initial post-settle state.
         if n_derived > 0 || n_derived_resets > 0 {
             ret.do_settle_comb();
-            ret.comb_dirty = false;
             for i in 0..n_derived {
                 let clk = &ret.ir.derived_clock_schedule.clocks[i];
                 ret.prev_derived_clock_values[i] = ret.read_derived_clock_bit(clk);
@@ -847,7 +718,7 @@ impl Simulator {
             fired[i] = true;
         }
         self.fire_derived_clock_batch_once(batch);
-        self.settle_comb_if_stale();
+        self.do_settle_comb();
         // A clock that rose BECAUSE this batch committed reaches its own
         // blocks here, in the same half period -- the rule the reset chain
         // below already follows.  It cannot be left to the next step: the
@@ -882,7 +753,7 @@ impl Simulator {
                 fired[i] = true;
             }
             self.fire_derived_clock_batch_once(&chained);
-            self.settle_comb_if_stale();
+            self.do_settle_comb();
         }
         // The batch can have asserted an async reset; that reaches its
         // blocks here, in the same half period.
@@ -953,7 +824,7 @@ impl Simulator {
                     self.fire_components(&Event::reset(vid));
                 }
             }
-            self.settle_comb_if_stale();
+            self.do_settle_comb();
         }
     }
 
@@ -999,14 +870,11 @@ impl Simulator {
                 *ptr.add(native_bytes) = 0;
             }
         }
+        // Clocks toggle every step: marking only the clock's readers keeps
+        // the settle from rerunning every cell each step.
         self.ir
             .dataflow_mark_ptr(ptr, crate::ir::value_size(native_bytes, self.ir.use_4state));
-        // Clocks toggle every step, so a full-scan fallback here would
-        // defeat the dirty-seed path: record the covered word precisely
-        // through the shared range entry.
-        if self.clock_toggle_dirties {
-            self.comb_dirty = true;
-        }
+        self.comb_dirty = true;
     }
 
     /// One step's flop state into the running digest (`VERYL_STATE_DIGEST`).
@@ -1030,75 +898,8 @@ impl Simulator {
     /// Settle the comb list with whichever engine is configured.
     #[inline]
     fn do_settle_comb(&mut self) {
-        self.settles_run += 1;
         self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
-    }
-
-    /// Full settle unless the filter's precise tracking proves the comb
-    /// already matches the current state.  Without the filter this is
-    /// unconditional — the legacy flag is not maintained mid-step, so
-    /// `comb_dirty == false` proves nothing there.
-    fn settle_comb_if_stale(&mut self) {
-        if self.settle_filter.is_none() || self.comb_dirty {
-            self.do_settle_comb();
-            self.comb_dirty = false;
-            self.filter_note_settle();
-        } else {
-            self.settles_skipped += 1;
-            self.filter_miss_streak = 0;
-            self.check_skipped_settle();
-        }
-    }
-
-    /// Adaptive auto-off over the settle filter.  Called at each settle
-    /// the filter failed to skip: a long enough miss streak disarms it
-    /// (commits then dirty unconditionally, paying no compares), and a
-    /// disarmed filter re-arms after `SETTLE_FILTER_REARM` settles.
-    #[inline]
-    fn filter_note_settle(&mut self) {
-        if self.settle_filter.is_none() {
-            return;
-        }
-        if self.filter_armed {
-            self.filter_miss_streak += 1;
-            if self.filter_miss_streak >= SETTLE_FILTER_AUTO_OFF_STREAK {
-                self.filter_armed = false;
-                self.filter_rearm_countdown = SETTLE_FILTER_REARM;
-            }
-        } else {
-            self.filter_rearm_countdown -= 1;
-            if self.filter_rearm_countdown == 0 {
-                self.filter_armed = true;
-                self.filter_miss_streak = 0;
-            }
-        }
-    }
-
-    /// `VERYL_SETTLE_FILTER_CHECK=1`: a skipped settle must be a no-op on
-    /// the comb — run it anyway and panic on the first byte it would have
-    /// changed.  Slow (clones comb per skip); diagnostics only.
-    fn check_skipped_settle(&mut self) {
-        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let on = *ON.get_or_init(|| env::var("VERYL_SETTLE_FILTER_CHECK").as_deref() == Ok("1"));
-        if !on || self.settle_filter.is_none() {
-            return;
-        }
-        // The gate state region at the tail of the comb buffer is
-        // bookkeeping, not logic: compare only the storage below it.
-        let limit = (self.ir.gate_state_base as usize).min(self.ir.comb_values.len());
-        let before = self.ir.comb_values[..limit].to_vec();
-        self.do_settle_comb();
         self.comb_dirty = false;
-        if let Some(i) = before
-            .iter()
-            .zip(self.ir.comb_values[..limit].iter())
-            .position(|(a, b)| a != b)
-        {
-            panic!(
-                "[settle_filter] WRONG SKIP: comb byte {i:#x} changed under a skipped settle (last event {:?})",
-                self.last_event,
-            );
-        }
     }
 
     /// Dump the `VERYL_EVENT_DIAG=1` per-statement event-eval time
@@ -1306,14 +1107,11 @@ impl Simulator {
             let start = Instant::now();
 
             self.do_settle_comb();
-            self.comb_dirty = false;
 
             #[cfg(feature = "profile")]
             {
                 self.profile.settle_comb_ns += start.elapsed().as_nanos() as u64;
             }
-        } else {
-            self.check_skipped_settle();
         }
     }
 
@@ -1440,27 +1238,17 @@ impl Simulator {
             let start = Instant::now();
 
             self.do_settle_comb();
-            self.comb_dirty = false;
-            self.filter_note_settle();
 
             #[cfg(feature = "profile")]
             {
                 self.profile.settle_comb_ns += start.elapsed().as_nanos() as u64;
             }
-        } else if self.settle_filter.is_some() {
-            self.settles_skipped += 1;
-            self.filter_miss_streak = 0;
-            self.check_skipped_settle();
         }
 
         self.step_event_inner(events, resets);
 
         clear_event_write_log();
-        // With the filter, the commit compare / event comb-write flag have
-        // already dirtied the comb when needed.
-        if self.settle_filter.is_none() {
-            self.comb_dirty = true;
-        }
+        self.comb_dirty = true;
 
         if !self.watch_vars.is_empty() {
             let tag = match events.first() {
@@ -1690,9 +1478,12 @@ impl Simulator {
                 None => std::ptr::null(),
             };
             self.last_whole_event = wptr;
-            // An event absent from the classification must fail CLOSED: a
-            // future path firing an unclassified event gets a settle, not a
-            // silent skip.
+            // An event absent from the classification fails closed: it marks
+            // every reader rather than none.
+            debug_assert!(
+                self.ir.event_comb_writes.contains_key(event) || (ptr.is_null() && wptr.is_none()),
+                "event {event:?} has code but no comb-write classification"
+            );
             self.last_event_writes_comb =
                 !self.ir.event_comb_writes.contains_key(event) || self.dirty_events.contains(event);
             self.last_event_watch = self.event_comb_watch.get(event).copied();
@@ -1702,21 +1493,9 @@ impl Simulator {
             (ptr, wptr)
         };
 
-        // Writes outside the FF write log (comb bytes, readmemh, tb-method
-        // returns) bypass the commit compare, so the settle filter must
-        // treat this fire as dirtying the comb.  Disarmed, every fire
-        // dirties — that also keeps the watch snapshot below dark.
-        if self.settle_filter.is_some() && (self.last_event_writes_comb || !self.filter_armed) {
-            if self.settle_diag && !self.comb_dirty && self.last_event_writes_comb {
-                self.dirty_from_event += 1;
-            }
-            self.comb_dirty = true;
-        }
-
         // Snapshot the event's comb-reaching writes (`event_comb_watch`) so
-        // an unchanged fire (a divided clock wave on its flat tick) stays
-        // invisible to the settle.  Pointless once the comb is dirty, except
-        // under dataflow: there the snapshot is the readers' only signal.
+        // an unchanged fire (a divided clock wave on its flat tick) marks no
+        // reader.
         let dataflow = self.ir.dataflow.is_some();
         // A marked whole-event function sets the readers' bits at each store,
         // so the fire needs no snapshot.
@@ -1731,9 +1510,7 @@ impl Simulator {
         let df_marked = df_marked || (jit_marked && whole_event_ptr.is_none());
         // The whole-settle entry runs the settles: no marks, no snapshot.
         let unmarked = dataflow && self.ir.dataflow_unmarked.get();
-        let watch: Option<(u32, u32)> = if (dataflow && !df_marked && !unmarked)
-            || (!self.comb_dirty && self.settle_filter.is_some())
-        {
+        let watch: Option<(u32, u32)> = if dataflow && !df_marked && !unmarked {
             self.last_event_watch
         } else {
             None
@@ -1898,19 +1675,6 @@ impl Simulator {
                 },
                 None => {}
             }
-        } else if let Some((ws, wl)) = watch {
-            let mut pos = 0usize;
-            for &(off, len) in &self.watch_pool[ws as usize..(ws + wl) as usize] {
-                let (off, len) = (off as usize, len as usize);
-                if self.comb_watch_scratch[pos..pos + len] != self.ir.comb_values[off..off + len] {
-                    if self.settle_diag {
-                        self.dirty_from_event += 1;
-                    }
-                    self.comb_dirty = true;
-                    break;
-                }
-                pos += len;
-            }
         }
 
         #[cfg(feature = "profile")]
@@ -1919,70 +1683,18 @@ impl Simulator {
         }
     }
 
-    /// Commit the log with a waveform attached: every changed byte is reported
-    /// so the dump's gate hears about it, and the settle filter's probe rides
-    /// along on the same compare.  Kept apart from `commit_event_log` so a run
-    /// without a waveform commits exactly as it did before there was one.
-    fn commit_marking(
-        ir: &mut Ir,
-        dump: &mut WaveDumper,
-        probe: Option<&mut dyn FnMut(usize, usize) -> bool>,
-    ) -> bool {
-        let (ff, log) = (&mut ir.ff_values, &ir.write_log_buffer);
-        match probe {
-            Some(probe) => ff_commit_from_log_marking(ff, log, &mut |off, len| {
-                dump.mark_ff(off, len);
-                probe(off, len)
-            }),
-            None => ff_commit_from_log_marking(ff, log, &mut |off, len| {
-                dump.mark_ff(off, len);
-                false
-            }),
-        }
-    }
-
-    /// `commit_event_log` for a run with a waveform; see `commit_marking`.
-    fn commit_event_log_marking(&mut self) {
-        match &self.settle_filter {
-            Some(_) if self.ff_unreachable && !self.comb_dirty => {
-                Self::commit_marking(&mut self.ir, self.dump.as_mut().unwrap(), None);
-            }
-            Some(spans) if self.filter_armed && !self.comb_dirty => {
-                let diag_offsets = &mut self.dirty_commit_offsets;
-                let record = self.settle_diag;
-                if Self::commit_marking(
-                    &mut self.ir,
-                    self.dump.as_mut().unwrap(),
-                    Some(&mut |off, len| {
-                        let hit = spans.ff_change_may_reach_comb(off, len);
-                        if hit && record && diag_offsets.len() < 16 {
-                            diag_offsets.push((off, len));
-                        }
-                        hit
-                    }),
-                ) {
-                    if self.settle_diag {
-                        self.dirty_from_commit += 1;
-                    }
-                    self.comb_dirty = true;
-                }
-            }
-            _ => {
-                Self::commit_marking(&mut self.ir, self.dump.as_mut().unwrap(), None);
-                if self.settle_filter.is_some() && !self.filter_armed {
-                    self.comb_dirty = true;
-                }
-            }
-        }
-    }
-
     /// Apply the accumulated write log to FF storage and reset the buffer.
     fn commit_event_log(&mut self) {
         #[cfg(feature = "profile")]
         let ff_start = Instant::now();
 
-        if self.dump.is_some() {
-            self.commit_event_log_marking();
+        if let Some(dump) = self.dump.as_mut() {
+            // Every changed byte is reported so the dump's gate hears about it.
+            ff_commit_from_log_marking(
+                &mut self.ir.ff_values,
+                &self.ir.write_log_buffer,
+                &mut |off, len| dump.mark_ff(off, len),
+            );
             self.ir.dataflow_mark_all();
         } else if self.ir.dataflow.is_some() && self.ir.dataflow_unmarked.get() {
             ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
@@ -2003,48 +1715,10 @@ impl Simulator {
                         off,
                         off + len,
                     );
-                    false
                 },
             );
         } else {
-            match &self.settle_filter {
-                // Value-compare the commit against the comb's reach: when no
-                // byte the comb can read changes, the standing settled state
-                // stays valid and `comb_dirty` stays false.  An already-dirty
-                // comb skips the compare — the verdict cannot improve.
-                Some(_) if self.ff_unreachable && !self.comb_dirty => {
-                    ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
-                }
-                Some(spans) if self.filter_armed && !self.comb_dirty => {
-                    let diag_offsets = &mut self.dirty_commit_offsets;
-                    let record = self.settle_diag;
-                    if ff_commit_from_log_watched(
-                        &mut self.ir.ff_values,
-                        &self.ir.write_log_buffer,
-                        &mut |off, len| {
-                            let hit = spans.ff_change_may_reach_comb(off, len);
-                            if hit && record && diag_offsets.len() < 16 {
-                                diag_offsets.push((off, len));
-                            }
-                            hit
-                        },
-                    ) {
-                        if self.settle_diag {
-                            self.dirty_from_commit += 1;
-                        }
-                        self.comb_dirty = true;
-                    }
-                }
-                _ => {
-                    ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
-                    // Disarmed, the flag must still reach the next settle
-                    // decision (the event fire above covers eval'd paths, but
-                    // not commits without one, e.g. the reset batch).
-                    if self.settle_filter.is_some() && !self.filter_armed {
-                        self.comb_dirty = true;
-                    }
-                }
-            }
+            ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
         }
 
         if self.write_log_diag.enabled {
@@ -2124,7 +1798,7 @@ impl Simulator {
         for &id in &masters {
             self.set_input_clock_bit(id, 1);
         }
-        self.settle_comb_if_stale();
+        self.do_settle_comb();
         if watch_enabled {
             self.dump_watch("after_settle");
         }
@@ -2220,7 +1894,7 @@ impl Simulator {
             if !post_commit_sources {
                 break;
             }
-            self.settle_comb_if_stale();
+            self.do_settle_comb();
             for (i, v) in new_values.iter_mut().enumerate().take(n) {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
                 *v = self.read_derived_clock_bit(clk);
@@ -2331,7 +2005,7 @@ impl Simulator {
             for &id in &masters {
                 self.set_input_clock_bit(id, 0);
             }
-            self.settle_comb_if_stale();
+            self.do_settle_comb();
             // A clock the master inverts -- `~clk`, or a `clock_negedge`
             // whose active level `read_derived_clock_bit` inverts -- reaches
             // its active level HERE.  The pre-commit phase fires on the
@@ -2366,11 +2040,7 @@ impl Simulator {
         self.snapshot_derived_reset_levels();
 
         clear_event_write_log();
-        // With the filter, the commit compare / event comb-write flag have
-        // already dirtied the comb when needed.
-        if self.settle_filter.is_none() {
-            self.comb_dirty = true;
-        }
+        self.comb_dirty = true;
         if self.state_digest.is_some() {
             self.fold_state_digest();
         }
@@ -2623,7 +2293,6 @@ impl Simulator {
         if self.dump.is_some() {
             if self.comb_dirty {
                 self.do_settle_comb();
-                self.comb_dirty = false;
             }
             let dump = self.dump.as_mut().unwrap();
             dump.timestamp(self.time);
@@ -2682,26 +2351,6 @@ impl Drop for Simulator {
             eprintln!(
                 "[state_digest] module={} steps={n} ff={h:016x}",
                 self.ir.name
-            );
-        }
-        if self.settle_diag {
-            eprintln!(
-                "[settle_filter] module={} settles_run={} settles_skipped={} filter_on={} armed={} clock_toggle_dirties={} dirty_from_event={} dirty_from_commit={} first_commit_hits={:?}",
-                self.ir.name,
-                self.settles_run,
-                self.settles_skipped,
-                self.settle_filter.is_some(),
-                self.filter_armed,
-                self.clock_toggle_dirties,
-                self.dirty_from_event,
-                self.dirty_from_commit,
-                self.dirty_commit_offsets,
-            );
-            let mut evs: Vec<String> = self.dirty_events.iter().map(|e| format!("{e:?}")).collect();
-            evs.sort();
-            eprintln!(
-                "[settle_filter] module={} dirty_events={:?}",
-                self.ir.name, evs
             );
         }
     }

@@ -9,7 +9,7 @@ use crate::ir::declaration::{
     branch_tag, stable_topo_sort_with_blocks, stable_topo_sort_with_pieces,
 };
 use crate::ir::derived_clock::{
-    DerivedClockSchedule, build_schedule as build_derived_clock_schedule, extract_eval_proto_stmts,
+    DerivedClockSchedule, build_schedule as build_derived_clock_schedule,
 };
 use crate::ir::external::{ExternalComponentInst, ProtoExternalComponent};
 use crate::ir::inst_layout::InstLayout;
@@ -114,9 +114,8 @@ pub struct Module {
     /// decide which of its own statements really invalidate the comb.
     pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
     /// Per event, the comb byte offsets its statements can write, or `None`
-    /// when unboundable (`event_comb_write_offsets`).  The simulator's
-    /// settle filter dirties the comb on a fire of any event whose writes
-    /// can reach a comb read.
+    /// when unboundable (`event_comb_write_offsets`).  The dataflow settle
+    /// marks the comb readers of those writes on each fire.
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// First byte of the gate state region at the comb buffer's tail;
     /// logic storage ends here.
@@ -124,8 +123,8 @@ pub struct Module {
     /// Comb-buffer offsets of the event gates' idle flags (`event_gate`),
     /// cleared by writes the gates cannot see.
     pub event_gate_flags: Vec<u32>,
-    /// Lazily built settle-filter layout info, shared (`Arc::clone`) by
-    /// every `Module`/`Ir` from one `ProtoModule` — the products are
+    /// Lazily built dataflow-settle layout info, shared (`Arc::clone`) by
+    /// every `Module`/`Ir` from one `ProtoModule`: the products are
     /// offset-based and instantiation-invariant.
     pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
 }
@@ -1304,11 +1303,10 @@ fn collect_event_written_comb(
 
 /// Comb byte ranges `(lo, hi)` — element base offsets, `lo == hi` for a
 /// static write, `hi` the last element of a dynamic one — one event's
-/// statements can write, for the settle filter.  `None` when a write
+/// statements can write, for the dataflow settle.  `None` when a write
 /// cannot be bounded (`$readmemh` element stores and tb-method returns
-/// land outside the FF write log — an FF destination there bypasses the
-/// value-compared commit too — and a compiled block without originals
-/// hides its interior): the event must then dirty the comb on every fire.
+/// land outside the FF write log, and a compiled block without originals
+/// hides its interior): the event must then mark the comb on every fire.
 /// `Some` lets the simulator value-compare exactly the ranges the comb can
 /// read (an always_ff's comb-scoped scratch is invisible to the settle).
 ///
@@ -5946,8 +5944,8 @@ impl Conv<&air::Module> for ProtoModule {
             }
         }
         // Everything below here is logic storage; the gate state appended
-        // past it mutates as bookkeeping, which the settle filter's skip
-        // oracle and the event validator exclude from their comparisons.
+        // past it mutates as bookkeeping, which the event validator excludes
+        // from its comparison.
         let gate_state_base = context.comb_total_bytes as u32;
         // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
         // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
@@ -6484,18 +6482,10 @@ impl Conv<&air::Module> for ProtoModule {
             trace_scc_cycles(&pre_jit_stmts, &module_variable_meta);
         }
 
-        // The event gate always compares what the derived-clock closure
-        // touches.
-        let (derived_clock_schedule, closure_touched) = if derived_clock_vars.is_empty() {
-            (DerivedClockSchedule::default(), crate::HashSet::default())
+        let derived_clock_schedule = if derived_clock_vars.is_empty() {
+            DerivedClockSchedule::default()
         } else {
-            let (sched, eval_indices) = build_derived_clock_schedule(
-                &derived_clock_vars,
-                &pre_jit_stmts,
-                &input_clock_offsets,
-            );
-            let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
-            (sched, collect_comb_touched_offsets(&eval_protos))
+            build_derived_clock_schedule(&derived_clock_vars, &pre_jit_stmts, &input_clock_offsets)
         };
 
         // Idle-subtree gates over the clock events; see `event_gate`.
@@ -6515,7 +6505,6 @@ impl Conv<&air::Module> for ProtoModule {
                     crate::ir::opt::event_gate::CombContext::new(
                         ci,
                         &pre_jit_stmts[..],
-                        &closure_touched,
                         &comb_touched_offsets,
                     )
                 });
@@ -7802,7 +7791,7 @@ mod event_written_comb_tests {
     }
 
     #[test]
-    fn settle_filter_event_write_classification() {
+    fn event_comb_write_classification() {
         // FF-only writes ride the value-compared commit; comb writes are
         // reported by offset for the reach classification.
         assert_eq!(

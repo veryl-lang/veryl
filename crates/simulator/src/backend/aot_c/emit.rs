@@ -5306,8 +5306,8 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
             ));
             calls.push_str(&format!("        veryl_evg_{k}_{m}{ENTRY_ARGS};\n"));
         }
-        // Past the settle filter's cap a compare costs more per fire than a
-        // skip saves.  Ungating only makes the group run more often.
+        // Past the cap a compare costs more per fire than a skip saves.
+        // Ungating only makes the group run more often.
         let spans = g.compare_spans();
         if spans
             .iter()

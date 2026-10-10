@@ -26955,10 +26955,8 @@ fn wide_select_of_a_dynamic_array_element() {
 fn dual_driven_variable_keeps_the_comb_value_across_quiet_steps() {
     // `#[allow(multiple_assign)]` lets a comb statement and an always_ff
     // drive one variable; the comb side's write rides the FF write log and
-    // is regenerated only by a settle.  The settle filter must not leave
-    // the event's value standing where the comb's belongs: comb outs are
-    // in `comb_touched_offsets`, so the event-side change dirties the comb
-    // through the commit compare and the settle wins the value back.
+    // is regenerated only by a settle, which must win the value back from
+    // the event's.
     let code = r#"
     module Top (
         clk: input  clock   ,
@@ -26998,53 +26996,9 @@ fn dual_driven_variable_keeps_the_comb_value_across_quiet_steps() {
 }
 
 #[test]
-fn settle_filter_auto_off_boundary_keeps_comb_updated() {
-    // A design whose FF state reaches the comb every cycle never skips a
-    // settle; the filter disarms after its miss streak (auto-off) and the
-    // comb must keep updating across that boundary on unconditional
-    // dirtying alone.
-    let code = r#"
-    module Top (
-        clk: input  clock    ,
-        rst: input  reset    ,
-        o  : output logic<32>,
-    ) {
-        var cnt: logic<32>;
-        always_ff (clk) {
-            if_reset {
-                cnt = 0;
-            } else {
-                cnt = cnt + 1;
-            }
-        }
-        always_comb {
-            o = cnt + 1;
-        }
-    }
-    "#;
-    for config in Config::all() {
-        let ir = analyze(code, &config);
-        let mut sim = Simulator::new(ir, None);
-        let clk = sim.get_clock("clk").unwrap();
-        let rst = sim.get_reset("rst").unwrap();
-        sim.step_reset(&clk, &rst);
-        for _ in 0..1500 {
-            sim.step(&clk);
-        }
-        assert_eq!(
-            sim.get("o").unwrap(),
-            Value::new(1501, 32, false),
-            "config={config:?}"
-        );
-    }
-}
-
-#[test]
-fn ff_outside_comb_reach_commits_without_settling() {
-    // No comb statement reads any FF here, so the filter proves every
-    // commit invisible (`ff_never_reaches_comb`) and skips both the
-    // compares and the settles — the FF side must still advance and the
-    // comb keep its settled value.
+fn ff_outside_comb_reach_advances_under_a_constant_comb() {
+    // No comb statement reads any FF here: the FF side must still advance
+    // and the comb keep its settled value.
     let code = r#"
     module Top (
         clk: input  clock    ,

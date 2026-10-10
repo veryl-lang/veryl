@@ -185,9 +185,7 @@ pub struct Ir {
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
     /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
     pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
-    /// See `Module::event_comb_writes`.  Consumed by the simulator's
-    /// settle filter: a fire of an event whose writes can reach a comb
-    /// read dirties the comb.
+    /// See `Module::event_comb_writes`.
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// See `Module::gate_state_base`.
     pub gate_state_base: u32,
