@@ -6,7 +6,6 @@
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod comb_fusion;
-pub(crate) mod cone_gate;
 pub(crate) mod cone_order;
 pub(crate) mod dataflow;
 #[cfg(not(target_family = "wasm"))]

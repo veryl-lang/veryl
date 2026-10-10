@@ -156,13 +156,6 @@ pub struct Simulator {
     /// `last_event`'s watch slice of `watch_pool`, cached alongside
     /// `last_event_stmts`.
     last_event_watch: Option<(u32, u32)>,
-    /// Trigger bit of `last_event`; `None` when the analysis never indexed it.
-    last_event_trigger: Option<usize>,
-    /// Events fired since the last settle, one bit per
-    /// `Ir::cone_trigger_events` entry; empty when the trigger analysis is
-    /// off.  Handed to the cone-gate guards through the comb buffer.
-    trigger_pending: Vec<u64>,
-    trigger_index: HashMap<Event, usize>,
     /// `VERYL_STATE_DIGEST=1`: a running hash of the FF storage after every
     /// step, printed on drop, to compare two runs' whole flop history.
     state_digest: Option<(u64, u64)>,
@@ -546,14 +539,6 @@ impl Simulator {
         let n_derived = ir.derived_clock_schedule.clocks.len();
         let n_derived_resets = ir.derived_clock_schedule.resets.len();
         let components_pending = !ir.external_components.is_empty();
-        // Everything counts as fired before the first settle.
-        let trigger_pending_init = vec![u64::MAX; ir.cone_trigger_words as usize];
-        let trigger_index_init: HashMap<Event, usize> = ir
-            .cone_trigger_events
-            .iter()
-            .enumerate()
-            .map(|(i, e)| (e.clone(), i))
-            .collect();
         let mut ret = Self {
             ir,
             time: 0,
@@ -597,9 +582,6 @@ impl Simulator {
             last_event_jit_ff_marked: false,
             df_unmarked_push: false,
             last_event_watch: None,
-            last_event_trigger: None,
-            trigger_pending: trigger_pending_init,
-            trigger_index: trigger_index_init,
             state_digest: (env::var("VERYL_STATE_DIGEST").as_deref() == Ok("1"))
                 .then_some((0xcbf2_9ce4_8422_2325, 0)),
             settle_diag: env::var("VERYL_SETTLE_FILTER_DIAG").as_deref() == Ok("1"),
@@ -716,134 +698,6 @@ impl Simulator {
             }
             ret.ff_unreachable = spans.ff_never_reaches_comb();
             ret.settle_filter = Some(spans);
-        }
-
-        // VERYL_CONE_FF_DIAG=1: static breakdown of the cone-gate compare
-        // sets by buffer, to size compare-set optimizations.
-        if env::var("VERYL_CONE_FF_DIAG").as_deref() == Ok("1") && !ret.ir.cone_segments.is_empty()
-        {
-            let (mut ff_total, mut comb_total, mut pre_total) = (0usize, 0usize, 0usize);
-            let mut rows: Vec<(usize, usize, usize, &str)> = Vec::new();
-            for s in &ret.ir.cone_segments {
-                let ff: usize = s
-                    .compare
-                    .iter()
-                    .filter(|r| r.0)
-                    .map(|r| (r.2 - r.1) as usize)
-                    .sum();
-                let comb: usize = s
-                    .compare
-                    .iter()
-                    .filter(|r| !r.0)
-                    .map(|r| (r.2 - r.1) as usize)
-                    .sum();
-                let pre: usize = s.compare_pre.iter().map(|r| (r.1 - r.0) as usize).sum();
-                ff_total += ff;
-                comb_total += comb;
-                pre_total += pre;
-                rows.push((ff, comb, pre, s.cone.as_str()));
-            }
-            let range_count: usize = ret
-                .ir
-                .cone_segments
-                .iter()
-                .map(|s| s.compare.len() + s.compare_pre.len())
-                .sum();
-            let replay_bytes: usize = ret
-                .ir
-                .cone_segments
-                .iter()
-                .flat_map(|s| s.replay.iter())
-                .map(|r| (r.1 - r.0) as usize)
-                .sum();
-            eprintln!(
-                "[cone_ff_diag] module={} segments={} compare bytes: ff={} comb={} pre(comb)={} in {} ranges (avg {:.1} B/range), replay bytes={} — ff share {:.1}%",
-                ret.ir.name,
-                ret.ir.cone_segments.len(),
-                ff_total,
-                comb_total,
-                pre_total,
-                range_count,
-                (ff_total + comb_total + pre_total) as f64 / range_count.max(1) as f64,
-                replay_bytes,
-                100.0 * ff_total as f64 / (ff_total + comb_total + pre_total).max(1) as f64,
-            );
-            rows.sort_by_key(|&(ff, comb, pre, _)| std::cmp::Reverse(ff + comb + pre));
-            for (ff, comb, pre, cone) in rows.iter().take(12) {
-                eprintln!("[cone_ff_diag]   ff={ff:6} comb={comb:6} pre={pre:5}  {cone}");
-            }
-            let mut hist = [0usize; 8];
-            let mut hist_bytes = [0usize; 8];
-            for s in &ret.ir.cone_segments {
-                for len in s
-                    .compare
-                    .iter()
-                    .map(|r| (r.2 - r.1) as usize)
-                    .chain(s.compare_pre.iter().map(|r| (r.1 - r.0) as usize))
-                {
-                    let b = match len {
-                        0..=8 => 0,
-                        9..=32 => 1,
-                        33..=64 => 2,
-                        65..=128 => 3,
-                        129..=256 => 4,
-                        257..=512 => 5,
-                        513..=2048 => 6,
-                        _ => 7,
-                    };
-                    hist[b] += 1;
-                    hist_bytes[b] += len;
-                }
-            }
-            eprintln!(
-                "[cone_ff_diag] range histogram (count/bytes): ≤8:{}/{} ≤32:{}/{} ≤64:{}/{} ≤128:{}/{} ≤256:{}/{} ≤512:{}/{} ≤2K:{}/{} >2K:{}/{}",
-                hist[0],
-                hist_bytes[0],
-                hist[1],
-                hist_bytes[1],
-                hist[2],
-                hist_bytes[2],
-                hist[3],
-                hist_bytes[3],
-                hist[4],
-                hist_bytes[4],
-                hist[5],
-                hist_bytes[5],
-                hist[6],
-                hist_bytes[6],
-                hist[7],
-                hist_bytes[7],
-            );
-            // Overlap: bytes compared by SEVERAL segments — the dedupe
-            // headroom a shared-summary scheme could reclaim.
-            let mut events: Vec<(u32, i32)> = Vec::new();
-            for s in &ret.ir.cone_segments {
-                for r in s.compare.iter().filter(|r| !r.0) {
-                    events.push((r.1, 1));
-                    events.push((r.2, -1));
-                }
-                for r in &s.compare_pre {
-                    events.push((r.0, 1));
-                    events.push((r.1, -1));
-                }
-            }
-            events.sort_unstable();
-            let (mut depth, mut prev, mut uniq, mut multi) = (0i32, 0u32, 0usize, 0usize);
-            for &(x, d) in &events {
-                let span = (x - prev) as usize;
-                if depth >= 1 {
-                    uniq += span;
-                }
-                if depth >= 2 {
-                    multi += span;
-                }
-                depth += d;
-                prev = x;
-            }
-            eprintln!(
-                "[cone_ff_diag] comb compare coverage: unique={uniq} bytes, of which shared(≥2 segs)={multi}; sum-with-multiplicity={}",
-                comb_total + pre_total,
-            );
         }
 
         // Reset nets start DEASSERTED: zeroed storage reads as ASSERTED on an
@@ -1203,28 +1057,6 @@ impl Simulator {
         if self.clock_toggle_dirties {
             self.comb_dirty = true;
         }
-        // Set outside any event's statements; the analysis gives every master
-        // clock its own bit.
-        if !self.trigger_pending.is_empty() {
-            let bit = self.trigger_index[&Event::clock(var_id)];
-            self.trigger_pending[bit / 64] |= 1u64 << (bit % 64);
-        }
-    }
-
-    /// Storage is about to change outside the event model (a testbench store,
-    /// a component, a variable set by id): no guard may skip on its mask.
-    #[inline]
-    #[track_caller]
-    fn widen_trigger(&mut self) {
-        self.ir.dataflow_mark_all();
-        self.widen_trigger_pending();
-    }
-
-    fn widen_trigger_pending(&mut self) {
-        if self.trigger_pending.is_empty() {
-            return;
-        }
-        self.trigger_pending.iter_mut().for_each(|w| *w = u64::MAX);
     }
 
     /// One step's flop state into the running digest (`VERYL_STATE_DIGEST`).
@@ -1249,17 +1081,7 @@ impl Simulator {
     #[inline]
     fn do_settle_comb(&mut self) {
         self.settles_run += 1;
-        if self.trigger_pending.is_empty() {
-            self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
-            return;
-        }
-        let off = self.ir.cone_trigger_off as usize;
-        for (k, w) in self.trigger_pending.iter().enumerate() {
-            let o = off + k * 8;
-            self.ir.comb_values[o..o + 8].copy_from_slice(&w.to_le_bytes());
-        }
         self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
-        self.trigger_pending.iter_mut().for_each(|w| *w = 0);
     }
 
     /// Evaluate the derived-clock closure (its master-downstream subset when
@@ -1356,23 +1178,18 @@ impl Simulator {
 
     /// `VERYL_SETTLE_FILTER_CHECK=1`: a skipped settle must be a no-op on
     /// the comb — run it anyway and panic on the first byte it would have
-    /// changed.  Slow (clones comb per skip); diagnostics only, the settle
-    /// filter's analog of `VERYL_CONE_GATE_CHECK`.
+    /// changed.  Slow (clones comb per skip); diagnostics only.
     fn check_skipped_settle(&mut self) {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         let on = *ON.get_or_init(|| env::var("VERYL_SETTLE_FILTER_CHECK").as_deref() == Ok("1"));
         if !on || self.settle_filter.is_none() {
             return;
         }
-        // The cone-gate state region (streaks, shadows) lives at the tail
-        // of the comb buffer and mutates on every settle whether or not any
-        // logic value moves — compare only the storage below it.
-        let limit = (self.ir.cone_state_base as usize).min(self.ir.comb_values.len());
+        // The gate state region at the tail of the comb buffer is
+        // bookkeeping, not logic: compare only the storage below it.
+        let limit = (self.ir.gate_state_base as usize).min(self.ir.comb_values.len());
         let before = self.ir.comb_values[..limit].to_vec();
-        // The oracle settle must not consume what the real next settle needs.
-        let pending = self.trigger_pending.clone();
         self.do_settle_comb();
-        self.trigger_pending = pending;
         self.comb_dirty = false;
         if let Some(i) = before
             .iter()
@@ -1605,14 +1422,14 @@ impl Simulator {
     #[track_caller]
     pub fn mark_comb_dirty(&mut self) {
         self.comb_dirty = true;
-        self.widen_trigger();
+        self.ir.dataflow_mark_all();
     }
 
     /// `mark_comb_dirty` for a testbench store that may reach FF storage.
     #[track_caller]
     pub fn mark_ff_written(&mut self) {
         self.comb_dirty = true;
-        self.widen_trigger();
+        self.ir.dataflow_mark_all();
         self.invalidate_event_gates();
     }
 
@@ -1818,7 +1635,7 @@ impl Simulator {
             }
         }
         self.comb_dirty = true;
-        self.widen_trigger();
+        self.ir.dataflow_mark_all();
         for c in &components {
             if c.host.failed() {
                 let mut msgs = vec![];
@@ -1868,7 +1685,7 @@ impl Simulator {
         self.components = components;
         if wrote {
             self.comb_dirty = true;
-            self.widen_trigger();
+            self.ir.dataflow_mark_all();
             // A waveform's gate hears about writes only through the log.  The
             // test is what keeps a run without one off this path entirely.
             if self.dump.is_some() {
@@ -1984,18 +1801,8 @@ impl Simulator {
             self.last_event_blind = self.dataflow_blind.get(event).cloned();
             self.last_event_jit_marked = self.ir.event_jit_marked.contains(event);
             self.last_event_jit_ff_marked = self.ir.event_jit_ff_marked.contains(event);
-            self.last_event_trigger = self.trigger_index.get(event).copied();
             (ptr, wptr)
         };
-        if !self.trigger_pending.is_empty() {
-            match self.last_event_trigger {
-                Some(bit) => self.trigger_pending[bit / 64] |= 1u64 << (bit % 64),
-                // An event with statements the analysis never indexed could
-                // write anything; one without writes nothing.
-                None if !stmts_ptr.is_null() => self.widen_trigger(),
-                None => {}
-            }
-        }
 
         // Writes outside the FF write log (comb bytes, readmemh, tb-method
         // returns) bypass the commit compare, so the settle filter must
@@ -2687,9 +2494,7 @@ impl Simulator {
                 }
             }
             if !fall.is_empty() {
-                // The partial settle only refreshed the clock closure.  The
-                // subset leaves the pending trigger set alone: everything it
-                // moves is downstream of an event already in it.
+                // The partial settle only refreshed the clock closure.
                 match self.fall_partial_groups(&fall) {
                     Some(groups) => self.ir.fall_partial_settle(&mut self.mask_cache, &groups),
                     None => self.settle_comb_if_stale(),
@@ -2861,9 +2666,9 @@ impl Simulator {
             cr_wide_count,
         );
 
-        // Logic storage only: the gate state region at the tail (cone
-        // shadows, event-gate flags) is bookkeeping the AOT-C path alone keeps.
-        let logic = (self.ir.cone_state_base as usize).min(self.ir.comb_values.len());
+        // Logic storage only: the gate state region at the tail (event-gate
+        // flags) is bookkeeping the AOT-C path alone keeps.
+        let logic = (self.ir.gate_state_base as usize).min(self.ir.comb_values.len());
         let comb_diff = aot_comb[..logic]
             .iter()
             .zip(self.ir.comb_values[..logic].iter())
@@ -2941,7 +2746,6 @@ impl Simulator {
             write_native_value(ptr, nb, self.ir.use_4state, &val);
         }
         self.comb_dirty = true;
-        self.widen_trigger_pending();
         let len = crate::ir::value_size(nb, self.ir.use_4state);
         self.ir.dataflow_mark_ptr(ptr, len);
         // An FF store from outside any event; see `invalidate_event_gates`.

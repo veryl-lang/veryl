@@ -1286,9 +1286,6 @@ mod tests {
             comb_var: vec![(0, 8, 0), (8, 16, 1), (16, 24, 2), (24, 32, 3), (32, 40, 4)],
             ff_node: Vec::new(),
             event_written_comb: vec![],
-            trigger_events: Vec::new(),
-            event_writes: Vec::new(),
-            master_clocks: Vec::new(),
             ff_next_alias: Vec::new(),
             tour: Default::default(),
         };
@@ -1342,9 +1339,6 @@ mod tests {
             comb_var: Vec::new(),
             ff_node: vec![(0, 4, 1), (4, 8, 2)],
             event_written_comb: vec![],
-            trigger_events: Vec::new(),
-            event_writes: Vec::new(),
-            master_clocks: Vec::new(),
             ff_next_alias: Vec::new(),
             tour: Default::default(),
         };
@@ -1422,9 +1416,6 @@ mod tests {
             comb_var: vec![(0x100, 0x140, 1)],
             ff_node: vec![(0, 0x40, 1), (0x40, 0x80, 2)],
             event_written_comb: vec![],
-            trigger_events: Vec::new(),
-            event_writes: Vec::new(),
-            master_clocks: Vec::new(),
             ff_next_alias: Vec::new(),
             tour: Default::default(),
         }

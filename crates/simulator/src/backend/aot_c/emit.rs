@@ -407,37 +407,6 @@ fn const_skip_armed() -> bool {
         && std::env::var("VERYL_AOT_C_CONST_SKIP").as_deref() != Ok("0")
 }
 
-thread_local! {
-    /// Cone-gate segments for the next whole-comb emit.
-    /// Non-empty: the emitter keeps the caller's statement order (no const
-    /// split, no field gather), forces chunk boundaries at the segment edges,
-    /// and guards the dispatcher's calls with the segment compares.
-    static CONE_SEGMENTS: std::cell::RefCell<Vec<crate::ir::opt::cone_gate::ConeSegment>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-    static CONE_GROUPS: std::cell::RefCell<Vec<crate::ir::opt::cone_gate::ConeGroup>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-    /// Comb offset of the pending trigger mask.
-    static CONE_TRIGGER_OFF: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
-
-/// Install the cone-gate segments and groups for the next comb emit.
-/// Paired with `clear_cone_segments`.
-pub fn set_cone_segments(
-    segs: Vec<crate::ir::opt::cone_gate::ConeSegment>,
-    groups: Vec<crate::ir::opt::cone_gate::ConeGroup>,
-    trigger_off: u32,
-) {
-    CONE_SEGMENTS.with(|s| *s.borrow_mut() = segs);
-    CONE_GROUPS.with(|g| *g.borrow_mut() = groups);
-    CONE_TRIGGER_OFF.with(|t| t.set(trigger_off));
-}
-
-pub fn clear_cone_segments() {
-    CONE_SEGMENTS.with(|s| s.borrow_mut().clear());
-    CONE_GROUPS.with(|g| g.borrow_mut().clear());
-    CONE_TRIGGER_OFF.with(|t| t.set(0));
-}
-
 fn clear_current_local() {
     CURRENT_LOCAL.with(|c| c.borrow_mut().clear());
 }
@@ -6049,11 +6018,12 @@ fn compile_key(src: &str) -> (String, Vec<String>, String) {
     .iter()
     .map(|s| s.to_string())
     .collect();
-    // Without -march, gcc expands the cone gate's shadow save/restore
-    // memcpy as `rep movsq`, whose startup stall dominates at these
-    // sizes.  Guarded: clang rejects the flag, and the failing compile
-    // would silently drop the module to Cranelift.  Name check instead
-    // of a probe — a subprocess here would sit on the async-compile path.
+    // Without -march, gcc expands the fixed-size shadow copies (event
+    // gates, dataflow boundaries) as `rep movsq`, whose startup stall
+    // dominates at these sizes.  Guarded: clang rejects the flag, and the
+    // failing compile would silently drop the module to Cranelift.  Name
+    // check instead of a probe: a subprocess here would sit on the
+    // async-compile path.
     if cfg!(all(target_arch = "x86_64", target_os = "linux")) && !cc_name.contains("clang") {
         flags.push("-mmemcpy-strategy=unrolled_loop:256:noalign,libcall:-1:noalign".to_string());
     }
@@ -6725,63 +6695,9 @@ const ENTRY_PART_BYTES: usize = 192 * 1024;
 /// calls are free, but the emitted source and the .so both grow a little.
 const ENTRY_SPLIT_MIN_BYTES: usize = 512 * 1024;
 
-/// Bytes of bookkeeping a cone-gate guard keeps at `Segment::state_off`,
-/// ahead of its prerun / pre-shadow / shadow / replay storage: `[0]` primed,
-/// `[1]` converged, `[2]` auto-off, `[3]` diagnostic reason, `[4..8)` the
-/// dirty streak as a `u32`.
-use crate::ir::opt::cone_gate::{GROUP_STATE_HEADER_BYTES, GUARD_STATE_HEADER_BYTES};
-
-/// Epoch re-arm: every `rearm_mask + 1` evals, retry the auto-offed segments
-/// (mirrors `ConeGateState::tick_rearm`).  Zero the WHOLE header: an off
-/// segment stopped refreshing shadow/replay, so a stale match could skip.
-fn cone_gate_rearm_preamble(state_offs: &[u32], rearm_mask: u64) -> String {
-    if state_offs.is_empty() || rearm_mask == u64::MAX {
-        return String::new();
-    }
-    format!(
-        "    {{ static unsigned long long cg_ep;\n\
-         \x20     if (((++cg_ep) & {rearm_mask:#x}ULL) == 0) {{\n\
-         \x20       static const unsigned cg_ro[{n}] = {{{offs}}};\n\
-         \x20       for (unsigned _z = 0; _z < {n}; _z++) {{\n\
-         \x20         uint8_t *st = comb_values + cg_ro[_z];\n\
-         \x20         if (st[2]) {{ __builtin_memset(st, 0, {hdr}); }}\n\
-         \x20       }}\n\
-         \x20     }} }}\n",
-        n = state_offs.len(),
-        hdr = GUARD_STATE_HEADER_BYTES,
-        offs = state_offs
-            .iter()
-            .map(|off| format!("{off:#x}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
-}
-
 const ENTRY_SIG: &str = "(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, \
                          uint64_t *__restrict__ write_log, intptr_t ff_delta)";
 const ENTRY_ARGS: &str = "(ff_values, comb_values, write_log, ff_delta)";
-
-/// The emitted twin of `ConeGateState::mask_clean`.  With a backedge the
-/// convergence byte is kept only while the guard is on.  `None` for a mask
-/// with no bit set, which would ignore a widened pending set.
-fn trigger_pretest_cond(trigger: &[u64], trigger_off: usize, has_backedge: bool) -> Option<String> {
-    let words: Vec<String> = trigger
-        .iter()
-        .enumerate()
-        .filter(|&(_, &m)| m != 0)
-        .map(|(w, &m)| {
-            format!("(((const veryl_u64_ua*)(comb_values + {trigger_off:#x}))[{w}] & {m:#x}ULL)")
-        })
-        .collect();
-    if words.is_empty() {
-        return None;
-    }
-    let off = if has_backedge { "!cg_off && " } else { "" };
-    Some(format!(
-        "{off}cgst[0] && cgst[1] && !({})",
-        words.join(" | ")
-    ))
-}
 
 /// Lay the dispatcher's top-level units out over one or more functions and
 /// return the C for all of them.
@@ -6900,95 +6816,9 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     let mut n_const = const_part.as_ref().map_or(0, |(_, n, _)| *n);
     let stmts: &[ProtoStatement] = const_part.as_ref().map_or(stmts, |(s, _, _)| s.as_slice());
 
-    // Cone-gate segments and the const split compose: the split is a STABLE
-    // partition, so a segment's non-const members stay contiguous in the
-    // tail and its ranges just shift by the const counts.  A const statement
-    // extracted OUT of a segment is sound to leave ungated — its run-once
-    // output never changes, so neither the skip (which preserves it) nor the
-    // replay (which rewrites the same value) can disturb it.  The field
-    // gather below still cannot run: it permutes arbitrarily.
-    let mut cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment> =
-        CONE_SEGMENTS.with(|s| s.borrow().clone());
-    let cone_groups: Vec<crate::ir::opt::cone_gate::ConeGroup> =
-        CONE_GROUPS.with(|g| g.borrow().clone());
-    // Where each segment of the caller's list ends up below (a segment the
-    // split emptied is dropped), so the groups' member indices follow.
-    let mut seg_kept: Vec<Option<usize>> = (0..cone_segments.len()).map(Some).collect();
-    if let Some((_, _, is_const)) = &const_part
-        && !cone_segments.is_empty()
-    {
-        let mut cb = vec![0u32; is_const.len() + 1];
-        for (i, &c) in is_const.iter().enumerate() {
-            cb[i + 1] = cb[i] + c as u32;
-        }
-        let n_const_total = cb[is_const.len()] as usize;
-        for s in &mut cone_segments {
-            let lo_c = cb[s.stmt_lo.min(is_const.len())] as usize;
-            let hi_c = cb[s.stmt_hi.min(is_const.len())] as usize;
-            s.stmt_lo = n_const_total + s.stmt_lo - lo_c;
-            s.stmt_hi = n_const_total + s.stmt_hi - hi_c;
-        }
-        let mut kept = 0usize;
-        for (i, s) in cone_segments.iter().enumerate() {
-            seg_kept[i] = (s.stmt_lo < s.stmt_hi).then(|| {
-                kept += 1;
-                kept - 1
-            });
-        }
-        cone_segments.retain(|s| s.stmt_lo < s.stmt_hi);
-    }
-
-    // Field-group roles and gathering: see plan_field_groups.  With cone
-    // segments, the gather runs PER REGION (each segment and each gap
-    // independently) so no statement crosses a segment edge: the region
-    // permutations keep every segment's [stmt_lo, stmt_hi) intact, and the
-    // roles merge by their position-independent (window, mask) keys — a key
-    // two regions disagree on is dropped back to plain emission.
+    // Field-group roles and gathering: see plan_field_groups.
     let _field_roles = FieldRolesGuard;
-    let plan = if cone_segments.is_empty() {
-        plan_field_groups(stmts)
-    } else {
-        let mut bounds: Vec<usize> = cone_segments
-            .iter()
-            .flat_map(|s| [s.stmt_lo, s.stmt_hi])
-            .filter(|&b| b <= stmts.len())
-            .collect();
-        bounds.push(0);
-        bounds.push(stmts.len());
-        bounds.sort_unstable();
-        bounds.dedup();
-        let mut roles: HashMap<(isize, u64), FieldRole> = HashMap::default();
-        let mut conflicted: HashSet<(isize, u64)> = HashSet::default();
-        let mut order: Vec<usize> = Vec::with_capacity(stmts.len());
-        let mut atoms: Vec<(usize, usize)> = Vec::new();
-        for w in bounds.windows(2) {
-            let (lo, hi) = (w[0], w[1]);
-            if lo >= hi {
-                continue;
-            }
-            let p = plan_field_groups(&stmts[lo..hi]);
-            for (k, v) in p.roles {
-                match roles.get(&k) {
-                    Some(&prev) if prev != v => {
-                        conflicted.insert(k);
-                    }
-                    _ => {
-                        roles.insert(k, v);
-                    }
-                }
-            }
-            atoms.extend(p.atoms.iter().map(|&(s, l)| (order.len() + s, l)));
-            order.extend(p.order.iter().map(|&i| lo + i));
-        }
-        for k in &conflicted {
-            roles.remove(k);
-        }
-        FieldPlan {
-            roles,
-            order,
-            atoms,
-        }
-    };
+    let plan = plan_field_groups(stmts);
     FIELD_ROLES.with(|r| *r.borrow_mut() = plan.roles.clone());
     let gathered: Option<Vec<ProtoStatement>> =
         (!plan.atoms.is_empty()).then(|| plan.order.iter().map(|&i| stmts[i].clone()).collect());
@@ -7045,74 +6875,49 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             _ => 1,
         }
     }
-    // Cone-gate segment edges force chunk boundaries so the dispatcher can
-    // guard a segment as a whole number of chunk calls.
-    let seg_bounds: Vec<usize> = {
-        let mut v: Vec<usize> = cone_segments
-            .iter()
-            .flat_map(|s| [s.stmt_lo, s.stmt_hi])
-            .filter(|&b| b > 0 && b < stmts.len())
-            .collect();
-        v.sort_unstable();
-        v.dedup();
-        v
-    };
-    let clamp_to_seg = |start: usize, end: usize| -> usize {
-        let i = seg_bounds.partition_point(|&b| b <= start);
-        match seg_bounds.get(i) {
-            Some(&b) if b < end => b,
-            _ => end,
-        }
-    };
-    let chunks: Vec<&[ProtoStatement]> =
-        if (chunk_size == 0 || stmts.len() <= chunk_size) && seg_bounds.is_empty() {
-            if n_const > 0 && n_const < stmts.len() {
-                vec![&stmts[..n_const], &stmts[n_const..]]
-            } else {
-                vec![stmts]
-            }
+    let chunks: Vec<&[ProtoStatement]> = if chunk_size == 0 || stmts.len() <= chunk_size {
+        if n_const > 0 && n_const < stmts.len() {
+            vec![&stmts[..n_const], &stmts[n_const..]]
         } else {
-            // Never cut inside a gathered group — splitting one puts the
-            // accumulating stores in different functions and gcc can no longer
-            // keep the window in a register.
-            let mut chunks = Vec::new();
-            let (mut start, mut ai) = (0usize, 0usize);
-            while start < stmts.len() {
-                let mut end = start;
-                if chunk_size == 0 {
-                    end = stmts.len();
-                } else {
-                    let mut cost = 0usize;
-                    while end < stmts.len() && cost < chunk_size {
-                        cost += stmt_cost(&stmts[end]);
-                        end += 1;
-                    }
-                }
-                while ai < plan.atoms.len() && plan.atoms[ai].0 + plan.atoms[ai].1 <= end {
-                    ai += 1;
-                }
-                if ai < plan.atoms.len() && plan.atoms[ai].0 < end {
-                    end = if plan.atoms[ai].0 > start {
-                        plan.atoms[ai].0
-                    } else {
-                        plan.atoms[ai].0 + plan.atoms[ai].1
-                    };
-                }
-                // Force a boundary at the const prefix so the const chunks can
-                // be routed to the run-once entry.  A field-group atom is never
-                // split here (the co-writer rule makes its members all-const or
-                // all-demoted together); a sink atom straddling the boundary is
-                // split, which only costs the pair its locality (the localize
-                // sets are recomputed per final chunk).
-                if start < n_const && end > n_const {
-                    end = n_const;
-                }
-                let end = clamp_to_seg(start, end);
-                chunks.push(&stmts[start..end]);
-                start = end;
+            vec![stmts]
+        }
+    } else {
+        // Never cut inside a gathered group — splitting one puts the
+        // accumulating stores in different functions and gcc can no longer
+        // keep the window in a register.
+        let mut chunks = Vec::new();
+        let (mut start, mut ai) = (0usize, 0usize);
+        while start < stmts.len() {
+            let mut end = start;
+            let mut cost = 0usize;
+            while end < stmts.len() && cost < chunk_size {
+                cost += stmt_cost(&stmts[end]);
+                end += 1;
             }
-            chunks
-        };
+            while ai < plan.atoms.len() && plan.atoms[ai].0 + plan.atoms[ai].1 <= end {
+                ai += 1;
+            }
+            if ai < plan.atoms.len() && plan.atoms[ai].0 < end {
+                end = if plan.atoms[ai].0 > start {
+                    plan.atoms[ai].0
+                } else {
+                    plan.atoms[ai].0 + plan.atoms[ai].1
+                };
+            }
+            // Force a boundary at the const prefix so the const chunks can
+            // be routed to the run-once entry.  A field-group atom is never
+            // split here (the co-writer rule makes its members all-const or
+            // all-demoted together); a sink atom straddling the boundary is
+            // split, which only costs the pair its locality (the localize
+            // sets are recomputed per final chunk).
+            if start < n_const && end > n_const {
+                end = n_const;
+            }
+            chunks.push(&stmts[start..end]);
+            start = end;
+        }
+        chunks
+    };
     let const_chunks = {
         let mut acc = 0usize;
         let mut k = 0usize;
@@ -7140,26 +6945,6 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
     // that chunk and read only there (and not blocklisted) become C locals
     // instead of comb_values round-trips.  Empty sets when the knob is off.
     LAST_LOCALIZED_BYTES.with(|b| b.borrow_mut().clear());
-    // The cone-gate state regions live in comb_values but only the AOT side
-    // writes them — the validate dual-run must skip them like localized bytes.
-    if !cone_segments.is_empty() {
-        LAST_LOCALIZED_BYTES.with(|b| {
-            let mut v = b.borrow_mut();
-            for s in &cone_segments {
-                let be: usize = s.backedge.iter().map(|&(a, x)| (x - a) as usize).sum();
-                let pb: usize = s.compare_pre.iter().map(|&(a, x)| (x - a) as usize).sum();
-                let cb: usize = s.compare.iter().map(|&(_, a, x)| (x - a) as usize).sum();
-                let rb: usize = s.replay.iter().map(|&(a, x)| (x - a) as usize).sum();
-                let len = (8 + be + pb + cb + rb).next_multiple_of(8);
-                v.push((s.state_off as isize, len));
-            }
-            for g in &cone_groups {
-                let cb: usize = g.compare.iter().map(|&(_, a, x)| (x - a) as usize).sum();
-                let len = (GROUP_STATE_HEADER_BYTES + cb).next_multiple_of(8);
-                v.push((g.state_off as isize, len));
-            }
-        });
-    }
     let localize_sets: Vec<HashSet<isize>> = if localize_armed() {
         let bl = LOCALIZE_BLOCKLIST.with(|b| b.borrow().clone());
         let rg = LOCALIZE_RANGES.with(|r| r.borrow().clone());
@@ -7245,7 +7030,7 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
         emit_reserve_prologue(narrow, wide)
     };
 
-    if chunks.len() == 1 && const_chunks == 0 && cone_segments.is_empty() {
+    if chunks.len() == 1 && const_chunks == 0 {
         body.push_str(
             "__attribute__((visibility(\"default\")))\n\
              void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {\n\
@@ -7285,538 +7070,13 @@ pub fn emit_function(stmts: &[ProtoStatement]) -> Option<String> {
             }
             body.push_str("}\n");
         }
-        // Cone-gate guards: map each segment to its chunk-call range (chunk
-        // boundaries were forced at segment edges above) and emit its compare
-        // helper.  A segment whose edges did not land on chunk boundaries is
-        // left unguarded — safe, just unskippable.
-        let chunk_starts: Vec<usize> = {
-            let mut v = Vec::with_capacity(chunks.len() + 1);
-            let mut p = 0usize;
-            for c in &chunks {
-                v.push(p);
-                p += c.len();
-            }
-            v.push(p);
-            v
-        };
-        let cg_dbg = std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1");
-        // `VERYL_CONE_TRIGGER_CHECK=1`: where the mask claims clean on an
-        // armed guard, compare anyway and report the first disagreement.
-        let trig_check = std::env::var("VERYL_CONE_TRIGGER_CHECK").as_deref() == Ok("1");
-        let trigger_off = CONE_TRIGGER_OFF.with(|t| t.get()) as usize;
-        let mut guard_of_seg: Vec<Option<usize>> = vec![None; cone_segments.len()];
-        let guards: Vec<(usize, usize, &crate::ir::opt::cone_gate::ConeSegment)> = cone_segments
-            .iter()
-            .enumerate()
-            .filter_map(|(si, s)| {
-                let k1 = chunk_starts.iter().position(|&q| q == s.stmt_lo)?;
-                let k2 = chunk_starts.iter().position(|&q| q == s.stmt_hi)?;
-                (k1 < k2 && k1 >= const_chunks).then(|| {
-                    guard_of_seg[si] = Some(guard_of_seg.iter().flatten().count());
-                    (k1, k2, s)
-                })
-            })
+        // The dispatcher is built as a list of independent top-level units,
+        // one chunk call each, so `split_entry_function` can lay them out
+        // across several functions.
+        let entry_units: Vec<String> = (const_chunks..chunks.len())
+            .map(|i| format!("    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n"))
             .collect();
-        // A group over the surviving guards: one check per settle ahead of
-        // its first member, and a clean verdict lets every member skip its
-        // own compare.  Groups arrive shallowest first, so a guard's innermost
-        // group claims it last.
-        struct EmitGroup {
-            first: usize,
-            state_off: u32,
-            parent: Option<usize>,
-            compare: Vec<(bool, u32, u32)>,
-            off_decay: u32,
-        }
-        let mut egroups: Vec<EmitGroup> = Vec::new();
-        let mut group_kept: Vec<Option<usize>> = Vec::with_capacity(cone_groups.len());
-        let mut group_of_guard: Vec<Option<usize>> = vec![None; guards.len()];
-        for g in &cone_groups {
-            let members: Vec<usize> = g
-                .segments
-                .iter()
-                .filter_map(|&si| seg_kept.get(si as usize).copied().flatten())
-                .filter_map(|si| guard_of_seg.get(si).copied().flatten())
-                .collect();
-            if members.len() < 2 {
-                group_kept.push(None);
-                continue;
-            }
-            let mut parent = g.parent;
-            while let Some(pi) = parent {
-                if group_kept[pi as usize].is_some() {
-                    break;
-                }
-                parent = cone_groups[pi as usize].parent;
-            }
-            let idx = egroups.len();
-            group_kept.push(Some(idx));
-            for &m in &members {
-                group_of_guard[m] = Some(idx);
-            }
-            egroups.push(EmitGroup {
-                first: members.iter().copied().min().unwrap_or(0),
-                state_off: g.state_off,
-                parent: parent.and_then(|pi| group_kept[pi as usize]),
-                compare: g.compare.clone(),
-                off_decay: g.off_decay,
-            });
-        }
-        // Small compare ranges dominate by count, and __memcmp's call +
-        // dispatch overhead there outweighs the scan; past the cutoff
-        // libc's vector loop wins, so large ranges keep the call.
-        const CG_INLINE_CMP_MAX: usize = 256;
-        fn emit_cmp_range(f: &mut String, p: String, q: String, l: usize, on_diff: &str) {
-            if l == 0 {
-                return;
-            }
-            if l > CG_INLINE_CMP_MAX {
-                f.push_str(&format!(
-                    "    if (__builtin_memcmp({p}, {q}, {l})) {on_diff}\n"
-                ));
-                return;
-            }
-            f.push_str("    { uint64_t cg_d = 0;");
-            if l >= 8 {
-                f.push_str(&format!(
-                    " for (unsigned cg_i = 0; cg_i + 8 <= {l}u; cg_i += 8) {{ \
-                     uint64_t cg_x, cg_y; __builtin_memcpy(&cg_x, ({p}) + cg_i, 8); \
-                     __builtin_memcpy(&cg_y, ({q}) + cg_i, 8); cg_d |= cg_x ^ cg_y; }}"
-                ));
-            }
-            let r = l % 8;
-            if r > 0 {
-                f.push_str(&format!(
-                    " {{ uint64_t cg_x = 0, cg_y = 0; \
-                     __builtin_memcpy(&cg_x, ({p}) + {off}u, {r}); \
-                     __builtin_memcpy(&cg_y, ({q}) + {off}u, {r}); cg_d |= cg_x ^ cg_y; }}",
-                    off = l - r,
-                ));
-            }
-            f.push_str(&format!(" if (cg_d) {on_diff} }}\n"));
-        }
-        for (gi, &(_, _, s)) in guards.iter().enumerate() {
-            let mut f = format!(
-                "static int cg_cmp_{gi}(const uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values) {{\n"
-            );
-            let be: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
-            let pb: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
-            let head = s.state_off as usize + GUARD_STATE_HEADER_BYTES;
-            let pre_shadow_abs = head + be;
-            let shadow_abs = head + be + pb;
-            let mut acc = 0usize;
-            for &(a, b) in &s.compare_pre {
-                let l = (b - a) as usize;
-                emit_cmp_range(
-                    &mut f,
-                    format!("comb_values + {a:#x}"),
-                    format!("comb_values + {sh:#x}", sh = pre_shadow_abs + acc),
-                    l,
-                    "return 0;",
-                );
-                acc += l;
-            }
-            let mut acc = 0usize;
-            for (ri, &(is_ff, a, b)) in s.compare.iter().enumerate() {
-                let l = (b - a) as usize;
-                let buf = if is_ff { "ff_values" } else { "comb_values" };
-                let stash = if cg_dbg {
-                    format!(
-                        "{{ comb_values[{st}] = {ri_b}; return 0; }}",
-                        st = s.state_off as usize + 3,
-                        ri_b = (ri % 255) + 1,
-                    )
-                } else {
-                    "return 0;".to_string()
-                };
-                emit_cmp_range(
-                    &mut f,
-                    format!("{buf} + {a:#x}"),
-                    format!("comb_values + {sh:#x}", sh = shadow_abs + acc),
-                    l,
-                    &stash,
-                );
-                acc += l;
-            }
-            f.push_str("    return 1;\n}\n\n");
-            body.push_str(&f);
-            if trig_check {
-                let mut f = format!(
-                    "static int cg_cmpx_{gi}(const uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values) {{\n"
-                );
-                let mut acc = 0usize;
-                for &(is_ff, a, b) in &s.compare {
-                    let l = (b - a) as usize;
-                    let buf = if is_ff { "ff_values" } else { "comb_values" };
-                    // Internal scratch the segment rewrites before reading is
-                    // not an input; compare around it.
-                    let mut pieces: Vec<(u32, u32)> = vec![(a, b)];
-                    if !is_ff {
-                        for &(ia, ib) in &s.internal {
-                            pieces = pieces
-                                .into_iter()
-                                .flat_map(|(x, y)| {
-                                    let mut out = Vec::new();
-                                    if ib <= x || ia >= y {
-                                        out.push((x, y));
-                                    } else {
-                                        if ia > x {
-                                            out.push((x, ia));
-                                        }
-                                        if ib < y {
-                                            out.push((ib, y));
-                                        }
-                                    }
-                                    out
-                                })
-                                .collect();
-                        }
-                    }
-                    for (x, y) in pieces {
-                        emit_cmp_range(
-                            &mut f,
-                            format!("{buf} + {x:#x}"),
-                            format!(
-                                "comb_values + {sh:#x}",
-                                sh = shadow_abs + acc + (x - a) as usize
-                            ),
-                            (y - x) as usize,
-                            "return 0;",
-                        );
-                    }
-                    acc += l;
-                }
-                f.push_str("    return 1;\n}\n\n");
-                body.push_str(&f);
-            }
-        }
-        for (g, eg) in egroups.iter().enumerate() {
-            let mut f = format!(
-                "static int cg_gcmp_{g}(const uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values) {{\n"
-            );
-            let shadow_abs = eg.state_off as usize + GROUP_STATE_HEADER_BYTES;
-            let mut acc = 0usize;
-            for &(is_ff, a, b) in &eg.compare {
-                let l = (b - a) as usize;
-                let buf = if is_ff { "ff_values" } else { "comb_values" };
-                emit_cmp_range(
-                    &mut f,
-                    format!("{buf} + {a:#x}"),
-                    format!("comb_values + {sh:#x}", sh = shadow_abs + acc),
-                    l,
-                    "return 0;",
-                );
-                acc += l;
-            }
-            f.push_str("    return 1;\n}\n\n");
-            body.push_str(&f);
-        }
-        // The dispatcher is built as a list of independent top-level units —
-        // one guarded cone segment or one bare chunk call each — so
-        // `split_entry_function` can lay them out across several functions.
-        let mut entry_units: Vec<String> = Vec::new();
-        // Emit-time debug (VERYL_CONE_GATE_DIAG=1 at emit): per-segment
-        // skip/run counters printed every 16K evals.  File-scope statics, so
-        // the units referencing them can still be laid out across parts.
-        let mut cg_decl = String::new();
-        let mut cg_print = String::new();
-        if cg_dbg && !guards.is_empty() {
-            // Maps the `[cg]` counter columns to the segments.
-            for (gi, &(_, _, s)) in guards.iter().enumerate() {
-                eprintln!(
-                    "[cg-map] gi={gi} stmts=[{}..{}) cb={} {}",
-                    s.stmt_lo,
-                    s.stmt_hi,
-                    s.compare
-                        .iter()
-                        .map(|&(_, a, b)| (b - a) as usize)
-                        .sum::<usize>()
-                        + s.compare_pre
-                            .iter()
-                            .map(|&(a, b)| (b - a) as usize)
-                            .sum::<usize>(),
-                    s.cone
-                );
-            }
-            cg_decl = format!(
-                "static unsigned long long cg_tk[{n}], cg_sk[{n}], cg_rn[{n}]; static unsigned long long cg_calls;\n\
-                 static unsigned long long cg_gsk[{ng}], cg_grn[{ng}], cg_gs[{n}];\n\
-                 static const unsigned cg_stoff[{n}] = {{{offs}}};\n\n",
-                n = guards.len(),
-                ng = egroups.len().max(1),
-                offs = guards
-                    .iter()
-                    .map(|&(_, _, s)| format!("{:#x}", s.state_off))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
-            cg_print = format!(
-                "    if ((++cg_calls & 0x3fff) == 0) {{\n\
-                 \x20     __builtin_printf(\"[cg] evals=%llu\", cg_calls);\n\
-                 \x20     for (int z = 0; z < {n}; z++) __builtin_printf(\" %llu/%llu/%llu:c%u:f%u:o%u:g%llu\", cg_tk[z], cg_sk[z], cg_rn[z], (unsigned)comb_values[cg_stoff[z] + 1], (unsigned)comb_values[cg_stoff[z] + 3], (unsigned)comb_values[cg_stoff[z] + 2], cg_gs[z]);\n\
-                 \x20     for (int z = 0; z < {ng}; z++) __builtin_printf(\" G%llu/%llu\", cg_gsk[z], cg_grn[z]);\n\
-                 \x20     __builtin_printf(\"\\n\");\n\
-                 \x20   }}\n",
-                n = guards.len(),
-                ng = egroups.len().max(1),
-            );
-        }
-        body.push_str(&cg_decl);
-        let mut gi = 0usize;
-        let mut i = const_chunks;
-        while i < chunks.len() {
-            let mut unit = String::new();
-            if gi < guards.len() && guards[gi].0 == i {
-                let (k1, k2, s) = guards[gi];
-                for (g, eg) in egroups.iter().enumerate().filter(|(_, eg)| eg.first == gi) {
-                    let gst = eg.state_off as usize;
-                    let inherit = match eg.parent {
-                        Some(p) => format!("comb_values[{:#x}]", egroups[p].state_off as usize + 1),
-                        None => "0".to_string(),
-                    };
-                    // Clean: the boundary held, or the enclosing group's did.
-                    // Dirty: the shadow is taken now, as the members will see
-                    // the inputs; a later change dirties the next check.
-                    unit.push_str(&format!(
-                        "    {{ uint8_t *cgg = comb_values + {gst:#x};\n\
-                         \x20     int cg_gclean = {inherit};\n\
-                         \x20     if (!cg_gclean && !cgg[2]) {{\n\
-                         \x20       if (cgg[0] && cg_gcmp_{g}(ff_values, comb_values)) {{\n\
-                         \x20         cg_gclean = 1;\n\
-                         \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgg + 4, 4);\n\
-                         \x20           cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
-                         \x20           __builtin_memcpy(cgg + 4, &cg_stk, 4); }}\n",
-                        decay = eg.off_decay,
-                    ));
-                    if cg_dbg {
-                        unit.push_str(&format!("          cg_gsk[{g}]++;\n"));
-                    }
-                    unit.push_str(&format!(
-                        "        }} else {{\n\
-                         \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgg + 4, 4);\n\
-                         \x20           if (++cg_stk >= {auto_off}u) cgg[2] = 1;\n\
-                         \x20           __builtin_memcpy(cgg + 4, &cg_stk, 4); }}\n",
-                        auto_off = crate::ir::opt::cone_gate::AUTO_OFF_STREAK,
-                    ));
-                    let shadow_abs = gst + GROUP_STATE_HEADER_BYTES;
-                    let mut acc = 0usize;
-                    for &(is_ff, a, b) in &eg.compare {
-                        let l = (b - a) as usize;
-                        let buf = if is_ff { "ff_values" } else { "comb_values" };
-                        unit.push_str(&format!(
-                            "          __builtin_memcpy(comb_values + {dst:#x}, {buf} + {a:#x}, {l});\n",
-                            dst = shadow_abs + acc,
-                        ));
-                        acc += l;
-                    }
-                    if cg_dbg {
-                        unit.push_str(&format!("          cg_grn[{g}]++;\n"));
-                    }
-                    unit.push_str(
-                        "          cgg[0] = 1;\n\
-                         \x20       }\n\
-                         \x20     }\n\
-                         \x20     cgg[1] = (uint8_t)cg_gclean;\n\
-                         \x20   }\n",
-                    );
-                }
-                // A member skipped by its group's verdict decays its streak as
-                // a clean compare would: otherwise only dirty settles reach its
-                // own compare, the streak climbs to auto-off, and auto-off
-                // bypasses the group's verdict as well.
-                let group_clean = match group_of_guard[gi] {
-                    Some(g) => format!(
-                        "if (comb_values[{off:#x}]) {{ cg_run = 0; {dbg}\
-                         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
-                         \x20         cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
-                         \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4); }} }} else ",
-                        off = egroups[g].state_off as usize + 1,
-                        dbg = if cg_dbg {
-                            format!("cg_gs[{gi}]++; ")
-                        } else {
-                            String::new()
-                        },
-                        decay = s.off_decay,
-                    ),
-                    None => String::new(),
-                };
-                let st = s.state_off as usize;
-                let be: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
-                let pb: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
-                let cb: usize = s.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
-                let prerun_abs = st + GUARD_STATE_HEADER_BYTES;
-                let pre_shadow_abs = prerun_abs + be;
-                let shadow_abs = prerun_abs + be + pb;
-                let replay_abs = prerun_abs + be + pb + cb;
-                // Trigger pre-test.  A replaying segment takes the full compare
-                // instead: its skip also needs the replayed span unmoved, and
-                // there is no `compare_pre`-only comparator here.
-                let pretest = if s.replay.is_empty() {
-                    trigger_pretest_cond(&s.trigger, trigger_off, !s.backedge.is_empty())
-                } else {
-                    None
-                };
-                let trigger_clean = match pretest {
-                    None => String::new(),
-                    Some(cond) => {
-                        let check = if trig_check {
-                            format!(
-                                "if (!cg_off && cgst[1] && !cg_cmpx_{gi}(ff_values, comb_values)) {{ \
-                                 static int t_said; if (!t_said) {{ t_said = 1; \
-                                 __builtin_printf(\"[cone_gate] TRIGGER WRONG SKIP guard {gi}\\n\"); }} }} "
-                            )
-                        } else {
-                            String::new()
-                        };
-                        let dbg = if cg_dbg {
-                            format!("cg_tk[{gi}]++; ")
-                        } else {
-                            String::new()
-                        };
-                        format!("if ({cond}) {{ {check}{dbg}cg_run = 0; }} else ")
-                    }
-                };
-                // An off segment never consults its shadows, so the whole
-                // maintenance path is skipped -- mirroring the Rust
-                // `before_run`/`refresh` early returns.  `cgst[0]` is still
-                // set: the trigger pre-test serves off segments too.
-                unit.push_str(&format!(
-                    "    {{ uint8_t *cgst = comb_values + {st:#x};\n\
-                     \x20     int cg_run = 1;\n\
-                     \x20     int cg_off = cgst[2];\n\
-                     \x20     {trigger_clean}if (!cg_off && cgst[0] && cgst[1]) {{\n\
-                     \x20       {group_clean}if (cg_cmp_{gi}(ff_values, comb_values)) {{\n\
-                     \x20         cg_run = 0;\n\
-                     \x20         {{ uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
-                     \x20           cg_stk = cg_stk > {decay}u ? cg_stk - {decay}u : 0;\n\
-                     \x20           __builtin_memcpy(cgst + 4, &cg_stk, 4); }}\n\
-                     \x20       }} else {{\n\
-                     \x20         uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);\n\
-                     \x20         if (++cg_stk >= {auto_off}u) cgst[2] = 1;\n\
-                     \x20         __builtin_memcpy(cgst + 4, &cg_stk, 4);\n\
-                     \x20       }}\n\
-                     \x20     }}\n\
-                     \x20     if (!cg_run) {{\n",
-                    decay = s.off_decay,
-                    auto_off = crate::ir::opt::cone_gate::AUTO_OFF_STREAK,
-                ));
-                if cg_dbg {
-                    unit.push_str(&format!("        cg_sk[{gi}]++;\n"));
-                }
-                let mut acc = 0usize;
-                for &(a, b) in &s.replay {
-                    let l = (b - a) as usize;
-                    unit.push_str(&format!(
-                        "        __builtin_memcpy(comb_values + {a:#x}, comb_values + {src:#x}, {l});\n",
-                        src = replay_abs + acc,
-                    ));
-                    acc += l;
-                }
-                unit.push_str(
-                    "      }\n\
-                     \x20     if (cg_run) {\n\
-                     \x20       if (!cg_off) {\n",
-                );
-                let mut acc = 0usize;
-                for &(a, b) in &s.backedge {
-                    let l = (b - a) as usize;
-                    unit.push_str(&format!(
-                        "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
-                        dst = prerun_abs + acc,
-                    ));
-                    acc += l;
-                }
-                let mut acc = 0usize;
-                for &(a, b) in &s.compare_pre {
-                    let l = (b - a) as usize;
-                    unit.push_str(&format!(
-                        "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
-                        dst = pre_shadow_abs + acc,
-                    ));
-                    acc += l;
-                }
-                unit.push_str("        }\n");
-                for k in k1..k2 {
-                    unit.push_str(&format!(
-                        "        veryl_aot_chunk_{k}(ff_values, comb_values, write_log);\n",
-                    ));
-                }
-                unit.push_str("        if (!cg_off) {\n        { int cg_conv = 1;\n");
-                let mut acc = 0usize;
-                for (ri, &(a, b)) in s.backedge.iter().enumerate() {
-                    let l = (b - a) as usize;
-                    if cg_dbg {
-                        unit.push_str(&format!(
-                            "          if (cg_conv && __builtin_memcmp(comb_values + {pre:#x}, comb_values + {a:#x}, {l})) {{ cg_conv = 0; cgst[3] = {ri_b}; \
-                             if ((cg_calls & 0x3fff) == 1) __builtin_printf(\"[cgconv] seg_state={st:#x} range={ri} off={a:#x} pre=%016llx post=%016llx\\n\", *(unsigned long long*)(comb_values + {pre:#x}), *(unsigned long long*)(comb_values + {a:#x})); }}\n",
-                            pre = prerun_abs + acc,
-                            ri_b = (ri % 255) + 1,
-                            st = s.state_off,
-                            ri = ri,
-                        ));
-                    } else {
-                        unit.push_str(&format!(
-                            "          cg_conv = cg_conv && !__builtin_memcmp(comb_values + {pre:#x}, comb_values + {a:#x}, {l});\n",
-                            pre = prerun_abs + acc,
-                        ));
-                    }
-                    acc += l;
-                }
-                unit.push_str("          cgst[1] = (uint8_t)cg_conv; }\n");
-                let mut acc = 0usize;
-                for &(is_ff, a, b) in &s.compare {
-                    let l = (b - a) as usize;
-                    let buf = if is_ff { "ff_values" } else { "comb_values" };
-                    unit.push_str(&format!(
-                        "        __builtin_memcpy(comb_values + {dst:#x}, {buf} + {a:#x}, {l});\n",
-                        dst = shadow_abs + acc,
-                    ));
-                    acc += l;
-                }
-                let mut acc = 0usize;
-                for &(a, b) in &s.replay {
-                    let l = (b - a) as usize;
-                    unit.push_str(&format!(
-                        "        __builtin_memcpy(comb_values + {dst:#x}, comb_values + {a:#x}, {l});\n",
-                        dst = replay_abs + acc,
-                    ));
-                    acc += l;
-                }
-                unit.push_str("        }\n");
-                if cg_dbg {
-                    unit.push_str(&format!("        cg_rn[{gi}]++;\n"));
-                }
-                unit.push_str("        cgst[0] = 1;\n      }\n    }\n");
-                gi += 1;
-                i = k2;
-            } else {
-                unit.push_str(&format!(
-                    "    veryl_aot_chunk_{i}(ff_values, comb_values, write_log);\n",
-                ));
-                i += 1;
-            }
-            entry_units.push(unit);
-        }
-        // VERYL_CONE_GATE_REARM overrides the epoch for calibration; 0
-        // disables it.
-        let rearm_mask: u64 = std::env::var("VERYL_CONE_GATE_REARM")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .map_or(crate::ir::opt::cone_gate::REARM_EVALS - 1, |v| {
-                if v == 0 {
-                    u64::MAX // disabled
-                } else {
-                    v.next_power_of_two() - 1
-                }
-            });
-        let state_offs: Vec<u32> = guards
-            .iter()
-            .map(|&(_, _, s)| s.state_off)
-            .chain(egroups.iter().map(|eg| eg.state_off))
-            .collect();
-        let rearm = cone_gate_rearm_preamble(&state_offs, rearm_mask);
-        let entry_preamble = format!("{reserve_prologue}{rearm}{cg_print}");
-        body.push_str(&split_entry_function(&entry_preamble, &entry_units));
+        body.push_str(&split_entry_function(&reserve_prologue, &entry_units));
     }
     if comb_noslp {
         // The marker line is the cheapest way to carry the verdict to
@@ -9484,12 +8744,11 @@ fn emit_stmt_inner(stmt: &ProtoStatement) -> Option<String> {
         ProtoStatement::For(for_stmt) => emit_for(for_stmt),
         ProtoStatement::Break => Some("break;".to_string()),
         ProtoStatement::SystemFunctionCall(call) => {
-            // $display/$write call into the Rust formatter so one rare
-            // trace statement no longer drops the whole event — or comb —
-            // onto Cranelift.  A comb print runs once per settle pass, and
-            // cone gating never skips a side-effecting cone
-            // (`has_side_effects`).  $finish/$assert/$readmemh
-            // affect sim state / need richer handling and stay on Cranelift.
+            // $display/$write call into the Rust formatter.  A comb print
+            // runs at every settle: the dataflow plan keeps a side-effecting
+            // cell always dirty (`has_side_effects`).  $finish, $assert and
+            // $readmemh are declined: an event containing one stays on
+            // Cranelift, a comb containing one gets no dataflow settle.
             match call {
                 ProtoSystemFunctionCall::Display { format_str, args } => {
                     emit_event_print(format_str, args, true)
@@ -12504,29 +11763,6 @@ mod tests {
 
     fn dummy_token() -> TokenRange {
         TokenRange::default()
-    }
-
-    #[test]
-    fn cone_gate_rearm_clears_the_whole_guard_header() {
-        // A re-armed guard must run once before it may skip again; its shadow
-        // and replay bytes went stale while it was off.
-        let c =
-            cone_gate_rearm_preamble(&[0x40, 0x1c0], crate::ir::opt::cone_gate::REARM_EVALS - 1);
-        assert!(
-            c.contains(&format!(
-                "__builtin_memset(st, 0, {GUARD_STATE_HEADER_BYTES})"
-            )),
-            "re-arm must zero primed/converged/off/streak, not just off: {c}"
-        );
-        assert!(
-            c.contains("0x40, 0x1c0"),
-            "every guard's state offset is retried: {c}"
-        );
-        // Nothing to retry, or the epoch disabled, emits no preamble.
-        assert!(
-            cone_gate_rearm_preamble(&[], crate::ir::opt::cone_gate::REARM_EVALS - 1).is_empty()
-        );
-        assert!(cone_gate_rearm_preamble(&[0x40], u64::MAX).is_empty());
     }
 
     #[test]
@@ -16611,73 +15847,6 @@ mod tests {
     }
 
     #[test]
-    fn a_member_skipped_by_its_group_decays_its_streak() {
-        use crate::ir::opt::cone_gate::{ConeGroup, ConeSegment};
-        let assign = |dst: isize, src: isize| {
-            ProtoStatement::Assign(ProtoAssignStatement {
-                dst: VarOffset::Comb(dst),
-                dst_width: 32,
-                select: None,
-                dynamic_select: None,
-                rhs_select: None,
-                expr: ProtoExpression::Variable {
-                    var_offset: VarOffset::Comb(src),
-                    select: None,
-                    dynamic_select: None,
-                    width: 32,
-                    var_full_width: 32,
-                    expr_context: ExpressionContext {
-                        width: 32,
-                        signed: false,
-                    },
-                },
-                dst_ff_current_offset: 0,
-                comb_direct: false,
-                token: dummy_token(),
-            })
-        };
-        let seg = |k: usize, src: u32, state_off: u32| ConeSegment {
-            block_lo: k,
-            block_hi: k + 1,
-            stmt_lo: k,
-            stmt_hi: k + 1,
-            state_off,
-            compare: vec![(false, src, src + 4)],
-            backedge: vec![],
-            compare_pre: vec![],
-            replay: vec![],
-            off_decay: 7,
-            trigger: vec![],
-            internal: vec![],
-            cone: String::new(),
-        };
-        set_cone_segments(
-            vec![seg(0, 0x00, 0x100), seg(1, 0x10, 0x140)],
-            vec![ConeGroup {
-                node: 0,
-                segments: vec![0, 1],
-                compare: vec![(false, 0x00, 0x04)],
-                off_decay: 1,
-                parent: None,
-                state_off: 0x180,
-                cone: String::new(),
-            }],
-            0,
-        );
-        let src = emit_function(&[assign(0x10, 0x00), assign(0x20, 0x10)]);
-        clear_cone_segments();
-        let src = src.expect("must emit");
-        assert!(
-            src.contains("cg_run = 0; { uint32_t cg_stk; __builtin_memcpy(&cg_stk, cgst + 4, 4);"),
-            "{src}"
-        );
-        assert!(
-            src.contains("cg_stk = cg_stk > 7u ? cg_stk - 7u : 0;"),
-            "{src}"
-        );
-    }
-
-    #[test]
     fn emit_function_simple_assign() {
         let a = ProtoAssignStatement {
             dst: VarOffset::Comb(0x10),
@@ -17242,9 +16411,9 @@ mod tests {
         }
         src.push_str(ENTRY_SECTION_MARKER);
         src.push('\n');
-        src.push_str("static int cg_cmp_0(void) { return 1; }\n");
+        src.push_str("static int entry_helper_0(void) { return 1; }\n");
         src.push_str(&format!(
-            "{ENTRY_ATTR}\nvoid veryl_aot_eval(void) {{ (void)cg_cmp_0(); }}\n"
+            "{ENTRY_ATTR}\nvoid veryl_aot_eval(void) {{ (void)entry_helper_0(); }}\n"
         ));
 
         let units = split_translation_units(&src, 4).expect("stub must have the chunked shape");
@@ -17253,35 +16422,17 @@ mod tests {
             .find(|u| u.contains("void veryl_aot_eval(void)"))
             .expect("some unit defines the entry");
         assert!(
-            entry.contains("static int cg_cmp_0(void)"),
+            entry.contains("static int entry_helper_0(void)"),
             "the entry's own helper must travel with it"
         );
         assert_eq!(
             units
                 .iter()
-                .filter(|u| u.contains("static int cg_cmp_0(void)"))
+                .filter(|u| u.contains("static int entry_helper_0(void)"))
                 .count(),
             1,
             "and only with it"
         );
-    }
-
-    #[test]
-    fn trigger_pretest_requires_convergence() {
-        let c = trigger_pretest_cond(&[0b1000], 0x40, false).unwrap();
-        assert!(c.contains("cgst[0] && cgst[1] && "), "{c}");
-        assert!(!c.contains("cg_off"), "{c}");
-        // The convergence byte of an off guard with a backedge is stale.
-        let c = trigger_pretest_cond(&[0b1000], 0x40, true).unwrap();
-        assert!(c.starts_with("!cg_off && cgst[0] && cgst[1] && "), "{c}");
-    }
-
-    #[test]
-    fn an_all_zero_trigger_mask_gets_no_pretest() {
-        assert!(trigger_pretest_cond(&[0, 0], 0x40, false).is_none());
-        let c = trigger_pretest_cond(&[0, 0b1], 0x40, false).unwrap();
-        assert!(c.contains("[1] & 0x1ULL"), "{c}");
-        assert!(!c.contains("))[0]"), "{c}");
     }
 
     // Below the threshold the dispatcher stays one function; above it the

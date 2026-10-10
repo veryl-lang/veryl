@@ -1504,9 +1504,6 @@ mod tests {
             ff_node: Vec::new(),
             comb_var: Vec::new(),
             event_written_comb: Vec::new(),
-            trigger_events: Vec::new(),
-            event_writes: Vec::new(),
-            master_clocks: Vec::new(),
             ff_next_alias: Vec::new(),
             tour: std::sync::OnceLock::new(),
         }

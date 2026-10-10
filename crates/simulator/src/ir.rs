@@ -209,21 +209,12 @@ pub struct Ir {
     /// settle filter: a fire of an event whose writes can reach a comb
     /// read dirties the comb.
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
-    /// See `Module::cone_state_base`.
-    pub cone_state_base: u32,
-    /// See `Module::cone_trigger_off`.
-    pub cone_trigger_off: u32,
-    pub cone_trigger_words: u32,
-    pub cone_trigger_events: Vec<Event>,
+    /// See `Module::gate_state_base`.
+    pub gate_state_base: u32,
     /// See `Module::event_gate_flags`.
     pub event_gate_flags: Vec<u32>,
     /// See `Module::settle_info`.
     pub(crate) settle_info: crate::tb_dirty::SettleInfoCache,
-    /// Cone-gate segments over `comb_statements`; empty when ungated.
-    /// Runtime shadows live in `cone_gate_state`.
-    pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
-    /// Lazily initialised per-segment shadows + auto-off counters.
-    pub cone_gate_state: std::cell::RefCell<Option<crate::ir::opt::cone_gate::ConeGateState>>,
     /// See `Module::fused_comb_offsets` (diagnostic; consumed by the
     /// dual-run checker to skip storage the fusion pass retired).
     pub fused_comb_offsets: Vec<isize>,
@@ -382,14 +373,9 @@ impl Ir {
             settle_touched_offsets: module.settle_touched_offsets,
             closure_out_watch: module.closure_out_watch,
             event_comb_writes: module.event_comb_writes,
-            cone_state_base: module.cone_state_base,
-            cone_trigger_off: module.cone_trigger_off,
-            cone_trigger_words: module.cone_trigger_words,
-            cone_trigger_events: module.cone_trigger_events,
+            gate_state_base: module.gate_state_base,
             event_gate_flags: module.event_gate_flags,
             settle_info: module.settle_info,
-            cone_segments: module.cone_segments,
-            cone_gate_state: std::cell::RefCell::new(None),
             whole_comb_fallback_recorded: Default::default(),
             dataflow_fallback_recorded: Default::default(),
             whole_derived_clock_fallback_recorded: Default::default(),
@@ -847,9 +833,7 @@ impl Ir {
 
     /// `VERYL_SETTLE_CONVERGE_CHECK=1`: one extra pass must change nothing.
     ///
-    /// UNGATED on purpose -- the cone gate derives its skip decision from the
-    /// same convergence assumption, so a gated pass would agree by
-    /// construction.  Every side effect of the extra pass is rewound.
+    /// Every side effect of the extra pass is rewound.
     fn check_settled(&self, mask_cache: &mut MaskCache) {
         let before = self.comb_values.clone();
         // The extra pass has side effects -- the is_ff refinement pushes
@@ -1451,208 +1435,13 @@ impl Ir {
         #[cfg(feature = "profile")]
         let start = std::time::Instant::now();
 
-        if self.cone_segments.is_empty() {
-            for x in &self.comb_statements {
-                dispatch_stmt_fast(x, mask_cache);
-            }
-        } else {
-            self.eval_comb_cone_gated(mask_cache);
+        for x in &self.comb_statements {
+            dispatch_stmt_fast(x, mask_cache);
         }
 
         #[cfg(feature = "profile")]
         {
             profile.eval_comb_full_ns += start.elapsed().as_nanos() as u64;
-        }
-    }
-
-    /// Settle pass with cone-gate segments: at each gated range, one compare
-    /// of its external inputs against the shadow of its last run decides
-    /// whether the whole range can be skipped (its outputs still hold the
-    /// fixpoint of those same inputs).  See `opt::cone_gate`.
-    fn eval_comb_cone_gated(&self, mask_cache: &mut MaskCache) {
-        // `VERYL_CONE_GATE_CHECK=1`: run every would-be-skipped segment
-        // anyway and panic on the first output byte the skip would have got
-        // wrong.  Debug instrument, quadratic in buffer size.
-        static CHECK: OnceLock<bool> = OnceLock::new();
-        let check = *CHECK.get_or_init(|| env::var("VERYL_CONE_GATE_CHECK").as_deref() == Ok("1"));
-        // `VERYL_CONE_TRIGGER_CHECK=1`: where the mask says clean, compare
-        // anyway and report a disagreement.
-        static TRIGGER_CHECK: OnceLock<bool> = OnceLock::new();
-        let trigger_check = *TRIGGER_CHECK
-            .get_or_init(|| env::var("VERYL_CONE_TRIGGER_CHECK").as_deref() == Ok("1"));
-        // `VERYL_CONE_TRIGGER_CHECK_MAX=N`: stop after N reports.
-        static TRIGGER_CHECK_MAX: OnceLock<u64> = OnceLock::new();
-        let trigger_check_max = *TRIGGER_CHECK_MAX.get_or_init(|| {
-            env::var("VERYL_CONE_TRIGGER_CHECK_MAX")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(u64::MAX)
-        });
-        let mut slot = self.cone_gate_state.borrow_mut();
-        let state = slot.get_or_insert_with(|| {
-            crate::ir::opt::cone_gate::ConeGateState::new(self.cone_segments.len())
-        });
-        state.tick_rearm();
-        // `VERYL_CONE_GATE_DIAG=1`: periodic segment-dispatch statistics.
-        static DIAG: OnceLock<bool> = OnceLock::new();
-        let diag = *DIAG.get_or_init(|| env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"));
-        if diag {
-            let total = state.skipped + state.ran;
-            if total >= state.next_report {
-                state.next_report = total + (1 << 18);
-                eprintln!(
-                    "[cone_gate] segment dispatches: skipped {:.1}% ({} of {})",
-                    100.0 * state.skipped as f64 / total as f64,
-                    state.skipped,
-                    total,
-                );
-                // Every 8th report, the per-segment table.
-                if total >= (1 << 21) && (total >> 18).is_multiple_of(8) {
-                    for (si, &(sk, rn)) in state.per_seg.iter().enumerate() {
-                        if let Some(seg) = self.cone_segments.get(si) {
-                            eprintln!(
-                                "[cone_gate]   seg{si} [{}..{}) sk={sk} rn={rn} ({:.1}%) {}",
-                                seg.lo,
-                                seg.hi,
-                                100.0 * sk as f64 / (sk + rn).max(1) as f64,
-                                seg.cone,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        let trig = self.cone_trigger_off as usize;
-        state.load_pending(&self.comb_values[trig..trig + self.cone_trigger_words as usize * 8]);
-        let n = self.comb_statements.len();
-        let mut i = 0usize;
-        let mut si = 0usize;
-        while i < n {
-            if let Some(seg) = self.cone_segments.get(si)
-                && seg.lo == i
-            {
-                let mask_clean = state.mask_clean(si, seg);
-                if mask_clean && trigger_check {
-                    // A clean mask promises every compared byte is where the
-                    // last run left it.
-                    if let Some((is_ff, off)) =
-                        state.first_moved(si, seg, &self.ff_values, &self.comb_values)
-                    {
-                        let fired: Vec<String> = self
-                            .cone_trigger_events
-                            .iter()
-                            .enumerate()
-                            .filter(|(b, _)| state.pending_bit(*b))
-                            .map(|(_, e)| format!("{e:?}"))
-                            .collect();
-                        let mask: Vec<String> = self
-                            .cone_trigger_events
-                            .iter()
-                            .enumerate()
-                            .filter(|(b, _)| seg.trigger[b / 64] >> (b % 64) & 1 == 1)
-                            .map(|(_, e)| format!("{e:?}"))
-                            .collect();
-                        eprintln!(
-                            "[cone_gate] TRIGGER WRONG SKIP seg {si} [{}..{}) {}: {} {:#x} ({}) settle={} fired={:?} mask={:?}",
-                            seg.lo,
-                            seg.hi,
-                            seg.cone,
-                            if is_ff { "ff" } else { "comb" },
-                            off,
-                            self.var_name_at(VarOffset::new(is_ff, off as isize))
-                                .unwrap_or_else(|| "?".to_string()),
-                            state.evals,
-                            fired,
-                            mask,
-                        );
-                        eprintln!(
-                            "[cone_gate]   compare={:x?} compare_pre={:x?} replay={:x?} backedge={:x?}",
-                            seg.compare, seg.compare_pre, seg.replay, seg.backedge
-                        );
-                        state.trigger_reports += 1;
-                        if state.trigger_reports >= trigger_check_max {
-                            panic!("[cone_gate] TRIGGER WRONG SKIP: report limit reached");
-                        }
-                    }
-                }
-                // A replaying skip also needs the replayed span unmoved
-                // (`compare_pre`), which the mask does not cover.
-                let mask_ok = mask_clean
-                    && (seg.replay.is_empty() || state.pre_clean(si, seg, &self.comb_values));
-                if mask_ok || state.check_clean(si, seg, &self.ff_values, &self.comb_values) {
-                    if check {
-                        // Oracle: a real run starts from the PRE-replay
-                        // state (its inputs just compared clean), so run
-                        // from that state and require the result to match
-                        // what skip+replay produced.  Re-running on the
-                        // post-replay buffer instead would feed post-run
-                        // values into read-before-write chains and flag
-                        // sound skips spuriously.  Diff only the FINAL
-                        // state: mid-segment transients (an init store
-                        // whose conditional companion overwrites it later
-                        // in the segment) are not errors.
-                        let pre = self.comb_values.to_vec();
-                        if !seg.replay.is_empty() {
-                            // SAFETY: the comb buffer outlives the settle
-                            // and the spans were bounds-checked at plan
-                            // time.
-                            unsafe {
-                                state.replay(si, seg, self.comb_values.as_ptr() as *mut u8);
-                            }
-                        }
-                        let before = self.comb_values.to_vec();
-                        // SAFETY: same buffer, same length.
-                        unsafe {
-                            std::ptr::copy_nonoverlapping(
-                                pre.as_ptr(),
-                                self.comb_values.as_ptr() as *mut u8,
-                                pre.len(),
-                            );
-                        }
-                        for x in &self.comb_statements[i..seg.hi] {
-                            dispatch_stmt_fast(x, mask_cache);
-                        }
-                        for (o, (a, b)) in before.iter().zip(self.comb_values.iter()).enumerate() {
-                            if a != b {
-                                panic!(
-                                    "[cone_gate] WRONG SKIP seg {si} [{}..{}) {}: comb {:#x} \
-                                     {:#04x} -> {:#04x}\n  compare={:x?}\n  compare_pre={:x?}\n  \
-                                     replay={:x?}\n  backedge={:x?}",
-                                    seg.lo,
-                                    seg.hi,
-                                    seg.cone,
-                                    o,
-                                    a,
-                                    b,
-                                    seg.compare,
-                                    seg.compare_pre,
-                                    seg.replay,
-                                    seg.backedge,
-                                );
-                            }
-                        }
-                    } else if !seg.replay.is_empty() {
-                        // SAFETY: the comb buffer outlives the settle and
-                        // the spans were bounds-checked at plan time.
-                        unsafe {
-                            state.replay(si, seg, self.comb_values.as_ptr() as *mut u8);
-                        }
-                    }
-                    i = seg.hi;
-                    si += 1;
-                    continue;
-                }
-                state.before_run(si, seg, &self.comb_values);
-                for x in &self.comb_statements[i..seg.hi] {
-                    dispatch_stmt_fast(x, mask_cache);
-                }
-                state.refresh(si, seg, &self.ff_values, &self.comb_values);
-                i = seg.hi;
-                si += 1;
-                continue;
-            }
-            dispatch_stmt_fast(&self.comb_statements[i], mask_cache);
-            i += 1;
         }
     }
 

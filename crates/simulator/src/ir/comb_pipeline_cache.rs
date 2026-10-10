@@ -76,16 +76,9 @@ pub struct CombPipeline {
     /// match implies the same layout, so the same reservation reproduces it
     /// exactly (the instance-reuse path does the same with `comb_size`).
     pub vsplit_temp_bytes: usize,
-    /// Cone-gate segments: block ranges refer to
-    /// `comb_statements` and compare ranges are FINAL (post-relayout) comb
-    /// offsets, so a cache hit reuses them verbatim.  Empty when ungated.
-    pub cone_segments: Arc<Vec<crate::ir::opt::cone_gate::ConeSegment>>,
-    /// Cone-gate groups over `cone_segments`, compare ranges FINAL; the
-    /// per-instance state offsets are zero here.
-    pub cone_groups: Arc<Vec<crate::ir::opt::cone_gate::ConeGroup>>,
-    /// The instance tree and storage owners the cone plan was built over,
-    /// in the FINAL storage space; the event gates attribute `always_ff`
-    /// statements to subtrees with it.
+    /// The instance tree and storage owners the cone order was built over,
+    /// in the FINAL storage space; the dataflow plan and the event gates
+    /// attribute statements to subtrees with it.
     pub cone_inputs: Option<Arc<crate::ir::opt::owners::OwnerInputs>>,
 }
 

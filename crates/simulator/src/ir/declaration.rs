@@ -1200,8 +1200,8 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // allocator as function locals; instance-reuse records
                     // the post-conv size, so cache replay stays consistent.
                     // A temp has no `VariableMeta`; recording it as a
-                    // relocation of the variable it serves lets the cone-gate
-                    // owner table adopt it (see `Context::comb_reloc`).
+                    // relocation of the variable it serves lets the owner
+                    // tables adopt it (see `Context::comb_reloc`).
                     let use_4state = context.config.use_4state;
                     let comb_total = &mut context.comb_total_bytes;
                     let comb_reloc = &mut context.comb_reloc;

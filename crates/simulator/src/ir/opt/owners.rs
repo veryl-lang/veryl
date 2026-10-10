@@ -3,11 +3,8 @@
 //! the planners that consume them share.
 
 use crate::HashMap;
-use crate::ir::Event;
 use crate::ir::statement::ProtoStatement;
-use crate::ir::variable::{
-    ModuleVariableMeta, VarOffset, VariableElement, VariableMeta, value_size,
-};
+use crate::ir::variable::{ModuleVariableMeta, VariableElement, VariableMeta, value_size};
 use veryl_analyzer::ir::VarId;
 
 /// FF-buffer ownership, held per uniformly strided RUN of elements rather
@@ -22,27 +19,6 @@ pub struct FfOwner {
 }
 
 impl FfOwner {
-    /// Index of the run covering `x`, padding included.
-    pub(crate) fn run_index(&self, x: usize) -> Option<usize> {
-        let i = self
-            .runs
-            .partition_point(|&(s, ..)| s <= x)
-            .checked_sub(1)?;
-        let (s, stride, count, _) = self.runs[i];
-        (x < s + count * stride).then_some(i)
-    }
-
-    pub(crate) fn runs_in(&self, s: usize, e: usize) -> impl Iterator<Item = usize> + '_ {
-        let first = self
-            .runs
-            .partition_point(|&(rs, stride, count, _)| rs + count * stride <= s);
-        self.runs[first..]
-            .iter()
-            .take_while(move |&&(rs, ..)| rs < e)
-            .enumerate()
-            .map(move |(k, _)| first + k)
-    }
-
     /// The element span covering `x`.  `None` also when `x` lands in the
     /// padding a stride wider than the element leaves behind each one.
     pub(crate) fn span(&self, x: usize) -> Option<(usize, usize)> {
@@ -140,14 +116,6 @@ pub struct OwnerInputs {
     pub comb_var: Vec<(usize, usize, u32)>,
     /// Merged comb byte ranges any event statement can write.
     pub event_written_comb: Vec<(usize, usize)>,
-    /// Firing `trigger_events[i]` sets bit `i` of the pending mask; empty
-    /// turns the trigger analysis off.
-    pub trigger_events: Vec<Event>,
-    /// `event_writes[i]` is what `trigger_events[i]` can write.
-    pub event_writes: Vec<EventWrites>,
-    /// Master input clock storage and its bit: the simulator writes the level
-    /// outside any event's statements.
-    pub master_clocks: Vec<(VarOffset, usize)>,
     /// `(next slot, current slot)` of every dual-slot FF element: an event
     /// names the next slot, the readers the current one.
     pub ff_next_alias: Vec<(usize, usize)>,
@@ -157,21 +125,11 @@ pub struct OwnerInputs {
     pub(crate) tour: std::sync::OnceLock<Tour>,
 }
 
-/// The storage one event's statements can write, as element base offsets in
-/// the same space as the owner tables.  `wild`: some write could not be
-/// bounded, so the event's bit goes into every mask.
-#[derive(Clone, Debug, Default)]
-pub struct EventWrites {
-    pub comb: Vec<isize>,
-    pub ff: Vec<isize>,
-    pub wild: bool,
-}
-
-/// `VERYL_CONE_GATE_DIAG=1` reports how the owner tables and the cone
-/// planning came out.
+/// `VERYL_CONE_ORDER_DIAG=1` reports how the owner tables and the cone
+/// reorder came out.
 pub(crate) fn diag() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("VERYL_CONE_GATE_DIAG").as_deref() == Ok("1"))
+    *ON.get_or_init(|| std::env::var("VERYL_CONE_ORDER_DIAG").as_deref() == Ok("1"))
 }
 
 /// Above this, a variable is owned as ONE span instead of one per element: the
@@ -382,7 +340,7 @@ impl OwnerInputs {
         inherit_reloc_owners(&mut self.comb_var, reloc);
         if diag() {
             eprintln!(
-                "[cone_gate] adopt_relocations: entries={} owned={}",
+                "[cone_order] adopt_relocations: entries={} owned={}",
                 reloc.len(),
                 self.comb_owner.len() - before,
             );
@@ -392,8 +350,7 @@ impl OwnerInputs {
 
 /// Assemble the node tables from the pre-instantiation variable-meta tree.
 /// `event_written` holds every comb offset the event statements can write
-/// (element-expanded); the covering variable spans join each segment's
-/// compare set so an event overwrite wakes the segment.
+/// (element-expanded); it becomes `OwnerInputs::event_written_comb`.
 pub fn build_inputs(
     top_name: &str,
     top_vars: &HashMap<VarId, VariableMeta>,
@@ -401,7 +358,6 @@ pub fn build_inputs(
     event_written: &crate::HashSet<isize>,
     comb_reloc: &[(isize, isize, usize)],
     use_4state: bool,
-    triggers: TriggerInputs,
 ) -> OwnerInputs {
     let mut node_parent: Vec<u32> = vec![u32::MAX];
     let mut node_path: Vec<String> = vec![top_name.to_string()];
@@ -421,12 +377,11 @@ pub fn build_inputs(
                     ff_next_alias: &mut Vec<(usize, usize)>| {
         for vm in vars.values() {
             ff_elems.clear();
-            // A variable past `MAX_TOTAL_COMPARE` can never join a compare set
-            // — that constant caps the sum over every gated segment — so
-            // per-element owners cost a span, a sort key and a writer list each
-            // for a precision no segment can spend.  One span keeps the lookup
-            // exact and makes the table a function of the design's variables
-            // rather than its array lengths.
+            // A variable past `MAX_ELEMENT_OWNER_BYTES` is priced out of almost
+            // every segment, so per-element owners cost a span, a sort key and
+            // a writer list each for a precision hardly ever used.  One span
+            // keeps the lookup exact and makes the table a function of the
+            // design's variables rather than its array lengths.
             let (comb_bytes, comb_span_bytes) = comb_extent(&vm.elements, use_4state);
             let fold_var = comb_bytes > MAX_ELEMENT_OWNER_BYTES
                 || comb_span_bytes > crate::ir::big_array::FOLD_SPAN_BYTES;
@@ -519,7 +474,7 @@ pub fn build_inputs(
     inherit_reloc_owners(&mut comb_var, comb_reloc);
     if diag() {
         eprintln!(
-            "[cone_gate] build_inputs: reloc entries={} owned={} comb_extent={}",
+            "[cone_order] build_inputs: reloc entries={} owned={} comb_extent={}",
             comb_reloc.len(),
             comb_owner.len() - before,
             comb_owner.last().map_or(0, |&(_, e, _)| e),
@@ -550,27 +505,6 @@ pub fn build_inputs(
     }
     merge_ranges(&mut event_written_comb);
     ff_next_alias.sort_unstable();
-    // A master clock's toggle reports its own event's bit; one no `always_ff`
-    // listens to still gets a bit, for the readers of its level.
-    let TriggerInputs {
-        mut trigger_events,
-        mut event_writes,
-        master_clocks: masters,
-    } = triggers;
-    let mut master_clocks: Vec<(VarOffset, usize)> = Vec::new();
-    if !trigger_events.is_empty() {
-        for (off, vid) in masters {
-            let bit = match trigger_events.iter().position(|e| *e == Event::clock(vid)) {
-                Some(i) => i,
-                None => {
-                    trigger_events.push(Event::clock(vid));
-                    event_writes.push(EventWrites::default());
-                    trigger_events.len() - 1
-                }
-            };
-            master_clocks.push((off, bit));
-        }
-    }
     OwnerInputs {
         node_parent,
         node_path,
@@ -579,22 +513,9 @@ pub fn build_inputs(
         ff_node,
         comb_var,
         event_written_comb,
-        trigger_events,
-        event_writes,
-        master_clocks,
         ff_next_alias,
         tour: std::sync::OnceLock::new(),
     }
-}
-
-/// The trigger analysis inputs; `Default` leaves it off.
-#[derive(Default)]
-pub struct TriggerInputs {
-    /// Bit order of the pending mask, shared with the simulator.
-    pub trigger_events: Vec<Event>,
-    pub event_writes: Vec<EventWrites>,
-    /// Master input clock storage and variable.
-    pub master_clocks: Vec<(VarOffset, VarId)>,
 }
 
 /// Does the statement (recursively) have effects a skip could lose?
@@ -723,6 +644,7 @@ pub(crate) fn intersect_ranges(a: &[(usize, usize)], b: &[(usize, usize)]) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::variable::VarOffset;
 
     #[test]
     fn reloc_owners_follow_temp_chains() {
@@ -964,19 +886,5 @@ mod tests {
         assert_eq!(first_ff_span(&max_end, 8), 1);
         // A byte past every entry yields an empty scan rather than a panic.
         assert_eq!(first_ff_span(&max_end, 24), 3);
-    }
-
-    #[test]
-    fn ff_owner_runs_in_names_every_run_a_range_touches() {
-        let owner = FfOwner {
-            runs: vec![(0, 4, 2, 4), (16, 8, 3, 4), (64, 4, 1, 4)],
-        };
-        assert_eq!(owner.run_index(4), Some(0));
-        assert_eq!(owner.run_index(20), Some(1));
-        assert_eq!(owner.run_index(40), None);
-        assert_eq!(owner.runs_in(0, 8).collect::<Vec<_>>(), vec![0]);
-        assert_eq!(owner.runs_in(6, 20).collect::<Vec<_>>(), vec![0, 1]);
-        assert_eq!(owner.runs_in(40, 70).collect::<Vec<_>>(), vec![2]);
-        assert!(owner.runs_in(40, 60).next().is_none());
     }
 }

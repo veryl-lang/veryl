@@ -20,8 +20,8 @@ pub(crate) fn comb_is_aot_native(ir: &Ir) -> bool {
     ir.whole_comb.is_some() || ir.dataflow.as_ref().is_some_and(|d| d.cell.get().is_some())
 }
 
-/// The dataflow settle replaces the cone gate, the fall partial settles and
-/// the whole-comb dispatch, so tests of those have nothing to check under it.
+/// The dataflow settle replaces the fall partial settles and the whole-comb
+/// dispatch, so tests of those have nothing to check under it.
 pub(crate) fn dataflow_on() -> bool {
     crate::ir::opt::dataflow::enabled()
 }

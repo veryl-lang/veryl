@@ -118,7 +118,7 @@ pub struct Context {
     pub internal_event_ids_allocated: u32,
     /// Per-call-site copies of a function's comb scratch, as
     /// `(old_offset, new_offset, bytes)`.  A copy carries no `VariableMeta`,
-    /// so without this record nothing owns it and `cone_gate` pins every
+    /// so without this record nothing owns it and `cone_order` pins every
     /// statement touching it to the root.
     pub comb_reloc: Vec<(isize, isize, usize)>,
     /// While events compile: the dataflow marks their comb stores and FF log

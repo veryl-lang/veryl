@@ -21,7 +21,7 @@ use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::VarOffset;
 
 thread_local! {
-    /// Why statements ended up attributed to the root, and so ungated:
+    /// Why statements ended up attributed to the root, and so in no cone:
     /// `0` unbounded storage, `1` no comb output, `2` a root-level write.
     static ROOT_REASONS: std::cell::Cell<[usize; 9]> = const { std::cell::Cell::new([0; 9]) };
 }
@@ -44,17 +44,17 @@ fn root_reason(k: usize) {
 }
 
 /// Print and clear the [`root_reason`] tally.  Every one of these statements
-/// runs on EVERY settle, so the mix says whether the ungated remainder is an
+/// lands outside every cone, so the mix says whether that remainder is an
 /// analysis gap or the design's own top level.
 fn report_root_reasons(name: &str, owner: &[(usize, usize, u32)]) {
     let v = ROOT_REASONS.with(|c| c.replace([0; 9]));
     if v.iter().any(|&x| x > 0) {
         eprintln!(
-            "[cone_gate] root-attributed stmts: unbounded={} no_comb_out={} root_write={} {}",
+            "[cone_order] root-attributed stmts: unbounded={} no_comb_out={} root_write={} {}",
             v[0], v[1], v[2], name,
         );
         eprintln!(
-            "[cone_gate]   unbounded by: out_comb_miss={} out_ff={} out_neg={} \
+            "[cone_order]   unbounded by: out_comb_miss={} out_ff={} out_neg={} \
              in_comb_miss={} in_ff_miss={} in_neg={}",
             v[3], v[4], v[5], v[6], v[7], v[8],
         );
@@ -64,13 +64,13 @@ fn report_root_reasons(name: &str, owner: &[(usize, usize, u32)]) {
             v.dedup();
             let (lo, hi) = (v.first().copied(), v.last().copied());
             eprintln!(
-                "[cone_gate]   unowned comb offsets: distinct={} min={lo:?} max={hi:?}",
+                "[cone_order]   unowned comb offsets: distinct={} min={lo:?} max={hi:?}",
                 v.len(),
             );
             let covered: usize = owner.iter().map(|&(a, b, _)| b - a).sum();
             let extent = owner.last().map_or(0, |&(_, e, _)| e);
             eprintln!(
-                "[cone_gate]   comb_owner: spans={} covered={covered} extent={extent} ({:.1}% of extent)",
+                "[cone_order]   comb_owner: spans={} covered={covered} extent={extent} ({:.1}% of extent)",
                 owner.len(),
                 100.0 * covered as f64 / extent.max(1) as f64,
             );
@@ -79,28 +79,26 @@ fn report_root_reasons(name: &str, owner: &[(usize, usize, u32)]) {
     }
 }
 
-/// Compare bytes the gate may spend per comb statement.  The per-segment test
-/// below wants one statement per 32 compare bytes, so a settle is worth about
-/// `32 * n`; an eighth of that caps the all-dirty worst case at a quarter of a
-/// settle, and a segment that never skips auto-offs out of even that.
+/// Input bytes the segments may count in total per comb statement.  A
+/// segment needs one statement per 32 of its own input bytes, so this caps
+/// the counted segments at a quarter of what that ratio would admit.
 const COMPARE_BYTES_PER_STMT: usize = 8;
 
-/// The design's total compare budget, proportional to the comb statement count
-/// because that is what the gate is spending it to avoid.  An absolute cap
-/// would hand the whole budget to whichever cones the schedule reaches first
-/// and leave the rest of the design ungated.
+/// The design's total input-byte budget for segments, proportional to the
+/// comb statement count.  An absolute cap would hand the whole budget to
+/// whichever cones the schedule reaches first and leave the rest of the
+/// design unclustered.
 fn compare_budget(comb_stmts: usize) -> usize {
     comb_stmts.saturating_mul(COMPARE_BYTES_PER_STMT)
 }
-/// A segment smaller than this is not worth its dispatch branch: on cones
-/// that fragment into short bursts the per-segment guard costs more than the
-/// statements it skips.
+/// A run shorter than this does not count as a segment: a cone that
+/// fragments into short bursts is not clustered.
 const MIN_SEGMENT_STMTS: usize = 64;
 /// A subtree carrying fewer statements than this is not worth a cone of its
-/// own; its statements gate as part of an ancestor's, or not at all.
+/// own; its statements join an ancestor's, or no cone at all.
 const MIN_CONE_STMTS: usize = 300;
 /// Below this comb statement count the schedule is left alone and only the
-/// cone runs it already contains are gated (see `schedule`).
+/// cone runs it already contains count as segments (see `schedule`).
 const CLUSTER_MIN_STMTS: usize = 5_000;
 
 pub(crate) struct StmtInfo {
@@ -121,8 +119,7 @@ pub(crate) struct StmtInfo {
     pub(crate) unknown_in: bool,
 }
 
-/// The reorder, with what the segment selection and the cone gate's own
-/// planning read back from it.
+/// The reorder, with what the segment selection reads back from it.
 pub(crate) struct Schedule {
     /// Permutation: `order[new_index] = old_index`.
     pub(crate) order: Vec<u32>,
@@ -266,7 +263,7 @@ pub(crate) fn schedule(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option
             });
         }
         // A side-effecting or unbounded statement poisons its whole ancestor
-        // chain: no cone containing it may skip.
+        // chain: no cone may contain it.
         if has_side_effects(s) || info.unbounded {
             let mut m = info.node;
             loop {
@@ -292,7 +289,7 @@ pub(crate) fn schedule(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option
         }
     }
     if diag() {
-        // Where does the ungated mass sit?  For every statement parked at
+        // Where does the mass outside every cone sit?  For every statement parked at
         // the root by an untracked offset (a rename/selector temp), estimate
         // the node its TRACKED reads/writes point at — the recoverable mass
         // per node if temps were carried in the owner tables.
@@ -324,7 +321,7 @@ pub(crate) fn schedule(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option
         for m in 0..inputs.node_parent.len() {
             if direct[m] >= 64 || rescuable[m] >= 64 || count[m] >= MIN_CONE_STMTS {
                 eprintln!(
-                    "[cone_gate] node count={} direct={} rescuable={} poisoned={} {}",
+                    "[cone_order] node count={} direct={} rescuable={} poisoned={} {}",
                     count[m], direct[m], rescuable[m], poisoned[m], inputs.node_path[m],
                 );
             }
@@ -335,8 +332,8 @@ pub(crate) fn schedule(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option
     // -- candidates: every qualifying node.  A statement joins its DEEPEST
     //    qualifying ancestor: deep subtrees (an idle arbiter, an FPU) are the
     //    ones whose inputs actually sit still, while a huge ancestor cone
-    //    would inherit the always-active core and never skip.  A shallower
-    //    qualifying node still gates its RESIDUAL statements as its own slot.
+    //    would inherit the always-active core.  A shallower qualifying node
+    //    still takes its RESIDUAL statements as its own slot.
     let qualifies = |m: u32| -> bool {
         m != root && !poisoned[m as usize] && count[m as usize] >= MIN_CONE_STMTS
     };
@@ -363,7 +360,7 @@ pub(crate) fn schedule(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option
     };
     let slot: Vec<usize> = infos.iter().map(|i| cone_of(i.node)).collect();
 
-    // -- per-span writer lists, consumed by the compare/replay construction
+    // -- per-span writer lists, consumed by the segment pricing
     //    and the clustering re-sort below.  They come out position-ascending
     //    and duplicate-free because the statement loop runs in order and two
     //    owner spans are always either identical or disjoint, so no span is
@@ -381,11 +378,10 @@ pub(crate) fn schedule(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option
         }
     }
 
-    // -- Small designs: keep the original order and gate the maximal cone
-    //    runs it already contains.  Clustering buys its extra gated mass out
-    //    of the schedule's ACTIVE remainder, whose fat compare sets and guard
-    //    glue cost more than the few extra skips return until the statement
-    //    count is well past `CLUSTER_MIN_STMTS`.
+    // -- Small designs: keep the original order and take the maximal cone
+    //    runs it already contains.  Clustering pulls its extra mass out of
+    //    the schedule's ACTIVE remainder, whose fat compare sets price it out
+    //    until the statement count is well past `CLUSTER_MIN_STMTS`.
     if n < CLUSTER_MIN_STMTS {
         let order: Vec<u32> = (0..n as u32).collect();
         let mut bursts: Vec<(usize, usize, usize)> = Vec::new();
@@ -529,7 +525,7 @@ pub(crate) fn schedule(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option
     // readiness: its FF-fed (quiet) statements are all ready before any
     // outside statement runs and convene into the first bursts, while
     // parts chained behind live core logic surface later — so a cone's
-    // skippable mass is not fused with its active mass.  Pinning the runs
+    // quiet mass is not fused with its active mass.  Pinning the runs
     // the original order already contains would defeat that: their members
     // block the rest of their cone from convening, shattering one cone into
     // several fat compare sets.  The runs are instead recovered by
@@ -609,29 +605,11 @@ pub(crate) fn schedule(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option
     })
 }
 
-/// A burst that passed the profitability filter, with its compare set.
-pub(crate) struct Selected {
-    /// `[start, end)` statement indices in the REORDERED comb list.
-    pub(crate) start: usize,
-    pub(crate) end: usize,
-    /// Compare ranges `(is_ff, start, end)`, sorted, disjoint per buffer.
-    pub(crate) compare: Vec<(bool, u32, u32)>,
-    /// Comb ranges the burst both reads and writes, less `replay`.
-    pub(crate) backedge: Vec<(u32, u32)>,
-    /// Comb outputs another writer shares; a skip restores them.
-    pub(crate) replay: Vec<(u32, u32)>,
-    pub(crate) bytes: usize,
-    /// The cone's node.
-    pub(crate) node: u32,
-}
-
-/// Turn the bursts of `sched` into gated segments with their compare sets,
-/// applying the static profitability filter.  Also returns the compare bytes
-/// spent and the budget they were drawn from.
-pub(crate) fn select_segments(
-    sched: &Schedule,
-    inputs: &OwnerInputs,
-) -> (Vec<Selected>, usize, usize) {
+/// Count the bursts of `sched` that pass the static profitability filter: a
+/// burst is worth keeping contiguous only when the bytes that decide whether
+/// its inputs moved are few against the statements it holds.  Also returns
+/// the bytes spent and the budget they were drawn from.
+pub(crate) fn select_segments(sched: &Schedule, inputs: &OwnerInputs) -> (usize, usize, usize) {
     let Schedule {
         order,
         bursts,
@@ -642,41 +620,33 @@ pub(crate) fn select_segments(
     let n = order.len();
     let budget = compare_budget(n);
     let mut in_burst = vec![false; n];
-    let mut segments: Vec<Selected> = Vec::new();
+    let mut segments = 0usize;
     let mut total_bytes = 0usize;
     for &(sl, start, end) in bursts {
         if sl == 0 || end - start < MIN_SEGMENT_STMTS {
             if diag() && sl != 0 && end - start >= 8 {
                 eprintln!(
-                    "[cone_gate] drop too-small [{start}..{end}) stmts={} {}",
+                    "[cone_order] drop too-small [{start}..{end}) stmts={} {}",
                     end - start,
                     inputs.node_path[cones[sl - 1] as usize],
                 );
             }
             continue;
         }
-        // A variable written both by this burst and by a statement OUTSIDE it
-        // (an FSM's `nxtstate = 0` default split from its conditional
-        // assignments) breaks under a plain skip: last-writer-wins depends on
-        // the write ORDER within the settle, and skipping only the inside
-        // writers leaves the outside writer's value standing.  A skip must
-        // therefore REPLAY the segment's stored outputs for those spans —
-        // that reproduces a real run exactly whether the outside writer sits
-        // before the segment (the segment's write wins either way) or after
-        // it (the outside statement still runs later and overwrites).
+        // Outputs another writer shares: a statement outside the burst (an
+        // FSM's `nxtstate = 0` default split from its conditional
+        // assignments), an event or a component.
         for &oi in &order[start..end] {
             in_burst[oi as usize] = true;
         }
-        let mut replay: Vec<(usize, usize)> = Vec::new();
+        let mut shared: Vec<(usize, usize)> = Vec::new();
         for &oi in &order[start..end] {
             for &(s, e) in &infos[oi as usize].out_comb {
-                // Keep only the spans an outside writer can reach: a byte this
-                // burst alone writes already holds what a run would leave.
                 let mut j = first_span(&inputs.comb_owner, s);
                 while j < inputs.comb_owner.len() && inputs.comb_owner[j].0 < e {
                     let (os, oe, _) = inputs.comb_owner[j];
                     if oe > s && writers[j].iter().any(|&w| !in_burst[w as usize]) {
-                        replay.push((os.max(s), oe.min(e)));
+                        shared.push((os.max(s), oe.min(e)));
                     }
                     j += 1;
                 }
@@ -685,7 +655,7 @@ pub(crate) fn select_segments(
         for &oi in &order[start..end] {
             in_burst[oi as usize] = false;
         }
-        merge_ranges(&mut replay);
+        merge_ranges(&mut shared);
         let mut in_comb: Vec<(usize, usize)> = Vec::new();
         let mut in_ff: Vec<(usize, usize)> = Vec::new();
         let mut out_comb: Vec<(usize, usize)> = Vec::new();
@@ -699,57 +669,26 @@ pub(crate) fn select_segments(
         merge_ranges(&mut in_ff);
         merge_ranges(&mut out_comb);
         let ext = subtract_ranges(&in_comb, &out_comb);
-        // Event/component writes to member outputs are outside writers too:
-        // route them through the replay, whose pre-run compare judges each
-        // byte as the segment CONSUMED it.  The post-run compare cannot —
-        // such a write lands after the run its shadow describes, so the
-        // shadow no longer says anything about the byte.
-        let evt_out = intersect_ranges(&inputs.event_written_comb, &out_comb);
-        replay.extend(evt_out);
-        merge_ranges(&mut replay);
-        // Bytes the segment both reads and writes carry its internal chain
-        // state: a read can precede its writer (a settle back-edge, a
-        // self-reading RMW, a bit-sliced accumulator) and then consumes the
-        // PREVIOUS pass's value, which `in − out` hides.  Spans are whole
-        // variables, so partial writes make a positional read-before-write
-        // analysis unsound here — keep the whole intersection in the compare
-        // set.  Under unchanged external inputs these bytes are at their
-        // fixpoint and compare equal, so the skip rate is unharmed.
-        let backedge_all = intersect_ranges(&in_comb, &out_comb);
-        // EVERY replay span must pass the pre-run compare, not just the
-        // read-back ones.  Replay restores whole-variable snapshots, but a
-        // burst statement may write only PART of the variable (a field
-        // assign): the untouched bytes in the snapshot belong to the
-        // OUTSIDE writers as of the snapshot settle, and blindly restoring
-        // them would roll those writers back.  Requiring the span's bytes
-        // at the segment position to equal their value at the snapshot
-        // run's start makes the replay an exact reproduction: touched
-        // bytes recompute equal (inputs unchanged), untouched bytes are
-        // rewritten with the value they already hold.  A fresh-but-equal
-        // event write still compares equal here, which is the point of
-        // the pre-run compare over the post-run one.
-        let compare_pre = replay.clone();
-        let backedge = subtract_ranges(&backedge_all, &replay);
-        let mut compare: Vec<(bool, u32, u32)> = Vec::new();
+        shared.extend(intersect_ranges(&inputs.event_written_comb, &out_comb));
+        merge_ranges(&mut shared);
+        // Bytes the burst both reads and writes carry its chain state: a read
+        // can precede its writer and consume the previous settle's value.
+        let backedge = subtract_ranges(&intersect_ranges(&in_comb, &out_comb), &shared);
         let mut comb_cmp = ext;
         comb_cmp.extend(backedge.iter().copied());
         merge_ranges(&mut comb_cmp);
-        let comb_cmp = subtract_ranges(&comb_cmp, &compare_pre);
-        compare.extend(comb_cmp.iter().map(|&(s, e)| (false, s as u32, e as u32)));
-        compare.extend(in_ff.iter().map(|&(s, e)| (true, s as u32, e as u32)));
-        let bytes: usize = compare
+        let comb_cmp = subtract_ranges(&comb_cmp, &shared);
+        let bytes: usize = comb_cmp
             .iter()
-            .map(|&(_, s, e)| (e - s) as usize)
-            .sum::<usize>()
-            + compare_pre.iter().map(|&(s, e)| e - s).sum::<usize>();
-        // Static bet: a vectorised compare costs far less per byte than
-        // evaluating a statement, so one statement per 32 compare bytes still
-        // pays off several-fold at a high skip rate — and a segment that
-        // cannot skip auto-offs into a cost of zero, bounding the downside.
+            .chain(&in_ff)
+            .chain(&shared)
+            .map(|&(s, e)| e - s)
+            .sum();
+        // A run counts only with at least one statement per 32 input bytes.
         if (end - start) < bytes / 32 || total_bytes + bytes > budget {
             if diag() {
                 eprintln!(
-                    "[cone_gate] drop unprofitable [{start}..{end}) stmts={} bytes={bytes} {}",
+                    "[cone_order] drop unprofitable [{start}..{end}) stmts={} bytes={bytes} {}",
                     end - start,
                     inputs.node_path[cones[sl - 1] as usize],
                 );
@@ -757,23 +696,12 @@ pub(crate) fn select_segments(
             continue;
         }
         total_bytes += bytes;
-        segments.push(Selected {
-            start,
-            end,
-            compare,
-            backedge: backedge
-                .iter()
-                .map(|&(s, e)| (s as u32, e as u32))
-                .collect(),
-            replay: replay.iter().map(|&(s, e)| (s as u32, e as u32)).collect(),
-            bytes,
-            node: cones[sl - 1],
-        });
+        segments += 1;
     }
     (segments, total_bytes, budget)
 }
 
-/// The cone reorder alone, for a settle that runs no cone gate.
+/// The cone reorder of a comb schedule.
 pub struct ConeOrder {
     /// Permutation: `order[new_index] = old_index`.
     pub order: Vec<u32>,
@@ -781,36 +709,122 @@ pub struct ConeOrder {
     pub segments: usize,
 }
 
-/// The order and segment count `cone_gate::plan` would produce, without the
-/// gate's trigger masks and groups.  `None` keeps the incoming order.
+/// The reordered schedule and the number of segments that justified it.
+/// `None` keeps the incoming order.
 pub fn cone_order(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<ConeOrder> {
     let sched = schedule(stmts, inputs)?;
     let (segments, total_bytes, budget) = select_segments(&sched, inputs);
     if diag() {
         eprintln!(
-            "[cone_gate] order: stmts={} cones={} segments={} compare_bytes={total_bytes}/{budget}",
+            "[cone_order] order: stmts={} cones={} segments={segments} compare_bytes={total_bytes}/{budget}",
             sched.order.len(),
             sched.cones.len(),
-            segments.len(),
         );
     }
-    if segments.is_empty() {
+    if segments == 0 {
         return None;
     }
     Some(ConeOrder {
         order: sched.order,
-        segments: segments.len(),
+        segments,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::opt::owners::FfOwner;
+
+    /// `dst = src`, one-byte comb variables.
+    fn copy(dst: usize, src: usize) -> ProtoStatement {
+        use crate::ir::{ExpressionContext, ProtoAssignStatement, ProtoExpression};
+        let ctx = ExpressionContext {
+            width: 8,
+            signed: false,
+        };
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst: VarOffset::Comb(dst as isize),
+            dst_width: 8,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr: ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(src as isize),
+                select: None,
+                dynamic_select: None,
+                width: 8,
+                var_full_width: 8,
+                expr_context: ctx,
+            },
+            dst_ff_current_offset: -1,
+            comb_direct: false,
+            token: Default::default(),
+        })
+    }
+
+    /// One copy chain of `len` statements per leaf under the root, the
+    /// chains' statements `interleaved` or one chain after another.
+    fn chain_design(
+        leaves: usize,
+        len: usize,
+        interleaved: bool,
+    ) -> (OwnerInputs, Vec<ProtoStatement>) {
+        let var = |leaf: usize, i: usize| (leaf * (len + 1) + i) * 8;
+        let mut node_parent = vec![u32::MAX];
+        node_parent.extend(std::iter::repeat_n(0, leaves));
+        let mut comb_owner = Vec::new();
+        for leaf in 0..leaves {
+            for i in 0..=len {
+                comb_owner.push((var(leaf, i), var(leaf, i) + 1, leaf as u32 + 1));
+            }
+        }
+        let inputs = OwnerInputs {
+            node_path: (0..node_parent.len()).map(|n| format!("n{n}")).collect(),
+            node_parent,
+            comb_owner,
+            ff_owner: FfOwner { runs: vec![] },
+            comb_var: Vec::new(),
+            ff_node: Vec::new(),
+            event_written_comb: vec![],
+            ff_next_alias: Vec::new(),
+            tour: Default::default(),
+        };
+        let stmt = |leaf: usize, i: usize| copy(var(leaf, i + 1), var(leaf, i));
+        let stmts = if interleaved {
+            (0..len)
+                .flat_map(|i| (0..leaves).map(move |leaf| (leaf, i)))
+                .map(|(leaf, i)| stmt(leaf, i))
+                .collect()
+        } else {
+            (0..leaves)
+                .flat_map(|leaf| (0..len).map(move |i| (leaf, i)))
+                .map(|(leaf, i)| stmt(leaf, i))
+                .collect()
+        };
+        (inputs, stmts)
+    }
+
+    #[test]
+    fn cone_order_clusters_each_qualifying_subtree() {
+        // The re-sort pulls each interleaved chain together.
+        let (inputs, stmts) = chain_design(3, 1_700, true);
+        let o = cone_order(&stmts, &inputs).unwrap();
+        assert_eq!(o.segments, 3);
+        assert!(o.order.windows(2).take(1_699).all(|w| w[1] == w[0] + 3));
+        // Chains already in place keep their order.
+        let (inputs, stmts) = chain_design(3, 400, false);
+        let o = cone_order(&stmts, &inputs).unwrap();
+        assert_eq!(o.segments, 3);
+        assert!(o.order.iter().enumerate().all(|(i, &x)| i == x as usize));
+        // Too little to pay for a compare: the incoming order stays.
+        let (inputs, stmts) = chain_design(2, 100, false);
+        assert!(cone_order(&stmts, &inputs).is_none());
+    }
 
     #[test]
     fn the_compare_budget_tracks_the_design_size() {
         // Under an absolute cap, replicating a design — a second core — leaves
-        // the copy ungated while the original stays gated.
+        // the copy unclustered while the original stays clustered.
         assert_eq!(compare_budget(2 * 36_032), 2 * compare_budget(36_032));
         // And it must stay under what the per-segment rule already implies:
         // every kept segment brings a statement per 32 compare bytes, so the

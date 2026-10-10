@@ -10,18 +10,13 @@ use crate::ir::ProtoStatement;
 use std::sync::Arc;
 
 /// What the emitter needs beyond the statements themselves: the per-chunk
-/// localization sets, the const-cone split's event-written set, and the gated
-/// cone segments.  Each is passed through a thread-local channel around the
-/// emit and cleared after, so they travel together.
+/// localization sets and the const-cone split's event-written set.  Each is
+/// passed through a thread-local channel around the emit and cleared after,
+/// so they travel together.
 #[derive(Default)]
 pub struct WholeCombShape<'a> {
     pub localize: Option<&'a LocalizeInfo>,
     pub const_unsafe: Option<&'a crate::HashSet<isize>>,
-    pub cone_segments: &'a [crate::ir::opt::cone_gate::ConeSegment],
-    pub cone_groups: &'a [crate::ir::opt::cone_gate::ConeGroup],
-    /// Comb offset of the pending trigger mask the guards pre-test, set even
-    /// when the trigger analysis is off.
-    pub cone_trigger_off: u32,
 }
 
 pub(crate) fn compile_whole_comb(
@@ -52,21 +47,11 @@ pub(crate) fn compile_whole_comb(
         if let Some(unsafe_comb) = shape.const_unsafe {
             super::aot_c::emit::set_const_unsafe(unsafe_comb.clone());
         }
-        #[cfg(not(target_family = "wasm"))]
-        if !shape.cone_segments.is_empty() {
-            super::aot_c::emit::set_cone_segments(
-                shape.cone_segments.to_vec(),
-                shape.cone_groups.to_vec(),
-                shape.cone_trigger_off,
-            );
-        }
         let r = backends.try_compile_whole_comb(&ctx, stmts);
         #[cfg(not(target_family = "wasm"))]
         super::aot_c::emit::clear_localize_blocklist();
         #[cfg(not(target_family = "wasm"))]
         super::aot_c::emit::clear_const_unsafe();
-        #[cfg(not(target_family = "wasm"))]
-        super::aot_c::emit::clear_cone_segments();
         r
     })
 }

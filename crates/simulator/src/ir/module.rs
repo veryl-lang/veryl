@@ -14,7 +14,6 @@ use crate::ir::derived_clock::{
 use crate::ir::external::{ExternalComponentInst, ProtoExternalComponent};
 use crate::ir::inst_layout::InstLayout;
 use crate::ir::opt::comb_fusion;
-use crate::ir::opt::cone_gate;
 use crate::ir::opt::cone_order;
 use crate::ir::opt::dead_var_dce;
 use crate::ir::opt::dup_assign_dce::dce_aggressive;
@@ -142,20 +141,14 @@ pub struct Module {
     /// a statement outside it reads: a change of one after a closure
     /// evaluation dirties the comb.
     pub closure_out_watch: Vec<(u32, u32)>,
-    pub cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment>,
     /// Per event, the comb byte offsets its statements can write, or `None`
     /// when unboundable (`event_comb_write_offsets`).  The simulator's
     /// settle filter dirties the comb on a fire of any event whose writes
     /// can reach a comb read.
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
-    /// First byte of the cone-gate state region at the comb buffer's tail;
+    /// First byte of the gate state region at the comb buffer's tail;
     /// logic storage ends here.
-    pub cone_state_base: u32,
-    /// The pending trigger mask at the head of that region, one bit per
-    /// `cone_trigger_events` entry.
-    pub cone_trigger_off: u32,
-    pub cone_trigger_words: u32,
-    pub cone_trigger_events: Vec<Event>,
+    pub gate_state_base: u32,
     /// Comb-buffer offsets of the event gates' idle flags (`event_gate`),
     /// cleared by writes the gates cannot see.
     pub event_gate_flags: Vec<u32>,
@@ -227,18 +220,10 @@ pub struct ProtoModule {
     pub settle_touched_offsets: Arc<HashSet<VarOffset>>,
     /// See `Module::closure_out_watch`.
     pub closure_out_watch: Vec<(u32, u32)>,
-    /// Cone-gate segments in BLOCK space (`comb_statements.0` indices) with
-    /// their state offsets assigned; `instantiate` maps them to the flat
-    /// statement space.
-    pub cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment>,
     /// See `Module::event_comb_writes`.
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
-    /// See `Module::cone_state_base`.
-    pub cone_state_base: u32,
-    /// See `Module::cone_trigger_off`.
-    pub cone_trigger_off: u32,
-    pub cone_trigger_words: u32,
-    pub cone_trigger_events: Vec<Event>,
+    /// See `Module::gate_state_base`.
+    pub gate_state_base: u32,
     /// Comb-buffer offsets of the event gates' idle flags (`event_gate`),
     /// cleared by writes the gates cannot see.
     pub event_gate_flags: Vec<u32>,
@@ -507,49 +492,7 @@ impl ProtoModule {
         let comb_flat =
             self.comb_statements
                 .to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
-        // Cone-gate segments: map BLOCK ranges to FLAT statement ranges
-        // (an Interpreted block flattens to its statement count, a Compiled
-        // block to one entry).  Requires the unbatched flat list below.
-        let cone_segments: Vec<crate::ir::opt::cone_gate::RtSegment> =
-            if self.cone_segments.is_empty() {
-                Vec::new()
-            } else {
-                let mut flat_at: Vec<usize> = Vec::with_capacity(self.comb_statements.0.len() + 1);
-                let mut pos = 0usize;
-                for b in &self.comb_statements.0 {
-                    flat_at.push(pos);
-                    pos += match b {
-                        ProtoStatementBlock::Interpreted(v) => v.len(),
-                        ProtoStatementBlock::Compiled(_) => 1,
-                    };
-                }
-                flat_at.push(pos);
-                self.cone_segments
-                    .iter()
-                    .filter(|s| s.block_lo < s.block_hi && s.block_hi < flat_at.len())
-                    .map(|s| crate::ir::opt::cone_gate::RtSegment {
-                        lo: flat_at[s.block_lo],
-                        hi: flat_at[s.block_hi],
-                        compare: s.compare.clone(),
-                        backedge: s.backedge.clone(),
-                        compare_pre: s.compare_pre.clone(),
-                        replay: s.replay.clone(),
-                        off_decay: s.off_decay,
-                        trigger: s.trigger.clone(),
-                        internal: s.internal.clone(),
-                        cone: s.cone.clone(),
-                    })
-                    .collect()
-            };
-        // Batching merges consecutive same-artifact chunks into one statement,
-        // which would break the 1:1 alignment gating needs — and a batched
-        // chunk could not be skipped per instance anyway.  The cone gate needs
-        // its segment edges intact for the same reason.
-        let comb_statements = if cone_segments.is_empty() {
-            batch_compiled_statements(comb_flat)
-        } else {
-            comb_flat
-        };
+        let comb_statements = batch_compiled_statements(comb_flat);
 
         let closure_stmts = |protos: &ProtoStatements| -> Vec<Statement> {
             if protos.0.is_empty() {
@@ -652,12 +595,8 @@ impl ProtoModule {
             comb_touched_offsets: Arc::clone(&self.comb_touched_offsets),
             settle_touched_offsets: Arc::clone(&self.settle_touched_offsets),
             closure_out_watch: self.closure_out_watch.clone(),
-            cone_segments,
             event_comb_writes: self.event_comb_writes.clone(),
-            cone_state_base: self.cone_state_base,
-            cone_trigger_off: self.cone_trigger_off,
-            cone_trigger_words: self.cone_trigger_words,
-            cone_trigger_events: self.cone_trigger_events.clone(),
+            gate_state_base: self.gate_state_base,
             event_gate_flags: self.event_gate_flags.clone(),
             settle_info: Arc::clone(&self.settle_info),
         }
@@ -1027,8 +966,7 @@ fn try_jit_gated(
     bounds.sort_unstable();
     bounds.dedup();
     let stmt_count = proto.len();
-    let (stmts, pieces) =
-        try_jit_with_boundaries(context, proto, &bounds, false, /* helpers= */ false);
+    let (stmts, pieces) = try_jit_with_boundaries(context, proto, &bounds);
     // A piece is named by the statement it starts at; the list's end closes
     // the last gate's range.
     let mut block_at: HashMap<usize, usize> = HashMap::default();
@@ -1291,11 +1229,11 @@ fn try_jit_no_cache(
     ProtoStatements(pieces.pop().unwrap_or_default())
 }
 
-/// Chunks every piece of one unified comb list and compiles the lot.
-/// Planning is per piece, so a cone segment still maps to whole blocks; the
-/// compiles pool across pieces.
-/// `helpers` asks for `compile_plans_parallel`, which only a caller holding a
-/// comb-pipeline claim may do; see it for why.
+/// Chunks every piece and compiles the lot.  Planning is per piece, so a
+/// piece maps to whole blocks; the compiles pool across pieces.
+/// `contains_compiled_block` as in `CompileCtx`.  `helpers` asks for
+/// `compile_plans_parallel`, which only a caller holding a comb-pipeline
+/// claim may do; see it for why.
 fn jit_pieces(
     context: &mut Context,
     pieces: Vec<Vec<ProtoStatement>>,
@@ -1352,18 +1290,14 @@ fn jit_pieces(
         .collect()
 }
 
-/// Chunking with the splits forced at `boundaries` (sorted pre-JIT statement
-/// indices), so a gated cone segment or event-gate range maps to a whole
-/// number of blocks.  Returns, per boundary-delimited piece, its `[lo, hi)`
-/// block range in the produced `ProtoStatements`.  `contains_compiled_block`
-/// as in `CompileCtx`: the unified comb embeds inst chunks and so disables
-/// load-cache CSE, an event list does not.  `helpers` as in `jit_pieces`.
+/// Chunking of an event list with the splits forced at `boundaries` (sorted
+/// statement indices), so an event-gate range maps to a whole number of
+/// blocks.  Returns, per boundary-delimited piece, its starting statement and
+/// its `[lo, hi)` block range in the produced `ProtoStatements`.
 fn try_jit_with_boundaries(
     context: &mut Context,
     mut proto: Vec<ProtoStatement>,
     boundaries: &[usize],
-    contains_compiled_block: bool,
-    helpers: bool,
 ) -> (
     ProtoStatements,
     Vec<(usize, usize, usize)>, // (piece_start_stmt, block_lo, block_hi)
@@ -1384,12 +1318,10 @@ fn try_jit_with_boundaries(
     }
     tails.reverse();
     let (starts, bodies): (Vec<usize>, Vec<Vec<ProtoStatement>>) = tails.into_iter().unzip();
-    for (start, piece_blocks) in starts.into_iter().zip(jit_pieces(
-        context,
-        bodies,
-        contains_compiled_block,
-        helpers,
-    )) {
+    for (start, piece_blocks) in starts
+        .into_iter()
+        .zip(jit_pieces(context, bodies, false, false))
+    {
         let lo = blocks.len();
         blocks.extend(piece_blocks);
         pieces.push((start, lo, blocks.len()));
@@ -1554,7 +1486,7 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
 /// return destination is an unresolved `VarId`) — the caller must not
 /// arm the split then.
 /// Narrowest storage an element can occupy, turning an element count into a
-/// lower bound on the bytes the cone gate's fold weighs.
+/// lower bound on the bytes the owner tables' fold weighs.
 const MIN_ELEMENT_BYTES: usize = 4;
 
 fn collect_event_written_comb(
@@ -1667,116 +1599,6 @@ fn collect_event_written_comb(
         }
     }
     Some(out)
-}
-
-/// The event order the cone gate's trigger analysis indexes by.  Elaboration
-/// fixes it and the simulator reads it back, so both sides see one order.
-fn trigger_event_order(events: &HashMap<Event, Vec<ProtoStatement>>) -> Vec<Event> {
-    let mut keys: Vec<Event> = events.keys().cloned().collect();
-    keys.sort_by_key(|e| format!("{e:?}"));
-    keys
-}
-
-/// What each event can write (`owners::EventWrites`); an event whose
-/// writes cannot be bounded is `wild`.
-fn collect_event_writes_each(
-    events: &HashMap<Event, Vec<ProtoStatement>>,
-) -> (Vec<Event>, Vec<owners::EventWrites>) {
-    use crate::ir::statement::ProtoTbMethodKind;
-    /// Elements past this a dynamic write leaves unbounded rather than named.
-    const MAX_NAMED_ELEMENTS: usize = 1 << 20;
-    /// Push the element base offsets `s` can write onto `(comb, ff)`, both
-    /// slots of a dual-slot FF; `false` when a write cannot be bounded.
-    fn walk_writes(s: &ProtoStatement, out: &mut (Vec<isize>, Vec<isize>)) -> bool {
-        match s {
-            ProtoStatement::Assign(a) => {
-                if a.dst.is_ff() {
-                    out.1.push(a.dst.raw());
-                    out.1.push(a.dst_ff_current_offset);
-                } else {
-                    out.0.push(a.dst.raw());
-                }
-                true
-            }
-            ProtoStatement::AssignDynamic(a) => {
-                if a.dst_num_elements > MAX_NAMED_ELEMENTS {
-                    return false;
-                }
-                let side = if a.dst_base.is_ff() {
-                    &mut out.1
-                } else {
-                    &mut out.0
-                };
-                for k in 0..a.dst_num_elements.max(1) {
-                    side.push(a.dst_base.raw() + a.dst_stride * k as isize);
-                }
-                true
-            }
-            ProtoStatement::If(x) => x
-                .true_side
-                .iter()
-                .chain(x.false_side.iter())
-                .all(|s| walk_writes(s, out)),
-            ProtoStatement::Case(x) => x
-                .arms
-                .iter()
-                .flat_map(|a| a.body.iter())
-                .chain(x.default.iter())
-                .all(|s| walk_writes(s, out)),
-            ProtoStatement::SequentialBlock(inner) => inner.iter().all(|s| walk_writes(s, out)),
-            ProtoStatement::CompiledBlock(cb) => {
-                !cb.original_stmts.is_empty()
-                    && cb.original_stmts.iter().all(|s| walk_writes(s, out))
-            }
-            ProtoStatement::For(f) => {
-                if f.var_offset.is_ff() {
-                    out.1.push(f.var_offset.raw());
-                } else {
-                    out.0.push(f.var_offset.raw());
-                }
-                f.body.iter().all(|s| walk_writes(s, out))
-            }
-            ProtoStatement::SystemFunctionCall(c) => {
-                !matches!(c, crate::ir::ProtoSystemFunctionCall::Readmemh { .. })
-            }
-            ProtoStatement::TbMethodCall { method, .. } => !matches!(
-                method,
-                ProtoTbMethodKind::Component { ret: Some(_), .. }
-                    | ProtoTbMethodKind::RandomGet { ret: Some(_), .. }
-                    | ProtoTbMethodKind::RandomGetRange { ret: Some(_), .. }
-                    | ProtoTbMethodKind::RandomGetSeed { ret: Some(_) }
-            ),
-            ProtoStatement::Break => true,
-            ProtoStatement::HierAssign(_) => {
-                unreachable!("hierarchical assignment is resolved by resolve_hier_refs")
-            }
-        }
-    }
-    let order = trigger_event_order(events);
-    let mut writes = Vec::with_capacity(order.len());
-    for k in &order {
-        let stmts = &events[k];
-        let mut out = (Vec::new(), Vec::new());
-        let ew = if stmts.iter().all(|s| walk_writes(s, &mut out)) {
-            let (mut comb, mut ff) = out;
-            comb.sort_unstable();
-            comb.dedup();
-            ff.sort_unstable();
-            ff.dedup();
-            owners::EventWrites {
-                comb,
-                ff,
-                wild: false,
-            }
-        } else {
-            owners::EventWrites {
-                wild: true,
-                ..Default::default()
-            }
-        };
-        writes.push(ew);
-    }
-    (order, writes)
 }
 
 /// Comb byte ranges `(lo, hi)` — element base offsets, `lo == hi` for a
@@ -1915,29 +1737,6 @@ impl StageTimer {
                 last.elapsed().as_secs_f64()
             );
             *last = std::time::Instant::now();
-        }
-    }
-}
-
-/// The cone planner's verdict: the reorder alone under a dataflow settle, the
-/// full gate plan otherwise.
-enum ConeSchedule {
-    Order(cone_order::ConeOrder),
-    Gate(cone_gate::ConePlan),
-}
-
-impl ConeSchedule {
-    fn order(&self) -> &[u32] {
-        match self {
-            ConeSchedule::Order(o) => &o.order,
-            ConeSchedule::Gate(p) => &p.order,
-        }
-    }
-
-    fn segments(&self) -> usize {
-        match self {
-            ConeSchedule::Order(o) => o.segments,
-            ConeSchedule::Gate(p) => p.segments.len(),
         }
     }
 }
@@ -2136,6 +1935,15 @@ fn run_comb_pipeline(
     // because the def only loses its reader here).
     // The field-def inliner's list is judged against the baseline's by their
     // cone plans (see `adopt_field_defs`); without a plan it is kept.
+    //
+    // The cone reorder only serves the dataflow cells.  A module the
+    // configuration or its pass count already rules out keeps the scheduled
+    // order; the reorder never lowers the pass count, so this decides no
+    // module that could still get cells.  The size threshold is not consulted:
+    // it counts event statements, which the pipeline cache key does not pin.
+    let cone_reorder = crate::ir::opt::dataflow::enabled()
+        && crate::ir::opt::dataflow::decline_reason(&context.config, required_comb_passes)
+            .is_none();
     let mut fusion_alt: Option<(Vec<ProtoStatement>, Vec<isize>)> = None;
     let (mut unified_sorted, mut fused_offsets) = if comb_fusion::enabled(context.config.use_4state)
     {
@@ -2143,37 +1951,27 @@ fn run_comb_pipeline(
         if let Some(extra) = fusion_extra {
             externals.extend(extra.iter().copied());
         }
-        if comb_fusion::sel_enabled() {
+        let sel = comb_fusion::sel_enabled();
+        if sel && cone_reorder && cone_inputs.is_some() {
             fusion_alt = Some(comb_fusion::inline_single_readers(
                 unified_sorted.clone(),
                 all_event_statements,
                 &externals,
                 false,
             ));
-            comb_fusion::inline_single_readers(
-                unified_sorted,
-                all_event_statements,
-                &externals,
-                true,
-            )
-        } else {
-            comb_fusion::inline_single_readers(
-                unified_sorted,
-                all_event_statements,
-                &externals,
-                false,
-            )
         }
+        comb_fusion::inline_single_readers(unified_sorted, all_event_statements, &externals, sel)
     } else {
         (unified_sorted, Vec::new())
     };
 
     stage.mark("dce+fusion");
 
-    // Cone scheduling: cluster each qualifying module
-    // subtree into few contiguous segments so the settle can skip them by
-    // one compare each.  The reorder is a legal schedule of the same
-    // dependency graph, so pass counts and the relayout below stay valid.
+    // Cone reorder: cluster each qualifying module subtree into few
+    // contiguous runs.  A dataflow node takes in whatever a sequential chain
+    // spans, so laying each block's chain out contiguously is what keeps its
+    // nodes small.  The reorder is a legal schedule of the same dependency
+    // graph, so the relayout below stays valid.
     // Whether the reorder below kept every dataflow edge pointing the same
     // way, checked on the permutation itself: that is what decides whether an
     // exact one-pass hint still describes the order that actually runs.
@@ -2184,25 +1982,13 @@ fn run_comb_pipeline(
         ci
     });
     let cone_inputs = adopted_inputs.as_ref().or(cone_inputs);
-    // A dataflow settle runs no cone gate but keeps the cone order: it lays
-    // each block's sequential chain out contiguously, and a dataflow node
-    // takes in whatever a chain spans.
-    let dataflow = crate::ir::opt::dataflow::enabled();
-    let plan_inputs = cone_inputs.filter(|_| cone_gate::enabled() || dataflow);
-    let plan_at = |stmts: &[ProtoStatement], ci: &owners::OwnerInputs| {
-        if dataflow {
-            cone_order::cone_order(stmts, ci).map(ConeSchedule::Order)
-        } else {
-            cone_gate::plan(stmts, ci).map(ConeSchedule::Gate)
-        }
-    };
     // The outer `Option` is whether the rule ran at all; a decision whose plan
     // is `None` is still a decision, and re-planning it would be a third plan.
-    let mut chosen_plan: Option<Option<ConeSchedule>> = None;
-    if let (Some(ci), Some((base_stmts, base_off))) = (plan_inputs, fusion_alt.take()) {
-        let segs = |p: &Option<ConeSchedule>| p.as_ref().map(ConeSchedule::segments);
-        let p_sel = plan_at(&unified_sorted, ci);
-        let p_base = plan_at(&base_stmts, ci);
+    let mut chosen_plan: Option<Option<cone_order::ConeOrder>> = None;
+    if let (Some(ci), Some((base_stmts, base_off))) = (cone_inputs, fusion_alt.take()) {
+        let segs = |p: &Option<cone_order::ConeOrder>| p.as_ref().map(|o| o.segments);
+        let p_sel = cone_order::cone_order(&unified_sorted, ci);
+        let p_base = cone_order::cone_order(&base_stmts, ci);
         let retired = base_stmts.len().saturating_sub(unified_sorted.len());
         let retired_frac = retired as f64 / base_stmts.len().max(1) as f64;
         let keep_sel = comb_fusion::adopt_field_defs(segs(&p_sel), segs(&p_base), retired_frac);
@@ -2214,13 +2000,13 @@ fn run_comb_pipeline(
             chosen_plan = Some(p_base);
         }
     }
-    let (unified_sorted, cone_plan) = match plan_inputs {
+    let (unified_sorted, reordered) = match cone_inputs.filter(|_| cone_reorder) {
         Some(ci) => match chosen_plan
             .take()
-            .unwrap_or_else(|| plan_at(&unified_sorted, ci))
+            .unwrap_or_else(|| cone_order::cone_order(&unified_sorted, ci))
         {
             Some(plan) => {
-                let plan_order = plan.order();
+                let plan_order = &plan.order;
                 let mut new_of = vec![0usize; plan_order.len()];
                 for (new, &old) in plan_order.iter().enumerate() {
                     new_of[old as usize] = new;
@@ -2229,16 +2015,11 @@ fn run_comb_pipeline(
                 let order: Vec<usize> = plan_order.iter().map(|&oi| oi as usize).collect();
                 let mut reordered = unified_sorted;
                 permute_in_place(&mut reordered, &order);
-                (reordered, Some(plan))
+                (reordered, true)
             }
-            None => (unified_sorted, None),
+            None => (unified_sorted, false),
         },
-        None => (unified_sorted, None),
-    };
-    let reordered = cone_plan.is_some();
-    let cone_plan = match cone_plan {
-        Some(ConeSchedule::Gate(p)) => Some(p),
-        _ => None,
+        None => (unified_sorted, false),
     };
     // An exact hint for the OLD order carries only if no edge changed
     // direction; otherwise re-take the positional metric, never lower.
@@ -2246,7 +2027,7 @@ fn run_comb_pipeline(
         let repositioned = compute_required_passes("comb-after-cone-reorder", &unified_sorted);
         if owners::diag() {
             eprintln!(
-                "[cone_gate] passes: pre-reorder {required_comb_passes} positional {repositioned}"
+                "[cone_order] passes: pre-reorder {required_comb_passes} positional {repositioned}"
             );
         }
         match passes_hint {
@@ -2272,34 +2053,6 @@ fn run_comb_pipeline(
     // old offset space); the caller replays the schedule on them and on
     // every other offset-bearing structure the pipeline does not own.
     let layout = layout_inputs.and_then(|li| {
-        // Plan-space ranges: the space the layout translates from.  Group
-        // compares rank ahead of their members', whose own compare is paid
-        // only when the group is dirty.
-        let comb_ranges = |compare: &[(bool, u32, u32)], extra: &[(u32, u32)]| {
-            let mut r: Vec<(u32, u32)> = compare
-                .iter()
-                .filter(|&&(is_ff, _, _)| !is_ff)
-                .map(|&(_, a, b)| (a, b))
-                .chain(extra.iter().copied())
-                .collect();
-            r.sort_unstable();
-            r
-        };
-        let cone_reads: Vec<Vec<(u32, u32)>> = match &cone_plan {
-            Some(p) if comb_layout::cone_layout() => {
-                let mut out: Vec<Vec<(u32, u32)>> = Vec::new();
-                if p.segments.len() >= cone_gate::SPLIT_MIN_SEGS {
-                    out.extend(p.groups.iter().map(|g| comb_ranges(&g.compare, &[])));
-                }
-                out.extend(
-                    p.segments
-                        .iter()
-                        .map(|sg| comb_ranges(&sg.compare, &sg.replay)),
-                );
-                out
-            }
-            _ => Vec::new(),
-        };
         comb_layout::build_schedule(
             &li.meta_units,
             &unified_sorted,
@@ -2308,7 +2061,6 @@ fn run_comb_pipeline(
             // The live total, not the Conv-time one: version_split just
             // bump-allocated its rename temps above it, and they need units too.
             context.comb_total_bytes,
-            &cone_reads,
         )
         .map(Arc::new)
     });
@@ -2317,7 +2069,7 @@ fn run_comb_pipeline(
         comb_layout::apply_to_stmts(&mut unified_sorted, sched);
     }
 
-    stage.mark("cone_gate+layout");
+    stage.mark("cone_order+layout");
 
     // Snapshot before JIT consumes it: the whole-comb backend needs the
     // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
@@ -2331,162 +2083,7 @@ fn run_comb_pipeline(
     } else {
         Vec::new()
     };
-    let (comb_statements, cone_segments, cone_groups) = match &cone_plan {
-        Some(plan) => {
-            let mut bounds: Vec<usize> = plan
-                .segments
-                .iter()
-                .flat_map(|s| [s.start, s.end])
-                .collect();
-            bounds.sort_unstable();
-            bounds.dedup();
-            let (ps, pieces) =
-                try_jit_with_boundaries(context, unified_sorted, &bounds, true, helpers);
-            // Bring ranges into the FINAL storage space piecewise: a merged
-            // span can straddle relayout units that land apart.
-            // Live bytes only: a function-inline scratch copy's owner span can
-            // reach bytes no layout unit kept, which now belong to another unit.
-            let translate_pairs = |v: &[(u32, u32)]| -> Vec<(u32, u32)> {
-                let mut out: Vec<(u32, u32)> = Vec::new();
-                for &(cs, ce) in v {
-                    match layout.as_deref() {
-                        Some(sched) => {
-                            for (ns, ne) in sched.translate_range_live(cs as isize, ce as isize) {
-                                out.push((ns as u32, ne as u32));
-                            }
-                        }
-                        None => out.push((cs, ce)),
-                    }
-                }
-                out.sort_unstable();
-                out
-            };
-            // Relayout scatters the whole-variable spans, leaving thousands
-            // of 4-8 byte memcmp/memcpy ranges whose per-span setup dwarfs
-            // the byte traffic.  Fuse ranges across small gaps: comparing a
-            // gap byte is at worst a spurious dirty, and replaying one is
-            // exact because the pre-run compare (`compare_pre` covers every
-            // replay range, gaps included) just proved it unchanged since
-            // the stored run.  The backedge ranges must stay exact: a gap
-            // byte the segment legitimately rewrites would read as
-            // non-convergence.
-            // Bridging a gap of up to 32 bytes buys one memcmp call less.  The
-            // trigger oracle needs the exact set: a bridged byte another writer
-            // moves is not a wrong skip.
-            let exact = std::env::var("VERYL_CONE_TRIGGER_CHECK").as_deref() == Ok("1");
-            let coalesce_gap = |v: &mut Vec<(u32, u32)>, gap: u32| {
-                let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
-                for &(cs, ce) in v.iter() {
-                    match out.last_mut() {
-                        Some(p) if cs <= p.1 + gap => p.1 = p.1.max(ce),
-                        _ => out.push((cs, ce)),
-                    }
-                }
-                *v = out;
-            };
-            let coalesce = |v: &mut Vec<(u32, u32)>| coalesce_gap(v, if exact { 0 } else { 32 });
-            // FF storage is never relaid out.
-            let translate_compare = |v: &[(bool, u32, u32)]| -> Vec<(bool, u32, u32)> {
-                let mut ffs: Vec<(u32, u32)> = Vec::new();
-                let mut combs: Vec<(u32, u32)> = Vec::new();
-                for &(ff, cs, ce) in v {
-                    if ff {
-                        ffs.push((cs, ce));
-                    } else {
-                        combs.extend(translate_pairs(&[(cs, ce)]));
-                    }
-                }
-                ffs.sort_unstable();
-                combs.sort_unstable();
-                coalesce(&mut ffs);
-                coalesce(&mut combs);
-                combs
-                    .into_iter()
-                    .map(|(cs, ce)| (false, cs, ce))
-                    .chain(ffs.into_iter().map(|(cs, ce)| (true, cs, ce)))
-                    .collect()
-            };
-            let mut segs: Vec<cone_gate::ConeSegment> = Vec::new();
-            // A segment whose start is not a chunk boundary is dropped, so
-            // the groups are re-indexed onto the segments kept.
-            let mut seg_index: Vec<Option<u32>> = Vec::with_capacity(plan.segments.len());
-            for s in &plan.segments {
-                let Some(&(_, blo, bhi)) = pieces.iter().find(|&&(st, _, _)| st == s.start) else {
-                    seg_index.push(None);
-                    continue;
-                };
-                seg_index.push(Some(segs.len() as u32));
-                let compare = translate_compare(&s.compare);
-                // A single-pass schedule reaches its fixpoint in one run, so
-                // every run is converged by construction and the backedge
-                // snapshot plus its post-run compare would only ever confirm
-                // that; an empty set skips both.
-                let internal = translate_pairs(&s.backedge);
-                let backedge = if required_comb_passes == 1 {
-                    Vec::new()
-                } else {
-                    internal.clone()
-                };
-                let mut replay = translate_pairs(&s.replay);
-                coalesce(&mut replay);
-                // The plan guarantees `compare_pre == replay`; keep the
-                // fused ranges identical so every replayed byte stays
-                // covered by the pre-run compare.
-                let compare_pre = replay.clone();
-                segs.push(cone_gate::ConeSegment {
-                    block_lo: blo,
-                    block_hi: bhi,
-                    stmt_lo: s.start,
-                    stmt_hi: s.end,
-                    state_off: 0,
-                    compare,
-                    backedge,
-                    compare_pre,
-                    replay,
-                    off_decay: s.off_decay,
-                    trigger: s.trigger.clone(),
-                    internal,
-                    cone: s.cone.clone(),
-                });
-            }
-            let mut groups: Vec<cone_gate::ConeGroup> = Vec::new();
-            let mut group_index: Vec<Option<u32>> = Vec::with_capacity(plan.groups.len());
-            for g in &plan.groups {
-                let members: Vec<u32> = g
-                    .segments
-                    .iter()
-                    .filter_map(|&i| seg_index[i as usize])
-                    .collect();
-                if members.len() < 2 {
-                    group_index.push(None);
-                    continue;
-                }
-                // A dropped enclosing group hands its role to its own parent.
-                let mut parent = g.parent;
-                while let Some(pi) = parent {
-                    if group_index[pi as usize].is_some() {
-                        break;
-                    }
-                    parent = plan.groups[pi as usize].parent;
-                }
-                group_index.push(Some(groups.len() as u32));
-                groups.push(cone_gate::ConeGroup {
-                    node: g.node,
-                    segments: members,
-                    compare: translate_compare(&g.compare),
-                    off_decay: g.off_decay,
-                    parent: parent.and_then(|pi| group_index[pi as usize]),
-                    state_off: 0,
-                    cone: g.cone.clone(),
-                });
-            }
-            (ps, segs, groups)
-        }
-        None => {
-            let a = try_jit_no_cache(context, unified_sorted, helpers);
-            (a, Vec::new(), Vec::new())
-        }
-    };
+    let comb_statements = try_jit_no_cache(context, unified_sorted, helpers);
     stage.mark("jit+aot_c");
     Ok(comb_pipeline_cache::CombPipeline {
         cone_inputs: cone_inputs.map(|ci| {
@@ -2512,8 +2109,6 @@ fn run_comb_pipeline(
             Some(sched) => fused_offsets.iter().map(|&o| sched.translate(o)).collect(),
             None => fused_offsets,
         },
-        cone_segments: Arc::new(cone_segments),
-        cone_groups: Arc::new(cone_groups),
         layout,
         nontrivial_comb_scc,
         vsplit_temp_bytes,
@@ -6459,83 +6054,33 @@ impl Conv<&air::Module> for ProtoModule {
         // Fusion and relayout rewrite offsets, so their inputs must flavor
         // the key: a shared base key would serve cached statements that
         // address a different comb layout.
-        // Cone-gate inputs: node tables from the meta tree plus the
-        // event-writable comb set.  `None` (also when the event writes cannot
-        // be bounded) leaves the pipeline ungated.
-        // The owner tables these inputs carry are what the dataflow plan is
-        // built from, cone gate or not.
+        // Owner tables from the meta tree plus the event-writable comb set,
+        // the input of the cone reorder, the dataflow plan and the event
+        // gates.  `None` when the event writes cannot be bounded declines
+        // all three.
         let cone_event_written: Option<HashSet<isize>> =
-            if cone_gate::enabled() || crate::ir::opt::dataflow::enabled() {
-                collect_event_written_comb(&all_event_statements).map(|mut evt| {
-                    // External components write their output connects into comb
-                    // storage between settles — outside both the comb list and
-                    // the event statements.  Add every connect's variable offsets
-                    // (conservatively: inputs too) so a component write always
-                    // lands in some segment's compare set.
-                    let mut ins: Vec<VarOffset> = Vec::new();
-                    // The compare set is keyed on unfolded offsets.
-                    let unfolded = BigArrayFold::default();
-                    for ext in &all_external_components {
-                        for c in &ext.connects {
-                            ins.clear();
-                            c.expr.gather_variable_offsets_expanded(&unfolded, &mut ins);
-                            for o in &ins {
-                                if let VarOffset::Comb(x) = o {
-                                    evt.insert(*x);
-                                }
+            collect_event_written_comb(&all_event_statements).map(|mut evt| {
+                // External components write their output connects into comb
+                // storage between settles, outside both the comb list and the
+                // event statements.  Add every connect's variable offsets
+                // (conservatively: inputs too) so a component write counts
+                // as an event write.
+                let mut ins: Vec<VarOffset> = Vec::new();
+                // The owner tables are keyed on unfolded offsets.
+                let unfolded = BigArrayFold::default();
+                for ext in &all_external_components {
+                    for c in &ext.connects {
+                        ins.clear();
+                        c.expr.gather_variable_offsets_expanded(&unfolded, &mut ins);
+                        for o in &ins {
+                            if let VarOffset::Comb(x) = o {
+                                evt.insert(*x);
                             }
                         }
                     }
-                    evt
-                })
-            } else {
-                None
-            };
-        // Part of the pipeline key: the masks they yield live in the cached plan.
-        let trigger_inputs: owners::TriggerInputs = if cone_event_written.is_some()
-            && cone_gate::trigger_enabled()
-        {
-            let (trigger_events, event_writes) = collect_event_writes_each(&all_event_statements);
-            let master_clocks: Vec<(VarOffset, VarId)> = src
-                .variables
-                .iter()
-                .filter(|(_, v)| v.r#type.is_clock())
-                .filter_map(|(vid, _)| {
-                    let el = variable_meta.get(vid)?.elements.first()?;
-                    Some((el.current, *vid))
-                })
-                .collect();
-            owners::TriggerInputs {
-                trigger_events,
-                event_writes,
-                master_clocks,
-            }
-        } else {
-            Default::default()
-        };
-        let trigger_digest: u64 = {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut h = DefaultHasher::new();
-            for (e, w) in trigger_inputs
-                .trigger_events
-                .iter()
-                .zip(&trigger_inputs.event_writes)
-            {
-                format!("{e:?}").hash(&mut h);
-                w.comb.hash(&mut h);
-                w.ff.hash(&mut h);
-                w.wild.hash(&mut h);
-            }
-            let mut masters: Vec<(isize, bool, String)> = trigger_inputs
-                .master_clocks
-                .iter()
-                .map(|(o, v)| (o.raw(), o.is_ff(), format!("{v:?}")))
-                .collect();
-            masters.sort();
-            masters.hash(&mut h);
-            h.finish()
-        };
+                }
+                evt
+            });
         let key = {
             let base = comb_pipeline_key(
                 unified_fp,
@@ -6552,7 +6097,6 @@ impl Conv<&air::Module> for ProtoModule {
                 let mut h = DefaultHasher::new();
                 comb_fusion::enabled(context.config.use_4state).hash(&mut h);
                 cone_event_written.is_some().hash(&mut h);
-                trigger_digest.hash(&mut h);
                 if let Some(extra) = &aux_extra_base {
                     extra.hash(&mut h);
                 }
@@ -6645,7 +6189,6 @@ impl Conv<&air::Module> for ProtoModule {
                         &evt,
                         &context.comb_reloc,
                         context.config.use_4state,
-                        trigger_inputs,
                     )
                 });
 
@@ -6701,63 +6244,10 @@ impl Conv<&air::Module> for ProtoModule {
                 context.comb_total_bytes = sched.buffer_end;
             }
         }
-        // Cone-gate state region: per gated segment, flags + streak (8 bytes)
-        // followed by its prerun/shadow/replay byte areas, appended past every
-        // variable (and past the relayout's buffer_end) so nothing else can
-        // land on it.  Zero-initialised buffers make `primed = 0` the natural
-        // starting state, and per-instance buffers make the state safe under
-        // instance reuse and concurrency.  Offsets are deterministic, so a
-        // pipeline-cache hit recomputes the identical layout.
-        // Everything from here up is logic storage; the state region below
-        // mutates on every settle (streaks, shadows), which the settle
-        // filter's skip oracle must exclude from its no-op comparison.
-        let cone_state_base = context.comb_total_bytes as u32;
-        let cone_trigger_words = cached
-            .cone_segments
-            .iter()
-            .map(|s| s.trigger.len())
-            .max()
-            .unwrap_or(0);
-        let cone_trigger_events: Vec<Event> = if cone_trigger_words > 0 {
-            cached
-                .cone_inputs
-                .as_deref()
-                .map(|ci| ci.trigger_events.clone())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        let cone_trigger_off = context.comb_total_bytes as u32;
-        context.comb_total_bytes += cone_trigger_words * 8;
-        let cone_segments: Vec<crate::ir::opt::cone_gate::ConeSegment> = {
-            let mut segs: Vec<_> = cached.cone_segments.as_ref().clone();
-            for s in &mut segs {
-                let prerun: usize = s.backedge.iter().map(|&(a, b)| (b - a) as usize).sum();
-                let pre: usize = s.compare_pre.iter().map(|&(a, b)| (b - a) as usize).sum();
-                let shadow: usize = s.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
-                let replay: usize = s.replay.iter().map(|&(a, b)| (b - a) as usize).sum();
-                let len = (crate::ir::opt::cone_gate::GUARD_STATE_HEADER_BYTES
-                    + prerun
-                    + pre
-                    + shadow
-                    + replay)
-                    .next_multiple_of(8);
-                s.state_off = context.comb_total_bytes as u32;
-                context.comb_total_bytes += len;
-            }
-            segs
-        };
-        let cone_groups: Vec<crate::ir::opt::cone_gate::ConeGroup> = {
-            let mut groups: Vec<_> = cached.cone_groups.as_ref().clone();
-            for g in &mut groups {
-                let shadow: usize = g.compare.iter().map(|&(_, a, b)| (b - a) as usize).sum();
-                let len = (crate::ir::opt::cone_gate::GROUP_STATE_HEADER_BYTES + shadow)
-                    .next_multiple_of(8);
-                g.state_off = context.comb_total_bytes as u32;
-                context.comb_total_bytes += len;
-            }
-            groups
-        };
+        // Everything below here is logic storage; the gate state appended
+        // past it mutates as bookkeeping, which the settle filter's skip
+        // oracle and the event validator exclude from their comparisons.
+        let gate_state_base = context.comb_total_bytes as u32;
         // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
         // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
         // of compiled chunks).
@@ -7799,9 +7289,6 @@ impl Conv<&air::Module> for ProtoModule {
                 whole::WholeCombShape {
                     localize: localize_info.as_ref(),
                     const_unsafe: const_unsafe_comb.as_ref(),
-                    cone_segments: &cone_segments,
-                    cone_groups: &cone_groups,
-                    cone_trigger_off,
                 },
             )
         };
@@ -7870,15 +7357,11 @@ impl Conv<&air::Module> for ProtoModule {
             external_components: all_external_components,
             rtl_driven,
             fused_comb_offsets: cached.fused_offsets.clone(),
-            cone_segments,
             comb_touched_offsets,
             settle_touched_offsets,
             closure_out_watch,
             event_comb_writes,
-            cone_state_base,
-            cone_trigger_off,
-            cone_trigger_words: cone_trigger_words as u32,
-            cone_trigger_events,
+            gate_state_base,
             event_gate_flags,
             event_gates: event_gate_chunks,
             event_jit_marked,
