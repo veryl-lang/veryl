@@ -2199,7 +2199,24 @@ impl ProtoExpression {
                             // payload is always I64 for LogicAnd/LogicOr (result is 1-bit)
                             let is_one = builder.ins().icmp_imm_s(IntCC::NotEqual, payload, 0);
                             let not_one = builder.ins().bnot(is_one);
-                            let has_x = builder.ins().band(not_one, is_xz);
+                            let mut has_x = builder.ins().band(not_one, is_xz);
+                            if *op == Op::LogicAnd {
+                                let x_bits = match x_mask_xz {
+                                    Some(mask) => builder.ins().bor(x_payload, mask),
+                                    None => x_payload,
+                                };
+                                let y_bits = match y_mask_xz {
+                                    Some(mask) => builder.ins().bor(y_payload, mask),
+                                    None => y_payload,
+                                };
+                                let x_zero =
+                                    icmp_const(builder, IntCC::Equal, x_bits, 0, needs_wide);
+                                let y_zero =
+                                    icmp_const(builder, IntCC::Equal, y_bits, 0, needs_wide);
+                                let is_zero = builder.ins().bor(x_zero, y_zero);
+                                let not_zero = builder.ins().bnot(is_zero);
+                                has_x = builder.ins().band(has_x, not_zero);
+                            }
                             let one = builder.ins().iconst(I64, 1);
                             let mask_xz = builder.ins().select(has_x, one, context.zero);
                             Some((payload, Some(mask_xz)))
@@ -3050,7 +3067,37 @@ impl ProtoExpression {
                 x_width,
                 y_width,
             );
-            if let Some(is_xz) = mask_xz {
+            if let Some(mut is_xz) = mask_xz {
+                if *op == Op::LogicAnd {
+                    let mut x_nonzero = emit_wide_is_nonzero(context, builder, x_ptr, op_nb);
+                    let mut y_nonzero = emit_wide_is_nonzero(context, builder, y_ptr, op_nb);
+                    if let Some(mask) = wide_any_xz(
+                        context,
+                        builder,
+                        x_mask_xz,
+                        None,
+                        returns_wide_pointer(x),
+                        false,
+                        x_width,
+                        0,
+                    ) {
+                        x_nonzero = builder.ins().bor(x_nonzero, mask);
+                    }
+                    if let Some(mask) = wide_any_xz(
+                        context,
+                        builder,
+                        y_mask_xz,
+                        None,
+                        returns_wide_pointer(y),
+                        false,
+                        y_width,
+                        0,
+                    ) {
+                        y_nonzero = builder.ins().bor(y_nonzero, mask);
+                    }
+                    let neither_known_zero = builder.ins().band(x_nonzero, y_nonzero);
+                    is_xz = builder.ins().band(is_xz, neither_known_zero);
+                }
                 let one = builder.ins().iconst(I64, 1);
                 let payload = builder.ins().select(is_xz, context.zero, payload);
                 let mask_xz = builder.ins().select(is_xz, one, context.zero);

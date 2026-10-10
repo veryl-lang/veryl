@@ -5375,6 +5375,22 @@ fn binary_corner_case() {
 }
 
 #[test]
+fn logical_and_known_zero_controls_unknown_operand() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'h0");
+        let one = format!("{width}'h1");
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&zero, "&&", &unknown, 1, "1'b0", true);
+            binary_test(&unknown, "&&", &zero, 1, "1'b0", true);
+            binary_test(&one, "&&", &unknown, 1, "1'bx", true);
+            binary_test(&unknown, "&&", &one, 1, "1'bx", true);
+        }
+    }
+    binary_test("8'b1xxxxxxx", "&&", "8'bxxxxxxx1", 1, "1'b1", true);
+}
+
+#[test]
 fn inout_function_argument_copies_back() {
     // https://github.com/veryl-lang/veryl/issues/3308
     let code = r#"
