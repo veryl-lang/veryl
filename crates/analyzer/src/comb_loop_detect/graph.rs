@@ -5,6 +5,7 @@ mod relation;
 
 use super::diagnostics::SummaryEdgeCause;
 use super::model::{BitDependency, SummaryRegion};
+use super::position::{Axis, Link, Overflow};
 #[cfg(test)]
 use super::region::translate_position;
 use super::region::{BitPartition, NodeKey};
@@ -26,11 +27,49 @@ use guarded::{GuardedCycle, guarded_cycle_displacements_cancel};
 use relation::PositionRelationSet;
 use std::collections::VecDeque;
 use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub(super) struct GraphDependency {
     pub(super) kind: BitDependency,
     pub(super) condition: PathCondition,
+}
+
+/// The arm a branch takes on one instance of the loops around it: the
+/// instance of the position an edge reaches, by `instance` from it. Arms of
+/// one branch on one instance exclude one another; on different instances
+/// they do not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct InstanceArm {
+    pub(super) branch: InstanceBranch,
+    pub(super) arm: usize,
+    pub(super) arms: usize,
+    pub(super) instance: crate::comb_loop_detect::position::Map,
+}
+
+impl InstanceArm {
+    /// The arm as a choice of the branch on one instance, which is a
+    /// branch of its own: the arms of different instances are independent.
+    fn choice(&self, instance: isize) -> Option<PathCondition> {
+        // Procedures number their branches from small namespaces, so the
+        // top of the range is free for the branches of instances.
+        let instance = u32::try_from(instance).ok()?;
+        let index = u32::try_from(self.branch.index).ok()?;
+        let procedure = usize::MAX.checked_sub(self.branch.namespace)?;
+        let local = (usize::try_from(index).ok()? << 32) | usize::try_from(instance).ok()?;
+        Some(PathCondition::default().with_choice(
+            crate::comb_loop_detect::ssa::BranchId::new(procedure, local, self.arms),
+            self.arm,
+        ))
+    }
+}
+
+/// A branch of a procedure in a scope of tables: the procedure's namespace
+/// and the branch's index among those of its scopes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct InstanceBranch {
+    pub(super) namespace: usize,
+    pub(super) index: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +97,12 @@ pub(super) struct DependencyGraph {
     pub(super) sites: HashMap<NodeIndex, DefinitionSite<NodeIndex>>,
     pub(super) summary_causes: HashMap<EdgeIndex, Vec<SummaryEdgeCause>>,
     pub(super) active_summary: Option<SummaryEdgeCause>,
+    /// Nodes that each iteration of a loop reads and writes, such as the
+    /// tables of instances: every recurrence of the loop passes through one.
+    pub(super) recurrences: HashSet<NodeIndex>,
+    /// The arms each edge takes on the instance of the position it
+    /// reaches, besides its condition.
+    pub(super) instance_arms: HashMap<EdgeIndex, Rc<[InstanceArm]>>,
 }
 
 impl DependencyGraph {
@@ -68,6 +113,8 @@ impl DependencyGraph {
             sites: HashMap::default(),
             summary_causes: HashMap::default(),
             active_summary: None,
+            recurrences: HashSet::default(),
+            instance_arms: HashMap::default(),
         }
     }
 }
@@ -92,16 +139,34 @@ pub(super) fn add_dependency_edge(
     destination: NodeIndex,
     dependency: GraphDependency,
 ) {
+    add_dependency_edge_with_arms(graph, source, destination, dependency, &[]);
+}
+
+/// `add_dependency_edge` for an edge taken only on `arms`. An edge merged
+/// with one taken otherwise is taken on either.
+pub(super) fn add_dependency_edge_with_arms(
+    graph: &mut DependencyGraph,
+    source: NodeIndex,
+    destination: NodeIndex,
+    dependency: GraphDependency,
+    arms: &[InstanceArm],
+) {
     let key = (source, destination, dependency.kind);
     let edge = if let Some(&existing) = graph.edges.get(&key) {
         let weight = graph
             .edge_weight_mut(existing)
             .expect("an edge found in the graph must remain present");
         weight.condition = weight.condition.disjoin(&dependency.condition);
+        if graph.instance_arms.get(&existing).map(|kept| &**kept) != Some(arms) {
+            graph.instance_arms.remove(&existing);
+        }
         existing
     } else {
         let edge = graph.add_edge(source, destination, dependency);
         graph.edges.insert(key, edge);
+        if !arms.is_empty() {
+            graph.instance_arms.insert(edge, arms.into());
+        }
         edge
     };
     if let Some(cause) = graph.active_summary.clone() {
@@ -159,61 +224,33 @@ pub(super) fn node_regions_overlap_with_dependency(
     destination: &GraphNode,
     dependency: BitDependency,
 ) -> bool {
-    dependency.array.is_none_or(|array| {
-        spans_overlap_with_offset(
-            source.region.array.start,
-            source.region.array.length,
+    let range = |start: usize, length: usize| {
+        let start = isize::try_from(start).ok()?;
+        Some((start, start.checked_add_unsigned(length)?))
+    };
+    let (
+        Some(source_array),
+        Some(source_packed),
+        Some(destination_array),
+        Some(destination_packed),
+    ) = (
+        range(source.region.array.start, source.region.array.length),
+        range(source.region.packed.start, source.region.packed.length),
+        range(
             destination.region.array.start,
             destination.region.array.length,
-            array,
-        )
-    }) && dependency.packed.is_none_or(|packed| {
-        spans_overlap_with_offset(
-            source.region.packed.start,
-            source.region.packed.length,
+        ),
+        range(
             destination.region.packed.start,
             destination.region.packed.length,
-            packed,
-        )
-    })
-}
-
-fn spans_overlap_with_offset(
-    source_start: usize,
-    source_length: usize,
-    destination_start: usize,
-    destination_length: usize,
-    offset: isize,
-) -> bool {
-    let Some(source_end) = source_start.checked_add(source_length) else {
+        ),
+    )
+    else {
         return false;
     };
-    let Some(destination_end) = destination_start.checked_add(destination_length) else {
-        return false;
-    };
-    if offset >= 0 {
-        let offset = offset.unsigned_abs();
-        let (Some(source_start), Some(source_end)) = (
-            source_start.checked_add(offset),
-            source_end.checked_add(offset),
-        ) else {
-            return false;
-        };
-        source_start < destination_end && destination_start < source_end
-    } else {
-        // `source + offset` overlaps `destination` iff `source` overlaps
-        // `destination - offset`. Shift the destination in the non-negative
-        // direction so a valid source suffix is not lost when source_start +
-        // offset would be negative.
-        let offset = offset.unsigned_abs();
-        let (Some(destination_start), Some(destination_end)) = (
-            destination_start.checked_add(offset),
-            destination_end.checked_add(offset),
-        ) else {
-            return false;
-        };
-        source_start < destination_end && destination_start < source_end
-    }
+    let source = [source_array, source_packed];
+    dependency.may_reach(Axis::Array, source, destination_array)
+        && dependency.may_reach(Axis::Packed, source, destination_packed)
 }
 
 /// Both passes use explicit worklists, including for long acyclic chains.
@@ -295,13 +332,25 @@ impl SearchBudget {
         )
     }
 
+    // Comparing or joining two guards looks each constraint of one up in
+    // the other, whose constraints are sorted by branch.
     fn spend_guard_comparison(&mut self, left: &PathCondition, right: &PathCondition) -> bool {
+        let (left, right) = (left.work_size(), right.work_size());
+        let lookup = usize::BITS - left.max(right).leading_zeros();
         self.spend(
-            left.work_size()
-                .saturating_add(right.work_size())
-                .saturating_pow(2)
+            left.saturating_add(right)
+                .saturating_mul(usize::try_from(lookup).unwrap_or(usize::MAX).max(1))
                 .max(1),
         )
+    }
+
+    /// The result of a relation operation, or `None` when its arithmetic
+    /// overflowed. The search then stops as incomplete, as when it runs out
+    /// of work.
+    fn checked<T>(&mut self, result: Result<T, Overflow>) -> Option<T> {
+        let value = result.ok();
+        self.exhausted |= value.is_none();
+        value
     }
 
     fn spend(&mut self, work: usize) -> bool {
@@ -327,13 +376,39 @@ fn insert_cycle_state<R: Clone + Eq>(
     size: impl Fn(&R) -> usize,
     budget: &mut SearchBudget,
 ) -> Option<PathCondition> {
+    insert_bounded_cycle_state(states, relation, condition, covers, size, None, budget)
+}
+
+type MayCover<R> = dyn Fn(&R, &R) -> bool;
+
+/// `insert_cycle_state` where `may_cover(outer, inner)`, a check charged as
+/// one unit, is false only when `outer` cannot cover `inner`.
+fn insert_bounded_cycle_state<R: Clone + Eq>(
+    states: &mut Vec<(R, PathCondition)>,
+    relation: &R,
+    condition: PathCondition,
+    covers: impl Fn(&R, &R) -> bool,
+    size: impl Fn(&R) -> usize,
+    may_cover: Option<&MayCover<R>>,
+    budget: &mut SearchBudget,
+) -> Option<PathCondition> {
     let mut condition = condition;
+    // The prefilter is charged one unit per state when given.
+    let filter_work = usize::from(may_cover.is_some());
+    let may_cover =
+        |outer: &R, inner: &R| may_cover.is_none_or(|may_cover| may_cover(outer, inner));
     let relation_size = size(relation);
     let comparison_work = |r: &R| size(r).saturating_mul(relation_size).saturating_add(1);
     // Different translations usually cannot dominate or merge. Charge guard
     // comparisons only after the positional check admits them, and stop
     // charging a scan as soon as its result is known.
     for (r, c) in states.iter() {
+        if !budget.spend(filter_work) {
+            return None;
+        }
+        if !may_cover(r, relation) {
+            continue;
+        }
         if !budget.spend(comparison_work(r)) {
             return None;
         }
@@ -349,6 +424,12 @@ fn insert_cycle_state<R: Clone + Eq>(
     loop {
         let mut merge = None;
         for (index, (r, c)) in states.iter().enumerate() {
+            if !budget.spend(filter_work) {
+                return None;
+            }
+            if !may_cover(r, relation) || !may_cover(relation, r) {
+                continue;
+            }
             if !budget.spend(comparison_work(r)) {
                 return None;
             }
@@ -371,6 +452,13 @@ fn insert_cycle_state<R: Clone + Eq>(
     let mut index = 0;
     while index < states.len() {
         let (r, c) = &states[index];
+        if !budget.spend(filter_work) {
+            return None;
+        }
+        if !may_cover(relation, r) {
+            index += 1;
+            continue;
+        }
         if !budget.spend(comparison_work(r)) {
             return None;
         }
@@ -390,6 +478,166 @@ fn insert_cycle_state<R: Clone + Eq>(
     }
     states.push((relation.clone(), condition.clone()));
     Some(condition)
+}
+
+enum Insertion {
+    Inserted(PathCondition),
+    Covered,
+    Exhausted,
+}
+
+/// The armed states of one node, grouped by the hulls of their anchor and
+/// current positions: a state covers another only where its hulls contain
+/// the other's, so only those groups are compared. A group whose hulls are
+/// single positions is covered only by its own and by wider ones. Each
+/// state keeps the serial it was queued with.
+#[derive(Default)]
+struct ArmedStates {
+    groups: Vec<(Hulls, Vec<ArmedState>)>,
+    index: HashMap<Hulls, usize>,
+    /// The groups whose hulls are not single positions.
+    wide: Vec<usize>,
+}
+
+type Hulls = [Option<(isize, isize)>; 4];
+
+/// A state, the path condition it holds on and its serial.
+type ArmedState = (ArmedRelation, PathCondition, u64);
+
+fn single_positions(hulls: &Hulls) -> bool {
+    hulls
+        .iter()
+        .all(|range| range.is_some_and(|(start, end)| end.checked_sub(start) == Some(1)))
+}
+
+impl ArmedStates {
+    /// The groups that may hold a state related to one with `hulls`: as an
+    /// outer state when `outer`, else as an inner one.
+    fn related(&self, hulls: &Hulls, outer: bool) -> Vec<usize> {
+        let own = self.index.get(hulls).copied();
+        if single_positions(hulls) {
+            let mut groups = own.into_iter().collect::<Vec<_>>();
+            if outer {
+                groups.extend(
+                    self.wide
+                        .iter()
+                        .copied()
+                        .filter(|&group| Some(group) != own),
+                );
+            }
+            return groups;
+        }
+        (0..self.groups.len()).collect()
+    }
+
+    /// `insert_cycle_state` over the groups that can cover or be covered.
+    fn insert(
+        &mut self,
+        relation: &ArmedRelation,
+        condition: PathCondition,
+        serial: u64,
+        live: &mut HashSet<u64>,
+        budget: &mut SearchBudget,
+    ) -> Insertion {
+        let hulls = relation.relation.hulls();
+        let mut condition = condition;
+        let relation_size = relation.size();
+        let comparison_work =
+            |r: &ArmedRelation| r.size().saturating_mul(relation_size).saturating_add(1);
+        for group in self.related(&hulls, true) {
+            let (group_hulls, states) = &self.groups[group];
+            if !budget.spend(1) {
+                return Insertion::Exhausted;
+            }
+            if !PositionRelationSet::hulls_contain(group_hulls, &hulls) {
+                continue;
+            }
+            for (r, c, _) in states {
+                if !budget.spend(comparison_work(r)) {
+                    return Insertion::Exhausted;
+                }
+                if r.covers(relation) {
+                    if !budget.spend_guard_comparison(c, &condition) {
+                        return Insertion::Exhausted;
+                    }
+                    if c.covers(&condition) {
+                        return Insertion::Covered;
+                    }
+                }
+            }
+        }
+        let own = match self.index.get(&hulls) {
+            Some(&own) => own,
+            None => {
+                self.groups.push((hulls, Vec::new()));
+                let own = self.groups.len() - 1;
+                self.index.insert(hulls, own);
+                if !single_positions(&hulls) {
+                    self.wide.push(own);
+                }
+                own
+            }
+        };
+        // Exact unions of guards on the same relation.
+        loop {
+            let mut merge = None;
+            for (index, (r, c, _)) in self.groups[own].1.iter().enumerate() {
+                if !budget.spend(comparison_work(r)) {
+                    return Insertion::Exhausted;
+                }
+                if r == relation {
+                    if !budget.spend_guard_comparison(c, &condition) {
+                        return Insertion::Exhausted;
+                    }
+                    if let Some(merged) = c.disjoin_exact(&condition) {
+                        merge = Some((index, merged));
+                        break;
+                    }
+                }
+            }
+            let Some((index, merged)) = merge else {
+                break;
+            };
+            let (_, _, removed) = self.groups[own].1.swap_remove(index);
+            live.remove(&removed);
+            condition = merged;
+        }
+        for group in self.related(&hulls, false) {
+            if !budget.spend(1) {
+                return Insertion::Exhausted;
+            }
+            let (group_hulls, states) = &mut self.groups[group];
+            if !PositionRelationSet::hulls_contain(&hulls, group_hulls) {
+                continue;
+            }
+            let mut index = 0;
+            while index < states.len() {
+                let (r, c, removed) = &states[index];
+                if !budget.spend(comparison_work(r)) {
+                    return Insertion::Exhausted;
+                }
+                if relation.covers(r) {
+                    if !budget.spend_guard_comparison(&condition, c) {
+                        return Insertion::Exhausted;
+                    }
+                    if condition.covers(c) {
+                        live.remove(removed);
+                        states.swap_remove(index);
+                        continue;
+                    }
+                }
+                index += 1;
+            }
+        }
+        if !budget.spend(relation_size.saturating_add(1)) {
+            return Insertion::Exhausted;
+        }
+        self.groups[own]
+            .1
+            .push((relation.clone(), condition.clone(), serial));
+        live.insert(serial);
+        Insertion::Inserted(condition)
+    }
 }
 
 fn try_cycle_witness(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) -> bool {
@@ -412,17 +660,63 @@ fn try_cycle_witness(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) 
 }
 
 pub(super) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Option<bool> {
-    let mut budget = SearchBudget::new();
-    let found = has_compatible_cycle_with_budget(graph, scc, &mut budget);
-    // Count the decision separately from optional diagnostic path recovery.
-    // Measurement must not change the budget or the production search path.
-    #[cfg(test)]
-    DECISION_WORK.set(
-        DECISION_WORK
-            .get()
-            .saturating_add(CYCLE_SEARCH_WORK - budget.remaining),
-    );
-    (found || !budget.exhausted).then_some(found)
+    // Arms taken on instances only exclude walks: a component with no walk
+    // that ignores them has none, and only one with such a walk is searched
+    // again with them.
+    let armed = scc.iter().any(|&node| {
+        graph
+            .edges(node)
+            .any(|edge| graph.instance_arms.contains_key(&edge.id()))
+    });
+    let mut found = None;
+    // A walk the search without arms closes.
+    let mut walk: Option<Vec<EdgeIndex>> = None;
+    for arms in [false, true] {
+        if arms && !armed {
+            break;
+        }
+        // The walk the search without arms closed is followed first with
+        // them: when it closes, it is a closed walk that takes its arms
+        // consistently.
+        if arms
+            && let Some(path) = walk.as_ref()
+            && let Some(&first) = path.first()
+            && let Some((start, _)) = graph.edge_endpoints(first)
+        {
+            let edges = path.iter().copied().collect::<HashSet<_>>();
+            let mut budget = SearchBudget::new();
+            if has_compatible_cycle_through(graph, scc, &mut budget, true, Some((start, &edges))) {
+                found = Some(true);
+                break;
+            }
+        }
+        let mut budget = SearchBudget::new();
+        let closes = has_compatible_cycle_with_budget(graph, scc, &mut budget, arms);
+        // Count the decision separately from optional diagnostic path
+        // recovery. Measurement must not change the budget or the
+        // production search path.
+        #[cfg(test)]
+        DECISION_WORK.set(
+            DECISION_WORK
+                .get()
+                .saturating_add(CYCLE_SEARCH_WORK - budget.remaining),
+        );
+        found = (closes || !budget.exhausted).then_some(closes);
+        if found != Some(true) {
+            break;
+        }
+        // A closed walk that takes no arm closes whatever the arms are.
+        if !arms && armed {
+            walk = diagnostic_cycle(graph, scc);
+            if walk.as_ref().is_some_and(|path| {
+                path.iter()
+                    .all(|edge| !graph.instance_arms.contains_key(edge))
+            }) {
+                break;
+            }
+        }
+    }
+    found
 }
 
 #[cfg(test)]
@@ -480,23 +774,54 @@ fn has_compatible_cycle_with_budget(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
     budget: &mut SearchBudget,
+    arms: bool,
 ) -> bool {
+    has_compatible_cycle_through(graph, scc, budget, arms, None)
+}
+
+/// `has_compatible_cycle_with_budget` over the closed walks from one anchor
+/// along `walk`'s edges alone when given.
+fn has_compatible_cycle_through(
+    graph: &DependencyGraph,
+    scc: &[NodeIndex],
+    budget: &mut SearchBudget,
+    arms: bool,
+    walk: Option<(NodeIndex, &HashSet<EdgeIndex>)>,
+) -> bool {
+    let allowed = |edge: EdgeIndex| walk.is_none_or(|(_, edges)| edges.contains(&edge));
     if scc.is_empty()
         || (scc.len() == 1 && !graph.edges(scc[0]).any(|edge| edge.target() == scc[0]))
     {
         return false;
     }
+    // Only an arm some other arm of its branch may meet on an instance can
+    // exclude a walk; the others are not followed.
+    let contested = if arms {
+        match Contested::of(graph, scc, &allowed, budget) {
+            Some(contested) => contested,
+            None => return false,
+        }
+    } else {
+        Contested::default()
+    };
+    let instance_arms = |edge: EdgeIndex| contested.arms.get(&edge);
     let mut nodes: HashSet<_> = scc.iter().copied().collect();
-    if has_zero_dependency_cycle(graph, scc, budget) {
+    if walk.is_none() && has_zero_dependency_cycle(graph, scc, budget, arms) {
         return true;
     }
     // Prefer finite self-edge anchors: their translations go straight to the
     // closed-walk solver instead of being enumerated inside a first-return
     // path. Among them, broad domains keep wide shifts out of the internal
     // search state. Correctness does not depend on the anchor order.
-    let mut starts = scc.to_vec();
+    let mut starts = match walk {
+        Some((start, _)) => vec![start],
+        None => scc.to_vec(),
+    };
+    // A recurrence node first: its iterations close as first returns
+    // instead of being repeated inside the paths of other anchors.
     starts.sort_by_cached_key(|&node| {
         std::cmp::Reverse((
+            graph.recurrences.contains(&node),
             !graph[node].domains.is_empty(),
             graph.edges(node).any(|edge| edge.target() == node),
             domain_area(&graph[node]),
@@ -510,28 +835,31 @@ fn has_compatible_cycle_with_budget(
         if !budget.spend_product(graph[start].domains.len().max(1), 1) {
             return false;
         }
-        let initial = PositionRelationSet::identity(&graph[start].domains);
+        let initial = ArmedRelation {
+            relation: PositionRelationSet::identity(&graph[start].domains),
+            arms: Vec::new(),
+        };
         let mut cycles = HashSet::default();
-        let mut queue = VecDeque::from([(start, PathCondition::default(), initial)]);
-        let mut reached: HashMap<NodeIndex, Vec<(PositionRelationSet, PathCondition)>> =
-            HashMap::default();
-        while let Some((node, condition, relation)) = queue.pop_front() {
-            if !budget.spend(reached.get(&node).map_or(1, |states| states.len() + 1)) {
+        // Each queued state with its serial; one a later state replaced is
+        // no longer live and is skipped.
+        let mut queue = VecDeque::from([(start, PathCondition::default(), initial, 0u64)]);
+        let mut reached: HashMap<NodeIndex, ArmedStates> = HashMap::default();
+        let mut live = HashSet::default();
+        let mut serials = 1u64;
+        while let Some((node, condition, armed, serial)) = queue.pop_front() {
+            if !budget.spend(1) {
                 return false;
             }
-            if node != start
-                && !reached[&node]
-                    .iter()
-                    .any(|(r, c)| *r == relation && *c == condition)
-            {
+            if node != start && !live.contains(&serial) {
                 continue;
             }
+            let relation = &armed.relation;
             for edge in graph.edges(node) {
                 if !budget.spend(1) {
                     return false;
                 }
                 let next = edge.target();
-                if !returnable.contains(&next) {
+                if !returnable.contains(&next) || !allowed(edge.id()) {
                     continue;
                 }
                 let Some(next_condition) =
@@ -547,38 +875,202 @@ fn has_compatible_cycle_with_budget(
                 }
                 let next_relation =
                     relation.then_dependency(edge.weight().kind, &graph[next].domains);
+                let Some(next_relation) = budget.checked(next_relation) else {
+                    return false;
+                };
                 if next_relation.is_empty() {
                     continue;
                 }
-                if next == start {
-                    if next_relation.intersects_identity() {
-                        return true;
+                if !budget.spend(armed.size()) {
+                    return false;
+                }
+                let edge_arms = instance_arms(edge.id()).map_or(&[][..], |arms| &arms[..]);
+                let arms = armed.through(
+                    edge.weight().kind,
+                    &graph[next].domains,
+                    edge_arms,
+                    &next_relation,
+                    false,
+                );
+                let Some(arms) = budget.checked(arms) else {
+                    return false;
+                };
+                let Some(arms) = arms else {
+                    continue;
+                };
+                // An arm taken on one known instance is a choice like any
+                // other, which every walk through it shares.
+                let mut next_condition = next_condition;
+                if let Some(edge_arms) = instance_arms(edge.id())
+                    && let Some(hull) = next_relation.array_hull()
+                {
+                    let mut excluded = false;
+                    for arm in edge_arms.iter() {
+                        let Some(choice) = single_instance(edge_arms, arm, hull)
+                            .filter(|&instance| contested.contains(arm.branch, instance))
+                            .and_then(|instance| arm.choice(instance))
+                        else {
+                            continue;
+                        };
+                        match next_condition.conjoin_if_compatible(&choice) {
+                            Some(condition) => next_condition = condition,
+                            None => {
+                                excluded = true;
+                                break;
+                            }
+                        }
                     }
-                    let inserted = cycles.insert(GuardedCycle {
-                        relation: next_relation,
-                        condition: next_condition,
+                    if excluded {
+                        continue;
+                    }
+                }
+                // So is an arm taken earlier whose instance the positions the
+                // path reaches now give.
+                let mut arms = arms;
+                if let Some(hull) = next_relation.array_hull() {
+                    let mut excluded = false;
+                    arms.retain(|arm| {
+                        let instance = (!excluded)
+                            .then(|| arm.current.single_anchor_reaching(hull))
+                            .flatten();
+                        // On an instance no other arm meets, it excludes none.
+                        if instance
+                            .is_some_and(|instance| !contested.contains(arm.branch, instance))
+                        {
+                            return false;
+                        }
+                        let Some(choice) = instance.and_then(|instance| {
+                            InstanceArm {
+                                branch: arm.branch,
+                                arm: arm.arm,
+                                arms: arm.arms,
+                                instance: crate::comb_loop_detect::position::Map::translation(0),
+                            }
+                            .choice(instance)
+                        }) else {
+                            return true;
+                        };
+                        match next_condition.conjoin_if_compatible(&choice) {
+                            Some(condition) => {
+                                next_condition = condition;
+                                false
+                            }
+                            None => {
+                                excluded = true;
+                                true
+                            }
+                        }
                     });
+                    if excluded {
+                        continue;
+                    }
+                }
+                if next == start {
+                    let Some(closes) = budget.checked(next_relation.intersects_identity()) else {
+                        return false;
+                    };
+                    // Back at the anchor's own array position, the arms are
+                    // taken on the instances of that position. A return
+                    // there alone is excluded with them.
+                    let back = armed.through(
+                        edge.weight().kind,
+                        &graph[next].domains,
+                        edge_arms,
+                        &next_relation,
+                        true,
+                    );
+                    let Some(back) = budget.checked(back) else {
+                        return false;
+                    };
+                    // Arms whose instances the anchor's position gives.
+                    let conflicting = next_relation
+                        .anchor_array_hull()
+                        .zip(next_relation.array_hull())
+                        .map(|(anchor, current)| (anchor.0.max(current.0), anchor.1.min(current.1)))
+                        .filter(|hull| hull.0 < hull.1)
+                        .is_some_and(|hull| {
+                            let mut condition = next_condition.clone();
+                            arms.iter().any(|arm| {
+                                let Some(choice) = arm
+                                    .current
+                                    .single_anchor_reaching(hull)
+                                    .and_then(|instance| {
+                                        InstanceArm {
+                                            branch: arm.branch,
+                                            arm: arm.arm,
+                                            arms: arm.arms,
+                                            instance:
+                                                crate::comb_loop_detect::position::Map::translation(
+                                                    0,
+                                                ),
+                                        }
+                                        .choice(instance)
+                                    })
+                                else {
+                                    return false;
+                                };
+                                match condition.conjoin_if_compatible(&choice) {
+                                    Some(next) => {
+                                        condition = next;
+                                        false
+                                    }
+                                    None => true,
+                                }
+                            })
+                        });
+                    let next_relation = if back.is_none() || conflicting {
+                        let returns = next_relation.without_array_diagonal();
+                        if returns.is_empty() {
+                            continue;
+                        }
+                        returns
+                    } else if closes {
+                        return true;
+                    } else {
+                        next_relation
+                    };
+                    // A return kept apart from the others keeps only its
+                    // condition: each arm it took on one of several
+                    // instances becomes a choice on each of them in turn,
+                    // as a later return may take that instance otherwise.
+                    let Some(conditions) = arm_choices(&arms, next_condition, &contested, budget)
+                    else {
+                        return false;
+                    };
+                    let before = cycles.len();
+                    for condition in conditions {
+                        cycles.insert(GuardedCycle {
+                            relation: next_relation.clone(),
+                            condition,
+                        });
+                    }
+                    // Whether the count reached a power of two it had not.
+                    let after = cycles.len();
+                    let inserted = after > before
+                        && (1usize << (usize::BITS - 1 - after.leading_zeros())) > before;
                     // Check geometrically growing prefixes without waiting
                     // for every first-return path through the other loops.
                     if inserted
                         && !queue.is_empty()
                         && cycles.len() >= 2
-                        && cycles.len().is_power_of_two()
                         && try_cycle_witness(&cycles, budget)
                     {
                         return true;
                     }
                     continue;
                 }
-                if let Some(condition) = insert_cycle_state(
-                    reached.entry(next).or_default(),
-                    &next_relation,
-                    next_condition,
-                    PositionRelationSet::piecewise_covers,
-                    PositionRelationSet::piece_count,
-                    budget,
-                ) {
-                    queue.push_back((next, condition, next_relation));
+                let next_armed = ArmedRelation {
+                    relation: next_relation,
+                    arms,
+                };
+                let states = reached.entry(next).or_default();
+                match states.insert(&next_armed, next_condition, serials, &mut live, budget) {
+                    Insertion::Inserted(condition) => {
+                        queue.push_back((next, condition, next_armed, serials));
+                        serials += 1;
+                    }
+                    Insertion::Covered => {}
+                    Insertion::Exhausted => return false,
                 }
             }
         }
@@ -596,8 +1088,317 @@ fn has_compatible_cycle_with_budget(
     false
 }
 
+/// The arms of a component that another arm of their branch may meet on an
+/// instance: the instances where the arms of its edges into tables differ,
+/// and the edges with such arms.
+#[derive(Default)]
+struct Contested {
+    instances: HashSet<(InstanceBranch, isize)>,
+    /// Branches on instances no bounded positions give.
+    unbounded: HashSet<InstanceBranch>,
+    arms: HashMap<EdgeIndex, Rc<[InstanceArm]>>,
+}
+
+impl Contested {
+    fn of(
+        graph: &DependencyGraph,
+        scc: &[NodeIndex],
+        allowed: &dyn Fn(EdgeIndex) -> bool,
+        budget: &mut SearchBudget,
+    ) -> Option<Self> {
+        let members = scc.iter().copied().collect::<HashSet<_>>();
+        let mut taken: HashMap<(InstanceBranch, isize), usize> = HashMap::default();
+        let mut contested = Self::default();
+        let mut armed = Vec::new();
+        for &node in scc {
+            for edge in graph.edges(node) {
+                if !members.contains(&edge.target()) || !allowed(edge.id()) {
+                    continue;
+                }
+                let Some(arms) = graph.instance_arms.get(&edge.id()) else {
+                    continue;
+                };
+                armed.push((edge.id(), arms.clone()));
+                let domains = &graph[edge.target()].domains;
+                for arm in arms.iter() {
+                    if domains.is_empty() {
+                        contested.unbounded.insert(arm.branch);
+                    }
+                    for domain in domains {
+                        // Instances beyond `isize` are not known; the
+                        // search stops as incomplete rather than leave the
+                        // arm uncontested.
+                        let parameters = isize::try_from(domain.array_start)
+                            .ok()
+                            .and_then(|start| {
+                                let length = isize::try_from(domain.array_length).ok()?;
+                                Some((start, start.checked_add(length)?))
+                            })
+                            .ok_or(Overflow)
+                            .and_then(|(start, end)| arm.instance.source_parameters(start, end));
+                        let parameters = budget.checked(parameters)?;
+                        let Some((first, last)) = parameters else {
+                            continue;
+                        };
+                        for t in first..=last {
+                            if !budget.spend(1) {
+                                return None;
+                            }
+                            let instance = arm
+                                .instance
+                                .step
+                                .checked_mul(t)
+                                .and_then(|offset| arm.instance.base.checked_add(offset))
+                                .ok_or(Overflow);
+                            let instance = budget.checked(instance)?;
+                            match taken.entry((arm.branch, instance)) {
+                                std::collections::hash_map::Entry::Vacant(entry) => {
+                                    entry.insert(arm.arm);
+                                }
+                                std::collections::hash_map::Entry::Occupied(entry) => {
+                                    if *entry.get() != arm.arm {
+                                        contested.instances.insert((arm.branch, instance));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let branches = contested
+            .instances
+            .iter()
+            .map(|(branch, _)| *branch)
+            .chain(contested.unbounded.iter().copied())
+            .collect::<HashSet<_>>();
+        for (edge, arms) in armed {
+            let kept = arms
+                .iter()
+                .filter(|arm| branches.contains(&arm.branch))
+                .copied()
+                .collect::<Vec<_>>();
+            if !kept.is_empty() {
+                contested.arms.insert(edge, kept.into());
+            }
+        }
+        Some(contested)
+    }
+
+    fn contains(&self, branch: InstanceBranch, instance: isize) -> bool {
+        self.unbounded.contains(&branch) || self.instances.contains(&(branch, instance))
+    }
+}
+
+/// `condition` with each arm of `arms` taken on one of the instances it
+/// may be on, for each such choice that is compatible. An arm on instances
+/// no bounded range holds stays out of the condition. `None` when the work
+/// is exhausted.
+fn arm_choices(
+    arms: &[TakenArm],
+    condition: PathCondition,
+    contested: &Contested,
+    budget: &mut SearchBudget,
+) -> Option<Vec<PathCondition>> {
+    let mut conditions = vec![condition];
+    for arm in arms {
+        let Some((low, high)) = arm
+            .current
+            .anchor_array_hull()
+            .or_else(|| arm.anchor.array_hull())
+        else {
+            continue;
+        };
+        let mut next = Vec::new();
+        for condition in &conditions {
+            for instance in low..high {
+                if !budget.spend(1) {
+                    return None;
+                }
+                if !contested.contains(arm.branch, instance) {
+                    next.push(condition.clone());
+                    continue;
+                }
+                let choice = InstanceArm {
+                    branch: arm.branch,
+                    arm: arm.arm,
+                    arms: arm.arms,
+                    instance: crate::comb_loop_detect::position::Map::translation(0),
+                }
+                .choice(instance);
+                match choice {
+                    Some(choice) => next.extend(condition.conjoin_if_compatible(&choice)),
+                    // An instance no choice names keeps the condition.
+                    None => next.push(condition.clone()),
+                }
+            }
+        }
+        next.sort_unstable();
+        next.dedup();
+        conditions = next;
+    }
+    Some(conditions)
+}
+
+/// The one instance the arms of `arm`'s branch and arm among `arms` give
+/// the positions of `hull`, `None` when they give several or none. Arms
+/// of one write differ only by the positions they map.
+fn single_instance(arms: &[InstanceArm], arm: &InstanceArm, hull: (isize, isize)) -> Option<isize> {
+    let mut found = None;
+    for other in arms
+        .iter()
+        .filter(|other| other.branch == arm.branch && other.arm == arm.arm)
+    {
+        let map = other.instance;
+        let Ok(Some((first, last))) = map.source_parameters(hull.0, hull.1) else {
+            continue;
+        };
+        for t in [first, last] {
+            let instance = map.base.checked_add(map.step.checked_mul(t)?)?;
+            if found.is_some_and(|found| found != instance) {
+                return None;
+            }
+            found = Some(instance);
+        }
+    }
+    found
+}
+
+/// A relation from the anchor with the arms its path took on instances.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ArmedRelation {
+    relation: PositionRelationSet,
+    arms: Vec<TakenArm>,
+}
+
+/// An arm a path took on an instance: the relation from the instance to the
+/// current position, and from the anchor to the instance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TakenArm {
+    branch: InstanceBranch,
+    arm: usize,
+    arms: usize,
+    current: PositionRelationSet,
+    anchor: PositionRelationSet,
+}
+
+impl TakenArm {
+    /// Whether this arm and `other` take one branch differently on the
+    /// instance `current` relates to the current position or `anchor`
+    /// relates to the anchor position, for every position the path takes.
+    fn excludes(
+        &self,
+        other: &InstanceArm,
+        current: &PositionRelationSet,
+        anchor: &PositionRelationSet,
+    ) -> bool {
+        self.branch == other.branch
+            && self.arm != other.arm
+            && ((!self.current.is_empty() && self.current.array_within_function(current))
+                || (!self.anchor.is_empty() && self.anchor.array_within_function(anchor)))
+    }
+}
+
+impl ArmedRelation {
+    /// Every path of `other` is one of `self`'s: a wider relation that took
+    /// no other arm.
+    fn covers(&self, other: &Self) -> bool {
+        self.relation.piecewise_covers(&other.relation)
+            && self.arms.iter().all(|arm| {
+                other.arms.iter().any(|narrower| {
+                    narrower.branch == arm.branch
+                        && narrower.arm == arm.arm
+                        && arm.current.piecewise_covers(&narrower.current)
+                        && arm.anchor.piecewise_covers(&narrower.anchor)
+                })
+            })
+    }
+
+    fn size(&self) -> usize {
+        self.arms
+            .iter()
+            .fold(self.relation.piece_count(), |size, arm| {
+                size.saturating_add(arm.current.piece_count())
+                    .saturating_add(arm.anchor.piece_count())
+            })
+    }
+
+    /// The arms taken after an edge of `dependency` into `destination` that
+    /// takes `arms` on the instances of the positions it reaches, where the
+    /// path relates the anchor as `relation`, back at the anchor when
+    /// `closing`. `None` when one of them excludes an arm already taken on
+    /// the same instance.
+    fn through(
+        &self,
+        dependency: BitDependency,
+        destination: &[PositionDomain],
+        arms: &[InstanceArm],
+        relation: &PositionRelationSet,
+        closing: bool,
+    ) -> Result<Option<Vec<TakenArm>>, Overflow> {
+        let mut taken = Vec::with_capacity(self.arms.len() + arms.len());
+        for arm in &self.arms {
+            let current = arm.current.then_dependency(dependency, destination)?;
+            // An arm related to no instance by either relation excludes none.
+            if !current.array_is_determined() && !arm.anchor.array_is_determined() {
+                continue;
+            }
+            taken.push(TakenArm {
+                current,
+                ..arm.clone()
+            });
+        }
+        for arm in arms {
+            let instance = BitDependency {
+                array: Link::Map(arm.instance),
+                packed: Link::Unlinked,
+            };
+            // Each instance with the positions holding it.
+            let current = match arm.instance.inverse() {
+                Some(positions) => PositionRelationSet::identity(&[]).then_dependency(
+                    BitDependency {
+                        array: Link::Map(positions),
+                        packed: Link::Unlinked,
+                    },
+                    destination,
+                )?,
+                None => PositionRelationSet::default(),
+            };
+            // The instance of each anchor position. A closing path is back
+            // at the anchor position.
+            let anchor = if closing {
+                PositionRelationSet::identity(&[]).then_dependency(instance, &[])?
+            } else {
+                relation.then_dependency(instance, &[])?
+            };
+            if taken
+                .iter()
+                .any(|other| other.excludes(arm, &current, &anchor))
+            {
+                return Ok(None);
+            }
+            if !current.array_is_determined() && !anchor.array_is_determined() {
+                continue;
+            }
+            let entry = TakenArm {
+                branch: arm.branch,
+                arm: arm.arm,
+                arms: arm.arms,
+                current,
+                anchor,
+            };
+            if !taken.contains(&entry) {
+                taken.push(entry);
+            }
+        }
+        Ok(Some(taken))
+    }
+}
+
 /// Recover a feasible first-return path for source diagnostics. Parent indices
-/// keep long paths linear in storage; positions and guards match the decision walk.
+/// keep long paths linear in storage; positions and guards match the decision
+/// walk. Arms taken on instances are not followed: the path shown is one of
+/// the component's, which the decision has already found to close.
 pub(super) fn diagnostic_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
@@ -650,11 +1451,12 @@ pub(super) fn diagnostic_cycle(
                     return None;
                 }
                 let relation = relation.then_dependency(graph[edge].kind, &graph[next].domains);
+                let relation = budget.checked(relation)?;
                 if relation.is_empty() {
                     continue;
                 }
                 if next == start {
-                    if relation.intersects_identity() {
+                    if budget.checked(relation.intersects_identity())? {
                         let mut path = vec![edge];
                         let mut cursor = index;
                         while let Some((parent, edge)) = states[cursor].3 {
@@ -737,6 +1539,7 @@ fn has_zero_dependency_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
     budget: &mut SearchBudget,
+    arms: bool,
 ) -> bool {
     // Identity paths can cycle only within an SCC of the identity-only
     // subgraph. Starting at every node of an acyclic identity chain would
@@ -777,7 +1580,7 @@ fn has_zero_dependency_cycle(
             .map(|node| identity[node])
             .collect::<Vec<_>>();
         let nodes = component.iter().copied().collect();
-        if has_zero_dependency_cycle_in_component(graph, &component, &nodes, budget) {
+        if has_zero_dependency_cycle_in_component(graph, &component, &nodes, budget, arms) {
             return true;
         }
         if budget.exhausted {
@@ -792,20 +1595,21 @@ fn has_zero_dependency_cycle_in_component(
     scc: &[NodeIndex],
     nodes: &HashSet<NodeIndex>,
     budget: &mut SearchBudget,
+    arms: bool,
 ) -> bool {
     for &start in scc {
-        let initial = initial_feasible_positions(&graph[start]);
+        let initial = (initial_feasible_positions(&graph[start]), Vec::new());
         let mut queue = VecDeque::from([(start, PathCondition::default(), initial)]);
-        let mut reached: HashMap<NodeIndex, Vec<(Vec<FeasiblePosition>, PathCondition)>> =
-            HashMap::default();
-        while let Some((node, condition, feasible)) = queue.pop_front() {
+        type Taken = (Vec<FeasiblePosition>, Vec<InstanceArm>);
+        let mut reached: HashMap<NodeIndex, Vec<(Taken, PathCondition)>> = HashMap::default();
+        while let Some((node, condition, (feasible, taken))) = queue.pop_front() {
             if !budget.spend(reached.get(&node).map_or(1, |states| states.len() + 1)) {
                 return false;
             }
             if node != start
                 && !reached[&node]
                     .iter()
-                    .any(|(r, c)| *r == feasible && *c == condition)
+                    .any(|((r, t), c)| *r == feasible && *t == taken && *c == condition)
             {
                 continue;
             }
@@ -836,18 +1640,43 @@ fn has_zero_dependency_cycle_in_component(
                 if feasible.is_empty() {
                     continue;
                 }
+                // Positions stay the anchor's, so arms of one branch exclude
+                // one another where they take instances alike.
+                let mut taken = taken.clone();
+                if let Some(arms) = graph.instance_arms.get(&edge.id()).filter(|_| arms) {
+                    let excluded = arms.iter().any(|arm| {
+                        taken.iter().any(|other| {
+                            other.branch == arm.branch
+                                && other.arm != arm.arm
+                                && other.instance == arm.instance
+                        })
+                    });
+                    if excluded {
+                        continue;
+                    }
+                    for arm in arms.iter() {
+                        if !taken.contains(arm) {
+                            taken.push(*arm);
+                        }
+                    }
+                    // One set of arms, whatever order a path took them in.
+                    taken.sort_unstable();
+                }
                 if next == start {
                     return true;
                 }
+                let state = (feasible, taken);
                 if let Some(condition) = insert_cycle_state(
                     reached.entry(next).or_default(),
-                    &feasible,
+                    &state,
                     next_condition,
-                    PartialEq::eq,
-                    Vec::len,
+                    |(left, left_arms): &Taken, (right, right_arms): &Taken| {
+                        left == right && left_arms.iter().all(|arm| right_arms.contains(arm))
+                    },
+                    |(feasible, taken): &Taken| feasible.len() + taken.len(),
                     budget,
                 ) {
-                    queue.push_back((next, condition, feasible));
+                    queue.push_back((next, condition, state));
                 }
             }
         }
@@ -907,11 +1736,15 @@ fn feasible_from_domain(
     dependency: BitDependency,
 ) -> Option<FeasiblePosition> {
     Some(FeasiblePosition {
-        array: inverse_translated_axis(domain.array_start, domain.array_length, dependency.array)?,
+        array: inverse_translated_axis(
+            domain.array_start,
+            domain.array_length,
+            dependency.array.translation_offset(),
+        )?,
         packed: inverse_translated_axis(
             domain.packed_start,
             domain.packed_length,
-            dependency.packed,
+            dependency.packed.translation_offset(),
         )?,
     })
 }
@@ -948,7 +1781,8 @@ fn intersect_axis(
 }
 
 fn dependency_is_identity(dependency: BitDependency) -> bool {
-    dependency.array == Some(0) && dependency.packed == Some(0)
+    dependency.array == Link::from_offset(Some(0))
+        && dependency.packed == Link::from_offset(Some(0))
 }
 
 #[cfg(test)]
@@ -1025,8 +1859,8 @@ mod tests {
             &source,
             &destination,
             BitDependency {
-                array: Some(-4),
-                packed: Some(-4),
+                array: Link::from_offset(Some(-4)),
+                packed: Link::from_offset(Some(-4)),
             },
         ));
     }
@@ -1042,8 +1876,8 @@ mod tests {
         let b = graph.add_node(test_node(1, region));
         let identity = GraphDependency {
             kind: BitDependency {
-                array: Some(0),
-                packed: Some(0),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(0)),
             },
             condition: PathCondition::default(),
         };
@@ -1082,8 +1916,8 @@ mod tests {
         let high = node(0, 7, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
         graph.add_edge(low, middle, edge(1));
@@ -1108,8 +1942,8 @@ mod tests {
             b,
             GraphDependency {
                 kind: BitDependency {
-                    array: Some(0),
-                    packed: Some(3),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(3)),
                 },
                 condition: PathCondition::default(),
             },
@@ -1119,8 +1953,8 @@ mod tests {
             a,
             GraphDependency {
                 kind: BitDependency {
-                    array: Some(0),
-                    packed: Some(-1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(-1)),
                 },
                 condition: PathCondition::default(),
             },
@@ -1159,8 +1993,8 @@ mod tests {
         let d = node(3);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1204,8 +2038,8 @@ mod tests {
         let high = node(2, 2, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1253,8 +2087,8 @@ mod tests {
         let high = node(2, width - 1, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1302,8 +2136,8 @@ mod tests {
         let high = node(2, width - 1, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1331,8 +2165,8 @@ mod tests {
         let join = graph.add_node(test_node(2, region));
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1372,8 +2206,8 @@ mod tests {
         let low = node(1, 2, 3);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1415,8 +2249,8 @@ mod tests {
         let low = node(1, 0, width - 2);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1457,8 +2291,8 @@ mod tests {
         let low = node(1, 0, width - 2);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1501,8 +2335,8 @@ mod tests {
         let minus_guard = node(2, 1, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1551,8 +2385,8 @@ mod tests {
         let minus_guard = node(2, middle, width - middle - 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1600,8 +2434,8 @@ mod tests {
         let wrap = node(2, 0, 1);
         let edge = |packed| {
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(packed),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(packed)),
             })
         };
 
@@ -1619,15 +2453,15 @@ mod tests {
         let cycles = [
             (
                 BitDependency {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
                 condition.clone(),
             ),
             (
                 BitDependency {
-                    array: Some(0),
-                    packed: Some(-7),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(-7)),
                 },
                 condition,
             ),
@@ -1647,15 +2481,15 @@ mod tests {
         let cycles = [
             (
                 BitDependency {
-                    array: Some(1),
-                    packed: Some(0),
+                    array: Link::from_offset(Some(1)),
+                    packed: Link::from_offset(Some(0)),
                 },
                 condition.clone(),
             ),
             (
                 BitDependency {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
                 condition,
             ),
@@ -1675,22 +2509,22 @@ mod tests {
         let cycles = [
             (
                 BitDependency {
-                    array: Some(1),
-                    packed: Some(0),
+                    array: Link::from_offset(Some(1)),
+                    packed: Link::from_offset(Some(0)),
                 },
                 condition.clone(),
             ),
             (
                 BitDependency {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
                 condition.clone(),
             ),
             (
                 BitDependency {
-                    array: Some(-1),
-                    packed: Some(-1),
+                    array: Link::from_offset(Some(-1)),
+                    packed: Link::from_offset(Some(-1)),
                 },
                 condition,
             ),
@@ -1764,8 +2598,8 @@ mod tests {
                     arm => Some(arm as usize - 1),
                 };
                 let dependency = BitDependency {
-                    array: Some(0),
-                    packed,
+                    array: Link::IDENTITY,
+                    packed: Link::from_offset(packed),
                 };
                 if node_regions_overlap_with_dependency(
                     &graph[nodes[source]],
@@ -1811,7 +2645,7 @@ mod tests {
                         if !source_allowed {
                             continue;
                         }
-                        let mapped = match dependency.packed {
+                        let mapped = match dependency.packed.translation_offset() {
                             Some(offset) => translate_position(position, offset)
                                 .filter(|&mapped| mapped < width)
                                 .into_iter()
@@ -1902,8 +2736,12 @@ mod tests {
                 let raw_array = random();
                 let raw_packed = random();
                 let dependency = BitDependency {
-                    array: (raw_array % 4 != 0).then_some(raw_array as isize % 5 - 2),
-                    packed: (raw_packed % 4 != 0).then_some(raw_packed as isize % 5 - 2),
+                    array: Link::from_offset(
+                        (raw_array % 4 != 0).then_some(raw_array as isize % 5 - 2),
+                    ),
+                    packed: Link::from_offset(
+                        (raw_packed % 4 != 0).then_some(raw_packed as isize % 5 - 2),
+                    ),
                 };
                 let arm = match random() % 3 {
                     0 => None,
@@ -1957,10 +2795,16 @@ mod tests {
                             {
                                 continue;
                             }
-                            let destination_arrays =
-                                mapped_positions(source_array, dependency.array, array_width);
-                            let destination_packeds =
-                                mapped_positions(source_packed, dependency.packed, packed_width);
+                            let destination_arrays = mapped_positions(
+                                source_array,
+                                dependency.array.translation_offset(),
+                                array_width,
+                            );
+                            let destination_packeds = mapped_positions(
+                                source_packed,
+                                dependency.packed.translation_offset(),
+                                packed_width,
+                            );
                             for destination_array in &destination_arrays {
                                 for destination_packed in &destination_packeds {
                                     if !(destination_domain.0
@@ -1993,6 +2837,147 @@ mod tests {
                 "case {case}, shape [{array_width}, {packed_width}], domains {domain_specs:?}, edges {edge_specs:?}"
             );
         }
+    }
+
+    /// Compare the decision with the expanded graphs of random graphs whose
+    /// edges take links from `link`. Exact when `exact`, else only sound.
+    fn compare_with_expanded_graphs(
+        link: impl Fn(&mut dyn FnMut() -> u32) -> Link,
+        exact: bool,
+    ) -> (usize, usize) {
+        use daggy::petgraph::algo::is_cyclic_directed;
+
+        let mut state = 0x1357_9bdf_u32;
+        let mut random = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            state >> 8
+        };
+        let (mut matched, mut over) = (0, 0);
+        for case in 0..6_000 {
+            let node_count = 1 + random() as usize % 3;
+            let array_width = 1 + random() as usize % 4;
+            let packed_width = 1 + random() as usize % 4;
+            let array = ArraySpan {
+                start: 0,
+                length: array_width,
+            };
+            let mut graph = DependencyGraph::new();
+            let nodes = (0..node_count)
+                .map(|id| {
+                    let id = VarId::from_raw(id as u32);
+                    graph.add_node(GraphNode {
+                        region: SummaryRegion {
+                            id,
+                            array,
+                            packed: PackedSpan::new(0, packed_width).unwrap(),
+                        },
+                        domains: vec![PositionDomain {
+                            array_start: 0,
+                            array_length: array_width,
+                            packed_start: 0,
+                            packed_length: packed_width,
+                        }],
+                        diagnostic: Some((id, array, 0)),
+                    })
+                })
+                .collect::<Vec<_>>();
+            let mut edges = Vec::new();
+            for _ in 0..1 + random() as usize % (node_count * 3) {
+                let source = random() as usize % node_count;
+                let destination = random() as usize % node_count;
+                let dependency = BitDependency {
+                    array: link(&mut random),
+                    packed: link(&mut random),
+                };
+                if dependency.is_empty() {
+                    continue;
+                }
+                edges.push((source, destination, dependency));
+                add_dependency_edge(
+                    &mut graph,
+                    nodes[source],
+                    nodes[destination],
+                    GraphDependency::unconditional(dependency),
+                );
+            }
+            let symbolic = tarjan_scc(&graph.graph)
+                .iter()
+                .any(|scc| has_compatible_cycle(&graph, scc));
+            let mut expanded = Graph::<(), ()>::new();
+            let positions = (0..node_count)
+                .map(|_| {
+                    (0..array_width * packed_width)
+                        .map(|_| expanded.add_node(()))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            for &(source, destination, dependency) in &edges {
+                for from in 0..array_width * packed_width {
+                    for to in 0..array_width * packed_width {
+                        let point = |index: usize| {
+                            (
+                                (index / packed_width) as isize,
+                                (index % packed_width) as isize,
+                            )
+                        };
+                        if dependency.relates(point(from), point(to)) {
+                            expanded.add_edge(
+                                positions[source][from],
+                                positions[destination][to],
+                                (),
+                            );
+                        }
+                    }
+                }
+            }
+            let concrete = is_cyclic_directed(&expanded);
+            assert!(
+                symbolic || !concrete,
+                "case {case}: missed a cycle in [{array_width}, {packed_width}] with {edges:?}"
+            );
+            assert!(
+                !exact || symbolic == concrete,
+                "case {case}: invented a cycle in [{array_width}, {packed_width}] with {edges:?}"
+            );
+            if symbolic == concrete {
+                matched += 1;
+            } else {
+                over += 1;
+            }
+        }
+        (matched, over)
+    }
+
+    #[test]
+    fn affine_cycle_detection_never_misses_an_expanded_cycle() {
+        use crate::comb_loop_detect::position::Map;
+        let link = |random: &mut dyn FnMut() -> u32| match random() % 7 {
+            0 => Link::Unlinked,
+            1 => Link::strided(2 + random() as isize % 2, random() as isize % 3),
+            2 | 3 => Link::translation(random() as isize % 5 - 2),
+            _ => Map::scaled(
+                random().is_multiple_of(3),
+                [-2isize, -1, 1, 2, 3][random() as usize % 5],
+                random() as isize % 7 - 3,
+                1 + random() as isize % 3,
+            ),
+        };
+        let (matched, over) = compare_with_expanded_graphs(link, false);
+        eprintln!("affine cycle detection: {matched} exact, {over} conservative");
+    }
+
+    #[test]
+    fn strided_cycle_detection_matches_expanded_graphs() {
+        // Strided and unlinked coordinates with translations and strides
+        // lose no precision.
+        use crate::comb_loop_detect::position::Map;
+        let link = |random: &mut dyn FnMut() -> u32| match random() % 5 {
+            0 => Link::Unlinked,
+            1 | 2 => Link::strided(2 + random() as isize % 2, random() as isize % 3),
+            3 => Map::scaled(false, 2, random() as isize % 3, 1),
+            _ => Link::translation(random() as isize % 5 - 2),
+        };
+        compare_with_expanded_graphs(link, true);
     }
 
     fn mapped_positions(position: usize, offset: Option<isize>, width: usize) -> Vec<usize> {
@@ -2040,8 +3025,8 @@ mod tests {
                 node,
                 node,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(shift),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(shift)),
                 }),
             );
         }
@@ -2052,7 +3037,8 @@ mod tests {
         assert!(!has_compatible_cycle_with_budget(
             &graph,
             &[node],
-            &mut budget
+            &mut budget,
+            true
         ));
         assert!(budget.exhausted);
         assert_eq!(compatible_cycle(&graph, &[node]), Some(false));
@@ -2062,8 +3048,8 @@ mod tests {
                 node,
                 node,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(-shift),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(-shift)),
                 }),
             );
         }
@@ -2074,7 +3060,8 @@ mod tests {
         assert!(has_compatible_cycle_with_budget(
             &graph,
             &[node],
-            &mut budget
+            &mut budget,
+            true
         ));
         assert!(!budget.exhausted);
         let mut budget = SearchBudget {
@@ -2084,7 +3071,8 @@ mod tests {
         assert!(!has_compatible_cycle_with_budget(
             &graph,
             &[node],
-            &mut budget
+            &mut budget,
+            true
         ));
         assert!(budget.exhausted);
         assert_eq!(compatible_cycle(&graph, &[node]), Some(true));
@@ -2109,8 +3097,8 @@ mod tests {
                 node,
                 node,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(offset),
-                    packed: Some(1 - offset),
+                    array: Link::from_offset(Some(offset)),
+                    packed: Link::from_offset(Some(1 - offset)),
                 }),
             );
         }
@@ -2122,7 +3110,8 @@ mod tests {
             assert!(!has_compatible_cycle_with_budget(
                 &graph,
                 &[node],
-                &mut budget
+                &mut budget,
+                true
             ));
             assert!(budget.exhausted);
         }

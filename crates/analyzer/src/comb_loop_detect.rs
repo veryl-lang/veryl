@@ -15,6 +15,7 @@ mod diagnostics;
 mod graph;
 mod hierarchy;
 mod model;
+mod position;
 mod procedure;
 mod region;
 mod ssa;
@@ -27,7 +28,8 @@ pub(crate) use procedure::{
     function_summary_graph_edge_count, function_summary_graph_node_count, module_context_entries,
     reset_function_evaluation_count, reset_module_context_entries,
     reset_traced_procedure_evaluation_count, reset_visible_source_probes,
-    traced_procedure_evaluation_count, visible_source_probes, write_footprint_statement_visits,
+    statement_evaluation_count, traced_procedure_evaluation_count, visible_source_probes,
+    write_footprint_statement_visits,
 };
 
 use diagnostics::{DiagnosticReplayCache, TraceKind, check_graph};
@@ -38,8 +40,9 @@ pub(crate) use diagnostics::{
     reset_diagnostic_replay_count,
 };
 use graph::{
-    DependencyGraph, GraphDependency, GraphNode, add_dependency_edge, add_region_dependency,
-    ensure_node, node_regions_overlap_with_dependency,
+    DependencyGraph, GraphDependency, GraphNode, add_dependency_edge,
+    add_dependency_edge_with_arms, add_region_dependency, ensure_node,
+    node_regions_overlap_with_dependency,
 };
 #[cfg(test)]
 pub(crate) use graph::{
@@ -47,6 +50,7 @@ pub(crate) use graph::{
 };
 use hierarchy::{module_postorder, walk_insts};
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
+use position::Link;
 use region::{
     ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
     translate_position, var_reads,
@@ -63,6 +67,8 @@ pub(crate) use summary::{
     module_summary_work, reset_module_summary_work, with_module_summary_limit,
 };
 
+#[cfg(test)]
+pub(crate) use procedure::with_enumerated_loops;
 #[cfg(test)]
 pub(crate) use procedure::{with_procedure_guard_limit, with_procedure_import_limit};
 
@@ -100,6 +106,12 @@ pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
 #[cfg(test)]
 pub(crate) fn is_complete(ir: &Ir) -> bool {
     check_inner(ir).1
+}
+
+/// The diagnostics of one analysis with whether it was complete.
+#[cfg(test)]
+pub(crate) fn check_with_completeness(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
+    check_inner(ir)
 }
 
 fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
@@ -723,11 +735,12 @@ fn collect_statement_spans(
                 collect_statement_spans(&statement.default, out, ctx);
             }
             Statement::For(statement) => {
-                // Storage boundaries still belong to this consumer. Keeping
-                // the common IR compact must not turn distinct constant
-                // iterations into one strong-write alias region.
-                if !crate::ir::peel::has_own_break(&statement.body)
-                    && let Some(iterations) = statement.range.eval_iter(ctx)
+                // Loops that need their iterator's values still enumerate
+                // their constant iterations during evaluation, which needs
+                // each iteration's boundaries. Every other loop is evaluated
+                // once with a symbolic iterator.
+                if let procedure::LoopEvaluation::Enumerated(iterations) =
+                    procedure::loop_evaluation(statement, ctx)
                 {
                     for iteration in iterations {
                         let body = crate::ir::peel::specialize_iteration(ctx, statement, iteration);
@@ -1202,6 +1215,27 @@ fn add_dependency_dag(
     internal_region: SummaryRegion,
     allowed: impl Fn(NodeKey) -> bool,
 ) -> Vec<Option<NodeIndex>> {
+    add_dependency_dag_with(
+        graph,
+        node_map,
+        bit_part,
+        dag,
+        internal_region,
+        allowed,
+        &HashMap::default(),
+    )
+}
+
+/// `add_dependency_dag`, with the nodes `own` gives for some external keys.
+fn add_dependency_dag_with(
+    graph: &mut DependencyGraph,
+    node_map: &mut HashMap<NodeKey, NodeIndex>,
+    bit_part: &BitPartition,
+    dag: ssa::DependencyDag<NodeKey>,
+    internal_region: SummaryRegion,
+    allowed: impl Fn(NodeKey) -> bool,
+    own: &HashMap<NodeKey, NodeIndex>,
+) -> Vec<Option<NodeIndex>> {
     // These are parent expression/procedure edges, even when insertion
     // was triggered by projecting an individual child summary edge.
     let active_summary = graph.active_summary.take();
@@ -1210,6 +1244,7 @@ fn add_dependency_dag(
         .iter()
         .enumerate()
         .map(|(index, node)| match node {
+            DependencyDagNode::External(key) if own.contains_key(key) => Some(own[key]),
             DependencyDagNode::External(key) if allowed(*key) => {
                 ensure_node(graph, node_map, bit_part, *key)
             }
@@ -1231,8 +1266,9 @@ fn add_dependency_dag(
         if let DependencyDagNode::Replicated { replication } = node
             && let Some(node) = mapped[index]
         {
-            // A bounded positive translation represents every copy without
-            // expanding bits, repetitions or paths through function imports.
+            // A bounded nonzero translation, forward or backward, represents
+            // every copy without expanding bits, repetitions or paths through
+            // function imports.
             let relation = replication.relation();
             add_dependency_edge(
                 graph,
@@ -1292,7 +1328,8 @@ fn add_procedure_graph(
 ) {
     let destinations = analysis
         .destinations
-        .into_iter()
+        .iter()
+        .copied()
         .filter_map(|(key, root)| {
             (is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables))
                 .then_some((key, root))
@@ -1304,29 +1341,61 @@ fn add_procedure_graph(
         return;
     };
 
-    let mapped = add_dependency_dag(
+    // Each table of the procedure is a node of its own, written and read
+    // by it alone.
+    let tables = analysis
+        .tables
+        .iter()
+        .map(|&(key, domain, _)| {
+            let node = graph.add_node(GraphNode {
+                region: internal_region,
+                domains: vec![domain],
+                diagnostic: None,
+            });
+            graph.recurrences.insert(node);
+            (key, node)
+        })
+        .collect::<HashMap<_, _>>();
+    let table_destinations = analysis
+        .destinations
+        .iter()
+        .filter(|(key, _)| tables.contains_key(key))
+        .copied()
+        .collect::<Vec<_>>();
+    let mapped = add_dependency_dag_with(
         graph,
         node_map,
         bit_part,
         analysis.graph,
         internal_region,
         |key| is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables),
+        &tables,
     );
-    for (destination, root) in destinations {
-        let (Some(root), Some(destination)) = (
-            root.and_then(|root| mapped[root]),
-            ensure_node(graph, node_map, bit_part, destination),
-        ) else {
+    // A table's writes take the arms of their branches on the instance of
+    // each position.
+    let arms = analysis
+        .tables
+        .iter()
+        .map(|(key, _, arms)| (*key, arms.as_slice()))
+        .collect::<HashMap<_, _>>();
+    for (key, root) in destinations.into_iter().chain(table_destinations) {
+        let destination = match tables.get(&key) {
+            Some(&node) => Some(node),
+            None => ensure_node(graph, node_map, bit_part, key),
+        };
+        let (Some(root), Some(destination)) = (root.and_then(|root| mapped[root]), destination)
+        else {
             continue;
         };
-        add_dependency_edge(
+        add_dependency_edge_with_arms(
             graph,
             root,
             destination,
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(0),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(0)),
             }),
+            arms.get(&key).copied().unwrap_or_default(),
         );
     }
 }
@@ -2122,20 +2191,21 @@ fn add_resolved_dependency_edges(
                 Some((destination_array, destination_packed)),
             ) = (source.offset, destination.offset)
             {
-                BitDependency {
-                    array: dependency.array.map(|array| {
-                        array
-                            .checked_add(destination_array)
-                            .and_then(|offset| offset.checked_sub(source_array))
-                            .expect("mapped array dependency offset must fit in isize")
-                    }),
-                    packed: dependency.packed.map(|packed| {
-                        packed
-                            .checked_add(destination_packed)
-                            .and_then(|offset| offset.checked_sub(source_packed))
-                            .expect("mapped packed dependency offset must fit in isize")
-                    }),
-                }
+                // Parent coordinates are child coordinates displaced by
+                // each region's offset.
+                BitDependency::translation(
+                    source_array
+                        .checked_neg()
+                        .expect("mapped array source offset must fit in isize"),
+                    source_packed
+                        .checked_neg()
+                        .expect("mapped packed source offset must fit in isize"),
+                )
+                .compose(dependency)
+                .compose(BitDependency::translation(
+                    destination_array,
+                    destination_packed,
+                ))
             } else {
                 BitDependency::WHOLE
             };

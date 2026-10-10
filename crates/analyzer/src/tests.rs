@@ -10,7 +10,9 @@ use veryl_parser::resource_table;
 
 mod comb_loop_adversarial_tests;
 mod comb_loop_conservative_tests;
+mod comb_loop_counted_tests;
 mod comb_loop_diagnostic_tests;
+mod comb_loop_differential_tests;
 mod comb_loop_function_tests;
 mod comb_loop_incomplete_tests;
 mod comb_loop_interface_function_tests;
@@ -97,6 +99,29 @@ fn a_long_const_chain_is_not_a_function_instantiation() {
         .unwrap()
         .join()
         .unwrap();
+}
+
+/// Whether one analysis of `code` finds a combinational loop, and whether
+/// it was complete.
+fn comb_loop_outcome(code: &str) -> (bool, bool) {
+    symbol_table::clear();
+    attribute_table::clear();
+    doc_comment_table::clear();
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let parser = Parser::parse(code, &"").unwrap();
+    let analyzer = Analyzer::new(&metadata);
+    let mut context = Context::default();
+    let mut ir = Ir::default();
+
+    analyzer.analyze_pass1("prj", &parser.veryl);
+    Analyzer::analyze_post_pass1();
+    analyzer.analyze_pass2(&parser.veryl, &mut context, Some(&mut ir));
+    let (errors, complete) = crate::comb_loop_detect::check_with_completeness(&ir);
+    let found = errors
+        .iter()
+        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }));
+    (found, complete)
 }
 
 #[track_caller]

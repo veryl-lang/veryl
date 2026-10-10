@@ -1,34 +1,31 @@
 //! Analyzer-IR procedure evaluation for combinational dependency extraction.
 
 use super::model::SummaryRegion;
+use super::position::{
+    Axis, Link, Overflow, checked, first_in_class, greatest_common_divisor, intersect_classes,
+};
 use super::region::{
-    ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference,
-    translate_position, var_reads,
+    ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference, var_reads,
 };
 use super::ssa::{
     BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
-    PositionDomain, PositionRelation, Replication, SsaStore, VersionId,
+    PositionDomain, PositionRelation, RepeatedIteration, Replication, SsaStore, TransferCoverage,
+    VersionId,
 };
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
-    ArrayLiteralItem, AssignDestination, CasePattern, CaseStatement, Expression, ExpressionContext,
-    Factor, ForBound, ForRange, ForStatement, FunctionCall, IfStatement, MemberSelectDomain,
-    Module, Op, Shape, Statement, SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex,
-    VarPath, VarSelect, VarSelectOp,
+    ArrayLiteralItem, AssignDestination, AssignStatement, CasePattern, CaseStatement,
+    CountedIterations, Expression, ExpressionContext, Factor, ForBound, ForRange, ForStatement,
+    FunctionCall, IfStatement, MemberSelectDomain, Module, Op, Shape, Statement,
+    SystemFunctionCall, SystemFunctionKind, TbMethod, Type, VarIndex, VarPath, VarSelect,
+    VarSelectOp,
 };
 use crate::value::Value;
 use crate::{HashMap, HashSet};
 use std::borrow::Cow;
 use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
-
-fn translate_array_span(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
-    Some(ArraySpan {
-        start: translate_position(span.start, offset)?,
-        length: span.length,
-    })
-}
 
 fn position_domain(array: ArraySpan, packed: PackedSpan) -> PositionDomain {
     PositionDomain {
@@ -39,8 +36,23 @@ fn position_domain(array: ArraySpan, packed: PackedSpan) -> PositionDomain {
     }
 }
 
-fn translate_packed_span(span: PackedSpan, offset: isize) -> Option<PackedSpan> {
-    PackedSpan::new(translate_position(span.start, offset)?, span.length)
+/// `span + offset` restricted to non-negative positions.
+fn translate_array_span_clipped(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
+    let start = isize::try_from(span.start).ok()?.checked_add(offset)?;
+    let end = isize::try_from(span.end()?).ok()?.checked_add(offset)?;
+    let start = usize::try_from(start.max(0)).ok()?;
+    let end = usize::try_from(end).ok()?;
+    let length = end.checked_sub(start)?;
+    (length != 0).then_some(ArraySpan { start, length })
+}
+
+/// `span + offset` restricted to non-negative positions.
+fn translate_span_clipped(span: PackedSpan, offset: isize) -> Option<PackedSpan> {
+    let start = isize::try_from(span.start).ok()?.checked_add(offset)?;
+    let end = isize::try_from(span.end()).ok()?.checked_add(offset)?;
+    let start = usize::try_from(start.max(0)).ok()?;
+    let end = usize::try_from(end).ok()?;
+    PackedSpan::new(start, end.checked_sub(start)?)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -88,19 +100,75 @@ impl AffineIndex {
         (self.terms == source.terms).then(|| self.constant.checked_sub(source.constant))?
     }
 
-    fn fits(&self, width: usize, signed: bool, ctx: &Context) -> Option<()> {
+    /// The congruent form modulo `2^width` whose values all lie in the
+    /// integer range of the width, if there is one.
+    fn representative(
+        mut self,
+        width: usize,
+        signed: bool,
+        ctx: &Context,
+        iterators: &[CountedIterator],
+    ) -> Option<Self> {
+        if self.fits(width, signed, ctx, iterators).is_some() {
+            return Some(self);
+        }
         let (allowed_min, allowed_max) = integer_range(width, signed)?;
+        let modulus = 1i128.checked_shl(u32::try_from(width).ok()?)?;
+        let (min, max) = self.extent(ctx, iterators)?;
+        if max - min > allowed_max - allowed_min {
+            return None;
+        }
+        let shift = (allowed_min - min).div_euclid(modulus)
+            + i128::from((allowed_min - min).rem_euclid(modulus) != 0);
+        let shift = shift.checked_mul(modulus)?;
+        if max + shift > allowed_max {
+            return None;
+        }
+        self.constant = isize::try_from(self.constant as i128 + shift).ok()?;
+        self.fits(width, signed, ctx, iterators)?;
+        Some(self)
+    }
+
+    /// Smallest and largest values when each term's variable ranges over
+    /// `range`.
+    fn extent_with(
+        &self,
+        mut range: impl FnMut(VarId) -> Option<(i128, i128)>,
+    ) -> Option<(i128, i128)> {
         let mut min = self.constant as i128;
         let mut max = min;
         for &(id, coefficient) in &self.terms {
-            let ty = &ctx.variables.get(&id)?.r#type;
-            let (low, high) = integer_range(ty.total_width()?, ty.signed)?;
+            let (low, high) = range(id)?;
             let coefficient = coefficient as i128;
             let low = low.checked_mul(coefficient)?;
             let high = high.checked_mul(coefficient)?;
             min = min.checked_add(low.min(high))?;
             max = max.checked_add(low.max(high))?;
         }
+        Some((min, max))
+    }
+
+    /// Smallest and largest values over the iterator and variable ranges.
+    fn extent(&self, ctx: &Context, iterators: &[CountedIterator]) -> Option<(i128, i128)> {
+        self.extent_with(|id| {
+            // A counted iterator takes only the values of its iteration space.
+            if let Some(iterator) = iterators.iter().find(|x| x.id == id) {
+                return Some((iterator.min as i128, iterator.max as i128));
+            }
+            let ty = &ctx.variables.get(&id)?.r#type;
+            integer_range(ty.total_width()?, ty.signed)
+        })
+    }
+
+    fn fits(
+        &self,
+        width: usize,
+        signed: bool,
+        ctx: &Context,
+        iterators: &[CountedIterator],
+    ) -> Option<()> {
+        let (allowed_min, allowed_max) = integer_range(width, signed)?;
+        let (min, max) = self.extent(ctx, iterators)?;
         (allowed_min <= min && max <= allowed_max).then_some(())
     }
 }
@@ -111,10 +179,20 @@ fn integer_range(width: usize, signed: bool) -> Option<(i128, i128)> {
     (magnitude > 0).then(|| (if signed { -magnitude } else { 0 }, magnitude - 1))
 }
 
+/// The coordinates of an access to each element dimension, outermost
+/// first, and the position they give in the flattened array.
+#[derive(Clone)]
+struct AffineElements {
+    elements: Vec<AffineIndex>,
+    flat: AffineIndex,
+}
+
 #[derive(Clone)]
 struct SampledAffineIndex {
     index: AffineIndex,
-    versions: Vec<VersionId>,
+    /// The values each variable of the index was read at, in the order of
+    /// its terms.
+    versions: Vec<(VarId, Vec<VersionId>)>,
 }
 
 impl SampledAffineIndex {
@@ -127,24 +205,149 @@ impl SampledAffineIndex {
 }
 
 fn affine_constant(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
-    let constant = expression
-        .eval_value(ctx)
-        .and_then(|value| value.to_usize())
-        .and_then(|value| isize::try_from(value).ok())?;
     Some(AffineIndex {
         terms: Vec::new(),
-        constant,
+        constant: constant_integer(expression, ctx)?,
     })
 }
 
-fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineIndex> {
-    if expression.comptime().is_const {
-        return affine_constant(expression, ctx);
+/// The integer a constant operand has in its context. A signed context
+/// extends the value's own sign bit; an unsigned one extends with zeros.
+fn constant_integer(expression: &Expression, ctx: &mut Context) -> Option<isize> {
+    let value = expression.eval_value(ctx)?;
+    let bits = value.to_usize()? as i128;
+    let width = u32::try_from(value.width()).ok()?;
+    let negative =
+        expression.comptime().expr_context.signed && width > 0 && (bits >> (width - 1)) & 1 == 1;
+    let integer = if negative {
+        bits - 1i128.checked_shl(width)?
+    } else {
+        bits
+    };
+    isize::try_from(integer).ok()
+}
+
+/// An integer coordinate whose bit-vector evaluation cannot wrap.
+///
+/// Context-determined `+`, `-` and `*` are evaluated modulo `2^width`, which
+/// is a ring, so the affine form of the tree is congruent to its value. The
+/// value equals that form exactly when some representative of the form lies
+/// in the integer range of the context for every iterator value; the form is
+/// shifted to that representative. Subtrees evaluated at another width
+/// (casts and self-determined operands) are checked as their own trees.
+fn affine_index(
+    expression: &Expression,
+    ctx: &mut Context,
+    iterators: &[CountedIterator],
+) -> Option<AffineIndex> {
+    let comptime = expression.comptime();
+    let context = comptime.expr_context;
+    let result = affine_ring(expression, ctx, iterators, context.width)?;
+    // Coordinates synthesized by conversion carry no bit-vector type.
+    if context.width == 0 && comptime.r#type.is_unknown() {
+        return Some(result);
     }
-    if expression.comptime().r#type.kind.is_float() {
+    result.representative(context.width, context.signed, ctx, iterators)
+}
+
+/// Progressions as spans with the step between their positions, from the
+/// first, merged where they overlap or touch: a merged progression steps by
+/// the steps of both and the distance between their starts.
+fn merge_progressions(mut progressions: Vec<(ArraySpan, usize)>) -> Vec<(ArraySpan, usize)> {
+    progressions.sort_unstable_by_key(|(span, _)| span.start);
+    let mut merged: Vec<(ArraySpan, usize)> = Vec::new();
+    for (span, step) in progressions {
+        if let Some((last, last_step)) = merged.last_mut()
+            && span.start <= last.start + last.length
+        {
+            let end = (last.start + last.length).max(span.start + span.length);
+            *last_step = greatest_common_divisor(
+                greatest_common_divisor(*last_step, step),
+                span.start - last.start,
+            );
+            last.length = end - last.start;
+            continue;
+        }
+        merged.push((span, step));
+    }
+    merged
+}
+
+/// Whether a position of the progression from the start of `span`, `step`
+/// apart, lies in both `span` and `key`.
+fn progression_meets(span: ArraySpan, step: usize, key: ArraySpan) -> bool {
+    let from = span.start.max(key.start);
+    let end = (span.start + span.length).min(key.start + key.length);
+    (from - span.start)
+        .checked_next_multiple_of(step)
+        .is_some_and(|offset| span.start + offset < end)
+}
+
+/// Every assignment of values to `iterators`, one empty assignment when
+/// there are none.
+fn iterator_assignments(iterators: Vec<CountedIterator>) -> Vec<Vec<(VarId, isize)>> {
+    let mut assignments = vec![Vec::new()];
+    for iterator in iterators {
+        let values = (iterator.min..=iterator.max).step_by(iterator.modulus.unsigned_abs());
+        assignments = assignments
+            .into_iter()
+            .flat_map(|assignment: Vec<(VarId, isize)>| {
+                values.clone().map(move |value| {
+                    let mut assignment = assignment.clone();
+                    assignment.push((iterator.id, value));
+                    assignment
+                })
+            })
+            .collect();
+    }
+    assignments
+}
+
+/// A storage coordinate into a dimension of `size` positions. A wrapped
+/// unsigned value that would be negative as an integer selects no element,
+/// exactly like the negative integer, as long as it wraps past the last
+/// position and no positive value wraps. The selected positions of the
+/// integer form and of the bit vector then agree.
+fn affine_position(
+    expression: &Expression,
+    ctx: &mut Context,
+    iterators: &[CountedIterator],
+    size: usize,
+) -> Option<AffineIndex> {
+    if let Some(position) = affine_index(expression, ctx, iterators) {
+        return Some(position);
+    }
+    let comptime = expression.comptime();
+    let context = comptime.expr_context;
+    if context.signed || context.width < 1 {
         return None;
     }
-    let result = match expression {
+    let result = affine_ring(expression, ctx, iterators, context.width)?;
+    let (min, max) = result.extent(ctx, iterators)?;
+    let modulus = 1i128.checked_shl(u32::try_from(context.width).ok()?)?;
+    let wraps_past_last = min
+        .checked_add(modulus)
+        .is_some_and(|wrapped| wrapped >= size as i128);
+    (-modulus <= min && max < modulus && wraps_past_last).then_some(result)
+}
+
+fn affine_ring(
+    expression: &Expression,
+    ctx: &mut Context,
+    iterators: &[CountedIterator],
+    width: usize,
+) -> Option<AffineIndex> {
+    let comptime = expression.comptime();
+    if comptime.expr_context.width != width {
+        return affine_index(expression, ctx, iterators);
+    }
+    if comptime.is_const {
+        return affine_constant(expression, ctx);
+    }
+    if comptime.r#type.kind.is_float() {
+        return None;
+    }
+    match expression {
         Expression::Term(factor) => match factor.as_ref() {
             Factor::Variable(id, index, select, _)
                 if index.indices.is_empty() && select.is_empty() =>
@@ -154,11 +357,13 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
             Factor::Value(_) => affine_constant(expression, ctx),
             _ => None,
         },
-        Expression::Unary(Op::Add, expression, _) => affine_index(expression, ctx),
-        Expression::Unary(Op::Sub, expression, _) => affine_index(expression, ctx)?.scaled(-1),
+        Expression::Unary(Op::Add, operand, _) => affine_ring(operand, ctx, iterators, width),
+        Expression::Unary(Op::Sub, operand, _) => {
+            affine_ring(operand, ctx, iterators, width)?.scaled(-1)
+        }
         Expression::Binary(left, Op::Add | Op::Sub, right, _) => {
-            let mut result = affine_index(left, ctx)?;
-            let right = affine_index(right, ctx)?;
+            let mut result = affine_ring(left, ctx, iterators, width)?;
+            let right = affine_ring(right, ctx, iterators, width)?;
             result.add_scaled(
                 &right,
                 if matches!(expression, Expression::Binary(_, Op::Sub, _, _)) {
@@ -170,8 +375,8 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
             Some(result)
         }
         Expression::Binary(left, Op::Mul, right, _) => {
-            let left = affine_index(left, ctx)?;
-            let right = affine_index(right, ctx)?;
+            let left = affine_ring(left, ctx, iterators, width)?;
+            let right = affine_ring(right, ctx, iterators, width)?;
             if left.terms.is_empty() {
                 right.scaled(left.constant)
             } else if right.terms.is_empty() {
@@ -180,19 +385,15 @@ fn affine_index(expression: &Expression, ctx: &mut Context) -> Option<AffineInde
                 None
             }
         }
-        Expression::Binary(left, Op::As, _, comptime) => {
-            let result = affine_index(left, ctx)?;
-            result.fits(comptime.r#type.total_width()?, comptime.r#type.signed, ctx)?;
-            Some(result)
-        }
+        Expression::Binary(left, Op::As, _, comptime) => affine_index(left, ctx, iterators)?
+            .representative(
+                comptime.r#type.total_width()?,
+                comptime.r#type.signed,
+                ctx,
+                iterators,
+            ),
         _ => None,
-    }?;
-    // Affine coordinates use integers. Every intermediate operation and
-    // operand coercion must preserve that interpretation before cancelling
-    // terms or comparing offsets; bit-vector overflow and casts need not.
-    let context = expression.comptime().expr_context;
-    result.fits(context.width, context.signed, ctx)?;
-    Some(result)
+    }
 }
 
 fn affine_bound(bound: &ForBound, ctx: &mut Context) -> Option<AffineIndex> {
@@ -201,7 +402,7 @@ fn affine_bound(bound: &ForBound, ctx: &mut Context) -> Option<AffineIndex> {
             terms: Vec::new(),
             constant: isize::try_from(*value).ok()?,
         }),
-        ForBound::Expression(expression) => affine_index(expression, ctx),
+        ForBound::Expression(expression) => affine_index(expression, ctx, &[]),
     }
 }
 
@@ -281,6 +482,155 @@ fn project_repeated_span(
 #[cfg(test)]
 use std::cell::Cell;
 
+mod children;
+mod footprint;
+mod iterator_use;
+mod last_writer;
+use footprint::{LoopAccesses, for_range_step};
+#[cfg(test)]
+pub(crate) use iterator_use::with_enumerated_loops;
+pub(super) use iterator_use::{LoopEvaluation, loop_evaluation};
+use last_writer::{Step, WriterId, WriterScope};
+
+/// A copy of `expression` and the entries of `cache` for its variable
+/// occurrences, calls and branches, keyed by the copy's.
+fn copied_with_cache(
+    expression: &Expression,
+    cache: &EvaluationCache,
+) -> (Rc<Expression>, EvaluationCache) {
+    fn rekey(
+        original: &Expression,
+        copy: &Expression,
+        cache: &EvaluationCache,
+        copied: &mut EvaluationCache,
+    ) {
+        if let Some(&branch) = cache.expression_branches.get(&std::ptr::from_ref(original)) {
+            copied
+                .expression_branches
+                .insert(std::ptr::from_ref(copy), branch);
+        }
+        if let (Expression::Term(original), Expression::Term(copy)) = (original, copy) {
+            let (original, copy) = (original.as_ref(), copy.as_ref());
+            if let Some(sampled) = cache
+                .variables
+                .as_ref()
+                .and_then(|variables| variables.get(&std::ptr::from_ref(original)))
+            {
+                copied
+                    .variables
+                    .get_or_insert_with(HashMap::default)
+                    .insert(std::ptr::from_ref(copy), Rc::clone(sampled));
+            }
+            if let (Factor::FunctionCall(original), Factor::FunctionCall(copy)) = (original, copy)
+                && let Some(result) = cache.calls.get(&std::ptr::from_ref(original))
+            {
+                copied
+                    .calls
+                    .insert(std::ptr::from_ref(copy), Rc::clone(result));
+            }
+        }
+        for (original, copy) in children::children(original)
+            .into_iter()
+            .zip(children::children(copy))
+        {
+            rekey(original, copy, cache, copied);
+        }
+    }
+    let copy = Rc::new(expression.clone());
+    let mut copied = EvaluationCache {
+        variables: Some(HashMap::default()),
+        ..EvaluationCache::default()
+    };
+    rekey(expression, &copy, cache, &mut copied);
+    (copy, copied)
+}
+
+/// A read of a key whose value may come from definitions.
+struct DefinedRead<'p> {
+    bits: PackedSpan,
+    low: usize,
+    requested_array: ArraySpan,
+    /// The destination bit, for a projection anchored at one.
+    anchored_bits: Option<PackedSpan>,
+    /// The elements read, in the flattened array.
+    elements: ArraySpan,
+    projection: &'p ProjectionContext,
+}
+
+/// What a read through definitions takes: the definitions evaluated again,
+/// the other versions it may be, and whether each version passed leads to a
+/// definition.
+struct DefinedSources {
+    /// What is taken on each path, the unconditional one first.
+    groups: Vec<(PathCondition, ExpressionSources, Vec<VersionId>)>,
+    reached: HashMap<(VersionId, PathCondition), bool>,
+}
+
+impl DefinedSources {
+    fn new() -> Self {
+        Self {
+            groups: vec![(
+                PathCondition::default(),
+                ExpressionSources::default(),
+                Vec::new(),
+            )],
+            reached: HashMap::default(),
+        }
+    }
+
+    fn group(
+        &mut self,
+        condition: &PathCondition,
+    ) -> &mut (PathCondition, ExpressionSources, Vec<VersionId>) {
+        let index = match self
+            .groups
+            .iter()
+            .position(|(other, ..)| other == condition)
+        {
+            Some(index) => index,
+            None => {
+                self.groups
+                    .push((condition.clone(), ExpressionSources::default(), Vec::new()));
+                self.groups.len() - 1
+            }
+        };
+        &mut self.groups[index]
+    }
+}
+
+/// The expression a whole key was last assigned inside a counted loop, with
+/// what it read then. Read at a destination that moves with the iterators,
+/// the key takes the expression again: a value kept in a scalar, a constant
+/// element or a field keeps the positions it was read from, as it would
+/// written in place.
+struct Definition {
+    /// The assigned expression, or the inputs of a call whose output it is.
+    expressions: Vec<Rc<Expression>>,
+    /// Whether each bit is the expression's bit, rather than a call output
+    /// that may depend on every bit of its inputs.
+    bitwise: bool,
+    /// The values each variable occurrence of the expressions read, and
+    /// their calls and branches, keyed by these copies.
+    cache: EvaluationCache,
+    /// What decided that the assignment ran or where it wrote.
+    controls: Vec<VersionId>,
+    /// The iterations that reached the assignment.
+    iterators: Vec<CountedIterator>,
+    /// The last iteration of each finished loop inside those, innermost
+    /// last, when the value is what that iteration left.
+    fixed: Vec<CountedIterator>,
+    /// The key and the version it was bound, which a loop left as it is
+    /// when it still holds it.
+    key: NodeKey,
+    bound: VersionId,
+    /// The element the expression was written to when it moves with the
+    /// iterators, in the flattened array.
+    destination: Option<AffineIndex>,
+    /// The bit of the variable that bit 0 of the expression was written to.
+    shift: isize,
+    context_width: usize,
+}
+
 #[derive(Clone)]
 struct CallResult {
     region_groups: Vec<(ArraySpan, Vec<(PackedSpan, VersionId)>)>,
@@ -296,7 +646,7 @@ struct SampledVariable {
 // Region-split writes query one RHS several times, but a function call in that
 // RHS is one procedural evaluation. `None` is an invocation barrier: temporary
 // call nodes in a cloned callee body must never enter the caller's cache.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct EvaluationCache {
     calls: HashMap<*const FunctionCall, Rc<CallResult>>,
     expression_branches: HashMap<*const Expression, BranchId>,
@@ -371,6 +721,12 @@ fn destination_packed_shape(destination: &AssignDestination) -> Cow<'_, [Option<
 struct SsaKey {
     node: NodeKey,
     call_frame: Option<usize>,
+    /// The table of one write in a counted loop nest, see `last_writer`,
+    /// with the scope of the nest: a nest evaluated again, as on each value
+    /// of a loop around it, keeps tables of its own. The write is the
+    /// ordinal of its first table, so that the key, which orders the SSA
+    /// merges, does not depend on the token identities of the source.
+    writer: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -453,6 +809,32 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 // Bound their materialization before cycle search gets a chance to run.
 const FUNCTION_SUMMARY_WORK: usize = 100_000;
 
+/// The operands of a chain of bitwise operators over `left` and `right`,
+/// left to right, without recursion.
+fn bitwise_operands<'e>(left: &'e Expression, right: &'e Expression) -> Vec<&'e Expression> {
+    let mut operands = Vec::new();
+    let mut pending = vec![right, left];
+    while let Some(expression) = pending.pop() {
+        match expression {
+            Expression::Binary(
+                left,
+                Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor,
+                right,
+                _,
+            ) => {
+                pending.push(right);
+                pending.push(left);
+            }
+            _ => operands.push(expression),
+        }
+    }
+    operands
+}
+
+/// The first identifier of the tables that are circuit nodes, see
+/// `ProcedureAnalysis::table_node`.
+pub(super) const TABLE_IDS: u32 = u32::MAX / 4;
+
 // Ordinary procedures can import many individually bounded summaries. Limit
 // their combined expansion, including repeated copies of runtime-loop
 // transfers, independently of the directly written SSA graph.
@@ -499,6 +881,9 @@ pub(super) struct FunctionSummaries<'a> {
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
+    /// Functions whose loops keep tables of instances, which only a
+    /// procedure's circuit relates: each call is evaluated in its caller.
+    inlined: HashSet<FunctionSummaryKey>,
     contexts: Vec<ProcedureContext>,
     module_scope_ids: Rc<HashSet<VarId>>,
 }
@@ -888,6 +1273,7 @@ impl<'a> FunctionSummaries<'a> {
             module,
             bit_part,
             summaries: HashMap::default(),
+            inlined: HashSet::default(),
             // Most modules never need a function summary. Allocate the
             // baseline scratch context lazily so ordinary declarations keep
             // just the reusable top-level procedure context.
@@ -906,6 +1292,9 @@ impl<'a> FunctionSummaries<'a> {
                 FunctionSummaryLookup::Recursive,
                 FunctionSummaryLookup::Ready,
             );
+        }
+        if self.inlined.contains(&key) {
+            return FunctionSummaryLookup::Missing;
         }
         self.summaries.insert(key.clone(), None);
         let mut context = self
@@ -952,6 +1341,7 @@ thread_local! {
     static VISIBLE_SOURCE_PROBES: Cell<usize> = const { Cell::new(0) };
     static TRACED_PROCEDURE_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
     static WRITE_FOOTPRINT_STATEMENT_VISITS: Cell<usize> = const { Cell::new(0) };
+    static STATEMENT_EVALUATIONS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -964,6 +1354,7 @@ pub(crate) fn reset_function_evaluation_count() {
     FUNCTION_SUMMARY_GRAPH_EDGES.set(0);
     MODULE_CONTEXT_ENTRIES.set(0);
     WRITE_FOOTPRINT_STATEMENT_VISITS.set(0);
+    STATEMENT_EVALUATIONS.set(0);
 }
 
 #[cfg(test)]
@@ -999,6 +1390,11 @@ pub(crate) fn function_summary_graph_edge_count() -> usize {
 #[cfg(test)]
 pub(crate) fn write_footprint_statement_visits() -> usize {
     WRITE_FOOTPRINT_STATEMENT_VISITS.get()
+}
+
+#[cfg(test)]
+pub(crate) fn statement_evaluation_count() -> usize {
+    STATEMENT_EVALUATIONS.get()
 }
 
 #[cfg(test)]
@@ -1045,6 +1441,9 @@ pub(super) struct ProcedureResult {
     pub(super) graph: DependencyDag<NodeKey>,
     pub(super) destinations: Vec<(NodeKey, Option<usize>)>,
     pub(super) status: AnalysisStatus,
+    /// The tables that are circuit nodes of their own, each with its
+    /// positions: written by the procedure and read by it.
+    pub(super) tables: Vec<(NodeKey, PositionDomain, Vec<super::graph::InstanceArm>)>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -1075,6 +1474,18 @@ struct ProjectionContext {
     destination_index: Option<SampledAffineIndex>,
     destination_array: Option<ArraySpan>,
     array_shape: Option<Shape>,
+    /// The destination element is selected by a symbolic affine index, and
+    /// array coordinates of this evaluation are absolute destination
+    /// positions. A read whose affine index has the same symbolic terms keeps
+    /// its constant displacement; every other source reaches each candidate
+    /// destination element.
+    anchor: bool,
+    /// The destination is one bit selected by a symbolic affine position,
+    /// and packed coordinates of this evaluation are absolute destination
+    /// bits. A one-bit read at an affine position with the same symbolic
+    /// terms keeps its constant displacement; every other source reaches the
+    /// destination bit as a whole.
+    packed_anchor: Option<SampledAffineIndex>,
 }
 
 impl ExpressionSources {
@@ -1115,7 +1526,7 @@ impl ExpressionSources {
 
     fn forget_array_position(&mut self) {
         for (_, relation) in &mut self.sources {
-            relation.array = None;
+            relation.array = Link::from_offset(None);
         }
     }
 
@@ -1210,6 +1621,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             graph,
             destinations,
             status: inner.status,
+            tables: Vec::new(),
         }
     }
 
@@ -1260,6 +1672,192 @@ struct ProcedureAnalysis<'a, 's> {
     active_assignment: Option<TokenRange>,
     repeatable: bool,
     shared_call_branches: HashMap<SummaryInvocationKey, Rc<HashMap<BranchId, BranchId>>>,
+    /// Iterators of the enclosing statically counted loops with their value
+    /// extents. Their bodies are evaluated once with the iterator symbolic.
+    counted_iterators: Vec<CountedIterator>,
+    /// Control versions whose array coordinates are positions of an affine
+    /// iterator frame rather than of an ordinary value.
+    control_frames: HashMap<VersionId, SampledAffineIndex>,
+    /// Whether each called function specialization depends only on its
+    /// inputs. Anchored expressions ask this once per occurrence.
+    /// Whether each function reads only its inputs (`true` in the key) or
+    /// writes nothing but its own variables (`false`).
+    pure_functions: HashMap<(VarId, Option<Vec<usize>>, bool), bool>,
+    /// The writes of the outermost counted loop being evaluated, when its
+    /// reads take their last writers.
+    writer_scope: Option<Rc<WriterScope>>,
+    /// The places of the statements being evaluated in that loop.
+    statement_places: Vec<Vec<Step>>,
+    /// The writes of each writer to each key's table that hold the value
+    /// at element positions rather than at instances.
+    imprecise_tables: HashMap<(NodeKey, WriterId), usize>,
+    /// What each table held before the latest write's value at element
+    /// positions, which the write's value at instances replaces.
+    held_tables: HashMap<(NodeKey, WriterId), VersionId>,
+    /// Whether a loop kept tables of instances.
+    instance_tables: bool,
+    /// Whether a function is summarized, which stops at such a loop.
+    summarizing: bool,
+    /// Whether tables are nodes of the circuit: each read takes the table
+    /// the loops leave, which the procedure writes, so that the circuit
+    /// relates its instances to one another instead of the loop transfer.
+    external_tables: bool,
+    /// The tables that are circuit nodes, each with its positions and the
+    /// arms its writes take on their instances.
+    tables: Vec<(SsaKey, PositionDomain, Vec<super::graph::InstanceArm>)>,
+    table_indices: HashMap<SsaKey, usize>,
+    /// The branches in the scopes of tables, by scope and place, each
+    /// with its identity among the procedure's.
+    instance_branches: HashMap<(usize, Vec<Step>), usize>,
+    /// The scopes of tables opened so far.
+    writer_scopes: usize,
+    /// The branches made inside loops.
+    iteration_branches: HashSet<BranchId>,
+    /// The write of each table ordinal, and the ordinal of each write.
+    writer_ids: Vec<WriterId>,
+    writer_ordinals: HashMap<WriterId, usize>,
+    /// The statement each statement of a specialized iteration body being
+    /// evaluated comes from.
+    statement_origins: HashMap<*const Statement, *const Statement>,
+    /// The runtime loops being evaluated in the scope of the last writers.
+    runtime_loop_depth: usize,
+    /// The definition of each version bound by a whole-key assignment, and
+    /// the versions in the order they were recorded.
+    definitions: HashMap<VersionId, Rc<Definition>>,
+    definition_log: Vec<VersionId>,
+    /// The definitions being taken again, which a read inside one of them
+    /// takes as the version it is.
+    redefining: HashSet<VersionId>,
+    /// The destination being written by the current assignment.
+    current_writer: Option<WriterId>,
+    /// A statement being evaluated once per set of iterations.
+    split_statement: Option<*const Statement>,
+}
+
+/// Accesses of a counted loop body, per iteration and over all iterations.
+struct CountedCoverage {
+    per_iteration: LoopAccesses,
+    closed: LoopAccesses,
+    iterator: CountedIterator,
+    step: isize,
+}
+
+/// Which side a branch condition takes: always one, each on its own
+/// iterations, or either.
+enum Decision {
+    Constant(bool),
+    Split(IteratorSplit),
+    Unknown,
+}
+
+/// One side of a two-way branch: a block, or an assignment of one operand of
+/// a ternary.
+#[derive(Clone, Copy)]
+enum Side<'s> {
+    Block(&'s [Statement]),
+    Assign(&'s AssignStatement, &'s Expression),
+}
+
+/// Iterations of the counted iterator at `position` on which a condition
+/// holds and fails, each as disjoint progressions; empty when no iteration
+/// takes that side.
+struct IteratorSplit {
+    position: usize,
+    holds: Vec<CountedIterator>,
+    fails: Vec<CountedIterator>,
+}
+
+/// The values a counted iterator takes: those in `min..=max` that are
+/// congruent to `residue` modulo `modulus`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CountedIterator {
+    id: VarId,
+    min: isize,
+    max: isize,
+    modulus: isize,
+    residue: isize,
+}
+
+impl CountedIterator {
+    fn new(id: VarId, min: isize, max: isize) -> Self {
+        Self {
+            id,
+            min,
+            max,
+            modulus: 1,
+            residue: 0,
+        }
+    }
+
+    /// The values in `min..=max` congruent to `residue` modulo `modulus` as
+    /// well, `None` when there are none. `min` and `max` are values.
+    fn confined(
+        self,
+        min: isize,
+        max: isize,
+        modulus: isize,
+        residue: isize,
+    ) -> Result<Option<Self>, Overflow> {
+        let Some((residue, modulus)) = checked(intersect_classes(
+            (self.residue, self.modulus),
+            (residue, modulus),
+        ))?
+        else {
+            return Ok(None);
+        };
+        // Within the iterator's own values, so a request beyond them, such
+        // as `i < isize::MIN`, is empty before any arithmetic.
+        let min = min.max(self.min);
+        let max = max.min(self.max);
+        if min > max {
+            return Ok(None);
+        }
+        // The first and last values of the class within the bounds, taken
+        // wide: a value of the class past `isize` lies beyond the bounds,
+        // so the class is empty there rather than overflowing.
+        let (wide_min, wide_max, residue_wide, modulus_wide) =
+            (min as i128, max as i128, residue as i128, modulus as i128);
+        let first = wide_min + (residue_wide - wide_min).rem_euclid(modulus_wide);
+        let last = wide_max - (wide_max - residue_wide).rem_euclid(modulus_wide);
+        if first > last {
+            return Ok(None);
+        }
+        // Both lie within the bounds, so within `isize`.
+        let (min, max) = (first as isize, last as isize);
+        Ok(Some(Self {
+            min,
+            max,
+            modulus,
+            residue,
+            ..self
+        }))
+    }
+
+    /// The number of values, `None` when it does not fit in `isize`.
+    fn count(&self) -> Option<isize> {
+        Some(self.max.checked_sub(self.min)? / self.modulus + 1)
+    }
+
+    /// The values in `min..=max`, `None` when there are none.
+    fn within(self, min: isize, max: isize) -> Result<Option<Self>, Overflow> {
+        self.confined(min, max, 1, 0)
+    }
+
+    /// The iterator of a counted loop over `iterations`. An additive step
+    /// takes every `|step|`-th value from the first one. `None` when its
+    /// values do not fit in `isize`.
+    fn of(statement: &ForStatement, iterations: CountedIterations) -> Option<Self> {
+        let min = isize::try_from(iterations.min).ok()?;
+        let max = isize::try_from(iterations.max).ok()?;
+        let mut iterator = Self::new(statement.var_id, min, max);
+        if let Some(modulus) = for_range_step(&statement.range).and_then(isize::checked_abs)
+            && modulus > 1
+        {
+            iterator.modulus = modulus;
+            iterator.residue = min.rem_euclid(modulus);
+        }
+        Some(iterator)
+    }
 }
 
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
@@ -1302,6 +1900,30 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             active_assignment: None,
             repeatable: true,
             shared_call_branches: HashMap::default(),
+            counted_iterators: Vec::new(),
+            control_frames: HashMap::default(),
+            pure_functions: HashMap::default(),
+            writer_scope: None,
+            statement_places: Vec::new(),
+            imprecise_tables: HashMap::default(),
+            held_tables: HashMap::default(),
+            external_tables: false,
+            instance_tables: false,
+            summarizing: false,
+            tables: Vec::new(),
+            table_indices: HashMap::default(),
+            instance_branches: HashMap::default(),
+            writer_scopes: 0,
+            iteration_branches: HashSet::default(),
+            writer_ids: Vec::new(),
+            writer_ordinals: HashMap::default(),
+            statement_origins: HashMap::default(),
+            runtime_loop_depth: 0,
+            definitions: HashMap::default(),
+            definition_log: Vec::new(),
+            redefining: HashSet::default(),
+            current_writer: None,
+            split_statement: None,
         }
     }
 
@@ -1317,6 +1939,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut this = Self::from_context(bit_part, summaries.module, ctx, module_scope_ids);
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
+        this.external_tables = true;
         #[cfg(test)]
         if this.tracing {
             TRACED_PROCEDURE_EVALUATIONS.set(TRACED_PROCEDURE_EVALUATIONS.get() + 1);
@@ -1325,10 +1948,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         this.branch_namespace = branch_namespace;
         this.eval_block(statements, &[]);
         let (graph, destinations) = this.dependency_graph();
+        let tables = (0..this.tables.len())
+            .filter_map(|index| {
+                let (_, domain, arms) = &this.tables[index];
+                Some((this.table_node(index)?, *domain, arms.clone()))
+            })
+            .collect();
         let result = ProcedureResult {
             graph,
             destinations,
             status: this.status,
+            tables,
         };
         this.ctx.rollback_analysis_transaction();
         context.restore(this.ctx);
@@ -1381,6 +2011,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut this = Self::from_context(bit_part, module, ctx, module_scope_ids);
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
+        this.summarizing = true;
         this.call_caches.push(None);
         this.receiver_indices.push(
             (!function.path.path.0.is_empty())
@@ -1388,6 +2019,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .flatten(),
         );
         this.eval_function_body(&body.statements, body.ret, &[]);
+        if this.instance_tables {
+            if let Some(summaries) = this.summaries.as_deref_mut() {
+                summaries.inlined.insert(FunctionSummaryKey {
+                    id,
+                    index: index.map(<[usize]>::to_vec),
+                });
+            }
+            this.ctx.rollback_analysis_transaction();
+            context.restore(this.ctx);
+            return None;
+        }
         this.receiver_indices.pop();
         this.call_caches.pop();
 
@@ -1509,7 +2151,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .filter(|key| self.is_module_scope_key(*key))
             .collect::<Vec<_>>();
         destinations.sort_unstable();
-        let roots = destinations
+        let mut roots = destinations
             .iter()
             .map(|destination| {
                 let version = self.read_key(*destination);
@@ -1522,6 +2164,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 })
             })
             .collect::<Vec<_>>();
+        // Each table holds what the loops wrote at its instances.
+        for index in 0..self.tables.len() {
+            let (key, domain, _) = self.tables[index].clone();
+            let Some(node) = self.table_node(index) else {
+                continue;
+            };
+            let value = self.ssa.read(key);
+            destinations.push(node);
+            roots.push(self.ssa.root_in_domain(value, domain));
+        }
         let graph = self.dependency_dag_for_nodes(&roots, usize::MAX);
         let destinations = destinations
             .into_iter()
@@ -1542,11 +2194,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Function)
             .then(|| self.call_frames.last().copied())
             .flatten();
-        SsaKey { node, call_frame }
+        SsaKey {
+            node,
+            call_frame,
+            writer: None,
+        }
     }
 
     fn read_key(&mut self, node: NodeKey) -> VersionId {
         self.ssa.read(self.ssa_key(node))
+    }
+
+    /// The value of `node` from its last writers, when they are known.
+    fn read_source_key(
+        &mut self,
+        node: NodeKey,
+        read: Option<&mut last_writer::LastWriterRead>,
+    ) -> VersionId {
+        match read.and_then(|read| self.key_last_writers(read, node)) {
+            Some(sources) => self.last_writer_value(node, &sources),
+            None => self.read_key(node),
+        }
     }
 
     fn bind_key(&mut self, node: NodeKey, version: VersionId) {
@@ -1584,11 +2252,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     DependencyDagNode::External(SsaKey {
                         node,
                         call_frame: None,
+                        writer: None,
                     }) => DependencyDagNode::External(node),
-                    DependencyDagNode::External(SsaKey {
-                        call_frame: Some(_),
-                        ..
-                    }) => unreachable!("call-frame storage is not a visible DAG source"),
+                    DependencyDagNode::External(key) => DependencyDagNode::External(
+                        self.table_indices
+                            .get(&key)
+                            .and_then(|&index| self.table_node(index))
+                            .expect("call-frame storage is not a visible DAG source"),
+                    ),
                     DependencyDagNode::Internal => DependencyDagNode::Internal,
                     DependencyDagNode::Replicated { replication } => {
                         DependencyDagNode::Replicated { replication }
@@ -1607,7 +2278,50 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // module partition for every declaration makes sparse writes quadratic.
         #[cfg(test)]
         VISIBLE_SOURCE_PROBES.set(VISIBLE_SOURCE_PROBES.get() + 1);
+        if key.writer.is_some() {
+            return self.table_indices.contains_key(key);
+        }
         key.call_frame.is_none() && self.is_module_scope_key(key.node)
+    }
+
+    /// The circuit node of the table `index`.
+    fn table_node(&self, index: usize) -> Option<NodeKey> {
+        let (_, domain, _) = self.tables.get(index)?;
+        let id = u32::try_from(index).ok()?.checked_add(TABLE_IDS)?;
+        Some((
+            VarId::from_raw(id),
+            ArraySpan {
+                start: domain.array_start,
+                length: domain.array_length,
+            },
+            0,
+        ))
+    }
+
+    /// Make the table `key` a circuit node over `domain`.
+    pub(super) fn register_table(
+        &mut self,
+        key: SsaKey,
+        domain: PositionDomain,
+        arms: Vec<super::graph::InstanceArm>,
+    ) {
+        if !self.table_indices.contains_key(&key) {
+            self.table_indices.insert(key, self.tables.len());
+            self.tables.push((key, domain, arms));
+        }
+    }
+
+    /// The identity of the branch at `place` in the current scope of tables.
+    pub(super) fn instance_branch(&mut self, place: &[Step]) -> super::graph::InstanceBranch {
+        let count = self.instance_branches.len();
+        let index = *self
+            .instance_branches
+            .entry((self.writer_scopes, place.to_vec()))
+            .or_insert(count);
+        super::graph::InstanceBranch {
+            namespace: self.branch_namespace,
+            index,
+        }
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
@@ -1963,40 +2677,687 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn flattened_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<AffineIndex> {
+        self.affine_elements(id, index)
+            .map(|elements| elements.flat)
+    }
+
+    /// The coordinates of an access to every element dimension, each affine
+    /// in the counted iterators, and the position they give in the
+    /// flattened array.
+    fn affine_elements(&mut self, id: VarId, index: &VarIndex) -> Option<AffineElements> {
         let index = self.receiver_index(id, index);
         let variable = self.ctx.variables.get(&id)?;
         if index.is_range() || index.dimension() != variable.r#type.array.dims() {
             return None;
         }
         let dimensions = variable.r#type.array.clone();
-        let mut result = AffineIndex::default();
+        let mut elements = Vec::new();
+        let mut flat = AffineIndex::default();
         let mut stride = 1isize;
         // Validate the original bit-vector expressions before flattening.
         // Layout strides are integer coordinate arithmetic, not synthetic
         // expressions with missing width/signedness metadata.
         for (expression, dimension) in index.indices.iter().zip(dimensions.iter()).rev() {
-            let coordinate = affine_index(expression, &mut self.ctx)?;
-            result.add_scaled(&coordinate, stride)?;
-            stride = stride.checked_mul(isize::try_from((*dimension)?).ok()?)?;
+            let dimension = (*dimension)?;
+            let coordinate = affine_position(
+                expression,
+                &mut self.ctx,
+                &self.counted_iterators,
+                dimension,
+            )?;
+            flat.add_scaled(&coordinate, stride)?;
+            stride = stride.checked_mul(isize::try_from(dimension).ok()?)?;
+            elements.push(coordinate);
         }
-        Some(result)
+        elements.reverse();
+        Some(AffineElements { elements, flat })
+    }
+
+    /// Lowest bit and width of a packed select whose coordinates are affine.
+    /// This mirrors `VarSelect::eval_value`, so a struct member rebased to
+    /// base bits and the equivalent bit select have the same position.
+    fn packed_affine_select(
+        &mut self,
+        id: VarId,
+        select: &VarSelect,
+    ) -> Option<(AffineIndex, usize)> {
+        let variable = self.ctx.variables.get(&id)?;
+        if select.is_empty() {
+            return None;
+        }
+        let element_width = if variable.r#type.is_struct_union() {
+            1
+        } else {
+            variable.r#type.kind.width()?
+        };
+        let dimensions = variable.r#type.width().clone();
+        let dimension = select.dimension();
+        // The selected dimension, or the element bits of a value without
+        // packed dimensions.
+        let size = if dimensions.dims() < dimension {
+            element_width
+        } else {
+            dimensions.iter().nth(dimension - 1).copied().flatten()?
+        };
+        let (element, count) = |position: &Expression,
+                                ctx: &mut Context,
+                                iterators: &[CountedIterator]|
+         -> Option<(AffineIndex, usize)> {
+            let x = affine_position(position, ctx, iterators, size)?;
+            let constant =
+                |expression: &Expression, ctx: &mut Context| expression.eval_value(ctx)?.to_usize();
+            Some(match &select.1 {
+                None => (x, 1),
+                Some((VarSelectOp::PlusColon, count)) => (x, constant(count, ctx)?),
+                Some((VarSelectOp::MinusColon, count)) => {
+                    let count = constant(count, ctx)?;
+                    let mut element = x;
+                    element.constant = element
+                        .constant
+                        .checked_sub(isize::try_from(count).ok()?)?
+                        .checked_add(1)?;
+                    (element, count)
+                }
+                Some((VarSelectOp::Colon, end)) => {
+                    let y = affine_position(end, ctx, iterators, size)?;
+                    if x.terms != y.terms {
+                        return None;
+                    }
+                    let count = x.constant.checked_sub(y.constant)?.checked_add(1)?;
+                    (y, usize::try_from(count).ok()?)
+                }
+                Some((VarSelectOp::Step, count)) => {
+                    let count = constant(count, ctx)?;
+                    (x.scaled(isize::try_from(count).ok()?)?, count)
+                }
+            })
+        }(
+            &select.0[dimension - 1],
+            &mut self.ctx,
+            &self.counted_iterators,
+        )?;
+        if dimensions.dims() < dimension {
+            // A bit select of a value without packed dimensions.
+            return (dimension == 1 && dimensions.dims() == 0 && count != 0)
+                .then_some((element, count));
+        }
+        let skip = dimensions.dims() - dimension;
+        let mut low = AffineIndex::default();
+        let mut width = 0usize;
+        let mut base = element_width;
+        for (i, size) in dimensions.iter().rev().enumerate() {
+            let size = (*size)?;
+            if i == skip {
+                low.add_scaled(&element, isize::try_from(base).ok()?)?;
+                width = count.checked_mul(base)?;
+            } else if i > skip {
+                let position = &select.0[dimension - (i - skip) - 1];
+                let x = affine_position(position, &mut self.ctx, &self.counted_iterators, size)?;
+                low.add_scaled(&x, isize::try_from(base).ok()?)?;
+            }
+            base = base.checked_mul(size)?;
+        }
+        (width != 0).then_some((low, width))
+    }
+
+    fn sample_packed_select(
+        &mut self,
+        id: VarId,
+        select: &VarSelect,
+    ) -> Option<(SampledAffineIndex, usize)> {
+        let (index, width) = self.packed_affine_select(id, select)?;
+        let mut versions = Vec::new();
+        for &(id, _) in &index.terms {
+            let read = self.read_variable(id, &VarIndex::default(), &VarSelect::default(), None);
+            versions.push((id, read));
+        }
+        Some((SampledAffineIndex { index, versions }, width))
+    }
+
+    /// Inclusive extent of an affine position over the counted iterators.
+    /// The iterators being evaluated, outermost first.
+    fn iterator_ids(&self) -> Vec<VarId> {
+        self.counted_iterators
+            .iter()
+            .map(|iterator| iterator.id)
+            .collect()
+    }
+
+    fn affine_hull(&self, index: &AffineIndex) -> Option<(isize, isize)> {
+        let (min, max) = index.extent_with(|id| {
+            let iterator = self.counted_iterators.iter().find(|x| x.id == id)?;
+            Some((iterator.min as i128, iterator.max as i128))
+        })?;
+        Some((isize::try_from(min).ok()?, isize::try_from(max).ok()?))
+    }
+
+    /// Nonnegative positions an affine index takes over the counted
+    /// iterators, as progressions: each span with the step between its
+    /// positions, starting at its first position. A progression is one entry
+    /// however many positions it has.
+    fn affine_progressions(&mut self, index: &AffineIndex) -> Option<Vec<(ArraySpan, usize)>> {
+        let mut progressions = Vec::new();
+        for assignment in self.index_progressions(index)? {
+            let mut progression = AffineIndex {
+                terms: Vec::new(),
+                constant: index.constant,
+            };
+            for &(id, coefficient) in &index.terms {
+                match assignment.iter().find(|(fixed, _)| *fixed == id) {
+                    Some(&(_, value)) => {
+                        progression.constant = progression
+                            .constant
+                            .checked_add(coefficient.checked_mul(value)?)?;
+                    }
+                    None => progression.terms.push((id, coefficient)),
+                }
+            }
+            let step = self
+                .iterator_terms(&progression)
+                .and_then(|terms| terms.first().map(|&(_, step, _)| step))
+                .unwrap_or(1)
+                .max(1);
+            let (first, last) = self.affine_hull(&progression)?;
+            if last < 0 {
+                continue;
+            }
+            // The first nonnegative position of the progression.
+            let first = if first < 0 {
+                first_in_class(first, step, 0)?
+            } else {
+                first
+            };
+            if first > last {
+                continue;
+            }
+            let start = usize::try_from(first).ok()?;
+            let length = usize::try_from(last - first).ok()?.checked_add(1)?;
+            progressions.push((ArraySpan { start, length }, usize::try_from(step).ok()?));
+        }
+        Some(progressions)
+    }
+
+    /// `value` at the positions of `region` that are `step` apart from its
+    /// start. A stride keeps one relation, restricted to its residue, rather
+    /// than one projection per position. Each is charged to the procedure's
+    /// work; `None` means it is exhausted.
+    fn progression_value(
+        &mut self,
+        value: VersionId,
+        domain: PositionDomain,
+        axis: Axis,
+        step: usize,
+    ) -> Option<VersionId> {
+        if !self.reserve_guard_work(1) {
+            return None;
+        }
+        let value = if step > 1 {
+            let modulus = isize::try_from(step).ok()?;
+            let start = match axis {
+                Axis::Array => domain.array_start,
+                Axis::Packed => domain.packed_start,
+            };
+            let residue = isize::try_from(start).ok()?.rem_euclid(modulus);
+            let mut relation = PositionRelation::identity();
+            *relation.link_mut(axis) = Link::Map(super::position::Map {
+                crossed: false,
+                modulus,
+                residue,
+                base: residue,
+                step: modulus,
+            });
+            self.ssa.related_definition(vec![(value, relation)])
+        } else {
+            value
+        };
+        Some(self.ssa.projected(value, domain))
+    }
+
+    /// `version` written to `key` only at the positions of `progressions`
+    /// on `axis`, each `(start, length, step)`. `None` when no position lies
+    /// in the key, so the key keeps its value. A progression that cannot be
+    /// expressed leaves the version whole.
+    fn confine_to_progressions(
+        &mut self,
+        version: VersionId,
+        key: NodeKey,
+        progressions: &[(usize, usize, usize)],
+        axis: Axis,
+    ) -> Option<VersionId> {
+        let packed = self.key_span(key)?;
+        let (key_start, key_length) = match axis {
+            Axis::Array => (key.1.start, key.1.length),
+            Axis::Packed => (packed.start, packed.length),
+        };
+        // The positions of each progression within the key, from its first
+        // position there.
+        let pieces = progressions
+            .iter()
+            .filter_map(|&(start, length, step)| {
+                let end = (start + length).min(key_start + key_length);
+                // The first position of the progression from the key's start.
+                let first = start
+                    + start
+                        .max(key_start)
+                        .checked_sub(start)?
+                        .checked_next_multiple_of(step)?;
+                (first < end).then(|| (first, end - first, step))
+            })
+            .collect::<Vec<_>>();
+        if pieces.is_empty() {
+            return None;
+        }
+        if pieces == [(key_start, key_length, 1)] {
+            return Some(version);
+        }
+        let alternatives = pieces
+            .into_iter()
+            .map(|(start, length, step)| {
+                let domain = match axis {
+                    Axis::Array => position_domain(ArraySpan { start, length }, packed),
+                    Axis::Packed => position_domain(key.1, PackedSpan { start, length }),
+                };
+                self.progression_value(version, domain, axis, step)
+            })
+            .collect::<Option<Vec<_>>>();
+        Some(match alternatives {
+            Some(alternatives) => self.ssa.phi(alternatives),
+            None => version,
+        })
+    }
+
+    fn counted_iterator(&self, id: VarId) -> Option<CountedIterator> {
+        self.counted_iterators
+            .iter()
+            .rev()
+            .find(|iterator| iterator.id == id)
+            .copied()
+    }
+
+    /// For an index over counted iterators only, each term with the step
+    /// between the positions it takes and the number of its values.
+    fn iterator_terms(&self, index: &AffineIndex) -> Option<Vec<(VarId, isize, isize)>> {
+        let mut terms = index
+            .terms
+            .iter()
+            .map(|&(id, coefficient)| {
+                let iterator = self.counted_iterator(id)?;
+                let step = coefficient.checked_abs()?.checked_mul(iterator.modulus)?;
+                Some((id, step, iterator.count()?))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        terms.sort_unstable_by_key(|&(_, step, _)| step);
+        Some(terms)
+    }
+
+    /// Whether the positions of an index over counted iterators form one
+    /// progression: each step is the span of the finer terms below it.
+    fn forms_one_progression(terms: &[(VarId, isize, isize)]) -> bool {
+        terms
+            .windows(2)
+            .all(|pair| pair[0].1.checked_mul(pair[0].2) == Some(pair[1].1))
+    }
+
+    /// Whether every position from the first to the last that an index over
+    /// counted iterators addresses is one it takes.
+    fn index_has_gaps(&self, index: &AffineIndex) -> bool {
+        self.iterator_terms(index).is_some_and(|terms| {
+            !Self::forms_one_progression(&terms) || terms.first().is_some_and(|term| term.1 > 1)
+        })
+    }
+
+    /// The iterator values that divide the positions of `index` into
+    /// progressions: every counted iterator but the one with the most values
+    /// is fixed to each of its values in turn, unless the positions already
+    /// form one progression. One empty assignment means no division. Each
+    /// assignment is charged to the procedure's work, so `None` means the
+    /// division would exceed it and the analysis stops.
+    fn index_progressions(&mut self, index: &AffineIndex) -> Option<Vec<Vec<(VarId, isize)>>> {
+        let (fixed, count) = self.progression_division(index);
+        if count != Some(0) && !count.is_some_and(|count| self.reserve_guard_work(count)) {
+            self.exhaust_work();
+            return None;
+        }
+        Some(iterator_assignments(fixed))
+    }
+
+    /// The counted iterators `index_progressions` fixes and the number of
+    /// assignments of their values, `None` when it does not fit in `usize`.
+    /// No iterators and zero assignments mean no division.
+    fn progression_division(&self, index: &AffineIndex) -> (Vec<CountedIterator>, Option<usize>) {
+        let Some(terms) = self.iterator_terms(index) else {
+            return (Vec::new(), Some(0));
+        };
+        if Self::forms_one_progression(&terms) {
+            return (Vec::new(), Some(0));
+        }
+        let kept = terms
+            .iter()
+            .max_by_key(|&&(_, _, count)| count)
+            .map(|&(id, _, _)| id);
+        let fixed = terms
+            .iter()
+            .filter(|term| Some(term.0) != kept)
+            .filter_map(|&(id, _, _)| self.counted_iterator(id))
+            .collect::<Vec<_>>();
+        let count = fixed.iter().try_fold(1usize, |count, iterator| {
+            count.checked_mul(usize::try_from(iterator.count()?).ok()?)
+        });
+        (fixed, count)
+    }
+
+    /// The links from a source coordinate to a destination coordinate, one
+    /// per progression of the source positions, each with its source index.
+    fn affine_links(
+        &mut self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+    ) -> Option<Vec<(Link, SampledAffineIndex)>> {
+        // An iterator in only one of the coordinates relates no position of
+        // the other, so each of its values has its own link.
+        let unshared = self
+            .counted_iterators
+            .iter()
+            .filter(|iterator| {
+                let mentions =
+                    |index: &AffineIndex| index.terms.iter().any(|(id, _)| *id == iterator.id);
+                mentions(&destination.index) != mentions(&source.index)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let mut assignments = Vec::new();
+        let divisions = self.index_progressions(&source.index)?;
+        let unshared = unshared
+            .into_iter()
+            .filter(|iterator| {
+                !divisions
+                    .iter()
+                    .flatten()
+                    .any(|(fixed, _)| *fixed == iterator.id)
+            })
+            .collect::<Vec<_>>();
+        let count = unshared
+            .iter()
+            .try_fold(divisions.len(), |count, iterator| {
+                count.checked_mul(usize::try_from(iterator.count()?).ok()?)
+            });
+        if !unshared.is_empty() && !count.is_some_and(|count| self.reserve_guard_work(count)) {
+            self.exhaust_work();
+            return None;
+        }
+        let values = iterator_assignments(unshared);
+        for division in divisions {
+            for value in &values {
+                let mut assignment = division.clone();
+                assignment.extend_from_slice(value);
+                assignments.push(assignment);
+            }
+        }
+        // An assignment whose coordinates are not related by one map takes
+        // each value of an iterator they share in turn, the one with the
+        // fewest values first.
+        let mut links = Vec::new();
+        while let Some(assignment) = assignments.pop() {
+            if let Some(link) = self.assigned_link(destination, source, crossed, &assignment) {
+                links.push(link);
+                continue;
+            }
+            let assigned = |id: VarId| assignment.iter().any(|(fixed, _)| *fixed == id);
+            let iterator = self
+                .counted_iterators
+                .iter()
+                .filter(|iterator| {
+                    iterator.min < iterator.max
+                        && !assigned(iterator.id)
+                        && destination
+                            .index
+                            .terms
+                            .iter()
+                            .any(|(id, _)| *id == iterator.id)
+                        && source.index.terms.iter().any(|(id, _)| *id == iterator.id)
+                })
+                .min_by_key(|iterator| iterator.count())
+                .copied()?;
+            let count = usize::try_from(iterator.count()?).ok()?;
+            if !self.reserve_guard_work(count) {
+                self.exhaust_work();
+                return None;
+            }
+            for value in iterator_assignments(vec![iterator]) {
+                let mut assignment = assignment.clone();
+                assignment.extend(value);
+                assignments.push(assignment);
+            }
+        }
+        Some(links)
+    }
+
+    /// The link of `affine_links` with the iterators of `assignment` fixed
+    /// to their values.
+    fn assigned_link(
+        &self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+        assignment: &[(VarId, isize)],
+    ) -> Option<(Link, SampledAffineIndex)> {
+        let fixed = |sampled: &SampledAffineIndex| {
+            let mut index = AffineIndex {
+                terms: Vec::new(),
+                constant: sampled.index.constant,
+            };
+            for &(id, coefficient) in &sampled.index.terms {
+                match assignment.iter().find(|(fixed, _)| *fixed == id) {
+                    Some(&(_, value)) => {
+                        index.constant = index
+                            .constant
+                            .checked_add(coefficient.checked_mul(value)?)?;
+                    }
+                    None => index.terms.push((id, coefficient)),
+                }
+            }
+            // A variable fixed to a value no longer selects by what
+            // it read.
+            let versions = sampled
+                .versions
+                .iter()
+                .filter(|(id, _)| index.terms.iter().any(|(term, _)| term == id))
+                .cloned()
+                .collect();
+            Some(SampledAffineIndex { index, versions })
+        };
+        let destination = fixed(destination)?;
+        let source = fixed(source)?;
+        let link = self.affine_link(&destination, &source, crossed)?;
+        Some((link, source))
+    }
+
+    /// The link from a source coordinate to a destination coordinate when both
+    /// are affine in the same symbolic values, restricted to the source
+    /// coordinates that the iterator values reach.
+    fn affine_link(
+        &self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+    ) -> Option<Link> {
+        // An iterator with one value on the iterations being evaluated is
+        // that value on both sides.
+        let destination = &self.fold_single_values(destination);
+        let source = &self.fold_single_values(source);
+        // One position to one position: a translation between them, from
+        // the other axis when crossed.
+        if destination.index.terms.is_empty() && source.index.terms.is_empty() {
+            let offset = destination
+                .index
+                .constant
+                .checked_sub(source.index.constant)?;
+            return Some(if crossed {
+                Link::Map(super::position::Map {
+                    crossed,
+                    modulus: 1,
+                    residue: 0,
+                    base: offset,
+                    step: 1,
+                })
+            } else {
+                Link::translation(offset)
+            });
+        }
+        let link = self.unconfined_affine_link(destination, source, crossed)?;
+        let Link::Map(map) = link else {
+            return Some(link);
+        };
+        // Source positions are congruent to their constant plus each term at
+        // its iterator's residue, modulo the finest step between them, when
+        // they form one progression.
+        let Some(terms) = self.iterator_terms(&source.index) else {
+            return Some(link);
+        };
+        let Some(&(_, modulus, _)) = terms.first() else {
+            return Some(link);
+        };
+        if modulus <= 1 || !Self::forms_one_progression(&terms) {
+            return Some(link);
+        }
+        let mut residue = source.index.constant;
+        for &(id, coefficient) in &source.index.terms {
+            let iterator = self.counted_iterator(id)?;
+            residue = residue.checked_add(coefficient.checked_mul(iterator.residue)?)?;
+        }
+        map.restricted(modulus, residue.rem_euclid(modulus))
+    }
+
+    /// The link from a source coordinate to a destination coordinate when both
+    /// are affine in the same symbolic values. Eliminating those values gives
+    /// `destination = lambda * (source - source_base) + destination_base` if
+    /// their coefficient vectors are proportional. A constant destination is
+    /// reached only from the positions the source coordinate can take.
+    fn unconfined_affine_link(
+        &self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        crossed: bool,
+    ) -> Option<Link> {
+        if source.index.terms.is_empty()
+            || destination.versions != source.versions && !destination.index.terms.is_empty()
+        {
+            return None;
+        }
+        if destination.index.terms.is_empty() {
+            let modulus = source
+                .index
+                .terms
+                .iter()
+                .fold(0usize, |gcd, (_, coefficient)| {
+                    greatest_common_divisor(gcd, coefficient.unsigned_abs())
+                });
+            let modulus = isize::try_from(modulus).ok()?;
+            return Some(Link::Map(super::position::Map {
+                crossed,
+                modulus,
+                residue: source.index.constant.rem_euclid(modulus),
+                base: destination.index.constant,
+                step: 0,
+            }));
+        }
+        let ids = |index: &AffineIndex| index.terms.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        if ids(&destination.index) != ids(&source.index) {
+            return None;
+        }
+        let (_, numerator) = destination.index.terms[0];
+        let (_, denominator) = source.index.terms[0];
+        let proportional = destination
+            .index
+            .terms
+            .iter()
+            .zip(&source.index.terms)
+            .all(|(&(_, d), &(_, s))| d.checked_mul(denominator) == s.checked_mul(numerator));
+        if !proportional {
+            return None;
+        }
+        // destination = (numerator * source + offset) / denominator
+        let offset = denominator
+            .checked_mul(destination.index.constant)?
+            .checked_sub(numerator.checked_mul(source.index.constant)?)?;
+        let (numerator, offset, denominator) = if denominator < 0 {
+            (
+                numerator.checked_neg()?,
+                offset.checked_neg()?,
+                denominator.checked_neg()?,
+            )
+        } else {
+            (numerator, offset, denominator)
+        };
+        Some(super::position::Map::scaled(
+            crossed,
+            numerator,
+            offset,
+            denominator,
+        ))
+    }
+
+    /// `index` with each iterator confined to one value folded into its
+    /// constant, so that indices over different such iterators relate.
+    fn fold_single_values(&self, index: &SampledAffineIndex) -> SampledAffineIndex {
+        let mut folded = AffineIndex {
+            terms: Vec::new(),
+            constant: index.index.constant,
+        };
+        for &(id, coefficient) in &index.index.terms {
+            match self.counted_iterator(id) {
+                Some(iterator) if iterator.min == iterator.max => {
+                    match coefficient
+                        .checked_mul(iterator.min)
+                        .and_then(|value| folded.constant.checked_add(value))
+                    {
+                        Some(constant) => folded.constant = constant,
+                        None => return index.clone(),
+                    }
+                }
+                _ => folded.terms.push((id, coefficient)),
+            }
+        }
+        let versions = index
+            .versions
+            .iter()
+            .filter(|(id, _)| folded.terms.iter().any(|(term, _)| term == id))
+            .cloned()
+            .collect();
+        SampledAffineIndex {
+            index: folded,
+            versions,
+        }
+    }
+
+    /// `index`, over iterators, with the values its variables are read at.
+    fn sample_iterator_index(&mut self, index: AffineIndex) -> SampledAffineIndex {
+        let mut versions = Vec::new();
+        for &(id, _) in &index.terms {
+            let read = if self.ctx.variables.contains_key(&id) {
+                self.read_variable(id, &VarIndex::default(), &VarSelect::default(), None)
+            } else {
+                Vec::new()
+            };
+            versions.push((id, read));
+        }
+        SampledAffineIndex { index, versions }
     }
 
     fn sample_affine_index(&mut self, id: VarId, index: &VarIndex) -> Option<SampledAffineIndex> {
         let index = self.flattened_affine_index(id, index)?;
         let mut versions = Vec::new();
         for &(id, _) in &index.terms {
-            versions.extend(self.read_variable(
-                id,
-                &VarIndex::default(),
-                &VarSelect::default(),
-                None,
-            ));
+            let read = self.read_variable(id, &VarIndex::default(), &VarSelect::default(), None);
+            versions.push((id, read));
         }
         Some(SampledAffineIndex { index, versions })
     }
 
-    fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
+    /// Bind `version` to `key`, returning the version bound.
+    fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) -> VersionId {
+        self.record_table_write(key, version);
         // Later statements read this version without passing through the
         // circuit graph's variable node. Keep its storage bounds in SSA so
         // discarded bits cannot reach a subsequent whole-value read.
@@ -2012,6 +3373,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             self.bind_key(key, version);
         }
         self.written.insert(key);
+        version
     }
 
     fn receiver_index(&self, id: VarId, index: &VarIndex) -> VarIndex {
@@ -2068,19 +3430,81 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .map(|key| (key, self.read_key(key)))
                 .collect();
         }
-        let index = self.receiver_index(id, index);
-        let accesses = var_reads(id, &index, select, member_select_domain, &mut self.ctx);
-        if accesses.is_empty() && !(index.is_const() && select.is_const_with_range()) {
+        // The affine coordinates both the last writers and the reachable
+        // positions take, derived once.
+        let elements = if self.writer_scope.is_some()
+            || (!self.counted_iterators.is_empty() && !index.is_const())
+        {
+            self.affine_elements(id, index)
+        } else {
+            None
+        };
+        let mut sources = self.last_writer_read(id, elements.clone(), select, member_select_domain);
+        let receiver = self.receiver_index(id, index);
+        let accesses = var_reads(id, &receiver, select, member_select_domain, &mut self.ctx);
+        if accesses.is_empty() && !(receiver.is_const() && select.is_const_with_range()) {
             self.status = self.status.max(AnalysisStatus::Partial);
         }
+        let accesses = if index.is_const() {
+            accesses
+                .into_iter()
+                .map(|(array, packed)| (array, packed, 1))
+                .collect()
+        } else {
+            self.reachable_reads(elements.as_ref().map(|elements| &elements.flat), accesses)
+        };
         let mut values = Vec::new();
-        for (array, packed) in accesses {
+        for (array, packed, step) in accesses {
             for key in self.bit_part.overlapping_access(id, array, packed) {
-                let version = self.read_key(key);
+                if !progression_meets(array, step, key.1) {
+                    continue;
+                }
+                let version = self.read_source_key(key, sources.as_mut());
                 values.push((key, self.project_read(key, version, array, packed)));
             }
         }
         values
+    }
+
+    /// An index affine in the counted iterators reads only the elements it
+    /// takes over their iterations: each access narrowed to each progression
+    /// of those positions, as its span and the step between its positions.
+    /// Overlapping progressions merge, and a position outside the array
+    /// reads nothing. A division beyond the procedure's work stops the
+    /// analysis, as for a write.
+    fn reachable_reads(
+        &mut self,
+        flat: Option<&AffineIndex>,
+        accesses: Vec<(ArraySpan, PackedSpan)>,
+    ) -> Vec<(ArraySpan, PackedSpan, usize)> {
+        let whole = |accesses: Vec<(ArraySpan, PackedSpan)>| {
+            accesses
+                .into_iter()
+                .map(|(array, packed)| (array, packed, 1))
+                .collect()
+        };
+        let Some(flat) = flat.filter(|flat| !flat.terms.is_empty()) else {
+            return whole(accesses);
+        };
+        let Some(progressions) = self.affine_progressions(flat) else {
+            return whole(accesses);
+        };
+        let progressions = merge_progressions(progressions);
+        accesses
+            .into_iter()
+            .flat_map(|(array, packed)| {
+                progressions.iter().filter_map(move |&(span, step)| {
+                    let first = span.start.max(array.start);
+                    // The first position of the progression in the access.
+                    let first = span.start + (first - span.start).checked_next_multiple_of(step)?;
+                    let span = ArraySpan {
+                        start: first,
+                        length: (span.start + span.length).checked_sub(first)?,
+                    };
+                    Some((array.intersection(span)?, packed, step))
+                })
+            })
+            .collect()
     }
 
     fn read_variable(
@@ -2180,6 +3604,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn destination_width(&mut self, destination: &AssignDestination) -> Option<usize> {
         let variable = self.ctx.variables.get(&destination.id)?.clone();
+        if !destination.select.is_const_with_range() && !self.counted_iterators.is_empty() {
+            // An affine select inside a counted loop has a constant width.
+            return self
+                .packed_affine_select(destination.id, &destination.select)
+                .map(|(_, width)| width);
+        }
         let (high, low) = destination
             .select
             .eval_value(&mut self.ctx, &variable.r#type, false)?;
@@ -2198,6 +3628,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         expression_context_width: usize,
         controls: &[VersionId],
     ) {
+        if expression_offset == 0
+            && self.write_packed_anchored_destination(
+                destination,
+                expression,
+                expression_context_width,
+                controls,
+            )
+        {
+            return;
+        }
         let selectors = self.eval_destination_selectors(destination);
         let variable = self.ctx.variables.get(&destination.id).cloned();
         let selected = if destination.select.is_const_with_range() {
@@ -2219,8 +3659,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .zip(selected)
             .and_then(|(array, (_, low))| {
                 Some(PositionRelation {
-                    array: Some(isize::try_from(array.start).ok()?),
-                    packed: Some(signed_difference(low, expression_offset)?),
+                    array: Link::from_offset(Some(isize::try_from(array.start).ok()?)),
+                    packed: Link::from_offset(Some(signed_difference(low, expression_offset)?)),
                 })
             });
         let destination_index = self.sample_affine_index(destination.id, &destination.index);
@@ -2228,15 +3668,107 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let dynamic_array = !destination.index.is_const();
         let dynamic_packed = !destination.select.is_const_with_range();
         let dynamic = dynamic_array || dynamic_packed;
+        // A packed select that moves with the counted iterators receives
+        // only its own bits of the expression and writes only the bits its
+        // position takes.
+        let packed_reachable = (dynamic_packed
+            && destination_array.is_some_and(|array| array.length == 1))
+        .then(|| {
+            let (select, width) = self.packed_affine_select(destination.id, &destination.select)?;
+            // The bits of each progression of select positions: one span when
+            // the steps leave no gap, else one progression per bit of the
+            // width.
+            let mut pieces = Vec::new();
+            for (span, step) in self.affine_progressions(&select)? {
+                if step <= width {
+                    pieces.push((
+                        PackedSpan {
+                            start: span.start,
+                            length: span.length - 1 + width,
+                        },
+                        1,
+                    ));
+                } else {
+                    for bit in 0..width {
+                        pieces.push((
+                            PackedSpan {
+                                start: span.start + bit,
+                                length: span.length,
+                            },
+                            step,
+                        ));
+                    }
+                }
+            }
+            Some((pieces, width))
+        })
+        .flatten();
+        let anchor = dynamic_array
+            && destination_index
+                .as_ref()
+                .is_some_and(|index| !index.index.terms.is_empty())
+            && expression.comptime().r#type.array.total().unwrap_or(1) == 1;
+        // An anchored destination addresses only the positions its index
+        // takes over the iterations that reach this write.
+        let reachable = anchor
+            .then(|| self.affine_progressions(&destination_index.as_ref()?.index))
+            .flatten();
+        let reachable_hull = reachable.as_ref().map(|progressions| {
+            let start = progressions
+                .iter()
+                .map(|(span, _)| span.start)
+                .min()
+                .unwrap_or(0);
+            let end = progressions
+                .iter()
+                .map(|(span, _)| span.start + span.length)
+                .max()
+                .unwrap_or(0);
+            ArraySpan {
+                start,
+                length: end.saturating_sub(start),
+            }
+        });
+        // Controls anchored at the destination's frame keep its displacement.
+        let mut anchored_controls = Vec::new();
+        let mut whole_controls = Vec::new();
+        for &control in controls {
+            // A frame's coordinates lie on the array axis of its control.
+            let link = anchor
+                .then(|| {
+                    let frame = self.control_frames.get(&control)?;
+                    self.affine_link(destination_index.as_ref()?, frame, false)
+                })
+                .flatten();
+            if let Some(link) = link {
+                anchored_controls.push((
+                    control,
+                    PositionRelation {
+                        array: link,
+                        packed: Link::Unlinked,
+                    },
+                ));
+            } else {
+                whole_controls.push(control);
+            }
+        }
         for key in keys {
-            let mut whole = controls.to_vec();
+            let mut whole = whole_controls.clone();
             whole.extend_from_slice(&selectors);
             let mut sources = if let (Some(destination_array), Some((_, low)), Some(key_span)) =
                 (destination_array, selected, self.key_span(key))
             {
-                let destination_region = key.1.intersection(destination_array);
+                let destination_region =
+                    key.1
+                        .intersection(destination_array)
+                        .and_then(|region| match reachable_hull {
+                            Some(hull) => region.intersection(hull),
+                            None => Some(region),
+                        });
                 let expression_array = destination_region.and_then(|array| {
-                    if dynamic_array {
+                    if anchor {
+                        Some(array)
+                    } else if dynamic_array {
                         // Each candidate destination receives the scalar RHS,
                         // including when no affine correspondence is proven.
                         Some(ArraySpan {
@@ -2261,17 +3793,51 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             destination_index: destination_index.clone(),
                             destination_array: Some(destination_region),
                             array_shape: Some(destination.comptime.r#type.array.clone()),
+                            anchor,
+                            packed_anchor: None,
                         },
                     )
                 } else {
                     ExpressionSources::default()
                 }
+            } else if let Some((_, width)) = packed_reachable {
+                self.eval_expr_requested_in(
+                    expression,
+                    ArraySpan {
+                        start: 0,
+                        length: 1,
+                    },
+                    PackedSpan {
+                        start: expression_offset,
+                        length: width,
+                    },
+                    expression_context_width,
+                    &ProjectionContext {
+                        array_shape: Some(destination.comptime.r#type.array.clone()),
+                        ..ProjectionContext::default()
+                    },
+                )
             } else {
                 ExpressionSources::whole(self.eval_expr(expression))
             };
             sources.extend_whole(whole);
+            for &(control, relation) in &anchored_controls {
+                sources.push(control, relation);
+            }
             sources.normalize();
             for (_, relation) in &mut sources.sources {
+                if anchor {
+                    // Array coordinates are already destination positions.
+                    *relation = destination_offset
+                        .map(|base| {
+                            relation.compose(PositionRelation {
+                                array: Link::from_offset(Some(0)),
+                                packed: base.packed,
+                            })
+                        })
+                        .unwrap_or_else(PositionRelation::whole);
+                    continue;
+                }
                 *relation = destination_offset
                     .map(|base| relation.compose(base))
                     .unwrap_or_else(PositionRelation::whole);
@@ -2279,17 +3845,1720 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     // The LSP's first element is not the runtime destination.
                     // A scalar RHS can reach every candidate array element;
                     // this uncertainty does not widen its packed bit mapping.
-                    relation.array = None;
+                    relation.array = Link::from_offset(None);
                 }
             }
-            let version = self
+            let mut version = self
                 .ssa
                 .related_definition_guarded(sources.sources, &self.path_condition);
             if let Some(token) = self.active_assignment {
                 self.ssa.record_site(version, token, controls);
             }
-            self.bind_destination(key, version, dynamic);
+            if let Some(reachable) = &reachable {
+                let progressions = reachable
+                    .iter()
+                    .map(|&(span, step)| (span.start, span.length, step))
+                    .collect::<Vec<_>>();
+                // Positions outside the reachable ones keep their value.
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, &progressions, Axis::Array)
+                else {
+                    continue;
+                };
+                version = confined;
+            }
+            if let Some((reachable, _)) = &packed_reachable {
+                let progressions = reachable
+                    .iter()
+                    .map(|&(span, step)| (span.start, span.length, step))
+                    .collect::<Vec<_>>();
+                // Bits outside the reachable ones keep their value.
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, &progressions, Axis::Packed)
+                else {
+                    continue;
+                };
+                version = confined;
+            }
+            let bound = self.bind_destination(key, version, dynamic);
+            // A value no instance tells apart is the same at each of them,
+            // as the table already holds it.
+            if !self.reads_instances(expression)
+                && anchored_controls.is_empty()
+                && !(packed_reachable.is_some()
+                    && controls
+                        .iter()
+                        .any(|control| self.control_frames.contains_key(control)))
+                && self.record_uniform_write(key)
+            {
+            }
+            // The table of the write holds each instance's value at the
+            // instance's position, taken again for that position.
+            else if let (Some((_, low)), Some(key_span)) = (selected, self.key_span(key))
+                && expression.comptime().r#type.array.total().unwrap_or(1) == 1
+                && let Some(packed) = key_span.translated(low, expression_offset)
+                && let Some((writer, anchor_index, hull, _)) = self.instance_anchor(key)
+            {
+                let mut sources = self.eval_expr_requested_in(
+                    expression,
+                    hull,
+                    packed,
+                    expression_context_width,
+                    &ProjectionContext {
+                        destination_index: Some(anchor_index.clone()),
+                        destination_array: Some(hull),
+                        array_shape: Some(destination.comptime.r#type.array.clone()),
+                        anchor: true,
+                        packed_anchor: None,
+                    },
+                );
+                sources.extend_whole(whole_controls.iter().copied());
+                sources.extend_whole(selectors.iter().copied());
+                let controls = anchored_controls
+                    .iter()
+                    .map(|&(control, _)| control)
+                    .collect::<Vec<_>>();
+                sources.extend(self.instance_controls(&controls, &anchor_index));
+                sources.normalize();
+                let shift = Link::from_offset(signed_difference(low, expression_offset));
+                for (_, relation) in &mut sources.sources {
+                    *relation = relation.compose(PositionRelation {
+                        array: Link::from_offset(Some(0)),
+                        packed: shift,
+                    });
+                }
+                let value = self
+                    .ssa
+                    .related_definition_guarded(sources.sources, &self.path_condition);
+                self.record_instance_write(key, writer, value, &anchor_index.index);
+            }
+            // A write at bits that move with the iterators holds each
+            // instance's value at the instance's position, at any bit of
+            // the ones the write can take.
+            else if packed_reachable.is_some() {
+                self.record_bit_instance(
+                    key,
+                    expression,
+                    expression_context_width,
+                    controls,
+                    &selectors,
+                );
+            }
+            // The storage and any last writer table hold projections of it.
+            let moving = destination_index
+                .as_ref()
+                .filter(|_| anchor && !dynamic_packed)
+                .map(|index| index.index.clone());
+            if (!dynamic || moving.is_some())
+                && let Some((_, low)) = selected
+            {
+                let mut definition_controls = whole_controls.clone();
+                definition_controls.extend_from_slice(&selectors);
+                definition_controls.extend(anchored_controls.iter().map(|&(control, _)| control));
+                self.record_definition(
+                    key,
+                    version,
+                    bound,
+                    expression,
+                    definition_controls,
+                    moving,
+                    signed_difference(low, expression_offset),
+                    expression_context_width,
+                );
+            }
         }
+    }
+
+    /// Record that `version` holds `expression`, written with its bit 0 at
+    /// bit `shift` of the variable. Only inside a counted loop, where a
+    /// destination can move with the iterators, and only while the
+    /// assignment's reads are sampled.
+    #[allow(clippy::too_many_arguments)]
+    fn record_definition(
+        &mut self,
+        key: NodeKey,
+        version: VersionId,
+        bound: VersionId,
+        expression: &Expression,
+        controls: Vec<VersionId>,
+        destination: Option<AffineIndex>,
+        shift: Option<isize>,
+        context_width: usize,
+    ) {
+        if self.counted_iterators.is_empty() {
+            return;
+        }
+        let Some(shift) = shift else {
+            return;
+        };
+        let Some(Some(cache)) = self.call_caches.last() else {
+            return;
+        };
+        if cache.variables.is_none() {
+            return;
+        }
+        let (copy, cache) = copied_with_cache(expression, cache);
+        let definition = Definition {
+            expressions: vec![copy],
+            bitwise: true,
+            cache,
+            controls,
+            iterators: self.counted_iterators.clone(),
+            fixed: Vec::new(),
+            key,
+            bound,
+            destination,
+            shift,
+            context_width,
+        };
+        self.definitions.insert(version, Rc::new(definition));
+        self.definition_log.push(version);
+    }
+
+    /// Bind the table of each output of a call that reads only its inputs,
+    /// written at constant coordinates, to the inputs taken again at each
+    /// instance: every bit of an output may come from any bit of them.
+    fn record_output_instances(&mut self, call: &FunctionCall, controls: &[VersionId]) {
+        if !self.in_writer_scope() || !self.function_is_pure(call) {
+            return;
+        }
+        for destination in call.outputs.values().flatten() {
+            if !destination.index.is_const()
+                || !(destination.select.is_empty() || destination.select.is_const_with_range())
+            {
+                continue;
+            }
+            let previous = self
+                .current_writer
+                .replace(last_writer::output_writer(destination));
+            let uniform = !call
+                .inputs
+                .values()
+                .any(|input| self.reads_instances(input));
+            for key in self.write_keys(destination) {
+                // Outputs of inputs no instance tells apart are the same at
+                // each of them, as the table already holds them.
+                if uniform && self.record_uniform_write(key) {
+                    continue;
+                }
+                let Some((writer, anchor_index, hull, _)) = self.instance_anchor(key) else {
+                    continue;
+                };
+                let Some(packed) = self.key_span(key) else {
+                    continue;
+                };
+                let projection = ProjectionContext {
+                    destination_index: Some(anchor_index.clone()),
+                    destination_array: Some(hull),
+                    array_shape: None,
+                    anchor: true,
+                    packed_anchor: None,
+                };
+                let mut sources = ExpressionSources::default();
+                for input in call.inputs.values() {
+                    let width = input.comptime().expr_context.width;
+                    let Some(whole) = PackedSpan::new(0, width) else {
+                        continue;
+                    };
+                    let mut read =
+                        self.eval_expr_requested_in(input, hull, whole, width, &projection);
+                    for (_, relation) in &mut read.sources {
+                        relation.packed = Link::Unlinked;
+                    }
+                    sources.extend(read);
+                }
+                sources.extend_whole(controls.iter().copied());
+                let _ = packed;
+                let value = self
+                    .ssa
+                    .related_definition_guarded(sources.sources, &self.path_condition);
+                self.record_instance_write(key, writer, value, &anchor_index.index);
+            }
+            self.current_writer = previous;
+        }
+    }
+
+    /// Record that each output of a call that reads only its inputs, written
+    /// at constant coordinates, holds a value of those inputs.
+    fn record_output_definitions(&mut self, call: &FunctionCall, controls: &[VersionId]) {
+        if self.counted_iterators.is_empty() || !self.function_is_pure(call) {
+            return;
+        }
+        let Some(Some(cache)) = self.call_caches.last() else {
+            return;
+        };
+        let mut expressions = Vec::new();
+        let mut copied = EvaluationCache::default();
+        for input in call.inputs.values() {
+            let (copy, cache) = copied_with_cache(input, cache);
+            expressions.push(copy);
+            copied.calls.extend(cache.calls);
+            copied.expression_branches.extend(cache.expression_branches);
+            copied
+                .variables
+                .get_or_insert_with(HashMap::default)
+                .extend(cache.variables.into_iter().flatten());
+        }
+        let cache = copied;
+        for destination in call.outputs.values().flatten() {
+            if !destination.index.is_const()
+                || !(destination.select.is_empty() || destination.select.is_const_with_range())
+            {
+                continue;
+            }
+            let mut selectors = controls.to_vec();
+            selectors.extend(self.eval_destination_selectors(destination));
+            for key in self.write_keys(destination) {
+                let version = self.ssa.read(self.ssa_key(key));
+                let definition = Definition {
+                    expressions: expressions.clone(),
+                    bitwise: false,
+                    cache: cache.clone(),
+                    controls: selectors.clone(),
+                    iterators: self.counted_iterators.clone(),
+                    fixed: Vec::new(),
+                    key,
+                    bound: version,
+                    destination: None,
+                    shift: 0,
+                    context_width: 1,
+                };
+                self.definitions.insert(version, Rc::new(definition));
+                self.definition_log.push(version);
+            }
+        }
+    }
+
+    /// Whether `expression` reads a counted iterator or storage whose
+    /// writes the scope's tables hold, so that its value may differ from
+    /// one instance to another.
+    fn reads_instances(&self, expression: &Expression) -> bool {
+        if let Expression::Term(factor) = expression
+            && let Factor::Variable(id, ..) = factor.as_ref()
+            && (self.counted_iterator(*id).is_some() || self.covers_writes_of(*id))
+        {
+            return true;
+        }
+        children::children(expression)
+            .into_iter()
+            .any(|child| self.reads_instances(child))
+    }
+
+    /// The sources of `bits` of `key` that `read`, a value whose bit 0 is bit
+    /// `low` of the variable, takes from the tables of its last writes, for
+    /// the destination of `projection`: each table at the position of the
+    /// instance it reads, related to the destination by the iterators they
+    /// both move with. Whether the value from before the loop is also a last
+    /// write is left to the caller. `None` when the last writes are not
+    /// solved.
+    fn instance_read_sources(
+        &mut self,
+        read: &last_writer::LastWriterRead,
+        key: NodeKey,
+        bits: PackedSpan,
+        low: usize,
+        requested_array: ArraySpan,
+        projection: &ProjectionContext,
+    ) -> Option<(ExpressionSources, bool)> {
+        let destination = projection.destination_index.clone()?;
+        let cells = self.key_last_writes(read, key)?;
+        let current = self.counted_iterators.clone();
+        let packed = Link::from_offset(isize::try_from(low).ok().and_then(isize::checked_neg));
+        let value_bits = PackedSpan::new(bits.start.checked_sub(low)?, bits.length)?;
+        let mut sources = ExpressionSources::default();
+        let mut snapshot = false;
+        for (cell, writes) in cells {
+            if cell.len() != current.len() {
+                return None;
+            }
+            self.counted_iterators.clone_from(&cell);
+            let pieces = self.instance_pieces(
+                read,
+                key,
+                bits,
+                packed,
+                &destination,
+                &writes,
+                &mut snapshot,
+            );
+            let reached = (cell != current)
+                .then(|| {
+                    let (first, last) = self.affine_hull(&destination.index)?;
+                    let start = usize::try_from(first.max(0)).ok()?;
+                    let length = usize::try_from(last)
+                        .ok()?
+                        .checked_sub(start)?
+                        .checked_add(1)?;
+                    Some(ArraySpan { start, length })
+                })
+                .flatten();
+            self.counted_iterators.clone_from(&current);
+            let pieces = pieces?;
+            if cell == current {
+                sources.extend(pieces);
+                continue;
+            }
+            // On only some iterations, these writes reach only the
+            // destination positions those take.
+            let value = self.ssa.related_definition(pieces.sources);
+            let value = match reached {
+                Some(reached) => self
+                    .ssa
+                    .projected(value, position_domain(reached, value_bits)),
+                None => value,
+            };
+            let _ = requested_array;
+            sources.push(value, PositionRelation::identity());
+        }
+        Some((sources, snapshot))
+    }
+
+    /// The tables of `writes`, each at the position of the instance it holds,
+    /// on the iterations being evaluated.
+    #[allow(clippy::too_many_arguments)]
+    fn instance_pieces(
+        &mut self,
+        read: &last_writer::LastWriterRead,
+        key: NodeKey,
+        bits: PackedSpan,
+        packed: Link,
+        destination: &SampledAffineIndex,
+        writes: &[last_writer::LastWrite],
+        snapshot: &mut bool,
+    ) -> Option<ExpressionSources> {
+        let mut pieces = ExpressionSources::default();
+        for write in writes {
+            let Some(writer) = write.source else {
+                *snapshot = true;
+                continue;
+            };
+            let table = self.read_table(key, writer);
+            if write.earlier.is_some() {
+                // Any of the instances may be the last.
+                let iterators = self.iterator_ids();
+                let value = match self.earlier_region(read.id(), write, &iterators) {
+                    Some(region) => self.ssa.projected(table, position_domain(region, bits)),
+                    None => table,
+                };
+                pieces.push(
+                    value,
+                    PositionRelation {
+                        array: Link::Unlinked,
+                        packed,
+                    },
+                );
+                continue;
+            }
+            let position = write
+                .instance
+                .as_ref()
+                .and_then(|instance| self.table_position(read.id(), writer, instance));
+            // An instance at a fraction of positions a step apart is whole
+            // over the consecutive values of their step.
+            let (position, destination, saved) = match position {
+                Some(position) => (Some(position), destination.clone(), None),
+                None => match write.instance.as_ref().and_then(|instance| {
+                    self.stepped_table_position(read.id(), writer, instance, destination)
+                }) {
+                    Some((position, destination, cell)) => (
+                        Some(position),
+                        destination,
+                        Some(std::mem::replace(&mut self.counted_iterators, cell)),
+                    ),
+                    None => (None, destination.clone(), None),
+                },
+            };
+            let Some(position) = position else {
+                // An instance not known exactly may be any of them.
+                pieces.push(
+                    table,
+                    PositionRelation {
+                        array: Link::Unlinked,
+                        packed,
+                    },
+                );
+                continue;
+            };
+            let linked = self.instance_links(table, position, &destination, bits, packed);
+            if let Some(saved) = saved {
+                self.counted_iterators = saved;
+            }
+            pieces.extend(linked?);
+        }
+        Some(pieces)
+    }
+
+    /// The table at `position`, related to `destination` on the iterations
+    /// being evaluated.
+    fn instance_links(
+        &mut self,
+        table: VersionId,
+        position: AffineIndex,
+        destination: &SampledAffineIndex,
+        bits: PackedSpan,
+        packed: Link,
+    ) -> Option<ExpressionSources> {
+        let mut pieces = ExpressionSources::default();
+        let sampled = self.sample_iterator_index(position);
+        let source = self.fold_single_values(&sampled);
+        let destination = &self.fold_single_values(destination);
+        let links = match destination.destination_offset_from(&source) {
+            Some(offset) => vec![(Link::from_offset(Some(offset)), source)],
+            None => self.affine_links(destination, &source, false)?,
+        };
+        for (link, part) in links {
+            let (first, last) = self.affine_hull(&part.index)?;
+            let start = usize::try_from(first).ok()?;
+            let length = usize::try_from(last)
+                .ok()?
+                .checked_sub(start)?
+                .checked_add(1)?;
+            let value = self
+                .ssa
+                .projected(table, position_domain(ArraySpan { start, length }, bits));
+            pieces.push(
+                value,
+                PositionRelation {
+                    array: link,
+                    packed,
+                },
+            );
+        }
+        Some(pieces)
+    }
+
+    /// The sources of `bits` of a key holding `version`, read as a value whose
+    /// bit 0 is bit `low` of the variable, through the definitions it is
+    /// selected from: each definition taken again for the destination of
+    /// `projection`, and each other version it may be read as it is. A
+    /// version leading to no definition is read whole, never through the
+    /// versions it selects from. `None` when no definition is reached.
+    #[allow(clippy::too_many_arguments)]
+    fn defined_sources(
+        &mut self,
+        version: VersionId,
+        bits: PackedSpan,
+        low: usize,
+        elements: ArraySpan,
+        requested_array: ArraySpan,
+        anchored_bits: Option<PackedSpan>,
+        projection: &ProjectionContext,
+    ) -> Option<(ExpressionSources, Vec<VersionId>)> {
+        let mut found = DefinedSources::new();
+        let read = DefinedRead {
+            bits,
+            low,
+            requested_array,
+            anchored_bits,
+            elements,
+            projection,
+        };
+        if !self.collect_defined_sources(version, &read, &mut found, &PathCondition::default())? {
+            return None;
+        }
+        // What is taken on a path is held on that path alone.
+        let mut defined = ExpressionSources::default();
+        let mut plain = Vec::new();
+        for (condition, sources, versions) in found.groups {
+            if condition.is_unconditional() {
+                defined.extend(sources);
+                plain.extend(versions);
+                continue;
+            }
+            if !sources.sources.is_empty() {
+                let value = self.ssa.related_definition(sources.sources);
+                let value = self.ssa.guarded(value, &condition);
+                defined.push(value, PositionRelation::identity());
+            }
+            for version in versions {
+                plain.push(self.ssa.guarded(version, &condition));
+            }
+        }
+        Some((defined, plain))
+    }
+
+    /// The choices of `condition` on branches made outside every loop, which
+    /// hold on each iteration alike: a read in another iteration keeps them.
+    fn outer_condition(&self, condition: &PathCondition) -> PathCondition {
+        let namespace = self.branch_namespace;
+        condition.restricted(|branch| {
+            branch.procedure() == namespace && !self.iteration_branches.contains(&branch)
+        })
+    }
+
+    /// Whether `version` leads to a definition, collecting into `found` what
+    /// it is taken from. Each version passed is charged to the procedure's
+    /// work; `None` when it is exhausted.
+    fn collect_defined_sources(
+        &mut self,
+        version: VersionId,
+        read: &DefinedRead<'_>,
+        found: &mut DefinedSources,
+        condition: &PathCondition,
+    ) -> Option<bool> {
+        let memo = (version, condition.clone());
+        if let Some(&reached) = found.reached.get(&memo) {
+            return Some(reached);
+        }
+        if !self.reserve_guard_work(1) {
+            return None;
+        }
+        // A definition read again while it is taken again, as one reading
+        // its own earlier iteration does, is read as the version it is.
+        let reached = if self.redefining.contains(&version) {
+            false
+        } else if let Some(definition) = self.definitions.get(&version).cloned()
+            && let Some(sources) = {
+                self.redefining.insert(version);
+                let sources = self.definition_sources(&definition, read);
+                self.redefining.remove(&version);
+                sources
+            }
+        {
+            // Taken again, the definition holds on the paths outside the
+            // loops that the version bound to it holds on.
+            let mut held = Some(condition.clone());
+            for other in self.ssa.holding_conditions(version) {
+                let other = self.outer_condition(&other);
+                held = held.and_then(|held| held.conjoin_if_compatible(&other));
+            }
+            match held {
+                Some(held) => {
+                    found.group(&held).1.extend(sources);
+                    true
+                }
+                // No path holds it; the version is read as it is.
+                None => false,
+            }
+        } else if let Some((source, held)) = self.ssa.held(version) {
+            let held = match held {
+                Some(held) => condition.conjoin_if_compatible(&self.outer_condition(&held)),
+                None => Some(condition.clone()),
+            };
+            match held {
+                Some(held) => self.collect_defined_sources(source, read, found, &held)?,
+                None => false,
+            }
+        } else if let Some(inputs) = self.ssa.selected_from(version) {
+            let mut reached = false;
+            let mut others = Vec::new();
+            for input in inputs {
+                if self.collect_defined_sources(input, read, found, condition)? {
+                    reached = true;
+                } else {
+                    others.push(input);
+                }
+            }
+            if reached {
+                found.group(condition).2.extend(others);
+            }
+            reached
+        } else {
+            false
+        };
+        found.reached.insert(memo, reached);
+        Some(reached)
+    }
+
+    /// The sources of `bits` of `key`, which holds `definition`, read as a
+    /// value whose bit 0 is bit `low` of the variable: the definition's
+    /// expression evaluated again for the destination of `projection`, with
+    /// the values it read when it was assigned. `None` when its iterations
+    /// do not lead those being evaluated, or the work is exhausted.
+    fn definition_sources(
+        &mut self,
+        definition: &Definition,
+        read: &DefinedRead<'_>,
+    ) -> Option<ExpressionSources> {
+        let depth = definition.iterators.len().min(self.counted_iterators.len());
+        if definition
+            .iterators
+            .iter()
+            .zip(&self.counted_iterators)
+            .any(|(defined, current)| defined.id != current.id)
+        {
+            return None;
+        }
+        // The iterations being evaluated that reached the assignment.
+        let current = self.counted_iterators[..depth].to_vec();
+        let mut reached = Vec::with_capacity(depth);
+        for (defined, current) in definition.iterators.iter().zip(&current) {
+            match current.confined(defined.min, defined.max, defined.modulus, defined.residue) {
+                Ok(Some(iterator)) => reached.push(iterator),
+                Ok(None) => return Some(ExpressionSources::default()),
+                Err(_) => return None,
+            }
+        }
+        let inner = &definition.iterators[depth..];
+        let mut points = Vec::new();
+        match &definition.destination {
+            // A write at a moving element, in a loop that has finished, is
+            // the one of the iteration that wrote the element read: the
+            // inner iterator solved for each value of the others it moves
+            // with.
+            Some(destination) => {
+                if read.elements.length != 1 {
+                    return None;
+                }
+                let [inner] = inner else {
+                    return None;
+                };
+                let mut coefficient = None;
+                let mut outer = Vec::new();
+                for &(id, factor) in &destination.terms {
+                    if id == inner.id {
+                        coefficient = Some(factor);
+                    } else {
+                        outer.push((
+                            current.iter().position(|iterator| iterator.id == id)?,
+                            factor,
+                        ));
+                    }
+                }
+                let coefficient = coefficient?;
+                let target = isize::try_from(read.elements.start)
+                    .ok()?
+                    .checked_sub(destination.constant)?;
+                let count = outer.iter().try_fold(1usize, |count, &(level, _)| {
+                    count.checked_mul(usize::try_from(reached[level].count()?).ok()?)
+                })?;
+                if !self.reserve_guard_work(count) {
+                    return None;
+                }
+                let mut assignments = vec![(reached.clone(), target)];
+                for &(level, factor) in &outer {
+                    let mut next = Vec::new();
+                    for (iterators, target) in assignments {
+                        let iterator = iterators[level];
+                        let step = iterator.modulus.unsigned_abs();
+                        for value in (iterator.min..=iterator.max).step_by(step) {
+                            let mut iterators = iterators.clone();
+                            iterators[level] = iterator.within(value, value).ok()??;
+                            next.push((iterators, target.checked_sub(factor.checked_mul(value)?)?));
+                        }
+                    }
+                    assignments = next;
+                }
+                for (iterators, target) in assignments {
+                    if target % coefficient != 0 {
+                        continue;
+                    }
+                    let value = target / coefficient;
+                    if let Ok(Some(value)) = inner.within(value, value) {
+                        points.push((iterators, vec![value]));
+                    }
+                }
+            }
+            // A value an assignment left after the loops it was in, on the
+            // one iteration of each that reached it.
+            None => {
+                if inner.iter().any(|iterator| iterator.min != iterator.max) {
+                    return None;
+                }
+                points.push((reached, inner.to_vec()));
+            }
+        }
+        let mut sources = ExpressionSources::default();
+        for (iterators, mut fixed) in points {
+            fixed.extend_from_slice(&definition.fixed);
+            sources.extend(
+                self.definition_sources_at(definition, read, &current, &iterators, &fixed)?,
+            );
+        }
+        Some(sources)
+    }
+
+    /// `definition_sources` on the iterations `iterators` of those being
+    /// evaluated, `current`, with the finished loops inside them at `fixed`.
+    fn definition_sources_at(
+        &mut self,
+        definition: &Definition,
+        read: &DefinedRead<'_>,
+        current: &[CountedIterator],
+        iterators: &[CountedIterator],
+        fixed: &[CountedIterator],
+    ) -> Option<ExpressionSources> {
+        let DefinedRead {
+            bits,
+            low,
+            requested_array,
+            anchored_bits,
+            projection,
+            ..
+        } = *read;
+        let depth = current.len();
+        // Bit `b` of the variable is bit `b - shift` of the expression and
+        // bit `b - low` of the value read.
+        let start = isize::try_from(bits.start)
+            .ok()?
+            .checked_sub(definition.shift)?;
+        let (requested, displacement) = if !definition.bitwise {
+            // Every bit of a call output may come from any bit of its inputs.
+            if projection.packed_anchor.is_some() {
+                return None;
+            }
+            (PackedSpan::new(0, 1)?, 0)
+        } else if projection.packed_anchor.is_some() {
+            // Packed coordinates are the destination bit, which a one-bit
+            // value takes from bit 0 of the expression.
+            if start != 0 || bits.length != 1 || isize::try_from(low).ok()? != definition.shift {
+                return None;
+            }
+            (anchored_bits?, 0)
+        } else {
+            (
+                PackedSpan::new(usize::try_from(start).ok()?, bits.length)?,
+                definition.shift.checked_sub(isize::try_from(low).ok()?)?,
+            )
+        };
+        if !self.reserve_guard_work(1) {
+            return None;
+        }
+        self.counted_iterators[..depth].copy_from_slice(iterators);
+        self.counted_iterators.extend_from_slice(fixed);
+        self.call_caches.push(Some(definition.cache.clone()));
+        let mut sources = ExpressionSources::default();
+        for expression in &definition.expressions {
+            if definition.bitwise {
+                sources.extend(self.eval_expr_requested_in(
+                    expression,
+                    requested_array,
+                    requested,
+                    definition.context_width,
+                    projection,
+                ));
+                continue;
+            }
+            let width = expression.comptime().expr_context.width;
+            let Some(whole) = PackedSpan::new(0, width) else {
+                continue;
+            };
+            let mut input =
+                self.eval_expr_requested_in(expression, requested_array, whole, width, projection);
+            for (_, relation) in &mut input.sources {
+                relation.packed = Link::Unlinked;
+            }
+            sources.extend(input);
+        }
+        // On only some iterations, the definition reaches only the
+        // destination positions they take.
+        let confined = current != iterators;
+        let reached = confined
+            .then(|| {
+                let destination = projection.destination_index.as_ref()?;
+                let (first, last) = self.affine_hull(&destination.index)?;
+                let start = usize::try_from(first.max(0)).ok()?;
+                let length = usize::try_from(last)
+                    .ok()?
+                    .checked_sub(start)?
+                    .checked_add(1)?;
+                Some(ArraySpan { start, length })
+            })
+            .flatten();
+        self.call_caches.pop();
+        let outer = self.counted_iterators.len() - fixed.len();
+        self.counted_iterators.truncate(outer);
+        self.counted_iterators[..depth].copy_from_slice(current);
+        for (_, relation) in &mut sources.sources {
+            *relation = relation.compose(PositionRelation {
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(displacement)),
+            });
+        }
+        sources.extend_whole(definition.controls.iter().copied());
+        if confined {
+            // Positions the confined iterations cannot take, or that cannot
+            // be told, leave the definition whole within its value.
+            let value = self.ssa.related_definition(sources.sources);
+            let Some(reached) = reached.filter(|_| projection.packed_anchor.is_none()) else {
+                return Some(ExpressionSources::whole(vec![value]));
+            };
+            let bits = PackedSpan::new(
+                usize::try_from(
+                    isize::try_from(bits.start)
+                        .ok()?
+                        .checked_sub(isize::try_from(low).ok()?)?,
+                )
+                .ok()?,
+                bits.length,
+            )?;
+            let value = self.ssa.projected(value, position_domain(reached, bits));
+            return Some(ExpressionSources {
+                sources: vec![(value, PositionRelation::identity())],
+            });
+        }
+        Some(sources)
+    }
+
+    /// Write one bit selected by an affine position inside a counted loop.
+    /// Returns `false` without effects when the destination has another form.
+    fn write_packed_anchored_destination(
+        &mut self,
+        destination: &AssignDestination,
+        expression: &Expression,
+        expression_context_width: usize,
+        controls: &[VersionId],
+    ) -> bool {
+        if self.counted_iterators.is_empty()
+            || !destination.index.is_const()
+            || destination.select.is_const_with_range()
+            || destination.comptime.member_select_domain.is_some()
+        {
+            return false;
+        }
+        let Some((select, 1)) = self.sample_packed_select(destination.id, &destination.select)
+        else {
+            return false;
+        };
+        if select.index.terms.is_empty() {
+            return false;
+        }
+        let Some((low, high)) = self.affine_hull(&select.index) else {
+            return false;
+        };
+        let (Ok(low), Ok(high)) = (usize::try_from(low), usize::try_from(high)) else {
+            return false;
+        };
+        let Some(region) = PackedSpan::new(low, high - low + 1) else {
+            return false;
+        };
+        let progressions = self.affine_progressions(&select.index).map(|progressions| {
+            progressions
+                .into_iter()
+                .map(|(span, step)| (span.start, span.length, step))
+                .collect::<Vec<_>>()
+        });
+        let mut selected_destination = destination.clone();
+        selected_destination.index = self.receiver_index(destination.id, &destination.index);
+        let Some(destination_array) = dst_writes(&selected_destination, &mut self.ctx)
+            .into_iter()
+            .map(|(array, _)| array)
+            .next()
+        else {
+            return false;
+        };
+        let Ok(base) = isize::try_from(destination_array.start) else {
+            return false;
+        };
+        let selectors = self.eval_destination_selectors(destination);
+        let keys = self.write_keys(destination);
+        for key in keys {
+            let Some(key_region) = self
+                .key_span(key)
+                .and_then(|span| span.intersection(region))
+            else {
+                continue;
+            };
+            let Some(array) = key
+                .1
+                .intersection(destination_array)
+                .and_then(|array| array.translated(destination_array.start, 0))
+            else {
+                continue;
+            };
+            let mut sources = self.eval_expr_requested_in(
+                expression,
+                array,
+                key_region,
+                expression_context_width,
+                &ProjectionContext {
+                    array_shape: Some(destination.comptime.r#type.array.clone()),
+                    packed_anchor: Some(select.clone()),
+                    ..ProjectionContext::default()
+                },
+            );
+            for &control in controls {
+                // A frame's coordinates lie on the array axis of its control.
+                let element = SampledAffineIndex {
+                    index: AffineIndex {
+                        terms: Vec::new(),
+                        constant: isize::try_from(array.start).unwrap_or(0),
+                    },
+                    versions: Vec::new(),
+                };
+                let relation = self.control_frames.get(&control).and_then(|frame| {
+                    Some(PositionRelation {
+                        array: self.affine_link(&element, frame, false)?,
+                        packed: self.affine_link(&select, frame, true)?,
+                    })
+                });
+                match relation {
+                    Some(relation) => sources.push(control, relation),
+                    None => sources.extend_whole([control]),
+                }
+            }
+            sources.extend_whole(selectors.iter().copied());
+            sources.normalize();
+            for (_, relation) in &mut sources.sources {
+                // Packed coordinates are already destination bits.
+                *relation = relation.compose(PositionRelation::translation(base, 0));
+            }
+            let mut version = self
+                .ssa
+                .related_definition_guarded(sources.sources, &self.path_condition);
+            if let Some(token) = self.active_assignment {
+                self.ssa.record_site(version, token, controls);
+            }
+            // Bits between the steps of the select keep their value.
+            if let Some(progressions) = &progressions {
+                let Some(confined) =
+                    self.confine_to_progressions(version, key, progressions, Axis::Packed)
+                else {
+                    continue;
+                };
+                version = confined;
+            }
+            self.bind_destination(key, version, true);
+            self.record_bit_instance(
+                key,
+                expression,
+                expression_context_width,
+                controls,
+                &selectors,
+            );
+        }
+        true
+    }
+
+    /// `controls` related to the instances at `anchor` of a table: a
+    /// control with a frame selects each instance by its position, any
+    /// other every instance.
+    fn instance_controls(
+        &self,
+        controls: &[VersionId],
+        anchor: &SampledAffineIndex,
+    ) -> ExpressionSources {
+        let mut sources = ExpressionSources::default();
+        for &control in controls {
+            let link = self
+                .control_frames
+                .get(&control)
+                .and_then(|frame| self.affine_link(anchor, frame, false));
+            match link {
+                Some(link) => sources.push(
+                    control,
+                    PositionRelation {
+                        array: link,
+                        packed: Link::Unlinked,
+                    },
+                ),
+                None => sources.extend_whole([control]),
+            }
+        }
+        sources
+    }
+
+    /// Bind the table of the current write of bits that move with the
+    /// iterators, at constant element coordinates, to the value taken again
+    /// at each instance: at any bit of the ones the write can take.
+    fn record_bit_instance(
+        &mut self,
+        key: NodeKey,
+        expression: &Expression,
+        expression_context_width: usize,
+        controls: &[VersionId],
+        selectors: &[VersionId],
+    ) {
+        // A value no instance tells apart, under no condition that moves
+        // with the iterators, is the same at each of them, as the table
+        // already holds it.
+        if !self.reads_instances(expression)
+            && !controls
+                .iter()
+                .any(|control| self.control_frames.contains_key(control))
+            && self.record_uniform_write(key)
+        {
+            return;
+        }
+        if expression.comptime().r#type.array.total().unwrap_or(1) != 1 {
+            return;
+        }
+        let Some(width) = PackedSpan::whole(expression_context_width) else {
+            return;
+        };
+        let Some((writer, anchor_index, hull, _)) = self.instance_anchor(key) else {
+            return;
+        };
+        let mut sources = self.eval_expr_requested_in(
+            expression,
+            hull,
+            width,
+            expression_context_width,
+            &ProjectionContext {
+                destination_index: Some(anchor_index.clone()),
+                destination_array: Some(hull),
+                array_shape: None,
+                anchor: true,
+                packed_anchor: None,
+            },
+        );
+        sources.extend(self.instance_controls(controls, &anchor_index));
+        sources.extend_whole(selectors.iter().copied());
+        sources.normalize();
+        for (_, relation) in &mut sources.sources {
+            relation.packed = Link::Unlinked;
+        }
+        let value = self
+            .ssa
+            .related_definition_guarded(sources.sources, &self.path_condition);
+        self.record_instance_write(key, writer, value, &anchor_index.index);
+    }
+
+    /// Operands whose every bit may reach the anchored destination bit. Their
+    /// leaves are either anchored one-bit reads or whole sources.
+    fn eval_packed_anchored_operands(
+        &mut self,
+        operands: &[&Expression],
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        projection: &ProjectionContext,
+    ) -> ExpressionSources {
+        let mut reads = ExpressionSources::default();
+        for operand in operands {
+            let comptime = operand.comptime();
+            let context = ExpressionContext {
+                width: comptime.r#type.total_width().unwrap_or(1),
+                ..comptime.expr_context
+            };
+            reads.extend(self.eval_expr_bits_in(
+                operand,
+                requested_array,
+                requested,
+                context,
+                projection,
+            ));
+        }
+        reads
+    }
+
+    /// A read at an affine packed position while the destination element is
+    /// selected by an affine array index. Each bit `k` of the read value moves
+    /// with the iterator along the packed axis, so it reaches the destination
+    /// element through a map from the source packed coordinate to the
+    /// destination array coordinate.
+    fn eval_array_anchored_strided_read(
+        &mut self,
+        factor: &Factor,
+        requested: PackedSpan,
+        projection: &ProjectionContext,
+        selectors: &[VersionId],
+    ) -> Option<ExpressionSources> {
+        let Factor::Variable(id, index, select, comptime) = factor else {
+            return None;
+        };
+        let destination = projection.destination_index.as_ref()?;
+        let mut last_writers =
+            self.last_writer_sources(*id, index, select, comptime.member_select_domain);
+        let receiver = self.receiver_index(*id, index);
+        if !receiver.is_const() {
+            return None;
+        }
+        let (source, width) = self.sample_packed_select(*id, select)?;
+        if source.index.terms.is_empty() {
+            return None;
+        }
+        let bits = PackedSpan::whole(width)?.intersection(requested)?;
+        let accesses = var_reads(*id, &receiver, &VarSelect::default(), None, &mut self.ctx);
+        let mut reads = ExpressionSources::default();
+        // The destination bit and the source position both move with the
+        // iterator, which no single per-axis map relates; each bit of the
+        // element becomes its own source.
+        for bit in bits.start..bits.end() {
+            let offset = isize::try_from(bit).ok()?;
+            let mut shifted = source.clone();
+            shifted.index.constant = shifted.index.constant.checked_add(offset)?;
+            let constant = SampledAffineIndex {
+                index: AffineIndex {
+                    terms: Vec::new(),
+                    constant: offset,
+                },
+                versions: Vec::new(),
+            };
+            // Positions before the first bit hold nothing.
+            let (first, last) = self.affine_hull(&shifted.index)?;
+            let first = usize::try_from(first.max(0)).ok()?;
+            let Ok(last) = usize::try_from(last) else {
+                continue;
+            };
+            let Some(hull) = PackedSpan::new(first, (last + 1).saturating_sub(first)) else {
+                continue;
+            };
+            let mut links: Option<Vec<(PositionRelation, PackedSpan)>> = None;
+            for (array, packed) in &accesses {
+                let Some(span) = hull.intersection(*packed) else {
+                    continue;
+                };
+                for key in self.bit_part.overlapping_access(*id, *array, span) {
+                    // Where the scope's tables hold the last writes, each
+                    // set of iterations reads its own instances.
+                    if let Some(read) = last_writers.as_ref()
+                        && let Some(cells) = self.key_last_writes(read, key)
+                    {
+                        let pieces = self.strided_instance_pieces(
+                            *id,
+                            key,
+                            *array,
+                            destination,
+                            &shifted,
+                            &constant,
+                            cells,
+                        )?;
+                        reads.extend(pieces);
+                        continue;
+                    }
+                    let version = self.read_source_key(key, last_writers.as_mut());
+                    // The links on all the iterations, shared by the keys.
+                    let links = match &links {
+                        Some(links) => links,
+                        None => {
+                            links.insert(self.strided_links(destination, &shifted, &constant)?)
+                        }
+                    };
+                    for &(relation, part) in links.iter() {
+                        let Some(part) = part.intersection(span) else {
+                            continue;
+                        };
+                        reads.push(self.project_read(key, version, *array, part), relation);
+                    }
+                }
+            }
+        }
+        reads.extend_whole(selectors.iter().copied());
+        Some(reads)
+    }
+
+    /// The relations from the packed positions `source` of a read takes to
+    /// the destination element at `destination` and the destination bit
+    /// `constant`, each with the source positions it relates, on the
+    /// iterations being evaluated.
+    fn strided_links(
+        &mut self,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        constant: &SampledAffineIndex,
+    ) -> Option<Vec<(PositionRelation, PackedSpan)>> {
+        let mut links = Vec::new();
+        // Each part of the source positions one map relates to the
+        // destination, with what the part takes.
+        for (array, part) in self.affine_links(destination, source, true)? {
+            let relation = PositionRelation {
+                array,
+                packed: self.affine_link(constant, &part, false)?,
+            };
+            let (first, last) = self.affine_hull(&part.index)?;
+            let first = usize::try_from(first.max(0)).ok()?;
+            let Ok(last) = usize::try_from(last) else {
+                continue;
+            };
+            if let Some(span) = PackedSpan::new(first, (last + 1).saturating_sub(first)) {
+                links.push((relation, span));
+            }
+        }
+        Some(links)
+    }
+
+    /// The sources of a strided read of `key` on each set of iterations
+    /// `cells` gives with its last writes: the value from before the loop at
+    /// the positions those iterations read, and each table at the instance
+    /// it holds there.
+    #[allow(clippy::too_many_arguments)]
+    fn strided_instance_pieces(
+        &mut self,
+        id: VarId,
+        key: NodeKey,
+        array: ArraySpan,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        constant: &SampledAffineIndex,
+        cells: Vec<(Vec<CountedIterator>, Vec<last_writer::LastWrite>)>,
+    ) -> Option<ExpressionSources> {
+        let current = self.counted_iterators.clone();
+        let mut pieces = ExpressionSources::default();
+        for (cell, writes) in cells {
+            if cell.len() != current.len() {
+                return None;
+            }
+            self.counted_iterators.clone_from(&cell);
+            let cell_pieces =
+                self.strided_cell_pieces(id, key, array, destination, source, constant, &writes);
+            self.counted_iterators.clone_from(&current);
+            pieces.extend(cell_pieces?);
+        }
+        Some(pieces)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn strided_cell_pieces(
+        &mut self,
+        id: VarId,
+        key: NodeKey,
+        array: ArraySpan,
+        destination: &SampledAffineIndex,
+        source: &SampledAffineIndex,
+        constant: &SampledAffineIndex,
+        writes: &[last_writer::LastWrite],
+    ) -> Option<ExpressionSources> {
+        let key_bits = self.key_span(key)?;
+        let links = self.strided_links(destination, source, constant)?;
+        let mut pieces = ExpressionSources::default();
+        for write in writes {
+            let Some(writer) = write.source else {
+                let snapshot = self.scope_snapshot(key)?;
+                for (relation, span) in &links {
+                    if let Some(span) = span.intersection(key_bits) {
+                        pieces.push(self.project_read(key, snapshot, array, span), *relation);
+                    }
+                }
+                continue;
+            };
+            let table = self.read_table(key, writer);
+            let position = write
+                .instance
+                .as_ref()
+                .filter(|_| write.earlier.is_none())
+                .and_then(|instance| self.table_position(id, writer, instance));
+            let Some(position) = position else {
+                // An instance not known exactly may be any of them.
+                pieces.push(table, PositionRelation::whole());
+                continue;
+            };
+            let position = self.sample_iterator_index(position);
+            let position = self.fold_single_values(&position);
+            // The table's instance moves along its array axis, the bits
+            // read along its packed one; each relates to the destination.
+            for (array, part) in self.affine_links(destination, &position, false)? {
+                let (first, last) = self.affine_hull(&part.index)?;
+                let start = usize::try_from(first).ok()?;
+                let length = usize::try_from(last)
+                    .ok()?
+                    .checked_sub(start)?
+                    .checked_add(1)?;
+                for (relation, span) in &links {
+                    let Some(span) = span.intersection(key_bits) else {
+                        continue;
+                    };
+                    let value = self
+                        .ssa
+                        .projected(table, position_domain(ArraySpan { start, length }, span));
+                    pieces.push(
+                        value,
+                        PositionRelation {
+                            array,
+                            packed: relation.packed,
+                        },
+                    );
+                }
+            }
+        }
+        Some(pieces)
+    }
+
+    /// A one-bit variable read in packed-anchor mode.
+    fn eval_packed_anchored_read(
+        &mut self,
+        factor: &Factor,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        anchor: &SampledAffineIndex,
+        projection: &ProjectionContext,
+    ) -> ExpressionSources {
+        let Factor::Variable(id, index, select, comptime) = factor else {
+            unreachable!("only variable reads are anchored");
+        };
+        let mut selector_sources = Vec::new();
+        for expression in index.expressions().chain(select.0.iter()) {
+            selector_sources.extend(self.eval_expr(expression));
+        }
+        if let Some((_, expression)) = &select.1 {
+            selector_sources.extend(self.eval_expr(expression));
+        }
+        let mut last_writers =
+            self.last_writer_sources(*id, index, select, comptime.member_select_domain);
+        let receiver = self.receiver_index(*id, index);
+        if receiver.is_const()
+            && let Some(reads) = self.eval_packed_anchored_bit(
+                *id,
+                &receiver,
+                select,
+                requested_array,
+                requested,
+                anchor,
+                last_writers.as_mut(),
+            )
+        {
+            let mut reads = reads;
+            reads.extend_whole(selector_sources);
+            return reads;
+        }
+        if select.is_const_with_range()
+            && let Some(reads) = self.eval_packed_anchored_element(
+                *id,
+                index,
+                select,
+                requested_array,
+                anchor,
+                last_writers.as_mut(),
+            )
+        {
+            let mut reads = reads;
+            reads.extend_whole(selector_sources);
+            return reads;
+        }
+        // A one-bit value the scope's tables hold is taken at the instance
+        // it reads.
+        if let Some(mut reads) =
+            self.packed_anchored_instance(factor, requested_array, anchor, last_writers.as_mut())
+        {
+            reads.extend_whole(selector_sources);
+            return reads;
+        }
+        // A one-bit value kept where no position relates it to the
+        // destination bit takes its definition again.
+        if let Some(mut reads) = self.packed_anchored_definition(
+            factor,
+            requested_array,
+            requested,
+            projection,
+            last_writers.as_mut(),
+        ) {
+            reads.extend_whole(selector_sources);
+            return reads;
+        }
+        selector_sources.extend(self.read_variable(
+            *id,
+            index,
+            select,
+            comptime.member_select_domain,
+        ));
+        ExpressionSources::whole(selector_sources)
+    }
+
+    /// The sources of a one-bit read at constant coordinates of storage the
+    /// scope's tables hold, for a destination bit at `anchor` that moves
+    /// with the iterators: each table at the position of the instance it
+    /// reads, related to the destination bit across the axes. `None` when
+    /// the last writes are not solved.
+    fn packed_anchored_instance(
+        &mut self,
+        factor: &Factor,
+        requested_array: ArraySpan,
+        anchor: &SampledAffineIndex,
+        last_writers: Option<&mut last_writer::LastWriterRead>,
+    ) -> Option<ExpressionSources> {
+        let Factor::Variable(id, index, select, comptime) = factor else {
+            return None;
+        };
+        if !index.is_const() || !(select.is_empty() || select.is_const_with_range()) {
+            return None;
+        }
+        let read = last_writers?;
+        let variable = self.ctx.variables.get(id)?.clone();
+        let (high, low) = if select.is_empty() {
+            (variable.r#type.total_width()?.checked_sub(1)?, 0)
+        } else {
+            select.eval_value(&mut self.ctx, &variable.r#type, false)?
+        };
+        if high != low {
+            return None;
+        }
+        let receiver = self.receiver_index(*id, index);
+        let accesses = var_reads(
+            *id,
+            &receiver,
+            select,
+            comptime.member_select_domain,
+            &mut self.ctx,
+        );
+        let [(array, packed)] = accesses.as_slice() else {
+            return None;
+        };
+        let keys = self.bit_part.overlapping_access(*id, *array, *packed);
+        let [key] = keys.as_slice() else {
+            return None;
+        };
+        let key = *key;
+        let bits = packed.intersection(self.key_span(key)?)?;
+        let cells = self.key_last_writes(read, key)?;
+        let current = self.counted_iterators.clone();
+        let mut sources = ExpressionSources::default();
+        for (cell, writes) in cells {
+            if cell.len() != current.len() {
+                return None;
+            }
+            self.counted_iterators.clone_from(&cell);
+            let destination = self.fold_single_values(anchor);
+            let reached = self.affine_hull(&destination.index);
+            let mut pieces = ExpressionSources::default();
+            for write in writes {
+                let Some(writer) = write.source else {
+                    if let Some(snapshot) = self.scope_snapshot(key) {
+                        let value = self.project_read(key, snapshot, *array, *packed);
+                        pieces.push(value, PositionRelation::whole());
+                    }
+                    continue;
+                };
+                let table = self.read_table(key, writer);
+                if write.earlier.is_some() {
+                    // Any of the instances may be the last.
+                    let iterators = self.iterator_ids();
+                    let value = match self.earlier_region(*id, &write, &iterators) {
+                        Some(region) => self.ssa.projected(table, position_domain(region, bits)),
+                        None => table,
+                    };
+                    pieces.push(value, PositionRelation::whole());
+                    continue;
+                }
+                let position = write
+                    .instance
+                    .as_ref()
+                    .and_then(|instance| self.table_position(*id, writer, instance));
+                let link = position.and_then(|position| {
+                    let sampled = self.sample_iterator_index(position);
+                    let source = self.fold_single_values(&sampled);
+                    let link = self.affine_link(&destination, &source, true)?;
+                    let (first, last) = self.affine_hull(&source.index)?;
+                    let start = usize::try_from(first).ok()?;
+                    let length = usize::try_from(last).ok()?.checked_sub(start)? + 1;
+                    Some((link, ArraySpan { start, length }))
+                });
+                match link {
+                    Some((link, region)) => {
+                        let value = self.ssa.projected(table, position_domain(region, bits));
+                        pieces.push(
+                            value,
+                            PositionRelation {
+                                array: Link::Unlinked,
+                                packed: link,
+                            },
+                        );
+                    }
+                    None => pieces.push(table, PositionRelation::whole()),
+                }
+            }
+            self.counted_iterators.clone_from(&current);
+            if cell == current {
+                sources.extend(pieces);
+                continue;
+            }
+            // On only some iterations, these writes reach only the
+            // destination bits those take.
+            let value = self.ssa.related_definition(pieces.sources);
+            let value = match reached {
+                Some((first, last)) => {
+                    let start = usize::try_from(first.max(0)).ok()?;
+                    let length = usize::try_from(last).ok()?.checked_sub(start)? + 1;
+                    self.ssa.projected(
+                        value,
+                        position_domain(requested_array, PackedSpan::new(start, length)?),
+                    )
+                }
+                None => value,
+            };
+            sources.push(value, PositionRelation::identity());
+        }
+        let _ = low;
+        Some(sources)
+    }
+
+    /// The sources of a one-bit read at constant coordinates for a
+    /// destination bit that moves with the iterators, through the
+    /// definitions its key holds. `None` when it reaches none.
+    fn packed_anchored_definition(
+        &mut self,
+        factor: &Factor,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        projection: &ProjectionContext,
+        last_writers: Option<&mut last_writer::LastWriterRead>,
+    ) -> Option<ExpressionSources> {
+        let Factor::Variable(id, index, select, comptime) = factor else {
+            return None;
+        };
+        if !index.is_const() || !(select.is_empty() || select.is_const_with_range()) {
+            return None;
+        }
+        let variable = self.ctx.variables.get(id)?.clone();
+        let (high, low) = if select.is_empty() {
+            (variable.r#type.total_width()?.checked_sub(1)?, 0)
+        } else {
+            select.eval_value(&mut self.ctx, &variable.r#type, false)?
+        };
+        if high != low {
+            return None;
+        }
+        let receiver = self.receiver_index(*id, index);
+        let accesses = var_reads(
+            *id,
+            &receiver,
+            select,
+            comptime.member_select_domain,
+            &mut self.ctx,
+        );
+        let [(array, packed)] = accesses.as_slice() else {
+            return None;
+        };
+        let keys = self.bit_part.overlapping_access(*id, *array, *packed);
+        let [key] = keys.as_slice() else {
+            return None;
+        };
+        let key = *key;
+        let version = self.read_source_key(key, last_writers);
+        let bits = packed.intersection(self.key_span(key)?)?;
+        let (defined, plain) = self.defined_sources(
+            version,
+            bits,
+            low,
+            *array,
+            requested_array,
+            Some(requested),
+            projection,
+        )?;
+        let mut reads = defined;
+        for version in plain {
+            let version = self.project_read(key, version, *array, *packed);
+            reads.push(version, PositionRelation::whole());
+        }
+        Some(reads)
+    }
+
+    /// One bit at an affine packed position of a constant element.
+    #[allow(clippy::too_many_arguments)]
+    fn eval_packed_anchored_bit(
+        &mut self,
+        id: VarId,
+        receiver: &VarIndex,
+        select: &VarSelect,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        anchor: &SampledAffineIndex,
+        mut last_writers: Option<&mut last_writer::LastWriterRead>,
+    ) -> Option<ExpressionSources> {
+        let (source, width) = self.sample_packed_select(id, select)?;
+        if width != 1 || source.index.terms.is_empty() {
+            return None;
+        }
+        // Each progression of the source bits has its own map to the
+        // destination bit.
+        let mut links = Vec::new();
+        for (link, source) in self.affine_links(anchor, &source, false)? {
+            let source_span = match link.translation_offset() {
+                // Positions before the first bit do not exist.
+                Some(offset) => translate_span_clipped(requested, offset.checked_neg()?),
+                None => {
+                    let (low, high) = self.affine_hull(&source.index)?;
+                    let low = usize::try_from(low).ok()?;
+                    PackedSpan::new(low, usize::try_from(high).ok()?.checked_sub(low)? + 1)
+                }
+            };
+            if let Some(source_span) = source_span {
+                links.push((link, source_span));
+            }
+        }
+        let mut reads = ExpressionSources::default();
+        let variable = self.ctx.variables.get(&id).cloned();
+        let accesses = var_reads(id, receiver, &VarSelect::default(), None, &mut self.ctx);
+        let selected_array = if accesses.len() == 1 {
+            variable
+                .as_ref()
+                .and_then(|variable| receiver.eval_selection(&mut self.ctx, &variable.r#type.array))
+        } else {
+            None
+        };
+        for &(link, source_span) in &links {
+            for (idx, access) in &accesses {
+                let source_array = if let Some(selection) = selected_array {
+                    requested_array
+                        .intersection(ArraySpan {
+                            start: selection.result_start,
+                            length: selection.length,
+                        })
+                        .and_then(|requested| {
+                            requested.translated(selection.result_start, selection.source_start)
+                        })
+                        .and_then(|requested| requested.intersection(*idx))
+                } else {
+                    Some(*idx)
+                };
+                if let (Some(source_array), Some(source_span)) =
+                    (source_array, source_span.intersection(*access))
+                {
+                    for key in self
+                        .bit_part
+                        .overlapping_access(id, source_array, source_span)
+                    {
+                        let version = self.read_source_key(key, last_writers.as_deref_mut());
+                        let version = self.project_read(key, version, source_array, source_span);
+                        reads.push(
+                            version,
+                            PositionRelation {
+                                array: Link::from_offset(selected_array.and_then(|selection| {
+                                    signed_difference(
+                                        selection.result_start,
+                                        selection.source_start,
+                                    )
+                                })),
+                                packed: link,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        Some(reads)
+    }
+
+    /// A one-bit element at an affine array position: the destination bit
+    /// moves with the source element along the other axis.
+    fn eval_packed_anchored_element(
+        &mut self,
+        id: VarId,
+        index: &VarIndex,
+        select: &VarSelect,
+        requested_array: ArraySpan,
+        anchor: &SampledAffineIndex,
+        mut last_writers: Option<&mut last_writer::LastWriterRead>,
+    ) -> Option<ExpressionSources> {
+        let source = self.sample_affine_index(id, index)?;
+        if source.index.terms.is_empty() {
+            return None;
+        }
+        let variable = self.ctx.variables.get(&id)?.clone();
+        let (high, low) = select.eval_value(&mut self.ctx, &variable.r#type, false)?;
+        if high != low {
+            return None;
+        }
+        let bit = PackedSpan::new(low, 1)?;
+        let (first, last) = self.affine_hull(&source.index)?;
+        let first = usize::try_from(first).ok()?;
+        let elements = ArraySpan {
+            start: first,
+            length: usize::try_from(last).ok()?.checked_sub(first)? + 1,
+        };
+        let element = SampledAffineIndex {
+            index: AffineIndex {
+                terms: Vec::new(),
+                constant: isize::try_from(requested_array.start).ok()?,
+            },
+            versions: Vec::new(),
+        };
+        let relation = PositionRelation {
+            array: self.affine_link(&element, &source, false)?,
+            packed: self.affine_link(anchor, &source, true)?,
+        };
+        let mut reads = ExpressionSources::default();
+        let receiver = self.receiver_index(id, index);
+        for (idx, access) in var_reads(id, &receiver, select, None, &mut self.ctx) {
+            let (Some(array), Some(packed)) =
+                (idx.intersection(elements), access.intersection(bit))
+            else {
+                continue;
+            };
+            for key in self.bit_part.overlapping_access(id, array, packed) {
+                let version = self.read_source_key(key, last_writers.as_deref_mut());
+                reads.push(self.project_read(key, version, array, packed), relation);
+            }
+        }
+        Some(reads)
     }
 
     fn eval_function_body(
@@ -2350,6 +5619,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn next_branch_id(&mut self, arms: usize) -> BranchId {
         let branch = BranchId::new(self.branch_namespace, self.next_branch, arms);
         self.next_branch += 1;
+        // A branch inside a loop is taken on each iteration again.
+        if !self.counted_iterators.is_empty() || !self.loop_flows.is_empty() {
+            self.iteration_branches.insert(branch);
+        }
         branch
     }
 
@@ -2460,68 +5733,57 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn eval_statement(&mut self, statement: &Statement, controls: &[VersionId]) -> FlowResult {
+        let entered = self.enter_statement_place(statement);
+        let result = match self.last_writer_split(statement) {
+            Some(cells) => self.eval_split_statement(statement, cells, controls),
+            None => self.eval_statement_inner(statement, controls),
+        };
+        if entered {
+            self.statement_places.pop();
+        }
+        result
+    }
+
+    fn eval_statement_inner(
+        &mut self,
+        statement: &Statement,
+        controls: &[VersionId],
+    ) -> FlowResult {
+        #[cfg(test)]
+        STATEMENT_EVALUATIONS.set(STATEMENT_EVALUATIONS.get() + 1);
         match statement {
             Statement::Assign(assign) => {
-                let previous_assignment = self.active_assignment;
-                self.active_assignment = self.tracing.then_some(assign.token);
-                self.call_caches.push(Some(EvaluationCache {
-                    variables: Some(HashMap::default()),
-                    ..EvaluationCache::default()
-                }));
-                // Evaluate RHS reads in expression order before destination
-                // selectors or any region writes. Keep each occurrence's value
-                // and index versions even if a later call or write changes them.
-                let sources = if let [destination] = assign.dst.as_slice() {
-                    let packed = destination_packed_shape(destination);
-                    self.eval_expr_shaped(
-                        &assign.expr,
-                        true,
-                        EvaluationShape {
-                            array: destination.comptime.r#type.array.as_slice(),
-                            packed: packed.as_ref(),
-                        },
-                    )
-                } else {
-                    self.eval_expr(&assign.expr)
-                };
-                let widths: Vec<_> = assign
-                    .dst
-                    .iter()
-                    .map(|destination| self.destination_width(destination))
-                    .collect();
-                if widths.iter().all(Option::is_some) {
-                    let total_width = widths.iter().flatten().sum();
-                    let mut offset = total_width;
-                    for (destination, width) in assign.dst.iter().zip(widths) {
-                        let width = width.expect("checked above");
-                        offset -= width;
-                        self.write_assignment_destination(
-                            destination,
-                            &assign.expr,
-                            offset,
-                            total_width,
-                            controls,
-                        );
-                    }
-                } else {
-                    for destination in &assign.dst {
-                        self.write_destination(destination, &sources, controls);
-                    }
+                // An iterator condition confines each value to the
+                // iterations that select it.
+                if let Expression::Ternary(condition, true_value, false_value, _) = &assign.expr
+                    && let decision @ Decision::Split(_) = self.decide(condition)
+                {
+                    return self.eval_sides(
+                        condition,
+                        decision,
+                        [
+                            Side::Assign(assign, true_value),
+                            Side::Assign(assign, false_value),
+                        ],
+                        controls,
+                    );
                 }
-                self.call_caches.pop();
-                self.active_assignment = previous_assignment;
-                if self.is_return_assignment(&assign.dst) {
-                    self.record_return();
-                    FlowResult::new(ProcedureFlow::Return)
-                } else {
-                    FlowResult::new(ProcedureFlow::Continue)
-                }
+                self.eval_assign(assign, &assign.expr, controls)
             }
             Statement::If(statement) => self.eval_if(statement, controls),
             Statement::Case(statement) => self.eval_case(statement, controls),
             Statement::For(statement) => self.eval_for(statement, controls),
             Statement::FunctionCall(call) => {
+                // The inputs keep the values they read, as an assignment's
+                // expression does, for the definitions of the outputs.
+                self.call_caches.push(Some(EvaluationCache {
+                    variables: Some(HashMap::default()),
+                    ..EvaluationCache::default()
+                }));
                 self.eval_call(call, controls);
+                self.record_output_definitions(call, controls);
+                self.record_output_instances(call, controls);
+                self.call_caches.pop();
                 FlowResult::new(ProcedureFlow::Continue)
             }
             Statement::SystemFunctionCall(call) => {
@@ -2606,38 +5868,377 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
+    /// Assign `expression` to the destinations of `assign`.
+    fn eval_assign(
+        &mut self,
+        assign: &AssignStatement,
+        expression: &Expression,
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let previous_assignment = self.active_assignment;
+        self.active_assignment = self.tracing.then_some(assign.token);
+        self.call_caches.push(Some(EvaluationCache {
+            variables: Some(HashMap::default()),
+            ..EvaluationCache::default()
+        }));
+        // Evaluate RHS reads in expression order before destination
+        // selectors or any region writes. Keep each occurrence's value
+        // and index versions even if a later call or write changes them.
+        let sources = if let [destination] = assign.dst.as_slice() {
+            let packed = destination_packed_shape(destination);
+            self.eval_expr_shaped(
+                expression,
+                true,
+                EvaluationShape {
+                    array: destination.comptime.r#type.array.as_slice(),
+                    packed: packed.as_ref(),
+                },
+            )
+        } else {
+            self.eval_expr(expression)
+        };
+        let widths: Vec<_> = assign
+            .dst
+            .iter()
+            .map(|destination| self.destination_width(destination))
+            .collect();
+        if widths.iter().all(Option::is_some) {
+            let total_width = widths.iter().flatten().sum();
+            let mut offset = total_width;
+            for (index, (destination, width)) in assign.dst.iter().zip(widths).enumerate() {
+                let width = width.expect("checked above");
+                offset -= width;
+                self.current_writer = Some((assign.token, index));
+                self.write_assignment_destination(
+                    destination,
+                    expression,
+                    offset,
+                    total_width,
+                    controls,
+                );
+            }
+        } else {
+            for (index, destination) in assign.dst.iter().enumerate() {
+                self.current_writer = Some((assign.token, index));
+                self.write_destination(destination, &sources, controls);
+            }
+        }
+        self.current_writer = None;
+        self.call_caches.pop();
+        self.active_assignment = previous_assignment;
+        if self.is_return_assignment(&assign.dst) {
+            self.record_return();
+            FlowResult::new(ProcedureFlow::Return)
+        } else {
+            FlowResult::new(ProcedureFlow::Continue)
+        }
+    }
+
     fn eval_if(&mut self, statement: &IfStatement, controls: &[VersionId]) -> FlowResult {
-        let condition = self.eval_expr(&statement.cond);
+        let decision = self.decide(&statement.cond);
+        self.eval_sides(
+            &statement.cond,
+            decision,
+            [
+                Side::Block(&statement.true_side),
+                Side::Block(&statement.false_side),
+            ],
+            controls,
+        )
+    }
+
+    /// What is known statically about which side `condition` takes.
+    fn decide(&mut self, condition: &Expression) -> Decision {
+        if let Some(truth) = self.constant_truth(condition) {
+            Decision::Constant(truth)
+        } else if let Some(split) = self.iterator_condition_split(condition) {
+            Decision::Split(split)
+        } else {
+            Decision::Unknown
+        }
+    }
+
+    /// Evaluate the true and false sides of `condition` as `decision`
+    /// selects them.
+    fn eval_sides(
+        &mut self,
+        condition: &Expression,
+        decision: Decision,
+        [true_side, false_side]: [Side<'_>; 2],
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let sources = self.eval_control_condition(condition);
         let mut nested_controls = controls.to_vec();
-        nested_controls.extend_from_slice(&condition);
-        match self.constant_truth(&statement.cond) {
-            Some(true) => return self.eval_block(&statement.true_side, &nested_controls),
-            Some(false) => return self.eval_block(&statement.false_side, &nested_controls),
-            None => {}
+        nested_controls.extend_from_slice(&sources);
+        // Each arm is a side with the iterations that take it. A side that no
+        // iteration takes is never evaluated, and a side whose iterations form
+        // several progressions is evaluated once per progression.
+        let arms = match decision {
+            Decision::Constant(true) => vec![(true_side, None)],
+            Decision::Constant(false) => vec![(false_side, None)],
+            Decision::Split(IteratorSplit {
+                position,
+                holds,
+                fails,
+            }) => holds
+                .into_iter()
+                .map(|iterator| (true_side, Some((position, iterator))))
+                .chain(
+                    fails
+                        .into_iter()
+                        .map(|iterator| (false_side, Some((position, iterator)))),
+                )
+                .collect::<Vec<_>>(),
+            Decision::Unknown => vec![(true_side, None), (false_side, None)],
+        };
+        if let [(side, confinement)] = arms.as_slice() {
+            return self.eval_confined_side(*confinement, *side, &nested_controls);
         }
 
-        let branch = self.next_branch_id(2);
+        let branch = self.next_branch_id(arms.len());
         let parent_condition = self.path_condition.clone();
-        self.choose_path(&parent_condition, branch, 0);
-        let checkpoint = self.ssa.checkpoint();
-        let true_flow = self.eval_block(&statement.true_side, &nested_controls);
-        let true_state = self.ssa.capture_and_rollback(checkpoint);
-        let true_condition = self.path_condition.clone();
-
-        self.choose_path(&parent_condition, branch, 1);
-        let checkpoint = self.ssa.checkpoint();
-        let false_flow = self.eval_block(&statement.false_side, &nested_controls);
-        let false_state = self.ssa.capture_and_rollback(checkpoint);
-        let false_condition = self.path_condition.clone();
-
+        let mut branches = Vec::with_capacity(arms.len());
+        for (arm, (side, confinement)) in arms.into_iter().enumerate() {
+            self.choose_path(&parent_condition, branch, arm);
+            let checkpoint = self.ssa.checkpoint();
+            let flow = self.eval_confined_side(confinement, side, &nested_controls);
+            let state = self.ssa.capture_and_rollback(checkpoint);
+            branches.push((flow, state, self.path_condition.clone()));
+        }
         self.path_condition = parent_condition;
-        self.merge_branches(
-            vec![
-                (true_flow, true_state, true_condition),
-                (false_flow, false_state, false_condition),
-            ],
-            &condition,
-        )
+        self.merge_branches(branches, &sources)
+    }
+
+    fn eval_confined_side(
+        &mut self,
+        confinement: Option<(usize, CountedIterator)>,
+        side: Side<'_>,
+        controls: &[VersionId],
+    ) -> FlowResult {
+        match side {
+            Side::Block(statements) => self.eval_confined_block(confinement, statements, controls),
+            Side::Assign(assign, expression) => {
+                let Some((position, confined)) = confinement else {
+                    return self.eval_assign(assign, expression, controls);
+                };
+                let iterator = self.counted_iterators[position];
+                self.counted_iterators[position] = confined;
+                let flow = self.eval_assign(assign, expression, controls);
+                self.counted_iterators[position] = iterator;
+                flow
+            }
+        }
+    }
+
+    /// Evaluate a block with one counted iterator confined to the iterations
+    /// that reach it, so affine accesses inside address only their positions.
+    fn eval_confined_block(
+        &mut self,
+        confinement: Option<(usize, CountedIterator)>,
+        statements: &[Statement],
+        controls: &[VersionId],
+    ) -> FlowResult {
+        let Some((position, confined)) = confinement else {
+            return self.eval_block(statements, controls);
+        };
+        let iterator = self.counted_iterators[position];
+        self.counted_iterators[position] = confined;
+        let flow = self.eval_block(statements, controls);
+        self.counted_iterators[position] = iterator;
+        flow
+    }
+
+    /// The iterations on which a comparison of a counted iterator with a
+    /// constant holds and fails. Such a condition reads no signal.
+    fn iterator_condition_split(&mut self, condition: &Expression) -> Option<IteratorSplit> {
+        if let Expression::Binary(left, op @ (Op::Eq | Op::Ne), right, _) = condition
+            && let Some(split) = self
+                .iterator_remainder_split(left, *op, right)
+                .or_else(|| self.iterator_remainder_split(right, *op, left))
+        {
+            return Some(split);
+        }
+        let (left, op, right) = match condition {
+            Expression::Binary(left, op, right, _) => (left, *op, right),
+            Expression::Unary(Op::LogicNot, operand, _) => {
+                let split = self.iterator_condition_split(operand)?;
+                return Some(IteratorSplit {
+                    position: split.position,
+                    holds: split.fails,
+                    fails: split.holds,
+                });
+            }
+            _ => return None,
+        };
+        let iterator = |expression: &Expression, iterators: &[CountedIterator]| {
+            let Expression::Term(factor) = expression else {
+                return None;
+            };
+            let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+                return None;
+            };
+            if !index.indices.is_empty() || !select.is_empty() {
+                return None;
+            }
+            iterators.iter().rposition(|iterator| iterator.id == *id)
+        };
+        let (position, constant, op) =
+            if let Some(position) = iterator(left, &self.counted_iterators) {
+                (position, right, op)
+            } else {
+                let position = iterator(right, &self.counted_iterators)?;
+                let op = match op {
+                    Op::Less => Op::Greater,
+                    Op::LessEq => Op::GreaterEq,
+                    Op::Greater => Op::Less,
+                    Op::GreaterEq => Op::LessEq,
+                    op => op,
+                };
+                (position, left, op)
+            };
+        let comptime = constant.comptime();
+        if !comptime.is_const {
+            return None;
+        }
+        // The operands are compared at their common context.
+        let constant = constant_integer(constant, &mut self.ctx)?;
+        let iterator = self.counted_iterators[position];
+        let (min, max) = (iterator.min, iterator.max);
+        // Arithmetic beyond `isize` leaves the condition unsplit, so both
+        // sides take every iteration.
+        let within = |min: isize, max: isize| iterator.within(min, max).ok();
+        // Iterations below and above `bound`, none past the iterator's
+        // ends, so the bound moves by one only inside them.
+        let before = |bound: isize| {
+            if bound > min {
+                within(min, bound - 1)
+            } else {
+                Some(None)
+            }
+        };
+        let after = |bound: isize| {
+            if bound < max {
+                within(bound + 1, max)
+            } else {
+                Some(None)
+            }
+        };
+        // Iterations below `bound` and from it, and up to it and above it.
+        let below = |bound: isize| Some((before(bound)?, within(bound, max)?));
+        let up_to = |bound: isize| Some((within(min, bound)?, after(bound)?));
+        let pair = |(holds, fails)| (vec![holds], vec![fails]);
+        let (holds, fails) = match op {
+            Op::Eq | Op::Ne => {
+                let equal = within(constant, constant)?;
+                // The other values lie below and above the constant, each
+                // one progression.
+                let unequal = if equal.is_some() {
+                    vec![before(constant)?, after(constant)?]
+                } else {
+                    vec![Some(iterator)]
+                };
+                let equal = vec![equal];
+                if op == Op::Eq {
+                    (equal, unequal)
+                } else {
+                    (unequal, equal)
+                }
+            }
+            Op::Less => pair(below(constant)?),
+            Op::LessEq => pair(up_to(constant)?),
+            Op::Greater => {
+                let (lower, upper) = up_to(constant)?;
+                (vec![upper], vec![lower])
+            }
+            Op::GreaterEq => {
+                let (lower, upper) = below(constant)?;
+                (vec![upper], vec![lower])
+            }
+            _ => return None,
+        };
+        Some(IteratorSplit {
+            position,
+            holds: holds.into_iter().flatten().collect(),
+            fails: fails.into_iter().flatten().collect(),
+        })
+    }
+
+    /// The iterations on which the remainder of a counted iterator by a
+    /// constant equals (`Eq`) or differs from (`Ne`) a constant. Each
+    /// remainder that an iteration leaves is one progression.
+    fn iterator_remainder_split(
+        &mut self,
+        remainder: &Expression,
+        op: Op,
+        value: &Expression,
+    ) -> Option<IteratorSplit> {
+        let Expression::Binary(dividend, Op::Rem, divisor, _) = remainder else {
+            return None;
+        };
+        let Expression::Term(factor) = dividend.as_ref() else {
+            return None;
+        };
+        let Factor::Variable(id, index, select, _) = factor.as_ref() else {
+            return None;
+        };
+        if !index.indices.is_empty() || !select.is_empty() {
+            return None;
+        }
+        let position = self
+            .counted_iterators
+            .iter()
+            .rposition(|iterator| iterator.id == *id)?;
+        let iterator = self.counted_iterators[position];
+        let mut constant = |expression: &Expression| {
+            if !expression.comptime().is_const {
+                return None;
+            }
+            let value = expression.eval_value(&mut self.ctx)?.to_usize()?;
+            isize::try_from(value).ok()
+        };
+        let divisor = constant(divisor)?;
+        let value = constant(value)?;
+        // A negative dividend would leave a negative remainder.
+        if divisor <= 0 || iterator.min < 0 {
+            return None;
+        }
+        // Consecutive iterations leave every remainder they can within one
+        // period of their own progression, so no more than there are
+        // iterations. Each remainder is one arm, charged to the procedure's
+        // work before any is built.
+        let iterations = iterator.count()?;
+        if !self.reserve_guard_work(usize::try_from(divisor.min(iterations)).ok()?) {
+            return None;
+        }
+        let mut equal = Vec::new();
+        let mut unequal = Vec::new();
+        let mut current = iterator.min;
+        let mut seen = HashSet::default();
+        while current <= iterator.max {
+            let remainder = current.rem_euclid(divisor);
+            if !seen.insert(remainder) {
+                break;
+            }
+            let class = iterator
+                .confined(iterator.min, iterator.max, divisor, remainder)
+                .ok()??;
+            if remainder == value {
+                equal.push(class);
+            } else {
+                unequal.push(class);
+            }
+            current = current.checked_add(iterator.modulus)?;
+        }
+        let (holds, fails) = if op == Op::Eq {
+            (equal, unequal)
+        } else {
+            (unequal, equal)
+        };
+        Some(IteratorSplit {
+            position,
+            holds,
+            fails,
+        })
     }
 
     fn eval_case(&mut self, statement: &CaseStatement, controls: &[VersionId]) -> FlowResult {
@@ -2741,17 +6342,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return FlowResult::new(ProcedureFlow::Continue);
         }
 
-        if let Some(iterations) = statement.range.eval_iter(&mut self.ctx) {
-            self.eval_known_for_iterations(statement, &range_controls, iterations)
-        } else if statement.range.is_over_size_limit(&mut self.ctx) {
+        match loop_evaluation(statement, &mut self.ctx) {
+            LoopEvaluation::Enumerated(values) => {
+                self.eval_known_for_iterations(statement, &range_controls, values)
+            }
+            LoopEvaluation::Counted(iterations) if iterations.count == 0 => {
+                FlowResult::new(ProcedureFlow::Continue)
+            }
+            LoopEvaluation::Counted(iterations) => {
+                self.eval_counted_for(statement, &range_controls, iterations)
+            }
             // A resource limit must not turn a finite, statically known loop
             // into the more conservative runtime-loop semantics. Without an
             // exact finite summary, suppress dependencies from this procedure
             // and report the analysis as incomplete.
-            self.status = AnalysisStatus::Barrier;
-            FlowResult::new(ProcedureFlow::Continue)
-        } else {
-            self.eval_runtime_for(statement, &range_controls)
+            LoopEvaluation::OverLimit => {
+                self.status = AnalysisStatus::Barrier;
+                FlowResult::new(ProcedureFlow::Continue)
+            }
+            LoopEvaluation::Runtime => self.eval_runtime_for(statement, &range_controls),
         }
     }
 
@@ -2819,13 +6428,40 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         });
         let mut flow = ProcedureFlow::Continue;
         let mut iteration_controls = range_controls.to_vec();
-        for value in iterations {
+        // Inside the scope of the last writers, which scans this loop as one
+        // over its iterations, each iteration is the one of its value.
+        let in_scope = self.in_writer_scope();
+        for (ordinal, value) in iterations.into_iter().enumerate() {
             self.set_known_iterator_value(statement, value);
             let body = crate::ir::peel::specialize_iteration(&mut self.ctx, statement, value);
+            let mut origins = Vec::new();
+            let iterator = in_scope
+                .then(|| {
+                    let ordinal = isize::try_from(ordinal).ok()?;
+                    let level = self.counted_iterators.len();
+                    last_writer::ordinal_iterator(statement, level, ordinal).or_else(|| {
+                        let value = isize::try_from(value).ok()?;
+                        Some(CountedIterator::new(statement.var_id, value, value))
+                    })
+                })
+                .flatten();
+            if let Some(iterator) = iterator {
+                self.counted_iterators.push(iterator);
+                if let Some(body) = &body {
+                    last_writer::statement_origins(&statement.body, body, &mut origins);
+                    self.statement_origins.extend(origins.iter().copied());
+                }
+            }
             let result = self.eval_block(
                 body.as_deref().unwrap_or(&statement.body),
                 &iteration_controls,
             );
+            if iterator.is_some() {
+                for (specialized, _) in origins {
+                    self.statement_origins.remove(&specialized);
+                }
+                self.counted_iterators.pop();
+            }
             flow = result.flow;
             if flow != ProcedureFlow::Continue || self.guard_work.is_none() {
                 break;
@@ -2856,10 +6492,171 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         FlowResult::new(ProcedureFlow::Continue)
     }
 
+    /// Evaluate a statically counted loop without enumerating its iterations.
+    /// The body is evaluated once with a symbolic iterator whose value extent
+    /// confines affine accesses, and the one-iteration transfer is closed as a
+    /// finite recurrence. Unlike a runtime loop, the body executes at least
+    /// once, so its unconditional writes are not merged with the entry state.
+    fn eval_counted_for(
+        &mut self,
+        statement: &ForStatement,
+        range_controls: &[VersionId],
+        iterations: CountedIterations,
+    ) -> FlowResult {
+        let Some(iterator) = CountedIterator::of(statement, iterations) else {
+            self.status = AnalysisStatus::Barrier;
+            return FlowResult::new(ProcedureFlow::Continue);
+        };
+        self.counted_iterators.push(iterator);
+        let opened = self.writer_scope.is_none();
+        if opened {
+            self.open_writer_scope(statement);
+            // A function whose loop keeps tables is evaluated in its
+            // callers instead of summarized.
+            if self.summarizing && self.instance_tables {
+                self.close_writer_scope();
+                self.counted_iterators.pop();
+                self.exhaust_work();
+                return FlowResult::new(ProcedureFlow::Continue);
+            }
+        }
+        let coverage = for_range_step(&statement.range).map(|step| {
+            let per_iteration = self.loop_accesses(&statement.body);
+            let closed = per_iteration.clone().close(&iterator, step);
+            CountedCoverage {
+                per_iteration,
+                closed,
+                iterator,
+                step,
+            }
+        });
+        let result = self.eval_repeated_for(statement, range_controls, false, coverage.as_ref());
+        if opened {
+            // After the loop, storage holds what the last write instance at
+            // each position left.
+            let last = if matches!(statement.range, ForRange::Reverse { .. }) {
+                iterator.min
+            } else {
+                iterator.max
+            };
+            if self.guard_work.is_some()
+                && let Ok(Some(last)) = iterator.within(last, last)
+            {
+                self.bind_exit_values(statement.body.len(), last);
+            }
+            self.close_writer_scope();
+        }
+        self.counted_iterators.pop();
+        result
+    }
+
+    /// The definitions recorded since `mark` that the keys they were bound
+    /// to still hold.
+    fn held_definitions(&mut self, mark: usize) -> Vec<Rc<Definition>> {
+        let mut held = Vec::new();
+        for index in mark..self.definition_log.len() {
+            let Some(definition) = self.definitions.get(&self.definition_log[index]).cloned()
+            else {
+                continue;
+            };
+            if self.ssa.read(self.ssa_key(definition.key)) == definition.bound {
+                held.push(definition);
+            }
+        }
+        held
+    }
+
+    /// After the innermost counted loop, whose last value is `last`, each
+    /// key that the end of its body left holding a definition holds what
+    /// the last iteration assigned: the definition at that value, when that
+    /// iteration reaches it.
+    fn leave_definitions(&mut self, held: Vec<Rc<Definition>>, last: isize) {
+        let depth = self.counted_iterators.len();
+        for definition in held {
+            if definition.iterators.len() != depth || definition.destination.is_some() {
+                continue;
+            }
+            let Ok(Some(last)) = definition.iterators[depth - 1].confined(last, last, 1, 0) else {
+                continue;
+            };
+            let after = self.ssa.read(self.ssa_key(definition.key));
+            let mut fixed = vec![last];
+            fixed.extend_from_slice(&definition.fixed);
+            let left = Definition {
+                expressions: definition.expressions.clone(),
+                bitwise: definition.bitwise,
+                cache: definition.cache.clone(),
+                controls: definition.controls.clone(),
+                iterators: definition.iterators[..depth - 1].to_vec(),
+                fixed,
+                key: definition.key,
+                bound: after,
+                destination: definition.destination.clone(),
+                shift: definition.shift,
+                context_width: definition.context_width,
+            };
+            self.definitions.insert(after, Rc::new(left));
+            self.definition_log.push(after);
+        }
+    }
+
+    fn counted_transfer_coverage(
+        &self,
+        coverage: &CountedCoverage,
+        transfer: &BranchState<SsaKey>,
+    ) -> HashMap<SsaKey, TransferCoverage> {
+        transfer
+            .keys()
+            // A write's table is indexed by its instances, not by the
+            // positions the coverage tells; it keeps what it held.
+            .filter(|key| key.writer.is_none())
+            .filter_map(|&key| {
+                let packed = *self
+                    .bit_part
+                    .ranges_of((key.node.0, key.node.1))
+                    .get(key.node.2)?;
+                let array = key.node.1;
+                let key_coverage = coverage.key_coverage(key.node.0, array, packed);
+                let exposed = key_coverage.exposed.map(|spans| {
+                    spans
+                        .into_iter()
+                        .filter_map(|span| span.intersection(array))
+                        .map(|span| position_domain(span, packed))
+                        .collect()
+                });
+                Some((
+                    key,
+                    TransferCoverage {
+                        killed: key_coverage.killed,
+                        exposed,
+                    },
+                ))
+            })
+            .collect()
+    }
+
     fn eval_runtime_for(
         &mut self,
         statement: &ForStatement,
         range_controls: &[VersionId],
+    ) -> FlowResult {
+        let may_execute_zero_times = for_range_has_dynamic_bounds(&statement.range);
+        // Its reads may see a write of its previous run, which the last
+        // writers of the scope do not order.
+        let in_scope = self.in_writer_scope();
+        self.runtime_loop_depth += usize::from(in_scope);
+        let result =
+            self.eval_repeated_for(statement, range_controls, may_execute_zero_times, None);
+        self.runtime_loop_depth -= usize::from(in_scope);
+        result
+    }
+
+    fn eval_repeated_for(
+        &mut self,
+        statement: &ForStatement,
+        range_controls: &[VersionId],
+        may_execute_zero_times: bool,
+        coverage: Option<&CountedCoverage>,
     ) -> FlowResult {
         // A runtime iterator is not part of a static prefix. Consequently
         // accesses such as x[i], x[i + 1], and x[j] all may address the same
@@ -2867,13 +6664,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // the ordinary dynamic-access rules conservatively retain that alias.
         self.forget_runtime_iterator_value(statement.var_id);
         let parent_condition = self.path_condition.clone();
-        let may_execute_zero_times = for_range_has_dynamic_bounds(&statement.range);
+        // Branches made from here on are taken on each iteration again.
+        let outer_branches = BranchId::new(self.branch_namespace, self.next_branch, 0);
         let checkpoint = self.ssa.checkpoint();
         self.loop_flows.push(LoopFlow {
             checkpoint,
             breaks: Vec::new(),
         });
+        let returns = self.recorded_returns();
+        let definitions = self.definition_log.len();
         let flow = self.eval_block(&statement.body, range_controls);
+        // A counted loop runs its body at least once, so a key its end
+        // leaves holding a definition holds the last iteration's.
+        let held = if coverage.is_some() && !may_execute_zero_times {
+            self.held_definitions(definitions)
+        } else {
+            Vec::new()
+        };
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
         if self.guard_work.is_none() {
@@ -2890,27 +6697,107 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // Break and fallthrough paths jointly describe one abstract
         // iteration. Close that finite transfer instead of re-evaluating the
         // body or enumerating runtime iterator values.
-        let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
+        let mut transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
+        // A table that is a circuit node is read as what the loops leave, so
+        // what each iteration writes there does not feed the next: it is
+        // observed as a value of any iteration.
+        let produced = if self.external_tables {
+            let tables = &self.table_indices;
+            transfer.split_off(|key| tables.contains_key(key))
+        } else {
+            BranchState::unchanged()
+        };
         let bit_part = self.bit_part;
-        if self
+        let tables = self.writer_scope.clone();
+        let last = coverage.map(|coverage| {
+            if coverage.step < 0 {
+                coverage.iterator.min
+            } else {
+                coverage.iterator.max
+            }
+        });
+        let coverage = coverage
+            .map(|coverage| self.counted_transfer_coverage(coverage, &transfer))
+            .unwrap_or_default();
+        // A return inside the body exits from some later iteration, which
+        // reads the state that earlier iterations left.
+        let returns = match (self.function_flows.last_mut(), returns) {
+            (Some(function), Some(start)) => &mut function.returns[start..],
+            _ => &mut [],
+        };
+        let mut observed = returns
+            .iter_mut()
+            .map(|state| std::mem::replace(state, BranchState::unchanged()))
+            .collect::<Vec<_>>();
+        let produces = produced.len() > 0;
+        if produces {
+            observed.push(produced);
+        }
+        let writer_ids = self.writer_ids.clone();
+        let closed = self
             .ssa
             .try_close_repeated_transfer(
-                &transfer,
-                checkpoint,
-                may_execute_zero_times,
+                RepeatedIteration {
+                    observed: &mut observed,
+                    bound_only: usize::from(produces),
+                    outer_branches: Some(outer_branches),
+                    ..RepeatedIteration::new(&transfer, checkpoint, may_execute_zero_times)
+                },
                 &mut self.import_work,
                 |key| {
-                    bit_part
+                    let domain = bit_part
                         .ranges_of((key.node.0, key.node.1))
                         .get(key.node.2)
-                        .map(|packed| position_domain(key.node.1, *packed))
+                        .map(|packed| position_domain(key.node.1, *packed))?;
+                    Some(match (key.writer, &tables) {
+                        (Some((writer, _)), Some(tables)) => {
+                            tables.table_domain(key.node.0, writer_ids[writer], domain)
+                        }
+                        _ => domain,
+                    })
                 },
+                |key| coverage.get(&key).cloned().unwrap_or_default(),
             )
-            .is_none()
-        {
+            .is_some();
+        let produced = produces.then(|| observed.pop()).flatten();
+        for (slot, state) in returns.iter_mut().zip(observed) {
+            *slot = state;
+        }
+        if !closed {
             self.exhaust_work();
+        } else {
+            // The closure takes no branch of the iterations apart, but the
+            // loop runs only on the paths that reach it, as each of its
+            // values does.
+            let mut keys = transfer.keys().copied().collect::<Vec<_>>();
+            keys.sort_unstable();
+            for key in keys {
+                let value = self.ssa.read(key);
+                let value = self.ssa.guarded(value, &self.path_condition);
+                self.ssa.bind(key, value);
+            }
+            if let Some(produced) = produced {
+                let mut keys = produced.keys().copied().collect::<Vec<_>>();
+                keys.sort_unstable();
+                for key in keys {
+                    let Some(value) = produced.get(&key) else {
+                        continue;
+                    };
+                    let value = self.ssa.guarded(value, &self.path_condition);
+                    self.ssa.bind(key, value);
+                }
+            }
+            if let Some(last) = last {
+                self.leave_definitions(held, last);
+            }
         }
         FlowResult::new(ProcedureFlow::Continue)
+    }
+
+    fn recorded_returns(&self) -> Option<usize> {
+        self.function_flows
+            .last()
+            .map(|function| function.returns.len())
     }
 
     fn merge_flow_state_bindings(&mut self, states: &[FlowState]) -> BranchState<SsaKey> {
@@ -2971,18 +6858,38 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if self.guard_work.is_none() {
             return ExpressionSources::default();
         }
-        let requested_array = if matches!(expression, Expression::ArrayLiteral(_, _)) {
-            requested_array
-        } else {
-            let expression_array = expression.comptime().r#type.array.total().unwrap_or(1);
-            let Some(requested_array) = requested_array.intersection(ArraySpan {
-                start: 0,
-                length: expression_array,
-            }) else {
-                return ExpressionSources::default();
+        if projection.packed_anchor.is_some() {
+            // Packed coordinates are destination bits, not bits of this value.
+            let sources =
+                self.eval_expr_bits_in(expression, requested_array, requested, context, projection);
+            if sources
+                .sources
+                .iter()
+                .any(|(_, relation)| relation.packed.is_unlinked())
+            {
+                let value = self.ssa.related_definition(sources.sources);
+                let value = self
+                    .ssa
+                    .projected(value, position_domain(requested_array, requested));
+                return ExpressionSources {
+                    sources: vec![(value, PositionRelation::default())],
+                };
+            }
+            return sources;
+        }
+        let requested_array =
+            if projection.anchor || matches!(expression, Expression::ArrayLiteral(_, _)) {
+                requested_array
+            } else {
+                let expression_array = expression.comptime().r#type.array.total().unwrap_or(1);
+                let Some(requested_array) = requested_array.intersection(ArraySpan {
+                    start: 0,
+                    length: expression_array,
+                }) else {
+                    return ExpressionSources::default();
+                };
+                requested_array
             };
-            requested_array
-        };
         let natural_width = expression
             .comptime()
             .r#type
@@ -3026,7 +6933,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 if sources
                     .sources
                     .iter()
-                    .any(|(_, relation)| relation.packed.is_none())
+                    .any(|(_, relation)| relation.packed.is_unlinked())
                 {
                     let array = projection
                         .destination_index
@@ -3079,6 +6986,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         context: ExpressionContext,
         projection: &ProjectionContext,
     ) -> ExpressionSources {
+        if let Some(anchor) = &projection.packed_anchor {
+            return self.eval_packed_anchored_bits(
+                expression,
+                requested_array,
+                requested,
+                context,
+                projection,
+                anchor,
+            );
+        }
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::Variable(id, index, select, comptime) => {
@@ -3103,8 +7020,18 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     } else {
                         None
                     };
+                    if projection.anchor
+                        && selected.is_none()
+                        && let Some(sources) = self.eval_array_anchored_strided_read(
+                            factor,
+                            requested,
+                            projection,
+                            &selector_sources,
+                        )
+                    {
+                        return sources;
+                    }
                     if let Some((_, low)) = selected {
-                        let mut reads = Vec::new();
                         let receiver = self.receiver_index(*id, index);
                         let accesses = var_reads(
                             *id,
@@ -3113,96 +7040,302 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             comptime.member_select_domain,
                             &mut self.ctx,
                         );
+                        // A translation would also relate the positions that
+                        // a confined iterator skips; those are mapped below.
                         let dynamic_array_offset = projection
                             .destination_index
                             .as_ref()
-                            .filter(|destination| !destination.index.terms.is_empty())
+                            .filter(|destination| {
+                                !destination.index.terms.is_empty()
+                                    && !self.index_has_gaps(&destination.index)
+                            })
                             .and_then(|destination| {
                                 let source = if let Some(sampled) = &sampled {
                                     sampled.index.clone()
                                 } else {
                                     self.sample_affine_index(*id, index)
                                 }?;
-                                destination.destination_offset_from(&source)
-                            });
-                        let selected_array = if receiver.is_const() && accesses.len() == 1 {
-                            variable.as_ref().and_then(|variable| {
-                                receiver.eval_selection(&mut self.ctx, &variable.r#type.array)
-                            })
-                        } else {
-                            None
-                        };
-                        if let Some(source_span) = requested.translated(0, low) {
-                            for (idx, access) in &accesses {
-                                let source_array = if let Some(offset) = dynamic_array_offset {
-                                    offset
-                                        .checked_neg()
-                                        .and_then(|offset| {
-                                            translate_array_span(
-                                                projection
-                                                    .destination_array
-                                                    .unwrap_or(requested_array),
-                                                offset,
-                                            )
-                                        })
-                                        .and_then(|requested| requested.intersection(*idx))
-                                } else if let Some(selection) = selected_array {
-                                    requested_array
-                                        .intersection(ArraySpan {
-                                            start: selection.result_start,
-                                            length: selection.length,
-                                        })
-                                        .and_then(|requested| {
-                                            requested.translated(
-                                                selection.result_start,
-                                                selection.source_start,
-                                            )
-                                        })
-                                        .and_then(|requested| requested.intersection(*idx))
-                                } else {
-                                    Some(*idx)
-                                };
-                                if let (Some(source_array), Some(source_span)) =
-                                    (source_array, source_span.intersection(*access))
+                                if self.index_has_gaps(&source.index) {
+                                    return None;
+                                }
+                                // An iterator with one value on the
+                                // iterations being evaluated is that value,
+                                // whichever version of it each side read.
+                                let destination = self.fold_single_values(destination);
+                                let source = self.fold_single_values(&source);
+                                if destination
+                                    .index
+                                    .terms
+                                    .iter()
+                                    .all(|(id, _)| self.counted_iterator(*id).is_some())
                                 {
-                                    for key in self.bit_part.overlapping_access(
-                                        *id,
-                                        source_array,
-                                        source_span,
-                                    ) {
-                                        let version = if let Some(sampled) = &sampled {
-                                            sampled.values.get(&key).copied()
-                                        } else {
-                                            Some(self.read_key(key))
-                                        };
-                                        if let Some(version) = version {
-                                            reads.push(self.project_read(
-                                                key,
-                                                version,
-                                                source_array,
-                                                source_span,
-                                            ));
+                                    destination.index.destination_offset_from(&source.index)
+                                } else {
+                                    destination.destination_offset_from(&source)
+                                }
+                            });
+                        // Another affine relation to the anchored destination
+                        // element, such as a stride or a reversal, reads the
+                        // positions the source index takes.
+                        // Each progression of the source positions has its own
+                        // map to the destination.
+                        let mapped_arrays = if projection.anchor && dynamic_array_offset.is_none() {
+                            let source = if let Some(sampled) = &sampled {
+                                sampled.index.clone()
+                            } else {
+                                self.sample_affine_index(*id, index)
+                            };
+                            source
+                                .map(|source| self.fold_single_values(&source))
+                                .filter(|source| !source.index.terms.is_empty())
+                                .and_then(|source| {
+                                    let destination = self
+                                        .fold_single_values(projection.destination_index.as_ref()?);
+                                    self.affine_links(&destination, &source, false)?
+                                        .into_iter()
+                                        .map(|(link, source)| {
+                                            let (first, last) = self.affine_hull(&source.index)?;
+                                            let first = usize::try_from(first).ok()?;
+                                            let length =
+                                                usize::try_from(last).ok()?.checked_sub(first)? + 1;
+                                            Some((
+                                                link,
+                                                ArraySpan {
+                                                    start: first,
+                                                    length,
+                                                },
+                                            ))
+                                        })
+                                        .collect::<Option<Vec<_>>>()
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+                        // Anchored array coordinates are destination positions,
+                        // not positions of an array-valued expression.
+                        let selected_array =
+                            if !projection.anchor && receiver.is_const() && accesses.len() == 1 {
+                                variable.as_ref().and_then(|variable| {
+                                    receiver.eval_selection(&mut self.ctx, &variable.r#type.array)
+                                })
+                            } else {
+                                None
+                            };
+                        let variants = if mapped_arrays.is_empty() {
+                            vec![None]
+                        } else {
+                            mapped_arrays.into_iter().map(Some).collect()
+                        };
+                        // The positions the index takes on the iterations
+                        // being evaluated; a key elsewhere is not read.
+                        let index_hull = projection
+                            .anchor
+                            .then(|| {
+                                let source = match &sampled {
+                                    Some(sampled) => sampled.index.clone()?,
+                                    None => self.sample_affine_index(*id, index)?,
+                                };
+                                let (first, last) = self.affine_hull(&source.index)?;
+                                let start = usize::try_from(first.max(0)).ok()?;
+                                let length = usize::try_from(last)
+                                    .ok()?
+                                    .checked_sub(start)?
+                                    .checked_add(1)?;
+                                Some(ArraySpan { start, length })
+                            })
+                            .flatten();
+                        let mut sources = ExpressionSources::default();
+                        // A read of storage the scope's writes cover takes
+                        // their tables at the positions of the instances it
+                        // reads, once for each key.
+                        let mut instance_read = projection
+                            .anchor
+                            .then(|| {
+                                self.last_writer_sources(
+                                    *id,
+                                    index,
+                                    select,
+                                    comptime.member_select_domain,
+                                )
+                            })
+                            .flatten();
+                        // Whether each key's last writes include the value
+                        // from before the loop, which each variant relates
+                        // by its own map.
+                        let mut instance_keys: HashMap<NodeKey, Option<bool>> = HashMap::default();
+                        for mapped_array in variants {
+                            let mut reads = Vec::new();
+                            let mut substituted = ExpressionSources::default();
+                            if let Some(source_span) = requested.translated(0, low) {
+                                for (idx, access) in &accesses {
+                                    let source_array = if let Some((_, hull)) = mapped_array {
+                                        hull.intersection(*idx)
+                                    } else if let Some(offset) = dynamic_array_offset {
+                                        offset
+                                            .checked_neg()
+                                            .and_then(|offset| {
+                                                // Positions before the first
+                                                // element do not exist.
+                                                translate_array_span_clipped(
+                                                    projection
+                                                        .destination_array
+                                                        .unwrap_or(requested_array),
+                                                    offset,
+                                                )
+                                            })
+                                            .and_then(|requested| requested.intersection(*idx))
+                                    } else if let Some(selection) = selected_array {
+                                        requested_array
+                                            .intersection(ArraySpan {
+                                                start: selection.result_start,
+                                                length: selection.length,
+                                            })
+                                            .and_then(|requested| {
+                                                requested.translated(
+                                                    selection.result_start,
+                                                    selection.source_start,
+                                                )
+                                            })
+                                            .and_then(|requested| requested.intersection(*idx))
+                                    } else if let Some(hull) = index_hull {
+                                        hull.intersection(*idx)
+                                    } else {
+                                        Some(*idx)
+                                    };
+                                    if let (Some(source_array), Some(source_span)) =
+                                        (source_array, source_span.intersection(*access))
+                                    {
+                                        for key in self.bit_part.overlapping_access(
+                                            *id,
+                                            source_array,
+                                            source_span,
+                                        ) {
+                                            if let Some(read) = instance_read.as_mut() {
+                                                let snapshot = match instance_keys.get(&key) {
+                                                    Some(&snapshot) => snapshot,
+                                                    None => {
+                                                        let bits =
+                                                            self.key_span(key).and_then(|span| {
+                                                                source_span.intersection(span)
+                                                            });
+                                                        let solved = bits.and_then(|bits| {
+                                                            self.instance_read_sources(
+                                                                read,
+                                                                key,
+                                                                bits,
+                                                                low,
+                                                                requested_array,
+                                                                projection,
+                                                            )
+                                                        });
+                                                        let snapshot =
+                                                            solved.map(|(instance, snapshot)| {
+                                                                substituted.extend(instance);
+                                                                snapshot
+                                                            });
+                                                        instance_keys.insert(key, snapshot);
+                                                        snapshot
+                                                    }
+                                                };
+                                                if let Some(snapshot) = snapshot {
+                                                    if snapshot
+                                                        && let Some(value) =
+                                                            self.scope_snapshot(key)
+                                                    {
+                                                        reads.push(self.project_read(
+                                                            key,
+                                                            value,
+                                                            source_array,
+                                                            source_span,
+                                                        ));
+                                                    }
+                                                    continue;
+                                                }
+                                            }
+                                            let version = if let Some(sampled) = &sampled {
+                                                sampled.values.get(&key).copied()
+                                            } else {
+                                                let mut last_writers = self.last_writer_sources(
+                                                    *id,
+                                                    index,
+                                                    select,
+                                                    comptime.member_select_domain,
+                                                );
+                                                Some(
+                                                    self.read_source_key(
+                                                        key,
+                                                        last_writers.as_mut(),
+                                                    ),
+                                                )
+                                            };
+                                            if let Some(version) = version {
+                                                // A value kept where no position
+                                                // relates it to the destination
+                                                // takes its definition again.
+                                                let defined = (projection.anchor
+                                                    && mapped_array.is_none()
+                                                    && dynamic_array_offset.is_none())
+                                                .then(|| {
+                                                    let bits = source_span
+                                                        .intersection(self.key_span(key)?)?;
+                                                    self.defined_sources(
+                                                        version,
+                                                        bits,
+                                                        low,
+                                                        source_array,
+                                                        requested_array,
+                                                        None,
+                                                        projection,
+                                                    )
+                                                })
+                                                .flatten();
+                                                match defined {
+                                                    Some((defined, plain)) => {
+                                                        substituted.extend(defined);
+                                                        for version in plain {
+                                                            reads.push(self.project_read(
+                                                                key,
+                                                                version,
+                                                                source_array,
+                                                                source_span,
+                                                            ));
+                                                        }
+                                                    }
+                                                    None => reads.push(self.project_read(
+                                                        key,
+                                                        version,
+                                                        source_array,
+                                                        source_span,
+                                                    )),
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
+                            // An unknown array selector loses only the array
+                            // correspondence, not the selected packed positions.
+                            let offset = PositionRelation {
+                                array: mapped_array.map(|(link, _)| link).unwrap_or_else(|| {
+                                    Link::from_offset(dynamic_array_offset.or_else(|| {
+                                        selected_array.and_then(|selection| {
+                                            signed_difference(
+                                                selection.result_start,
+                                                selection.source_start,
+                                            )
+                                        })
+                                    }))
+                                }),
+                                packed: Link::from_offset(
+                                    isize::try_from(low).ok().and_then(isize::checked_neg),
+                                ),
+                            };
+                            for version in reads {
+                                sources.push(version, offset);
+                            }
+                            sources.extend(substituted);
                         }
-                        // An unknown array selector loses only the array
-                        // correspondence, not the selected packed positions.
-                        let offset = PositionRelation {
-                            array: dynamic_array_offset.or_else(|| {
-                                selected_array.and_then(|selection| {
-                                    signed_difference(
-                                        selection.result_start,
-                                        selection.source_start,
-                                    )
-                                })
-                            }),
-                            packed: isize::try_from(low).ok().and_then(isize::checked_neg),
-                        };
-                        let mut sources = ExpressionSources {
-                            sources: reads.into_iter().map(|version| (version, offset)).collect(),
-                        };
                         sources.extend_whole(selector_sources);
                         sources
                     } else {
@@ -3230,6 +7363,40 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         ),
                     _ => ExpressionSources::whole(self.eval_system_call(call, &[], true)),
                 },
+                Factor::FunctionCall(call)
+                    if projection.anchor
+                        && call.outputs.is_empty()
+                        && self.function_is_pure(call) =>
+                {
+                    // A call that reads only its inputs maps each destination
+                    // element from the same elements of its actuals.
+                    let inputs = call.inputs.values().collect::<Vec<_>>();
+                    self.eval_anchored_operands(&inputs, requested_array, projection)
+                }
+                Factor::FunctionCall(call) if projection.anchor => {
+                    // A call result has its own array coordinates. Request
+                    // the selected bits of every result element and let them
+                    // reach each candidate destination element.
+                    let all = ArraySpan {
+                        start: 0,
+                        length: isize::MAX.unsigned_abs(),
+                    };
+                    ExpressionSources {
+                        sources: self
+                            .eval_call_requested(call, &[], Some((all, requested)))
+                            .into_iter()
+                            .map(|version| {
+                                (
+                                    version,
+                                    PositionRelation {
+                                        array: Link::from_offset(None),
+                                        packed: Link::from_offset(Some(0)),
+                                    },
+                                )
+                            })
+                            .collect(),
+                    }
+                }
                 Factor::FunctionCall(call) => ExpressionSources {
                     sources: self
                         .eval_call_requested(call, &[], Some((requested_array, requested)))
@@ -3258,6 +7425,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     context,
                     projection,
                 ),
+                _ if projection.anchor => {
+                    self.eval_anchored_operands(&[operand], requested_array, projection)
+                }
                 _ => ExpressionSources::whole(self.eval_expr(operand)),
             },
             Expression::Binary(left, op, right, comptime) => match op {
@@ -3302,14 +7472,20 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             );
                             if let Ok(shift) = isize::try_from(shift) {
                                 input.translate(PositionRelation {
-                                    array: Some(0),
-                                    packed: Some(shift),
+                                    array: Link::from_offset(Some(0)),
+                                    packed: Link::from_offset(Some(shift)),
                                 });
                             } else {
                                 input.widen_all();
                             }
                             reads.extend(input);
                         }
+                    } else if projection.anchor {
+                        reads.extend(self.eval_anchored_operands(
+                            &[left],
+                            requested_array,
+                            projection,
+                        ));
                     } else {
                         reads.extend_whole(self.eval_expr(left));
                     }
@@ -3335,8 +7511,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             );
                             if let Ok(shift) = isize::try_from(shift) {
                                 input.translate(PositionRelation {
-                                    array: Some(0),
-                                    packed: Some(-shift),
+                                    array: Link::from_offset(Some(0)),
+                                    packed: Link::from_offset(Some(-shift)),
                                 });
                             } else {
                                 input.widen_all();
@@ -3366,37 +7542,60 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 self.project_sign_extension(sign, requested_array, sign_span, fill);
                             reads.push(filled, PositionRelation::default());
                         }
+                    } else if projection.anchor {
+                        reads.extend(self.eval_anchored_operands(
+                            &[left],
+                            requested_array,
+                            projection,
+                        ));
                     } else {
                         reads.extend_whole(self.eval_expr(left));
                     }
                     reads
                 }
                 Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
-                    let mut reads = self.eval_expr_in_context(
-                        left,
-                        requested_array,
-                        requested,
-                        context,
-                        projection,
-                    );
-                    reads.extend(self.eval_expr_in_context(
-                        right,
-                        requested_array,
-                        requested,
-                        context,
-                        projection,
-                    ));
+                    // Each bit reads the same bit of every operand of a chain
+                    // of bitwise operators, which is taken as one list so that
+                    // a long chain does not nest the evaluation.
+                    let mut reads = ExpressionSources::default();
+                    for operand in bitwise_operands(left, right) {
+                        reads.extend(self.eval_expr_in_context(
+                            operand,
+                            requested_array,
+                            requested,
+                            context,
+                            projection,
+                        ));
+                    }
                     reads
                 }
                 Op::LogicAnd | Op::LogicOr => ExpressionSources::whole(
                     self.eval_short_circuit(expression, left, *op, right, true),
                 ),
+                _ if projection.anchor => {
+                    self.eval_anchored_operands(&[left, right], requested_array, projection)
+                }
                 _ => ExpressionSources::whole(self.eval_expr(expression)),
             },
             Expression::Ternary(condition, left, right, _) => {
-                let controls = self.eval_expr(condition);
                 let mut reads = ExpressionSources::default();
-                reads.extend_whole(controls.iter().copied());
+                let controls = if projection.anchor {
+                    // An elementwise condition selects at the same destination
+                    // element; its bits all reach the selected value.
+                    let condition =
+                        self.eval_anchored_operands(&[condition], requested_array, projection);
+                    let controls = condition
+                        .sources
+                        .iter()
+                        .map(|(version, _)| *version)
+                        .collect();
+                    reads.extend(condition);
+                    controls
+                } else {
+                    let controls = self.eval_expr(condition);
+                    reads.extend_whole(controls.iter().copied());
+                    controls
+                };
                 match self.constant_truth(condition) {
                     Some(true) => reads.extend(self.eval_expr_in_context(
                         left,
@@ -3498,8 +7697,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 );
                                 if let Ok(output_start) = isize::try_from(output_start) {
                                     part.translate(PositionRelation {
-                                        array: Some(0),
-                                        packed: Some(output_start),
+                                        array: Link::from_offset(Some(0)),
+                                        packed: Link::from_offset(Some(output_start)),
                                     });
                                 } else {
                                     part.widen_all();
@@ -3535,8 +7734,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 reads.push(
                                     repeated,
                                     PositionRelation {
-                                        array: Some(0),
-                                        packed: Some(offset),
+                                        array: Link::from_offset(Some(0)),
+                                        packed: Link::from_offset(Some(offset)),
                                     },
                                 );
                             } else {
@@ -3553,6 +7752,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     low = next;
                 }
                 reads
+            }
+            Expression::ArrayLiteral(..) if projection.anchor => {
+                ExpressionSources::whole(self.eval_expr(expression))
             }
             Expression::ArrayLiteral(items, _) => {
                 let Some(requested_end) = requested_array.end() else {
@@ -3628,8 +7830,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             );
                             if let Ok(output_start) = isize::try_from(output_start) {
                                 item.translate(PositionRelation {
-                                    array: Some(output_start),
-                                    packed: Some(0),
+                                    array: Link::from_offset(Some(output_start)),
+                                    packed: Link::from_offset(Some(0)),
                                 });
                             } else {
                                 item.widen_all();
@@ -3700,8 +7902,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                             );
                             if let Ok(output_start) = isize::try_from(output_start) {
                                 item.translate(PositionRelation {
-                                    array: Some(output_start),
-                                    packed: Some(0),
+                                    array: Link::from_offset(Some(output_start)),
+                                    packed: Link::from_offset(Some(0)),
                                 });
                             } else {
                                 item.widen_all();
@@ -3770,8 +7972,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         };
                         if let Ok(low) = isize::try_from(low) {
                             field.translate(PositionRelation {
-                                array: Some(0),
-                                packed: Some(low),
+                                array: Link::from_offset(Some(0)),
+                                packed: Link::from_offset(Some(low)),
                             });
                         } else {
                             field.widen_all();
@@ -3786,6 +7988,393 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 reads
             }
         }
+    }
+
+    /// Evaluate operands whose every bit may reach every result bit, keeping
+    /// their anchored array correspondence with the destination element.
+    fn eval_anchored_operands(
+        &mut self,
+        operands: &[&Expression],
+        requested_array: ArraySpan,
+        projection: &ProjectionContext,
+    ) -> ExpressionSources {
+        let mut reads = ExpressionSources::default();
+        for operand in operands {
+            let comptime = operand.comptime();
+            let Some(width) = comptime.r#type.total_width().and_then(PackedSpan::whole) else {
+                reads.extend_whole(self.eval_expr(operand));
+                continue;
+            };
+            let mut sources = self.eval_expr_in_context(
+                operand,
+                requested_array,
+                width,
+                ExpressionContext {
+                    width: width.length,
+                    ..comptime.expr_context
+                },
+                projection,
+            );
+            for (_, relation) in &mut sources.sources {
+                relation.packed = Link::from_offset(None);
+            }
+            reads.extend(sources);
+        }
+        reads
+    }
+
+    /// The affine coordinate frame of a condition evaluated once per symbolic
+    /// iteration: the symbolic terms of its first affine variable access.
+    fn condition_frame(
+        &mut self,
+        expression: &Expression,
+    ) -> Option<(SampledAffineIndex, ArraySpan)> {
+        if self.counted_iterators.is_empty() {
+            return None;
+        }
+        let (id, index, select) = first_indexed_variable(expression)?;
+        // The frame is an abstract coordinate: the symbolic part of the first
+        // position that moves with the iterators, on either axis.
+        let mut sampled = self
+            .sample_affine_index(id, &index)
+            .filter(|sampled| !sampled.index.terms.is_empty())
+            .or_else(|| {
+                self.sample_packed_select(id, &select)
+                    .map(|(sampled, _)| sampled)
+                    .filter(|sampled| !sampled.index.terms.is_empty())
+            })?;
+        sampled.index.constant = 0;
+        let (min, max) = self.affine_hull(&sampled.index)?;
+        let region = ArraySpan {
+            start: usize::try_from(min).ok()?,
+            length: usize::try_from(max.checked_sub(min)?.checked_add(1)?).ok()?,
+        };
+        Some((sampled, region))
+    }
+
+    /// Evaluate a control condition. Inside a counted loop, an elementwise
+    /// condition is anchored to its iterator frame, so a write at the same
+    /// frame keeps the displacement instead of reaching every element.
+    fn eval_control_condition(&mut self, expression: &Expression) -> Vec<VersionId> {
+        let Some((frame, region)) = self.condition_frame(expression) else {
+            return self.eval_expr(expression);
+        };
+        let projection = ProjectionContext {
+            destination_index: Some(frame.clone()),
+            destination_array: Some(region),
+            array_shape: None,
+            anchor: true,
+            packed_anchor: None,
+        };
+        let sources = self.eval_anchored_operands(&[expression], region, &projection);
+        if sources.is_empty() {
+            return Vec::new();
+        }
+        let version = self.ssa.related_definition(sources.sources);
+        let version = self.ssa.projected(
+            version,
+            position_domain(
+                region,
+                PackedSpan {
+                    start: 0,
+                    length: 1,
+                },
+            ),
+        );
+        self.control_frames.insert(version, frame);
+        vec![version]
+    }
+
+    fn eval_packed_anchored_bits(
+        &mut self,
+        expression: &Expression,
+        requested_array: ArraySpan,
+        requested: PackedSpan,
+        context: ExpressionContext,
+        projection: &ProjectionContext,
+        anchor: &SampledAffineIndex,
+    ) -> ExpressionSources {
+        match expression {
+            Expression::Term(factor) => match factor.as_ref() {
+                Factor::Variable(..) => self.eval_packed_anchored_read(
+                    factor,
+                    requested_array,
+                    requested,
+                    anchor,
+                    projection,
+                ),
+                Factor::Value(_) => ExpressionSources::default(),
+                Factor::FunctionCall(call)
+                    if call.outputs.is_empty() && self.function_is_pure(call) =>
+                {
+                    // A call that reads only its inputs takes its actuals as
+                    // an operator takes its operands.
+                    let inputs = call.inputs.values().collect::<Vec<_>>();
+                    self.eval_packed_anchored_operands(
+                        &inputs,
+                        requested_array,
+                        requested,
+                        projection,
+                    )
+                }
+                _ => ExpressionSources::whole(self.eval_expr(expression)),
+            },
+            Expression::Unary(Op::BitNot | Op::Add, operand, _) => {
+                self.eval_expr_bits_in(operand, requested_array, requested, context, projection)
+            }
+            Expression::Unary(_, operand, _) => self.eval_packed_anchored_operands(
+                &[operand],
+                requested_array,
+                requested,
+                projection,
+            ),
+            Expression::Binary(left, op, right, _) => match op {
+                Op::BitAnd | Op::BitOr | Op::BitXor | Op::BitXnor => {
+                    let mut reads = self.eval_expr_bits_in(
+                        left,
+                        requested_array,
+                        requested,
+                        context,
+                        projection,
+                    );
+                    reads.extend(self.eval_expr_bits_in(
+                        right,
+                        requested_array,
+                        requested,
+                        context,
+                        projection,
+                    ));
+                    reads
+                }
+                Op::As
+                | Op::LogicShiftL
+                | Op::ArithShiftL
+                | Op::LogicShiftR
+                | Op::ArithShiftR
+                | Op::LogicAnd
+                | Op::LogicOr => ExpressionSources::whole(self.eval_expr(expression)),
+                _ => self.eval_packed_anchored_operands(
+                    &[left, right],
+                    requested_array,
+                    requested,
+                    projection,
+                ),
+            },
+            Expression::Ternary(condition, left, right, _) => {
+                let mut reads = self.eval_packed_anchored_operands(
+                    &[condition],
+                    requested_array,
+                    requested,
+                    projection,
+                );
+                let controls = reads
+                    .sources
+                    .iter()
+                    .map(|(version, _)| *version)
+                    .collect::<Vec<_>>();
+                match self.constant_truth(condition) {
+                    Some(true) => reads.extend(self.eval_expr_bits_in(
+                        left,
+                        requested_array,
+                        requested,
+                        context,
+                        projection,
+                    )),
+                    Some(false) => reads.extend(self.eval_expr_bits_in(
+                        right,
+                        requested_array,
+                        requested,
+                        context,
+                        projection,
+                    )),
+                    None => {
+                        let branch = self.expression_branch_id(expression);
+                        let parent_condition = self.path_condition.clone();
+                        let checkpoint = self.ssa.checkpoint();
+                        self.choose_path(&parent_condition, branch, 0);
+                        let left_condition = self.path_condition.clone();
+                        let left = self.eval_expr_bits_in(
+                            left,
+                            requested_array,
+                            requested,
+                            context,
+                            projection,
+                        );
+                        let left = self.guard_expression_sources(left);
+                        let left_state = self.ssa.capture_and_rollback(checkpoint);
+                        let checkpoint = self.ssa.checkpoint();
+                        self.choose_path(&parent_condition, branch, 1);
+                        let right_condition = self.path_condition.clone();
+                        let right = self.eval_expr_bits_in(
+                            right,
+                            requested_array,
+                            requested,
+                            context,
+                            projection,
+                        );
+                        let right = self.guard_expression_sources(right);
+                        let right_state = self.ssa.capture_and_rollback(checkpoint);
+                        self.merge_expression_states(
+                            [
+                                (&left_state, &left_condition),
+                                (&right_state, &right_condition),
+                            ],
+                            &controls,
+                        );
+                        self.path_condition = parent_condition;
+                        reads.extend(left);
+                        reads.extend(right);
+                    }
+                }
+                reads
+            }
+            Expression::Concatenation(..)
+            | Expression::ArrayLiteral(..)
+            | Expression::StructConstructor(..) => {
+                ExpressionSources::whole(self.eval_expr(expression))
+            }
+        }
+    }
+
+    /// Whether a call depends only on its inputs: its body reads and writes
+    /// nothing but function variables and calls only such functions.
+    fn function_is_pure(&mut self, call: &FunctionCall) -> bool {
+        self.function_effects_within(call, true)
+    }
+
+    /// Whether a call writes nothing but its own variables and outputs. It
+    /// may read anything.
+    fn function_writes_only_its_own(&mut self, call: &FunctionCall) -> bool {
+        self.function_effects_within(call, false)
+    }
+
+    /// Whether a call writes nothing but its own variables and outputs and,
+    /// when `inputs_only`, reads nothing but its inputs and own variables.
+    fn function_effects_within(&mut self, call: &FunctionCall, inputs_only: bool) -> bool {
+        let key = (call.id, call.index.clone(), inputs_only);
+        if let Some(&pure) = self.pure_functions.get(&key) {
+            return pure;
+        }
+        fn pure_expression(
+            analysis: &ProcedureAnalysis<'_, '_>,
+            expression: &Expression,
+            depth: usize,
+            inputs_only: bool,
+        ) -> bool {
+            let recurse =
+                |expression: &Expression| pure_expression(analysis, expression, depth, inputs_only);
+            match expression {
+                Expression::Term(factor) => match factor.as_ref() {
+                    Factor::Variable(id, ..) => {
+                        (!inputs_only || analysis.is_function_variable(*id))
+                            && children::children(expression).into_iter().all(recurse)
+                    }
+                    Factor::Value(_) => true,
+                    Factor::FunctionCall(call) => {
+                        call.outputs.is_empty()
+                            && call.inputs.values().all(recurse)
+                            && pure_call(analysis, call, depth + 1, inputs_only)
+                    }
+                    _ => false,
+                },
+                _ => children::children(expression).into_iter().all(recurse),
+            }
+        }
+        fn pure_statements(
+            analysis: &ProcedureAnalysis<'_, '_>,
+            statements: &[Statement],
+            depth: usize,
+            inputs_only: bool,
+        ) -> bool {
+            let pure_expression = |analysis, expression, depth| {
+                pure_expression(analysis, expression, depth, inputs_only)
+            };
+            let pure_statements = |analysis, statements, depth| {
+                pure_statements(analysis, statements, depth, inputs_only)
+            };
+            statements.iter().all(|statement| match statement {
+                Statement::Assign(assign) => {
+                    assign.hier_dst.is_none()
+                        && pure_expression(analysis, &assign.expr, depth)
+                        && assign.dst.iter().all(|destination| {
+                            analysis.is_function_variable(destination.id)
+                                && destination
+                                    .index
+                                    .expressions()
+                                    .all(|x| pure_expression(analysis, x, depth))
+                                && destination
+                                    .select
+                                    .0
+                                    .iter()
+                                    .all(|x| pure_expression(analysis, x, depth))
+                                && destination
+                                    .select
+                                    .1
+                                    .as_ref()
+                                    .is_none_or(|(_, x)| pure_expression(analysis, x, depth))
+                        })
+                }
+                Statement::If(statement) => {
+                    pure_expression(analysis, &statement.cond, depth)
+                        && pure_statements(analysis, &statement.true_side, depth)
+                        && pure_statements(analysis, &statement.false_side, depth)
+                }
+                Statement::Case(statement) => {
+                    pure_expression(analysis, &statement.case_target, depth)
+                        && statement.arms.iter().all(|arm| {
+                            arm.patterns.iter().all(|pattern| match pattern {
+                                CasePattern::Eq(x) => pure_expression(analysis, x, depth),
+                                CasePattern::Range { lo, hi, .. } => {
+                                    pure_expression(analysis, lo, depth)
+                                        && pure_expression(analysis, hi, depth)
+                                }
+                            }) && pure_statements(analysis, &arm.body, depth)
+                        })
+                        && pure_statements(analysis, &statement.default, depth)
+                }
+                Statement::For(statement) => {
+                    let (start, end, _) = for_range_bounds(&statement.range);
+                    [start, end].into_iter().all(|bound| match bound {
+                        ForBound::Expression(x) => pure_expression(analysis, x, depth),
+                        ForBound::Const(..) => true,
+                    }) && pure_statements(analysis, &statement.body, depth)
+                }
+                Statement::Break | Statement::Null => true,
+                _ => false,
+            })
+        }
+        fn pure_call(
+            analysis: &ProcedureAnalysis<'_, '_>,
+            call: &FunctionCall,
+            depth: usize,
+            inputs_only: bool,
+        ) -> bool {
+            if depth > 16 {
+                return false;
+            }
+            let Some(function) = analysis.ctx.functions.get(&call.id) else {
+                return false;
+            };
+            if !function.path.path.0.is_empty() {
+                // Interface methods read their receiver.
+                return false;
+            }
+            let body = match &call.index {
+                Some(index) => function.get_function(index),
+                None => function.get_function(&[]),
+            };
+            body.is_some_and(|body| pure_statements(analysis, &body.statements, depth, inputs_only))
+        }
+        let pure = pure_call(self, call, 0, inputs_only);
+        self.pure_functions.insert(key, pure);
+        pure
+    }
+
+    fn is_function_variable(&self, id: VarId) -> bool {
+        self.ctx
+            .variables
+            .get(&id)
+            .is_some_and(|variable| variable.affiliation == crate::symbol::Affiliation::Function)
     }
 
     fn expression_array_extent(&mut self, expression: &Expression) -> Option<usize> {
@@ -4660,13 +9249,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         let mut projected = Vec::new();
         for (key, relation, condition) in sources {
-            let array_matches = relation.array.is_none_or(|offset| {
-                translate_array_span(key.node.1, offset)
+            let array_matches = relation.array.translation_offset().is_none_or(|offset| {
+                translate_array_span_clipped(key.node.1, offset)
                     .is_some_and(|span| span.overlaps(requested_array))
             });
-            let packed_matches = relation.packed.is_none_or(|offset| {
+            let packed_matches = relation.packed.translation_offset().is_none_or(|offset| {
                 self.key_span(key.node)
-                    .and_then(|span| translate_packed_span(span, offset))
+                    .and_then(|span| translate_span_clipped(span, offset))
                     .is_some_and(|span| span.overlaps(requested_packed))
             });
             if array_matches && packed_matches {
@@ -4791,8 +9380,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             sources: vec![(
                 repeated,
                 PositionRelation {
-                    array: Some(offset),
-                    packed: Some(0),
+                    array: Link::from_offset(Some(offset)),
+                    packed: Link::from_offset(Some(0)),
                 },
             )],
         })
@@ -4803,10 +9392,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         mut sources: ExpressionSources,
         projection: &ProjectionContext,
     ) -> VersionId {
-        if projection
-            .destination_index
-            .as_ref()
-            .is_some_and(|index| !index.index.terms.is_empty())
+        if !projection.anchor
+            && projection
+                .destination_index
+                .as_ref()
+                .is_some_and(|index| !index.index.terms.is_empty())
         {
             // Affine reads can use destination array coordinates. Dynamic
             // writes already forget array correspondence, so discard only
@@ -4830,8 +9420,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let extended = self.ssa.related_definition(vec![(
             sign,
             PositionRelation {
-                array: Some(0),
-                packed: None,
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(None),
             },
         )]);
         self.ssa
@@ -4864,6 +9454,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             for ((destination, width), selectors) in destinations.iter().zip(widths).zip(selectors)
             {
                 offset -= width;
+                let previous = self
+                    .current_writer
+                    .replace(last_writer::output_writer(destination));
                 self.write_formal_output(
                     destination,
                     formal_versions,
@@ -4871,11 +9464,16 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     total_width,
                     &selectors,
                 );
+                self.current_writer = previous;
             }
         } else {
             for (destination, mut sources) in destinations.iter().zip(selectors) {
                 sources.extend(formal_versions.iter().map(|(_, version)| *version));
+                let previous = self
+                    .current_writer
+                    .replace(last_writer::output_writer(destination));
                 self.bind_whole_destination(destination, sources, controls);
+                self.current_writer = previous;
             }
         }
     }
@@ -4923,8 +9521,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // An unknown array selector loses only the array correspondence.
         // Packed bits still copy to their corresponding destination bits.
         let position_offset = PositionRelation {
-            array: destination_array.and_then(|array| isize::try_from(array.start).ok()),
-            packed: selected.and_then(|(_, low)| signed_difference(low, formal_offset)),
+            array: Link::from_offset(
+                destination_array.and_then(|array| isize::try_from(array.start).ok()),
+            ),
+            packed: Link::from_offset(
+                selected.and_then(|(_, low)| signed_difference(low, formal_offset)),
+            ),
         };
         let dynamic = self.destination_is_dynamic(destination);
         for key in self.write_keys(destination) {
@@ -5044,6 +9646,30 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 }
 
+fn first_indexed_variable(expression: &Expression) -> Option<(VarId, VarIndex, VarSelect)> {
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Variable(id, index, select, _)
+                if !index.indices.is_empty() || !select.is_const_with_range() =>
+            {
+                Some((*id, index.clone(), select.clone()))
+            }
+            _ => None,
+        },
+        Expression::Unary(_, operand, _) => first_indexed_variable(operand),
+        Expression::Binary(left, _, right, _) => {
+            first_indexed_variable(left).or_else(|| first_indexed_variable(right))
+        }
+        Expression::Ternary(condition, left, right, _) => first_indexed_variable(condition)
+            .or_else(|| first_indexed_variable(left))
+            .or_else(|| first_indexed_variable(right)),
+        Expression::Concatenation(parts, _) => parts
+            .iter()
+            .find_map(|(part, _)| first_indexed_variable(part)),
+        Expression::ArrayLiteral(..) | Expression::StructConstructor(..) => None,
+    }
+}
+
 fn statements_have_unknown(statements: &[Statement]) -> bool {
     statements.iter().any(|statement| match statement {
         Statement::Assign(assign) => expression_has_unknown(&assign.expr),
@@ -5107,5 +9733,60 @@ fn expression_has_unknown(expression: &Expression) -> bool {
         Expression::StructConstructor(_, fields, _) => fields
             .iter()
             .any(|(_, expression)| expression_has_unknown(expression)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counted_iterator_is_empty_below_the_most_negative_bound() {
+        let iterator = CountedIterator {
+            id: VarId::default(),
+            min: 1,
+            max: 3,
+            modulus: 2,
+            residue: 1,
+        };
+        // `i < isize::MIN` leaves no value, without subtracting the residue
+        // from that bound.
+        assert_eq!(iterator.within(1, isize::MIN), Ok(None));
+        assert_eq!(iterator.within(isize::MAX, 3), Ok(None));
+        let within = iterator.within(2, isize::MAX).unwrap().expect("3 remains");
+        assert_eq!((within.min, within.max), (3, 3));
+    }
+
+    #[test]
+    fn counted_iterator_class_past_the_bounds_is_empty() {
+        let iterator = CountedIterator {
+            id: VarId::default(),
+            min: isize::MAX - 2,
+            max: isize::MAX,
+            modulus: 1,
+            residue: 0,
+        };
+        // The next value of the class lies past `isize::MAX`, so there is
+        // none rather than an overflow.
+        let residue = (isize::MAX - 3).rem_euclid(8);
+        assert_eq!(
+            iterator.confined(isize::MIN, isize::MAX, 8, residue),
+            Ok(None)
+        );
+        let iterator = CountedIterator {
+            min: isize::MIN,
+            max: isize::MIN + 2,
+            ..iterator
+        };
+        let residue = (isize::MIN + 3).rem_euclid(8);
+        assert_eq!(
+            iterator.confined(isize::MIN, isize::MAX, 8, residue),
+            Ok(None)
+        );
+        let last = iterator
+            .confined(isize::MIN, isize::MAX, 8, isize::MIN.rem_euclid(8))
+            .unwrap()
+            .expect("the first value remains");
+        assert_eq!((last.min, last.max), (isize::MIN, isize::MIN));
     }
 }

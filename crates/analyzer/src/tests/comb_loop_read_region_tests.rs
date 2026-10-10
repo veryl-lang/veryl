@@ -396,8 +396,9 @@ fn demanded_read_regions_keep_byte_enabled_descriptor_lookup_compact() {
         reset_analysis_size();
         let errors = analyze(&code);
         assert!(errors.is_empty(), "entries={entries}: {errors:#?}");
+        // The byte-lane loop is counted, so its lanes do not cut the storage.
         let (atoms, nodes, edges) = analysis_size();
-        assert_eq!(atoms, entries + 24);
+        assert_eq!(atoms, entries + 10);
         assert!(nodes <= 9 * entries + 256, "{nodes} nodes");
         assert!(edges <= 14 * entries + 256, "{edges} edges");
         assert!(comb_loop_analysis_is_complete(&code));

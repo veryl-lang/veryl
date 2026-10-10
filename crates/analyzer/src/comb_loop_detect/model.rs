@@ -12,48 +12,7 @@ pub(super) struct SummaryRegion {
     pub(super) packed: PackedSpan,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct BitDependency {
-    /// `None` means that every source coordinate on this axis may affect the
-    /// destination region. `Some(C)` preserves `source + C = destination`.
-    pub(super) array: Option<isize>,
-    pub(super) packed: Option<isize>,
-}
-
-impl BitDependency {
-    pub(super) const WHOLE: Self = Self {
-        array: None,
-        packed: None,
-    };
-
-    pub(super) const fn identity() -> Self {
-        Self {
-            array: Some(0),
-            packed: Some(0),
-        }
-    }
-
-    pub(super) fn exact_offset(self) -> Option<(isize, isize)> {
-        self.array.zip(self.packed)
-    }
-
-    pub(super) fn compose(self, next: Self) -> Self {
-        Self {
-            array: compose_axis(self.array, next.array),
-            packed: compose_axis(self.packed, next.packed),
-        }
-    }
-}
-
-fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(
-            left.checked_add(right)
-                .expect("composed dependency offset must fit in isize"),
-        ),
-        _ => None,
-    }
-}
+pub(super) use super::position::Relation as BitDependency;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SummaryNodeKind {

@@ -1,6 +1,7 @@
 use super::*;
 use crate::comb_loop_detect::graph::{GraphDependency, GraphNode};
 use crate::comb_loop_detect::model::SummaryRegion;
+use crate::comb_loop_detect::position::Link;
 use crate::comb_loop_detect::region::{ArraySpan, PackedSpan};
 use crate::comb_loop_detect::ssa::{BranchId, PathCondition, PositionDomain};
 use crate::ir::VarId;
@@ -71,8 +72,8 @@ fn discarded_cycles_and_exponential_dags_cannot_be_entered_from_a_series_node() 
                 previous,
                 next,
                 GraphDependency::unconditional(BitDependency {
-                    array: Some(0),
-                    packed: Some(1isize << bit),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1isize << bit)),
                 }),
             );
             previous = next;
@@ -103,8 +104,8 @@ fn connected_diamonds_keep_exponentially_many_paths_as_a_linear_graph() {
                 destination,
                 GraphDependency {
                     kind: BitDependency {
-                        array: Some(0),
-                        packed: Some(arm as isize),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some(arm as isize)),
                     },
                     condition: PathCondition::default()
                         .with_choice(BranchId::new(0, index, 2), arm),
@@ -168,8 +169,8 @@ fn positional_operations_are_not_composed_through_overflowing_prefixes() {
             previous,
             next,
             GraphDependency::unconditional(BitDependency {
-                array: Some(0),
-                packed: Some(offset),
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(Some(offset)),
             }),
         );
         previous = next;
@@ -181,7 +182,7 @@ fn positional_operations_are_not_composed_through_overflowing_prefixes() {
         result
             .edges
             .iter()
-            .map(|edge| edge.kind.packed.unwrap())
+            .map(|edge| edge.kind.packed.translation_offset().unwrap())
             .collect::<Vec<_>>(),
         offsets
     );
@@ -248,16 +249,16 @@ fn identical_domain_boundaries_contract_without_losing_guards() {
 fn equal_bounds_still_clip_shifted_and_whole_dependencies() {
     for kind in [
         BitDependency {
-            array: Some(1),
-            packed: Some(0),
+            array: Link::from_offset(Some(1)),
+            packed: Link::from_offset(Some(0)),
         },
         BitDependency {
-            array: Some(0),
-            packed: Some(1),
+            array: Link::from_offset(Some(0)),
+            packed: Link::from_offset(Some(1)),
         },
         BitDependency {
-            array: None,
-            packed: None,
+            array: Link::from_offset(None),
+            packed: Link::from_offset(None),
         },
     ] {
         let mut graph = DependencyGraph::new();
@@ -312,6 +313,7 @@ fn bit_reachability(
                 for next_bit in 0..3 {
                     if dependency
                         .packed
+                        .translation_offset()
                         .is_none_or(|offset| bit as isize + offset == next_bit as isize)
                         && visited.insert((*target, next_bit))
                     {
@@ -352,10 +354,10 @@ fn generated_small_graphs_preserve_bit_reachability_for_every_branch_valuation()
                 let dependency = match flavor {
                     0 => BitDependency::identity(),
                     _ => BitDependency {
-                        array: Some(0),
+                        array: Link::from_offset(Some(0)),
                         packed: match index % 4 {
-                            0 => None,
-                            value => Some(value as isize - 2),
+                            0 => Link::from_offset(None),
+                            value => Link::translation(value as isize - 2),
                         },
                     },
                 };

@@ -78,14 +78,8 @@ pub(super) fn check_graph(
         "unconstrained dependency nodes must be introduced as a DAG"
     );
     for scc in strongly_connected_components(graph) {
-        match compatible_cycle(graph, &scc) {
-            Some(true) => {}
-            Some(false) => continue,
-            None => {
-                complete = false;
-                continue;
-            }
-        }
+        // A component without a variable of the module reports nothing,
+        // whether it closes or not.
         let mut keys = scc
             .iter()
             .filter_map(|node| graph[*node].diagnostic)
@@ -94,6 +88,14 @@ pub(super) fn check_graph(
         keys.dedup();
         if keys.is_empty() {
             continue;
+        }
+        match compatible_cycle(graph, &scc) {
+            Some(true) => {}
+            Some(false) => continue,
+            None => {
+                complete = false;
+                continue;
+            }
         }
         let mut paths = keys
             .iter()

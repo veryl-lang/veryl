@@ -77,6 +77,22 @@ impl fmt::Display for ForBound {
     }
 }
 
+/// Extent of a statically known iteration space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CountedIterations {
+    pub min: usize,
+    pub max: usize,
+    pub count: usize,
+}
+
+impl CountedIterations {
+    pub const EMPTY: Self = Self {
+        min: 0,
+        max: 0,
+        count: 0,
+    };
+}
+
 /// Loop iteration range representation.
 #[derive(Clone, Debug)]
 pub enum ForRange {
@@ -173,6 +189,78 @@ impl ForRange {
         end.saturating_sub(start) > limit
     }
 
+    /// The extent of a statically known iteration space without enumerating
+    /// it. Additive ranges are bounded only by arithmetic overflow, so a
+    /// symbolic consumer need not observe `evaluate_size_limit`.
+    pub fn eval_counted(&self, context: &mut Context) -> Option<CountedIterations> {
+        let counted = |values: Vec<usize>| {
+            let min = values.iter().copied().min();
+            let max = values.iter().copied().max();
+            Some(match min.zip(max) {
+                Some((min, max)) => CountedIterations {
+                    min,
+                    max,
+                    count: values.len(),
+                },
+                None => CountedIterations::EMPTY,
+            })
+        };
+        match self {
+            ForRange::Forward {
+                start,
+                end,
+                inclusive,
+                step,
+            } => {
+                let start = start.eval_value(context)?;
+                let end = end.eval_value(context)?;
+                let end = if *inclusive { end.checked_add(1)? } else { end };
+                if *step == 0 {
+                    return None;
+                }
+                if end <= start {
+                    return Some(CountedIterations::EMPTY);
+                }
+                let count = (end - start).div_ceil(*step);
+                let max = start.checked_add((count - 1).checked_mul(*step)?)?;
+                Some(CountedIterations {
+                    min: start,
+                    max,
+                    count,
+                })
+            }
+            ForRange::Reverse {
+                start,
+                end,
+                inclusive,
+                step,
+            } => {
+                let start = start.eval_value(context)?;
+                let end = end.eval_value(context)?;
+                if *step == 0 {
+                    return None;
+                }
+                let high = if *inclusive {
+                    end
+                } else if let Some(high) = end.checked_sub(1) {
+                    high
+                } else {
+                    return Some(CountedIterations::EMPTY);
+                };
+                if high < start {
+                    return Some(CountedIterations::EMPTY);
+                }
+                let count = (high - start) / *step + 1;
+                Some(CountedIterations {
+                    min: high - (count - 1) * *step,
+                    max: high,
+                    count,
+                })
+            }
+            ForRange::Stepped { .. } => counted(self.eval_iter(context)?),
+        }
+    }
+
     pub fn eval_iter(&self, context: &mut Context) -> Option<Vec<usize>> {
         let limit = context.config.evaluate_size_limit;
         match self {
@@ -228,8 +316,11 @@ impl ForRange {
                     // emitted `for (i = hi; i >= lo; i -= step)`.
                     let hi = if *inclusive {
                         end
+                    } else if let Some(hi) = end.checked_sub(1) {
+                        hi
                     } else {
-                        end.saturating_sub(1)
+                        // An exclusive end of 0 leaves no value.
+                        return Some(Vec::new());
                     };
                     let mut ret = vec![];
                     let mut i = hi as i64;
@@ -1531,6 +1622,32 @@ impl fmt::Display for CasePattern {
                 let op = if *inclusive { "..=" } else { ".." };
                 write!(f, "{lo}{op}{hi}")
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reverse_range_to_an_exclusive_zero_is_empty() {
+        let mut context = Context::default();
+        for step in [1, 2] {
+            let range = ForRange::Reverse {
+                start: ForBound::Const(0, false),
+                end: ForBound::Const(0, false),
+                inclusive: false,
+                step,
+            };
+            assert_eq!(range.eval_iter(&mut context), Some(Vec::new()), "{step}");
+            assert_eq!(
+                range
+                    .eval_counted(&mut context)
+                    .map(|iterations| iterations.count),
+                Some(0),
+                "{step}"
+            );
         }
     }
 }

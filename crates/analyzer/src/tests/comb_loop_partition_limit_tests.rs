@@ -117,9 +117,10 @@ fn partition_limit_default_skips_a_legal_generated_write_matrix_without_diagnost
 
 #[test]
 fn partition_limit_default_bounds_byte_enabled_memory_next_state() {
-    // 32,768 512-bit words are a 2 MiB memory. A common per-element default
-    // copy followed by byte-enabled writes still creates a word-by-byte
-    // partition. The equivalent whole-array copy avoids the array cuts.
+    // 32,768 512-bit words are a 2 MiB memory. Enumerating a per-element
+    // default copy followed by byte-enabled writes would create a
+    // word-by-byte partition. Counted loops keep it as compact as the
+    // equivalent whole-array copy.
     for whole_copy in [false, true] {
         let initialization = if whole_copy {
             "next_data = data;"
@@ -148,11 +149,14 @@ fn partition_limit_default_bounds_byte_enabled_memory_next_state() {
         reset_analysis_size();
         let errors = analyze(&code);
         assert!(errors.is_empty(), "whole_copy={whole_copy}: {errors:#?}");
-        if whole_copy {
-            assert_eq!(analysis_size().0, 67);
-        } else {
-            assert_eq!(analysis_size(), (0, 0, 0));
-        }
-        assert_eq!(comb_loop_analysis_is_complete(&code), whole_copy);
+        // Neither the per-row copy nor the byte lanes are enumerated: both
+        // counted loops write symbolic positions of a few storage regions.
+        let (atoms, nodes, edges) = analysis_size();
+        assert!(atoms <= 8, "whole_copy={whole_copy}: {atoms} atoms");
+        assert!(
+            nodes <= 16 && edges <= 16,
+            "whole_copy={whole_copy}: {nodes} nodes, {edges} edges"
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
     }
 }

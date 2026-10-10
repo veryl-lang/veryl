@@ -3,6 +3,8 @@
 mod dag;
 mod repeated;
 
+pub(super) use repeated::{RepeatedIteration, TransferCoverage};
+
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::hash::Hash;
@@ -74,6 +76,9 @@ enum Version<K> {
     Projected {
         source: VersionId,
         domain: PositionDomain,
+        /// Whether the source is only kept at those positions, as state,
+        /// rather than read there.
+        retains: bool,
     },
     Replicated {
         source: VersionId,
@@ -100,6 +105,11 @@ impl BranchId {
 
     pub(super) const fn arms(self) -> usize {
         self.arms
+    }
+
+    /// The numbering of the procedure that made the branch.
+    pub(super) const fn procedure(self) -> usize {
+        self.procedure
     }
 }
 
@@ -203,6 +213,26 @@ impl PathCondition {
 
     pub(super) fn is_unconditional(&self) -> bool {
         self.constraints.is_empty()
+    }
+
+    /// The choices on the branches `keep` accepts.
+    pub(super) fn restricted(&self, keep: impl Fn(BranchId) -> bool) -> Self {
+        if self
+            .constraints
+            .iter()
+            .all(|constraint| keep(constraint.branch))
+        {
+            return self.clone();
+        }
+        Self {
+            constraints: Rc::new(
+                self.constraints
+                    .iter()
+                    .filter(|constraint| keep(constraint.branch))
+                    .cloned()
+                    .collect(),
+            ),
+        }
     }
 
     pub(super) fn with_choice(&self, branch: BranchId, arm: usize) -> Self {
@@ -392,11 +422,10 @@ impl PathCondition {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct PositionRelation {
-    pub(super) array: Option<isize>,
-    pub(super) packed: Option<isize>,
-}
+use super::position::Axis;
+#[cfg(test)]
+use super::position::Link;
+pub(super) use super::position::Relation as PositionRelation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Replication {
@@ -413,23 +442,20 @@ impl Replication {
 
     pub(super) fn relation(self) -> PositionRelation {
         match self {
-            Self::Array(stride) => PositionRelation {
-                array: Some(stride),
-                packed: Some(0),
-            },
-            Self::Packed(stride) => PositionRelation {
-                array: Some(0),
-                packed: Some(stride),
-            },
+            Self::Array(stride) => PositionRelation::translation(stride, 0),
+            Self::Packed(stride) => PositionRelation::translation(0, stride),
         }
     }
 
-    fn forget_position(self, mut relation: PositionRelation) -> PositionRelation {
+    pub(super) fn axis(self) -> Axis {
         match self {
-            Self::Array(_) => relation.array = None,
-            Self::Packed(_) => relation.packed = None,
+            Self::Array(_) => Axis::Array,
+            Self::Packed(_) => Axis::Packed,
         }
-        relation
+    }
+
+    fn forget_position(self, relation: PositionRelation) -> PositionRelation {
+        relation.forget(self.axis())
     }
 }
 
@@ -475,51 +501,6 @@ pub(super) struct PositionDomain {
     pub(super) packed_length: usize,
 }
 
-impl Default for PositionRelation {
-    fn default() -> Self {
-        Self {
-            array: Some(0),
-            packed: Some(0),
-        }
-    }
-}
-
-impl PositionRelation {
-    pub(super) const fn whole() -> Self {
-        Self {
-            array: None,
-            packed: None,
-        }
-    }
-
-    pub(super) fn compose(self, other: Self) -> Self {
-        Self {
-            array: compose_axis(self.array, other.array),
-            packed: compose_axis(self.packed, other.packed),
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn union(self, other: Self) -> Self {
-        Self {
-            array: (self.array == other.array).then_some(self.array).flatten(),
-            packed: (self.packed == other.packed)
-                .then_some(self.packed)
-                .flatten(),
-        }
-    }
-}
-
-fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(
-            left.checked_add(right)
-                .expect("composed position offset must fit in isize"),
-        ),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct Checkpoint {
     undo_start: usize,
@@ -532,6 +513,10 @@ pub(super) struct BranchState<K> {
 }
 
 impl<K> BranchState<K> {
+    pub(super) fn keys(&self) -> impl Iterator<Item = &K> {
+        self.bindings.keys()
+    }
+
     pub(super) fn len(&self) -> usize {
         self.bindings.len()
     }
@@ -540,6 +525,31 @@ impl<K> BranchState<K> {
         Self {
             bindings: HashMap::default(),
         }
+    }
+
+    pub(super) fn get(&self, key: &K) -> Option<VersionId>
+    where
+        K: Eq + Hash,
+    {
+        self.bindings.get(key).copied()
+    }
+
+    /// The bindings of the keys `taken` selects, removed from this state.
+    pub(super) fn split_off(&mut self, taken: impl Fn(&K) -> bool) -> Self
+    where
+        K: Copy + Eq + Hash,
+    {
+        let keys = self
+            .bindings
+            .keys()
+            .copied()
+            .filter(|key| taken(key))
+            .collect::<Vec<_>>();
+        let bindings = keys
+            .into_iter()
+            .filter_map(|key| Some((key, self.bindings.remove(&key)?)))
+            .collect();
+        Self { bindings }
     }
 }
 
@@ -596,7 +606,7 @@ where
             .insert(version, DefinitionSite { token, data_inputs });
     }
 
-    fn entry(&mut self, key: K) -> VersionId {
+    pub(super) fn entry(&mut self, key: K) -> VersionId {
         if let Some(version) = self.entries.get(&key) {
             return *version;
         }
@@ -674,8 +684,40 @@ where
 
     pub(super) fn projected(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
         let version = self.versions.len();
-        self.versions.push(Version::Projected { source, domain });
+        self.versions.push(Version::Projected {
+            source,
+            domain,
+            retains: false,
+        });
         version
+    }
+
+    /// `source` kept only at `domain`: state there, as a merge keeps it,
+    /// not a value read there.
+    pub(super) fn retained(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
+        let version = self.versions.len();
+        self.versions.push(Version::Projected {
+            source,
+            domain,
+            retains: true,
+        });
+        version
+    }
+
+    /// A value seen only at the union of `domains`; no domain leaves it whole.
+    pub(super) fn projected_union(
+        &mut self,
+        source: VersionId,
+        domains: &[PositionDomain],
+    ) -> VersionId {
+        if domains.is_empty() {
+            return source;
+        }
+        let alternatives = domains
+            .iter()
+            .map(|&domain| self.projected(source, domain))
+            .collect();
+        self.phi(alternatives)
     }
 
     /// Export into a destination that already enforces `domain`. Other SSA
@@ -685,6 +727,7 @@ where
             Version::Projected {
                 source,
                 domain: projected,
+                retains: false,
             } if *projected == domain => *source,
             _ => version,
         }
@@ -697,7 +740,7 @@ where
         replication: Replication,
     ) -> VersionId {
         assert!(
-            replication.stride() > 0,
+            replication.stride() != 0,
             "replication must advance its axis"
         );
         let version = self.versions.len();
@@ -868,28 +911,36 @@ where
     /// Apply the transitive closure of a runtime loop's may-dependency
     /// transfer without enumerating runtime iterator values or iterations.
     ///
-    /// `single_iteration` maps each written key to its output after one
-    /// abstract iteration. Versions that predate `iteration_checkpoint` are
-    /// that iteration's inputs, so they form the nodes of a finite transfer
-    /// graph. Condensing its recurrence components models arbitrary positive
+    /// The iteration's state maps each written key to its output after one
+    /// abstract iteration. Versions that predate its checkpoint are that
+    /// iteration's inputs, so they form the nodes of a finite transfer graph.
+    /// Condensing its recurrence components models arbitrary positive
     /// iteration counts without enumerating positions or paths. `may_skip`
-    /// additionally retains each key's loop-entry version.
+    /// additionally retains each key's loop-entry version. Each `observed`
+    /// state, recorded inside the iteration such as a return path, is
+    /// rebound to read what any number of earlier iterations left.
+    /// `source` seen only on the paths `condition` takes: an alias, not a
+    /// read.
+    pub(super) fn guarded(&mut self, source: VersionId, condition: &PathCondition) -> VersionId {
+        if condition.is_unconditional() {
+            return source;
+        }
+        let version = self.versions.len();
+        self.versions.push(Version::Guarded {
+            source,
+            condition: condition.clone(),
+        });
+        version
+    }
+
     pub(super) fn try_close_repeated_transfer(
         &mut self,
-        single_iteration: &BranchState<K>,
-        iteration_checkpoint: Checkpoint,
-        may_skip: bool,
+        iteration: RepeatedIteration<K>,
         import_work: &mut usize,
         domain: impl Fn(K) -> Option<PositionDomain>,
+        coverage: impl Fn(K) -> TransferCoverage,
     ) -> Option<()> {
-        repeated::try_close(
-            self,
-            single_iteration,
-            iteration_checkpoint,
-            may_skip,
-            import_work,
-            domain,
-        )
+        repeated::try_close(self, iteration, import_work, domain, coverage)
     }
 
     #[cfg(test)]
@@ -902,11 +953,10 @@ where
     ) {
         let mut import_work = usize::MAX;
         self.try_close_repeated_transfer(
-            single_iteration,
-            iteration_checkpoint,
-            may_skip,
+            RepeatedIteration::new(single_iteration, iteration_checkpoint, may_skip),
             &mut import_work,
             domain,
+            |_| TransferCoverage::default(),
         )
         .expect("unlimited runtime transfer construction");
     }
@@ -1067,9 +1117,10 @@ where
                         }
                     }
                 }
-                Version::Projected { source, .. } | Version::Replicated { source, .. } => {
-                    enqueue((*source, true))
-                }
+                Version::Projected {
+                    source, retains, ..
+                } => enqueue((*source, include_entry || !retains)),
+                Version::Replicated { source, .. } => enqueue((*source, true)),
             }
         }
 
@@ -1155,8 +1206,12 @@ where
                     import_work -= spent;
                     node
                 }
-                Version::Projected { source, domain } => {
-                    let inputs = mapped[&(*source, true)]
+                Version::Projected {
+                    source,
+                    domain,
+                    retains,
+                } => {
+                    let inputs = mapped[&(*source, include_entry || !retains)]
                         .map(|source| {
                             (
                                 source,
@@ -1193,7 +1248,45 @@ where
         Some(builder.graph)
     }
 
-    fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
+    /// The versions `version` takes its value from when it only selects
+    /// among them: the inputs of a merge, or the source of a guard or a
+    /// projection. `None` for any other version.
+    pub(super) fn selected_from(&self, version: VersionId) -> Option<Vec<VersionId>> {
+        match self.versions.get(version)? {
+            Version::Phi(inputs) => Some(inputs.clone()),
+            _ => None,
+        }
+    }
+
+    /// The version `version` holds, with the path it holds it on when it
+    /// holds it on one: what a projection holds is at positions of the
+    /// version's own key.
+    pub(super) fn held(&self, version: VersionId) -> Option<(VersionId, Option<PathCondition>)> {
+        match self.versions.get(version)? {
+            Version::Guarded { source, condition } => Some((*source, Some(condition.clone()))),
+            Version::Projected { source, .. } => Some((*source, None)),
+            _ => None,
+        }
+    }
+
+    /// The paths `version` and the versions it holds are held on.
+    pub(super) fn holding_conditions(&self, mut version: VersionId) -> Vec<PathCondition> {
+        let mut conditions = Vec::new();
+        loop {
+            if let Some(Version::Definition { condition, .. }) = self.versions.get(version)
+                && !condition.is_unconditional()
+            {
+                conditions.push(condition.clone());
+            }
+            let Some((source, condition)) = self.held(version) else {
+                return conditions;
+            };
+            conditions.extend(condition);
+            version = source;
+        }
+    }
+
+    pub(super) fn phi(&mut self, mut inputs: Vec<VersionId>) -> VersionId {
         inputs.sort_unstable();
         inputs.dedup();
         if inputs.len() == 1 {
@@ -1338,8 +1431,14 @@ where
                         }
                     }
                 }
-                Version::Projected { source, .. } => {
-                    enqueue((*source, true, relation), condition, work)?;
+                Version::Projected {
+                    source, retains, ..
+                } => {
+                    enqueue(
+                        (*source, include_entry || !retains, relation),
+                        condition,
+                        work,
+                    )?;
                 }
                 Version::Replicated {
                     source,
@@ -1646,15 +1745,15 @@ mod tests {
             (
                 Replication::Array(2),
                 PositionRelation {
-                    array: None,
-                    packed: Some(3),
+                    array: Link::from_offset(None),
+                    packed: Link::from_offset(Some(3)),
                 },
             ),
             (
                 Replication::Packed(2),
                 PositionRelation {
-                    array: Some(1),
-                    packed: None,
+                    array: Link::from_offset(Some(1)),
+                    packed: Link::from_offset(None),
                 },
             ),
         ] {
@@ -1663,8 +1762,8 @@ mod tests {
             let translated = ssa.related_definition(vec![(
                 source,
                 PositionRelation {
-                    array: Some(1),
-                    packed: Some(3),
+                    array: Link::from_offset(Some(1)),
+                    packed: Link::from_offset(Some(3)),
                 },
             )]);
             let repeated = ssa.replicated(
@@ -1700,23 +1799,23 @@ mod tests {
         let first = ssa.related_definition(vec![(
             source,
             PositionRelation {
-                array: Some(3),
-                packed: Some(-2),
+                array: Link::from_offset(Some(3)),
+                packed: Link::from_offset(Some(-2)),
             },
         )]);
         let destination = ssa.related_definition(vec![(
             first,
             PositionRelation {
-                array: Some(-1),
-                packed: Some(5),
+                array: Link::from_offset(Some(-1)),
+                packed: Link::from_offset(Some(5)),
             },
         )]);
 
         assert_eq!(
             ssa.root_source_relations(destination).get("source"),
             Some(&PositionRelation {
-                array: Some(2),
-                packed: Some(3),
+                array: Link::from_offset(Some(2)),
+                packed: Link::from_offset(Some(3)),
             })
         );
     }
@@ -1730,8 +1829,8 @@ mod tests {
             (
                 source,
                 PositionRelation {
-                    array: Some(0),
-                    packed: Some(1),
+                    array: Link::from_offset(Some(0)),
+                    packed: Link::from_offset(Some(1)),
                 },
             ),
         ]);
@@ -1739,8 +1838,8 @@ mod tests {
         assert_eq!(
             ssa.root_source_relations(destination).get("source"),
             Some(&PositionRelation {
-                array: Some(0),
-                packed: None,
+                array: Link::from_offset(Some(0)),
+                packed: Link::from_offset(None),
             })
         );
     }
@@ -1900,8 +1999,8 @@ mod tests {
                 (
                     value,
                     PositionRelation {
-                        array: Some(0),
-                        packed: Some(1isize << shift),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some(1isize << shift)),
                     },
                 ),
             ]);
@@ -2140,8 +2239,8 @@ mod tests {
                 (
                     value,
                     PositionRelation {
-                        array: Some(0),
-                        packed: Some(1isize << shift),
+                        array: Link::from_offset(Some(0)),
+                        packed: Link::from_offset(Some(1isize << shift)),
                     },
                 ),
             ]);
