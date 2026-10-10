@@ -593,10 +593,6 @@ impl<K> BranchState<K> {
             bindings: HashMap::default(),
         }
     }
-
-    pub(super) fn bindings(&self) -> impl Iterator<Item = (&K, VersionId)> {
-        self.bindings.iter().map(|(key, version)| (key, *version))
-    }
 }
 
 struct Undo<K> {
@@ -1046,17 +1042,16 @@ where
         retains[version]
     }
 
-    /// The version below the write history of `version` and the positions of
-    /// `extent` that no write in that history may supply, which therefore
-    /// still hold that version. `Ok(None)` when it has no history, and `Err`
-    /// when resolving it runs out of `work`.
-    #[allow(clippy::type_complexity)]
-    pub(super) fn unwritten_regions(
+    /// The writes of the history of `version` that may supply `extent`, each
+    /// with its region, including the version below the history. `Ok(None)`
+    /// when it has no history, and `Err` when resolving it runs out of
+    /// `work`.
+    pub(super) fn logged_pieces(
         &self,
         version: VersionId,
         extent: PositionDomain,
         work: &mut usize,
-    ) -> Result<Option<(VersionId, Vec<PositionDomain>)>, RanOut> {
+    ) -> Result<Option<Vec<(VersionId, PositionDomain)>>, RanOut> {
         let Some(log) = self
             .logs
             .get(&version)
@@ -1064,15 +1059,13 @@ where
         else {
             return Ok(None);
         };
-        let base = log.base();
-        let mut unwritten = log::Fragments::default();
-        unwritten.insert(extent);
-        for piece in log.resolve(extent, work).ok_or(RanOut)? {
-            if piece.version != base {
-                unwritten.subtract(piece.domain, work).ok_or(RanOut)?;
-            }
-        }
-        Ok(Some((base, unwritten.into_domains().collect())))
+        let pieces = log.resolve(extent, work).ok_or(RanOut)?;
+        Ok(Some(
+            pieces
+                .into_iter()
+                .map(|piece| (piece.version, piece.domain))
+                .collect(),
+        ))
     }
 
     /// Make every existing version opaque to regional reads until the
@@ -1132,6 +1125,15 @@ where
 
     /// Export into a destination that already enforces `domain`. Other SSA
     /// readers retain the original projection and its intermediate bounds.
+    /// `source` restricted to `domain` without reading it: unlike a
+    /// projection, a value kept only through restrictions keeps the key's
+    /// entry value as retention.
+    pub(super) fn restricted(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
+        let version = self.versions.len();
+        self.versions.push(Version::Restricted { source, domain });
+        version
+    }
+
     pub(super) fn root_in_domain(&self, version: VersionId, domain: PositionDomain) -> VersionId {
         match &self.versions[version] {
             Version::Projected {

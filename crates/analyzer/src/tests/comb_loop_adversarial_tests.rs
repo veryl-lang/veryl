@@ -1512,3 +1512,59 @@ fn comb_loop_runtime_loop_keeps_positions_it_never_writes() {
     );
     assert!(comb_loop_analysis_is_complete(code));
 }
+
+#[test]
+fn comb_loop_runtime_loop_keeps_positions_apart_in_its_recurrence() {
+    // `x[2]` is overwritten with zero by every iteration and `x[1]` follows
+    // `x[0]`, so `x[2]` never depends on `a`.
+    let code = r#"
+        module Top (n: input u32, o: output logic) {
+            var a: logic;
+            var x: logic<3>;
+            always_comb {
+                x = {2'b0, a};
+                for _i in 0..n {
+                    x[1] = x[0];
+                    x[2] = 0;
+                }
+            }
+            assign a = x[2];
+            assign o = x[1];
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}
+
+#[test]
+fn comb_loop_runtime_loop_retention_is_not_a_dependency() {
+    // A loop that may run zero times keeps the value from before it, as an
+    // untaken branch does; that retention is not feedback.
+    for body in [
+        "if a[0] { p[1] = a[1]; }",
+        "for _j in 0..k { p[1] = a[1]; }",
+    ] {
+        let code = format!(
+            r#"
+            module Top (k: input logic<2>, a: input logic<8>, o: output logic) {{
+                var p: logic<8>;
+                always_comb {{ {body} }}
+                assign o = p[1];
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "{body}: {errors:#?}"
+        );
+    }
+}

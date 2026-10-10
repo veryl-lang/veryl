@@ -289,7 +289,7 @@ impl Fragments {
     }
 
     /// Remove the positions of `region`.
-    pub(super) fn subtract(&mut self, region: PositionDomain, work: &mut usize) -> Option<()> {
+    fn subtract(&mut self, region: PositionDomain, work: &mut usize) -> Option<()> {
         for fragment in self.overlapping(region, work)? {
             self.remove(fragment);
             for part in complement(fragment, region) {
@@ -328,7 +328,7 @@ impl Fragments {
         Some(inside)
     }
 
-    pub(super) fn into_domains(self) -> impl Iterator<Item = PositionDomain> {
+    fn into_domains(self) -> impl Iterator<Item = PositionDomain> {
         self.boxes
             .into_iter()
             .map(
