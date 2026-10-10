@@ -5942,6 +5942,29 @@ fn batch_compiled_statements(stmts: Vec<Statement>) -> Vec<Statement> {
     result
 }
 
+/// A call expands its function's body inline, so a loop kept in a function
+/// is kept in every caller.
+pub(crate) fn lower_function_loops(
+    src: &air::Module,
+    analyzer_context: &mut veryl_analyzer::conv::Context,
+) {
+    if veryl_analyzer::ir::peel::is_test_module(src) {
+        return;
+    }
+    let mut functions = analyzer_context.functions.clone();
+    for function in functions.values_mut() {
+        for body in &mut function.functions {
+            veryl_analyzer::ir::peel::lower_constant_loop_body(
+                analyzer_context,
+                &mut body.statements,
+                usize::MAX,
+                false,
+            );
+        }
+    }
+    analyzer_context.functions = functions;
+}
+
 /// A private native-simulator copy with bounded constant loops lowered and
 /// decided `break` loops peeled. Returns `None` when no loop changes;
 /// `analyzer_context` holds `src`'s variables.
@@ -6015,6 +6038,7 @@ impl Conv<&air::Module> for ProtoModule {
         let mut analyzer_context = veryl_analyzer::conv::Context::default();
         analyzer_context.variables = src.variables.clone();
         analyzer_context.functions = src.functions.clone();
+        lower_function_loops(src, &mut analyzer_context);
 
         let peeled = peeled_declarations(src, &mut analyzer_context);
         let (hoisted_declarations, ff_table) = simulated_declarations(
