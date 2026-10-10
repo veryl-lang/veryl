@@ -2,13 +2,13 @@
 
 use super::model::SummaryRegion;
 use super::region::{
-    ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference,
-    translate_position, var_reads,
+    ArraySpan, BitPartition, NodeKey, PackedSpan, dst_writes, signed_difference, var_reads,
 };
 use super::ssa::{
     BranchId, BranchState, Checkpoint, DependencyDag, DependencyDagNode, PathCondition,
-    PositionDomain, PositionRelation, Replication, SsaStore, VersionId,
+    PositionDomain, PositionRelation, RanOut, Replication, SsaStore, VersionId,
 };
+use super::steps::Steps;
 use crate::conv::Context;
 use crate::ir::VarId;
 use crate::ir::{
@@ -23,24 +23,73 @@ use std::borrow::Cow;
 use std::rc::Rc;
 use veryl_parser::token_range::TokenRange;
 
+/// `span + offset` restricted to non-negative positions. A variable is one
+/// storage region, so a shift that moves part of it below position 0 still
+/// keeps the rest.
 fn translate_array_span(span: ArraySpan, offset: isize) -> Option<ArraySpan> {
-    Some(ArraySpan {
-        start: translate_position(span.start, offset)?,
-        length: span.length,
+    let start = isize::try_from(span.start).ok()?.checked_add(offset)?;
+    let end = isize::try_from(span.end()?).ok()?.checked_add(offset)?;
+    let start = usize::try_from(start.max(0)).ok()?;
+    let end = usize::try_from(end).ok()?;
+    let length = end.checked_sub(start)?;
+    (length != 0).then_some(ArraySpan { start, length })
+}
+
+/// `span + offset` restricted to non-negative positions.
+fn translate_packed_span(span: PackedSpan, offset: isize) -> Option<PackedSpan> {
+    let start = isize::try_from(span.start).ok()?.checked_add(offset)?;
+    let end = isize::try_from(span.end()).ok()?.checked_add(offset)?;
+    let start = usize::try_from(start.max(0)).ok()?;
+    let end = usize::try_from(end).ok()?;
+    PackedSpan::new(start, end.checked_sub(start)?)
+}
+
+/// Whether `expression` reads some element at an index that reads one of
+/// `ids`.
+fn reads_at_index_of(expression: &Expression, ids: &[VarId]) -> bool {
+    fn mentions(expression: &Expression, ids: &[VarId]) -> bool {
+        any_variable(expression, &mut |id, _| ids.contains(&id))
+    }
+    any_variable(expression, &mut |_, index| {
+        index.expressions().any(|index| mentions(index, ids))
     })
 }
 
-fn position_domain(array: ArraySpan, packed: PackedSpan) -> PositionDomain {
-    PositionDomain {
-        array_start: array.start,
-        array_length: array.length,
-        packed_start: packed.start,
-        packed_length: packed.length,
+/// Whether `f` holds for some variable read in `expression`, outside calls.
+fn any_variable(expression: &Expression, f: &mut impl FnMut(VarId, &VarIndex) -> bool) -> bool {
+    match expression {
+        Expression::Term(factor) => match factor.as_ref() {
+            Factor::Variable(id, index, select, _) => {
+                f(*id, index)
+                    || index.expressions().any(|x| any_variable(x, f))
+                    || select.0.iter().any(|x| any_variable(x, f))
+                    || select.1.as_ref().is_some_and(|(_, x)| any_variable(x, f))
+            }
+            // The evaluation passes the projection on to these inputs.
+            Factor::SystemFunctionCall(call) => match &call.kind {
+                SystemFunctionKind::Signed(input) | SystemFunctionKind::Unsigned(input) => {
+                    any_variable(&input.0, f)
+                }
+                _ => false,
+            },
+            _ => false,
+        },
+        Expression::Unary(_, x, _) => any_variable(x, f),
+        Expression::Binary(x, _, y, _) => any_variable(x, f) || any_variable(y, f),
+        Expression::Ternary(x, y, z, _) => {
+            any_variable(x, f) || any_variable(y, f) || any_variable(z, f)
+        }
+        Expression::Concatenation(items, _) => items.iter().any(|(x, repeat)| {
+            any_variable(x, f) || repeat.as_ref().is_some_and(|x| any_variable(x, f))
+        }),
+        Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
+            ArrayLiteralItem::Value(x, repeat) => {
+                any_variable(x, f) || repeat.as_ref().is_some_and(|x| any_variable(x, f))
+            }
+            ArrayLiteralItem::Defaul(x) => any_variable(x, f),
+        }),
+        Expression::StructConstructor(_, items, _) => items.iter().any(|(_, x)| any_variable(x, f)),
     }
-}
-
-fn translate_packed_span(span: PackedSpan, offset: isize) -> Option<PackedSpan> {
-    PackedSpan::new(translate_position(span.start, offset)?, span.length)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -416,14 +465,26 @@ struct FunctionSummaryKey {
     index: Option<Vec<usize>>,
 }
 
+/// A key a function writes, its DAG root, and the positions the function
+/// definitely and possibly writes; other positions keep the caller's value.
+type FunctionWrite = (
+    NodeKey,
+    Option<usize>,
+    Rc<[PositionDomain]>,
+    Rc<[PositionDomain]>,
+);
+
 #[derive(Clone)]
 struct FunctionSummary {
     arg_map: HashMap<VarPath, VarId>,
     graph: Rc<DependencyDag<SsaKey>>,
     result: FunctionResultSummary,
-    writes: Vec<(NodeKey, Option<usize>)>,
+    writes: Vec<FunctionWrite>,
     opaque_sources: Vec<NodeKey>,
     status: AnalysisStatus,
+    /// Summarizing stopped for want of steps. Such a summary serves only the
+    /// call that made it, so a later attempt with more steps summarizes anew.
+    ran_out: bool,
     repeatable: bool,
 }
 
@@ -449,53 +510,9 @@ enum FunctionSummaryLookup {
 
 type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 
-// Distinct invocation guards can require genuinely different subgraphs.
-// Bound their materialization before cycle search gets a chance to run.
-const FUNCTION_SUMMARY_WORK: usize = 100_000;
-
-// Ordinary procedures can import many individually bounded summaries. Limit
-// their combined expansion, including repeated copies of runtime-loop
-// transfers, independently of the directly written SSA graph.
-const PROCEDURE_IMPORT_WORK: usize = 100_000;
-
-// Early returns and breaks retain every preceding guard prefix during SSA
-// evaluation; source queries can accumulate new prefixes while walking shared
-// DAGs. Charge both before allocation and abandon the affected procedure if
-// their combined work exceeds this budget.
-const PROCEDURE_GUARD_WORK: usize = 100_000;
-
-#[cfg(test)]
-thread_local! {
-    static GUARD_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(PROCEDURE_GUARD_WORK) };
-    static IMPORT_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(PROCEDURE_IMPORT_WORK) };
-}
-
-#[cfg(test)]
-pub(crate) fn with_procedure_import_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
-    struct Reset(usize);
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            IMPORT_LIMIT.set(self.0);
-        }
-    }
-    let _reset = Reset(IMPORT_LIMIT.replace(limit));
-    f()
-}
-
-#[cfg(test)]
-pub(crate) fn with_procedure_guard_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
-    struct Reset(usize);
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            GUARD_LIMIT.set(self.0);
-        }
-    }
-    let _reset = Reset(GUARD_LIMIT.replace(limit));
-    f()
-}
-
 pub(super) struct FunctionSummaries<'a> {
     pub(super) tracing: bool,
+    steps: Steps,
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
@@ -882,9 +899,10 @@ fn module_scope_ids(module: &Module) -> HashSet<VarId> {
         .collect()
 }
 impl<'a> FunctionSummaries<'a> {
-    pub(super) fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
+    pub(super) fn new(module: &'a Module, bit_part: &'a BitPartition, steps: &Steps) -> Self {
         Self {
             tracing: false,
+            steps: steps.clone(),
             module,
             bit_part,
             summaries: HashMap::default(),
@@ -931,7 +949,11 @@ impl<'a> FunctionSummaries<'a> {
         context.clear_summary();
         self.contexts.push(context);
         if let Some(summary) = summary {
-            self.summaries.insert(key, Some(summary.clone()));
+            if summary.ran_out {
+                self.summaries.remove(&key);
+            } else {
+                self.summaries.insert(key, Some(summary.clone()));
+            }
             FunctionSummaryLookup::Ready(summary)
         } else {
             self.summaries.remove(&key);
@@ -1045,6 +1067,8 @@ pub(super) struct ProcedureResult {
     pub(super) graph: DependencyDag<NodeKey>,
     pub(super) destinations: Vec<(NodeKey, Option<usize>)>,
     pub(super) status: AnalysisStatus,
+    /// The analysis stopped for want of steps; more steps may complete it.
+    pub(super) ran_out: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -1143,8 +1167,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
     ) -> Self {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut inner =
-            ProcedureAnalysis::from_context(bit_part, summaries.module, ctx, module_scope_ids);
+        let mut inner = ProcedureAnalysis::from_context(bit_part, summaries, ctx, module_scope_ids);
         inner.tracing = summaries.tracing;
         inner.summaries = Some(summaries);
         Self { inner: Some(inner) }
@@ -1169,7 +1192,6 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         regions: &[SummaryRegion],
         context_width: usize,
         context_type: &Type,
-        work: usize,
     ) -> DependencyDag<NodeKey> {
         let inner = self.inner();
         inner.use_expression_namespace(expression);
@@ -1196,11 +1218,11 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
                 let value = inner.ssa.related_definition(sources.sources);
                 inner
                     .ssa
-                    .projected(value, position_domain(region.array, region.packed))
+                    .projected(value, PositionDomain::new(region.array, region.packed))
             })
             .collect::<Vec<_>>();
         inner.call_caches.pop();
-        inner.dependency_dag_for_nodes(&roots, work)
+        inner.dependency_dag_for_nodes(&roots)
     }
 
     pub(super) fn dependencies(&mut self) -> ProcedureResult {
@@ -1210,6 +1232,7 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
             graph,
             destinations,
             status: inner.status,
+            ran_out: inner.stopped,
         }
     }
 
@@ -1249,8 +1272,10 @@ struct ProcedureAnalysis<'a, 's> {
     function_flows: Vec<FunctionFlow>,
     loop_flows: Vec<LoopFlow>,
     path_condition: PathCondition,
-    guard_work: Option<usize>,
-    import_work: usize,
+    /// The module's steps, shared with every other stage of its analysis.
+    steps: Steps,
+    /// Set once the procedure ran out of steps; it is then abandoned.
+    stopped: bool,
     branch_namespace: usize,
     next_branch: usize,
     status: AnalysisStatus,
@@ -1265,18 +1290,11 @@ struct ProcedureAnalysis<'a, 's> {
 impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn from_context(
         bit_part: &'a BitPartition,
-        module: &'a Module,
+        summaries: &FunctionSummaries<'a>,
         ctx: Context,
         module_scope_ids: Rc<HashSet<VarId>>,
     ) -> Self {
-        #[cfg(test)]
-        let guard_work = GUARD_LIMIT.get();
-        #[cfg(not(test))]
-        let guard_work = PROCEDURE_GUARD_WORK;
-        #[cfg(test)]
-        let import_work = IMPORT_LIMIT.get();
-        #[cfg(not(test))]
-        let import_work = PROCEDURE_IMPORT_WORK;
+        let module = summaries.module;
         Self {
             bit_part,
             module,
@@ -1291,8 +1309,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             function_flows: Vec::new(),
             loop_flows: Vec::new(),
             path_condition: PathCondition::default(),
-            guard_work: Some(guard_work),
-            import_work,
+            steps: summaries.steps.clone(),
+            stopped: false,
             branch_namespace: 0,
             next_branch: 0,
             status: AnalysisStatus::Complete,
@@ -1314,7 +1332,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     ) -> ProcedureResult {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut this = Self::from_context(bit_part, summaries.module, ctx, module_scope_ids);
+        let mut this = Self::from_context(bit_part, summaries, ctx, module_scope_ids);
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
         #[cfg(test)]
@@ -1329,6 +1347,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             graph,
             destinations,
             status: this.status,
+            ran_out: this.stopped,
         };
         this.ctx.rollback_analysis_transaction();
         context.restore(this.ctx);
@@ -1337,14 +1356,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn eval_expression_sources(&mut self, expression: &Expression) -> Vec<RegionSource> {
         let versions = self.eval_reachable_expr(expression);
-        if self.guard_work.is_none() {
+        if self.stopped {
             return Vec::new();
         }
         let value = self.ssa.definition(versions);
-        let Some(sources) = self
-            .guard_work
-            .as_mut()
-            .and_then(|work| self.ssa.try_root_source_keys_guarded(value, work))
+        let steps = self.steps.clone();
+        let Some(sources) = steps.lend(|work| self.ssa.try_root_source_keys_guarded(value, work))
         else {
             self.exhaust_work();
             return Vec::new();
@@ -1378,7 +1395,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut this = Self::from_context(bit_part, module, ctx, module_scope_ids);
+        let mut this = Self::from_context(bit_part, summaries, ctx, module_scope_ids);
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
         this.call_caches.push(None);
@@ -1409,7 +1426,33 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .into_iter()
             .map(|destination| {
                 let version = this.read_key(destination);
-                (destination, version)
+                // An output argument starts without a value on every call.
+                // An input or inout one starts with the actual's value.
+                let fresh = formal_ids.contains(&destination.0)
+                    && this
+                        .ctx
+                        .variables
+                        .get(&destination.0)
+                        .is_some_and(|variable| {
+                            matches!(variable.kind, crate::ir::VarKind::Output)
+                        });
+                let regions = match this.key_span(destination) {
+                    Some(_) if this.stopped => None,
+                    Some(packed) => this.steps.clone().lend(|work| {
+                        this.ssa.written_regions(
+                            version,
+                            PositionDomain::new(destination.1, packed),
+                            fresh,
+                            work,
+                        )
+                    }),
+                    None => Some((Vec::new(), Vec::new())),
+                };
+                let (definite, maybe) = regions.unwrap_or_else(|| {
+                    this.exhaust_work();
+                    (Vec::new(), Vec::new())
+                });
+                (destination, version, definite, maybe)
             })
             .collect::<Vec<_>>();
 
@@ -1417,21 +1460,23 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .iter()
             .flat_map(|(_, regions)| regions.iter().map(|(_, version)| *version))
             .collect::<Vec<_>>();
-        roots.extend(write_versions.iter().map(|(_, version)| *version));
-        let graph = this
-            .guard_work
-            .and_then(|_| {
-                this.ssa.try_dependency_dag(
-                    &roots,
-                    |key| {
-                        this.is_visible_source(key)
-                            || (key.call_frame.is_none() && formal_ids.contains(&key.node.0))
-                    },
-                    FUNCTION_SUMMARY_WORK,
-                )
+        roots.extend(write_versions.iter().map(|(_, version, _, _)| *version));
+        let graph = (!this.stopped)
+            .then(|| {
+                this.steps.lend(|work| {
+                    this.ssa.try_dependency_dag(
+                        &roots,
+                        |key| {
+                            this.is_visible_source(key)
+                                || (key.call_frame.is_none() && formal_ids.contains(&key.node.0))
+                        },
+                        work,
+                    )
+                })
             })
+            .flatten()
             .unwrap_or_else(|| {
-                this.status = AnalysisStatus::Barrier;
+                this.exhaust_work();
                 DependencyDag {
                     nodes: Vec::new(),
                     edges: Vec::new(),
@@ -1463,10 +1508,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             .collect();
         let writes: Vec<_> = write_versions
             .into_iter()
-            .map(|(destination, _)| {
+            .map(|(destination, _, definite, maybe)| {
                 (
                     destination,
                     root.next().expect("every function write has a DAG root"),
+                    definite.into(),
+                    maybe.into(),
                 )
             })
             .collect();
@@ -1495,6 +1542,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             writes,
             opaque_sources,
             status: this.status,
+            ran_out: this.stopped,
         };
         this.ctx.rollback_analysis_transaction();
         context.restore(this.ctx);
@@ -1517,12 +1565,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 // Keep the stored projection for reads within the procedure,
                 // but avoid a duplicate boundary on its final output edge.
                 self.key_span(*destination).map_or(version, |packed| {
-                    self.ssa
-                        .root_in_domain(version, position_domain(destination.1, packed))
+                    let domain = PositionDomain::new(destination.1, packed);
+                    // Export each live write once rather than the overlay
+                    // chain, which carries every earlier write to the end.
+                    let version = self.read_logged(version, domain);
+                    self.ssa.root_in_domain(version, domain)
                 })
             })
             .collect::<Vec<_>>();
-        let graph = self.dependency_dag_for_nodes(&roots, usize::MAX);
+        let graph = self.dependency_dag_for_nodes(&roots);
         let destinations = destinations
             .into_iter()
             .zip(graph.roots.iter().copied())
@@ -1553,21 +1604,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         self.ssa.bind(self.ssa_key(node), version);
     }
 
-    fn dependency_dag_for_nodes(
-        &mut self,
-        roots: &[VersionId],
-        work: usize,
-    ) -> DependencyDag<NodeKey> {
-        let graph = self.guard_work.and_then(|_| {
-            self.ssa.try_dependency_dag_with_import_limit(
-                roots,
-                |key| self.is_visible_source(key),
-                work,
-                self.import_work,
-            )
-        });
+    fn dependency_dag_for_nodes(&mut self, roots: &[VersionId]) -> DependencyDag<NodeKey> {
+        let graph = (!self.stopped)
+            .then(|| {
+                self.steps.lend(|work| {
+                    self.ssa
+                        .try_dependency_dag(roots, |key| self.is_visible_source(key), work)
+                })
+            })
+            .flatten();
         let Some(graph) = graph else {
-            self.status = AnalysisStatus::Barrier;
+            self.exhaust_work();
             return DependencyDag {
                 nodes: Vec::new(),
                 edges: Vec::new(),
@@ -1904,7 +1951,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn bind_opaque_keys(&mut self, keys: Vec<NodeKey>, weak: bool) {
         for key in keys {
             let opaque = self.ssa.definition(Vec::new());
-            self.bind_destination(key, opaque, weak);
+            self.bind_destination(key, opaque, None, weak);
         }
     }
 
@@ -1935,12 +1982,17 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    fn write_keys(&mut self, destination: &AssignDestination) -> Vec<NodeKey> {
+    /// The keys a destination may write and the storage region it writes.
+    fn write_target(
+        &mut self,
+        destination: &AssignDestination,
+    ) -> (Vec<NodeKey>, Option<(ArraySpan, PackedSpan)>) {
         if !self.ctx.variables.contains_key(&destination.id)
             && destination.index.indices.is_empty()
             && destination.select.is_empty()
         {
-            return self.keys_for_id(destination.id);
+            let region = dst_writes(destination, &mut self.ctx).into_iter().next();
+            return (self.keys_for_id(destination.id), region);
         }
         let mut keys = Vec::new();
         let mut destination = destination.clone();
@@ -1949,12 +2001,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if accesses.is_empty() {
             self.status = AnalysisStatus::Barrier;
         }
+        let region = accesses.first().copied();
         for (idx, span) in accesses {
             keys.extend(self.bit_part.overlapping_access(destination.id, idx, span));
         }
         keys.sort_unstable();
         keys.dedup();
-        keys
+        (keys, region)
     }
 
     fn destination_is_dynamic(&self, destination: &AssignDestination) -> bool {
@@ -1996,21 +2049,47 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         Some(SampledAffineIndex { index, versions })
     }
 
-    fn bind_destination(&mut self, key: NodeKey, version: VersionId, dynamic: bool) {
-        // Later statements read this version without passing through the
-        // circuit graph's variable node. Keep its storage bounds in SSA so
-        // discarded bits cannot reach a subsequent whole-value read.
-        let version = if let Some(packed) = self.key_span(key) {
-            self.ssa.projected(version, position_domain(key.1, packed))
-        } else {
-            version
+    /// Bind a write of `region` (the whole key when absent). Later statements
+    /// read this version without passing through the circuit graph's variable
+    /// node, so the written bounds stay in SSA: discarded bits cannot reach a
+    /// later read, and a strong write replaces only its own region.
+    fn bind_destination(
+        &mut self,
+        key: NodeKey,
+        version: VersionId,
+        region: Option<(ArraySpan, PackedSpan)>,
+        dynamic: bool,
+    ) {
+        let Some(packed) = self.key_span(key) else {
+            // Without storage bounds the write cannot be placed in the log;
+            // bind it as a whole so later reads still observe it.
+            let key_ssa = self.ssa_key(key);
+            if dynamic {
+                self.ssa.weak_bind(key_ssa, version);
+            } else {
+                self.ssa.bind(key_ssa, version);
+            }
+            self.written.insert(key);
+            return;
         };
-        if dynamic {
-            let key = self.ssa_key(key);
-            self.ssa.weak_bind(key, version);
-        } else {
-            self.bind_key(key, version);
-        }
+        let extent = PositionDomain::new(key.1, packed);
+        let written = match region {
+            Some((array, bits)) => {
+                let (Some(array), Some(bits)) =
+                    (array.intersection(key.1), bits.intersection(packed))
+                else {
+                    return;
+                };
+                PositionDomain::new(array, bits)
+            }
+            None => extent,
+        };
+        let version = self.ssa.projected(version, written);
+        let previous = self.read_key(key);
+        let version = self
+            .ssa
+            .overlay(previous, version, written, extent, !dynamic);
+        self.bind_key(key, version);
         self.written.insert(key);
     }
 
@@ -2050,7 +2129,25 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         {
             version
         } else {
-            self.ssa.projected(version, position_domain(array, packed))
+            let domain = PositionDomain::new(array, packed);
+            let version = self.read_logged(version, domain);
+            self.ssa.projected(version, domain)
+        }
+    }
+
+    /// Read `domain` from the write history of `version` on the module's
+    /// steps. A version without a history is read whole.
+    fn read_logged(&mut self, version: VersionId, domain: PositionDomain) -> VersionId {
+        if self.stopped {
+            return version;
+        }
+        let steps = self.steps.clone();
+        match steps.lend(|work| self.ssa.read_logged(version, domain, work)) {
+            Ok(read) => read.unwrap_or(version),
+            Err(RanOut) => {
+                self.exhaust_work();
+                version
+            }
         }
     }
 
@@ -2165,7 +2262,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         dependencies: Vec<VersionId>,
         controls: &[VersionId],
     ) {
-        let keys = self.write_keys(destination);
+        let (keys, region) = self.write_target(destination);
         let dynamic = self.destination_is_dynamic(destination);
         let version = self
             .ssa
@@ -2174,7 +2271,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             if let Some(token) = self.active_assignment {
                 self.ssa.record_site(version, token, controls);
             }
-            self.bind_destination(key, version, dynamic);
+            self.bind_destination(key, version, region, dynamic);
         }
     }
 
@@ -2224,71 +2321,118 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 })
             });
         let destination_index = self.sample_affine_index(destination.id, &destination.index);
-        let keys = self.write_keys(destination);
+        let (keys, region) = self.write_target(destination);
         let dynamic_array = !destination.index.is_const();
         let dynamic_packed = !destination.select.is_const_with_range();
         let dynamic = dynamic_array || dynamic_packed;
+        // A runtime index also read on the right-hand side relates each
+        // element written to elements at a fixed displacement. A storage node
+        // holds the whole array, so evaluate each candidate element on its
+        // own: it then reads only its own elements, and every other source
+        // still reaches every candidate.
+        let per_element = dynamic_array
+            && destination_index.as_ref().is_some_and(|index| {
+                let ids = index
+                    .index
+                    .terms
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect::<Vec<_>>();
+                !ids.is_empty() && reads_at_index_of(expression, &ids)
+            });
         for key in keys {
-            let mut whole = controls.to_vec();
-            whole.extend_from_slice(&selectors);
-            let mut sources = if let (Some(destination_array), Some((_, low)), Some(key_span)) =
-                (destination_array, selected, self.key_span(key))
-            {
-                let destination_region = key.1.intersection(destination_array);
-                let expression_array = destination_region.and_then(|array| {
-                    if dynamic_array {
-                        // Each candidate destination receives the scalar RHS,
-                        // including when no affine correspondence is proven.
-                        Some(ArraySpan {
-                            start: 0,
-                            length: array.length,
-                        })
-                    } else {
-                        array.translated(destination_array.start, 0)
-                    }
+            // Each element takes a step before it is evaluated.
+            let span = destination_array
+                .and_then(|array| key.1.intersection(array))
+                .filter(|_| per_element);
+            for offset in 0..span.map_or(1, |span| span.length) {
+                let element = span.map(|span| ArraySpan {
+                    start: span.start + offset,
+                    length: 1,
                 });
-                if let (Some(array), Some(destination_region), Some(packed)) = (
-                    expression_array,
-                    destination_region,
-                    key_span.translated(low, expression_offset),
-                ) {
-                    self.eval_expr_requested_in(
-                        expression,
-                        array,
-                        packed,
-                        expression_context_width,
-                        &ProjectionContext {
-                            destination_index: destination_index.clone(),
-                            destination_array: Some(destination_region),
-                            array_shape: Some(destination.comptime.r#type.array.clone()),
-                        },
-                    )
-                } else {
-                    ExpressionSources::default()
+                if element.is_some() && !self.reserve_guard_work(1) {
+                    return;
                 }
-            } else {
-                ExpressionSources::whole(self.eval_expr(expression))
-            };
-            sources.extend_whole(whole);
-            sources.normalize();
-            for (_, relation) in &mut sources.sources {
-                *relation = destination_offset
-                    .map(|base| relation.compose(base))
-                    .unwrap_or_else(PositionRelation::whole);
-                if dynamic_array {
-                    // The LSP's first element is not the runtime destination.
-                    // A scalar RHS can reach every candidate array element;
-                    // this uncertainty does not widen its packed bit mapping.
-                    relation.array = None;
+                let mut whole = controls.to_vec();
+                whole.extend_from_slice(&selectors);
+                let mut sources =
+                    if let (Some(destination_array), Some((high, low)), Some(key_span)) =
+                        (destination_array, selected, self.key_span(key))
+                    {
+                        let destination_region =
+                            key.1
+                                .intersection(destination_array)
+                                .and_then(|span| match element {
+                                    Some(element) => span.intersection(element),
+                                    None => Some(span),
+                                });
+                        let expression_array = destination_region.and_then(|array| {
+                            if dynamic_array {
+                                // Each candidate destination receives the scalar RHS,
+                                // including when no affine correspondence is proven.
+                                Some(ArraySpan {
+                                    start: 0,
+                                    length: array.length,
+                                })
+                            } else {
+                                array.translated(destination_array.start, 0)
+                            }
+                        });
+                        if let (Some(array), Some(destination_region), Some(packed)) = (
+                            expression_array,
+                            destination_region,
+                            // Only the selected bits of the key are written.
+                            PackedSpan::from_select(high, low)
+                                .and_then(|selected| selected.intersection(key_span))
+                                .and_then(|span| span.translated(low, expression_offset)),
+                        ) {
+                            self.eval_expr_requested_in(
+                                expression,
+                                array,
+                                packed,
+                                expression_context_width,
+                                &ProjectionContext {
+                                    destination_index: destination_index.clone(),
+                                    destination_array: Some(destination_region),
+                                    array_shape: Some(destination.comptime.r#type.array.clone()),
+                                },
+                            )
+                        } else {
+                            ExpressionSources::default()
+                        }
+                    } else {
+                        ExpressionSources::whole(self.eval_expr(expression))
+                    };
+                sources.extend_whole(whole);
+                sources.normalize();
+                for (_, relation) in &mut sources.sources {
+                    *relation = destination_offset
+                        .map(|base| relation.compose(base))
+                        .unwrap_or_else(PositionRelation::whole);
+                    if dynamic_array {
+                        // The LSP's first element is not the runtime destination.
+                        // A scalar RHS can reach every candidate array element;
+                        // this uncertainty does not widen its packed bit mapping.
+                        relation.array = None;
+                    }
                 }
+                let version = self
+                    .ssa
+                    .related_definition_guarded(sources.sources, &self.path_condition);
+                if let Some(token) = self.active_assignment {
+                    self.ssa.record_site(version, token, controls);
+                }
+                let region = match (element, region) {
+                    (Some(element), Some((array, packed))) => {
+                        let Some(array) = array.intersection(element) else {
+                            continue;
+                        };
+                        Some((array, packed))
+                    }
+                    (_, region) => region,
+                };
+                self.bind_destination(key, version, region, dynamic);
             }
-            let version = self
-                .ssa
-                .related_definition_guarded(sources.sources, &self.path_condition);
-            if let Some(token) = self.active_assignment {
-                self.ssa.record_site(version, token, controls);
-            }
-            self.bind_destination(key, version, dynamic);
         }
     }
 
@@ -2314,7 +2458,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if flow.flow != ProcedureFlow::Return {
             function.returns.push(fallthrough);
         }
-        if self.guard_work.is_some() {
+        if !self.stopped {
             self.ssa.merge(&function.returns);
         }
         self.path_condition = caller_condition;
@@ -2354,8 +2498,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     }
 
     fn reserve_guard_work(&mut self, cost: usize) -> bool {
-        self.guard_work = self.guard_work.and_then(|work| work.checked_sub(cost));
-        if self.guard_work.is_none() {
+        if self.stopped || !self.steps.take(cost) {
             self.exhaust_work();
             return false;
         }
@@ -2364,7 +2507,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
 
     fn exhaust_work(&mut self) {
         self.status = AnalysisStatus::Barrier;
-        self.guard_work = None;
+        self.stopped = true;
         self.path_condition = PathCondition::default();
     }
 
@@ -2403,10 +2546,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         &mut self,
         conditions: impl IntoIterator<Item = &'c PathCondition>,
     ) -> Option<PathCondition> {
-        let condition = self
-            .guard_work
-            .as_mut()
-            .and_then(|work| PathCondition::try_disjoin_all(conditions, work));
+        let condition = (!self.stopped)
+            .then(|| {
+                self.steps
+                    .lend(|work| PathCondition::try_disjoin_all(conditions, work))
+            })
+            .flatten();
         if condition.is_none() {
             self.exhaust_work();
         }
@@ -2437,7 +2582,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let mut active_controls = controls.to_vec();
         let mut continuation_controls = Vec::new();
         for statement in statements {
-            if self.guard_work.is_none() {
+            if self.stopped {
                 break;
             }
             let result = self.eval_statement(statement, &active_controls);
@@ -2827,7 +2972,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 &iteration_controls,
             );
             flow = result.flow;
-            if flow != ProcedureFlow::Continue || self.guard_work.is_none() {
+            if flow != ProcedureFlow::Continue || self.stopped {
                 break;
             }
             for control in result.continuation_controls {
@@ -2838,7 +2983,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let fallthrough = self.ssa.capture_and_rollback(checkpoint);
-        if self.guard_work.is_none() {
+        if self.stopped {
             self.path_condition = parent_condition;
             return FlowResult::new(ProcedureFlow::Continue);
         }
@@ -2873,10 +3018,13 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             checkpoint,
             breaks: Vec::new(),
         });
+        // The body reads its iteration inputs, not the writes before the loop.
+        let floor = self.ssa.raise_log_floor();
         let flow = self.eval_block(&statement.body, range_controls);
+        self.ssa.restore_log_floor(floor);
         let mut loop_flow = self.loop_flows.pop().expect("loop flow was pushed above");
         let body_state = self.ssa.capture_and_rollback(checkpoint);
-        if self.guard_work.is_none() {
+        if self.stopped {
             self.path_condition = parent_condition;
             return FlowResult::new(ProcedureFlow::Continue);
         }
@@ -2892,23 +3040,27 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // body or enumerating runtime iterator values.
         let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
         let bit_part = self.bit_part;
-        if self
-            .ssa
-            .try_close_repeated_transfer(
-                &transfer,
-                checkpoint,
-                may_execute_zero_times,
-                &mut self.import_work,
-                |key| {
-                    bit_part
-                        .ranges_of((key.node.0, key.node.1))
-                        .get(key.node.2)
-                        .map(|packed| position_domain(key.node.1, *packed))
-                },
-            )
+        let domain_of = |key: SsaKey| {
+            bit_part
+                .ranges_of((key.node.0, key.node.1))
+                .get(key.node.2)
+                .map(|packed| PositionDomain::new(key.node.1, *packed))
+        };
+        let steps = self.steps.clone();
+        if steps
+            .lend(|work| {
+                self.ssa.try_close_repeated_transfer(
+                    &transfer,
+                    checkpoint,
+                    may_execute_zero_times,
+                    work,
+                    domain_of,
+                )
+            })
             .is_none()
         {
             self.exhaust_work();
+            return FlowResult::new(ProcedureFlow::Continue);
         }
         FlowResult::new(ProcedureFlow::Continue)
     }
@@ -2968,7 +3120,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         context: ExpressionContext,
         projection: &ProjectionContext,
     ) -> ExpressionSources {
-        if self.guard_work.is_none() {
+        if self.stopped {
             return ExpressionSources::default();
         }
         let requested_array = if matches!(expression, Expression::ArrayLiteral(_, _)) {
@@ -3035,7 +3187,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         .and(projection.destination_array)
                         .unwrap_or(requested_array);
                     let value = self.ssa.related_definition(sources.sources);
-                    let value = self.ssa.projected(value, position_domain(array, span));
+                    let value = self.ssa.projected(value, PositionDomain::new(array, span));
                     ExpressionSources {
                         sources: vec![(value, PositionRelation::default())],
                     }
@@ -3278,7 +3430,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     let source = self.expression_projection_source(sources, projection);
                     let source = self
                         .ssa
-                        .projected(source, position_domain(requested_array, span));
+                        .projected(source, PositionDomain::new(requested_array, span));
                     ExpressionSources {
                         sources: vec![(source, PositionRelation::default())],
                     }
@@ -3526,10 +3678,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                                 let part = self.expression_projection_source(part, projection);
                                 let part = self
                                     .ssa
-                                    .projected(part, position_domain(requested_array, local));
+                                    .projected(part, PositionDomain::new(requested_array, local));
                                 let repeated = self.ssa.replicated(
                                     part,
-                                    position_domain(requested_array, total),
+                                    PositionDomain::new(requested_array, total),
                                     Replication::Packed(stride),
                                 );
                                 reads.push(
@@ -3764,7 +3916,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         let source = self.expression_projection_source(field, projection);
                         let source = self
                             .ssa
-                            .projected(source, position_domain(requested_array, local));
+                            .projected(source, PositionDomain::new(requested_array, local));
                         let mut field = ExpressionSources {
                             sources: vec![(source, PositionRelation::default())],
                         };
@@ -3866,7 +4018,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             bit_part
                 .ranges_of((key.node.0, key.node.1))
                 .get(key.node.2)
-                .map(|packed| position_domain(key.node.1, *packed))
+                .map(|packed| PositionDomain::new(key.node.1, *packed))
         });
     }
 
@@ -3936,7 +4088,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         prune_constant_branches: bool,
         shape: EvaluationShape<'_>,
     ) -> Vec<VersionId> {
-        if self.guard_work.is_none() {
+        if self.stopped {
             return Vec::new();
         }
         let comptime = expression.comptime();
@@ -4403,6 +4555,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         summary: &FunctionSummary,
     ) -> CallResult {
         self.status = self.status.max(summary.status);
+        if summary.ran_out {
+            self.exhaust_work();
+        }
         self.repeatable &= summary.repeatable;
         // Later actuals can overwrite variables or selectors read by earlier
         // ones. Formal-region projections must reuse each occurrence's value
@@ -4441,8 +4596,30 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             }
         }
 
+        // Positions of an output formal the function leaves keep the value
+        // the formal starts with: none, or the actual's for an inout one.
+        for (path, _) in &call.outputs {
+            let Some(&formal) = summary.arg_map.get(path) else {
+                continue;
+            };
+            let actual = call
+                .inputs
+                .iter()
+                .find_map(|(input, actual)| (input == path).then_some(actual));
+            for key in self.keys_for_id(formal) {
+                let version = if let Some(actual) = actual {
+                    let mut sources = self.eval_actual_for_formal_key(actual, key);
+                    sources.normalize();
+                    self.ssa.related_definition(sources.sources)
+                } else {
+                    self.ssa.definition(Vec::new())
+                };
+                self.bind_key(key, version);
+            }
+        }
+
         let bindings = Rc::new(bindings);
-        for (destination, root) in &summary.writes {
+        for (destination, root, definite, maybe) in &summary.writes {
             let imported = self.ssa.imported(
                 summary.graph.clone(),
                 *root,
@@ -4456,8 +4633,24 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let version = self
                 .ssa
                 .related_definition_guarded(sources.sources, &self.path_condition);
-            self.bind_key(*destination, version);
             self.written.insert(*destination);
+            let extent = self
+                .key_span(*destination)
+                .map(|packed| PositionDomain::new(destination.1, packed));
+            match extent {
+                Some(extent) if !(definite.as_ref() == [extent] && maybe.is_empty()) => {
+                    // Positions the function leaves keep the caller's value.
+                    let mut current = self.read_key(*destination);
+                    for (regions, strong) in [(definite, true), (maybe, false)] {
+                        for region in regions.iter() {
+                            let above = self.ssa.projected(version, *region);
+                            current = self.ssa.overlay(current, above, *region, extent, strong);
+                        }
+                    }
+                    self.bind_key(*destination, current);
+                }
+                _ => self.bind_key(*destination, version),
+            }
         }
 
         let formal_outputs = call
@@ -4642,15 +4835,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         requested_packed: PackedSpan,
     ) -> Vec<VersionId> {
         if self.ssa.has_structural_dependency(version) {
-            return vec![
-                self.ssa
-                    .projected(version, position_domain(requested_array, requested_packed)),
-            ];
+            return vec![self.ssa.projected(
+                version,
+                PositionDomain::new(requested_array, requested_packed),
+            )];
         }
-        let Some(sources) = self
-            .guard_work
-            .as_mut()
-            .and_then(|work| self.ssa.try_root_source_relations_guarded(version, work))
+        let steps = self.steps.clone();
+        let Some(sources) = (!self.stopped)
+            .then(|| steps.lend(|work| self.ssa.try_root_source_relations_guarded(version, work)))
+            .flatten()
         else {
             self.exhaust_work();
             return Vec::new();
@@ -4746,7 +4939,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let version = self.ssa.related_definition(sources.sources);
         let version = self
             .ssa
-            .projected(version, position_domain(formal_key.1, span));
+            .projected(version, PositionDomain::new(formal_key.1, span));
         ExpressionSources {
             sources: vec![(version, PositionRelation::default())],
         }
@@ -4768,7 +4961,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // expanding the copies or broadcasting into adjacent literal items.
         let source = self.ssa.projected(
             source,
-            position_domain(
+            PositionDomain::new(
                 ArraySpan {
                     start: 0,
                     length: item_length,
@@ -4778,7 +4971,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         );
         let repeated = self.ssa.replicated(
             source,
-            position_domain(
+            PositionDomain::new(
                 ArraySpan {
                     start: 0,
                     length: output.length,
@@ -4826,7 +5019,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // Project before replication so a coarse source region cannot make
         // non-sign bits contribute. Preserve the array axis and restrict the
         // result to the widened portion before translating to the destination.
-        let sign = self.ssa.projected(version, position_domain(array, sign));
+        let sign = self
+            .ssa
+            .projected(version, PositionDomain::new(array, sign));
         let extended = self.ssa.related_definition(vec![(
             sign,
             PositionRelation {
@@ -4835,7 +5030,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             },
         )]);
         self.ssa
-            .projected(extended, position_domain(array, extension))
+            .projected(extended, PositionDomain::new(array, extension))
     }
 
     fn write_formal_outputs(
@@ -4927,12 +5122,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             packed: selected.and_then(|(_, low)| signed_difference(low, formal_offset)),
         };
         let dynamic = self.destination_is_dynamic(destination);
-        for key in self.write_keys(destination) {
+        let (keys, region) = self.write_target(destination);
+        for key in keys {
             let mut positional = Vec::new();
             let mut whole = selectors.to_vec();
-            if let (Some((_, low)), Some(span)) = (selected, self.key_span(key)) {
-                if let Some(requested) = span
-                    .translated(low, formal_offset)
+            if let (Some((high, low)), Some(span)) = (selected, self.key_span(key)) {
+                // Only the selected bits of the key receive the formal.
+                if let Some(requested) = PackedSpan::from_select(high, low)
+                    .and_then(|selected| selected.intersection(span))
+                    .and_then(|span| span.translated(low, formal_offset))
                     .and_then(|span| PackedSpan::whole(context_width)?.intersection(span))
                 {
                     for (formal_key, version) in formal_versions {
@@ -4991,7 +5189,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             let version = self
                 .ssa
                 .related_definition_guarded(positional, &self.path_condition);
-            self.bind_destination(key, version, dynamic);
+            self.bind_destination(key, version, region, dynamic);
         }
     }
 

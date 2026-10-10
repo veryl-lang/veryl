@@ -1,8 +1,10 @@
 //! IR-independent statement-ordered SSA state.
 
 mod dag;
+mod log;
 mod repeated;
 
+use super::region::{ArraySpan, PackedSpan};
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::hash::Hash;
@@ -79,6 +81,21 @@ enum Version<K> {
         source: VersionId,
         domain: PositionDomain,
         replication: Replication,
+    },
+    /// A write of `region`: positions there come from `above`, and
+    /// `below` remains at the `retained` positions (every position for a weak
+    /// write). Both inputs keep their retention semantics, like a `Phi`.
+    Overlay {
+        below: VersionId,
+        retained: Option<Rc<[PositionDomain]>>,
+        above: VersionId,
+    },
+    /// `source` at `domain` only. Unlike `Projected`, this is not a read: the
+    /// source keeps its retention semantics, like the retained part of an
+    /// `Overlay`.
+    Restricted {
+        source: VersionId,
+        domain: PositionDomain,
     },
 }
 
@@ -467,6 +484,10 @@ pub(super) struct DependencyDag<K> {
     pub(super) sites: HashMap<usize, DefinitionSite<usize>>,
 }
 
+/// Work ran out before an answer was found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RanOut;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct PositionDomain {
     pub(super) array_start: usize,
@@ -520,6 +541,37 @@ fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {
     }
 }
 
+impl PositionDomain {
+    pub(super) fn new(array: ArraySpan, packed: PackedSpan) -> Self {
+        Self {
+            array_start: array.start,
+            array_length: array.length,
+            packed_start: packed.start,
+            packed_length: packed.length,
+        }
+    }
+
+    /// The smallest box containing both, with ends saturated at `usize::MAX`.
+    pub(super) fn hull(self, other: Self) -> Self {
+        let array_start = self.array_start.min(other.array_start);
+        let array_end = self
+            .array_start
+            .saturating_add(self.array_length)
+            .max(other.array_start.saturating_add(other.array_length));
+        let packed_start = self.packed_start.min(other.packed_start);
+        let packed_end = self
+            .packed_start
+            .saturating_add(self.packed_length)
+            .max(other.packed_start.saturating_add(other.packed_length));
+        Self {
+            array_start,
+            array_length: array_end - array_start,
+            packed_start,
+            packed_length: packed_end - packed_start,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Checkpoint {
     undo_start: usize,
@@ -558,6 +610,18 @@ pub(super) struct SsaStore<K> {
     undo: Vec<Undo<K>>,
     checkpoints: Vec<usize>,
     sites: HashMap<VersionId, DefinitionSite<VersionId>>,
+    // Indexed write histories of overlay versions for regional reads.
+    logs: HashMap<VersionId, Rc<log::LogNode>>,
+    // Versions below this are opaque to regional reads. A loop body reads
+    // its iteration inputs, which must stay visible to transfer closure.
+    log_floor: VersionId,
+    // Regional reads already resolved. A log is fixed when its version is
+    // created and versions are never discarded, so a result stays valid.
+    logged_reads: HashMap<(VersionId, PositionDomain), VersionId>,
+    // Per version, whether it may still hold an entry value. Inputs precede
+    // the versions built from them and versions never change, so this is
+    // extended in creation order.
+    retains_entry: std::cell::RefCell<Vec<bool>>,
 }
 
 impl<K> Default for SsaStore<K> {
@@ -570,6 +634,10 @@ impl<K> Default for SsaStore<K> {
             undo: Vec::new(),
             checkpoints: Vec::new(),
             sites: HashMap::default(),
+            logs: HashMap::default(),
+            log_floor: 0,
+            logged_reads: HashMap::default(),
+            retains_entry: Default::default(),
         }
     }
 }
@@ -672,6 +740,357 @@ where
         version
     }
 
+    /// Write `above` at `region` over `below`. A strong write replaces the
+    /// previous value there; a weak write may leave it.
+    pub(super) fn overlay(
+        &mut self,
+        below: VersionId,
+        above: VersionId,
+        region: PositionDomain,
+        extent: PositionDomain,
+        strong: bool,
+    ) -> VersionId {
+        let retained = if strong {
+            let complement = complement(extent, region);
+            if complement.is_empty() {
+                return above;
+            }
+            Some(complement.into())
+        } else {
+            None
+        };
+        let log = self.log(below).push(log::Layer::Write {
+            region,
+            version: above,
+            strong,
+        });
+        let version = self.versions.len();
+        self.versions.push(Version::Overlay {
+            below,
+            retained,
+            above,
+        });
+        self.logs.insert(version, log);
+        version
+    }
+
+    fn log(&self, version: VersionId) -> Rc<log::LogNode> {
+        self.logs
+            .get(&version)
+            .filter(|_| version >= self.log_floor)
+            .cloned()
+            .unwrap_or_else(|| log::LogNode::root(version))
+    }
+
+    /// The positions of `extent` that `version` definitely overwrites with
+    /// respect to the key's entry value, and those it may overwrite only.
+    /// A position supplied by a version that may still hold the entry value,
+    /// such as a join with an untaken arm, is only possibly written, unless
+    /// the entry value is `fresh` and so cannot outlive the call.
+    /// `None` when resolving the write history runs out of `work`.
+    pub(super) fn written_regions(
+        &self,
+        version: VersionId,
+        extent: PositionDomain,
+        fresh: bool,
+        work: &mut usize,
+    ) -> Option<Regions> {
+        // Joins and the versions below write histories can nest as deep as
+        // the branches that made them, so they are visited from an explicit
+        // stack, each version and region once.
+        let mut results: HashMap<(VersionId, PositionDomain), Regions> = HashMap::default();
+        let mut stack = vec![(version, extent, false)];
+        while let Some((current, domain, expanded)) = stack.pop() {
+            if results.contains_key(&(current, domain)) {
+                continue;
+            }
+            *work = work.checked_sub(1)?;
+            let parts = self.written_parts(current, domain, work)?;
+            let missing = parts
+                .dependencies()
+                .filter(|part| !results.contains_key(part))
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                debug_assert!(!expanded, "dependencies are resolved before revisiting");
+                stack.push((current, domain, true));
+                stack.extend(
+                    missing
+                        .into_iter()
+                        .map(|(version, domain)| (version, domain, false)),
+                );
+                continue;
+            }
+            let regions = match parts {
+                WrittenParts::Join(inputs) => {
+                    let inputs = inputs
+                        .iter()
+                        .map(|input| &results[input])
+                        .collect::<Vec<_>>();
+                    Self::joined_written_regions(&inputs, work)?
+                }
+                WrittenParts::Logged {
+                    entry,
+                    below,
+                    writes,
+                } => self.logged_written_regions(&entry, &below, writes, &results, fresh, work)?,
+                WrittenParts::Leaf => self.leaf_written_regions(current, domain, fresh),
+            };
+            results.insert((current, domain), regions);
+        }
+        results.remove(&(version, extent))
+    }
+
+    /// How `version` supplies `domain`: from the inputs of a join without a
+    /// log, from its write history, or as one value.
+    fn written_parts(
+        &self,
+        version: VersionId,
+        domain: PositionDomain,
+        work: &mut usize,
+    ) -> Option<WrittenParts> {
+        let is_entry = |version: VersionId| matches!(self.versions[version], Version::Entry(_));
+        let Some(log) = self
+            .logs
+            .get(&version)
+            .filter(|_| version >= self.log_floor)
+        else {
+            return Some(match &self.versions[version] {
+                Version::Phi(inputs) => {
+                    WrittenParts::Join(inputs.iter().map(|&input| (input, domain)).collect())
+                }
+                _ => WrittenParts::Leaf,
+            });
+        };
+        // Resolve the whole history: a partial answer would only say that
+        // every position may be written.
+        let base = log.base();
+        let mut entry = Vec::new();
+        let mut below = Vec::new();
+        let mut writes = Vec::new();
+        for piece in log.resolve(domain, work)? {
+            if piece.version != base {
+                writes.push(piece);
+            } else if is_entry(base) {
+                entry.push(piece.domain);
+            } else {
+                // The version below the history supplies these positions;
+                // what it writes there is resolved in turn.
+                below.push((base, piece.domain));
+            }
+        }
+        Some(WrittenParts::Logged {
+            entry,
+            below,
+            writes,
+        })
+    }
+
+    /// A version that is not a join and has no history writes all of
+    /// `extent`, possibly so when it may still hold the entry value.
+    fn leaf_written_regions(
+        &self,
+        version: VersionId,
+        extent: PositionDomain,
+        fresh: bool,
+    ) -> Regions {
+        if matches!(self.versions[version], Version::Entry(_)) {
+            (Vec::new(), Vec::new())
+        } else if !fresh && self.may_retain_entry(version) {
+            (Vec::new(), vec![extent])
+        } else {
+            (vec![extent], Vec::new())
+        }
+    }
+
+    /// The regions of a write history: the writes over the positions that
+    /// still hold the entry value or what the version below writes there.
+    fn logged_written_regions(
+        &self,
+        entry: &[PositionDomain],
+        below: &[(VersionId, PositionDomain)],
+        writes: Vec<log::Piece>,
+        results: &HashMap<(VersionId, PositionDomain), Regions>,
+        fresh: bool,
+        work: &mut usize,
+    ) -> Option<Regions> {
+        let mut definite = Vec::new();
+        let mut maybe = Vec::new();
+        // Positions where a weak write may leave the entry value.
+        let mut kept = log::Fragments::default();
+        for domain in entry {
+            kept.insert(*domain);
+        }
+        for part in below {
+            let (below_definite, below_maybe) = &results[part];
+            *work = work.checked_sub(below_definite.len().saturating_add(below_maybe.len()))?;
+            definite.extend(below_definite.iter().copied());
+            maybe.extend(below_maybe.iter().copied());
+            // Below the history, a possible write or no write keeps the entry.
+            let mut unwritten = vec![part.1];
+            for written in below_definite {
+                unwritten = unwritten
+                    .into_iter()
+                    .flat_map(|domain| complement(domain, *written))
+                    .collect();
+            }
+            for domain in unwritten {
+                kept.insert(domain);
+            }
+        }
+        let (retaining, writes): (Vec<_>, Vec<_>) = writes
+            .into_iter()
+            .partition(|piece| !fresh && self.may_retain_entry(piece.version));
+        maybe.extend(retaining.into_iter().map(|piece| piece.domain));
+        // Each written piece meets only the kept positions that overlap it.
+        for piece in writes {
+            let mut parts = vec![piece.domain];
+            for kept in kept.overlapping(piece.domain, work)? {
+                maybe.extend(
+                    parts
+                        .iter()
+                        .filter_map(|part| log::intersection(*part, kept)),
+                );
+                parts = parts
+                    .into_iter()
+                    .flat_map(|part| complement(part, kept))
+                    .collect();
+            }
+            definite.extend(parts);
+        }
+        Some((definite, maybe))
+    }
+
+    /// `written_regions` of a join without a log, from those of its inputs:
+    /// a position is definitely written only where every input definitely
+    /// writes it.
+    fn joined_written_regions(inputs: &[&Regions], work: &mut usize) -> Option<Regions> {
+        let mut definite: Option<Vec<PositionDomain>> = None;
+        let mut touched = Vec::new();
+        for (input_definite, input_maybe) in inputs {
+            *work = work.checked_sub(
+                input_definite
+                    .len()
+                    .saturating_add(input_maybe.len())
+                    .saturating_add(1),
+            )?;
+            touched.extend(input_definite.iter().copied());
+            touched.extend(input_maybe.iter().copied());
+            let input_definite = input_definite.clone();
+            definite = Some(match definite {
+                None => input_definite,
+                Some(definite) => {
+                    *work =
+                        work.checked_sub(definite.len().saturating_mul(input_definite.len()))?;
+                    definite
+                        .iter()
+                        .flat_map(|left| {
+                            input_definite
+                                .iter()
+                                .filter_map(|right| log::intersection(*left, *right))
+                        })
+                        .collect()
+                }
+            });
+        }
+        let definite = definite.unwrap_or_default();
+        let mut maybe = Vec::new();
+        for part in touched {
+            *work = work.checked_sub(definite.len().saturating_add(1))?;
+            let mut parts = vec![part];
+            for written in &definite {
+                parts = parts
+                    .into_iter()
+                    .flat_map(|part| complement(part, *written))
+                    .collect();
+            }
+            maybe.extend(parts);
+        }
+        let mut definite = definite;
+        for regions in [&mut definite, &mut maybe] {
+            regions.sort_unstable_by_key(|domain| {
+                (
+                    domain.array_start,
+                    domain.packed_start,
+                    domain.array_length,
+                    domain.packed_length,
+                )
+            });
+            regions.dedup();
+        }
+        Some((definite, maybe))
+    }
+
+    /// Whether some position of `version` may still be the key's entry
+    /// value: the entry is reachable through values that keep retention
+    /// rather than read it. Imported values may.
+    fn may_retain_entry(&self, version: VersionId) -> bool {
+        let mut retains = self.retains_entry.borrow_mut();
+        for next in retains.len()..=version {
+            let value = match &self.versions[next] {
+                Version::Entry(_) | Version::Imported { .. } => true,
+                Version::Phi(inputs) => inputs.iter().any(|input| retains[*input]),
+                Version::Overlay { below, above, .. } => retains[*below] || retains[*above],
+                Version::Guarded { source, .. } | Version::Restricted { source, .. } => {
+                    retains[*source]
+                }
+                Version::Definition { .. }
+                | Version::Projected { .. }
+                | Version::Replicated { .. } => false,
+            };
+            retains.push(value);
+        }
+        retains[version]
+    }
+
+    /// Make every existing version opaque to regional reads until the
+    /// returned floor is restored.
+    pub(super) fn raise_log_floor(&mut self) -> VersionId {
+        std::mem::replace(&mut self.log_floor, self.versions.len())
+    }
+
+    pub(super) fn restore_log_floor(&mut self, floor: VersionId) {
+        self.log_floor = floor;
+    }
+
+    /// Read `domain` from the write history of `version`: only the writes
+    /// that may supply the domain. `Ok(None)` when it has no history, and
+    /// `Err` when resolving the history runs out of `work`.
+    pub(super) fn read_logged(
+        &mut self,
+        version: VersionId,
+        domain: PositionDomain,
+        work: &mut usize,
+    ) -> Result<Option<VersionId>, RanOut> {
+        if version < self.log_floor {
+            return Ok(None);
+        }
+        if let Some(&read) = self.logged_reads.get(&(version, domain)) {
+            return Ok(Some(read));
+        }
+        let Some(log) = self.logs.get(&version) else {
+            return Ok(None);
+        };
+        let pieces = log.resolve(domain, work).ok_or(RanOut)?;
+        let inputs = pieces
+            .into_iter()
+            .map(|piece| {
+                let version = self.versions.len();
+                self.versions.push(Version::Restricted {
+                    source: piece.version,
+                    domain: piece.domain,
+                });
+                version
+            })
+            .collect::<Vec<_>>();
+        let read = if inputs.is_empty() {
+            self.definition(Vec::new())
+        } else {
+            self.phi(inputs)
+        };
+        self.logged_reads.insert((version, domain), read);
+        Ok(Some(read))
+    }
+
     pub(super) fn projected(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
         let version = self.versions.len();
         self.versions.push(Version::Projected { source, domain });
@@ -680,6 +1099,15 @@ where
 
     /// Export into a destination that already enforces `domain`. Other SSA
     /// readers retain the original projection and its intermediate bounds.
+    /// `source` restricted to `domain` without reading it: unlike a
+    /// projection, a value kept only through restrictions keeps the key's
+    /// entry value as retention.
+    pub(super) fn restricted(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
+        let version = self.versions.len();
+        self.versions.push(Version::Restricted { source, domain });
+        version
+    }
+
     pub(super) fn root_in_domain(&self, version: VersionId, domain: PositionDomain) -> VersionId {
         match &self.versions[version] {
             Version::Projected {
@@ -719,7 +1147,9 @@ where
             match &self.versions[version] {
                 Version::Imported { .. }
                 | Version::Projected { .. }
-                | Version::Replicated { .. } => return true,
+                | Version::Replicated { .. }
+                | Version::Overlay { .. }
+                | Version::Restricted { .. } => return true,
                 Version::Definition { sources, .. } => {
                     queue.extend(sources.iter().map(|(source, _)| *source));
                 }
@@ -820,7 +1250,20 @@ where
             if bound_branches < state_count {
                 inputs.push(fallback);
             }
+            let log = (inputs.iter().any(|input| self.logs.contains_key(input)))
+                .then(|| {
+                    let common = self.log(fallback);
+                    let branches = inputs.iter().map(|input| self.log(*input)).collect();
+                    log::LogNode::merge(&common, branches)
+                })
+                .flatten();
+            let first_new = self.versions.len();
             let version = self.phi(inputs);
+            if let Some(log) = log
+                && version >= first_new
+            {
+                self.logs.insert(version, log);
+            }
             self.bind(key, version);
         }
     }
@@ -879,7 +1322,7 @@ where
         single_iteration: &BranchState<K>,
         iteration_checkpoint: Checkpoint,
         may_skip: bool,
-        import_work: &mut usize,
+        work: &mut usize,
         domain: impl Fn(K) -> Option<PositionDomain>,
     ) -> Option<()> {
         repeated::try_close(
@@ -887,7 +1330,7 @@ where
             single_iteration,
             iteration_checkpoint,
             may_skip,
-            import_work,
+            work,
             domain,
         )
     }
@@ -900,12 +1343,12 @@ where
         may_skip: bool,
         domain: impl Fn(K) -> Option<PositionDomain>,
     ) {
-        let mut import_work = usize::MAX;
+        let mut work = usize::MAX;
         self.try_close_repeated_transfer(
             single_iteration,
             iteration_checkpoint,
             may_skip,
-            &mut import_work,
+            &mut work,
             domain,
         )
         .expect("unlimited runtime transfer construction");
@@ -999,28 +1442,18 @@ where
     where
         K: Ord,
     {
-        self.try_dependency_dag(roots, allowed, usize::MAX)
+        let mut work = usize::MAX;
+        self.try_dependency_dag(roots, allowed, &mut work)
             .expect("unlimited dependency export")
     }
 
+    /// Export the dependencies of `roots`, counting each step of the walk and
+    /// of every imported summary down from `work`. `None` when it runs out.
     pub(super) fn try_dependency_dag(
         &self,
         roots: &[VersionId],
         allowed: impl Fn(&K) -> bool,
-        work: usize,
-    ) -> Option<DependencyDag<K>>
-    where
-        K: Ord,
-    {
-        self.try_dependency_dag_with_import_limit(roots, allowed, work, usize::MAX)
-    }
-
-    pub(super) fn try_dependency_dag_with_import_limit(
-        &self,
-        roots: &[VersionId],
-        allowed: impl Fn(&K) -> bool,
-        mut work: usize,
-        mut import_work: usize,
+        work: &mut usize,
     ) -> Option<DependencyDag<K>>
     where
         K: Ord,
@@ -1034,7 +1467,7 @@ where
             }
         }
         while let Some((version, include_entry)) = queue.pop_front() {
-            work = work.checked_sub(1)?;
+            *work = work.checked_sub(1)?;
             let mut enqueue = |state| {
                 if states.insert(state) {
                     queue.push_back(state);
@@ -1053,14 +1486,19 @@ where
                     }
                 }
                 Version::Guarded { source, .. } => enqueue((*source, include_entry)),
+                Version::Overlay { below, above, .. } => {
+                    enqueue((*below, include_entry));
+                    enqueue((*above, include_entry));
+                }
+                Version::Restricted { source, .. } => enqueue((*source, include_entry)),
                 Version::Imported { bindings, .. } => {
                     // All output roots of a call share the same actuals.
                     if visited_bindings.insert(Rc::as_ptr(bindings)) {
                         #[cfg(test)]
                         IMPORT_BINDING_VISITS.set(IMPORT_BINDING_VISITS.get() + bindings.len());
-                        work = work.checked_sub(bindings.len())?;
+                        *work = work.checked_sub(bindings.len())?;
                         for sources in bindings.values() {
-                            work = work.checked_sub(sources.len())?;
+                            *work = work.checked_sub(sources.len())?;
                             for (source, _) in sources {
                                 enqueue((*source, true));
                             }
@@ -1082,7 +1520,7 @@ where
         let mut ordered = states.into_iter().collect::<Vec<_>>();
         ordered.sort_unstable();
         for state @ (version, include_entry) in ordered {
-            work = work.checked_sub(1)?;
+            *work = work.checked_sub(1)?;
             let site = self.sites.get(&version).map(|site| DefinitionSite {
                 token: site.token,
                 data_inputs: site
@@ -1096,7 +1534,7 @@ where
                     (include_entry && allowed(key)).then(|| builder.external(*key))
                 }
                 Version::Definition { sources, condition } => {
-                    work = work.checked_sub(
+                    *work = work.checked_sub(
                         sources
                             .len()
                             .saturating_mul(condition.work_size().saturating_add(1)),
@@ -1125,8 +1563,46 @@ where
                         .collect();
                     Some(builder.internal(inputs, Vec::new(), site))
                 }
+                Version::Overlay {
+                    below,
+                    retained,
+                    above,
+                } => {
+                    let identity = |source| {
+                        (
+                            source,
+                            PositionRelation::default(),
+                            PathCondition::default(),
+                        )
+                    };
+                    let mut inputs = Vec::new();
+                    if let Some(below) = mapped[&(*below, include_entry)] {
+                        let below = match retained {
+                            Some(domains) => {
+                                builder.internal(vec![identity(below)], domains.to_vec(), None)
+                            }
+                            None => below,
+                        };
+                        inputs.push(identity(below));
+                    }
+                    inputs.extend(mapped[&(*above, include_entry)].map(identity));
+                    Some(builder.internal(inputs, Vec::new(), site))
+                }
+                Version::Restricted { source, domain } => {
+                    let inputs = mapped[&(*source, include_entry)]
+                        .map(|source| {
+                            (
+                                source,
+                                PositionRelation::default(),
+                                PathCondition::default(),
+                            )
+                        })
+                        .into_iter()
+                        .collect();
+                    Some(builder.internal(inputs, vec![*domain], site))
+                }
                 Version::Guarded { source, condition } => {
-                    work = work.checked_sub(condition.work_size().saturating_add(1))?;
+                    *work = work.checked_sub(condition.work_size().saturating_add(1))?;
                     let inputs = mapped[&(*source, include_entry)]
                         .map(|source| (source, PositionRelation::default(), condition.clone()))
                         .into_iter()
@@ -1138,23 +1614,15 @@ where
                     root,
                     bindings,
                     branches,
-                } => {
-                    let available = work.min(import_work);
-                    let mut remaining = available;
-                    let node = imports.inline(
-                        graph,
-                        *root,
-                        bindings,
-                        branches,
-                        &mapped,
-                        &mut builder,
-                        &mut remaining,
-                    )?;
-                    let spent = available - remaining;
-                    work -= spent;
-                    import_work -= spent;
-                    node
-                }
+                } => imports.inline(
+                    graph,
+                    *root,
+                    bindings,
+                    branches,
+                    &mapped,
+                    &mut builder,
+                    work,
+                )?,
                 Version::Projected { source, domain } => {
                     let inputs = mapped[&(*source, true)]
                         .map(|source| {
@@ -1307,6 +1775,14 @@ where
                         enqueue((*source, include_entry, relation), condition, work)?;
                     }
                 }
+                // Scalar source queries ignore the written region.
+                Version::Overlay { below, above, .. } => {
+                    enqueue((*below, include_entry, relation), condition.clone(), work)?;
+                    enqueue((*above, include_entry, relation), condition, work)?;
+                }
+                Version::Restricted { source, .. } => {
+                    enqueue((*source, include_entry, relation), condition, work)?;
+                }
                 Version::Imported {
                     graph,
                     root,
@@ -1428,6 +1904,70 @@ where
             .map(|((key, relation), condition)| (key, relation, condition))
             .collect(),
     )
+}
+
+/// The positions of `extent` outside `region`, as disjoint boxes.
+/// Positions definitely written, and positions possibly written only.
+type Regions = (Vec<PositionDomain>, Vec<PositionDomain>);
+
+/// How a version supplies a region, for `written_regions`.
+enum WrittenParts {
+    /// The inputs of a join without a write history, each with the region.
+    Join(Vec<(VersionId, PositionDomain)>),
+    Logged {
+        /// Positions that still hold the key's entry value.
+        entry: Vec<PositionDomain>,
+        /// Positions supplied by the version below the history.
+        below: Vec<(VersionId, PositionDomain)>,
+        writes: Vec<log::Piece>,
+    },
+    Leaf,
+}
+
+impl WrittenParts {
+    fn dependencies(&self) -> impl Iterator<Item = (VersionId, PositionDomain)> + '_ {
+        let parts: &[(VersionId, PositionDomain)] = match self {
+            Self::Join(inputs) => inputs,
+            Self::Logged { below, .. } => below,
+            Self::Leaf => &[],
+        };
+        parts.iter().copied()
+    }
+}
+
+pub(super) fn complement(extent: PositionDomain, region: PositionDomain) -> Vec<PositionDomain> {
+    let array_end = extent.array_start.saturating_add(extent.array_length);
+    let packed_end = extent.packed_start.saturating_add(extent.packed_length);
+    let start = region.array_start.max(extent.array_start);
+    let end = region
+        .array_start
+        .saturating_add(region.array_length)
+        .min(array_end);
+    let low = region.packed_start.max(extent.packed_start);
+    let high = region
+        .packed_start
+        .saturating_add(region.packed_length)
+        .min(packed_end);
+    if start >= end || low >= high {
+        return vec![extent];
+    }
+    let mut pieces = Vec::new();
+    let mut push =
+        |array_start: usize, array_end: usize, packed_start: usize, packed_end: usize| {
+            if array_start < array_end && packed_start < packed_end {
+                pieces.push(PositionDomain {
+                    array_start,
+                    array_length: array_end - array_start,
+                    packed_start,
+                    packed_length: packed_end - packed_start,
+                });
+            }
+        };
+    push(extent.array_start, start, extent.packed_start, packed_end);
+    push(end, array_end, extent.packed_start, packed_end);
+    push(start, end, extent.packed_start, low);
+    push(start, end, high, packed_end);
+    pieces
 }
 
 /// Joins and source walks can accumulate quadratic guard payloads. Charge each
@@ -1597,7 +2137,7 @@ mod tests {
             // Every output includes the preceding outputs. Both normalizing
             // all actuals and walking that prefix per root would be quadratic.
             let exported = caller
-                .try_dependency_dag(&roots, |_| true, size * 32)
+                .try_dependency_dag(&roots, |_| true, &mut (size * 32))
                 .expect("one invocation must fit in a linear export budget");
             assert_eq!(exported.nodes.len(), graph.nodes.len());
             assert_eq!(exported.edges.len(), graph.edges.len());
@@ -2035,7 +2575,9 @@ mod tests {
             let input = callee.read("input");
             let output = callee.definition_guarded(vec![input], &condition);
             assert_eq!(
-                callee.try_dependency_dag(&[output], |_| true, 64).is_some(),
+                callee
+                    .try_dependency_dag(&[output], |_| true, &mut 64)
+                    .is_some(),
                 stride == 1
             );
             let graph = Rc::new(callee.dependency_dag(&[output], |_| true));
@@ -2057,12 +2599,7 @@ mod tests {
             for limit in [64, 256] {
                 assert_eq!(
                     caller
-                        .try_dependency_dag_with_import_limit(
-                            &[imported],
-                            |_| true,
-                            usize::MAX,
-                            limit,
-                        )
+                        .try_dependency_dag(&[imported], |_| true, &mut { limit })
                         .is_some(),
                     stride == 1 || limit == 256
                 );

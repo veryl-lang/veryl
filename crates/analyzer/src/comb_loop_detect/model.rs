@@ -43,6 +43,72 @@ impl BitDependency {
             packed: compose_axis(self.packed, next.packed),
         }
     }
+
+    fn axis(self, axis: usize) -> Option<isize> {
+        [self.array, self.packed][axis]
+    }
+
+    /// Whether a position of `source` can reach a position of `destination`
+    /// on `axis` (0 for the array axis, 1 for the packed one).
+    pub(super) fn may_reach(
+        self,
+        axis: usize,
+        source: [AxisBounds; 2],
+        destination: AxisBounds,
+    ) -> bool {
+        let Some(offset) = self.axis(axis) else {
+            return true;
+        };
+        let (start, end) = source[axis];
+        // Arithmetic beyond `isize` keeps the conservative answer.
+        match (start.checked_add(offset), end.checked_add(offset)) {
+            (Some(low), Some(high)) => low < destination.1 && destination.0 < high,
+            _ => true,
+        }
+    }
+}
+
+// Half-open coordinate bounds of a box, per axis.
+pub(super) type AxisBounds = (isize, isize);
+
+pub(super) fn domain_bounds(domain: &PositionDomain) -> Option<[AxisBounds; 2]> {
+    let range = |start: usize, length: usize| {
+        let start = isize::try_from(start).ok()?;
+        Some((start, start.checked_add_unsigned(length)?))
+    };
+    Some([
+        range(domain.array_start, domain.array_length)?,
+        range(domain.packed_start, domain.packed_length)?,
+    ])
+}
+
+pub(super) fn bounds_domain(bounds: [AxisBounds; 2]) -> Option<PositionDomain> {
+    let [array, packed] = bounds;
+    if array.0 >= array.1 || packed.0 >= packed.1 {
+        return None;
+    }
+    Some(PositionDomain {
+        array_start: usize::try_from(array.0).ok()?,
+        array_length: usize::try_from(array.1 - array.0).ok()?,
+        packed_start: usize::try_from(packed.0).ok()?,
+        packed_length: usize::try_from(packed.1 - packed.0).ok()?,
+    })
+}
+
+/// Hull of the destination positions of a source box: `None` if unbounded
+/// or beyond `isize`, `Some(None)` if no position is reached.
+#[allow(clippy::option_option)]
+pub(super) fn image(
+    dependency: BitDependency,
+    source: [AxisBounds; 2],
+) -> Option<Option<[AxisBounds; 2]>> {
+    let mut result = [(0, 0); 2];
+    for (axis, bounds) in result.iter_mut().enumerate() {
+        let offset = dependency.axis(axis)?;
+        let (start, end) = source[axis];
+        *bounds = (start.checked_add(offset)?, end.checked_add(offset)?);
+    }
+    Some(Some(result))
 }
 
 fn compose_axis(left: Option<isize>, right: Option<isize>) -> Option<isize> {

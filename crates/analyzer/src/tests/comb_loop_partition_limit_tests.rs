@@ -1,7 +1,5 @@
 use super::*;
-use crate::comb_loop_detect::{
-    analysis_size, reset_analysis_size, with_partition_extra_atom_limit,
-};
+use crate::comb_loop_detect::{analysis_size, reset_analysis_size};
 
 fn crossing_writes(count: usize) -> String {
     let mut writes = String::new();
@@ -20,7 +18,10 @@ fn crossing_writes(count: usize) -> String {
 }
 
 #[test]
-fn partition_limit_marks_residual_write_expansion_incomplete_and_preserves_parent_cycles() {
+fn crossing_writes_complete_and_preserve_parent_cycles() {
+    // Row writes and dynamically indexed column writes cut both axes of the
+    // same storage. Writes are regions of one storage node, so neither the
+    // child nor its parent is limited by a row-by-column partition.
     for count in [8, 64] {
         let code = format!(
             "{}
@@ -31,95 +32,78 @@ fn partition_limit_marks_residual_write_expansion_incomplete_and_preserves_paren
              }}",
             crossing_writes(count)
         );
-        with_partition_extra_atom_limit(0, || {
-            let errors = analyze(&code);
-            assert_eq!(comb_loop_analysis_is_complete(&code), count == 8);
-            assert!(
-                errors.iter().all(|error| match error {
-                    AnalyzerError::CombinationalLoop { identifier, .. }
-                    | AnalyzerError::UnassignVariable { identifier, .. } =>
-                        identifier == "independent",
-                    _ => false,
-                }),
-                "{errors:#?}"
-            );
-            assert_eq!(errors.iter().filter(|error| matches!(error,
-                AnalyzerError::CombinationalLoop { identifier, .. } if identifier == "independent"
-            )).count(), 1, "{errors:#?}");
-        });
+        let errors = analyze(&code);
+        assert!(comb_loop_analysis_is_complete(&code));
+        assert!(
+            errors.iter().all(|error| match error {
+                AnalyzerError::CombinationalLoop { identifier, .. }
+                | AnalyzerError::UnassignVariable { identifier, .. } => identifier == "independent",
+                _ => false,
+            }),
+            "{errors:#?}"
+        );
+        assert_eq!(errors.iter().filter(|error| matches!(error,
+            AnalyzerError::CombinationalLoop { identifier, .. } if identifier == "independent"
+        )).count(), 1, "{errors:#?}");
     }
 }
 
 #[test]
-fn partition_limit_does_not_invent_feedback_or_leak_between_modules() {
+fn crossing_writes_do_not_invent_feedback_or_leak_between_modules() {
     let code = crossing_writes(64);
-    with_partition_extra_atom_limit(0, || {
-        let errors = analyze(&code);
-        assert!(errors.is_empty(), "{errors:#?}");
-        assert!(!comb_loop_analysis_is_complete(&code));
-        let simple =
-            "module Top(i: input logic<1000003>, o: output logic<1000003>) { assign o = i; }";
-        assert!(analyze(simple).is_empty());
-        assert!(comb_loop_analysis_is_complete(simple));
-    });
-    // The default allowance admits this small write partition in full.
     assert!(analyze(&code).is_empty());
     assert!(comb_loop_analysis_is_complete(&code));
+    let simple = "module Top(i: input logic<1000003>, o: output logic<1000003>) { assign o = i; }";
+    assert!(analyze(simple).is_empty());
+    assert!(comb_loop_analysis_is_complete(simple));
 }
 
 #[test]
-fn partition_limit_keeps_optimized_read_views_and_rotations_complete() {
-    with_partition_extra_atom_limit(0, || {
-        let count = 256;
-        let reads = (0..count)
-            .map(|bit| format!("assign o[{bit}] = mem[{bit}][{bit}] ^ mem[index][{bit}];"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let code = format!(
-            "module Top(index: input u32, mem: input logic<{count}>[{count}], o: output logic<{count}>) {{ {reads} }}"
-        );
-        assert!(analyze(&code).is_empty());
-        assert!(comb_loop_analysis_is_complete(&code));
+fn optimized_read_views_and_rotations_are_complete() {
+    let count = 256;
+    let reads = (0..count)
+        .map(|bit| format!("assign o[{bit}] = mem[{bit}][{bit}] ^ mem[index][{bit}];"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let code = format!(
+        "module Top(index: input u32, mem: input logic<{count}>[{count}], o: output logic<{count}>) {{ {reads} }}"
+    );
+    assert!(analyze(&code).is_empty());
+    assert!(comb_loop_analysis_is_complete(&code));
 
-        let code = "module Top(o: output logic<1000003>) { var a: logic<1000003>; assign a = {o[999999:0], o[1000002:1000000]}; assign o = a; }";
-        let errors = analyze(code);
-        assert!(
-            matches!(errors.as_slice(), [AnalyzerError::CombinationalLoop { .. }]),
-            "{errors:#?}"
-        );
-        assert!(comb_loop_analysis_is_complete(code));
-    });
+    let code = "module Top(o: output logic<1000003>) { var a: logic<1000003>; assign a = {o[999999:0], o[1000002:1000000]}; assign o = a; }";
+    let errors = analyze(code);
+    assert!(
+        matches!(errors.as_slice(), [AnalyzerError::CombinationalLoop { .. }]),
+        "{errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
 }
 
 #[test]
-fn partition_limit_default_skips_a_legal_generated_write_matrix_without_diagnostics() {
+fn generated_write_matrix_is_complete_without_a_storage_partition() {
     // Two linear groups of writes split both axes of the same storage. The
-    // resulting 1088 * 1088 atoms exceed the default allowance before SSA
-    // construction. Declaring the array alone does not cause this expansion.
+    // former atom partition needed 1088 * 1088 atoms here; regional writes
+    // keep one storage region and a linear write history.
     let code = crossing_writes(1088);
     reset_analysis_size();
     let errors = analyze(&code);
     assert!(errors.is_empty(), "{errors:#?}");
-    assert_eq!(
-        analysis_size(),
-        (0, 0, 0),
-        "the unfinished partition must not reach graph construction"
+    let (atoms, nodes, edges) = analysis_size();
+    assert!(atoms <= 4, "{atoms} atoms");
+    assert!(
+        nodes <= 8 * 1088 && edges <= 8 * 1088,
+        "{nodes} nodes, {edges} edges"
     );
-    assert!(!comb_loop_analysis_is_complete(&code));
-
-    let whole =
-        "module Top(i: input logic<1088>[1088], o: output logic<1088>[1088]) { assign o = i; }";
-    with_partition_extra_atom_limit(0, || {
-        assert!(analyze(whole).is_empty());
-        assert!(comb_loop_analysis_is_complete(whole));
-    });
+    assert!(comb_loop_analysis_is_complete(&code));
 }
 
 #[test]
 fn partition_limit_default_bounds_byte_enabled_memory_next_state() {
     // 32,768 512-bit words are a 2 MiB memory. A common per-element default
-    // copy followed by byte-enabled writes still creates a word-by-byte
-    // partition. The equivalent whole-array copy avoids the array cuts.
+    // copy followed by byte-enabled writes once created a word-by-byte
+    // partition. Writes now record their regions instead, so the analysis
+    // stays linear in the writes.
     for whole_copy in [false, true] {
         let initialization = if whole_copy {
             "next_data = data;"
@@ -148,11 +132,42 @@ fn partition_limit_default_bounds_byte_enabled_memory_next_state() {
         reset_analysis_size();
         let errors = analyze(&code);
         assert!(errors.is_empty(), "whole_copy={whole_copy}: {errors:#?}");
-        if whole_copy {
-            assert_eq!(analysis_size().0, 67);
-        } else {
-            assert_eq!(analysis_size(), (0, 0, 0));
-        }
-        assert_eq!(comb_loop_analysis_is_complete(&code), whole_copy);
+        // Each variable is one storage node, so neither the rows nor the
+        // byte lanes cut the storage. The per-row copy writes one region per
+        // enumerated row; the whole-array copy writes one.
+        let (atoms, nodes, edges) = analysis_size();
+        assert_eq!(atoms, 5, "whole_copy={whole_copy}");
+        let rows = if whole_copy { 0 } else { 32768 };
+        assert!(
+            nodes <= rows + 512 && edges <= 2 * rows + 512,
+            "whole_copy={whole_copy}: {nodes} nodes, {edges} edges"
+        );
+        assert!(comb_loop_analysis_is_complete(&code));
     }
+}
+
+#[test]
+fn scattered_element_writes_resolve_in_linear_size() {
+    // Writes in bit-reversed order leave a fragment between every pair of
+    // written elements while the final value is resolved. Indexed fragments
+    // keep that resolution, and the exported graph, linear in the writes.
+    const COUNT: usize = 8192;
+    let bits = COUNT.trailing_zeros();
+    let writes = (0..COUNT)
+        .map(|k| k.reverse_bits() >> (usize::BITS - bits))
+        .map(|k| format!("o[{k}] = i;"))
+        .collect::<String>();
+    let code = format!(
+        "module Scattered (i: input logic<2>, o: output logic<2> [{COUNT}]) {{
+            always_comb {{ {writes} }}
+        }}"
+    );
+    reset_analysis_size();
+    assert!(analyze(&code).is_empty());
+    let (_, nodes, edges) = analysis_size();
+    assert!(
+        nodes <= 3 * COUNT && edges <= 4 * COUNT,
+        "{nodes} nodes, {edges} edges"
+    );
+    assert!(comb_loop_analysis_is_complete(&code));
 }
