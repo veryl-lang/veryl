@@ -1434,6 +1434,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut child_analyzer_context = veryl_analyzer::conv::Context::default();
         child_analyzer_context.variables = child_module.variables.clone();
         child_analyzer_context.functions = child_module.functions.clone();
+        crate::ir::module::lower_function_loops(child_module, &mut child_analyzer_context);
         let peeled = context
             .peel_cache
             .entry(Arc::as_ptr(&src.component))

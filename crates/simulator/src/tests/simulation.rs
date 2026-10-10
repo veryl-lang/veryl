@@ -17748,6 +17748,148 @@ fn runtime_loops(code: &str, module: &str) -> usize {
         .sum()
 }
 
+/// The top module and a child instance convert through separate paths.
+#[test]
+fn constant_loop_lowering_unrolls_a_loop_in_a_function() {
+    fn loops(stmts: &[crate::ir::Statement]) -> usize {
+        use crate::ir::Statement;
+        stmts
+            .iter()
+            .map(|s| match s {
+                Statement::For(x) => 1 + loops(&x.body),
+                Statement::If(x) => loops(&x.true_side) + loops(&x.false_side),
+                Statement::Case(x) => {
+                    x.arms.iter().map(|a| loops(&a.body)).sum::<usize>() + loops(&x.default)
+                }
+                Statement::SequentialBlock(b) => loops(b),
+                _ => 0,
+            })
+            .sum()
+    }
+    let code = r#"
+    module Enc (a: input logic<8>, y: output logic<3>) {
+        function first_set (
+            v: input logic<8>,
+        ) -> logic<3> {
+            var found: logic   ;
+            var idx  : logic<3>;
+            found = 0;
+            idx   = 0;
+            for i in 0..8 {
+                if !found && v[i] {
+                    found = 1;
+                    idx   = i as 3;
+                }
+            }
+            return idx;
+        }
+        assign y = first_set(a);
+    }
+    module Top (a: input logic<8>, y: output logic<3>, z: output logic<3>) {
+        function first_set (
+            v: input logic<8>,
+        ) -> logic<3> {
+            var found: logic   ;
+            var idx  : logic<3>;
+            found = 0;
+            idx   = 0;
+            for i in 0..8 {
+                if !found && v[i] {
+                    found = 1;
+                    idx   = i as 3;
+                }
+            }
+            return idx;
+        }
+        assign y = first_set(a);
+        inst u: Enc (a, y: z);
+    }
+    "#;
+    let no_jit = Config {
+        use_jit: false,
+        ..Default::default()
+    };
+    assert_eq!(loops(&analyze(code, &no_jit).comb_statements), 0);
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0b0010_1000, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("y").unwrap(), Value::new(3, 3, false), "{config:?}");
+        assert_eq!(sim.get("z").unwrap(), Value::new(3, 3, false), "{config:?}");
+    }
+}
+
+/// The inner bound is a variable the body assigns, which analysis leaves at
+/// its last value; unrolling with it would run the wrong count.
+#[test]
+fn a_function_loop_bounded_by_an_assigned_variable_keeps_its_count() {
+    let code = r#"
+    pub function select_onehot::<N: u32, T: type> (
+        sel : input logic<N>,
+        data: input T    <N>,
+    ) -> T {
+        const DEPTH: u32 = $clog2(N);
+        var next_n: u32   ;
+        var next_d: T  <N>;
+        next_n = N;
+        for i in 0..N {
+            if sel[i] {
+                next_d[i] = data[i];
+            } else {
+                next_d[i] = 0 as T;
+            }
+        }
+        for _i in 0..DEPTH {
+            var current_n: u32   ;
+            var current_d: T  <N>;
+            current_n = next_n;
+            current_d = next_d;
+            next_n = (current_n / 2) + (current_n % 2);
+            for j in 0..next_n {
+                if (j + 1) == next_n && (current_n % 2) == 1 {
+                    next_d[j] = current_d[2 * j + 0];
+                } else {
+                    next_d[j] = (current_d[2 * j + 0] | current_d[2 * j + 1]) as T;
+                }
+            }
+        }
+        return next_d[0];
+    }
+
+    module Mux #(
+        param ENTRIES  : u32  = 2       ,
+        param DATA_TYPE: type = logic<4>,
+    ) (
+        s: input  logic    <ENTRIES>,
+        a: input  DATA_TYPE<ENTRIES>,
+        b: output DATA_TYPE         ,
+    ) {
+        always_comb {
+            b = select_onehot::<ENTRIES, DATA_TYPE>(s, a);
+        }
+    }
+    module Top (s: input logic<16>, d: input logic<4, 16>, y: output logic<4>) {
+        inst u: Mux #(ENTRIES: 16) (s, a: d, b: y);
+    }
+    "#;
+    let d = (0..16u64).fold(0u64, |acc, i| acc | (((i + 1) & 0xf) << (4 * i)));
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("d", Value::new(d, 64, false));
+        for k in [0u64, 5, 15] {
+            sim.set("s", Value::new(1 << k, 16, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("y").unwrap(),
+                Value::new((k + 1) & 0xf, 4, false),
+                "s={k} {config:?}"
+            );
+        }
+    }
+}
+
 /// A reset network is not worth an unrolled copy.
 #[test]
 fn constant_loop_lowering_keeps_an_over_budget_loop() {
