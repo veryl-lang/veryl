@@ -393,6 +393,7 @@ impl Refined {
                 return Some(false);
             }
             for edge in incoming {
+                *work = work.checked_sub(1)?;
                 if *edge.weight() != PositionRelation::default() {
                     return Some(false);
                 }
@@ -403,6 +404,11 @@ impl Refined {
         }
         Some(true)
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static REFINE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Divide the nodes of `graph` into cells of positions before condensing it.
@@ -425,20 +431,42 @@ fn refine(graph: &TransferGraph, work: &mut usize) -> Option<Refined> {
     }
     let divisible = |node: NodeIndex| graph[node].replication.is_none();
     let mut cuts: Vec<[BTreeSet<usize>; 2]> = vec![Default::default(); graph.node_count()];
+    // Boundaries a node received but has not passed on yet. Each boundary
+    // crosses each edge at most once, and every crossing is charged.
+    let mut fresh: Vec<[Vec<usize>; 2]> = vec![Default::default(); graph.node_count()];
     let mut pending = Vec::new();
     for node in graph.node_indices().filter(|&node| divisible(node)) {
         for domain in &graph[node].domains {
-            let [array, packed] = &mut cuts[node.index()];
-            array.insert(domain.array_start);
-            array.insert(domain.array_start.saturating_add(domain.array_length));
-            packed.insert(domain.packed_start);
-            packed.insert(domain.packed_start.saturating_add(domain.packed_length));
+            for (axis, bounds) in [
+                (
+                    0,
+                    [
+                        domain.array_start,
+                        domain.array_start.saturating_add(domain.array_length),
+                    ],
+                ),
+                (
+                    1,
+                    [
+                        domain.packed_start,
+                        domain.packed_start.saturating_add(domain.packed_length),
+                    ],
+                ),
+            ] {
+                for bound in bounds {
+                    *work = work.checked_sub(1)?;
+                    if cuts[node.index()][axis].insert(bound) {
+                        fresh[node.index()][axis].push(bound);
+                    }
+                }
+            }
         }
         if !graph[node].domains.is_empty() {
             pending.push(node);
         }
     }
     while let Some(node) = pending.pop() {
+        let new = std::mem::take(&mut fresh[node.index()]);
         let neighbours = graph
             .edges_directed(node, Direction::Outgoing)
             .map(|edge| (edge.target(), *edge.weight()))
@@ -446,26 +474,29 @@ fn refine(graph: &TransferGraph, work: &mut usize) -> Option<Refined> {
                 graph
                     .edges_directed(node, Direction::Incoming)
                     .map(|edge| (edge.source(), *edge.weight())),
-            )
-            .collect::<Vec<_>>();
+            );
         for (other, relation) in neighbours {
+            *work = work.checked_sub(1)?;
+            #[cfg(test)]
+            REFINE_VISITS.set(REFINE_VISITS.get() + 1);
             if component_of[other.index()] != component_of[node.index()] || !divisible(other) {
                 continue;
             }
-            let mut grew = false;
+            let was_idle = fresh[other.index()].iter().all(Vec::is_empty);
             for (axis, offset) in [relation.array, relation.packed].into_iter().enumerate() {
                 if offset != Some(0) {
                     continue;
                 }
-                let new = cuts[node.index()][axis]
-                    .difference(&cuts[other.index()][axis])
-                    .copied()
-                    .collect::<Vec<_>>();
-                *work = work.checked_sub(new.len())?;
-                grew |= !new.is_empty();
-                cuts[other.index()][axis].extend(new);
+                *work = work.checked_sub(new[axis].len())?;
+                #[cfg(test)]
+                REFINE_VISITS.set(REFINE_VISITS.get() + new[axis].len());
+                for &cut in &new[axis] {
+                    if cuts[other.index()][axis].insert(cut) {
+                        fresh[other.index()][axis].push(cut);
+                    }
+                }
             }
-            if grew {
+            if was_idle && fresh[other.index()].iter().any(|cuts| !cuts.is_empty()) {
                 pending.push(other);
             }
         }
@@ -490,7 +521,14 @@ fn refine(graph: &TransferGraph, work: &mut usize) -> Option<Refined> {
                     .collect::<Vec<_>>()
             };
             let (arrays, packeds) = (intervals(array), intervals(packed));
-            *work = work.checked_sub(arrays.len().saturating_mul(packeds.len()))?;
+            // Each cell is compared with each domain of the node, and again
+            // when its domains are cut.
+            *work = work.checked_sub(
+                arrays
+                    .len()
+                    .saturating_mul(packeds.len())
+                    .saturating_mul(weight.domains.len().max(1).saturating_mul(2)),
+            )?;
             let mut cells = Vec::new();
             for &(array_start, array_end) in &arrays {
                 for &(packed_start, packed_end) in &packeds {
@@ -761,6 +799,51 @@ fn condense<K: Copy + Eq + Hash>(ssa: &mut SsaStore<K>, graph: &TransferGraph) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dense_transfer_boundaries_are_charged_per_crossing() {
+        // Every output reads every input along identity edges, and each keeps
+        // its own bit, so all nodes share one recurrence and many boundaries.
+        for keys in [16usize, 64] {
+            let mut ssa = SsaStore::default();
+            let extent = PositionDomain {
+                array_start: 0,
+                array_length: 1,
+                packed_start: 0,
+                packed_length: keys,
+            };
+            let entries = (0..keys).map(|key| ssa.read(key)).collect::<Vec<_>>();
+            let checkpoint = ssa.checkpoint();
+            for key in 0..keys {
+                let sources = entries
+                    .iter()
+                    .map(|&entry| (entry, PositionRelation::default()))
+                    .collect();
+                let value = ssa.related_definition(sources);
+                let bit = PositionDomain {
+                    packed_start: key,
+                    packed_length: 1,
+                    ..extent
+                };
+                let value = ssa.projected(value, bit);
+                ssa.bind(key, value);
+            }
+            let iteration = ssa.capture_and_rollback(checkpoint);
+            REFINE_VISITS.set(0);
+            let budget = usize::MAX / 2;
+            let mut work = budget;
+            ssa.try_close_repeated_transfer(&iteration, checkpoint, true, &mut work, |_| {
+                Some(extent)
+            })
+            .expect("an unlimited budget closes the transfer");
+            let visits = REFINE_VISITS.get();
+            assert!(
+                visits <= budget - work,
+                "{keys} keys: {visits} boundary visits for {} charged steps",
+                budget - work
+            );
+        }
+    }
 
     #[test]
     fn nested_repeated_transfer_stops_before_materializing_an_over_budget_copy() {
