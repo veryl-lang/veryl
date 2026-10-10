@@ -452,3 +452,46 @@ fn an_emitter_decline_is_reported() {
         "a module the emitter declines must be listed"
     );
 }
+
+#[test]
+fn a_flop_driven_clock_beside_a_gated_one_fires_on_the_master_step() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_en : input     logic,
+        o_cnt: output    logic<8>,
+        o_g  : output    logic<8>,
+    ) {
+        var half: logic;
+        always_ff (i_clk, i_rst) {
+            if_reset { half = 0; } else { half = !half; }
+        }
+        let clk_half: '_ clock = half;
+        let clk_g   : '_ clock = i_clk & i_en;
+        var cnt: logic<8>;
+        always_ff (clk_half, i_rst) {
+            if_reset { cnt = 0; } else { cnt += 1; }
+        }
+        var g: logic<8>;
+        always_ff (clk_g, i_rst) {
+            if_reset { g = 0; } else { g += 1; }
+        }
+        assign o_cnt = cnt;
+        assign o_g   = g;
+    }
+    "#;
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.set("i_en", Value::new(1, 1, false));
+        sim.step_reset(&clk, &rst);
+        for step in 1..=8u64 {
+            sim.step(&clk);
+            let cnt = sim.get("o_cnt").unwrap().payload_u64();
+            assert_eq!(cnt, step.div_ceil(2), "step {step}, {config:?}");
+        }
+    }
+}

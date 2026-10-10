@@ -113,11 +113,6 @@ pub struct Ir {
     pub disable_ff_opt: bool,
     /// Derived (gated / FF-divided) clocks in this module; empty when none.
     pub derived_clock_schedule: DerivedClockSchedule,
-    /// JIT-compiled evaluation of the derived-clock dependency closure,
-    /// run by `partial_settle` independently of `comb_statements`.
-    pub derived_clock_eval_stmts: Vec<Statement>,
-    /// See `Module::derived_clock_eval_passes`.
-    pub derived_clock_eval_passes: usize,
     /// Diagnostic: number of nontrivial SCCs found in the pre-JIT comb
     /// graph.  Real combinational loops are rejected by `analyze_dependency`,
     /// so any non-zero value here indicates duplicate ProtoStatements in
@@ -160,14 +155,6 @@ pub struct Ir {
     pub(crate) dataflow_check_panic: std::cell::Cell<bool>,
     /// Variables the checks found different, summed over checks.
     pub(crate) dataflow_check_mismatches: std::cell::Cell<u64>,
-    /// Whole-module compile of the derived-clock closure; `partial_settle`
-    /// invokes it in place of stepping `derived_clock_eval_stmts`.
-    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
-    /// See `Module::derived_clock_master_stmts`; `partial_settle_master`
-    /// runs these in place of the whole closure.
-    pub derived_clock_master_stmts: Vec<Statement>,
-    pub derived_clock_master_passes: usize,
-    pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
     /// Snapshotted from `Config::aot_c_validate`: when set, `settle_comb` /
     /// `step` dual-run the AOT-C and Cranelift paths and panic on divergence.
     pub aot_c_validate: bool,
@@ -198,10 +185,6 @@ pub struct Ir {
     /// See `Module::comb_touched_offsets`.  Consumed by the testbench's
     /// comb-dirty filter (`tb_dirty::TbDirtyFilter`).
     pub comb_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
-    /// See `Module::settle_touched_offsets`.
-    pub settle_touched_offsets: std::sync::Arc<crate::HashSet<crate::ir::VarOffset>>,
-    /// See `Module::closure_out_watch`.
-    pub closure_out_watch: Vec<(u32, u32)>,
     /// See `Module::event_comb_writes`.  Consumed by the simulator's
     /// settle filter: a fire of an event whose writes can reach a comb
     /// read dirties the comb.
@@ -219,8 +202,6 @@ pub struct Ir {
     /// taken every cycle; the residency table (a mutex) must be touched once.
     whole_comb_fallback_recorded: AtomicBool,
     dataflow_fallback_recorded: AtomicBool,
-    whole_derived_clock_fallback_recorded: AtomicBool,
-    whole_derived_clock_master_fallback_recorded: AtomicBool,
     pub(crate) whole_event_fallback_recorded: AtomicBool,
     /// `[ran, fell_back]` dispatch tallies.  The `*_fallback_recorded` flags
     /// above latch on the FIRST fallback and so cannot say how much of a run
@@ -228,8 +209,6 @@ pub struct Ir {
     pub(crate) whole_comb_dispatch: [AtomicU64; 2],
     /// Dataflow settles run by the `.so` and by the Cranelift cells.
     pub(crate) dataflow_dispatch: [AtomicU64; 2],
-    pub(crate) whole_derived_clock_dispatch: [AtomicU64; 2],
-    pub(crate) whole_derived_clock_master_dispatch: [AtomicU64; 2],
     pub(crate) whole_event_dispatch: [AtomicU64; 2],
     /// Event gate skips on the per-statement path.  `Ir` is not `Sync` and
     /// the gates run on the simulator's own thread, so this needs no atomic.
@@ -254,11 +233,6 @@ impl Drop for Ir {
         for (kind, c) in [
             ("whole_comb", &self.whole_comb_dispatch),
             ("dataflow", &self.dataflow_dispatch),
-            ("whole_derived_clock", &self.whole_derived_clock_dispatch),
-            (
-                "whole_derived_clock_master",
-                &self.whole_derived_clock_master_dispatch,
-            ),
             ("whole_event", &self.whole_event_dispatch),
         ] {
             let (ran, fell_back) = (c[0].load(Ordering::Relaxed), c[1].load(Ordering::Relaxed));
@@ -313,8 +287,6 @@ impl Ir {
             inst_layout: module.inst_layout,
             disable_ff_opt: config.disable_ff_opt,
             derived_clock_schedule: module.derived_clock_schedule,
-            derived_clock_eval_stmts: module.derived_clock_eval_stmts,
-            derived_clock_eval_passes: module.derived_clock_eval_passes,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
             whole_comb: module.whole_comb,
             dataflow_dirty: std::cell::RefCell::new(vec![
@@ -346,10 +318,6 @@ impl Ir {
             dataflow_check_mismatches: std::cell::Cell::new(0),
             dataflow: module.dataflow,
             dataflow_interp: module.dataflow_interp.into_iter().collect(),
-            whole_derived_clock: module.whole_derived_clock,
-            derived_clock_master_stmts: module.derived_clock_master_stmts,
-            derived_clock_master_passes: module.derived_clock_master_passes,
-            whole_derived_clock_master: module.whole_derived_clock_master,
             aot_c_validate: config.aot_c_validate,
             aot_c_validate_stride: config.aot_c_validate_stride,
             whole_events: module.whole_events,
@@ -360,21 +328,15 @@ impl Ir {
             rtl_driven: module.rtl_driven,
             fused_comb_offsets: module.fused_comb_offsets,
             comb_touched_offsets: module.comb_touched_offsets,
-            settle_touched_offsets: module.settle_touched_offsets,
-            closure_out_watch: module.closure_out_watch,
             event_comb_writes: module.event_comb_writes,
             gate_state_base: module.gate_state_base,
             event_gate_flags: module.event_gate_flags,
             settle_info: module.settle_info,
             whole_comb_fallback_recorded: Default::default(),
             dataflow_fallback_recorded: Default::default(),
-            whole_derived_clock_fallback_recorded: Default::default(),
-            whole_derived_clock_master_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
             whole_comb_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             dataflow_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
-            whole_derived_clock_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
-            whole_derived_clock_master_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_event_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             event_gate_skips: std::cell::Cell::new(0),
             const_cone_done: Default::default(),
@@ -631,113 +593,6 @@ impl Ir {
         }
         for s in &mut self.comb_statements {
             patch_stmt_log_buf(s, log_buf);
-        }
-        for s in &mut self.derived_clock_eval_stmts {
-            patch_stmt_log_buf(s, log_buf);
-        }
-        for s in &mut self.derived_clock_master_stmts {
-            patch_stmt_log_buf(s, log_buf);
-        }
-    }
-
-    /// Re-evaluate just the derived-clock dependency closure.
-    ///
-    /// The closure inherits `comb_statements`' order, so it needs the same
-    /// treatment `settle_comb` gives the whole list: where that order has a
-    /// backward edge, one pass leaves a gated clock holding the value its
-    /// producer had before this edge.
-    pub fn partial_settle(&self, mask_cache: &mut MaskCache) {
-        // As in `settle_comb`, the emitted C never writes the log; the pointer
-        // only satisfies `FuncPtr`.
-        if let Some(whole) = self.whole_derived_clock.as_ref() {
-            // `--backend-validate`: dual-run and diff, like `settle_comb`.
-            if self.aot_c_validate {
-                crate::backend::validate::partial_settle(self, whole.as_ref(), mask_cache);
-                return;
-            }
-            if self.dispatch_whole_closure(
-                whole.as_ref(),
-                self.derived_clock_eval_passes,
-                &self.whole_derived_clock_dispatch,
-                &self.whole_derived_clock_fallback_recorded,
-                "whole_derived_clock",
-            ) {
-                return;
-            }
-        }
-        self.run_chunked_partial_settle(mask_cache);
-    }
-
-    /// `partial_settle` for a master input clock that just toggled: with the
-    /// rest of the design settled, only the closure statements downstream of
-    /// a master can change, so only those run.
-    pub fn partial_settle_master(&self, mask_cache: &mut MaskCache) {
-        if self.derived_clock_master_stmts.is_empty() {
-            self.partial_settle(mask_cache);
-            return;
-        }
-        if let Some(whole) = self.whole_derived_clock_master.as_ref() {
-            if self.aot_c_validate {
-                crate::backend::validate::partial_settle_master(self, whole.as_ref(), mask_cache);
-                return;
-            }
-            if self.dispatch_whole_closure(
-                whole.as_ref(),
-                self.derived_clock_master_passes,
-                &self.whole_derived_clock_master_dispatch,
-                &self.whole_derived_clock_master_fallback_recorded,
-                "whole_derived_clock_master",
-            ) {
-                return;
-            }
-        }
-        self.run_chunked_partial_settle_master(mask_cache);
-    }
-
-    /// Run a whole-compiled closure for `passes` passes, tallying into
-    /// `dispatch`.  False when the async compile is still pending: the caller
-    /// then redoes every pass on the Cranelift chunk so a half-applied closure
-    /// never escapes.
-    fn dispatch_whole_closure(
-        &self,
-        whole: &dyn CompiledWhole,
-        passes: usize,
-        dispatch: &[AtomicU64; 2],
-        fallback_recorded: &AtomicBool,
-        kind: &str,
-    ) -> bool {
-        let ff_ptr = self.ff_values.as_ptr();
-        let comb_ptr = self.comb_values.as_ptr() as *mut u8;
-        let log_ptr = (&*self.write_log_buffer as *const _ as *const u8) as *mut u8;
-        for _ in 0..passes {
-            if whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) == DispatchOutcome::NotReady {
-                dispatch[1].fetch_add(1, Ordering::Relaxed);
-                if !fallback_recorded.swap(true, Ordering::Relaxed) {
-                    residency::record_fallback(kind, &self.name.to_string());
-                }
-                return false;
-            }
-        }
-        dispatch[0].fetch_add(1, Ordering::Relaxed);
-        true
-    }
-
-    /// Cranelift-only derived-clock closure, factored out so the validate mode
-    /// can run it as the reference after the whole backend.
-    pub(crate) fn run_chunked_partial_settle(&self, mask_cache: &mut MaskCache) {
-        for _ in 0..self.derived_clock_eval_passes {
-            for stmt in &self.derived_clock_eval_stmts {
-                dispatch_stmt_fast(stmt, mask_cache);
-            }
-        }
-    }
-
-    /// `run_chunked_partial_settle` for the master-toggle subset.
-    pub(crate) fn run_chunked_partial_settle_master(&self, mask_cache: &mut MaskCache) {
-        for _ in 0..self.derived_clock_master_passes {
-            for stmt in &self.derived_clock_master_stmts {
-                dispatch_stmt_fast(stmt, mask_cache);
-            }
         }
     }
 

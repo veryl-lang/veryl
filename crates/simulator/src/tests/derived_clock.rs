@@ -179,8 +179,8 @@ fn gated_clock_mux() {
 /// flips on every input clock posedge, so the gated clock pulses on
 /// every other input cycle — equivalent to a /2 divider.  Exercises
 /// the path where the derived clock's value depends on an FF output
-/// (the partial-settle must rerun after `ff_commit` to see the new
-/// toggle value).
+/// (the comb must settle again after `ff_commit` for the clock to see the
+/// new toggle value).
 #[test]
 fn ff_derived_divider() {
     let code = r#"
@@ -222,8 +222,8 @@ fn ff_derived_divider() {
 }
 
 /// FF output propagated through two comb-derived clocks in series.
-/// Verifies that the dependency closure includes transitively-reachable
-/// comb stmts (div_a feeds div_b).
+/// Verifies that a clock derived from another derived clock (div_a feeds
+/// div_b) sees its source's settled value.
 #[test]
 fn ff_copy_clock() {
     let code = r#"
@@ -261,7 +261,7 @@ fn ff_copy_clock() {
 
 /// /2 → /4 chain of FF dividers built from logic toggles + gated
 /// clocks.  Exercises the fixpoint loop: `div2` rising fires
-/// `always_ff (div2)` which toggles `tog_4`, after which the partial
+/// `always_ff (div2)` which toggles `tog_4`, after which the
 /// re-settle must reflect the new value of `div4` so the second
 /// always_ff fires on the same simulator step.
 #[test]
@@ -717,14 +717,11 @@ fn packed_struct_array_dynamic_field_ff() {
     }
 }
 
-/// The eval closure inherits the comb list's order, and a scope the
-/// dependency sort could not linearize leaves a reader ahead of its
-/// producer there.  One pass then evaluates the gate from the value its
-/// producer held before this edge, the rising edge is never seen, and every
-/// flop on the gated clock stops.  Reversing the chunk reproduces that order
-/// on a design small enough to state the expected counts for.
+/// A second-stage gate reading the first must see the first's value from
+/// this edge, not the previous one: a gate evaluated from the stale value
+/// never sees the rising edge, and the second domain stops.
 #[test]
-fn gated_clock_closure_order_with_a_backward_edge() {
+fn second_stage_gate_sees_the_first_stage_of_the_same_edge() {
     let code = r#"
     module Top (
         i_clk: input  '_ clock,
@@ -745,55 +742,15 @@ fn gated_clock_closure_order_with_a_backward_edge() {
     }
     "#;
 
-    let mut exercised = 0;
     for config in Config::all() {
         dbg!(&config);
-        let mut ir = analyze(code, &config);
-        // A single batched chunk has no order to reverse; those configs
-        // cannot carry the defect, so they are not evidence either way.
-        if ir.derived_clock_eval_stmts.len() < 2 {
-            continue;
-        }
-        exercised += 1;
-        ir.derived_clock_eval_stmts.reverse();
-        ir.derived_clock_master_stmts.reverse();
-        // Any order of N statements converges in N passes.
-        let passes = ir.derived_clock_eval_stmts.len();
-        ir.derived_clock_eval_passes = passes;
-        ir.derived_clock_master_passes = passes;
-
-        // NEGATIVE CONTROL: the same reversed chunk with the single pass the
-        // closure used to get.  Without this the test would also pass on an
-        // order that never needed the extra passes.
-        let mut one = analyze(code, &config);
-        one.derived_clock_eval_stmts.reverse();
-        one.derived_clock_master_stmts.reverse();
-        one.derived_clock_eval_passes = 1;
-        one.derived_clock_master_passes = 1;
-        let mut sim_one = Simulator::new(one, None);
-        let clk_one = sim_one.get_clock("i_clk").unwrap();
-        let rst_one = sim_one.get_reset("i_rst").unwrap();
-        sim_one.set("i_en1", Value::new(1, 1, false));
-        sim_one.set("i_en2", Value::new(1, 1, false));
-        sim_one.step_reset(&clk_one, &rst_one);
-        for _ in 0..6 {
-            sim_one.step(&clk_one);
-        }
-        assert_ne!(
-            sim_one.get("o_b").unwrap(),
-            Value::new(6, 8, false),
-            "vacuous: one pass over the reversed chunk already gave the right \
-             answer, so the order carries no backward edge, {config:?}",
-        );
-
-        let mut sim = Simulator::new(ir, None);
+        let mut sim = Simulator::new(analyze(code, &config), None);
         let clk = sim.get_clock("i_clk").unwrap();
         let rst = sim.get_reset("i_rst").unwrap();
 
         sim.set("i_en1", Value::new(1, 1, false));
         sim.set("i_en2", Value::new(1, 1, false));
         sim.step_reset(&clk, &rst);
-
         for _ in 0..6 {
             sim.step(&clk);
         }
@@ -805,7 +762,7 @@ fn gated_clock_closure_order_with_a_backward_edge() {
         assert_eq!(
             sim.get("o_b").unwrap(),
             Value::new(6, 8, false),
-            "second-stage gate reads the first through the reversed chunk, {config:?}",
+            "second-stage gate reads the first, {config:?}",
         );
 
         sim.set("i_en2", Value::new(0, 1, false));
@@ -822,11 +779,23 @@ fn gated_clock_closure_order_with_a_backward_edge() {
             Value::new(6, 8, false),
             "{config:?}"
         );
+
+        sim.set("i_en1", Value::new(0, 1, false));
+        sim.set("i_en2", Value::new(1, 1, false));
+        for _ in 0..3 {
+            sim.step(&clk);
+        }
+        assert_eq!(
+            sim.get("o_a").unwrap(),
+            Value::new(10, 8, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(6, 8, false),
+            "a closed first stage closes the second, {config:?}"
+        );
     }
-    assert!(
-        exercised > 0,
-        "no config produced a multi-statement eval chunk"
-    );
 }
 
 /// The hardened-cell shape: the gate is a cell two levels down, its output
@@ -1013,10 +982,6 @@ fn a_clock_chained_off_a_negedge_flop_keeps_running() {
 
 /// A gate written by the SIBLING ARMS of a `case`, off a flop that moves
 /// within the step, so the value must be REBUILT before the edge decision.
-///
-/// The RESULT only: an incomplete closure settles to the same value, it just
-/// needs more passes, so this holds either way.  The closure's own shape is
-/// `derived_clock_closure_keeps_every_writer_of_an_offset`'s job.
 #[test]
 fn gated_clock_written_by_sibling_case_arms() {
     let code = r#"
@@ -1089,11 +1054,12 @@ fn gated_clock_written_by_sibling_case_arms() {
     }
 }
 
-/// The closure `partial_settle` refreshes must hold EVERY writer of the
-/// offsets its clock depends on, not just the last one.  The chain through
-/// `arc` is what makes the drop observable at all.
+/// The gate depends on an offset with several writers: `nxt` is assigned by
+/// every arm of the `case`, and `arc` reads it.  While `st` is 1 the gate must
+/// stay closed, which holds only if `arc` sees the `nxt` of the arm that ran;
+/// the `nxt` left by `st == 0` would open it.
 #[test]
-fn derived_clock_closure_keeps_every_writer_of_an_offset() {
+fn derived_clock_gate_sees_the_writer_of_the_arm_that_ran() {
     let code = r#"
     module Top (
         i_clk: input  '_ clock   ,
@@ -1142,40 +1108,45 @@ fn derived_clock_closure_keeps_every_writer_of_an_offset() {
     }
     "#;
 
-    let mut exercised = 0;
     for config in Config::all() {
         dbg!(&config);
-        let ir = analyze(code, &config);
-        // A batched chunk is one statement whatever the closure holds.
-        if ir.derived_clock_eval_stmts.len() < 2 {
-            continue;
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        let cnt = |sim: &mut Simulator| sim.get("o_cnt").unwrap().payload_u128();
+
+        sim.set("i_sel", Value::new(0, 2, false));
+        sim.step_reset(&clk, &rst);
+        sim.step(&clk);
+        // The gate samples `st` as it was before the edge, so each step's
+        // count follows the previous step's `i_sel`.
+        let mut expect = cnt(&mut sim);
+        let seq = [
+            (0, true),
+            (0, true),
+            (1, true),
+            (1, false),
+            (1, false),
+            (2, false),
+            (2, false),
+            (0, false),
+            (0, true),
+            (1, true),
+            (1, false),
+        ];
+        for (sel, opens) in seq {
+            sim.set("i_sel", Value::new(sel, 2, false));
+            sim.step(&clk);
+            expect += u128::from(opens);
+            assert_eq!(cnt(&mut sim), expect, "i_sel={sel}, {config:?}");
         }
-        exercised += 1;
-        // A floor, not an equality: the total moves with lowering (5
-        // two-state, 6 four-state), while the defect caps it at 3 — one
-        // writer per offset in the cone, whatever the lowering.
-        assert!(
-            ir.derived_clock_eval_stmts.len() >= 4,
-            "the closure dropped a sibling arm: {} stmts, {config:?}",
-            ir.derived_clock_eval_stmts.len(),
-        );
-        assert_eq!(
-            ir.derived_clock_eval_passes, 1,
-            "a complete closure keeps the parent's linearized order, {config:?}",
-        );
     }
-    assert!(
-        exercised > 0,
-        "every config batched the closure: nothing was checked"
-    );
 }
 
 #[test]
-fn a_closure_output_read_as_data_stays_current_without_a_settle_of_its_own() {
-    // `clk_half` is computed by the derived-clock closure from a flop only
-    // the closure reads, so the flop's commits no longer dirty the comb; the
-    // mux reading the clock net as data must still follow it, through the
-    // closure's output watch.
+fn a_clock_net_read_as_data_stays_current() {
+    // `clk_half` both clocks a domain and feeds a mux as data; the mux must
+    // follow the net's level after every step.
     let code = r#"
     module Top (
         i_clk: input  '_ clock,

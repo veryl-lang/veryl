@@ -6,9 +6,7 @@
 //! 0→1 transitions after each `step()` and synthesizes
 //! `Event::Clock` for downstream `always_ff(derived_clk)`.
 //!
-//! Derived-clock values are refreshed by a dedicated
-//! `derived_clock_eval` ProtoStatements chunk (dependency closure only),
-//! JIT-compiled separately so the main comb JIT/AOT-C blob is untouched.
+//! Derived-clock values are refreshed by the regular comb settle.
 //!
 //! A non-port ASYNC RESET the design produces itself rides the same
 //! machinery: no testbench drives it, so its assertion is a transition of
@@ -77,21 +75,17 @@ impl DerivedClockSchedule {
     }
 }
 
-/// Returns `(schedule, eval_indices, master_indices)` where `eval_indices`
-/// are dependency-closure stmt indices into `pre_jit_stmts` (already
-/// topo-sorted by `analyze_dependency`) and `master_indices` the subset a
-/// master input clock alone can change (see `master_downstream`).
+/// Returns `(schedule, eval_indices)` where `eval_indices` are
+/// dependency-closure stmt indices into `pre_jit_stmts` (already topo-sorted
+/// by `analyze_dependency`).
 pub fn build_schedule(
     candidates: &[EdgeCandidate],
     pre_jit_stmts: &[ProtoStatement],
     input_clock_offsets: &HashMap<VarOffset, VarId>,
-) -> (DerivedClockSchedule, Vec<usize>, Vec<usize>) {
+) -> (DerivedClockSchedule, Vec<usize>) {
     // FF outputs go through the event/commit path.  Every writer, not the
     // last: an offset written by sibling conditional arms has one fragment
-    // per arm, and keeping only the last leaves the extracted subsequence
-    // with a read whose producer runs later.  The schedule then asks for
-    // settle passes it cannot justify — measured 3, and 1 once the closure
-    // is complete.
+    // per arm, and keeping only the last drops the others from the closure.
     let mut output_to_writer: HashMap<VarOffset, Writers> = HashMap::default();
     let mut scratch_in: Vec<VarOffset> = Vec::new();
     let mut scratch_out: Vec<VarOffset> = Vec::new();
@@ -188,9 +182,9 @@ pub fn build_schedule(
         if rst.current_offset.is_ff() {
             continue;
         }
-        // Same closure, for `partial_settle` only: a reset has no ICG
-        // reading, so its master inputs stay out of `master_input_clocks`
-        // (toggling one would fabricate a clock edge nothing asked for).
+        // Same closure, but a reset has no ICG reading, so its master
+        // inputs stay out of `master_input_clocks` (toggling one would
+        // fabricate a clock edge nothing asked for).
         let mut local_dep: HashSet<usize> = HashSet::default();
         let mut local_master: HashSet<VarId> = HashSet::default();
         collect_comb_closure(
@@ -204,11 +198,9 @@ pub fn build_schedule(
         dep_set.extend(local_dep);
     }
 
-    // Sort by pre_jit_stmts index so partial_settle runs deps first.
     let mut eval_indices: Vec<usize> = dep_set.into_iter().collect();
     absorb_forwarders(&mut eval_indices, pre_jit_stmts);
     eval_indices.sort_unstable();
-    let master_indices = master_downstream(&eval_indices, pre_jit_stmts, input_clock_offsets);
 
     let mut master_input_clocks: SmallVec<[VarId; 4]> = SmallVec::new();
     for vid in master_set {
@@ -222,17 +214,13 @@ pub fn build_schedule(
             master_input_clocks,
         },
         eval_indices,
-        master_indices,
     )
 }
 
 /// Extend the closure with the plain comb assigns outside it that read only
-/// what it already keeps current (its inputs and outputs, transitively).
-/// Left outside, such a statement (a clock net copied onto a port nobody
-/// reads, say) is a reader of the closure's inputs that the settle filter
-/// must honour, so every change of those inputs forces a full settle;
-/// evaluated with the closure it is refreshed at the closure's cost.  Bounded
-/// so the closure stays small.
+/// what it already holds (its inputs and outputs, transitively), such as a
+/// clock net copied onto a port nobody reads.  Bounded so the closure stays
+/// small.
 fn absorb_forwarders(eval_indices: &mut Vec<usize>, pre_jit_stmts: &[ProtoStatement]) {
     const CAP: usize = 64;
     let mut in_closure: HashSet<usize> = eval_indices.iter().copied().collect();
@@ -271,54 +259,6 @@ fn absorb_forwarders(eval_indices: &mut Vec<usize>, pre_jit_stmts: &[ProtoStatem
             }
         }
     }
-}
-
-/// The closure statements a master input clock can change: those reading a
-/// master, plus everything downstream of them within `eval_indices`.  With the
-/// rest of the design settled, toggling the master alone leaves every other
-/// closure statement's value in place.  Sorted like `eval_indices`.
-pub fn master_downstream(
-    eval_indices: &[usize],
-    pre_jit_stmts: &[ProtoStatement],
-    input_clock_offsets: &HashMap<VarOffset, VarId>,
-) -> Vec<usize> {
-    let mut readers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
-    let mut outs_of: HashMap<usize, Vec<VarOffset>> = HashMap::default();
-    let mut seeds: Vec<usize> = Vec::new();
-    let mut ins = Vec::new();
-    let mut outs = Vec::new();
-    for &i in eval_indices {
-        let Some(stmt) = pre_jit_stmts.get(i) else {
-            continue;
-        };
-        ins.clear();
-        outs.clear();
-        stmt.gather_variable_offsets(&mut ins, &mut outs);
-        if ins.iter().any(|o| input_clock_offsets.contains_key(o)) {
-            seeds.push(i);
-        }
-        for o in &ins {
-            readers.entry(*o).or_default().push(i);
-        }
-        outs_of.insert(i, outs.clone());
-    }
-    let mut set: HashSet<usize> = HashSet::default();
-    let mut stack = seeds;
-    while let Some(i) = stack.pop() {
-        if !set.insert(i) {
-            continue;
-        }
-        for o in outs_of.get(&i).into_iter().flatten() {
-            for &r in readers.get(o).into_iter().flatten() {
-                if !set.contains(&r) {
-                    stack.push(r);
-                }
-            }
-        }
-    }
-    let mut v: Vec<usize> = set.into_iter().collect();
-    v.sort_unstable();
-    v
 }
 
 pub fn extract_eval_proto_stmts(

@@ -79,21 +79,6 @@ pub struct Module {
     pub inst_layout: InstLayout,
     /// Derived (gated / FF-divided) clocks in this module; empty when none.
     pub derived_clock_schedule: DerivedClockSchedule,
-    /// JIT-compiled evaluation chunk for derived clocks; empty when none.
-    pub derived_clock_eval_stmts: Vec<Statement>,
-    /// Passes of `derived_clock_eval_stmts` needed for the closure to
-    /// converge — the `required_comb_passes` of that chunk.
-    pub derived_clock_eval_passes: usize,
-    /// One-function compile of the derived-clock closure, the counterpart of
-    /// `whole_comb` for `partial_settle`. `None` leaves it on
-    /// `derived_clock_eval_stmts`.
-    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
-    /// The closure statements a master input clock can change (see
-    /// `derived_clock::master_downstream`): what `partial_settle_master` runs
-    /// right after the master toggles, the rest of the design being settled.
-    pub derived_clock_master_stmts: Vec<Statement>,
-    pub derived_clock_master_passes: usize,
-    pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
     /// Diagnostic: number of non-trivial strongly-connected components in
     /// the pre-JIT `unified_sorted` dataflow graph.  Real RTL combinational
     /// loops are rejected up-front by `analyze_dependency`, so any non-zero
@@ -128,16 +113,6 @@ pub struct Module {
     /// per test does not deep-clone the whole set.  The testbench uses it to
     /// decide which of its own statements really invalidate the comb.
     pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
-    /// `comb_touched_offsets` without what only the derived-clock closure
-    /// touches: the settle filter's read set.  The closure is re-evaluated
-    /// on its own at every step, so an input only it reads never calls for
-    /// a full settle; what it writes for the rest of the comb is watched
-    /// through `closure_out_watch`.
-    pub settle_touched_offsets: Arc<HashSet<VarOffset>>,
-    /// Comb byte ranges `(offset, len)` the derived-clock closure writes and
-    /// a statement outside it reads: a change of one after a closure
-    /// evaluation dirties the comb.
-    pub closure_out_watch: Vec<(u32, u32)>,
     /// Per event, the comb byte offsets its statements can write, or `None`
     /// when unboundable (`event_comb_write_offsets`).  The simulator's
     /// settle filter dirties the comb on a fire of any event whose writes
@@ -181,18 +156,6 @@ pub struct ProtoModule {
     pub inst_layout: InstLayout,
     /// See `Module::derived_clock_schedule`.
     pub derived_clock_schedule: DerivedClockSchedule,
-    /// Pre-JIT form of `Module::derived_clock_eval_stmts`.
-    pub derived_clock_eval: ProtoStatements,
-    /// See `Module::derived_clock_eval_passes`.
-    pub derived_clock_eval_passes: usize,
-    /// See `Module::whole_derived_clock`.  Built in `conv()` and shared
-    /// (`Arc::clone`) with every `Module` produced by `instantiate()`.
-    pub whole_derived_clock: Option<Arc<dyn CompiledWhole>>,
-    /// Pre-JIT form of `Module::derived_clock_master_stmts`, with its pass
-    /// count and whole-module compile.
-    pub derived_clock_master_eval: ProtoStatements,
-    pub derived_clock_master_passes: usize,
-    pub whole_derived_clock_master: Option<Arc<dyn CompiledWhole>>,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
     /// See `Module::whole_comb`.  Built in `conv()` and shared
@@ -211,10 +174,6 @@ pub struct ProtoModule {
     pub fused_comb_offsets: Vec<isize>,
     /// See `Module::comb_touched_offsets`.
     pub comb_touched_offsets: Arc<HashSet<VarOffset>>,
-    /// See `Module::settle_touched_offsets`.
-    pub settle_touched_offsets: Arc<HashSet<VarOffset>>,
-    /// See `Module::closure_out_watch`.
-    pub closure_out_watch: Vec<(u32, u32)>,
     /// See `Module::event_comb_writes`.
     pub event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>>,
     /// See `Module::gate_state_base`.
@@ -489,22 +448,6 @@ impl ProtoModule {
                 .to_statements(ff_ptr, ff_len, comb_ptr, comb_len, self.use_4state);
         let comb_statements = batch_compiled_statements(comb_flat);
 
-        let closure_stmts = |protos: &ProtoStatements| -> Vec<Statement> {
-            if protos.0.is_empty() {
-                Vec::new()
-            } else {
-                batch_compiled_statements(protos.to_statements(
-                    ff_ptr,
-                    ff_len,
-                    comb_ptr,
-                    comb_len,
-                    self.use_4state,
-                ))
-            }
-        };
-        let derived_clock_eval_stmts = closure_stmts(&self.derived_clock_eval);
-        let derived_clock_master_stmts = closure_stmts(&self.derived_clock_master_eval);
-
         #[cfg(debug_assertions)]
         self.validate_offsets();
 
@@ -514,13 +457,6 @@ impl ProtoModule {
             ff_values,
             comb_values,
             module_variables,
-            derived_clock_eval_stmts,
-            derived_clock_eval_passes: self.derived_clock_eval_passes,
-            whole_derived_clock: self.whole_derived_clock.clone(),
-            derived_clock_master_stmts,
-            derived_clock_master_passes: self.derived_clock_master_passes,
-            whole_derived_clock_master: self.whole_derived_clock_master.clone(),
-
             event_statements,
             event_gates,
             event_jit_marked: self.event_jit_marked.clone(),
@@ -572,8 +508,6 @@ impl ProtoModule {
             rtl_driven: self.rtl_driven.clone(),
             fused_comb_offsets: self.fused_comb_offsets.clone(),
             comb_touched_offsets: Arc::clone(&self.comb_touched_offsets),
-            settle_touched_offsets: Arc::clone(&self.settle_touched_offsets),
-            closure_out_watch: self.closure_out_watch.clone(),
             event_comb_writes: self.event_comb_writes.clone(),
             gate_state_base: self.gate_state_base,
             event_gate_flags: self.event_gate_flags.clone(),
@@ -693,12 +627,6 @@ fn validate_meta_offsets(
 /// happens where they do not.
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
 const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
-
-/// Domain separator folded into the derived-clock closure's whole-compile key,
-/// so a closure can never collide with a comb list of the same shape.
-const DERIVED_CLOCK_KEY_DOMAIN: u128 = 0xD3C1_0CE0_D3C1_0CE0_D3C1_0CE0_D3C1_0CE0;
-/// Same for the closure's master-toggle subset.
-const DERIVED_CLOCK_MASTER_KEY_DOMAIN: u128 = 0x3A57_E2C1_3A57_E2C1_3A57_E2C1_3A57_E2C1;
 
 fn jit_chunk_size() -> usize {
     std::env::var("VERYL_JIT_CHUNK_SIZE")
@@ -5753,7 +5681,7 @@ impl Conv<&air::Module> for ProtoModule {
                 }
             }
             // Child-instance clock vars: only reader is `always_ff` sensitivity
-            // (invisible to DCE); dropping the writer starves partial_settle.
+            // (invisible to DCE); dropping the writer freezes the clock.
             for (_, off, _, _, _) in &nested_derived_clock_candidates {
                 protect.insert(*off);
             }
@@ -6556,90 +6484,18 @@ impl Conv<&air::Module> for ProtoModule {
             trace_scc_cycles(&pre_jit_stmts, &module_variable_meta);
         }
 
-        // Derived-clock eval is a separate `try_jit` chunk so the main
-        // comb JIT/AOT-C blob stays intact while partial_settle is fast.
-        let mut settle_touched_offsets = Arc::clone(&comb_touched_offsets);
-        let mut closure_out_watch: Vec<(u32, u32)> = Vec::new();
-        let (
-            derived_clock_schedule,
-            derived_clock_eval,
-            derived_clock_eval_passes,
-            whole_derived_clock,
-            derived_clock_master_eval,
-            derived_clock_master_passes,
-            whole_derived_clock_master,
-            closure_touched,
-        ) = if derived_clock_vars.is_empty() {
-            (
-                DerivedClockSchedule::default(),
-                ProtoStatements(vec![]),
-                1,
-                None,
-                ProtoStatements(vec![]),
-                1,
-                None,
-                crate::HashSet::default(),
-            )
+        // The event gate always compares what the derived-clock closure
+        // touches.
+        let (derived_clock_schedule, closure_touched) = if derived_clock_vars.is_empty() {
+            (DerivedClockSchedule::default(), crate::HashSet::default())
         } else {
-            let (sched, eval_indices, master_indices) = build_derived_clock_schedule(
+            let (sched, eval_indices) = build_derived_clock_schedule(
                 &derived_clock_vars,
                 &pre_jit_stmts,
                 &input_clock_offsets,
             );
             let eval_protos = extract_eval_proto_stmts(&eval_indices, &pre_jit_stmts);
-            let closure_touched = collect_comb_touched_offsets(&eval_protos);
-            if let Some(split) = closure_settle_split(
-                &pre_jit_stmts,
-                &eval_indices,
-                &eval_protos,
-                context.comb_total_bytes,
-            ) {
-                settle_touched_offsets = Arc::new(split.touched);
-                closure_out_watch = split.out_watch;
-            }
-            // The closure keeps `unified_sorted`'s relative order, which is
-            // only single-pass when that order linearized; where it did not,
-            // one pass reads a producer that runs later and the gated clock
-            // is computed from the previous step's value.
-            let passes = compute_required_passes("derived-clock-closure", &eval_protos);
-            // The closure runs on every master edge, so it gets the
-            // whole-module backend the comb gets; its own fingerprint lets
-            // the tests sharing a DUT compile it once.
-            let mut compile_closure = |protos: &[ProtoStatement], domain: u128| {
-                if !size_ok || protos.is_empty() {
-                    return None;
-                }
-                let key = crate::backend::registry::whole_comb_fingerprint(
-                    context.config.use_4state,
-                    protos,
-                    domain,
-                );
-                whole::compile_whole_comb(
-                    &mut context.backends,
-                    &context.config,
-                    key,
-                    &context.comb_cache,
-                    protos,
-                    whole::WholeCombShape::default(),
-                )
-            };
-            let whole = compile_closure(&eval_protos, DERIVED_CLOCK_KEY_DOMAIN);
-            // The master-toggle subset runs on every master edge too.
-            let master_protos = extract_eval_proto_stmts(&master_indices, &pre_jit_stmts);
-            let master_passes = compute_required_passes("derived-clock-master", &master_protos);
-            let whole_master = compile_closure(&master_protos, DERIVED_CLOCK_MASTER_KEY_DOMAIN);
-            let eval = try_jit(context, eval_protos);
-            let master_eval = try_jit(context, master_protos);
-            (
-                sched,
-                eval,
-                passes,
-                whole,
-                master_eval,
-                master_passes,
-                whole_master,
-                closure_touched,
-            )
+            (sched, collect_comb_touched_offsets(&eval_protos))
         };
 
         // Idle-subtree gates over the clock events; see `event_gate`.
@@ -7092,12 +6948,6 @@ impl Conv<&air::Module> for ProtoModule {
             site_table,
             inst_layout,
             derived_clock_schedule,
-            derived_clock_eval,
-            derived_clock_eval_passes,
-            whole_derived_clock,
-            derived_clock_master_eval,
-            derived_clock_master_passes,
-            whole_derived_clock_master,
             nontrivial_comb_scc,
             whole_comb,
             dataflow,
@@ -7106,8 +6956,6 @@ impl Conv<&air::Module> for ProtoModule {
             rtl_driven,
             fused_comb_offsets: cached.fused_offsets.clone(),
             comb_touched_offsets,
-            settle_touched_offsets,
-            closure_out_watch,
             event_comb_writes,
             gate_state_base,
             event_gate_flags,
@@ -7443,54 +7291,6 @@ pub(crate) fn collect_comb_touched_offsets(stmts: &[ProtoStatement]) -> HashSet<
     let mut acc = HashSet::default();
     walk_touched_offsets(stmts, &mut acc);
     acc
-}
-
-/// What `closure_settle_split` derives for the settle filter.
-struct ClosureSettleSplit {
-    /// The comb's touched offsets with the derived-clock closure left out.
-    touched: HashSet<VarOffset>,
-    /// Closure outputs the rest of the comb reads, `(offset, len)` in comb
-    /// bytes.
-    out_watch: Vec<(u32, u32)>,
-}
-
-/// `None` when a closure write cannot be bounded or lies outside the comb
-/// buffer: the filter then keeps the whole comb as its read set.
-fn closure_settle_split(
-    all: &[ProtoStatement],
-    eval_indices: &[usize],
-    eval_protos: &[ProtoStatement],
-    comb_bytes: usize,
-) -> Option<ClosureSettleSplit> {
-    let closure: HashSet<usize> = eval_indices.iter().copied().collect();
-    let mut touched = HashSet::default();
-    for (i, s) in all.iter().enumerate() {
-        if !closure.contains(&i) {
-            walk_touched_offsets(std::slice::from_ref(s), &mut touched);
-        }
-    }
-    let mut outer_comb: Vec<isize> = touched
-        .iter()
-        .filter_map(|o| match o {
-            VarOffset::Comb(x) => Some(*x),
-            VarOffset::Ff(_) => None,
-        })
-        .collect();
-    outer_comb.sort_unstable();
-    let mut watch = Vec::new();
-    for (lo, hi) in event_comb_write_offsets(eval_protos)? {
-        if lo < 0 || hi < lo || hi as usize >= comb_bytes {
-            return None;
-        }
-        let i = outer_comb.partition_point(|&x| x < lo);
-        if outer_comb.get(i).is_some_and(|&x| x <= hi) {
-            watch.push((lo as u32, (hi - lo + 1) as u32));
-        }
-    }
-    Some(ClosureSettleSplit {
-        touched,
-        out_watch: watch,
-    })
 }
 
 fn walk_touched_offsets(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) {

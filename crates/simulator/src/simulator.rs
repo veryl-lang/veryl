@@ -166,9 +166,6 @@ pub struct Simulator {
     /// Diag attribution: how often each source dirtied a clean comb.
     dirty_from_event: u64,
     dirty_from_commit: u64,
-    dirty_from_closure: u64,
-    /// Pre-evaluation bytes of `Ir::closure_out_watch`.
-    closure_watch_scratch: Vec<u8>,
     /// First few watched FF offsets the commit compare flagged (diag).
     dirty_commit_offsets: Vec<(usize, usize)>,
     /// Consecutive armed settles no skip interrupted; drives the auto-off
@@ -270,21 +267,8 @@ const DATAFLOW_WATCH_CAP_BYTES: usize = 64 * 1024;
 /// write is value-compared per fire; everything else dirties every fire).
 /// The filter caches it in `Ir::settle_info`, one build per module; the
 /// dataflow settle builds its own per simulator.
-/// `all_readers`: classify event writes against every comb read, closure
-/// statements included.  The filter leaves the closure's reads out (its own
-/// compare covers them); a dataflow settle has no such compare.
-fn build_settle_info(
-    ir: &Ir,
-    diag: bool,
-    cap: usize,
-    all_readers: bool,
-) -> crate::tb_dirty::SettleInfo {
-    let table = crate::tb_dirty::SpanTable::build(ir, &ir.settle_touched_offsets);
-    let tb_table = if std::sync::Arc::ptr_eq(&ir.settle_touched_offsets, &ir.comb_touched_offsets) {
-        table.clone()
-    } else {
-        crate::tb_dirty::SpanTable::build(ir, &ir.comb_touched_offsets)
-    };
+fn build_settle_info(ir: &Ir, diag: bool, cap: usize) -> crate::tb_dirty::SettleInfo {
+    let table = crate::tb_dirty::SpanTable::build(ir, &ir.comb_touched_offsets);
     // The master toggle always returns to its baseline within the step,
     // but the mid-step settles run while it is high — so it is invisible
     // to the settle only when no comb statement can read an input clock's
@@ -328,8 +312,7 @@ fn build_settle_info(
                 break;
             }
             let (lo, hi) = (lo as usize, hi as usize);
-            let reach = if all_readers { &tb_table } else { &table };
-            if !reach.comb_change_may_reach_comb(lo, hi - lo + 1) {
+            if !table.comb_change_may_reach_comb(lo, hi - lo + 1) {
                 continue;
             }
             match (elem_of(lo), elem_of(hi)) {
@@ -382,7 +365,6 @@ fn build_settle_info(
     }
     crate::tb_dirty::SettleInfo {
         table,
-        tb_table,
         clock_toggle_dirties,
         dirty_events,
         event_comb_watch,
@@ -588,8 +570,6 @@ impl Simulator {
             settles_run: 0,
             settles_skipped: 0,
             dirty_from_event: 0,
-            dirty_from_closure: 0,
-            closure_watch_scratch: Vec::new(),
             dirty_from_commit: 0,
             dirty_commit_offsets: Vec::new(),
             filter_miss_streak: 0,
@@ -607,7 +587,7 @@ impl Simulator {
         if ret.ir.dataflow.is_some() {
             // The dataflow settle has no filter: an event's comb writes are
             // compared per fire to mark their readers instead.
-            let info = build_settle_info(&ret.ir, ret.settle_diag, DATAFLOW_WATCH_CAP_BYTES, true);
+            let info = build_settle_info(&ret.ir, ret.settle_diag, DATAFLOW_WATCH_CAP_BYTES);
             ret.dirty_events = info.dirty_events;
             ret.event_comb_watch = info.event_comb_watch;
             ret.watch_pool = info.watch_pool;
@@ -644,9 +624,11 @@ impl Simulator {
             }
         } else if env::var("VERYL_SETTLE_FILTER").as_deref() != Ok("0") && !ret.ir.disable_ff_opt {
             let diag = ret.settle_diag;
-            let info = Arc::clone(ret.ir.settle_info.get_or_init(|| {
-                Arc::new(build_settle_info(&ret.ir, diag, WATCH_CAP_BYTES, false))
-            }));
+            let info = Arc::clone(
+                ret.ir
+                    .settle_info
+                    .get_or_init(|| Arc::new(build_settle_info(&ret.ir, diag, WATCH_CAP_BYTES))),
+            );
             ret.clock_toggle_dirties = info.clock_toggle_dirties;
             ret.dirty_events = info.dirty_events.clone();
             ret.event_comb_watch = info.event_comb_watch.clone();
@@ -758,13 +740,6 @@ impl Simulator {
                         .contains_key(&Event::clock(clk.var_id)),
                 );
             }
-            eprintln!(
-                "[derived_clock] eval chunk: {} entries x {} passes; master subset: {} entries x {} passes",
-                ret.ir.derived_clock_eval_stmts.len(),
-                ret.ir.derived_clock_eval_passes,
-                ret.ir.derived_clock_master_stmts.len(),
-                ret.ir.derived_clock_master_passes,
-            );
         }
 
         if env::var("VERYL_STEP_WATCH_LIST").as_deref() == Ok("1") {
@@ -1059,63 +1034,11 @@ impl Simulator {
         self.ir.settle_comb(&mut self.mask_cache, &mut self.profile);
     }
 
-    /// Evaluate the derived-clock closure (its master-downstream subset when
-    /// `master`) and dirty the comb if an output the rest of the comb reads
-    /// changed: the closure's inputs are outside the settle filter's read
-    /// set, so this compare is what keeps their readers current.
-    fn eval_closure(&mut self, master: bool) {
-        // A dataflow settle reaches the closure's cells like any others.
-        if self.ir.dataflow_ready() {
-            self.do_settle_comb();
-            return;
-        }
-        let watch = self.settle_filter.is_some()
-            && !self.comb_dirty
-            && !self.ir.closure_out_watch.is_empty();
-        if watch {
-            self.closure_watch_scratch.clear();
-            for &(off, len) in &self.ir.closure_out_watch {
-                let (off, len) = (off as usize, len as usize);
-                self.closure_watch_scratch
-                    .extend_from_slice(&self.ir.comb_values[off..off + len]);
-            }
-        }
-        if master {
-            self.ir.partial_settle_master(&mut self.mask_cache);
-        } else {
-            self.ir.partial_settle(&mut self.mask_cache);
-        }
-        if watch {
-            let mut pos = 0usize;
-            for &(off, len) in &self.ir.closure_out_watch {
-                let (off, len) = (off as usize, len as usize);
-                if self.closure_watch_scratch[pos..pos + len] != self.ir.comb_values[off..off + len]
-                {
-                    if self.settle_diag {
-                        self.dirty_from_closure += 1;
-                    }
-                    self.comb_dirty = true;
-                    break;
-                }
-                pos += len;
-            }
-        }
-    }
-
     /// Full settle unless the filter's precise tracking proves the comb
     /// already matches the current state.  Without the filter this is
     /// unconditional — the legacy flag is not maintained mid-step, so
     /// `comb_dirty == false` proves nothing there.
     fn settle_comb_if_stale(&mut self) {
-        // A commit that changed only derived-clock closure inputs leaves the
-        // comb clean, so the closure is refreshed here explicitly; its
-        // outputs' readers may then dirty the comb after all.
-        if self.settle_filter.is_some()
-            && !self.comb_dirty
-            && !self.ir.derived_clock_eval_stmts.is_empty()
-        {
-            self.eval_closure(false);
-        }
         if self.settle_filter.is_none() || self.comb_dirty {
             self.do_settle_comb();
             self.comb_dirty = false;
@@ -2177,23 +2100,8 @@ impl Simulator {
             set_event_write_log(&mut self.ir.write_log_buffer);
         }
 
-        // Hoisted like `has_eval_chunk` so loops test a local bool.
+        // Hoisted so loops test a local bool.
         let watch_enabled = !self.watch_vars.is_empty();
-
-        // Subsequent partial_settle only refreshes the dep subset, so
-        // the rest of the design must already be settled.
-        if self.comb_dirty {
-            self.do_settle_comb();
-            self.comb_dirty = false;
-            self.filter_note_settle();
-        } else if self.settle_filter.is_some() {
-            self.settles_skipped += 1;
-            self.filter_miss_streak = 0;
-            self.check_skipped_settle();
-        }
-        if watch_enabled {
-            self.dump_watch("after_settle");
-        }
 
         let masters: SmallVec<[VarId; 2]> = events
             .iter()
@@ -2211,16 +2119,14 @@ impl Simulator {
             })
             .collect();
 
-        let has_eval_chunk = !self.ir.derived_clock_eval_stmts.is_empty();
-
-        // Masters high → gated-clock exprs see the rising edge.
-        if !masters.is_empty() {
-            for &id in &masters {
-                self.set_input_clock_bit(id, 1);
-            }
-            if has_eval_chunk {
-                self.eval_closure(true);
-            }
+        // Masters high → gated-clock exprs see the rising edge.  One settle
+        // covers both this and whatever the previous step left stale.
+        for &id in &masters {
+            self.set_input_clock_bit(id, 1);
+        }
+        self.settle_comb_if_stale();
+        if watch_enabled {
+            self.dump_watch("after_settle");
         }
 
         // Two-phase firing.  A master-gated clock's edge IS the master
@@ -2300,8 +2206,8 @@ impl Simulator {
         let mut iters = 0;
         // Only FF-driven clocks and derived resets can gain an edge from a
         // commit.  A schedule of master-gated comb clocks alone has nothing
-        // to detect, so on a master step the closure refresh is left to the
-        // master=0 pass below.
+        // to detect, so on a master step the settle is left to the master=0
+        // pass below.
         let post_commit_sources = n_rst > 0
             || masters.is_empty()
             || self
@@ -2314,9 +2220,7 @@ impl Simulator {
             if !post_commit_sources {
                 break;
             }
-            if has_eval_chunk {
-                self.eval_closure(false);
-            }
+            self.settle_comb_if_stale();
             for (i, v) in new_values.iter_mut().enumerate().take(n) {
                 let clk = &self.ir.derived_clock_schedule.clocks[i];
                 *v = self.read_derived_clock_bit(clk);
@@ -2347,7 +2251,7 @@ impl Simulator {
             }
 
             // Resets that have just reached their asserted level, from the
-            // same refreshed closure.  A reset asserts BECAUSE a commit put
+            // same settled state.  A reset asserts BECAUSE a commit put
             // it there, so it belongs in this loop and not once per step.
             let mut rst_batch: SmallVec<[usize; 4]> = SmallVec::new();
             for i in 0..n_rst {
@@ -2363,29 +2267,10 @@ impl Simulator {
                 break;
             }
 
-            // The partial settle only refreshed the clock closure and the
-            // fired domains read arbitrary comb, so settle fully before
-            // firing (paid only when an edge fires).
-            self.settle_comb_if_stale();
-            // Re-verify on the fully settled state: the partial closure can
-            // show a transient that full settling cancels.  Those are not
-            // marked fired — the next iteration re-reads a consistent 0, so
-            // the loop still ends.
-            batch.retain(|i| {
-                let clk = &self.ir.derived_clock_schedule.clocks[*i];
-                self.read_derived_clock_bit(clk) == 1
-            });
-            rst_batch.retain(|i| {
-                let rst = &self.ir.derived_clock_schedule.resets[*i];
-                self.read_derived_reset_asserted(rst) == 1
-            });
-            // Record what the SETTLED state says about every reset, before
-            // firing: an assertion is then seen once, and a level that fell
-            // back re-arms.  This is also what makes the loop terminate.
+            // Record every reset level before firing: an assertion is then
+            // seen once, and a level that fell back re-arms.  This is also
+            // what makes the loop terminate.
             self.snapshot_derived_reset_levels();
-            if batch.is_empty() && rst_batch.is_empty() {
-                continue;
-            }
 
             iters += 1;
             debug_assert!(
@@ -2446,9 +2331,7 @@ impl Simulator {
             for &id in &masters {
                 self.set_input_clock_bit(id, 0);
             }
-            if has_eval_chunk {
-                self.eval_closure(false);
-            }
+            self.settle_comb_if_stale();
             // A clock the master inverts -- `~clk`, or a `clock_negedge`
             // whose active level `read_derived_clock_bit` inverts -- reaches
             // its active level HERE.  The pre-commit phase fires on the
@@ -2469,12 +2352,6 @@ impl Simulator {
                 }
             }
             if !fall.is_empty() {
-                // The partial settle only refreshed the clock closure.
-                self.settle_comb_if_stale();
-                fall.retain(|i| {
-                    let clk = &self.ir.derived_clock_schedule.clocks[*i];
-                    self.read_derived_clock_bit(clk) == 1
-                });
                 self.fire_derived_clock_batch(&fall, &mut fired_mask);
             }
         }
@@ -2809,7 +2686,7 @@ impl Drop for Simulator {
         }
         if self.settle_diag {
             eprintln!(
-                "[settle_filter] module={} settles_run={} settles_skipped={} filter_on={} armed={} clock_toggle_dirties={} dirty_from_event={} dirty_from_commit={} dirty_from_closure={} closure_watch={:?} first_commit_hits={:?}",
+                "[settle_filter] module={} settles_run={} settles_skipped={} filter_on={} armed={} clock_toggle_dirties={} dirty_from_event={} dirty_from_commit={} first_commit_hits={:?}",
                 self.ir.name,
                 self.settles_run,
                 self.settles_skipped,
@@ -2818,8 +2695,6 @@ impl Drop for Simulator {
                 self.clock_toggle_dirties,
                 self.dirty_from_event,
                 self.dirty_from_commit,
-                self.dirty_from_closure,
-                self.ir.closure_out_watch,
                 self.dirty_commit_offsets,
             );
             let mut evs: Vec<String> = self.dirty_events.iter().map(|e| format!("{e:?}")).collect();

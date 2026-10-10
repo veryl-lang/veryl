@@ -30,11 +30,6 @@ use crate::testbench::TestbenchStatement;
 pub(crate) struct SettleInfo {
     /// Span table template; re-target per `Ir` with `SpanTable::rebased`.
     pub(crate) table: SpanTable,
-    /// The same over the whole comb, for the testbench filter: a testbench
-    /// write to a derived-clock closure input must still settle, since
-    /// nothing else refreshes the closure before the next step's pre-commit
-    /// phase.  Shares `table` when the two read sets coincide.
-    pub(crate) tb_table: SpanTable,
     pub(crate) clock_toggle_dirties: bool,
     pub(crate) dirty_events: HashSet<Event>,
     pub(crate) event_comb_watch: crate::HashMap<Event, (u32, u32)>,
@@ -103,7 +98,7 @@ impl TbDirtyFilter {
         // Reuse the settle filter's cached table when it armed (the usual
         // case); a fresh build only on its opt-out path.
         let spans = match ir.settle_info.get() {
-            Some(info) => info.tb_table.rebased(ir),
+            Some(info) => info.table.rebased(ir),
             None => SpanTable::build(ir, &ir.comb_touched_offsets),
         };
         let mut clean = HashSet::default();
@@ -170,9 +165,7 @@ impl SpanTable {
         }
     }
 
-    /// `touched`: the offsets the comb in question reads or writes
-    /// (`Ir::settle_touched_offsets` for the settle filter, the whole
-    /// `Ir::comb_touched_offsets` for the testbench filter).
+    /// `touched`: the offsets the comb reads or writes.
     pub(crate) fn build(ir: &Ir, touched: &HashSet<VarOffset>) -> Self {
         let ff_base = ir.ff_values.as_ptr() as usize;
         let ff_end = ff_base + ir.ff_values.len();
