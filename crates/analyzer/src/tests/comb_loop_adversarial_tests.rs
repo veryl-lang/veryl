@@ -1568,3 +1568,33 @@ fn comb_loop_runtime_loop_retention_is_not_a_dependency() {
         );
     }
 }
+
+#[test]
+fn comb_loop_runtime_loop_reads_only_the_positions_it_reads() {
+    // A write at the runtime iterator copies `p[source]` to any element, so
+    // `p[7]` depends on `y` only when the loop reads `p[2]`.
+    for (source, expected) in [(3, false), (2, true)] {
+        let code = format!(
+            r#"
+            module Top (k: input logic<2>, a: input logic, o: output logic) {{
+                var p: logic<8>;
+                var y: logic;
+                always_comb {{
+                    p = 0;
+                    p[2] = y;
+                    for j in 0..k {{
+                        p[j] = p[{source}];
+                    }}
+                }}
+                assign y = p[7] ^ a;
+                assign o = p[0];
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        let found = errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }));
+        assert_eq!(found, expected, "p[{source}]: {errors:#?}");
+    }
+}

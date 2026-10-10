@@ -276,8 +276,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
         let input = builder.version(ssa, entry, start, work)?;
         let domains = domain(key).into_iter().collect::<Vec<_>>();
         // A write history divides the output by the writes that supply its
-        // positions. Each part gets its own root, so a recurrence through one
-        // part does not reach the positions of the others.
+        // positions.
         let pieces = match domains.as_slice() {
             [extent] => ssa
                 .logged_pieces(output, *extent, work)
@@ -285,8 +284,26 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
                 .map(|pieces| (*extent, pieces)),
             _ => None,
         };
+        // The output stands whole when its parts turn out to be one.
+        builder.version(ssa, output, start, work)?;
+        for &(version, _) in pieces.iter().flat_map(|(_, pieces)| pieces) {
+            builder.version(ssa, version, start, work)?;
+        }
+        outputs.push((key, entry, input, pieces, domains));
+    }
+    builder.copy_iteration(ssa, start, work)?;
+
+    // Each part of an output, divided where its writes and the iteration's
+    // reads of the key distinguish positions, gets its own root, so a
+    // recurrence through one part does not reach the positions of the others.
+    let mut divided = Vec::with_capacity(outputs.len());
+    for (key, entry, input, pieces, domains) in outputs {
+        let output = iteration.bindings[&key];
         let cells = match pieces {
-            Some((extent, pieces)) => Some(cells(extent, &pieces, work)?),
+            Some((extent, pieces)) => {
+                let reads = read_regions(&builder.graph, input, extent, work)?;
+                Some(cells(extent, &pieces, &reads, work)?)
+            }
             None => None,
         }
         .filter(|cells| cells.len() > 1)
@@ -300,16 +317,16 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
                 computes: false,
             });
             for version in versions {
-                let value = builder.version(ssa, version, start, work)?;
+                let value = builder.versions[&version];
                 builder
                     .graph
                     .add_edge(value, root, PositionRelation::default());
             }
             roots.push((root, root_domains));
         }
-        outputs.push((key, entry, input, roots, domains));
+        divided.push((key, entry, input, roots, domains));
     }
-    builder.copy_iteration(ssa, start, work)?;
+    let outputs = divided;
 
     let mut users: HashMap<NodeIndex, usize> = HashMap::default();
     for (_, _, input, _, _) in &outputs {
@@ -371,14 +388,84 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
     Some(())
 }
 
-/// Disjoint boxes covering `extent` that no piece boundary crosses, each with
-/// the versions of the pieces that supply it.
+/// The positions of `extent` that readers of `input` read, as far as their
+/// domains bound them.
+fn read_regions(
+    graph: &TransferGraph,
+    input: NodeIndex,
+    extent: PositionDomain,
+    work: &mut usize,
+) -> Option<Vec<PositionDomain>> {
+    let mut regions = Vec::new();
+    for edge in graph.edges(input) {
+        let relation = *edge.weight();
+        for domain in &graph[edge.target()].domains {
+            *work = work.checked_sub(1)?;
+            // The source positions that `relation` maps into `domain`.
+            let axis =
+                |start: usize, length: usize, offset: Option<isize>, whole: (usize, usize)| {
+                    let Some(offset) = offset else {
+                        return Some(whole);
+                    };
+                    let start = isize::try_from(start).ok()?.checked_sub(offset)?;
+                    let end = start.checked_add_unsigned(length)?;
+                    let start = usize::try_from(start.max(0)).ok()?;
+                    let end = usize::try_from(end).ok()?;
+                    (start < end).then(|| (start, end - start))
+                };
+            let (Some(array), Some(packed)) = (
+                axis(
+                    domain.array_start,
+                    domain.array_length,
+                    relation.array,
+                    (extent.array_start, extent.array_length),
+                ),
+                axis(
+                    domain.packed_start,
+                    domain.packed_length,
+                    relation.packed,
+                    (extent.packed_start, extent.packed_length),
+                ),
+            ) else {
+                continue;
+            };
+            let read = PositionDomain {
+                array_start: array.0,
+                array_length: array.1,
+                packed_start: packed.0,
+                packed_length: packed.1,
+            };
+            regions.extend(log::intersection(read, extent));
+        }
+    }
+    Some(regions)
+}
+
+/// Disjoint boxes covering `extent` that no piece or read boundary crosses,
+/// each with the versions of the pieces that supply it.
 fn cells(
     extent: PositionDomain,
     pieces: &[(VersionId, PositionDomain)],
+    reads: &[PositionDomain],
     work: &mut usize,
 ) -> Option<Vec<(Vec<PositionDomain>, Vec<VersionId>)>> {
     let mut cells = vec![(extent, Vec::new())];
+    for &domain in reads {
+        let mut next = Vec::with_capacity(cells.len());
+        for (cell, versions) in cells {
+            *work = work.checked_sub(1)?;
+            match log::intersection(cell, domain) {
+                Some(inside) if inside != cell => {
+                    for outside in complement(cell, domain) {
+                        next.push((outside, Vec::new()));
+                    }
+                    next.push((inside, versions));
+                }
+                _ => next.push((cell, versions)),
+            }
+        }
+        cells = next;
+    }
     for &(version, domain) in pieces {
         let mut next = Vec::with_capacity(cells.len());
         for (cell, mut versions) in cells {
