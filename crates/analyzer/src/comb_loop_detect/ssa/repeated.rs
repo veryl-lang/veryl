@@ -77,6 +77,8 @@ impl TransferBuilder {
                 Version::Phi(inputs) => inputs.len(),
                 Version::Guarded { .. } => 1,
                 Version::Projected { .. } | Version::Replicated { .. } => 2,
+                Version::Overlay { .. } => 3,
+                Version::Restricted { .. } => 2,
                 Version::Entry(_) | Version::Imported { .. } => 0,
             };
             *work = work.checked_sub(payload.saturating_add(1))?;
@@ -91,7 +93,7 @@ impl TransferBuilder {
         &mut self,
         ssa: &SsaStore<K>,
         start: usize,
-        import_work: &mut usize,
+        work: &mut usize,
     ) -> Option<()> {
         let mut imports = HashMap::default();
         let mut invocations: HashMap<_, HashMap<usize, NodeIndex>> = HashMap::default();
@@ -108,25 +110,56 @@ impl TransferBuilder {
                 Version::Entry(_) => unreachable!("entries are handled above"),
                 Version::Definition { sources, .. } => {
                     for &(source, relation) in sources {
-                        let source = self.version(ssa, source, start, import_work)?;
+                        let source = self.version(ssa, source, start, work)?;
                         self.graph.add_edge(source, node, relation);
                     }
                 }
                 Version::Phi(inputs) => {
                     for &source in inputs {
-                        let source = self.version(ssa, source, start, import_work)?;
+                        let source = self.version(ssa, source, start, work)?;
                         self.graph
                             .add_edge(source, node, PositionRelation::default());
                     }
                 }
                 Version::Guarded { source, .. } => {
-                    let source = self.version(ssa, *source, start, import_work)?;
+                    let source = self.version(ssa, *source, start, work)?;
+                    self.graph
+                        .add_edge(source, node, PositionRelation::default());
+                }
+                Version::Overlay {
+                    below,
+                    retained,
+                    above,
+                } => {
+                    let below = self.version(ssa, *below, start, work)?;
+                    let below = match retained {
+                        Some(domains) => {
+                            // Only the retained positions keep the value below.
+                            let restricted = self.graph.add_node(TransferNode {
+                                domains: domains.to_vec(),
+                                ..TransferNode::default()
+                            });
+                            self.graph
+                                .add_edge(below, restricted, PositionRelation::default());
+                            restricted
+                        }
+                        None => below,
+                    };
+                    self.graph
+                        .add_edge(below, node, PositionRelation::default());
+                    let above = self.version(ssa, *above, start, work)?;
+                    self.graph
+                        .add_edge(above, node, PositionRelation::default());
+                }
+                Version::Restricted { source, domain } => {
+                    self.graph[node].domains.push(*domain);
+                    let source = self.version(ssa, *source, start, work)?;
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
                 }
                 Version::Projected { source, domain } => {
                     self.graph[node].domains.push(*domain);
-                    let source = self.version(ssa, *source, start, import_work)?;
+                    let source = self.version(ssa, *source, start, work)?;
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
                 }
@@ -137,7 +170,7 @@ impl TransferBuilder {
                 } => {
                     self.graph[node].domains.push(*domain);
                     self.graph[node].replication = Some(*replication);
-                    let source = self.version(ssa, *source, start, import_work)?;
+                    let source = self.version(ssa, *source, start, work)?;
                     self.graph
                         .add_edge(source, node, PositionRelation::default());
                 }
@@ -149,11 +182,11 @@ impl TransferBuilder {
                 } => {
                     // Charge the root edge and all imported storage before
                     // allocation. These copies precede DAG-export budgets.
-                    *import_work = import_work.checked_sub(1)?;
+                    *work = work.checked_sub(1)?;
                     let index = match imports.entry(Rc::as_ptr(graph)) {
                         std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
                         std::collections::hash_map::Entry::Vacant(entry) => {
-                            entry.insert(ImportIndex::try_new(graph, import_work)?)
+                            entry.insert(ImportIndex::try_new(graph, work)?)
                         }
                     };
                     // Guards are discarded for runtime iterations, but actual
@@ -168,7 +201,7 @@ impl TransferBuilder {
                         if mapped.contains_key(&child) {
                             continue;
                         }
-                        *import_work = import_work.checked_sub(
+                        *work = work.checked_sub(
                             graph.domains[child]
                                 .len()
                                 .saturating_add(index.incoming[child].len())
@@ -193,9 +226,9 @@ impl TransferBuilder {
                         );
                         if let DependencyDagNode::External(key) = graph.nodes[child] {
                             let sources = bindings.get(&key).map(Vec::as_slice).unwrap_or_default();
-                            *import_work = import_work.checked_sub(sources.len())?;
+                            *work = work.checked_sub(sources.len())?;
                             for &(source, relation) in sources {
-                                let source = self.version(ssa, source, start, import_work)?;
+                                let source = self.version(ssa, source, start, work)?;
                                 self.graph.add_edge(source, copied, relation);
                             }
                         }
@@ -225,7 +258,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
     iteration: &BranchState<K>,
     checkpoint: Checkpoint,
     may_skip: bool,
-    import_work: &mut usize,
+    work: &mut usize,
     domain: impl Fn(K) -> Option<PositionDomain>,
 ) -> Option<()> {
     let mut builder = TransferBuilder::default();
@@ -234,8 +267,8 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
         .iter()
         .map(|(&key, &output)| {
             let entry = ssa.read(key);
-            let input = builder.version(ssa, entry, checkpoint.version_start, import_work)?;
-            let value = builder.version(ssa, output, checkpoint.version_start, import_work)?;
+            let input = builder.version(ssa, entry, checkpoint.version_start, work)?;
+            let value = builder.version(ssa, output, checkpoint.version_start, work)?;
             let domains = domain(key).into_iter().collect::<Vec<_>>();
             let root = builder.graph.add_node(TransferNode {
                 input: None,
@@ -248,7 +281,7 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
             Some((key, entry, input, root, domains))
         })
         .collect::<Option<Vec<_>>>()?;
-    builder.copy_iteration(ssa, checkpoint.version_start, import_work)?;
+    builder.copy_iteration(ssa, checkpoint.version_start, work)?;
 
     let mut unrestricted = HashSet::default();
     for (_, entry, input, root, domains) in &outputs {

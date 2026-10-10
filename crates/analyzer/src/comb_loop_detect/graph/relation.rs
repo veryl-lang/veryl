@@ -33,7 +33,8 @@
 
 use super::{FeasiblePosition, SearchBudget};
 use crate::comb_loop_detect::model::BitDependency;
-use crate::comb_loop_detect::ssa::PositionDomain;
+use crate::comb_loop_detect::ssa::{PathCondition, PositionDomain};
+use std::collections::{BTreeMap, BTreeSet};
 
 type AxisRange = Option<(isize, isize)>;
 
@@ -65,7 +66,7 @@ impl PositionRelationSet {
         self.pieces.len()
     }
 
-    pub(super) fn identity(domains: &[PositionDomain]) -> Self {
+    pub(super) fn identity(domains: &[PositionDomain], budget: &mut SearchBudget) -> Self {
         let pieces = if domains.is_empty() {
             vec![RelationPiece {
                 array: AxisRelation::Linked {
@@ -94,13 +95,14 @@ impl PositionRelationSet {
                 })
                 .collect()
         };
-        Self::normalized(pieces)
+        Self::normalized(pieces, budget)
     }
 
     pub(super) fn then_dependency(
         &self,
         dependency: BitDependency,
         destination: &[PositionDomain],
+        budget: &mut SearchBudget,
     ) -> Self {
         let domains = if destination.is_empty() {
             vec![(None, None)]
@@ -128,10 +130,10 @@ impl PositionRelationSet {
                 pieces.push(RelationPiece { array, packed });
             }
         }
-        Self::normalized(pieces)
+        Self::normalized(pieces, budget)
     }
 
-    pub(super) fn then(&self, next: &Self) -> Self {
+    pub(super) fn then(&self, next: &Self, budget: &mut SearchBudget) -> Self {
         let mut pieces = Vec::new();
         for left in &self.pieces {
             for right in &next.pieces {
@@ -144,13 +146,45 @@ impl PositionRelationSet {
                 pieces.push(RelationPiece { array, packed });
             }
         }
-        Self::normalized(pieces)
+        Self::normalized(pieces, budget)
     }
 
     pub(super) fn intersects_identity(&self) -> bool {
         self.pieces.iter().any(|piece| {
             axis_intersects_identity(piece.array) && axis_intersects_identity(piece.packed)
         })
+    }
+
+    /// Per piece, bounds of its anchors and of the current positions it
+    /// reaches (`None` when unbounded).
+    pub(super) fn piece_bounds(&self) -> Vec<[[AxisRange; 2]; 2]> {
+        self.pieces
+            .iter()
+            .map(|piece| {
+                let anchor = [piece.array, piece.packed].map(axis_start);
+                let current = [piece.array, piece.packed].map(axis_current);
+                [anchor, current]
+            })
+            .collect()
+    }
+
+    /// Per axis, bounds of the anchors that this relation can map onto
+    /// themselves (`None` when unbounded), or `None` when there are none.
+    pub(super) fn identity_anchor_bounds(&self) -> Option<[AxisRange; 2]> {
+        let mut hull: Option<[AxisRange; 2]> = None;
+        for piece in &self.pieces {
+            let Some(bounds) = piece_identity_anchor_bounds(piece) else {
+                continue;
+            };
+            hull = Some(match hull {
+                None => bounds,
+                Some(hull) => [0, 1].map(|axis| match (hull[axis], bounds[axis]) {
+                    (Some(a), Some(b)) => Some((a.0.min(b.0), a.1.max(b.1))),
+                    _ => None,
+                }),
+            });
+        }
+        hull
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -278,35 +312,104 @@ impl PositionRelationSet {
         else {
             return false;
         };
-        let translation = Self::normalized(vec![RelationPiece {
-            array: AxisRelation::Linked {
-                offset: array_offset,
-                start: array_start,
-            },
-            packed: AxisRelation::Linked {
-                offset: packed_offset,
-                start: packed_start,
-            },
-        }]);
-        budget.spend_product(self.piece_count(), translation.piece_count())
-            && self.then(&translation).intersects_identity()
+        let translation = Self {
+            pieces: vec![RelationPiece {
+                array: AxisRelation::Linked {
+                    offset: array_offset,
+                    start: array_start,
+                },
+                packed: AxisRelation::Linked {
+                    offset: packed_offset,
+                    start: packed_start,
+                },
+            }],
+        };
+        budget.spend_pieces(self.piece_count(), translation.piece_count())
+            && self.then(&translation, budget).intersects_identity()
     }
 
-    fn normalized(mut pieces: Vec<RelationPiece>) -> Self {
+    /// Merge, deduplicate and drop covered pieces. The comparisons are
+    /// charged first; when the budget cannot pay for them, the pieces are
+    /// kept as they are, which is the same relation.
+    fn normalized(pieces: Vec<RelationPiece>, budget: &mut SearchBudget) -> Self {
+        if pieces.len() < 2 || !budget.spend(pieces.len()) {
+            return Self { pieces };
+        }
+        let mut pieces = coalesce_anchors(coalesce_points(pieces));
         pieces.sort_unstable();
         pieces.dedup();
+        // A piece can only cover another whose linked axes have the same
+        // offset, so index pieces by their offsets instead of comparing all
+        // pairs.
+        let mut groups: crate::HashMap<PieceKey, Vec<usize>> = crate::HashMap::default();
+        for (index, piece) in pieces.iter().enumerate() {
+            groups.entry(piece_key(piece)).or_default().push(index);
+        }
+        let comparisons = pieces
+            .iter()
+            .flat_map(|piece| covering_keys(piece_key(piece)))
+            .map(|candidate| groups.get(&candidate).map_or(0, Vec::len))
+            .fold(0usize, usize::saturating_add);
+        if !budget.spend(comparisons) {
+            return Self { pieces };
+        }
         let mut retained = Vec::new();
         for (index, piece) in pieces.iter().copied().enumerate() {
-            if pieces
-                .iter()
-                .enumerate()
-                .any(|(outer, candidate)| outer != index && piece_contains(*candidate, piece))
-            {
+            // Distinct pieces cover each other only if they are equal, which
+            // `dedup` already removed.
+            if covering_keys(piece_key(&piece)).iter().any(|candidate| {
+                groups.get(candidate).is_some_and(|group| {
+                    group
+                        .iter()
+                        .any(|&outer| outer != index && piece_contains(pieces[outer], piece))
+                })
+            }) {
                 continue;
             }
             retained.push(piece);
         }
         Self { pieces: retained }
+    }
+
+    pub(super) fn union_all(
+        sets: impl IntoIterator<Item = Self>,
+        budget: &mut SearchBudget,
+    ) -> Self {
+        Self::normalized(
+            sets.into_iter().flat_map(|set| set.pieces).collect(),
+            budget,
+        )
+    }
+
+    /// Each piece as a relation of its own.
+    pub(super) fn into_pieces(self) -> impl Iterator<Item = Self> {
+        self.pieces.into_iter().map(|piece| Self {
+            pieces: vec![piece],
+        })
+    }
+
+    /// Split into sets that each keep one translation, so a union of walks
+    /// with different displacements still reaches the exact translation
+    /// solver. Other pieces stay together.
+    pub(super) fn split_translations(self) -> Vec<Self> {
+        let mut translations: BTreeMap<(isize, isize), Vec<RelationPiece>> = BTreeMap::new();
+        let mut others = Vec::new();
+        for piece in self.pieces {
+            match piece_key(&piece) {
+                [Some(array), Some(packed)] => {
+                    translations.entry((array, packed)).or_default().push(piece)
+                }
+                _ => others.push(piece),
+            }
+        }
+        let mut sets = translations
+            .into_values()
+            .map(|pieces| Self { pieces })
+            .collect::<Vec<_>>();
+        if !others.is_empty() {
+            sets.push(Self { pieces: others });
+        }
+        sets
     }
 }
 
@@ -627,5 +730,429 @@ fn range_contains(outer: AxisRange, inner: AxisRange) -> bool {
         (None, _) => true,
         (Some(_), None) => false,
         (Some(outer), Some(inner)) => outer.0 <= inner.0 && inner.1 <= outer.1,
+    }
+}
+
+fn axis_start(relation: AxisRelation) -> AxisRange {
+    match relation {
+        AxisRelation::Linked { start, .. } | AxisRelation::Unlinked { start, .. } => start,
+    }
+}
+
+fn axis_current(relation: AxisRelation) -> AxisRange {
+    match relation {
+        AxisRelation::Linked { offset, start } => translate_range(start, offset),
+        AxisRelation::Unlinked { current, .. } => current,
+    }
+}
+
+fn with_start(relation: AxisRelation, start: AxisRange) -> AxisRelation {
+    match relation {
+        AxisRelation::Linked { offset, .. } => AxisRelation::Linked { offset, start },
+        AxisRelation::Unlinked { current, .. } => AxisRelation::Unlinked { start, current },
+    }
+}
+
+impl RelationPiece {
+    fn axis(&self, axis: usize) -> AxisRelation {
+        [self.array, self.packed][axis]
+    }
+
+    fn with_axis(mut self, axis: usize, relation: AxisRelation) -> Self {
+        match axis {
+            0 => self.array = relation,
+            _ => self.packed = relation,
+        }
+        self
+    }
+
+    /// The union of two pieces that differ only in overlapping or adjacent
+    /// start ranges of one axis.
+    fn union_contiguous(&self, other: &Self) -> Self {
+        let mut union = *self;
+        for axis in 0..2 {
+            if let (Some(left), Some(right)) =
+                (axis_start(self.axis(axis)), axis_start(other.axis(axis)))
+                && left != right
+            {
+                union = union.with_axis(
+                    axis,
+                    with_start(
+                        self.axis(axis),
+                        Some((left.0.min(right.0), left.1.max(right.1))),
+                    ),
+                );
+            }
+        }
+        union
+    }
+}
+
+/// Per axis, bounds of the anchors of `piece` that it relates to themselves,
+/// or `None` when it relates none.
+fn piece_identity_anchor_bounds(piece: &RelationPiece) -> Option<[AxisRange; 2]> {
+    let axis = |relation: AxisRelation| match relation {
+        AxisRelation::Linked { offset: 0, start } => Some(start),
+        AxisRelation::Linked { .. } => None,
+        AxisRelation::Unlinked { start, current } => intersect_range(start, current),
+    };
+    Some([axis(piece.array)?, axis(piece.packed)?])
+}
+
+/// The offsets of the linked axes of a piece.
+type PieceKey = [Option<isize>; 2];
+
+fn piece_key(piece: &RelationPiece) -> PieceKey {
+    [piece.array, piece.packed].map(|relation| match relation {
+        AxisRelation::Linked { offset, .. } => Some(offset),
+        AxisRelation::Unlinked { .. } => None,
+    })
+}
+
+/// The keys of the pieces that may contain a piece with `key`: a linked axis
+/// is contained in a linked axis with the same offset or in an unlinked one.
+fn covering_keys(key: PieceKey) -> Vec<PieceKey> {
+    let [array, packed] = key;
+    let mut keys = vec![[array, packed], [None, packed], [array, None], [None, None]];
+    keys.sort_unstable();
+    keys.dedup();
+    keys
+}
+
+/// The current range of `axis` when it does not depend on the anchor: an
+/// unlinked range, or a translation of a single anchor position.
+fn point_image(piece: &RelationPiece, axis: usize) -> Option<(isize, isize)> {
+    match piece.axis(axis) {
+        AxisRelation::Unlinked { current, .. } => current,
+        AxisRelation::Linked { offset, start } => {
+            let (start, end) = start?;
+            if end.checked_sub(start)? != 1 {
+                return None;
+            }
+            Some((start.checked_add(offset)?, end.checked_add(offset)?))
+        }
+    }
+}
+
+/// An anchor-independent current range and the piece that has it.
+type PointImage = ((isize, isize), RelationPiece);
+
+/// Pieces that differ only in an anchor-independent current range relate the
+/// same anchors to the union of those ranges. Merge contiguous ranges into one
+/// unlinked range; for a single anchor position this is exactly the union of
+/// its separate images, so a run of translated copies of one position costs
+/// one piece. Isolated pieces keep their form for the translation solver.
+fn coalesce_points(mut pieces: Vec<RelationPiece>) -> Vec<RelationPiece> {
+    for axis in 0..2 {
+        if pieces.len() < 2 {
+            break;
+        }
+        let mut groups: BTreeMap<RelationPiece, Vec<PointImage>> = BTreeMap::new();
+        let mut result = Vec::with_capacity(pieces.len());
+        for piece in pieces {
+            match point_image(&piece, axis) {
+                Some(image) => {
+                    let start = axis_start(piece.axis(axis));
+                    let key = piece.with_axis(
+                        axis,
+                        AxisRelation::Unlinked {
+                            start,
+                            current: None,
+                        },
+                    );
+                    groups.entry(key).or_default().push((image, piece));
+                }
+                None => result.push(piece),
+            }
+        }
+        for (key, mut images) in groups {
+            if images.len() == 1 {
+                result.push(images[0].1);
+                continue;
+            }
+            images.sort_unstable();
+            let mut index = 0;
+            while index < images.len() {
+                let ((start, mut end), first) = images[index];
+                let mut next = index + 1;
+                while next < images.len() && images[next].0.0 <= end {
+                    end = end.max(images[next].0.1);
+                    next += 1;
+                }
+                if next == index + 1 {
+                    result.push(first);
+                } else {
+                    let anchor = axis_start(key.axis(axis));
+                    result.push(key.with_axis(
+                        axis,
+                        AxisRelation::Unlinked {
+                            start: anchor,
+                            current: Some((start, end)),
+                        },
+                    ));
+                }
+                index = next;
+            }
+        }
+        pieces = result;
+    }
+    pieces
+}
+
+/// Pieces that differ only in the start range of one axis relate each anchor
+/// by the same offsets and ranges, so contiguous ranges merge into one piece
+/// with exactly their union. Copies of one translation written element by
+/// element then cost one piece.
+fn coalesce_anchors(mut pieces: Vec<RelationPiece>) -> Vec<RelationPiece> {
+    for axis in 0..2 {
+        if pieces.len() < 2 {
+            break;
+        }
+        let mut groups: BTreeMap<RelationPiece, Vec<(isize, isize)>> = BTreeMap::new();
+        let mut result = Vec::with_capacity(pieces.len());
+        for piece in pieces {
+            match axis_start(piece.axis(axis)) {
+                Some(range) => {
+                    let key = piece.with_axis(axis, with_start(piece.axis(axis), None));
+                    groups.entry(key).or_default().push(range);
+                }
+                None => result.push(piece),
+            }
+        }
+        for (key, mut ranges) in groups {
+            ranges.sort_unstable();
+            let mut index = 0;
+            while index < ranges.len() {
+                let (start, mut end) = ranges[index];
+                index += 1;
+                while index < ranges.len() && ranges[index].0 <= end {
+                    end = end.max(ranges[index].1);
+                    index += 1;
+                }
+                result.push(key.with_axis(axis, with_start(key.axis(axis), Some((start, end)))));
+            }
+        }
+        pieces = result;
+    }
+    pieces
+}
+
+/// The relation pieces that reach one node, each under the conditions of the
+/// paths that reach it. A piece under a condition means: for every valuation
+/// of the condition, every pair of the piece is realized by a path whose
+/// guards that valuation admits. Unions of pieces preserve this, and so does
+/// the exact union of two conditions of one piece; conditions whose union is
+/// not exact stay separate. Only the entries added since the node was last
+/// expanded are propagated again.
+#[derive(Default)]
+pub(super) struct PieceStates {
+    pieces: crate::HashMap<RelationPiece, Vec<PathCondition>>,
+    groups: crate::HashMap<PieceKey, BTreeSet<RelationPiece>>,
+    /// Per axis, the bounded start ranges of the pieces that agree on
+    /// everything else and share a condition. Contiguous pieces merge, so
+    /// the ranges of one entry are disjoint and not adjacent.
+    runs: [crate::HashMap<(RelationPiece, PathCondition), BTreeMap<isize, isize>>; 2],
+    delta: BTreeSet<(RelationPiece, PathCondition)>,
+}
+
+impl PieceStates {
+    /// Add `relation` under `condition`. Returns `None` when the budget is
+    /// exhausted, otherwise whether some piece needs propagation.
+    pub(super) fn insert(
+        &mut self,
+        relation: &PositionRelationSet,
+        condition: &PathCondition,
+        budget: &mut SearchBudget,
+    ) -> Option<bool> {
+        let mut changed = false;
+        'piece: for piece in &relation.pieces {
+            if !budget.spend(1) {
+                return None;
+            }
+            // A recorded piece containing this one under a covering condition
+            // has every continuation of it.
+            for candidate in covering_keys(piece_key(piece)) {
+                for outer in self.groups.get(&candidate).into_iter().flatten() {
+                    if !budget.spend(1) {
+                        return None;
+                    }
+                    if !piece_contains(*outer, *piece) {
+                        continue;
+                    }
+                    for recorded in &self.pieces[outer] {
+                        if !budget.spend_guard_comparison(recorded, condition) {
+                            return None;
+                        }
+                        if recorded.covers(condition) {
+                            continue 'piece;
+                        }
+                    }
+                }
+            }
+            // Merge the piece with an equal piece under the exact union of
+            // their conditions, and with contiguous pieces under the same
+            // condition, until neither applies.
+            let mut piece = *piece;
+            let mut condition = condition.clone();
+            'merge: loop {
+                let recorded = self.pieces.get(&piece).cloned().unwrap_or_default();
+                for existing in recorded {
+                    if !budget.spend_guard_comparison(&existing, &condition) {
+                        return None;
+                    }
+                    if condition.covers(&existing) {
+                        self.remove(&piece, &existing);
+                        continue;
+                    }
+                    if let Some(union) = existing.disjoin_exact(&condition) {
+                        self.remove(&piece, &existing);
+                        condition = union;
+                        continue 'merge;
+                    }
+                }
+                let Some(neighbour) = self.contiguous(&piece, &condition) else {
+                    break;
+                };
+                if !budget.spend(1) {
+                    return None;
+                }
+                self.remove(&neighbour, &condition);
+                piece = piece.union_contiguous(&neighbour);
+            }
+            self.add(piece, condition);
+            changed = true;
+        }
+        Some(changed)
+    }
+
+    /// A recorded piece under `condition` that differs from `piece` only in
+    /// an overlapping or adjacent start range.
+    fn contiguous(
+        &self,
+        piece: &RelationPiece,
+        condition: &PathCondition,
+    ) -> Option<RelationPiece> {
+        (0..2).find_map(|axis| {
+            let (start, end) = axis_start(piece.axis(axis))?;
+            let key = piece.with_axis(axis, with_start(piece.axis(axis), None));
+            let runs = self.runs[axis].get(&(key, condition.clone()))?;
+            let (&low, &high) = runs.range(..=end).next_back()?;
+            (high >= start)
+                .then(|| key.with_axis(axis, with_start(key.axis(axis), Some((low, high)))))
+        })
+    }
+
+    fn add(&mut self, piece: RelationPiece, condition: PathCondition) {
+        self.groups
+            .entry(piece_key(&piece))
+            .or_default()
+            .insert(piece);
+        for axis in 0..2 {
+            if let Some((start, end)) = axis_start(piece.axis(axis)) {
+                let key = piece.with_axis(axis, with_start(piece.axis(axis), None));
+                self.runs[axis]
+                    .entry((key, condition.clone()))
+                    .or_default()
+                    .insert(start, end);
+            }
+        }
+        self.pieces
+            .entry(piece)
+            .or_default()
+            .push(condition.clone());
+        self.delta.insert((piece, condition));
+    }
+
+    fn remove(&mut self, piece: &RelationPiece, condition: &PathCondition) {
+        let conditions = self
+            .pieces
+            .get_mut(piece)
+            .expect("only recorded pieces are removed");
+        conditions.retain(|recorded| recorded != condition);
+        if conditions.is_empty() {
+            self.pieces.remove(piece);
+            if let Some(group) = self.groups.get_mut(&piece_key(piece)) {
+                group.remove(piece);
+            }
+        }
+        for axis in 0..2 {
+            if let Some((start, _)) = axis_start(piece.axis(axis)) {
+                let key = piece.with_axis(axis, with_start(piece.axis(axis), None));
+                if let Some(runs) = self.runs[axis].get_mut(&(key, condition.clone())) {
+                    runs.remove(&start);
+                }
+            }
+        }
+        self.delta.remove(&(*piece, condition.clone()));
+    }
+
+    /// The pieces to propagate, grouped by condition.
+    pub(super) fn take_delta(
+        &mut self,
+        budget: &mut SearchBudget,
+    ) -> Vec<(PathCondition, PositionRelationSet)> {
+        let mut grouped: BTreeMap<PathCondition, Vec<RelationPiece>> = BTreeMap::new();
+        for (piece, condition) in std::mem::take(&mut self.delta) {
+            grouped.entry(condition).or_default().push(piece);
+        }
+        grouped
+            .into_iter()
+            .map(|(condition, pieces)| (condition, PositionRelationSet::normalized(pieces, budget)))
+            .collect()
+    }
+}
+
+/// The relation pieces that reach one node along recorded paths, each with
+/// the conditions of those paths. Unlike `PieceStates`, neither pieces nor
+/// conditions are merged, so every entry is realized by the one path that
+/// recorded it, and a path search can return that path.
+#[derive(Default)]
+pub(super) struct PathPieces {
+    conditions: crate::HashMap<RelationPiece, Vec<PathCondition>>,
+    groups: crate::HashMap<PieceKey, Vec<RelationPiece>>,
+}
+
+impl PathPieces {
+    /// Record a path that reaches the single piece of `relation` under
+    /// `condition`, unless a recorded piece contains it under a covering
+    /// condition: every continuation of that path then continues the
+    /// recorded one. Returns `None` when the budget is exhausted, otherwise
+    /// whether the path was recorded.
+    pub(super) fn insert(
+        &mut self,
+        relation: &PositionRelationSet,
+        condition: &PathCondition,
+        budget: &mut SearchBudget,
+    ) -> Option<bool> {
+        let [piece] = relation.pieces.as_slice() else {
+            unreachable!("paths are recorded one piece at a time");
+        };
+        for candidate in covering_keys(piece_key(piece)) {
+            for outer in self.groups.get(&candidate).into_iter().flatten() {
+                if !budget.spend(1) {
+                    return None;
+                }
+                if !piece_contains(*outer, *piece) {
+                    continue;
+                }
+                for recorded in &self.conditions[outer] {
+                    if !budget.spend_guard_comparison(recorded, condition) {
+                        return None;
+                    }
+                    if recorded.covers(condition) {
+                        return Some(false);
+                    }
+                }
+            }
+        }
+        let existing = self.conditions.entry(*piece).or_default();
+        if existing.is_empty() {
+            self.groups
+                .entry(piece_key(piece))
+                .or_default()
+                .push(*piece);
+        }
+        existing.push(condition.clone());
+        Some(true)
     }
 }

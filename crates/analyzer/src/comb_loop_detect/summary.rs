@@ -4,6 +4,7 @@ use super::graph::DependencyGraph;
 use super::model::{
     BitDependency, ModuleCombSummary, SummaryDependency, SummaryNode, SummaryNodeKind,
 };
+use super::steps::Steps;
 use crate::ir::{Module, VarKind};
 use crate::{HashMap, HashSet};
 use daggy::petgraph::Direction;
@@ -15,62 +16,49 @@ use std::collections::VecDeque;
 #[cfg(test)]
 mod tests;
 
-// Guarded and positional boundaries cannot always be contracted. Bound the
-// child structure copied into each parent before reserving or cloning it, so
-// a small hierarchy cannot expand into its exponentially large instance tree.
-const MODULE_SUMMARY_WORK: usize = 1_000_000;
-
 #[cfg(test)]
 thread_local! {
     static INPUT_EDGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static WALKED_EDGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static SUMMARY_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(MODULE_SUMMARY_WORK) };
 }
 
-#[cfg(test)]
-pub(crate) fn with_module_summary_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
-    struct Reset(usize);
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            SUMMARY_LIMIT.set(self.0);
-        }
-    }
-    let _reset = Reset(SUMMARY_LIMIT.replace(limit));
-    f()
-}
-
+/// Child summaries copied into a module. Guarded and positional boundaries
+/// cannot always be contracted, so the copies take the module's steps before
+/// they are reserved or cloned: a small hierarchy cannot expand into its
+/// exponentially large instance tree. Once a copy does not fit, later ones
+/// are not measured again.
 pub(super) struct ExpansionBudget {
-    remaining: usize,
+    steps: Steps,
+    closed: bool,
 }
 
 impl ExpansionBudget {
-    pub(super) fn new() -> Self {
-        #[cfg(test)]
-        let remaining = SUMMARY_LIMIT.get();
-        #[cfg(not(test))]
-        let remaining = MODULE_SUMMARY_WORK;
-        Self { remaining }
+    pub(super) fn new(steps: &Steps) -> Self {
+        Self {
+            steps: steps.clone(),
+            closed: false,
+        }
     }
 
     pub(super) fn reserve(&mut self, summary: &ModuleCombSummary) -> bool {
-        let remaining = (|| {
-            let remaining = self.remaining.checked_sub(summary.nodes.len())?;
-            let mut remaining = remaining.checked_sub(summary.edges.len())?;
-            for node in &summary.nodes {
-                remaining = remaining.checked_sub(node.domains.len())?;
-            }
-            for edge in &summary.edges {
-                remaining = remaining.checked_sub(edge.condition.work_size())?;
-            }
-            Some(remaining)
-        })();
-        // Stop retrying large summaries once the module's budget is exhausted.
-        self.remaining = remaining.unwrap_or(0);
-        remaining.is_some()
-    }
-
-    pub(super) fn remaining(&self) -> usize {
-        self.remaining
+        if self.closed {
+            return false;
+        }
+        let cost = summary
+            .nodes
+            .iter()
+            .map(|node| node.domains.len().saturating_add(1))
+            .chain(
+                summary
+                    .edges
+                    .iter()
+                    .map(|edge| edge.condition.work_size().saturating_add(1)),
+            )
+            .try_fold(0usize, |cost, part| {
+                cost.checked_add(part)
+                    .filter(|&cost| cost <= self.steps.remaining())
+            });
+        self.reserve_work(cost.unwrap_or(usize::MAX))
     }
 
     pub(super) fn reserve_dag<K>(&mut self, graph: &super::ssa::DependencyDag<K>) -> bool {
@@ -87,9 +75,8 @@ impl ExpansionBudget {
     }
 
     pub(super) fn reserve_work(&mut self, cost: usize) -> bool {
-        let remaining = self.remaining.checked_sub(cost);
-        self.remaining = remaining.unwrap_or(0);
-        remaining.is_some()
+        self.closed = self.closed || !self.steps.take(cost);
+        !self.closed
     }
 }
 

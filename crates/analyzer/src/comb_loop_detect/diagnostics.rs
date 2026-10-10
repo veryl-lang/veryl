@@ -2,8 +2,12 @@
 
 use super::build_module_graph_with_trace;
 use super::graph::{DependencyGraph, compatible_cycle, strongly_connected_components};
-use super::model::{ModuleCombSummary, SummaryRegion};
-use super::region::{ArraySpan, BitPartition, NodeKey};
+use super::model::{
+    AxisBounds, ModuleCombSummary, SummaryRegion, bounds_domain, domain_bounds, image,
+};
+use super::region::{ArraySpan, NodeKey, PackedSpan};
+use super::ssa::PositionDomain;
+use super::steps::Steps;
 use crate::ir::{Component, Declaration, Module, Signature, VarId, VarPath, Variable};
 use crate::symbol::SymbolId;
 use crate::{AnalyzerError, HashMap, HashSet};
@@ -66,7 +70,7 @@ pub(super) type DiagnosticReplayCache = HashMap<(Signature, TraceKind), Rc<Depen
 pub(super) fn check_graph(
     module: &Module,
     graph: &DependencyGraph,
-    bit_part: &BitPartition,
+    steps: &Steps,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     replays: &mut DiagnosticReplayCache,
     errors: &mut Vec<AnalyzerError>,
@@ -77,15 +81,44 @@ pub(super) fn check_graph(
         super::graph::unconstrained_subgraph_is_acyclic(graph),
         "unconstrained dependency nodes must be introduced as a DAG"
     );
-    for scc in strongly_connected_components(graph) {
-        match compatible_cycle(graph, &scc) {
-            Some(true) => {}
-            Some(false) => continue,
-            None => {
-                complete = false;
-                continue;
-            }
+    let mut cyclic = Vec::new();
+    let sccs = strongly_connected_components(graph);
+    let decisions = steps.share(
+        sccs.len(),
+        false,
+        |stage| compatible_cycle(graph, &sccs[stage], steps),
+        Option::is_none,
+    );
+    for (scc, decision) in sccs.into_iter().zip(decisions) {
+        match decision {
+            Some(true) => cyclic.push(scc),
+            Some(false) => {}
+            None => complete = false,
         }
+    }
+    if cyclic.is_empty() {
+        return complete;
+    }
+    // Report each cycle with the elements and bits it passes through: the
+    // cyclic component is divided where its decision distinguished positions,
+    // and each part with a feasible path back to its positions is reported.
+    // Otherwise the component is reported undivided.
+    let reports = cyclic
+        .into_iter()
+        .map(|scc| (super::graph::report_cycles(graph, &scc, steps), scc))
+        .collect::<Vec<_>>();
+    let mut components = Vec::new();
+    for ((split, found), scc) in &reports {
+        match split.as_ref().filter(|_| !found.is_empty()) {
+            Some(split) => components.extend(
+                found
+                    .iter()
+                    .map(|(part, path)| (split, part.clone(), Some(path.clone()))),
+            ),
+            None => components.push((graph, scc.clone(), None)),
+        }
+    }
+    for (graph, scc, path) in components {
         let mut keys = scc
             .iter()
             .filter_map(|node| graph[*node].diagnostic)
@@ -110,8 +143,12 @@ pub(super) fn check_graph(
         if !reported.insert((module.signature.symbol, paths)) {
             continue;
         }
-        let cycle = dependency_cycle(graph, &scc);
-        let cycle_keys = cycle_nodes(graph, &cycle);
+        let cycle = path.unwrap_or_else(|| dependency_cycle(graph, &scc, steps));
+        let cycle_regions = cycle_nodes(graph, &cycle, steps);
+        let cycle_keys = cycle_regions
+            .iter()
+            .map(|(key, _)| *key)
+            .collect::<Vec<_>>();
         let mut tokens = diagnostic_tokens(module, &cycle_keys);
         if tokens.is_empty() {
             tokens = diagnostic_tokens(module, &keys);
@@ -119,7 +156,13 @@ pub(super) fn check_graph(
         let Some(&primary) = tokens.first() else {
             continue;
         };
-        let mut provenance = diagnostic_provenance(module, summaries, &cycle, replays);
+        // Provenance replays the module as built, whose edges the cycle's
+        // edges come from.
+        let original = cycle
+            .iter()
+            .map(|edge| graph.origins.get(edge).copied().unwrap_or(*edge))
+            .collect::<Vec<_>>();
+        let mut provenance = diagnostic_provenance(module, summaries, &original, replays);
         provenance.retain(|token| !tokens.contains(token));
         let identifier = module
             .variables
@@ -127,7 +170,7 @@ pub(super) fn check_graph(
             .map(|var| var.path.to_string());
         errors.push(AnalyzerError::combinational_loop(
             identifier.as_deref().unwrap_or("?"),
-            &format_cycle(module, bit_part, &cycle_keys),
+            &format_cycle(module, &cycle_regions),
             &primary,
             &tokens[1..],
             &provenance,
@@ -159,8 +202,8 @@ fn sorted_edges(
     edges
 }
 
-fn dependency_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Vec<EdgeIndex> {
-    if let Some(path) = super::graph::diagnostic_cycle(graph, scc) {
+fn dependency_cycle(graph: &DependencyGraph, scc: &[NodeIndex], steps: &Steps) -> Vec<EdgeIndex> {
+    if let Some(path) = super::graph::diagnostic_cycle(graph, scc, steps) {
         return path;
     }
     let members = scc.iter().copied().collect::<HashSet<_>>();
@@ -210,16 +253,35 @@ fn dependency_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Vec<EdgeIndex
     sorted_edges(graph, start, &members)
 }
 
-fn cycle_nodes(graph: &DependencyGraph, path: &[EdgeIndex]) -> Vec<NodeKey> {
+/// The variable nodes of a cycle, each with the positions the cycle passes
+/// through there. A node the split left whole is narrowed to those positions,
+/// so a ring through one storage node still names its elements.
+fn cycle_nodes(
+    graph: &DependencyGraph,
+    path: &[EdgeIndex],
+    steps: &Steps,
+) -> Vec<(NodeKey, SummaryRegion)> {
     let Some(first) = path.first() else {
         return Vec::new();
     };
-    let mut keys = std::iter::once(graph.edge_endpoints(*first).unwrap().0)
+    let nodes = std::iter::once(graph.edge_endpoints(*first).unwrap().0)
         .chain(
             path.iter()
                 .map(|edge| graph.edge_endpoints(*edge).unwrap().1),
         )
-        .filter_map(|node| graph[node].diagnostic)
+        .collect::<Vec<_>>();
+    let positions = cycle_positions(graph, path, &nodes, steps);
+    let mut keys = nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &node)| {
+            let key = graph[node].diagnostic?;
+            let region = graph[node].region;
+            let narrowed = positions
+                .as_ref()
+                .and_then(|positions| narrow_region(region, positions[index]));
+            Some((key, narrowed.unwrap_or(region)))
+        })
         .collect::<Vec<_>>();
     if let Some(&first) = keys.first()
         && keys.last() != Some(&first)
@@ -227,6 +289,69 @@ fn cycle_nodes(graph: &DependencyGraph, path: &[EdgeIndex]) -> Vec<NodeKey> {
         keys.push(first);
     }
     keys
+}
+
+/// Bounds of the positions at each node of `path` that lie on a cycle along
+/// it: those at the first node that the path leads back to themselves, and
+/// their images. Boxes over-approximate, so they only narrow names and never
+/// decide a cycle.
+fn cycle_positions(
+    graph: &DependencyGraph,
+    path: &[EdgeIndex],
+    nodes: &[NodeIndex],
+    steps: &Steps,
+) -> Option<Vec<[AxisBounds; 2]>> {
+    let anchors = super::graph::cycle_anchor_bounds(graph, path, steps)?;
+    let bounds = node_bounds(&graph[nodes[0]])?;
+    let start = [0, 1].map(|axis| anchors[axis].unwrap_or(bounds[axis]));
+    let mut boxes = vec![intersect_bounds(start, bounds)?];
+    for (edge, &next) in path.iter().zip(&nodes[1..]) {
+        let current = *boxes.last()?;
+        let bounds = node_bounds(&graph[next])?;
+        boxes.push(match image(graph[*edge].kind, current) {
+            None => bounds,
+            Some(image) => intersect_bounds(image?, bounds)?,
+        });
+    }
+    Some(boxes)
+}
+
+fn node_bounds(node: &super::graph::GraphNode) -> Option<[AxisBounds; 2]> {
+    let mut domains = node.domains.iter().map(domain_bounds);
+    let Some(first) = domains.next() else {
+        return domain_bounds(&PositionDomain::new(node.region.array, node.region.packed));
+    };
+    domains.try_fold(first?, |hull, bounds| {
+        let bounds = bounds?;
+        Some([
+            (hull[0].0.min(bounds[0].0), hull[0].1.max(bounds[0].1)),
+            (hull[1].0.min(bounds[1].0), hull[1].1.max(bounds[1].1)),
+        ])
+    })
+}
+
+fn intersect_bounds(a: [AxisBounds; 2], b: [AxisBounds; 2]) -> Option<[AxisBounds; 2]> {
+    let axis = |a: AxisBounds, b: AxisBounds| {
+        let bounds = (a.0.max(b.0), a.1.min(b.1));
+        (bounds.0 < bounds.1).then_some(bounds)
+    };
+    Some([axis(a[0], b[0])?, axis(a[1], b[1])?])
+}
+
+fn narrow_region(region: SummaryRegion, positions: [AxisBounds; 2]) -> Option<SummaryRegion> {
+    let domain = bounds_domain(positions)?;
+    let array = region.array.intersection(ArraySpan {
+        start: domain.array_start,
+        length: domain.array_length,
+    })?;
+    let packed = region
+        .packed
+        .intersection(PackedSpan::new(domain.packed_start, domain.packed_length)?)?;
+    Some(SummaryRegion {
+        array,
+        packed,
+        ..region
+    })
 }
 
 fn replay(
@@ -241,7 +366,10 @@ fn replay(
     }
     #[cfg(test)]
     DIAGNOSTIC_REPLAYS.set(DIAGNOSTIC_REPLAYS.get() + 1);
-    let (graph, _, _) = build_module_graph_with_trace(module, summaries, tracing).ok()?;
+    // Construction is deterministic and a replay has the steps the module
+    // started with, so it has the same edges.
+    let (graph, _) =
+        build_module_graph_with_trace(module, summaries, tracing, &Steps::new()).ok()?;
     let graph = Rc::new(graph);
     cache.insert(key, Rc::clone(&graph));
     Some(graph)
@@ -456,12 +584,12 @@ fn diagnostic_tokens(
     tokens
 }
 
-fn format_cycle(module: &Module, bit_part: &BitPartition, keys: &[NodeKey]) -> String {
+fn format_cycle(module: &Module, regions: &[(NodeKey, SummaryRegion)]) -> String {
     let mut names = Vec::new();
     // `dependency_cycle` repeats the first node at the end. Render each
     // region once per adjacent run, then close the human-readable cycle.
-    for key in keys.iter().take(keys.len().saturating_sub(1)) {
-        let name = format_cycle_node(module, bit_part, *key);
+    for (_, region) in regions.iter().take(regions.len().saturating_sub(1)) {
+        let name = format_cycle_node(module, *region);
         if names.last() != Some(&name) {
             names.push(name);
         }
@@ -474,8 +602,8 @@ fn format_cycle(module: &Module, bit_part: &BitPartition, keys: &[NodeKey]) -> S
     names.join(" -> ")
 }
 
-fn format_cycle_node(module: &Module, bit_part: &BitPartition, key: NodeKey) -> String {
-    let (id, array, range) = key;
+fn format_cycle_node(module: &Module, region: SummaryRegion) -> String {
+    let SummaryRegion { id, array, packed } = region;
     let variable = module
         .variables
         .get(&id)
@@ -500,9 +628,7 @@ fn format_cycle_node(module: &Module, bit_part: &BitPartition, key: NodeKey) -> 
         }
     }
 
-    if let Some(packed) = bit_part.ranges_of((id, array)).get(range)
-        && (variable.r#type.total_width() != Some(packed.length) || packed.start != 0)
-    {
+    if variable.r#type.total_width() != Some(packed.length) || packed.start != 0 {
         if packed.length == 1 {
             name.push_str(&format!("[{}]", packed.start));
         } else {

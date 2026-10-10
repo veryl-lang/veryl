@@ -229,6 +229,82 @@ fn comb_loop_dynamic_selector_bound_equality_respects_expression_widths() {
 }
 
 #[test]
+fn comb_loop_runtime_index_reads_keep_their_elements() {
+    // A variable is one storage node, so a write at a runtime index evaluates
+    // each candidate element with the elements it reads at that index.
+    for (destination, source, low, high, expected) in [
+        ("index + 1", "b[index]", "a[1]", "0", true),
+        ("index + 1", "b[index]", "0", "a[0]", false),
+        ("index", "b[index + 1]", "0", "a[0]", true),
+        ("index", "b[index + 1]", "a[1]", "0", false),
+        ("index", "b[index] | c", "0", "a[0]", false),
+        ("index", "b[index] | b[0]", "a[1]", "0", true),
+        ("index", "b[0]", "a[1]", "0", true),
+        ("index", "{b[index][0], c}", "0", "a[0]", false),
+        ("index", "b[index] + 1", "a[1]", "0", true),
+    ] {
+        let code = format!(
+            r#"
+            module Top(sel: input logic, c: input logic, o: output logic) {{
+                var index: logic;
+                var a: logic<2>[3];
+                var b: logic<2>[2];
+                always_comb {{
+                    index = sel;
+                    a = '{{default: 0}};
+                    a[{destination}] = {source};
+                }}
+                assign b[0] = {low};
+                assign b[1] = {high};
+                assign o = a[0][0];
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        let found = errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }));
+        assert_eq!(found, expected, "{code}\n{errors:#?}");
+        assert!(comb_loop_analysis_is_complete(&code), "{code}");
+    }
+}
+
+#[test]
+fn comb_loop_runtime_index_write_keeps_both_conditional_arms() {
+    // `x[1]` reaches `q[7]` through the child, and `q[7]` is one arm of the
+    // value written at the runtime index.
+    for value in ["(if c ? x[0] : q[7])", "q[7]", "(c & (if c ? x[0] : q[7]))"] {
+        let code = format!(
+            r#"
+            module Child (i: input logic<4>, o: output logic<4>) {{
+                always_comb {{ o = 0; o[i[1:0]] = i[2]; }}
+            }}
+            module Top (k: input logic<2>, o: output logic) {{
+                var x: logic [4];
+                var q: logic<8>;
+                var c: logic;
+                always_comb {{
+                    x = '{{default: 0}};
+                    c = 0;
+                    case k {{ 1: {{ x[k] = {value}; }} default: {{}} }}
+                }}
+                inst u: Child (i: {{x[0], x[1], x[2], x[3]}}, o: q[7:4]);
+                assign q[3:0] = q[7:4];
+                assign o = x[0];
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "{value}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
 fn comb_loop_dynamic_selector_stable_values_keep_safe_offsets() {
     for (destination, source) in [
         ("index", "b[index]"),
@@ -1327,6 +1403,7 @@ fn comb_loop_many_opposing_shifts_find_a_witness_before_exhausting_search() {
             .collect::<Vec<_>>()
             .join(" | ");
         let code = format!("module Top (o: output logic<128>) {{ assign o = {terms}; }}");
+        crate::comb_loop_detect::reset_cycle_decision_work();
         crate::comb_loop_detect::reset_cycle_search_work();
         assert_comb_loop(
             "opposing shifts already contain a feasible cycle",
@@ -1334,8 +1411,15 @@ fn comb_loop_many_opposing_shifts_find_a_witness_before_exhausting_search() {
             true,
         );
         assert!(
-            crate::comb_loop_detect::cycle_search_work() < 100_000,
+            crate::comb_loop_detect::cycle_decision_work() < 100_000,
             "a cheap witness must not pay for unvisited triples: {}",
+            crate::comb_loop_detect::cycle_decision_work()
+        );
+        // The report divides the component to name the looping bits; its
+        // path search must stay near the size of the divided graph.
+        assert!(
+            crate::comb_loop_detect::cycle_search_work() < 150_000,
+            "the report must not search every path to each bit: {}",
             crate::comb_loop_detect::cycle_search_work()
         );
         assert!(comb_loop_analysis_is_complete(&code));

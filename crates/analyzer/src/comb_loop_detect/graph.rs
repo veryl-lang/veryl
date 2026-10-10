@@ -3,7 +3,11 @@
 mod guarded;
 mod relation;
 
+use super::steps::Steps;
+use relation::{PathPieces, PieceStates};
+
 use super::diagnostics::SummaryEdgeCause;
+use super::model::{AxisBounds, bounds_domain, domain_bounds, image};
 use super::model::{BitDependency, SummaryRegion};
 #[cfg(test)]
 use super::region::translate_position;
@@ -58,6 +62,10 @@ pub(super) struct DependencyGraph {
     pub(super) sites: HashMap<NodeIndex, DefinitionSite<NodeIndex>>,
     pub(super) summary_causes: HashMap<EdgeIndex, Vec<SummaryEdgeCause>>,
     pub(super) active_summary: Option<SummaryEdgeCause>,
+    // Region-restricted entries into storage nodes, by node and region.
+    pub(super) carriers: HashMap<(NodeIndex, PositionDomain), NodeIndex>,
+    // In a split graph, the edge of the original graph each edge comes from.
+    pub(super) origins: HashMap<EdgeIndex, EdgeIndex>,
 }
 
 impl DependencyGraph {
@@ -68,6 +76,8 @@ impl DependencyGraph {
             sites: HashMap::default(),
             summary_causes: HashMap::default(),
             active_summary: None,
+            carriers: HashMap::default(),
+            origins: HashMap::default(),
         }
     }
 }
@@ -154,66 +164,56 @@ pub(super) fn ensure_node(
     Some(node)
 }
 
+/// Whether `dependency` can relate a position `source` admits to one that
+/// `destination` admits.
+#[cfg(test)]
 pub(super) fn node_regions_overlap_with_dependency(
     source: &GraphNode,
     destination: &GraphNode,
     dependency: BitDependency,
 ) -> bool {
-    dependency.array.is_none_or(|array| {
-        spans_overlap_with_offset(
-            source.region.array.start,
-            source.region.array.length,
-            destination.region.array.start,
-            destination.region.array.length,
-            array,
-        )
-    }) && dependency.packed.is_none_or(|packed| {
-        spans_overlap_with_offset(
-            source.region.packed.start,
-            source.region.packed.length,
-            destination.region.packed.start,
-            destination.region.packed.length,
-            packed,
-        )
-    })
+    regions_overlap_with_dependency(
+        (source.region, &source.domains),
+        (destination.region, &destination.domains),
+        dependency,
+    )
 }
 
-fn spans_overlap_with_offset(
-    source_start: usize,
-    source_length: usize,
-    destination_start: usize,
-    destination_length: usize,
-    offset: isize,
+/// As `node_regions_overlap_with_dependency`, for a node given by its region
+/// and domains. A single domain admits only that box; otherwise the region
+/// bounds the positions.
+pub(super) fn regions_overlap_with_dependency(
+    source: (SummaryRegion, &[PositionDomain]),
+    destination: (SummaryRegion, &[PositionDomain]),
+    dependency: BitDependency,
 ) -> bool {
-    let Some(source_end) = source_start.checked_add(source_length) else {
+    let range = |start: usize, length: usize| {
+        let start = isize::try_from(start).ok()?;
+        Some((start, start.checked_add_unsigned(length)?))
+    };
+    let extent = |(region, domains): (SummaryRegion, &[PositionDomain])| {
+        let domain = match domains {
+            [domain] => Some((
+                range(domain.array_start, domain.array_length)?,
+                range(domain.packed_start, domain.packed_length)?,
+            )),
+            _ => None,
+        };
+        domain.or_else(|| {
+            Some((
+                range(region.array.start, region.array.length)?,
+                range(region.packed.start, region.packed.length)?,
+            ))
+        })
+    };
+    let (Some((source_array, source_packed)), Some((destination_array, destination_packed))) =
+        (extent(source), extent(destination))
+    else {
         return false;
     };
-    let Some(destination_end) = destination_start.checked_add(destination_length) else {
-        return false;
-    };
-    if offset >= 0 {
-        let offset = offset.unsigned_abs();
-        let (Some(source_start), Some(source_end)) = (
-            source_start.checked_add(offset),
-            source_end.checked_add(offset),
-        ) else {
-            return false;
-        };
-        source_start < destination_end && destination_start < source_end
-    } else {
-        // `source + offset` overlaps `destination` iff `source` overlaps
-        // `destination - offset`. Shift the destination in the non-negative
-        // direction so a valid source suffix is not lost when source_start +
-        // offset would be negative.
-        let offset = offset.unsigned_abs();
-        let (Some(destination_start), Some(destination_end)) = (
-            destination_start.checked_add(offset),
-            destination_end.checked_add(offset),
-        ) else {
-            return false;
-        };
-        source_start < destination_end && destination_start < source_end
-    }
+    let source = [source_array, source_packed];
+    dependency.may_reach(0, source, destination_array)
+        && dependency.may_reach(1, source, destination_packed)
 }
 
 /// Both passes use explicit worklists, including for long acyclic chains.
@@ -239,11 +239,6 @@ pub(super) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool
     !daggy::petgraph::algo::is_cyclic_directed(&induced)
 }
 
-// Count both transitions and dominance comparisons: a bound on queued states
-// alone still permits quadratic work in the per-node antichains. Exhaustion
-// means incomplete analysis, never an invented cycle or a proof of absence.
-const CYCLE_SEARCH_WORK: usize = 1_000_000;
-
 #[cfg(test)]
 thread_local! {
     static SEARCH_WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -267,21 +262,45 @@ pub(crate) fn cycle_decision_work() -> usize {
     DECISION_WORK.get()
 }
 
+/// The steps of one search. It counts both transitions and dominance
+/// comparisons: a bound on queued states alone still permits quadratic work
+/// in the per-node antichains. Exhaustion means incomplete analysis, never an
+/// invented cycle or a proof of absence.
 struct SearchBudget {
     remaining: usize,
     exhausted: bool,
 }
 
 impl SearchBudget {
+    #[cfg(test)]
     fn new() -> Self {
         Self {
-            remaining: CYCLE_SEARCH_WORK,
+            remaining: super::steps::STEP_LIMIT,
             exhausted: false,
         }
     }
 
-    // Composition distributes over both unions, then normalization compares
-    // the resulting pieces. Charge before allocating that Cartesian product.
+    /// Search with the steps that remain for the module, keeping what the
+    /// search leaves.
+    fn with_steps<T>(steps: &Steps, search: impl FnOnce(&mut Self) -> T) -> T {
+        steps.lend(|remaining| {
+            let mut budget = Self {
+                remaining: *remaining,
+                exhausted: false,
+            };
+            let result = search(&mut budget);
+            *remaining = budget.remaining;
+            result
+        })
+    }
+
+    // Composition distributes over both unions. Charge before allocating
+    // that Cartesian product; normalization charges its own comparisons.
+    fn spend_pieces(&mut self, left: usize, right: usize) -> bool {
+        self.spend(left.saturating_mul(right).saturating_add(1))
+    }
+
+    // Pairwise work over a Cartesian product of feasible positions.
     fn spend_product(&mut self, left: usize, right: usize) -> bool {
         let pieces = left.saturating_mul(right);
         self.spend(pieces.saturating_pow(2).saturating_add(1))
@@ -411,23 +430,31 @@ fn try_cycle_witness(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) 
     found
 }
 
-pub(super) fn compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> Option<bool> {
-    let mut budget = SearchBudget::new();
-    let found = has_compatible_cycle_with_budget(graph, scc, &mut budget);
-    // Count the decision separately from optional diagnostic path recovery.
-    // Measurement must not change the budget or the production search path.
-    #[cfg(test)]
-    DECISION_WORK.set(
-        DECISION_WORK
-            .get()
-            .saturating_add(CYCLE_SEARCH_WORK - budget.remaining),
-    );
-    (found || !budget.exhausted).then_some(found)
+/// Whether `scc` has a compatible cycle, or `None` when the steps ran out.
+pub(super) fn compatible_cycle(
+    graph: &DependencyGraph,
+    scc: &[NodeIndex],
+    steps: &Steps,
+) -> Option<bool> {
+    SearchBudget::with_steps(steps, |budget| {
+        #[cfg(test)]
+        let initial = budget.remaining;
+        let found = has_compatible_cycle_with_budget(graph, scc, budget, None);
+        // Count the decision separately from diagnostic path recovery.
+        #[cfg(test)]
+        DECISION_WORK.set(
+            DECISION_WORK
+                .get()
+                .saturating_add(initial - budget.remaining),
+        );
+        (found || !budget.exhausted).then_some(found)
+    })
 }
 
 #[cfg(test)]
 fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
-    compatible_cycle(graph, scc).expect("small reference graphs must be decided completely")
+    compatible_cycle(graph, scc, &Steps::new())
+        .expect("small reference graphs must be decided completely")
 }
 
 // Correctness argument for the graph-relative cycle decision:
@@ -438,17 +465,18 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
 // `PathCondition` as its stored Cartesian set of branch choices. Correlations
 // discarded before graph construction are deliberately not reintroduced here.
 //
-// For a fixed anchor, every valuation of a queued state's condition admits a
-// real path that has not revisited the anchor, with exactly the state's binary
-// position relation. This holds initially by `identity`, is preserved by
-// `then_dependency`, and by exact unions of guards on the same relation.
-// Reverse reachability removes no path
-// that can return to the anchor. If an existing state has a superset relation
-// under a weaker condition, every continuation of the new state is also a
-// continuation of the existing state: relation composition is monotone and
-// every valuation admitted by the new condition is admitted by the existing
-// one. The dominance pruning is therefore lossless. The identity-edge search
-// is the same invariant specialized to zero translations.
+// For a fixed anchor, each node keeps a table from relation pieces to path
+// conditions (`PieceStates`). A piece under a condition means: for every
+// valuation of the condition, every position pair of the piece is realized by
+// a real path from the anchor that has not revisited it and whose guards that
+// valuation admits. This holds initially by `identity`, is preserved by
+// `then_dependency` with the conjoined edge guard, by the union of pieces
+// (composition distributes over unions) and by the exact disjunction of the
+// conditions of one piece. Reverse reachability removes no path that can
+// return to the anchor. A piece contained in another piece whose condition
+// covers its own adds no continuation, so dropping it is lossless; only the
+// pieces whose condition grew are expanded again. The identity-edge search is
+// the same invariant specialized to zero translations.
 //
 // Once an anchor occurrence is fixed, cutting a closed walk at every later
 // occurrence of that anchor uniquely decomposes it into first-return walks.
@@ -471,15 +499,18 @@ fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
 // in its first and last finite guards, so only finitely many displacements and
 // interval endpoints are reachable. A mixed word can be rotated to begin with
 // an `Unlinked` relation; its endpoints come only from finite domain boundaries
-// and those finite exact displacements. Thus only finitely many normalized
-// relation states are reachable. Branches and arms are finite as well, and a
-// dominated state is never queued again. Every endpoint and intermediate
+// and those finite exact displacements; merging contiguous anchor-independent
+// ranges only unions such endpoints. Thus only finitely many pieces are
+// reachable. Branches and arms are finite as well, so the condition of each
+// piece grows only finitely often and every piece is expanded finitely many
+// times. Every endpoint and intermediate
 // offset operation is a construction invariant required to be representable
 // in `isize`; overflow is not interpreted as a dependency relation.
 fn has_compatible_cycle_with_budget(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
     budget: &mut SearchBudget,
+    mut cuts: Option<&mut Cuts>,
 ) -> bool {
     if scc.is_empty()
         || (scc.len() == 1 && !graph.edges(scc[0]).any(|edge| edge.target() == scc[0]))
@@ -507,78 +538,116 @@ fn has_compatible_cycle_with_budget(
             return false;
         }
         let returnable = nodes_that_may_reach_start(graph, &nodes, start);
-        if !budget.spend_product(graph[start].domains.len().max(1), 1) {
+        if !budget.spend_pieces(graph[start].domains.len().max(1), 1) {
             return false;
         }
-        let initial = PositionRelationSet::identity(&graph[start].domains);
+        let initial = PositionRelationSet::identity(&graph[start].domains, budget);
         let mut cycles = HashSet::default();
-        let mut queue = VecDeque::from([(start, PathCondition::default(), initial)]);
-        let mut reached: HashMap<NodeIndex, Vec<(PositionRelationSet, PathCondition)>> =
-            HashMap::default();
-        while let Some((node, condition, relation)) = queue.pop_front() {
-            if !budget.spend(reached.get(&node).map_or(1, |states| states.len() + 1)) {
+        let mut reached: HashMap<NodeIndex, PieceStates> = HashMap::default();
+        let mut queue = VecDeque::from([start]);
+        let mut queued = HashSet::from_iter([start]);
+        let mut first = true;
+        while let Some(node) = queue.pop_front() {
+            queued.remove(&node);
+            if !budget.spend(1) {
                 return false;
             }
-            if node != start
-                && !reached[&node]
-                    .iter()
-                    .any(|(r, c)| *r == relation && *c == condition)
-            {
-                continue;
-            }
-            for edge in graph.edges(node) {
-                if !budget.spend(1) {
-                    return false;
-                }
-                let next = edge.target();
-                if !returnable.contains(&next) {
-                    continue;
-                }
-                let Some(next_condition) =
-                    condition.conjoin_if_compatible(&edge.weight().condition)
-                else {
-                    continue;
-                };
-                // Retain the full binary relation from the anchor position to
-                // the current position. Unlike a single optional offset, this
-                // preserves the reachable current range after a WHOLE edge.
-                if !budget.spend_product(relation.piece_count(), graph[next].domains.len().max(1)) {
-                    return false;
-                }
-                let next_relation =
-                    relation.then_dependency(edge.weight().kind, &graph[next].domains);
-                if next_relation.is_empty() {
-                    continue;
-                }
-                if next == start {
-                    if next_relation.intersects_identity() {
-                        return true;
+            let states = if std::mem::take(&mut first) {
+                vec![(PathCondition::default(), initial.clone())]
+            } else {
+                reached
+                    .get_mut(&node)
+                    .expect("queued nodes have states")
+                    .take_delta(budget)
+            };
+            for (condition, relation) in states {
+                // Parallel edges into one node under one guard continue as a
+                // single union state. Composition distributes over unions.
+                let mut successors: HashMap<(NodeIndex, PathCondition), Vec<PositionRelationSet>> =
+                    HashMap::default();
+                let mut order = Vec::new();
+                for edge in graph.edges(node) {
+                    if !budget.spend(1) {
+                        return false;
                     }
-                    let inserted = cycles.insert(GuardedCycle {
-                        relation: next_relation,
-                        condition: next_condition,
-                    });
-                    // Check geometrically growing prefixes without waiting
-                    // for every first-return path through the other loops.
-                    if inserted
-                        && !queue.is_empty()
-                        && cycles.len() >= 2
-                        && cycles.len().is_power_of_two()
-                        && try_cycle_witness(&cycles, budget)
+                    let next = edge.target();
+                    if !returnable.contains(&next) {
+                        continue;
+                    }
+                    let Some(next_condition) =
+                        condition.conjoin_if_compatible(&edge.weight().condition)
+                    else {
+                        continue;
+                    };
+                    // Retain the full binary relation from the anchor position to
+                    // the current position. Unlike a single optional offset, this
+                    // preserves the reachable current range after a WHOLE edge.
+                    if !budget
+                        .spend_pieces(relation.piece_count(), graph[next].domains.len().max(1))
                     {
-                        return true;
+                        return false;
                     }
-                    continue;
+                    let next_relation =
+                        relation.then_dependency(edge.weight().kind, &graph[next].domains, budget);
+                    if next_relation.is_empty() {
+                        continue;
+                    }
+                    if let Some(cuts) = cuts.as_deref_mut() {
+                        record_cuts(cuts, start, next, &next_relation);
+                    }
+                    let successor = successors
+                        .entry((next, next_condition.clone()))
+                        .or_default();
+                    if successor.is_empty() {
+                        order.push((next, next_condition));
+                    }
+                    successor.push(next_relation);
                 }
-                if let Some(condition) = insert_cycle_state(
-                    reached.entry(next).or_default(),
-                    &next_relation,
-                    next_condition,
-                    PositionRelationSet::piecewise_covers,
-                    PositionRelationSet::piece_count,
-                    budget,
-                ) {
-                    queue.push_back((next, condition, next_relation));
+                for successor in order {
+                    let relations = successors.remove(&successor).expect("ordered successor");
+                    let (next, next_condition) = successor;
+                    let next_relation = if relations.len() == 1 {
+                        relations.into_iter().next().expect("one relation")
+                    } else {
+                        let pieces = relations.iter().map(PositionRelationSet::piece_count).sum();
+                        if !budget.spend(pieces) {
+                            return false;
+                        }
+                        PositionRelationSet::union_all(relations, budget)
+                    };
+                    if next == start {
+                        if next_relation.intersects_identity() {
+                            return true;
+                        }
+                        let mut inserted = false;
+                        for relation in next_relation.split_translations() {
+                            inserted |= cycles.insert(GuardedCycle {
+                                relation,
+                                condition: next_condition.clone(),
+                            });
+                        }
+                        // Check geometrically growing prefixes without waiting
+                        // for every first-return path through the other loops.
+                        if inserted
+                            && !queue.is_empty()
+                            && cycles.len() >= 2
+                            && cycles.len().is_power_of_two()
+                            && try_cycle_witness(&cycles, budget)
+                        {
+                            return true;
+                        }
+                        continue;
+                    }
+                    let Some(changed) = reached.entry(next).or_default().insert(
+                        &next_relation,
+                        &next_condition,
+                        budget,
+                    ) else {
+                        return false;
+                    };
+                    if changed && queued.insert(next) {
+                        queue.push_back(next);
+                    }
                 }
             }
         }
@@ -596,13 +665,347 @@ fn has_compatible_cycle_with_budget(
     false
 }
 
+/// Boundaries per node, on each axis, at which a report divides it.
+pub(super) type Cuts = HashMap<NodeIndex, [Vec<isize>; 2]>;
+
+/// The boundaries that the decision for a cyclic component observes: the
+/// ranges of the start positions and of the positions each walk reaches.
+/// Dividing nodes there separates the positions the search distinguished,
+/// so a report can name the elements and bits of a cycle. The search takes
+/// the module's steps, so the boundaries follow its work, not the number of
+/// positions.
+pub(super) fn cycle_cuts(graph: &DependencyGraph, scc: &[NodeIndex], steps: &Steps) -> Cuts {
+    let mut cuts = Cuts::default();
+    SearchBudget::with_steps(steps, |budget| {
+        has_compatible_cycle_with_budget(graph, scc, budget, Some(&mut cuts))
+    });
+    cuts
+}
+
+fn record_cuts(cuts: &mut Cuts, start: NodeIndex, node: NodeIndex, relation: &PositionRelationSet) {
+    for [anchor, current] in relation.piece_bounds() {
+        for (node, bounds) in [(start, anchor), (node, current)] {
+            let entry = cuts.entry(node).or_default();
+            for axis in 0..2 {
+                if let Some((low, high)) = bounds[axis] {
+                    entry[axis].extend([low, high]);
+                }
+            }
+        }
+    }
+}
+
+fn node_box(node: &GraphNode) -> Option<[AxisBounds; 2]> {
+    match node.domains.as_slice() {
+        [domain] => domain_bounds(domain),
+        _ => None,
+    }
+}
+
+/// The nodes that replace one node of the graph being split.
+enum Pieces {
+    /// Outside the split components.
+    Dropped,
+    Whole(NodeIndex, Option<[AxisBounds; 2]>),
+    /// A grid at `cuts`, one node per cell in array-major order.
+    Grid {
+        cuts: [Vec<isize>; 2],
+        cells: Vec<(NodeIndex, [AxisBounds; 2])>,
+    },
+}
+
+impl Pieces {
+    fn nodes(&self) -> Vec<NodeIndex> {
+        match self {
+            Self::Dropped => Vec::new(),
+            Self::Whole(node, _) => vec![*node],
+            Self::Grid { cells, .. } => cells.iter().map(|(node, _)| *node).collect(),
+        }
+    }
+
+    /// The pieces that may contain a position of `reached`, or all of them
+    /// when it is unbounded.
+    fn candidates(
+        &self,
+        reached: Option<[AxisBounds; 2]>,
+    ) -> Vec<(NodeIndex, Option<[AxisBounds; 2]>)> {
+        match self {
+            Self::Dropped => Vec::new(),
+            Self::Whole(node, bounds) => vec![(*node, *bounds)],
+            Self::Grid { cuts, cells } => {
+                let Some(reached) = reached else {
+                    return cells
+                        .iter()
+                        .map(|&(node, cell)| (node, Some(cell)))
+                        .collect();
+                };
+                // Cell `k` spans `cuts[k]..cuts[k + 1]`.
+                let range = |axis: usize| {
+                    let cuts = &cuts[axis];
+                    let (start, end) = reached[axis];
+                    let first = cuts.partition_point(|&cut| cut <= start).saturating_sub(1);
+                    let last = cuts.partition_point(|&cut| cut < end).min(cuts.len() - 1);
+                    first..last
+                };
+                let width = cuts[1].len() - 1;
+                let mut result = Vec::new();
+                for array in range(0) {
+                    for packed in range(1) {
+                        let (node, cell) = cells[array * width + packed];
+                        result.push((node, Some(cell)));
+                    }
+                }
+                result
+            }
+        }
+    }
+}
+
+/// Divide the nodes of `nodes` at `cuts`, keeping only those nodes and the
+/// edges among them. A node is replaced by disjoint pieces of its domain, and
+/// an edge is kept between pieces whose positions it can relate, so the
+/// represented position pairs and walks are unchanged. `None` when no node
+/// is divided, or when the module's steps do not pay for the division.
+pub(super) fn split_at_cuts(
+    graph: &DependencyGraph,
+    nodes: &HashSet<NodeIndex>,
+    cuts: &Cuts,
+    steps: &Steps,
+) -> Option<DependencyGraph> {
+    let mut grids: Vec<Option<[Vec<isize>; 2]>> = Vec::with_capacity(graph.node_count());
+    let mut changed = false;
+    for node in graph.node_indices() {
+        let bounds = node_box(&graph[node]).filter(|_| nodes.contains(&node));
+        let (Some(bounds), Some(found)) = (bounds, cuts.get(&node)) else {
+            grids.push(None);
+            continue;
+        };
+        let grid = [0, 1].map(|axis| {
+            let (low, high) = bounds[axis];
+            let mut axis_cuts = found[axis]
+                .iter()
+                .copied()
+                .filter(|&cut| low < cut && cut < high)
+                .chain([low, high])
+                .collect::<Vec<_>>();
+            axis_cuts.sort_unstable();
+            axis_cuts.dedup();
+            axis_cuts
+        });
+        if grid[0].len() == 2 && grid[1].len() == 2 {
+            grids.push(None);
+            continue;
+        }
+        changed = true;
+        grids.push(Some(grid));
+    }
+    if !changed {
+        return None;
+    }
+
+    let mut split = DependencyGraph::new();
+    let mut mapped: Vec<Pieces> = Vec::with_capacity(graph.node_count());
+    for node in graph.node_indices() {
+        let original = &graph[node];
+        if !nodes.contains(&node) {
+            mapped.push(Pieces::Dropped);
+            continue;
+        }
+        let Some(grid) = grids[node.index()].take() else {
+            mapped.push(Pieces::Whole(
+                split.add_node(original.clone()),
+                node_box(original),
+            ));
+            continue;
+        };
+        let mut cells = Vec::new();
+        for array in grid[0].windows(2) {
+            for packed in grid[1].windows(2) {
+                let cell = [(array[0], array[1]), (packed[0], packed[1])];
+                let domain = bounds_domain(cell)
+                    .expect("cells between distinct cuts of a domain are non-empty domains");
+                let region = if original.diagnostic.is_some() {
+                    SummaryRegion {
+                        array: super::region::ArraySpan {
+                            start: domain.array_start,
+                            length: domain.array_length,
+                        },
+                        packed: super::region::PackedSpan::new(
+                            domain.packed_start,
+                            domain.packed_length,
+                        )
+                        .unwrap_or(original.region.packed),
+                        ..original.region
+                    }
+                } else {
+                    original.region
+                };
+                if !steps.take(1) {
+                    return None;
+                }
+                let piece = split.add_node(GraphNode {
+                    region,
+                    domains: vec![domain],
+                    diagnostic: original.diagnostic,
+                });
+                cells.push((piece, cell));
+            }
+        }
+        mapped.push(Pieces::Grid { cuts: grid, cells });
+    }
+    for edge in graph.edge_references() {
+        let relation = edge.weight().kind;
+        for (source, source_box) in mapped[edge.source().index()].candidates(None) {
+            let reached = match source_box.map(|source_box| image(relation, source_box)) {
+                Some(Some(None)) => continue,
+                Some(Some(Some(reached))) => Some(reached),
+                Some(None) | None => None,
+            };
+            for (destination, destination_box) in mapped[edge.target().index()].candidates(reached)
+            {
+                if !steps.take(1) {
+                    return None;
+                }
+                let reaches = match (source_box, destination_box) {
+                    (Some(source_box), Some(destination_box)) => {
+                        relation.may_reach(0, source_box, destination_box[0])
+                            && relation.may_reach(1, source_box, destination_box[1])
+                    }
+                    _ => true,
+                };
+                if !reaches {
+                    continue;
+                }
+                split.active_summary = None;
+                add_dependency_edge(&mut split, source, destination, edge.weight().clone());
+                let new_edge = split.edges[&(source, destination, relation)];
+                split.origins.insert(new_edge, edge.id());
+                if let Some(causes) = graph.summary_causes.get(&edge.id()) {
+                    split
+                        .summary_causes
+                        .entry(new_edge)
+                        .or_default()
+                        .extend(causes.iter().cloned());
+                }
+            }
+        }
+    }
+    for (node, site) in &graph.sites {
+        let inputs = site
+            .data_inputs
+            .iter()
+            .flat_map(|input| mapped[input.index()].nodes())
+            .collect::<Vec<_>>();
+        for piece in mapped[node.index()].nodes() {
+            split.sites.insert(
+                piece,
+                DefinitionSite {
+                    token: site.token,
+                    data_inputs: inputs.clone(),
+                },
+            );
+        }
+    }
+    Some(split)
+}
+
+/// Per axis, bounds of the positions at the first node of `path` that the
+/// path can lead back to themselves (`None` when unbounded), or `None` when
+/// it leads back to none.
+pub(super) fn cycle_anchor_bounds(
+    graph: &DependencyGraph,
+    path: &[EdgeIndex],
+    steps: &Steps,
+) -> Option<[Option<AxisBounds>; 2]> {
+    let (start, _) = graph.edge_endpoints(*path.first()?)?;
+    SearchBudget::with_steps(steps, |budget| {
+        let domains = &graph[start].domains;
+        if !budget.spend_pieces(domains.len().max(1), 1) {
+            return None;
+        }
+        let mut relation = PositionRelationSet::identity(domains, budget);
+        for &edge in path {
+            let (_, next) = graph.edge_endpoints(edge)?;
+            if !budget.spend_pieces(relation.piece_count(), graph[next].domains.len().max(1)) {
+                return None;
+            }
+            relation = relation.then_dependency(graph[edge].kind, &graph[next].domains, budget);
+            if relation.is_empty() {
+                return None;
+            }
+        }
+        relation.identity_anchor_bounds()
+    })
+}
+
 /// Recover a feasible first-return path for source diagnostics. Parent indices
 /// keep long paths linear in storage; positions and guards match the decision walk.
 pub(super) fn diagnostic_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
+    steps: &Steps,
 ) -> Option<Vec<EdgeIndex>> {
-    let mut budget = SearchBudget::new();
+    SearchBudget::with_steps(steps, |budget| {
+        diagnostic_cycle_with_budget(graph, scc, budget)
+    })
+}
+
+/// A component of a divided graph and a cycle through it.
+pub(super) type ReportedCycle = (Vec<NodeIndex>, Vec<EdgeIndex>);
+
+/// The cycles to report for a cyclic component: the component divided where
+/// its decision distinguished positions, and in each part of it the first
+/// path found back to the same positions. All of it takes the module's steps;
+/// empty when no path is found, and the component is then reported
+/// undivided.
+pub(super) fn report_cycles(
+    graph: &DependencyGraph,
+    scc: &[NodeIndex],
+    steps: &Steps,
+) -> (Option<DependencyGraph>, Vec<ReportedCycle>) {
+    let nodes = scc.iter().copied().collect::<HashSet<_>>();
+    let cuts = cycle_cuts(graph, scc, steps);
+    let split = split_at_cuts(graph, &nodes, &cuts, steps);
+    let found = split.as_ref().map_or_else(Vec::new, |split| {
+        SearchBudget::with_steps(steps, |budget| {
+            let mut found = Vec::new();
+            // A cycle is reported once per set of variables it passes through,
+            // so a part whose variables already have a path is not searched.
+            let mut variables_found = HashSet::default();
+            for part in kosaraju_scc(&**split) {
+                let cyclic =
+                    part.len() > 1 || split.edges(part[0]).any(|edge| edge.target() == part[0]);
+                if !cyclic {
+                    continue;
+                }
+                let mut variables = part
+                    .iter()
+                    .filter_map(|node| split[*node].diagnostic.map(|key| key.0))
+                    .collect::<Vec<_>>();
+                variables.sort_unstable();
+                variables.dedup();
+                if variables_found.contains(&variables) {
+                    continue;
+                }
+                if let Some(path) = diagnostic_cycle_with_budget(split, &part, budget) {
+                    variables_found.insert(variables);
+                    found.push((part, path));
+                }
+                if budget.exhausted {
+                    break;
+                }
+            }
+            found
+        })
+    });
+    (split, found)
+}
+
+fn diagnostic_cycle_with_budget(
+    graph: &DependencyGraph,
+    scc: &[NodeIndex],
+    budget: &mut SearchBudget,
+) -> Option<Vec<EdgeIndex>> {
     let members = scc.iter().copied().collect::<HashSet<_>>();
     let mut anchors = scc
         .iter()
@@ -611,7 +1014,7 @@ pub(super) fn diagnostic_cycle(
         .collect::<Vec<_>>();
     anchors.sort_unstable_by_key(|node| graph[*node].diagnostic);
     for start in anchors {
-        let relation = PositionRelationSet::identity(&graph[start].domains);
+        let relation = PositionRelationSet::identity(&graph[start].domains, budget);
         let mut states = vec![(
             start,
             PathCondition::default(),
@@ -619,8 +1022,7 @@ pub(super) fn diagnostic_cycle(
             None::<(usize, EdgeIndex)>,
         )];
         let mut queue = VecDeque::from([0]);
-        let mut reached: HashMap<NodeIndex, Vec<(PositionRelationSet, PathCondition)>> =
-            HashMap::default();
+        let mut reached: HashMap<NodeIndex, PathPieces> = HashMap::default();
         while let Some(index) = queue.pop_front() {
             let (node, condition, relation, _) = states[index].clone();
             let mut edges = graph
@@ -646,10 +1048,11 @@ pub(super) fn diagnostic_cycle(
                 else {
                     continue;
                 };
-                if !budget.spend_product(relation.piece_count(), graph[next].domains.len().max(1)) {
+                if !budget.spend_pieces(relation.piece_count(), graph[next].domains.len().max(1)) {
                     return None;
                 }
-                let relation = relation.then_dependency(graph[edge].kind, &graph[next].domains);
+                let relation =
+                    relation.then_dependency(graph[edge].kind, &graph[next].domains, budget);
                 if relation.is_empty() {
                     continue;
                 }
@@ -666,20 +1069,19 @@ pub(super) fn diagnostic_cycle(
                     }
                     continue;
                 }
-                let previous = reached.entry(next).or_default();
-                if !budget.spend(previous.len().saturating_mul(2)) {
-                    return None;
+                // Continue each piece separately, so that pieces reached
+                // along other paths are recognized by lookup instead of by
+                // comparing whole relations.
+                for piece in relation.into_pieces() {
+                    let recorded = reached
+                        .entry(next)
+                        .or_default()
+                        .insert(&piece, &condition, budget)?;
+                    if recorded {
+                        queue.push_back(states.len());
+                        states.push((next, condition.clone(), piece, Some((index, edge))));
+                    }
                 }
-                if previous
-                    .iter()
-                    .any(|(r, c)| r.piecewise_covers(&relation) && c.covers(&condition))
-                {
-                    continue;
-                }
-                previous.retain(|(r, c)| !relation.piecewise_covers(r) || !condition.covers(c));
-                previous.push((relation.clone(), condition.clone()));
-                queue.push_back(states.len());
-                states.push((next, condition, relation, Some((index, edge))));
             }
         }
     }
@@ -2052,10 +2454,14 @@ mod tests {
         assert!(!has_compatible_cycle_with_budget(
             &graph,
             &[node],
-            &mut budget
+            &mut budget,
+            None,
         ));
         assert!(budget.exhausted);
-        assert_eq!(compatible_cycle(&graph, &[node]), Some(false));
+        assert_eq!(
+            compatible_cycle(&graph, &[node], &Steps::new()),
+            Some(false)
+        );
         for shift in 1..=32 {
             add_dependency_edge(
                 &mut graph,
@@ -2074,7 +2480,8 @@ mod tests {
         assert!(has_compatible_cycle_with_budget(
             &graph,
             &[node],
-            &mut budget
+            &mut budget,
+            None,
         ));
         assert!(!budget.exhausted);
         let mut budget = SearchBudget {
@@ -2084,10 +2491,11 @@ mod tests {
         assert!(!has_compatible_cycle_with_budget(
             &graph,
             &[node],
-            &mut budget
+            &mut budget,
+            None,
         ));
         assert!(budget.exhausted);
-        assert_eq!(compatible_cycle(&graph, &[node]), Some(true));
+        assert_eq!(compatible_cycle(&graph, &[node], &Steps::new()), Some(true));
     }
 
     #[test]
@@ -2122,10 +2530,14 @@ mod tests {
             assert!(!has_compatible_cycle_with_budget(
                 &graph,
                 &[node],
-                &mut budget
+                &mut budget,
+                None,
             ));
             assert!(budget.exhausted);
         }
-        assert_eq!(compatible_cycle(&graph, &[node]), Some(false));
+        assert_eq!(
+            compatible_cycle(&graph, &[node], &Steps::new()),
+            Some(false)
+        );
     }
 }

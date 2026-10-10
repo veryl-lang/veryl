@@ -36,11 +36,8 @@ fn demanded_read_views_do_not_form_a_cartesian_storage_partition() {
             let errors = analyze(&code);
             assert!(errors.is_empty(), "count={count}, copy={copy}: {errors:?}");
             let (atoms, nodes, edges) = analysis_size();
-            assert_eq!(
-                atoms,
-                count + 2 + usize::from(copy),
-                "count={count}, copy={copy}"
-            );
+            // Each variable is one storage region.
+            assert_eq!(atoms, 3 + usize::from(copy), "count={count}, copy={copy}");
             assert!(
                 nodes <= 16 * count + 8,
                 "count={count}, copy={copy}: {nodes} nodes"
@@ -396,8 +393,9 @@ fn demanded_read_regions_keep_byte_enabled_descriptor_lookup_compact() {
         reset_analysis_size();
         let errors = analyze(&code);
         assert!(errors.is_empty(), "entries={entries}: {errors:#?}");
+        // Neither the rows nor the byte lanes cut the storage.
         let (atoms, nodes, edges) = analysis_size();
-        assert_eq!(atoms, entries + 24);
+        assert_eq!(atoms, 11);
         assert!(nodes <= 9 * entries + 256, "{nodes} nodes");
         assert!(edges <= 14 * entries + 256, "{edges} edges");
         assert!(comb_loop_analysis_is_complete(&code));

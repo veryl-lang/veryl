@@ -1238,6 +1238,37 @@ fn comb_loop_function_output_state_does_not_leak_between_calls() {
 }
 
 #[test]
+fn comb_loop_conditional_function_output_does_not_chain_between_calls() {
+    assert_comb_loop(
+        "a conditionally written output argument starts fresh on each call",
+        r#"
+        module Top (
+            c: input  logic,
+            y: output logic,
+            z: output logic,
+        ) {
+            function f (
+                c: input  logic,
+                a: input  logic,
+                o: output logic,
+            ) {
+                if c {
+                    o = a;
+                }
+            }
+            var x: logic;
+            always_comb {
+                f(c, x, y);
+                f(c, 0, z);
+            }
+            assign x = z;
+        }
+        "#,
+        false,
+    );
+}
+
+#[test]
 fn comb_loop_function_output_retains_same_call_control_feedback() {
     assert_comb_loop(
         "a function output retains control feedback within the same call",
@@ -1773,7 +1804,10 @@ fn function_summary_distinct_guarded_expansion_is_bounded_and_incomplete() {
     );
     let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
     eprintln!("distinct guarded fanout depth={DEPTH} nodes={nodes}");
-    assert!(nodes < 100_000);
+    // Each level calls the previous one with opposite selectors, so calls
+    // cannot share guards. The summaries take the module's steps, so their
+    // growth stops at the step limit.
+    assert!(nodes < 1 << 23, "{nodes} summary nodes");
     assert!(!comb_loop_analysis_is_complete(&code));
 }
 
@@ -4022,4 +4056,113 @@ fn function_summary_instance_actual_keeps_shifted_bit_dependencies() {
         );
         assert!(comb_loop_analysis_is_complete(&code));
     }
+}
+
+#[test]
+fn comb_loop_inout_argument_keeps_actual_where_function_leaves_it() {
+    for body in ["x[1] = c;", "var t: logic; t = c;"] {
+        let errors = analyze(&format!(
+            r#"
+            module Top (
+                c: input  logic,
+                o: output logic,
+            ) {{
+                var a: logic;
+                var y: logic<2>;
+                function f (
+                    c: input logic,
+                    x: inout logic<2>,
+                ) {{
+                    {body}
+                }}
+                always_comb {{
+                    y = {{1'b0, a}};
+                    f(c, y);
+                }}
+                assign a = y[0];
+                assign o = y[1];
+            }}
+            "#
+        ));
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+            "{body}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn comb_loop_inout_argument_keeps_actual_where_write_is_conditional() {
+    // An inout formal starts with the actual's value, so the bit the
+    // function writes only when `c` holds still carries `a` otherwise.
+    let errors = analyze(
+        r#"
+        module Top (
+            c: input  logic,
+            o: output logic,
+        ) {
+            var a: logic;
+            var y: logic<2>;
+            function f (
+                c: input logic,
+                x: inout logic<2>,
+            ) {
+                if c {
+                    x[0] = 0;
+                }
+            }
+            always_comb {
+                y = {1'b0, a};
+                f(c, y);
+            }
+            assign a = y[0];
+            assign o = y[1];
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+}
+
+#[test]
+fn comb_loop_inout_argument_overwritten_whole_drops_actual() {
+    let errors = analyze(
+        r#"
+        module Top (
+            c: input  logic,
+            o: output logic,
+        ) {
+            var a: logic;
+            var y: logic<2>;
+            function f (
+                c: input logic,
+                x: inout logic<2>,
+            ) {
+                if c {
+                    x = 0;
+                } else {
+                    x = 1;
+                }
+            }
+            always_comb {
+                y = {1'b0, a};
+                f(c, y);
+            }
+            assign a = y[0];
+            assign o = y[1];
+        }
+        "#,
+    );
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
 }
