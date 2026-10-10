@@ -3040,7 +3040,32 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         // body or enumerating runtime iterator values.
         let transfer = self.merge_flow_state_bindings(&loop_flow.breaks);
         let bit_part = self.bit_part;
+        let domain_of = |key: SsaKey| {
+            bit_part
+                .ranges_of((key.node.0, key.node.1))
+                .get(key.node.2)
+                .map(|packed| PositionDomain::new(key.node.1, *packed))
+        };
+        // Positions that no iteration writes keep their value from before the
+        // loop. A recurrence joins every position of a variable, so restore
+        // them after closing it rather than let it widen them.
         let steps = self.steps.clone();
+        let mut unwritten = Vec::new();
+        for (&key, output) in transfer.bindings() {
+            let Some(extent) = domain_of(key) else {
+                continue;
+            };
+            match steps.lend(|work| self.ssa.unwritten_regions(output, extent, work)) {
+                Ok(Some((base, regions))) if !regions.is_empty() => {
+                    unwritten.push((key, extent, base, regions));
+                }
+                Ok(_) => {}
+                Err(RanOut) => {
+                    self.exhaust_work();
+                    return FlowResult::new(ProcedureFlow::Continue);
+                }
+            }
+        }
         if steps
             .lend(|work| {
                 self.ssa.try_close_repeated_transfer(
@@ -3048,17 +3073,22 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     checkpoint,
                     may_execute_zero_times,
                     work,
-                    |key| {
-                        bit_part
-                            .ranges_of((key.node.0, key.node.1))
-                            .get(key.node.2)
-                            .map(|packed| PositionDomain::new(key.node.1, *packed))
-                    },
+                    domain_of,
                 )
             })
             .is_none()
         {
             self.exhaust_work();
+            return FlowResult::new(ProcedureFlow::Continue);
+        }
+        unwritten.sort_unstable_by_key(|(key, ..)| *key);
+        for (key, extent, base, regions) in unwritten {
+            let mut value = self.ssa.read(key);
+            for region in regions {
+                let kept = self.ssa.projected(base, region);
+                value = self.ssa.overlay(value, kept, region, extent, true);
+            }
+            self.ssa.bind(key, value);
         }
         FlowResult::new(ProcedureFlow::Continue)
     }

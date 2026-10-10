@@ -1485,3 +1485,30 @@ fn comb_loop_many_exclusive_opposing_shifts_remain_acyclic_and_complete() {
     );
     assert!(comb_loop_analysis_is_complete(&code));
 }
+
+#[test]
+fn comb_loop_runtime_loop_keeps_positions_it_never_writes() {
+    // Only `x[1]` changes in the loop, so `x[2]` stays zero.
+    let code = r#"
+        module Top (n: input u32, o: output logic) {
+            var a: logic;
+            var x: logic<3>;
+            always_comb {
+                x = {2'b0, a};
+                for _i in 0..n {
+                    x[1] = x[0];
+                }
+            }
+            assign a = x[2];
+            assign o = x[1];
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}

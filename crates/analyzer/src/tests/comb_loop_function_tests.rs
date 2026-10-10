@@ -4254,3 +4254,33 @@ fn function_conditional_whole_writes_nest_without_deep_recursion() {
         "{errors:#?}"
     );
 }
+
+#[test]
+fn function_partial_write_after_a_join_keeps_the_join_regions() {
+    // Both branches and the later write together overwrite all of `x`, so the
+    // caller's value from `a` does not survive the call.
+    let code = r#"
+        module Top (c: input logic, o: output logic) {
+            var a: logic;
+            var x: logic<2>;
+            function f (c: input logic) {
+                if c { x = 0; } else { x[0] = 0; }
+                x[1] = 0;
+            }
+            always_comb {
+                x = {1'b0, a};
+                f(c);
+            }
+            assign a = x[0];
+            assign o = x[1];
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}

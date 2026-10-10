@@ -221,22 +221,38 @@ pub(super) fn strongly_connected_components(graph: &DependencyGraph) -> Vec<Vec<
     kosaraju_scc(&**graph)
 }
 
+/// Whether the nodes without domains form a DAG. Removes sources one at a
+/// time instead of searching depth first, so a long chain needs no stack.
 pub(super) fn unconstrained_subgraph_is_acyclic(graph: &DependencyGraph) -> bool {
-    let mut induced = Graph::<(), ()>::new();
-    let mapped = graph
-        .node_indices()
-        .filter(|&node| graph[node].domains.is_empty())
-        .map(|node| (node, induced.add_node(())))
-        .collect::<HashMap<_, _>>();
+    let unconstrained = |node: NodeIndex| graph[node].domains.is_empty();
+    let mut incoming = vec![0usize; graph.node_count()];
     for edge in graph.edge_references() {
-        let (Some(&source), Some(&destination)) =
-            (mapped.get(&edge.source()), mapped.get(&edge.target()))
-        else {
-            continue;
-        };
-        induced.add_edge(source, destination, ());
+        if unconstrained(edge.source()) && unconstrained(edge.target()) {
+            incoming[edge.target().index()] += 1;
+        }
     }
-    !daggy::petgraph::algo::is_cyclic_directed(&induced)
+    let mut ready = graph
+        .node_indices()
+        .filter(|&node| unconstrained(node) && incoming[node.index()] == 0)
+        .collect::<Vec<_>>();
+    let mut removed = 0;
+    while let Some(node) = ready.pop() {
+        removed += 1;
+        for edge in graph.edges(node) {
+            let next = edge.target();
+            if unconstrained(next) {
+                incoming[next.index()] -= 1;
+                if incoming[next.index()] == 0 {
+                    ready.push(next);
+                }
+            }
+        }
+    }
+    removed
+        == graph
+            .node_indices()
+            .filter(|&node| unconstrained(node))
+            .count()
 }
 
 #[cfg(test)]

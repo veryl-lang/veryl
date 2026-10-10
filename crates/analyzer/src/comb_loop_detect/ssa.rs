@@ -593,6 +593,10 @@ impl<K> BranchState<K> {
             bindings: HashMap::default(),
         }
     }
+
+    pub(super) fn bindings(&self) -> impl Iterator<Item = (&K, VersionId)> {
+        self.bindings.iter().map(|(key, version)| (key, *version))
+    }
 }
 
 struct Undo<K> {
@@ -794,93 +798,157 @@ where
         extent: PositionDomain,
         fresh: bool,
         work: &mut usize,
-    ) -> Option<(Vec<PositionDomain>, Vec<PositionDomain>)> {
-        // Joins without a log can nest as deep as the branches that made
-        // them, so they are visited from an explicit stack, each once.
-        let unlogged_join = |version: VersionId| match &self.versions[version] {
-            Version::Phi(inputs)
-                if !(self.logs.contains_key(&version) && version >= self.log_floor) =>
-            {
-                Some(inputs)
-            }
-            _ => None,
-        };
-        let mut results: HashMap<VersionId, (Vec<PositionDomain>, Vec<PositionDomain>)> =
-            HashMap::default();
-        let mut stack = vec![(version, false)];
-        while let Some((current, expanded)) = stack.pop() {
-            if results.contains_key(&current) {
+    ) -> Option<Regions> {
+        // Joins and the versions below write histories can nest as deep as
+        // the branches that made them, so they are visited from an explicit
+        // stack, each version and region once.
+        let mut results: HashMap<(VersionId, PositionDomain), Regions> = HashMap::default();
+        let mut stack = vec![(version, extent, false)];
+        while let Some((current, domain, expanded)) = stack.pop() {
+            if results.contains_key(&(current, domain)) {
                 continue;
             }
             *work = work.checked_sub(1)?;
-            let Some(inputs) = unlogged_join(current) else {
-                let regions = self.unjoined_written_regions(current, extent, fresh, work)?;
-                results.insert(current, regions);
-                continue;
-            };
-            if expanded {
-                let inputs = inputs
-                    .iter()
-                    .map(|input| &results[input])
-                    .collect::<Vec<_>>();
-                let regions = Self::joined_written_regions(&inputs, work)?;
-                results.insert(current, regions);
-            } else {
-                stack.push((current, true));
+            let parts = self.written_parts(current, domain, work)?;
+            let missing = parts
+                .dependencies()
+                .filter(|part| !results.contains_key(part))
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                debug_assert!(!expanded, "dependencies are resolved before revisiting");
+                stack.push((current, domain, true));
                 stack.extend(
-                    inputs
-                        .iter()
-                        .filter(|input| !results.contains_key(input))
-                        .map(|&input| (input, false)),
+                    missing
+                        .into_iter()
+                        .map(|(version, domain)| (version, domain, false)),
                 );
+                continue;
             }
+            let regions = match parts {
+                WrittenParts::Join(inputs) => {
+                    let inputs = inputs
+                        .iter()
+                        .map(|input| &results[input])
+                        .collect::<Vec<_>>();
+                    Self::joined_written_regions(&inputs, work)?
+                }
+                WrittenParts::Logged {
+                    entry,
+                    below,
+                    writes,
+                } => self.logged_written_regions(&entry, &below, writes, &results, fresh, work)?,
+                WrittenParts::Leaf => self.leaf_written_regions(current, domain, fresh),
+            };
+            results.insert((current, domain), regions);
         }
-        results.remove(&version)
+        results.remove(&(version, extent))
     }
 
-    /// `written_regions` of a version that is not a join without a log.
-    fn unjoined_written_regions(
+    /// How `version` supplies `domain`: from the inputs of a join without a
+    /// log, from its write history, or as one value.
+    fn written_parts(
         &self,
         version: VersionId,
-        extent: PositionDomain,
-        fresh: bool,
+        domain: PositionDomain,
         work: &mut usize,
-    ) -> Option<(Vec<PositionDomain>, Vec<PositionDomain>)> {
+    ) -> Option<WrittenParts> {
         let is_entry = |version: VersionId| matches!(self.versions[version], Version::Entry(_));
-        // Resolve the whole history: a partial answer would only say that
-        // every position may be written.
         let Some(log) = self
             .logs
             .get(&version)
             .filter(|_| version >= self.log_floor)
         else {
-            return Some(if is_entry(version) {
-                (Vec::new(), Vec::new())
-            } else if !fresh && self.may_retain_entry(version) {
-                (Vec::new(), vec![extent])
-            } else {
-                (vec![extent], Vec::new())
+            return Some(match &self.versions[version] {
+                Version::Phi(inputs) => {
+                    WrittenParts::Join(inputs.iter().map(|&input| (input, domain)).collect())
+                }
+                _ => WrittenParts::Leaf,
             });
         };
+        // Resolve the whole history: a partial answer would only say that
+        // every position may be written.
         let base = log.base();
-        let pieces = log.resolve(extent, work)?;
-        let (kept, written): (Vec<_>, Vec<_>) = pieces
-            .into_iter()
-            .partition(|piece| piece.version == base && is_entry(base));
+        let mut entry = Vec::new();
+        let mut below = Vec::new();
+        let mut writes = Vec::new();
+        for piece in log.resolve(domain, work)? {
+            if piece.version != base {
+                writes.push(piece);
+            } else if is_entry(base) {
+                entry.push(piece.domain);
+            } else {
+                // The version below the history supplies these positions;
+                // what it writes there is resolved in turn.
+                below.push((base, piece.domain));
+            }
+        }
+        Some(WrittenParts::Logged {
+            entry,
+            below,
+            writes,
+        })
+    }
+
+    /// A version that is not a join and has no history writes all of
+    /// `extent`, possibly so when it may still hold the entry value.
+    fn leaf_written_regions(
+        &self,
+        version: VersionId,
+        extent: PositionDomain,
+        fresh: bool,
+    ) -> Regions {
+        if matches!(self.versions[version], Version::Entry(_)) {
+            (Vec::new(), Vec::new())
+        } else if !fresh && self.may_retain_entry(version) {
+            (Vec::new(), vec![extent])
+        } else {
+            (vec![extent], Vec::new())
+        }
+    }
+
+    /// The regions of a write history: the writes over the positions that
+    /// still hold the entry value or what the version below writes there.
+    fn logged_written_regions(
+        &self,
+        entry: &[PositionDomain],
+        below: &[(VersionId, PositionDomain)],
+        writes: Vec<log::Piece>,
+        results: &HashMap<(VersionId, PositionDomain), Regions>,
+        fresh: bool,
+        work: &mut usize,
+    ) -> Option<Regions> {
         let mut definite = Vec::new();
         let mut maybe = Vec::new();
-        let (retaining, written): (Vec<_>, Vec<_>) = written
+        // Positions where a weak write may leave the entry value.
+        let mut kept = log::Fragments::default();
+        for domain in entry {
+            kept.insert(*domain);
+        }
+        for part in below {
+            let (below_definite, below_maybe) = &results[part];
+            *work = work.checked_sub(below_definite.len().saturating_add(below_maybe.len()))?;
+            definite.extend(below_definite.iter().copied());
+            maybe.extend(below_maybe.iter().copied());
+            // Below the history, a possible write or no write keeps the entry.
+            let mut unwritten = vec![part.1];
+            for written in below_definite {
+                unwritten = unwritten
+                    .into_iter()
+                    .flat_map(|domain| complement(domain, *written))
+                    .collect();
+            }
+            for domain in unwritten {
+                kept.insert(domain);
+            }
+        }
+        let (retaining, writes): (Vec<_>, Vec<_>) = writes
             .into_iter()
             .partition(|piece| !fresh && self.may_retain_entry(piece.version));
         maybe.extend(retaining.into_iter().map(|piece| piece.domain));
-        // Each written piece meets only the kept pieces that overlap it.
-        let mut kept_index = log::Fragments::default();
-        for kept in &kept {
-            kept_index.insert(kept.domain);
-        }
-        for piece in written {
+        // Each written piece meets only the kept positions that overlap it.
+        for piece in writes {
             let mut parts = vec![piece.domain];
-            for kept in kept_index.overlapping(piece.domain, work)? {
+            for kept in kept.overlapping(piece.domain, work)? {
                 maybe.extend(
                     parts
                         .iter()
@@ -899,11 +967,7 @@ where
     /// `written_regions` of a join without a log, from those of its inputs:
     /// a position is definitely written only where every input definitely
     /// writes it.
-    #[allow(clippy::type_complexity)]
-    fn joined_written_regions(
-        inputs: &[&(Vec<PositionDomain>, Vec<PositionDomain>)],
-        work: &mut usize,
-    ) -> Option<(Vec<PositionDomain>, Vec<PositionDomain>)> {
+    fn joined_written_regions(inputs: &[&Regions], work: &mut usize) -> Option<Regions> {
         let mut definite: Option<Vec<PositionDomain>> = None;
         let mut touched = Vec::new();
         for (input_definite, input_maybe) in inputs {
@@ -980,6 +1044,35 @@ where
             retains.push(value);
         }
         retains[version]
+    }
+
+    /// The version below the write history of `version` and the positions of
+    /// `extent` that no write in that history may supply, which therefore
+    /// still hold that version. `Ok(None)` when it has no history, and `Err`
+    /// when resolving it runs out of `work`.
+    #[allow(clippy::type_complexity)]
+    pub(super) fn unwritten_regions(
+        &self,
+        version: VersionId,
+        extent: PositionDomain,
+        work: &mut usize,
+    ) -> Result<Option<(VersionId, Vec<PositionDomain>)>, RanOut> {
+        let Some(log) = self
+            .logs
+            .get(&version)
+            .filter(|_| version >= self.log_floor)
+        else {
+            return Ok(None);
+        };
+        let base = log.base();
+        let mut unwritten = log::Fragments::default();
+        unwritten.insert(extent);
+        for piece in log.resolve(extent, work).ok_or(RanOut)? {
+            if piece.version != base {
+                unwritten.subtract(piece.domain, work).ok_or(RanOut)?;
+            }
+        }
+        Ok(Some((base, unwritten.into_domains().collect())))
     }
 
     /// Make every existing version opaque to regional reads until the
@@ -1838,6 +1931,34 @@ where
 }
 
 /// The positions of `extent` outside `region`, as disjoint boxes.
+/// Positions definitely written, and positions possibly written only.
+type Regions = (Vec<PositionDomain>, Vec<PositionDomain>);
+
+/// How a version supplies a region, for `written_regions`.
+enum WrittenParts {
+    /// The inputs of a join without a write history, each with the region.
+    Join(Vec<(VersionId, PositionDomain)>),
+    Logged {
+        /// Positions that still hold the key's entry value.
+        entry: Vec<PositionDomain>,
+        /// Positions supplied by the version below the history.
+        below: Vec<(VersionId, PositionDomain)>,
+        writes: Vec<log::Piece>,
+    },
+    Leaf,
+}
+
+impl WrittenParts {
+    fn dependencies(&self) -> impl Iterator<Item = (VersionId, PositionDomain)> + '_ {
+        let parts: &[(VersionId, PositionDomain)] = match self {
+            Self::Join(inputs) => inputs,
+            Self::Logged { below, .. } => below,
+            Self::Leaf => &[],
+        };
+        parts.iter().copied()
+    }
+}
+
 pub(super) fn complement(extent: PositionDomain, region: PositionDomain) -> Vec<PositionDomain> {
     let array_end = extent.array_start.saturating_add(extent.array_length);
     let packed_end = extent.packed_start.saturating_add(extent.packed_length);

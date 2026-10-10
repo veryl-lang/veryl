@@ -289,7 +289,7 @@ impl Fragments {
     }
 
     /// Remove the positions of `region`.
-    fn subtract(&mut self, region: PositionDomain, work: &mut usize) -> Option<()> {
+    pub(super) fn subtract(&mut self, region: PositionDomain, work: &mut usize) -> Option<()> {
         for fragment in self.overlapping(region, work)? {
             self.remove(fragment);
             for part in complement(fragment, region) {
@@ -328,7 +328,7 @@ impl Fragments {
         Some(inside)
     }
 
-    fn into_domains(self) -> impl Iterator<Item = PositionDomain> {
+    pub(super) fn into_domains(self) -> impl Iterator<Item = PositionDomain> {
         self.boxes
             .into_iter()
             .map(
@@ -344,60 +344,126 @@ impl Fragments {
 
 /// Collect the writes from `tip` down to the ancestor of length `stop` and
 /// return the positions they do not definitely overwrite.
+/// One history being walked: from `node` down to the layer at `stop`,
+/// supplying `remaining`, and the join it is inside of, if any.
+struct WalkFrame<'a> {
+    node: &'a Rc<LogNode>,
+    stop: usize,
+    remaining: Fragments,
+    join: Option<JoinWalk<'a>>,
+}
+
+/// The branches of a join still to walk, from the positions inside it.
+struct JoinWalk<'a> {
+    branches: &'a [Rc<LogNode>],
+    next: usize,
+    stop: usize,
+    inside: Fragments,
+}
+
+/// Walk the history at `tip` down to `stop`, recording the writes that supply
+/// positions of `remaining` and returning the positions none supplies. The
+/// branches of joins are walked from an explicit stack, so nested joins need
+/// no recursion.
 fn walk(
     tip: &Rc<LogNode>,
     stop: usize,
-    mut remaining: Fragments,
+    remaining: Fragments,
     pieces: &mut Vec<Piece>,
     work: &mut usize,
 ) -> Option<Fragments> {
-    let mut node = tip;
-    while !remaining.is_empty() && node.len > stop {
-        *work = work.checked_sub(1)?;
-        if let Some(jump) = &node.jump
-            && jump.len >= stop
-            && !remaining.overlaps(node.bounds, work)?
-        {
-            node = jump;
-            continue;
-        }
-        match node.layer.as_ref().expect("only the root has no layer") {
-            Layer::Write {
-                region,
-                version,
-                strong,
-            } => {
-                for fragment in remaining.overlapping(*region, work)? {
-                    if let Some(domain) = intersection(fragment, *region) {
-                        pieces.push(Piece {
-                            version: *version,
-                            domain,
-                        });
-                    }
-                }
-                if *strong {
-                    remaining.subtract(*region, work)?;
+    let mut frames = vec![WalkFrame {
+        node: tip,
+        stop,
+        remaining,
+        join: None,
+    }];
+    let mut returned: Option<Fragments> = None;
+    loop {
+        let frame = frames.last_mut().expect("a frame is walked until done");
+        if let Some(join) = &mut frame.join {
+            // Positions a branch left unwritten keep the value below the join.
+            if let Some(left) = returned.take() {
+                for fragment in left.into_domains() {
+                    frame.remaining.add(fragment, work)?;
                 }
             }
-            Layer::Merge {
-                common,
-                branches,
-                bounds,
-            } => {
-                let inside = remaining.split_off(*bounds, work)?;
-                if !inside.is_empty() {
-                    for branch in branches.iter() {
-                        let left = walk(branch, common.len, inside.clone(), pieces, work)?;
-                        for fragment in left.into_domains() {
-                            remaining.add(fragment, work)?;
+            if let Some(branch) = join.branches.get(join.next) {
+                join.next += 1;
+                let child = WalkFrame {
+                    node: branch,
+                    stop: join.stop,
+                    remaining: join.inside.clone(),
+                    join: None,
+                };
+                frames.push(child);
+                continue;
+            }
+            frame.join = None;
+            frame.node = frame
+                .node
+                .prev
+                .as_ref()
+                .expect("only the root has no layer");
+        }
+        let mut joined = false;
+        while !frame.remaining.is_empty() && frame.node.len > frame.stop {
+            *work = work.checked_sub(1)?;
+            let node = frame.node;
+            if let Some(jump) = &node.jump
+                && jump.len >= frame.stop
+                && !frame.remaining.overlaps(node.bounds, work)?
+            {
+                frame.node = jump;
+                continue;
+            }
+            match node.layer.as_ref().expect("only the root has no layer") {
+                Layer::Write {
+                    region,
+                    version,
+                    strong,
+                } => {
+                    for fragment in frame.remaining.overlapping(*region, work)? {
+                        if let Some(domain) = intersection(fragment, *region) {
+                            pieces.push(Piece {
+                                version: *version,
+                                domain,
+                            });
                         }
                     }
+                    if *strong {
+                        frame.remaining.subtract(*region, work)?;
+                    }
+                }
+                Layer::Merge {
+                    common,
+                    branches,
+                    bounds,
+                } => {
+                    let inside = frame.remaining.split_off(*bounds, work)?;
+                    if !inside.is_empty() {
+                        frame.join = Some(JoinWalk {
+                            branches,
+                            next: 0,
+                            stop: common.len,
+                            inside,
+                        });
+                        joined = true;
+                        break;
+                    }
                 }
             }
+            frame.node = node.prev.as_ref().expect("only the root has no layer");
         }
-        node = node.prev.as_ref().expect("only the root has no layer");
+        if joined {
+            continue;
+        }
+        let done = frames.pop().expect("the walked frame is on the stack");
+        if frames.is_empty() {
+            return Some(done.remaining);
+        }
+        returned = Some(done.remaining);
     }
-    Some(remaining)
 }
 
 pub(super) fn intersection(a: PositionDomain, b: PositionDomain) -> Option<PositionDomain> {
