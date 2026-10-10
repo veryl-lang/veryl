@@ -4284,3 +4284,35 @@ fn function_partial_write_after_a_join_keeps_the_join_regions() {
     );
     assert!(comb_loop_analysis_is_complete(code));
 }
+
+#[test]
+fn function_runtime_loop_keeps_earlier_definite_writes() {
+    // `x[1]` is written before the loop, which only may write `x[0]`, so the
+    // caller's `x[1]` does not survive the call.
+    let code = r#"
+        module Top (n: input u32, o: output logic) {
+            var a: logic;
+            var x: logic<2>;
+            function f (n: input u32) {
+                x[1] = 0;
+                for _i in 0..n {
+                    x[0] = 0;
+                }
+            }
+            always_comb {
+                x = {a, 1'b0};
+                f(n);
+            }
+            assign a = x[1];
+            assign o = x[0];
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}

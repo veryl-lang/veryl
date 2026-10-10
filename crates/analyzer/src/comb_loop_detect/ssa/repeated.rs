@@ -9,10 +9,12 @@
 //! bit positions, displacement sums, or dependency paths are enumerated.
 
 use super::*;
+use daggy::petgraph::Direction;
 use daggy::petgraph::Graph;
 use daggy::petgraph::algo::kosaraju_scc;
 use daggy::petgraph::graph::NodeIndex;
 use daggy::petgraph::visit::EdgeRef;
+use std::collections::BTreeSet;
 
 #[derive(Default)]
 struct TransferNode {
@@ -270,86 +272,36 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
 ) -> Option<()> {
     let mut builder = TransferBuilder::default();
     let start = checkpoint.version_start;
-    let mut outputs = Vec::new();
-    for (&key, &output) in &iteration.bindings {
-        let entry = ssa.read(key);
-        let input = builder.version(ssa, entry, start, work)?;
-        let domains = domain(key).into_iter().collect::<Vec<_>>();
-        // A write history divides the output by the writes that supply its
-        // positions.
-        let pieces = match domains.as_slice() {
-            [extent] => ssa
-                .logged_pieces(output, *extent, work)
-                .ok()?
-                .map(|pieces| (*extent, pieces)),
-            _ => None,
-        };
-        // The output stands whole when its parts turn out to be one.
-        builder.version(ssa, output, start, work)?;
-        for &(version, _) in pieces.iter().flat_map(|(_, pieces)| pieces) {
-            builder.version(ssa, version, start, work)?;
-        }
-        outputs.push((key, entry, input, pieces, domains));
-    }
+    let outputs = iteration
+        .bindings
+        .iter()
+        .map(|(&key, &output)| {
+            let entry = ssa.read(key);
+            let input = builder.version(ssa, entry, start, work)?;
+            let value = builder.version(ssa, output, start, work)?;
+            let domains = domain(key).into_iter().collect::<Vec<_>>();
+            let root = builder.graph.add_node(TransferNode {
+                domains: domains.clone(),
+                ..TransferNode::default()
+            });
+            builder
+                .graph
+                .add_edge(value, root, PositionRelation::default());
+            Some((key, entry, input, root, domains))
+        })
+        .collect::<Option<Vec<_>>>()?;
     builder.copy_iteration(ssa, start, work)?;
 
-    // Each part of an output, divided where its writes and the iteration's
-    // reads of the key distinguish positions, gets its own root, so a
-    // recurrence through one part does not reach the positions of the others.
-    let mut divided = Vec::with_capacity(outputs.len());
-    for (key, entry, input, pieces, domains) in outputs {
-        let output = iteration.bindings[&key];
-        let cells = match pieces {
-            Some((extent, pieces)) => {
-                let reads = read_regions(&builder.graph, input, extent, work)?;
-                Some(cells(extent, &pieces, &reads, work)?)
-            }
-            None => None,
-        }
-        .filter(|cells| cells.len() > 1)
-        .unwrap_or_else(|| vec![(domains.clone(), vec![output])]);
-        let mut roots = Vec::new();
-        for (root_domains, versions) in cells {
-            let root = builder.graph.add_node(TransferNode {
-                input: None,
-                domains: root_domains.clone(),
-                replication: None,
-                computes: false,
-            });
-            for version in versions {
-                let value = builder.versions[&version];
-                builder
-                    .graph
-                    .add_edge(value, root, PositionRelation::default());
-            }
-            roots.push((root, root_domains));
-        }
-        divided.push((key, entry, input, roots, domains));
-    }
-    let outputs = divided;
-
-    let mut users: HashMap<NodeIndex, usize> = HashMap::default();
-    for (_, _, input, _, _) in &outputs {
-        *users.entry(*input).or_default() += 1;
-    }
     let mut unrestricted = HashSet::default();
-    for (_, entry, input, roots, domains) in &outputs {
+    for (_, entry, input, root, domains) in &outputs {
         // Separate the immutable first-iteration input from the join that
         // also accepts prior iterations. Multiple keys may share a version;
         // their domains are alternatives, not intersecting restrictions.
-        let initial = builder.graph[*input].input.take().map(|_| {
-            builder.graph.add_node(TransferNode {
+        if builder.graph[*input].input.take().is_some() {
+            let initial = builder.graph.add_node(TransferNode {
                 input: Some(*entry),
-                domains: Vec::new(),
-                replication: None,
-                computes: false,
-            })
-        });
-        if roots.len() > 1 && users[input] == 1 {
-            split_input(&mut builder.graph, *input, initial, roots, work)?;
-            continue;
-        }
-        if let Some(initial) = initial {
+                ..TransferNode::default()
+            });
             builder
                 .graph
                 .add_edge(initial, *input, PositionRelation::default());
@@ -360,25 +312,44 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
         } else if !unrestricted.contains(input) {
             builder.graph[*input].domains.extend_from_slice(domains);
         }
-        for (root, _) in roots {
-            builder
-                .graph
-                .add_edge(*root, *input, PositionRelation::default());
-        }
+        builder
+            .graph
+            .add_edge(*root, *input, PositionRelation::default());
     }
 
+    let refined = refine(&builder.graph, work)?;
     let generated_start = ssa.versions.len();
-    let mapped = condense(ssa, &builder.graph);
-    for (key, entry, _, roots, domains) in outputs {
-        let mut output = match roots.as_slice() {
-            [(root, _)] => mapped[root.index()],
-            _ => ssa.phi(roots.iter().map(|(root, _)| mapped[root.index()]).collect()),
+    let mapped = condense(ssa, &refined.graph);
+    for (key, entry, _, root, domains) in outputs {
+        let output = match domains.as_slice() {
+            [extent] => {
+                // The value after the loop: each cell that an iteration may
+                // change, written over the value before the loop. Cells that
+                // only keep that value stay as they were, with their history.
+                let mut output = entry;
+                for &(part, cell) in &refined.parts[root.index()] {
+                    if refined.keeps_entry(part, entry, work)? {
+                        continue;
+                    }
+                    let region = cell.unwrap_or(*extent);
+                    output = ssa.overlay(output, mapped[part.index()], region, *extent, !may_skip);
+                }
+                output
+            }
+            _ => {
+                let parts = refined.parts[root.index()]
+                    .iter()
+                    .map(|(part, _)| mapped[part.index()])
+                    .collect::<Vec<_>>();
+                let mut output = ssa.phi(parts);
+                if may_skip {
+                    // Skipping the loop keeps the value from before it.
+                    let entry = restrict(ssa, entry, &domains);
+                    output = ssa.phi(vec![output, entry]);
+                }
+                output
+            }
         };
-        if may_skip {
-            // Skipping the loop keeps the value from before it.
-            let entry = restrict(ssa, entry, &domains);
-            output = ssa.phi(vec![output, entry]);
-        }
         ssa.bind(key, output);
     }
     if generated_start < ssa.versions.len() {
@@ -388,204 +359,243 @@ pub(super) fn try_close<K: Copy + Eq + Hash>(
     Some(())
 }
 
-/// The positions of `extent` that readers of `input` read, as far as their
-/// domains bound them.
-fn read_regions(
-    graph: &TransferGraph,
-    input: NodeIndex,
-    extent: PositionDomain,
-    work: &mut usize,
-) -> Option<Vec<PositionDomain>> {
-    let mut regions = Vec::new();
-    for edge in graph.edges(input) {
-        let relation = *edge.weight();
-        for domain in &graph[edge.target()].domains {
-            *work = work.checked_sub(1)?;
-            // The source positions that `relation` maps into `domain`.
-            let axis =
-                |start: usize, length: usize, offset: Option<isize>, whole: (usize, usize)| {
-                    let Some(offset) = offset else {
-                        return Some(whole);
-                    };
-                    let start = isize::try_from(start).ok()?.checked_sub(offset)?;
-                    let end = start.checked_add_unsigned(length)?;
-                    let start = usize::try_from(start.max(0)).ok()?;
-                    let end = usize::try_from(end).ok()?;
-                    (start < end).then(|| (start, end - start))
-                };
-            let (Some(array), Some(packed)) = (
-                axis(
-                    domain.array_start,
-                    domain.array_length,
-                    relation.array,
-                    (extent.array_start, extent.array_length),
-                ),
-                axis(
-                    domain.packed_start,
-                    domain.packed_length,
-                    relation.packed,
-                    (extent.packed_start, extent.packed_length),
-                ),
-            ) else {
-                continue;
-            };
-            let read = PositionDomain {
-                array_start: array.0,
-                array_length: array.1,
-                packed_start: packed.0,
-                packed_length: packed.1,
-            };
-            regions.extend(log::intersection(read, extent));
-        }
-    }
-    Some(regions)
+/// A transfer graph whose nodes are divided into position cells.
+struct Refined {
+    graph: TransferGraph,
+    /// Per node of the original graph, its cells: the node of each and the
+    /// box of positions it holds, `None` when the node stays whole.
+    parts: Vec<Vec<(NodeIndex, Option<PositionDomain>)>>,
 }
 
-/// Disjoint boxes covering `extent` that no piece or read boundary crosses,
-/// each with the versions of the pieces that supply it.
-fn cells(
-    extent: PositionDomain,
-    pieces: &[(VersionId, PositionDomain)],
-    reads: &[PositionDomain],
-    work: &mut usize,
-) -> Option<Vec<(Vec<PositionDomain>, Vec<VersionId>)>> {
-    let mut cells = vec![(extent, Vec::new())];
-    for &domain in reads {
-        let mut next = Vec::with_capacity(cells.len());
-        for (cell, versions) in cells {
+impl Refined {
+    /// Whether `part` only keeps `entry`, the value before the loop: every
+    /// way into it keeps values along identity edges from that value.
+    fn keeps_entry(&self, part: NodeIndex, entry: VersionId, work: &mut usize) -> Option<bool> {
+        let mut visited = HashSet::from_iter([part]);
+        let mut stack = vec![part];
+        while let Some(node) = stack.pop() {
             *work = work.checked_sub(1)?;
-            match log::intersection(cell, domain) {
-                Some(inside) if inside != cell => {
-                    for outside in complement(cell, domain) {
-                        next.push((outside, Vec::new()));
-                    }
-                    next.push((inside, versions));
+            let weight = &self.graph[node];
+            if let Some(input) = weight.input {
+                if input != entry {
+                    return Some(false);
                 }
-                _ => next.push((cell, versions)),
-            }
-        }
-        cells = next;
-    }
-    for &(version, domain) in pieces {
-        let mut next = Vec::with_capacity(cells.len());
-        for (cell, mut versions) in cells {
-            *work = work.checked_sub(1)?;
-            let Some(inside) = log::intersection(cell, domain) else {
-                next.push((cell, versions));
                 continue;
-            };
-            for outside in complement(cell, domain) {
-                next.push((outside, versions.clone()));
             }
-            versions.push(version);
-            next.push((inside, versions));
-        }
-        cells = next;
-    }
-    Some(
-        cells
-            .into_iter()
-            .map(|(cell, versions)| (vec![cell], versions))
-            .collect(),
-    )
-}
-
-/// Replace the next-iteration input `input` by one node per part of the
-/// output, each fed by its root and the first-iteration input. A reader of
-/// the input reads only the parts whose positions its relation can bring
-/// into its domains.
-fn split_input(
-    graph: &mut TransferGraph,
-    input: NodeIndex,
-    initial: Option<NodeIndex>,
-    roots: &[(NodeIndex, Vec<PositionDomain>)],
-    work: &mut usize,
-) -> Option<()> {
-    let readers = graph
-        .edges(input)
-        .map(|edge| (edge.id(), edge.target(), *edge.weight()))
-        .collect::<Vec<_>>();
-    *work = work.checked_sub(readers.len().saturating_add(1).saturating_mul(roots.len()))?;
-    let parts = roots
-        .iter()
-        .map(|(root, domains)| {
-            let part = graph.add_node(TransferNode {
-                input: None,
-                domains: domains.clone(),
-                replication: None,
-                computes: false,
-            });
-            if let Some(initial) = initial {
-                graph.add_edge(initial, part, PositionRelation::default());
+            if weight.computes || weight.replication.is_some() {
+                return Some(false);
             }
-            graph.add_edge(*root, part, PositionRelation::default());
-            (part, domains[0])
-        })
-        .collect::<Vec<_>>();
-    let mut removed = Vec::new();
-    for (edge, reader, relation) in readers {
-        removed.push(edge);
-        for &(part, domain) in &parts {
-            if may_reach(domain, relation, &graph[reader].domains) {
-                graph.add_edge(part, reader, relation);
+            let mut incoming = self
+                .graph
+                .edges_directed(node, Direction::Incoming)
+                .peekable();
+            if incoming.peek().is_none() {
+                return Some(false);
+            }
+            for edge in incoming {
+                if *edge.weight() != PositionRelation::default() {
+                    return Some(false);
+                }
+                if visited.insert(edge.source()) {
+                    stack.push(edge.source());
+                }
             }
         }
+        Some(true)
     }
-    // Removing an edge moves the last one into its index, so remove the
-    // highest indices first.
-    removed.sort_unstable();
-    for edge in removed.into_iter().rev() {
-        graph.remove_edge(edge);
-    }
-    Some(())
 }
 
-/// Whether `relation` can bring a position of `domain` into one of
-/// `destinations`, all of them when there are none.
-fn may_reach(
-    domain: PositionDomain,
-    relation: PositionRelation,
-    destinations: &[PositionDomain],
-) -> bool {
-    let axis = |start: usize,
-                length: usize,
-                offset: Option<isize>,
-                other_start: usize,
-                other_length: usize| {
-        let Some(offset) = offset else {
-            return true;
-        };
-        let (Ok(start), Ok(other_start)) = (isize::try_from(start), isize::try_from(other_start))
-        else {
-            return true;
-        };
-        let (Some(low), Some(high), Some(other_high)) = (
-            start.checked_add(offset),
-            start
-                .checked_add_unsigned(length)
-                .and_then(|end| end.checked_add(offset)),
-            other_start.checked_add_unsigned(other_length),
-        ) else {
-            return true;
-        };
-        low < other_high && other_start < high
-    };
-    destinations.is_empty()
-        || destinations.iter().any(|destination| {
-            axis(
-                domain.array_start,
-                domain.array_length,
-                relation.array,
-                destination.array_start,
-                destination.array_length,
-            ) && axis(
-                domain.packed_start,
-                domain.packed_length,
-                relation.packed,
-                destination.packed_start,
-                destination.packed_length,
+/// Divide the nodes of `graph` into cells of positions before condensing it.
+///
+/// A recurrence condenses into one value, which loses which positions of its
+/// nodes reach which. Cells keep them apart: the boundaries of each node's
+/// domains are carried, within its recurrence, along every edge that keeps
+/// positions on an axis, and each node is divided at the boundaries it
+/// receives. A cell connects to a cell of a successor only when the edge can
+/// bring one of its positions there. A recurrence then joins only cells that
+/// feed one another, however the loop body was written, while a cell's value
+/// is still the union of its node's at those positions.
+fn refine(graph: &TransferGraph, work: &mut usize) -> Option<Refined> {
+    let components = kosaraju_scc(graph);
+    let mut component_of = vec![0; graph.node_count()];
+    for (index, nodes) in components.iter().enumerate() {
+        for node in nodes {
+            component_of[node.index()] = index;
+        }
+    }
+    let divisible = |node: NodeIndex| graph[node].replication.is_none();
+    let mut cuts: Vec<[BTreeSet<usize>; 2]> = vec![Default::default(); graph.node_count()];
+    let mut pending = Vec::new();
+    for node in graph.node_indices().filter(|&node| divisible(node)) {
+        for domain in &graph[node].domains {
+            let [array, packed] = &mut cuts[node.index()];
+            array.insert(domain.array_start);
+            array.insert(domain.array_start.saturating_add(domain.array_length));
+            packed.insert(domain.packed_start);
+            packed.insert(domain.packed_start.saturating_add(domain.packed_length));
+        }
+        if !graph[node].domains.is_empty() {
+            pending.push(node);
+        }
+    }
+    while let Some(node) = pending.pop() {
+        let neighbours = graph
+            .edges_directed(node, Direction::Outgoing)
+            .map(|edge| (edge.target(), *edge.weight()))
+            .chain(
+                graph
+                    .edges_directed(node, Direction::Incoming)
+                    .map(|edge| (edge.source(), *edge.weight())),
             )
-        })
+            .collect::<Vec<_>>();
+        for (other, relation) in neighbours {
+            if component_of[other.index()] != component_of[node.index()] || !divisible(other) {
+                continue;
+            }
+            let mut grew = false;
+            for (axis, offset) in [relation.array, relation.packed].into_iter().enumerate() {
+                if offset != Some(0) {
+                    continue;
+                }
+                let new = cuts[node.index()][axis]
+                    .difference(&cuts[other.index()][axis])
+                    .copied()
+                    .collect::<Vec<_>>();
+                *work = work.checked_sub(new.len())?;
+                grew |= !new.is_empty();
+                cuts[other.index()][axis].extend(new);
+            }
+            if grew {
+                pending.push(other);
+            }
+        }
+    }
+
+    let mut refined = TransferGraph::new();
+    let mut parts = Vec::with_capacity(graph.node_count());
+    for node in graph.node_indices() {
+        let weight = &graph[node];
+        let [array, packed] = &cuts[node.index()];
+        let cells = if !divisible(node) || (array.is_empty() && packed.is_empty()) {
+            vec![None]
+        } else {
+            let intervals = |cuts: &BTreeSet<usize>| {
+                let mut bounds = vec![0];
+                bounds.extend(cuts.iter().copied().filter(|&cut| cut > 0));
+                bounds.push(isize::MAX as usize);
+                bounds.dedup();
+                bounds
+                    .windows(2)
+                    .map(|pair| (pair[0], pair[1]))
+                    .collect::<Vec<_>>()
+            };
+            let (arrays, packeds) = (intervals(array), intervals(packed));
+            *work = work.checked_sub(arrays.len().saturating_mul(packeds.len()))?;
+            let mut cells = Vec::new();
+            for &(array_start, array_end) in &arrays {
+                for &(packed_start, packed_end) in &packeds {
+                    let cell = PositionDomain {
+                        array_start,
+                        array_length: array_end - array_start,
+                        packed_start,
+                        packed_length: packed_end - packed_start,
+                    };
+                    // A node with domains holds only their positions.
+                    if weight.domains.is_empty()
+                        || weight
+                            .domains
+                            .iter()
+                            .any(|domain| log::intersection(*domain, cell).is_some())
+                    {
+                        cells.push(Some(cell));
+                    }
+                }
+            }
+            cells
+        };
+        let node_parts = cells
+            .into_iter()
+            .map(|cell| {
+                let domains = match cell {
+                    None => weight.domains.clone(),
+                    Some(cell) if weight.domains.is_empty() => vec![cell],
+                    Some(cell) => weight
+                        .domains
+                        .iter()
+                        .filter_map(|domain| log::intersection(*domain, cell))
+                        .collect(),
+                };
+                let part = refined.add_node(TransferNode {
+                    input: weight.input,
+                    domains,
+                    replication: weight.replication,
+                    computes: weight.computes,
+                });
+                (part, cell)
+            })
+            .collect::<Vec<_>>();
+        parts.push(node_parts);
+    }
+    for edge in graph.edge_references() {
+        let relation = *edge.weight();
+        let (sources, targets) = (&parts[edge.source().index()], &parts[edge.target().index()]);
+        *work = work.checked_sub(sources.len().saturating_mul(targets.len()))?;
+        for &(source, source_cell) in sources {
+            for &(target, target_cell) in targets {
+                if may_relate(source_cell, relation, target_cell) {
+                    refined.add_edge(source, target, relation);
+                }
+            }
+        }
+    }
+    Some(Refined {
+        graph: refined,
+        parts,
+    })
+}
+
+/// Whether `relation` can bring a position of `source` into `target`; a
+/// missing cell holds every position.
+fn may_relate(
+    source: Option<PositionDomain>,
+    relation: PositionRelation,
+    target: Option<PositionDomain>,
+) -> bool {
+    let (Some(source), Some(target)) = (source, target) else {
+        return true;
+    };
+    let axis =
+        |start: usize, length: usize, offset: Option<isize>, other: usize, other_length: usize| {
+            let Some(offset) = offset else {
+                return true;
+            };
+            let (Ok(start), Ok(other)) = (isize::try_from(start), isize::try_from(other)) else {
+                return true;
+            };
+            let (Some(low), Some(high), Some(other_high)) = (
+                start.checked_add(offset),
+                start
+                    .checked_add_unsigned(length)
+                    .and_then(|end| end.checked_add(offset)),
+                other.checked_add_unsigned(other_length),
+            ) else {
+                return true;
+            };
+            low < other_high && other < high
+        };
+    axis(
+        source.array_start,
+        source.array_length,
+        relation.array,
+        target.array_start,
+        target.array_length,
+    ) && axis(
+        source.packed_start,
+        source.packed_length,
+        relation.packed,
+        target.packed_start,
+        target.packed_length,
+    )
 }
 
 /// `value` restricted to `domains`, as retention.
@@ -773,9 +783,11 @@ mod tests {
         }
         ssa.bind("output", value);
         let iteration = ssa.capture_and_rollback(inner);
-        let mut work = 0;
+        // Directly written SSA is not copied; dividing it into cells is
+        // charged by its size.
+        let mut work = 1024;
         ssa.try_close_repeated_transfer(&iteration, inner, true, &mut work, |_| Some(domain))
-            .expect("directly written SSA does not consume the copy budget");
+            .expect("directly written SSA is closed within a budget of its size");
 
         let iteration = ssa.capture_and_rollback(outer);
         let before = ssa.versions.len();

@@ -1598,3 +1598,32 @@ fn comb_loop_runtime_loop_reads_only_the_positions_it_reads() {
         assert_eq!(found, expected, "p[{source}]: {errors:#?}");
     }
 }
+
+#[test]
+fn comb_loop_runtime_loop_keeps_positions_apart_through_whole_writes() {
+    // The whole copy `x = x` writes every position but moves none, so `x[2]`
+    // still never depends on `a`.
+    let code = r#"
+        module Top (n: input u32, o: output logic) {
+            var a: logic;
+            var x: logic<4>;
+            always_comb {
+                x = {3'b0, a};
+                for _i in 0..n {
+                    x[1] = x[0];
+                    x = x;
+                }
+            }
+            assign a = x[2];
+            assign o = x[1];
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}

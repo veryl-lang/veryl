@@ -1042,32 +1042,6 @@ where
         retains[version]
     }
 
-    /// The writes of the history of `version` that may supply `extent`, each
-    /// with its region, including the version below the history. `Ok(None)`
-    /// when it has no history, and `Err` when resolving it runs out of
-    /// `work`.
-    pub(super) fn logged_pieces(
-        &self,
-        version: VersionId,
-        extent: PositionDomain,
-        work: &mut usize,
-    ) -> Result<Option<Vec<(VersionId, PositionDomain)>>, RanOut> {
-        let Some(log) = self
-            .logs
-            .get(&version)
-            .filter(|_| version >= self.log_floor)
-        else {
-            return Ok(None);
-        };
-        let pieces = log.resolve(extent, work).ok_or(RanOut)?;
-        Ok(Some(
-            pieces
-                .into_iter()
-                .map(|piece| (piece.version, piece.domain))
-                .collect(),
-        ))
-    }
-
     /// Make every existing version opaque to regional reads until the
     /// returned floor is restored.
     pub(super) fn raise_log_floor(&mut self) -> VersionId {
