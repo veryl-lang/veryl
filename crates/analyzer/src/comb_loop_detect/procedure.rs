@@ -75,7 +75,13 @@ fn any_variable(expression: &Expression, f: &mut impl FnMut(VarId, &VarIndex) ->
         Expression::Concatenation(items, _) => items.iter().any(|(x, repeat)| {
             any_variable(x, f) || repeat.as_ref().is_some_and(|x| any_variable(x, f))
         }),
-        Expression::ArrayLiteral(..) | Expression::StructConstructor(..) => false,
+        Expression::ArrayLiteral(items, _) => items.iter().any(|item| match item {
+            ArrayLiteralItem::Value(x, repeat) => {
+                any_variable(x, f) || repeat.as_ref().is_some_and(|x| any_variable(x, f))
+            }
+            ArrayLiteralItem::Defaul(x) => any_variable(x, f),
+        }),
+        Expression::StructConstructor(_, items, _) => items.iter().any(|(_, x)| any_variable(x, f)),
     }
 }
 
@@ -2328,13 +2334,15 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 !ids.is_empty() && reads_at_index_of(expression, &ids)
             });
         for key in keys {
-            let elements = match destination_array.and_then(|array| key.1.intersection(array)) {
-                Some(span) if per_element => (span.start..span.start + span.length)
-                    .map(|start| Some(ArraySpan { start, length: 1 }))
-                    .collect::<Vec<_>>(),
-                _ => vec![None],
-            };
-            for element in elements {
+            // Each element takes a step before it is evaluated.
+            let span = destination_array
+                .and_then(|array| key.1.intersection(array))
+                .filter(|_| per_element);
+            for offset in 0..span.map_or(1, |span| span.length) {
+                let element = span.map(|span| ArraySpan {
+                    start: span.start + offset,
+                    length: 1,
+                });
                 if element.is_some() && !self.reserve_guard_work(1) {
                     return;
                 }

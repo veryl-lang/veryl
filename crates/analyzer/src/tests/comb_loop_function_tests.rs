@@ -4166,3 +4166,63 @@ fn comb_loop_inout_argument_overwritten_whole_drops_actual() {
         "{errors:#?}"
     );
 }
+
+#[test]
+fn comb_loop_function_branches_that_all_overwrite_drop_the_caller_value() {
+    // One branch overwrites `x` whole and the other only `x[0]`, so after the
+    // call `x[0]` no longer holds the value the caller wrote from `a`.
+    let code = r#"
+        module Top (c: input logic, o: output logic) {
+            var a: logic;
+            var x: logic<2>;
+            function f (c: input logic) {
+                if c { x = 0; } else { x[0] = 0; }
+            }
+            always_comb {
+                x = {a, a};
+                f(c);
+                a = x[0];
+            }
+            assign o = x[1];
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}
+
+#[test]
+fn function_scattered_writes_summarize_in_near_linear_steps() {
+    // A function writes every other bit in scattered order, so its written and
+    // kept positions are both fragmented. Matching them must not compare
+    // every pair.
+    let steps = |count: usize| {
+        let writes = (0..count)
+            .map(|index| format!("x[{}] = 1'b0;", 2 * ((index * 2731) % count)))
+            .collect::<String>();
+        let width = 2 * count;
+        let code = format!(
+            r#"
+            module Top (a: input logic<{width}>, o: output logic<{width}>) {{
+                var x: logic<{width}>;
+                function f () {{ {writes} }}
+                always_comb {{
+                    x = a;
+                    f();
+                }}
+                assign o = x;
+            }}
+            "#
+        );
+        crate::comb_loop_detect::reset_steps_taken();
+        assert!(comb_loop_analysis_is_complete(&code), "{count} writes");
+        crate::comb_loop_detect::steps_taken()
+    };
+    let (small, large) = (steps(1024), steps(4096));
+    assert!(large < 8 * small, "{small} -> {large} steps");
+}

@@ -803,6 +803,9 @@ where
             .get(&version)
             .filter(|_| version >= self.log_floor)
         else {
+            if let Version::Phi(inputs) = &self.versions[version] {
+                return self.joined_written_regions(inputs, extent, fresh, work);
+            }
             return Some(if is_entry(version) {
                 (Vec::new(), Vec::new())
             } else if !fresh && self.may_retain_entry(version) {
@@ -822,20 +825,73 @@ where
             .into_iter()
             .partition(|piece| !fresh && self.may_retain_entry(piece.version));
         maybe.extend(retaining.into_iter().map(|piece| piece.domain));
+        // Each written piece meets only the kept pieces that overlap it.
+        let mut kept_index = log::Fragments::default();
+        for kept in &kept {
+            kept_index.insert(kept.domain);
+        }
         for piece in written {
             let mut parts = vec![piece.domain];
-            for kept in &kept {
+            for kept in kept_index.overlapping(piece.domain, work)? {
                 maybe.extend(
                     parts
                         .iter()
-                        .filter_map(|part| log::intersection(*part, kept.domain)),
+                        .filter_map(|part| log::intersection(*part, kept)),
                 );
                 parts = parts
                     .into_iter()
-                    .flat_map(|part| complement(part, kept.domain))
+                    .flat_map(|part| complement(part, kept))
                     .collect();
             }
             definite.extend(parts);
+        }
+        Some((definite, maybe))
+    }
+
+    /// `written_regions` of a join without a log: a position is definitely
+    /// written only where every input definitely writes it.
+    fn joined_written_regions(
+        &self,
+        inputs: &[VersionId],
+        extent: PositionDomain,
+        fresh: bool,
+        work: &mut usize,
+    ) -> Option<(Vec<PositionDomain>, Vec<PositionDomain>)> {
+        let mut definite: Option<Vec<PositionDomain>> = None;
+        let mut touched = Vec::new();
+        for &input in inputs {
+            *work = work.checked_sub(1)?;
+            let (input_definite, input_maybe) = self.written_regions(input, extent, fresh, work)?;
+            touched.extend(input_definite.iter().copied());
+            touched.extend(input_maybe);
+            definite = Some(match definite {
+                None => input_definite,
+                Some(definite) => {
+                    *work =
+                        work.checked_sub(definite.len().saturating_mul(input_definite.len()))?;
+                    definite
+                        .iter()
+                        .flat_map(|left| {
+                            input_definite
+                                .iter()
+                                .filter_map(|right| log::intersection(*left, *right))
+                        })
+                        .collect()
+                }
+            });
+        }
+        let definite = definite.unwrap_or_default();
+        let mut maybe = Vec::new();
+        for part in touched {
+            *work = work.checked_sub(definite.len().saturating_add(1))?;
+            let mut parts = vec![part];
+            for written in &definite {
+                parts = parts
+                    .into_iter()
+                    .flat_map(|part| complement(part, *written))
+                    .collect();
+            }
+            maybe.extend(parts);
         }
         Some((definite, maybe))
     }

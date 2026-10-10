@@ -160,11 +160,14 @@ impl LogNode {
     }
 }
 
-/// Disjoint position boxes ordered by their array start. A query visits only
-/// boxes whose array start lies within the longest array length of the query,
-/// so scattered writes into many small fragments do not rescan all of them.
+/// Disjoint position boxes ordered by their array start, then their packed
+/// start. A query visits only boxes whose array start lies within the longest
+/// array length of the query. Boxes that share an array start overlap on the
+/// array axis, so they are disjoint on the packed one: of those starting
+/// below the query, only the last can meet it. Scattered writes into many
+/// small fragments, of elements or of bits, do not rescan all of them.
 #[derive(Clone, Default)]
-struct Fragments {
+pub(super) struct Fragments {
     boxes: std::collections::BTreeSet<(usize, usize, usize, usize)>,
     // Array lengths of the boxes with their multiplicities.
     lengths: std::collections::BTreeMap<usize, usize>,
@@ -175,7 +178,7 @@ impl Fragments {
         self.boxes.is_empty()
     }
 
-    fn insert(&mut self, domain: PositionDomain) {
+    pub(super) fn insert(&mut self, domain: PositionDomain) {
         if self.boxes.insert((
             domain.array_start,
             domain.packed_start,
@@ -205,31 +208,71 @@ impl Fragments {
         self.lengths.keys().next_back().copied().unwrap_or(0)
     }
 
-    /// The boxes whose array start lies close enough to meet `region`.
-    fn candidates(&self, region: PositionDomain) -> impl Iterator<Item = PositionDomain> + '_ {
-        let low = region
+    /// Visit the boxes whose starts lie close enough to meet `region` until
+    /// `visit` returns true, charging each visited box and each array start
+    /// passed. Whether some visit returned true.
+    fn visit_candidates(
+        &self,
+        region: PositionDomain,
+        work: &mut usize,
+        mut visit: impl FnMut(PositionDomain) -> bool,
+    ) -> Option<bool> {
+        let high = region.array_start.saturating_add(region.array_length);
+        let packed_low = region.packed_start;
+        let packed_high = region.packed_start.saturating_add(region.packed_length);
+        let mut array = region
             .array_start
             .saturating_sub(self.longest().saturating_sub(1));
-        let high = region.array_start.saturating_add(region.array_length);
-        self.boxes.range((low, 0, 0, 0)..(high, 0, 0, 0)).map(
-            |&(array_start, packed_start, array_length, packed_length)| PositionDomain {
-                array_start,
-                array_length,
-                packed_start,
-                packed_length,
-            },
-        )
+        while array < high {
+            *work = work.checked_sub(1)?;
+            // The first box at or after this array start.
+            let Some(&(next, ..)) = self.boxes.range((array, 0, 0, 0)..).next() else {
+                break;
+            };
+            if next >= high {
+                break;
+            }
+            let below = self
+                .boxes
+                .range((next, 0, 0, 0)..(next, packed_low, 0, 0))
+                .next_back();
+            let within = self
+                .boxes
+                .range((next, packed_low, 0, 0)..(next, packed_high, 0, 0));
+            for &(array_start, packed_start, array_length, packed_length) in
+                below.into_iter().chain(within)
+            {
+                *work = work.checked_sub(1)?;
+                if visit(PositionDomain {
+                    array_start,
+                    array_length,
+                    packed_start,
+                    packed_length,
+                }) {
+                    return Some(true);
+                }
+            }
+            let Some(after) = next.checked_add(1) else {
+                break;
+            };
+            array = after;
+        }
+        Some(false)
     }
 
     /// The boxes overlapping `region`, charging each visited candidate.
-    fn overlapping(&self, region: PositionDomain, work: &mut usize) -> Option<Vec<PositionDomain>> {
+    pub(super) fn overlapping(
+        &self,
+        region: PositionDomain,
+        work: &mut usize,
+    ) -> Option<Vec<PositionDomain>> {
         let mut found = Vec::new();
-        for fragment in self.candidates(region) {
-            *work = work.checked_sub(1)?;
+        self.visit_candidates(region, work, |fragment| {
             if intersection(fragment, region).is_some() {
                 found.push(fragment);
             }
-        }
+            false
+        })?;
         Some(found)
     }
 
@@ -240,13 +283,9 @@ impl Fragments {
         let Some(region) = region else {
             return Some(false);
         };
-        for fragment in self.candidates(region) {
-            *work = work.checked_sub(1)?;
-            if intersection(fragment, region).is_some() {
-                return Some(true);
-            }
-        }
-        Some(false)
+        self.visit_candidates(region, work, |fragment| {
+            intersection(fragment, region).is_some()
+        })
     }
 
     /// Remove the positions of `region`.

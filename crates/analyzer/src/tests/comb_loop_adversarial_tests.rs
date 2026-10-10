@@ -270,6 +270,36 @@ fn comb_loop_runtime_index_reads_keep_their_elements() {
 }
 
 #[test]
+fn comb_loop_runtime_index_reads_in_struct_constructors_keep_their_elements() {
+    let code = r#"
+        module Top (sel: input logic, o: output logic) {
+            struct Pair {
+                value: logic<2>,
+            }
+            var index: logic;
+            var a: Pair [3];
+            var b: logic<2> [2];
+            always_comb {
+                index = sel;
+                a = '{default: 0};
+                a[index + 1] = Pair'{value: b[index]};
+            }
+            assign b[0] = 0;
+            assign b[1] = a[0].value;
+            assign o = a[0].value[0];
+        }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .all(|error| !matches!(error, AnalyzerError::CombinationalLoop { .. })),
+        "{errors:#?}"
+    );
+    assert!(comb_loop_analysis_is_complete(code));
+}
+
+#[test]
 fn comb_loop_runtime_index_write_keeps_both_conditional_arms() {
     // `x[1]` reaches `q[7]` through the child, and `q[7]` is one arm of the
     // value written at the runtime index.
