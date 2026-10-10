@@ -77,7 +77,9 @@ fn check_cost<'a>(spans: impl Iterator<Item = (&'a u32, &'a u32)>) -> usize {
 impl EventGate {
     /// `compare` joined across gaps into the spans the emitter checks and
     /// shadows: the joining that makes a check cheapest, the bytes between
-    /// two ranges costing bandwidth and a span apart costing a call.
+    /// two ranges costing bandwidth and a span apart costing a call.  No join
+    /// grows a span past the watch cap, past which the emitter ungates the
+    /// whole range.
     pub fn compare_spans(&self) -> Vec<Span> {
         let mut best: Option<(usize, Vec<Span>)> = None;
         let mut gap: u32 = 8;
@@ -85,7 +87,13 @@ impl EventGate {
             let mut out: Vec<Span> = Vec::with_capacity(self.compare.len());
             for &(is_ff, a, b) in &self.compare {
                 match out.last_mut() {
-                    Some(p) if p.0 == is_ff && a <= p.2 + gap => p.2 = p.2.max(b),
+                    Some(p)
+                        if p.0 == is_ff
+                            && a <= p.2 + gap
+                            && (p.2.max(b) - p.1) as usize <= crate::simulator::WATCH_CAP_BYTES =>
+                    {
+                        p.2 = p.2.max(b)
+                    }
                     _ => out.push((is_ff, a, b)),
                 }
             }
@@ -1184,6 +1192,27 @@ mod tests {
     use crate::ir::{ExpressionContext, ProtoAssignStatement};
     use veryl_analyzer::value::{Value, ValueU64};
     use veryl_parser::token_range::TokenRange;
+
+    /// Densely packed small ranges join cheapest into one span far past the
+    /// cap; the emitter would then drop the gate.
+    #[test]
+    fn joined_compare_spans_stay_within_the_watch_cap() {
+        let compare: Vec<(bool, u32, u32)> =
+            (0..400u32).map(|i| (false, i * 12, i * 12 + 4)).collect();
+        let gate = EventGate {
+            lo: 0,
+            hi: 1,
+            state_off: 0,
+            compare,
+            out_comb: Vec::new(),
+            cone: String::new(),
+        };
+        let spans = gate.compare_spans();
+        assert!(spans.len() > 1);
+        for (_, a, b) in spans {
+            assert!((b - a) as usize <= crate::simulator::WATCH_CAP_BYTES);
+        }
+    }
 
     /// A block of `n` constant writes to the 4-byte FF at `off`.
     fn ff_block(off: isize, n: usize) -> ProtoStatement {
