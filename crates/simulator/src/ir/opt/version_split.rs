@@ -5,7 +5,7 @@
 //! (a priority chain, e.g. an unrolled `for` + `if` scan) — into a single
 //! unconditional write whose RHS is a ternary select chain.  Bit-disjoint
 //! writers (per-field assigns) fold the same way, into a concatenation.
-//! One writer per variable lets the whole-comb backends localize and fuse
+//! One writer per variable lets the comb backends localize and fuse
 //! storage they otherwise must keep materialized.
 //!
 //! Runs on the merged comb list before dependency analysis, while
@@ -35,7 +35,7 @@ use veryl_parser::token_range::TokenRange;
 // Transformation pass
 // ---------------------------------------------------------------------------
 
-/// The single-writer form widens what the whole-comb backends can localize
+/// The single-writer form widens what the comb backends can localize
 /// and fuse, so it pays on the full sweep.
 pub fn pass_enabled(use_4state: bool) -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -132,7 +132,7 @@ const MAX_TREE_DEPTH: usize = 512;
 /// cost: folding removes work but grows the emitted code, and on a design
 /// whose settle streams through more code than the instruction cache holds
 /// the code costs more than the work saved, while folding too little leaves
-/// the multi-writer form the whole-comb passes cannot localize or fuse.
+/// the multi-writer form the comb passes cannot localize or fuse.
 /// Measured across the suite the response is a shallow bowl — this value wins
 /// several percent on the widest designs and is neutral on the rest, a
 /// quarter of it loses on both counts — and it doubles as a backstop for any

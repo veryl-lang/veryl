@@ -1,11 +1,11 @@
-//! AOT-C (`cc -O3` → `.so`) whole-module backend.
+//! AOT-C (`cc -O3` → `.so`) backend.
 //!
-//! Emits the entire comb or event statement list as a single C
-//! function, hands it to an external compiler, dlopens the resulting
-//! `.so`, and dispatches the loaded function in place of per-chunk
-//! Cranelift.  Async mode publishes the compiled module via `OnceLock`;
-//! `try_dispatch` returns `NotReady` until then.  See [`emit`] for the
-//! pipeline.
+//! Emits an event statement list as a single C function, and a module's
+//! dataflow comb settle as a set of cell functions (`emit::prepare_dataflow`),
+//! hands the source to an external compiler, dlopens the resulting `.so`, and
+//! dispatches the loaded function in place of per-chunk Cranelift.  Async mode
+//! publishes the compiled module via `OnceLock`; `try_dispatch` returns
+//! `NotReady` until then.  See [`emit`] for the pipeline.
 
 pub(crate) mod emit;
 
@@ -17,7 +17,7 @@ use std::sync::Arc;
 ///
 /// Localization keeps a comb signal in a C local and leaves its `comb_values`
 /// word holding whatever it last held.  Nothing outside the chunk reads it,
-/// so the simulation is unaffected and the validate dual-run skips those
+/// so the simulation is unaffected and the dataflow CHECK skips those
 /// bytes — but a waveform dump shows them, and then disagrees with a run that
 /// took the Cranelift or interpreted path.  Waveform dumping is the caller.
 ///
@@ -34,7 +34,8 @@ pub fn detach_pending_compiles() {
 
 pub struct AotCBackend {
     async_mode: bool,
-    /// When false, only whole-comb compile is attempted.
+    /// When false, no event is compiled; the dataflow comb settle, which the
+    /// module builder emits directly, is unaffected.
     event_enabled: bool,
 }
 
@@ -68,26 +69,6 @@ impl Backend for AotCBackend {
         false
     }
 
-    fn compile_whole_comb(
-        &mut self,
-        ctx: &CompileCtx,
-        stmts: &[ProtoStatement],
-    ) -> Option<Arc<dyn CompiledWhole>> {
-        if ctx.use_4state {
-            return None;
-        }
-        let cell = emit::prepare_comb(stmts, self.async_mode)?;
-        // Localized comb byte ranges (intentionally-stale comb_values bytes) for
-        // the validate dual-run to skip; empty unless VERYL_AOT_C_LOCALIZE is on.
-        let localized = Arc::new(emit::take_last_localized_bytes());
-        Some(Arc::new(AotCWhole {
-            cell,
-            localized,
-            dataflow_marked: false,
-            dataflow_ff_marked: false,
-        }))
-    }
-
     fn compile_whole_event(
         &mut self,
         ctx: &CompileCtx,
@@ -106,26 +87,14 @@ impl Backend for AotCBackend {
         )?;
         Some(Arc::new(AotCWhole {
             cell,
-            localized: Arc::new(Vec::new()),
             dataflow_marked,
             dataflow_ff_marked,
         }))
-    }
-
-    fn diagnose_whole_comb_fallback(&self, stmts: &[ProtoStatement]) -> Option<String> {
-        if !emit::diag_enabled() {
-            return None;
-        }
-        Some(emit::comb_fallback_reason(stmts))
     }
 }
 
 struct AotCWhole {
     cell: emit::AotCell,
-    /// Localized comb byte ranges (offset, native_bytes) intentionally left
-    /// stale in comb_values; the validate dual-run skips these.  Empty for
-    /// events and when localization is off.
-    localized: Arc<Vec<(isize, usize)>>,
     /// See `CompiledWhole::dataflow_marked`.
     dataflow_marked: bool,
     /// See `CompiledWhole::dataflow_ff_marked`.
@@ -168,31 +137,12 @@ impl CompiledWhole for AotCWhole {
                 // function's reads/writes; emitted code follows the
                 // standard JIT ABI (ff, comb, write_log).
                 unsafe {
-                    // Whole-design AOT-C functions are never relocated: ff_delta = 0.
+                    // Whole-event functions are never relocated: ff_delta = 0.
                     (m.func)(ff, comb as *const u8, log, 0);
                 }
                 DispatchOutcome::Done
             }
             None => DispatchOutcome::NotReady,
         }
-    }
-
-    fn try_dispatch_const(&self, ff: *const u8, comb: *mut u8, log: *mut u8) -> DispatchOutcome {
-        match self.cell.get() {
-            Some(m) => {
-                if let Some(f) = m.const_func {
-                    // SAFETY: same ABI and pointer contract as `func`.
-                    unsafe {
-                        f(ff, comb as *const u8, log, 0);
-                    }
-                }
-                DispatchOutcome::Done
-            }
-            None => DispatchOutcome::NotReady,
-        }
-    }
-
-    fn localized_comb_bytes(&self) -> &[(isize, usize)] {
-        &self.localized
     }
 }

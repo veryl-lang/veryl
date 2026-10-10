@@ -116,7 +116,7 @@ pub struct LayoutInputs {
 }
 
 /// Default-on for 2-state storage; `VERYL_COMB_LAYOUT=0` opts out.  Off on
-/// wasm, which has no whole-comb backend to profit from the reordering.
+/// wasm, which has no AOT-C backend to profit from the reordering.
 pub fn enabled(use_4state: bool) -> bool {
     if cfg!(target_family = "wasm") {
         return false;

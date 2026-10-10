@@ -1,6 +1,4 @@
-use crate::backend::{
-    ChunkOutput, ChunkPlan, CompileCtx, CompiledWhole, compile_plans_parallel, whole,
-};
+use crate::backend::{ChunkOutput, ChunkPlan, CompileCtx, CompiledWhole, compile_plans_parallel};
 use crate::ir::big_array::BigArrayFold;
 use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
@@ -85,11 +83,8 @@ pub struct Module {
     /// value here is a duplication artifact in the simulator IR assembly.
     /// Exposed for regression tests.
     pub nontrivial_comb_scc: usize,
-    /// Whole-comb dispatch handle, populated when a backend committed
-    /// to a one-function compile via `Backend::compile_whole_comb`.
-    /// `None` keeps `settle_comb` on the per-chunk Cranelift loop.
-    pub whole_comb: Option<Arc<dyn CompiledWhole>>,
     /// Dataflow settle (off under `VERYL_DATAFLOW=0`); see `opt::dataflow`.
+    /// `None` keeps `settle_comb` on the per-chunk Cranelift loop.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// The dataflow cells Cranelift could not compile, lowered onto this
     /// module's buffers for the dispatcher to interpret.
@@ -157,9 +152,6 @@ pub struct ProtoModule {
     pub derived_clock_schedule: DerivedClockSchedule,
     /// See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
-    /// See `Module::whole_comb`.  Built in `conv()` and shared
-    /// (`Arc::clone`) with every `Module` produced by `instantiate()`.
-    pub whole_comb: Option<Arc<dyn CompiledWhole>>,
     /// See `Module::dataflow`.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// See `Module::whole_events`.  Built in `conv()`, shared
@@ -466,7 +458,6 @@ impl ProtoModule {
             inst_layout: self.inst_layout.clone(),
             derived_clock_schedule: self.derived_clock_schedule.clone(),
             nontrivial_comb_scc: self.nontrivial_comb_scc,
-            whole_comb: self.whole_comb.clone(),
             dataflow: self.dataflow.clone(),
             #[cfg(not(target_family = "wasm"))]
             dataflow_interp: self
@@ -624,6 +615,10 @@ fn validate_meta_offsets(
 /// Those figures were calibrated on flat comb lists, where an entry IS a
 /// statement and the two units coincide; nested counting only changes what
 /// happens where they do not.
+/// On the comb side these chunks serve the per-chunk settle only: the
+/// fallback before a dataflow settle is ready, the reference the dataflow
+/// CHECK reruns, and `VERYL_DATAFLOW=0`.  Dataflow cells are compiled one
+/// function per cell and do not use it.
 /// Overridable via `VERYL_JIT_CHUNK_SIZE` env var for sweeps.
 const JIT_CHUNK_SIZE_DEFAULT: usize = 1024;
 
@@ -1091,7 +1086,7 @@ fn comb_pipeline_key(
     events: &HashMap<Event, Vec<ProtoStatement>>,
     protect: &HashSet<VarOffset>,
 ) -> u128 {
-    use crate::backend::registry::whole_comb_fingerprint_from;
+    use crate::backend::registry::comb_list_fingerprint_from;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
@@ -1108,7 +1103,7 @@ fn comb_pipeline_key(
     evt.hash(&mut h);
     prot_offs.hash(&mut h);
     unfuse_inputs_digest.hash(&mut h);
-    whole_comb_fingerprint_from(unified_fp, h.finish() as u128)
+    comb_list_fingerprint_from(unified_fp, h.finish() as u128)
 }
 
 /// Run the comb pipeline: `analyze_dependency` → `reorder_by_level` →
@@ -1176,19 +1171,17 @@ pub(crate) fn dump_stmt_order(tag: &str, module_name: StrId, stmts: &[ProtoState
     }
 }
 
-/// Comb offsets written anywhere in the event statement lists
-/// (misclassified-FF: ICG enables and other event-written comb).  The
-/// AOT-C const-cone split must treat any read of these as non-constant —
-/// no comb statement writes them, but their value changes across settles.
-/// Dynamic writes taint their whole element range.
-/// `None` when an event contains writes this walker cannot bound (a
-/// CompiledBlock without original statements, a tb-method call whose
-/// return destination is an unresolved `VarId`) — the caller must not
-/// arm the split then.
 /// Narrowest storage an element can occupy, turning an element count into a
 /// lower bound on the bytes the owner tables' fold weighs.
 const MIN_ELEMENT_BYTES: usize = 4;
 
+/// Comb offsets written anywhere in the event statement lists
+/// (misclassified-FF: ICG enables and other event-written comb): no comb
+/// statement writes them, but their value changes across settles.
+/// Dynamic writes taint their whole element range.
+/// `None` when an event contains writes this walker cannot bound (a
+/// CompiledBlock without original statements, a tb-method call whose
+/// return destination is an unresolved `VarId`).
 fn collect_event_written_comb(
     events: &HashMap<Event, Vec<ProtoStatement>>,
 ) -> Option<HashSet<isize>> {
@@ -1770,7 +1763,7 @@ fn run_comb_pipeline(
 
     stage.mark("cone_order+layout");
 
-    // Snapshot before JIT consumes it: the whole-comb backend needs the
+    // Snapshot before JIT consumes it: the dataflow plan needs the
     // pre-JIT stmts (JIT CompiledBlocks hide stmt-level I/O).
     let pre_jit_stmts = Arc::new(unified_sorted.clone());
     let comb_touched_offsets = Arc::new(collect_comb_touched_offsets(&pre_jit_stmts));
@@ -4694,8 +4687,8 @@ fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
     // +1 safety margin when any backward chain exists: intra-SCC forward
     // hops stay uncounted (a terminating approximation, measured one pass
     // short on a real design), and no tight static bound exists for
-    // value-dependent false-SCC convergence.  VERYL_MIN_PASSES_OVERRIDE
-    // remains the escape hatch.
+    // value-dependent false-SCC convergence.  VERYL_MIN_PASSES_OVERRIDE is
+    // the escape hatch on the per-chunk settle path.
     let passes = if max_delay == 0 { 1 } else { max_delay + 2 };
     if passes > 1 {
         log::info!(
@@ -5560,11 +5553,8 @@ impl Conv<&air::Module> for ProtoModule {
 
         // Before the expansion below splices a reused child's tree in; see
         // `comb_pipeline_key` for why this still pins the pipeline's input.
-        let unified_fp = crate::backend::registry::whole_comb_fingerprint(
-            context.config.use_4state,
-            &unified,
-            0,
-        );
+        let unified_fp =
+            crate::backend::registry::comb_list_fingerprint(context.config.use_4state, &unified, 0);
 
         // Baked inst-chunk artifacts would freeze their spans into rigid
         // units (see `expand_compiled_blocks`) — expand them BEFORE the key
@@ -6114,7 +6104,7 @@ impl Conv<&air::Module> for ProtoModule {
         // LocalizeInfo = (blocklist offsets, array ranges).
         type LocalizeInfo = (HashSet<isize>, Vec<(isize, usize, isize)>);
         // Wasm registers no AOT-C backend, so there is nothing to localize;
-        // the binding still exists so the whole-comb call site is uniform.
+        // the binding exists so the dataflow call site is uniform.
         #[cfg(target_family = "wasm")]
         let localize_info: Option<LocalizeInfo> = None;
         #[cfg(not(target_family = "wasm"))]
@@ -6156,11 +6146,6 @@ impl Conv<&air::Module> for ProtoModule {
         } else {
             None
         };
-
-        // Const-cone split input (see `collect_event_written_comb`);
-        // `None` leaves the split unarmed.
-        let const_unsafe_comb: Option<HashSet<isize>> =
-            collect_event_written_comb(&all_event_statements);
 
         // Diag: count FF offsets with multiple write sites — the
         // "multi-RMW candidates" that require scratch/cache forwarding
@@ -6824,6 +6809,20 @@ impl Conv<&air::Module> for ProtoModule {
                     crate::backend::aot_c::emit::clear_localize_blocklist();
                     if cell.is_none() && crate::ir::opt::dataflow::diag() {
                         eprintln!("[dataflow] declined: the emitter could not cover the cells");
+                        // Every uncovered statement, not just the first, so
+                        // one fix does not simply surface the next decline.
+                        let census =
+                            crate::backend::aot_c::emit::comb_uncovered_census(&pre_jit_stmts);
+                        let mut counts: HashMap<String, usize> = Default::default();
+                        for c in census {
+                            *counts.entry(c).or_default() += 1;
+                        }
+                        let mut v: Vec<_> = counts.into_iter().collect();
+                        v.sort_by_key(|x| std::cmp::Reverse(x.1));
+                        eprintln!("[dataflow] {} distinct uncovered comb stmts:", v.len());
+                        for (k, n) in v.iter().take(40) {
+                            eprintln!("  {n:6}x  {k}");
+                        }
                     }
                     let localized = crate::backend::aot_c::emit::take_last_localized_bytes();
                     let cell = cell?;
@@ -6861,69 +6860,6 @@ impl Conv<&air::Module> for ProtoModule {
         #[cfg(target_family = "wasm")]
         let dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>> = None;
 
-        // Whole-comb backend (today: AOT-C) — when registered + size_ok,
-        // try compile_whole_comb; backends that decline (4-state,
-        // unsupported construct) return None and Ir::settle_comb stays
-        // on the per-chunk Cranelift loop.
-        // A dataflow settle replaces the whole-comb one; until its `.so` lands
-        // the Cranelift cells run it.
-        let whole_comb: Option<Arc<dyn CompiledWhole>> = if !size_ok || dataflow.is_some() {
-            None
-        } else {
-            // Memoise the whole-comb compile by the same structural `key` as the
-            // comb pipeline: a shared DUT's C is emitted + fingerprinted once,
-            // not per test (the emit is the dominant per-test build cost at
-            // suite scale, and pure waste when the backend declines).
-            whole::compile_whole_comb(
-                &mut context.backends,
-                &context.config,
-                key,
-                &context.comb_cache,
-                &pre_jit_stmts,
-                whole::WholeCombShape {
-                    localize: localize_info.as_ref(),
-                    const_unsafe: const_unsafe_comb.as_ref(),
-                },
-            )
-        };
-
-        // A whole-comb bail silently drops the whole module to per-chunk
-        // dispatch — a perf regression with no other signal.  Each backend
-        // exposes its own diagnostic gate (today: VERYL_AOT_C_DIAG); the
-        // registry returns the first non-None diagnostic.
-        if size_ok
-            && whole_comb.is_none()
-            && let Some(reason) = context
-                .backends
-                .diagnose_whole_comb_fallback(&pre_jit_stmts)
-        {
-            eprintln!(
-                "[whole_comb] module {} fell back to per-chunk dispatch: {}",
-                src.name, reason,
-            );
-            // Census of ALL uncovered comb stmts (not just the first) so a
-            // single fix doesn't just surface the next bail.  AOT-C (and its
-            // census) is gated off on wasm, like `backend::aot_c`.
-            #[cfg(not(target_family = "wasm"))]
-            if std::env::var("VERYL_AOT_C_DIAG").as_deref() == Ok("1") {
-                let census = crate::backend::aot_c::emit::comb_uncovered_census(&pre_jit_stmts);
-                let mut counts: HashMap<String, usize> = Default::default();
-                for c in census {
-                    *counts.entry(c).or_default() += 1;
-                }
-                let mut v: Vec<_> = counts.into_iter().collect();
-                v.sort_by_key(|x| std::cmp::Reverse(x.1));
-                eprintln!(
-                    "[whole_comb_census] module {} uncovered comb stmts ({} distinct):",
-                    src.name,
-                    v.len()
-                );
-                for (k, n) in v.iter().take(40) {
-                    eprintln!("  {n:6}x  {k}");
-                }
-            }
-        }
-
         Ok(ProtoModule {
             name: src.name,
             ports: src.ports.clone(),
@@ -6938,7 +6874,6 @@ impl Conv<&air::Module> for ProtoModule {
             inst_layout,
             derived_clock_schedule,
             nontrivial_comb_scc,
-            whole_comb,
             dataflow,
             whole_events,
             external_components: all_external_components,

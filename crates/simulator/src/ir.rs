@@ -54,7 +54,7 @@ pub use variable::{
 pub use veryl_analyzer::ir::{Op, Type, VarId, VarPath};
 pub use veryl_analyzer::value::Value;
 
-use crate::backend::{self, CompiledWhole, DispatchOutcome};
+use crate::backend::CompiledWhole;
 use crate::residency;
 use crate::simulator::SimProfile;
 use crate::simulator_error::SimulatorError;
@@ -118,12 +118,6 @@ pub struct Ir {
     /// so any non-zero value here indicates duplicate ProtoStatements in
     /// the simulator IR assembly.  See `Module::nontrivial_comb_scc`.
     pub nontrivial_comb_scc: usize,
-    /// Whole-comb dispatch handle.  `Some` when a backend (today:
-    /// AOT-C) committed to a one-function compile via
-    /// `Backend::compile_whole_comb`; `settle_comb` invokes its
-    /// `try_dispatch` in place of per-chunk Cranelift.  `None` keeps
-    /// the per-chunk loop.
-    pub whole_comb: Option<Arc<dyn CompiledWhole>>,
     /// See `Module::dataflow`.
     pub dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>>,
     /// See `Module::dataflow_interp`, by cell.
@@ -155,8 +149,9 @@ pub struct Ir {
     pub(crate) dataflow_check_panic: std::cell::Cell<bool>,
     /// Variables the checks found different, summed over checks.
     pub(crate) dataflow_check_mismatches: std::cell::Cell<u64>,
-    /// Snapshotted from `Config::aot_c_validate`: when set, `settle_comb` /
-    /// `step` dual-run the AOT-C and Cranelift paths and panic on divergence.
+    /// Snapshotted from `Config::aot_c_validate`: when set, `step` dual-runs
+    /// the whole-event and Cranelift paths and panics on divergence, and the
+    /// dataflow settle is checked against a full rerun.
     pub aot_c_validate: bool,
     /// Snapshotted from `Config::aot_c_validate_stride`: dual-run only every
     /// Nth settle (0/1 = every cycle).
@@ -198,23 +193,17 @@ pub struct Ir {
     pub fused_comb_offsets: Vec<isize>,
     /// A failed compile leaves the cell empty forever, so the fallback is
     /// taken every cycle; the residency table (a mutex) must be touched once.
-    whole_comb_fallback_recorded: AtomicBool,
     dataflow_fallback_recorded: AtomicBool,
     pub(crate) whole_event_fallback_recorded: AtomicBool,
     /// `[ran, fell_back]` dispatch tallies.  The `*_fallback_recorded` flags
     /// above latch on the FIRST fallback and so cannot say how much of a run
     /// was affected; these can.  Published to `residency` on drop.
-    pub(crate) whole_comb_dispatch: [AtomicU64; 2],
     /// Dataflow settles run by the `.so` and by the Cranelift cells.
     pub(crate) dataflow_dispatch: [AtomicU64; 2],
     pub(crate) whole_event_dispatch: [AtomicU64; 2],
     /// Event gate skips on the per-statement path.  `Ir` is not `Sync` and
     /// the gates run on the simulator's own thread, so this needs no atomic.
     pub(crate) event_gate_skips: std::cell::Cell<u64>,
-    /// Whether the whole-comb backend's run-once constant-cone entry has
-    /// executed for THIS instance.  Per-instance (not per-artifact): a
-    /// shared `.so` serves many simulators, each with fresh comb buffers.
-    pub(crate) const_cone_done: AtomicBool,
 }
 
 /// A built component library on disk and the type name to look up in it.
@@ -229,7 +218,6 @@ pub struct ComponentLibrary {
 impl Drop for Ir {
     fn drop(&mut self) {
         for (kind, c) in [
-            ("whole_comb", &self.whole_comb_dispatch),
             ("dataflow", &self.dataflow_dispatch),
             ("whole_event", &self.whole_event_dispatch),
         ] {
@@ -246,19 +234,6 @@ impl Drop for Ir {
 }
 
 impl Ir {
-    /// Latch this module into `degraded_modules`.  Both whole-comb dispatch
-    /// sites call it, so a validate run reports the same fallbacks a plain one
-    /// does — otherwise `dispatch` could show `fell_back > 0` beside an empty
-    /// `degraded_modules`, and the two fields would contradict each other.
-    pub(crate) fn record_comb_fallback(&self) {
-        if !self
-            .whole_comb_fallback_recorded
-            .swap(true, Ordering::Relaxed)
-        {
-            residency::record_fallback("whole_comb", &self.name.to_string());
-        }
-    }
-
     pub fn from_module(module: Module, config: &Config, token: TokenRange) -> Ir {
         let mut ir = Ir {
             name: module.name,
@@ -286,7 +261,6 @@ impl Ir {
             disable_ff_opt: config.disable_ff_opt,
             derived_clock_schedule: module.derived_clock_schedule,
             nontrivial_comb_scc: module.nontrivial_comb_scc,
-            whole_comb: module.whole_comb,
             dataflow_dirty: std::cell::RefCell::new(vec![
                 0;
                 module
@@ -330,14 +304,11 @@ impl Ir {
             gate_state_base: module.gate_state_base,
             event_gate_flags: module.event_gate_flags,
             settle_info: module.settle_info,
-            whole_comb_fallback_recorded: Default::default(),
             dataflow_fallback_recorded: Default::default(),
             whole_event_fallback_recorded: Default::default(),
-            whole_comb_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             dataflow_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             whole_event_dispatch: [AtomicU64::new(0), AtomicU64::new(0)],
             event_gate_skips: std::cell::Cell::new(0),
-            const_cone_done: Default::default(),
         };
         // Bake the WriteLogBuffer's heap-stable address into every
         // JIT-dispatched Compiled/CompiledBatch so emitted code can perform
@@ -457,9 +428,9 @@ impl Ir {
     }
 
     /// `VERYL_BACKEND_DIAG=1`: report per-event/comb jit vs interpreter counts
-    /// and whether a whole-comb/event backend is dispatched. Chunking is
-    /// identical for `cc` and `cranelift` (only dispatch differs), so a `cc`
-    /// run also describes Cranelift's interp fallback. Read-only.
+    /// and whether a dataflow comb / whole-event backend is dispatched.
+    /// Chunking is identical for `cc` and `cranelift` (only dispatch differs),
+    /// so a `cc` run also describes Cranelift's interp fallback. Read-only.
     fn backend_diag(&self) {
         if env::var("VERYL_BACKEND_DIAG").as_deref() != Ok("1") {
             return;
@@ -541,7 +512,7 @@ impl Ir {
                 Statement::Compiled(_) | Statement::CompiledBatch(_) => "Compiled".to_string(),
             }
         }
-        let report = |label: &str, stmts: &[Statement], whole: bool| {
+        let report = |label: &str, stmts: &[Statement], tag: &str, accel: bool| {
             let (mut jit, mut interp) = (0usize, 0usize);
             for s in stmts {
                 if s.is_compiled() {
@@ -551,7 +522,7 @@ impl Ir {
                 }
             }
             eprintln!(
-                "  {label}: total={} jit={jit} interp={interp}  whole={whole}",
+                "  {label}: total={} jit={jit} interp={interp}  {tag}={accel}",
                 stmts.len()
             );
             for s in stmts {
@@ -561,13 +532,19 @@ impl Ir {
             }
         };
         eprintln!("=== BackendDiag for {} ===", self.name);
-        report("comb", &self.comb_statements, self.whole_comb.is_some());
+        report(
+            "comb",
+            &self.comb_statements,
+            "dataflow",
+            self.dataflow.is_some(),
+        );
         let mut events: Vec<_> = self.event_statements.iter().collect();
         events.sort_by_key(|(e, _)| format!("{e:?}"));
         for (event, stmts) in events {
             report(
                 &format!("event {event:?}"),
                 stmts,
+                "whole",
                 self.whole_events.contains_key(event),
             );
         }
@@ -594,28 +571,40 @@ impl Ir {
         }
     }
 
-    /// Evaluate comb for `required_comb_passes` passes.
+    /// Settle the comb: through the dataflow cells when the module has a
+    /// ready dataflow settle (only the cells something marked run, once), else
+    /// every comb statement for `required_comb_passes` passes.
     ///
     /// Real combinational loops are rejected by `analyze_dependency`
-    /// (error: `combinational_loop`), so once control reaches this function
-    /// the stmt-level graph is an acyclic DAG whose depth determines how
-    /// many passes are needed to settle.  No iteration-to-convergence is
-    /// required, and no runtime "did anything change?" check is performed.
+    /// (error: `combinational_loop`), so neither path tests for convergence:
+    /// the cells run once in topological order, the chunked settle runs its
+    /// precomputed pass count.
     pub fn settle_comb(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
-        self.settle_comb_passes(mask_cache, profile);
+        #[cfg(feature = "profile")]
+        {
+            profile.settle_comb_count += 1;
+        }
+        #[cfg(not(target_family = "wasm"))]
+        let settled = self.settle_dataflow();
+        #[cfg(target_family = "wasm")]
+        let settled = false;
+        if !settled {
+            self.run_chunked_settle(mask_cache, profile);
+        }
         if settle_converge_check() {
-            self.check_settled(mask_cache);
+            self.check_settled(mask_cache, settled);
         }
     }
 
     /// `VERYL_SETTLE_CONVERGE_CHECK=1`: one extra pass must change nothing.
+    /// `dataflow` says the settle just checked ran through the dataflow cells.
     ///
     /// Every side effect of the extra pass is rewound.
-    fn check_settled(&self, mask_cache: &mut MaskCache) {
+    fn check_settled(&self, mask_cache: &mut MaskCache, dataflow: bool) {
         let before = self.comb_values.clone();
         // The extra pass has side effects -- the is_ff refinement pushes
         // write-log entries and `$display` writes the output buffer -- so
-        // rewind both, as `backend::validate` does.
+        // rewind both.
         let ff_before = self.ff_values.clone();
         let narrow_before = self.write_log_buffer.narrow_count();
         let wide_before = self.write_log_buffer.wide_count();
@@ -643,13 +632,13 @@ impl Ir {
             (*buf).wide_count = wide_before;
         }
         crate::output_buffer::truncate_to(out_mark);
-        // Bytes whole-comb leaves deliberately stale (chunk-local, no external
-        // reader), so a difference there is this check's artefact.
-        // `backend::validate` skips the same set.
+        // Bytes the dataflow module leaves deliberately stale (chunk-local, no
+        // external reader), so a difference there is this check's artefact.
+        // The dataflow CHECK skips the same set.
         let stale = self
-            .whole_comb
+            .dataflow
             .as_ref()
-            .map(|w| w.localized_comb_bytes())
+            .map(|d| d.localized.as_slice())
             .unwrap_or(&[]);
         let localized = |i: usize| {
             stale
@@ -658,6 +647,13 @@ impl Ir {
         };
         for (i, (a, b)) in before.iter().zip(after.iter()).enumerate() {
             if a != b && !localized(i) {
+                if dataflow {
+                    panic!(
+                        "dataflow settle did not converge ({}): comb byte {i} changed \
+                         {a:#x} -> {b:#x} on an extra pass",
+                        self.name,
+                    );
+                }
                 panic!(
                     "settle did not converge in {} pass(es) ({}): comb byte {i} changed \
                      {a:#x} -> {b:#x} on an extra pass -- required_comb_passes is too low",
@@ -665,85 +661,6 @@ impl Ir {
                 );
             }
         }
-    }
-
-    fn settle_comb_passes(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
-        #[cfg(feature = "profile")]
-        {
-            profile.settle_comb_count += 1;
-        }
-        let _ = profile; // suppress unused warning when profile feature is off
-
-        // A ready dataflow settle replaces all of what follows.
-        // Dispatch: when a whole-comb backend (today: AOT-C) is ready,
-        // invoke it in place of per-chunk Cranelift dispatch.  When
-        // `--backend-validate` (`self.aot_c_validate`) we additionally
-        // dual-run the whole-comb and the per-chunk path and panic on
-        // first divergence.  Both paths fall through to Cranelift if
-        // the whole-comb backend declines (`whole_comb == None`) or
-        // returns `NotReady` (async compile pending).
-        #[cfg(not(target_family = "wasm"))]
-        if self.settle_dataflow() {
-            return;
-        }
-        let whole_comb = self.whole_comb.as_ref();
-        if let Some(whole) = whole_comb {
-            // Cache env var lookups in a process-static OnceLock: settle_comb
-            // runs once per cycle, so a per-cycle `std::env::var`/getenv would
-            // be a hot-path cost.
-            static AOT_C_PASSES_OVERRIDE: OnceLock<Option<usize>> = OnceLock::new();
-            let validate = self.aot_c_validate;
-            let env_passes = *AOT_C_PASSES_OVERRIDE.get_or_init(|| {
-                env::var("VERYL_AOT_C_PASSES")
-                    .ok()
-                    .and_then(|s| s.parse::<usize>().ok())
-            });
-            let ff_ptr = self.ff_values.as_ptr();
-            let comb_ptr = self.comb_values.as_ptr() as *mut u8;
-            // AOT-C comb eval never writes the log (the emitted C does
-            // `(void)write_log`), so the pointer is unused.  Pass the real
-            // heap-stable buffer address anyway to satisfy the FuncPtr
-            // contract (3rd arg is `*mut u8`).
-            let log_ptr = (&*self.write_log_buffer as *const _ as *const u8) as *mut u8;
-            let passes = env_passes.unwrap_or(self.required_comb_passes).max(1);
-
-            // Run-once constant cone (see `try_dispatch_const`).  NotReady
-            // leaves the flag unset — the main dispatch below falls back to
-            // Cranelift, which still evaluates the const statements.
-            if !self.const_cone_done.load(Ordering::Relaxed)
-                && whole.try_dispatch_const(ff_ptr, comb_ptr, log_ptr) == DispatchOutcome::Done
-            {
-                self.const_cone_done.store(true, Ordering::Relaxed);
-            }
-
-            if !validate {
-                // Common case: passes == 1 (no SCC backward edges).
-                for _ in 0..passes {
-                    match whole.try_dispatch(ff_ptr, comb_ptr, log_ptr) {
-                        DispatchOutcome::Done => {
-                            self.whole_comb_dispatch[0].fetch_add(1, Ordering::Relaxed);
-                        }
-                        DispatchOutcome::NotReady => {
-                            self.whole_comb_dispatch[1].fetch_add(1, Ordering::Relaxed);
-                            // Async compile not finished yet — drop to
-                            // Cranelift for this cycle (see `residency`).
-                            self.record_comb_fallback();
-                            self.run_chunked_settle(mask_cache, profile);
-                            return;
-                        }
-                    }
-                }
-                return;
-            }
-
-            // Validate path: delegate to backend::validate, which
-            // snapshots inputs, runs whole-comb, restores, runs
-            // Cranelift, and diffs.  Panics on divergence.
-            backend::validate::settle_comb(self, whole.as_ref(), passes, mask_cache, profile);
-            return;
-        }
-
-        self.run_chunked_settle(mask_cache, profile);
     }
 
     /// Run the dirty cells through the dataflow module.  `false` when there is
@@ -859,7 +776,7 @@ impl Ir {
         } else {
             None
         };
-        // SAFETY: the dataflow entry has the whole-comb ABI, reading and
+        // SAFETY: the dataflow entry has the `FuncPtr` ABI, reading and
         // writing the same buffers; `ff_delta` carries the dirty words,
         // which it clears as it runs.
         let t_run = probing.then(std::time::Instant::now);
@@ -1183,12 +1100,11 @@ impl Ir {
         }
     }
 
-    /// Cranelift-only settle path, factored out so the validate mode can
-    /// invoke it after AOT-C eval has run and the buffers have been restored.
-    pub(crate) fn run_chunked_settle(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
+    /// The per-chunk settle: every comb statement, once per required pass.
+    fn run_chunked_settle(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
         let _ = profile;
 
-        // `VERYL_MIN_PASSES_OVERRIDE` is still honoured as a debug knob.
+        // `VERYL_MIN_PASSES_OVERRIDE` is a debug knob of this path only.
         static MIN_PASSES_OVERRIDE: OnceLock<Option<usize>> = OnceLock::new();
         let min_override = *MIN_PASSES_OVERRIDE.get_or_init(|| {
             env::var("VERYL_MIN_PASSES_OVERRIDE")
@@ -1205,8 +1121,7 @@ impl Ir {
         }
     }
 
-    /// Evaluate unified comb once.
-    /// Called by settle_comb() for each required pass.
+    /// Evaluate unified comb once: one pass of the per-chunk settle.
     pub fn eval_comb_full(&self, mask_cache: &mut MaskCache, profile: &mut SimProfile) {
         let _ = profile;
         #[cfg(feature = "profile")]
@@ -1423,9 +1338,10 @@ pub struct Config {
     pub dump_asm: bool,
     /// Force all always_ff variables to FF (disable is_ff refinement).
     pub disable_ff_opt: bool,
-    /// `cc` backend: emit comb as C, compile externally, and dispatch the
-    /// `.so` instead of the Cranelift loop (which still covers stmts it can't
-    /// emit, so keep `use_jit` true).  Default false; `--backend cc` enables it.
+    /// `cc` backend: emit the dataflow comb settle as C, compile externally,
+    /// and dispatch the `.so` instead of the Cranelift loop (which still
+    /// covers modules the settle declines, so keep `use_jit` true).  Default
+    /// false; `--backend cc` enables it.
     pub aot_c: bool,
     /// `cc` backend event path: also emit the per-event FF-next + write-log.
     /// Requires `aot_c`.
@@ -1434,11 +1350,12 @@ pub struct Config {
     /// once ready, hiding the cold compile latency.  Requires `aot_c`; forced
     /// off under `aot_c_validate` (validation must dual-run from cycle 0).
     pub aot_c_async: bool,
-    /// Dual-run `cc` and Cranelift every cycle, panicking on the first
-    /// divergence (correctness check).  Implies a synchronous compile.
+    /// Dual-run each whole-event `.so` against Cranelift and check each
+    /// dataflow settle against a full rerun, panicking on the first divergence
+    /// (correctness check).  Implies a synchronous compile.
     pub aot_c_validate: bool,
-    /// Stride for `aot_c_validate`: dual-run + diff only every Nth comb/event
-    /// settle (off-stride cycles run Cranelift only — the ground truth that
+    /// Stride for `aot_c_validate`: check only every Nth dataflow settle /
+    /// event (an off-stride event runs Cranelift only, the ground truth that
     /// drives the sim).  0 or 1 = every cycle (full coverage); larger trades
     /// coverage for speed on long tests.
     pub aot_c_validate_stride: u64,
@@ -1534,7 +1451,7 @@ impl Config {
         // with timing, but tests must dual-check cc deterministically vs the
         // golden output.  Gated on cc_available so cc-less hosts still run.
         #[cfg(not(target_family = "wasm"))]
-        if backend::aot_c::cc_available() {
+        if crate::backend::aot_c::cc_available() {
             for disable_ff_opt in [false, true] {
                 ret.push(Config {
                     use_4state: false,
@@ -1551,8 +1468,6 @@ impl Config {
         ret
     }
 }
-
-// `lookup_comb_offset` has moved to `backend::validate`.
 
 /// The bytes of `ranges` in `buf`, back to back.
 fn gather_ranges(buf: &[u8], ranges: &[(u32, u32)]) -> Vec<u8> {

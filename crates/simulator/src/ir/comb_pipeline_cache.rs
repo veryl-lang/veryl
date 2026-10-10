@@ -27,7 +27,6 @@
 use super::statement::{ProtoStatement, ProtoStatements};
 use super::variable::VarOffset;
 use crate::HashMap;
-use crate::backend::CompiledWhole;
 use std::sync::{Arc, Condvar, Mutex};
 
 /// Memoised result of the whole comb pipeline for one comb-list key.
@@ -91,8 +90,6 @@ enum Slot {
 pub(crate) struct CombPipelineCache {
     entries: Mutex<HashMap<u128, Slot>>,
     ready: Condvar,
-    whole_entries: Mutex<HashMap<u128, WholeSlot>>,
-    whole_ready: Condvar,
 }
 
 /// Outcome of consulting the cache for one comb-list key.
@@ -138,68 +135,7 @@ impl Drop for Claim {
     }
 }
 
-// ── Whole-comb backend (AOT-C `.so`) cache ──────────────────────────────────
-//
-// `CombPipeline` memoises the sort/DCE/JIT rerun but NOT the backend compile
-// (`Backend::compile_whole_comb`), which re-emits + re-fingerprints the whole
-// shared-DUT comb per test — the dominant per-test build cost at suite scale.
-// Keyed by the same structural `u128`: a match implies a byte-identical comb
-// list (offsets included), so the emitted `.so` is reusable verbatim. A decline
-// (`None`) is cached too, so a declining DUT is emitted+probed once, not per test.
-type WholeComb = Option<Arc<dyn CompiledWhole>>;
-
-enum WholeSlot {
-    Computing,
-    Done(WholeComb),
-}
-
 impl CombPipelineCache {
-    /// Single-flight memoisation of the whole-comb compile: `compute` runs only
-    /// on the first miss for `key`, and parallel peers wait until it publishes.
-    /// A claim is released if `compute` unwinds so blocked peers can retry.
-    pub(crate) fn whole_comb_get_or_compute(
-        &self,
-        key: u128,
-        dut_reuse: bool,
-        compute: impl FnOnce() -> WholeComb,
-    ) -> WholeComb {
-        if !dut_reuse {
-            return compute();
-        }
-        let mut cache = self.whole_entries.lock().unwrap();
-        loop {
-            match cache.get(&key) {
-                Some(WholeSlot::Done(v)) => return v.clone(),
-                Some(WholeSlot::Computing) => cache = self.whole_ready.wait(cache).unwrap(),
-                None => {
-                    cache.insert(key, WholeSlot::Computing);
-                    break;
-                }
-            }
-        }
-        drop(cache);
-
-        // Release the claim on unwind so blocked peers retry instead of hanging.
-        struct Guard<'a>(&'a CombPipelineCache, u128, bool);
-        impl Drop for Guard<'_> {
-            fn drop(&mut self) {
-                if !self.2 {
-                    let mut cache = self.0.whole_entries.lock().unwrap();
-                    cache.remove(&self.1);
-                    self.0.whole_ready.notify_all();
-                }
-            }
-        }
-        let mut guard = Guard(self, key, false);
-        let result = compute();
-        guard.2 = true;
-
-        let mut cache = self.whole_entries.lock().unwrap();
-        cache.insert(key, WholeSlot::Done(result.clone()));
-        self.whole_ready.notify_all();
-        result
-    }
-
     /// Consult the cache. On a hit, clone out the memoised pipeline. On a miss,
     /// claim the slot single-flight: peers requesting the same key block until this
     /// thread publishes via the returned guard.

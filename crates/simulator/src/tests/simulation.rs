@@ -1647,9 +1647,10 @@ fn wide_256_select_store() {
     }
 }
 
-/// AOT-C config that forces native whole-module compile (min_stmts=0) and
-/// dual-runs cc vs Cranelift every cycle (aot_c_validate), panicking on the
-/// first divergence.
+/// AOT-C config with no size floor (min_stmts=0), so the module gets a
+/// dataflow settle and AOT-C events, under `aot_c_validate`: every event is
+/// dual-run against Cranelift and every dataflow settle checked against a
+/// full rerun, panicking on the first divergence.
 fn aot_native_validate_config() -> Config {
     Config {
         use_4state: false,
@@ -1666,8 +1667,8 @@ fn aot_native_validate_config() -> Config {
 #[test]
 fn wide_256_aot_native_comb() {
     // G1: a wide (>128-bit) comb module must be covered NATIVELY by the AOT-C
-    // backend (whole_comb = Some), not silently bailed to Cranelift.  The
-    // aot_c_validate config additionally dual-runs cc vs Cranelift each cycle,
+    // dataflow settle, not silently bailed to Cranelift.  The aot_c_validate
+    // config additionally checks the settle against a full Cranelift rerun,
     // asserting the wide-op helper codegen is bit-identical.
     if !crate::backend::aot_c::cc_available() {
         return; // no external C compiler on this host
@@ -1689,7 +1690,7 @@ fn wide_256_aot_native_comb() {
     let ir = analyze(code, &config);
     assert!(
         comb_is_aot_native(&ir),
-        "wide comb module must be AOT-C-native (whole_comb=Some), not bailed to Cranelift",
+        "wide comb module must be AOT-C-native, not bailed to Cranelift",
     );
     let mut sim = Simulator::new(ir, None);
     let a = Value::new(0x00FF, 256, false);
@@ -1705,7 +1706,7 @@ fn wide_256_aot_native_comb() {
 #[test]
 fn a_validate_run_counts_the_dispatches_it_compared() {
     // The counters used to sit only on the non-validate branch, so a validate
-    // run reported nothing -- indistinguishable from "no whole-* handle".
+    // run reported nothing -- indistinguishable from "no AOT-C handle".
     if !crate::backend::aot_c::cc_available() {
         return;
     }
@@ -1753,8 +1754,8 @@ fn a_validate_run_counts_the_dispatches_it_compared() {
     // counters deleted, which is the half this exists to pin.  Either outcome
     // counts -- where the artifact never lands every dispatch falls back, and
     // reporting THAT is the whole point of the field.
-    for kind in ["whole_comb:", "whole_event:"] {
-        if kind == "whole_comb:" && dataflow_on() {
+    for kind in ["dataflow:", "whole_event:"] {
+        if kind == "dataflow:" && !dataflow_on() {
             continue;
         }
         assert!(
@@ -23230,8 +23231,6 @@ fn system_function_expression_context() {
 
 fn assert_aot_comb_executed(sim: &Simulator, config: &Config) {
     if config.aot_c {
-        use std::sync::atomic::Ordering::Relaxed;
-
         // `cc --version` can succeed even when the runtime cannot prepare
         // or load a shared library. Probe a fixed source independently of
         // the emitter so an emission regression still fails the assertions.
@@ -23262,19 +23261,7 @@ fn assert_aot_comb_executed(sim: &Simulator, config: &Config) {
         }) {
             return;
         }
-        if dataflow_on() {
-            assert!(comb_is_aot_native(&sim.ir), "C did not land");
-        } else {
-            assert!(
-                sim.ir.whole_comb_dispatch[0].load(Relaxed) > 0,
-                "C did not execute"
-            );
-            assert_eq!(
-                sim.ir.whole_comb_dispatch[1].load(Relaxed),
-                0,
-                "C fell back"
-            );
-        }
+        assert!(comb_is_aot_native(&sim.ir), "C did not land");
     }
 }
 
@@ -27068,9 +27055,9 @@ fn comb_display_output_matches_across_backends() {
     "#;
 
     // The comb source has to DECLARE the formatter hook, not just call it:
-    // without it the whole-comb translation units fail to compile and the
-    // module silently drops back to per-chunk dispatch — invisible in the
-    // values, so pin the native coverage explicitly.
+    // without it the dataflow translation units fail to compile and the
+    // module silently drops back to Cranelift, which the values do not
+    // show, so pin the native coverage explicitly.
     if crate::backend::aot_c::cc_available() {
         let ir = analyze(code, &aot_native_validate_config());
         assert!(
@@ -32143,7 +32130,7 @@ fn narrowing_cast_of_a_signed_quotient_still_truncates() {
 
     let sweep = |config: &Config| {
         let ir = analyze(code, config);
-        let whole = comb_is_aot_native(&ir);
+        let native = comb_is_aot_native(&ir);
         let mut sim = Simulator::new(ir, None);
         let mut out: Vec<(u64, u64, u64, u64)> = Vec::new();
         for a in 0u64..16 {
@@ -32159,7 +32146,7 @@ fn narrowing_cast_of_a_signed_quotient_still_truncates() {
                 ));
             }
         }
-        (out, whole)
+        (out, native)
     };
 
     // The defect is AOT-C only: with no C compiler there is nothing to
@@ -32168,9 +32155,9 @@ fn narrowing_cast_of_a_signed_quotient_still_truncates() {
     if !crate::backend::aot_c::cc_available() {
         return;
     }
-    let (got, whole) = sweep(&aot_native_validate_config());
+    let (got, native) = sweep(&aot_native_validate_config());
     assert!(
-        whole,
+        native,
         "the AOT-C config must actually compile this module, or the check below is empty",
     );
     for (r, g) in reference.iter().zip(got.iter()) {
