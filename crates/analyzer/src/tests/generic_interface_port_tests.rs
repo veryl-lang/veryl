@@ -1,6 +1,57 @@
 use super::*;
 
 #[test]
+fn generic_interface_port_aliased_writers() {
+    for (body, conflict) in [
+        ("assign a.data = 8'h12; assign b.data = 8'h34;", true),
+        (
+            "assign a.data[3:0] = 4'h2; assign b.data[7:4] = 4'h3;",
+            false,
+        ),
+        (
+            "assign a.data[3:0] = 4'h2; assign b.data[4:2] = 3'h3;",
+            true,
+        ),
+        ("always_comb { a.data = 8'h12; b.data = 8'h34; }", false),
+        (
+            "inst u: $sv::Consumer (data: a.data); assign b.data = 8'h34;",
+            false,
+        ),
+    ] {
+        for forwarded in [false, true] {
+            let connection = if forwarded {
+                "inst u: Pass (a: bus, b: bus);"
+            } else {
+                "inst u: Child (a: bus, b: bus);"
+            };
+            let code = format!(
+                r#"
+                interface Bus {{ var data: logic<8>; }}
+                module Child (a: interface, b: interface) {{ {body} }}
+                module Pass (a: interface, b: interface) {{ inst u: Child (a, b); }}
+                module Top (data: output logic<8>) {{
+                    inst bus: Bus;
+                    {connection}
+                    assign data = bus.data;
+                }}
+            "#
+            );
+            let errors = analyze(&code);
+            assert_eq!(
+                errors
+                    .iter()
+                    .any(|e| matches!(e, AnalyzerError::MultipleAssignment { .. })),
+                conflict,
+                "{body}, forwarded={forwarded}: {errors:?}"
+            );
+            if !conflict {
+                assert!(errors.is_empty(), "{errors:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn generic_interface_port_array_slices() {
     for (slice, base) in [("1:2", 1), ("1+:2", 1), ("2-:2", 1), ("1 step 2", 2)] {
         for conflict in [false, true] {

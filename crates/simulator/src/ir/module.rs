@@ -6121,6 +6121,12 @@ impl Conv<&air::Module> for ProtoModule {
             &mut all_event_statements,
             &all_child_modules,
         )?;
+        super::declaration::propagate_interface_initialization(
+            src,
+            &variable_meta,
+            &all_child_modules,
+            &mut all_event_statements,
+        );
 
         // Component input connections may also reference DUT internals.
         for external in &mut all_external_components {

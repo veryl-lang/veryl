@@ -199,13 +199,18 @@ fn collect_interface_members(context: &Context) -> HashMap<ir::VarId, Variable> 
         .collect()
 }
 
+type InterfaceAssignments = (
+    HashMap<ir::VarId, Option<ir::AssignTableEntry>>,
+    Vec<HashMap<ir::VarId, ir::AssignTableEntry>>,
+);
+
 /// Keep the exact writes through direction-free interface ports, including
 /// maybe-only SV connections. These members remain references, rather than
 /// acquiring ownership of an entire signal from a single partial write.
 fn collect_interface_assignments(
     context: &mut Context,
     declarations: &[ir::Declaration],
-) -> HashMap<ir::VarId, ir::AssignTableEntry> {
+) -> InterfaceAssignments {
     let ports: Vec<_> = context
         .port_types
         .iter()
@@ -213,26 +218,50 @@ fn collect_interface_assignments(
         .map(|(path, _)| path.clone())
         .collect();
     if ports.is_empty() {
-        return HashMap::default();
+        return (HashMap::default(), vec![]);
     }
     context.begin_analysis_transaction();
     let mut assignments = ir::AssignTable::new(context);
+    let mut processes = vec![];
     for declaration in declarations {
-        let mut table = ir::AssignTable::new(context);
-        declaration.eval_assign(context, &mut table);
-        if matches!(declaration, ir::Declaration::Initial(_)) {
-            table.exempt_initial_writes(context);
+        let tables = if let ir::Declaration::Inst(inst) = declaration {
+            inst.assignment_processes(context)
+        } else {
+            let mut table = ir::AssignTable::new(context);
+            declaration.eval_assign(context, &mut table);
+            if matches!(declaration, ir::Declaration::Initial(_)) {
+                table.exempt_initial_writes(context);
+            }
+            vec![table]
+        };
+        for mut table in tables {
+            table.table.retain(|id, _| {
+                context.variables.get(id).is_some_and(|variable| {
+                    variable.kind == VarKind::Inout
+                        && ports.iter().any(|port| variable.path.starts_with(&port.0))
+                })
+            });
+            if !table.table.is_empty() {
+                processes.push(table.table.clone());
+            }
+            assignments.merge_by_or_from(context, &mut table, false, true);
         }
-        assignments.merge_by_or_from(context, &mut table, false, true);
     }
     context.rollback_analysis_transaction();
-    assignments.table.retain(|id, _| {
-        context.variables.get(id).is_some_and(|variable| {
-            variable.kind == VarKind::Inout
-                && ports.iter().any(|port| variable.path.starts_with(&port.0))
-        })
-    });
-    assignments.table
+    let mut assignments: HashMap<_, _> = assignments
+        .table
+        .into_iter()
+        .map(|(id, entry)| (id, Some(entry)))
+        .collect();
+    for (id, variable) in &context.variables {
+        if variable.kind == VarKind::Inout
+            && ports.iter().any(|port| variable.path.starts_with(&port.0))
+            && variable.r#type.total_array().unwrap_or(0) > context.config.evaluate_array_limit
+        {
+            assignments.insert(*id, None);
+        }
+    }
+    (assignments, processes)
 }
 
 impl Conv<&ModuleDeclaration> for ir::Module {
@@ -367,7 +396,8 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         declarations.retain(|x| !x.is_null());
-        let interface_assignments = collect_interface_assignments(&mut context, &declarations);
+        let (interface_assignments, interface_assignment_processes) =
+            collect_interface_assignments(&mut context, &declarations);
         let interface_members = collect_interface_members(&context);
         let port_types = context.drain_port_types();
         let variables = context.drain_variables();
@@ -394,6 +424,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
             functions,
             interface_members,
             interface_assignments,
+            interface_assignment_processes,
             declarations,
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),
@@ -623,6 +654,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             functions: HashMap::default(),
             interface_members,
             interface_assignments: HashMap::default(),
+            interface_assignment_processes: vec![],
             declarations: vec![],
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),

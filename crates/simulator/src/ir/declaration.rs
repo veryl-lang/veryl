@@ -1423,6 +1423,65 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
     }
 }
 
+fn reference_copies(
+    mask: &num_bigint::BigUint,
+    from: &super::variable::VariableElement,
+    to: &super::variable::VariableElement,
+    full_width: usize,
+    token: TokenRange,
+    initial: bool,
+) -> Vec<ProtoStatement> {
+    let mut statements = vec![];
+    let mut bit = 0;
+    while bit < full_width {
+        if !mask.bit(bit as u64) {
+            bit += 1;
+            continue;
+        }
+        let lsb = bit;
+        while bit + 1 < full_width && mask.bit((bit + 1) as u64) {
+            bit += 1;
+        }
+        let msb = bit;
+        let width = msb - lsb + 1;
+        let select = (width != full_width).then_some((msb, lsb));
+        let expr = ProtoExpression::Variable {
+            var_offset: from.current,
+            select,
+            dynamic_select: None,
+            width,
+            var_full_width: full_width,
+            expr_context: ExpressionContext {
+                width,
+                signed: false,
+            },
+        };
+        let assign = ProtoAssignStatement {
+            dst: to.current,
+            dst_width: full_width,
+            select,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: to.current_offset(),
+            comb_direct: to.is_ff() && !initial,
+            token,
+        };
+        // A dual-slot FF read-modify-write preserves other bits
+        // from its next slot. Keep copied bits there too, matching
+        // ordinary combinational assignment lowering.
+        if to.is_ff() && to.next_offset != to.current_offset() {
+            statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Ff(to.next_offset),
+                ..assign.clone()
+            }));
+        }
+        statements.push(ProtoStatement::Assign(assign));
+        bit += 1;
+    }
+    statements
+}
+
 fn connect_interface_references(
     context: &mut Context,
     inst: &air::InstDeclaration,
@@ -1462,7 +1521,11 @@ fn connect_interface_references(
         {
             return Err(SimulatorError::unsupported_description(&inst.token));
         }
-        let writes = module.interface_assignments.get(&binding.child);
+        let writes = match module.interface_assignments.get(&binding.child) {
+            Some(None) => return Err(SimulatorError::unsupported_description(&inst.token)),
+            Some(Some(writes)) => Some(writes),
+            None => None,
+        };
         let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
         for (element, child_element) in child.elements.iter().enumerate() {
             let parent_element = &parent.elements[selection.source_start + element];
@@ -1488,57 +1551,197 @@ fn connect_interface_references(
                 } else {
                     &mut statements
                 };
-                let mut bit = 0;
-                while bit < child.width {
-                    if !mask.bit(bit as u64) {
-                        bit += 1;
-                        continue;
-                    }
-                    let lsb = bit;
-                    while bit + 1 < child.width && mask.bit((bit + 1) as u64) {
-                        bit += 1;
-                    }
-                    let msb = bit;
-                    let width = msb - lsb + 1;
-                    let select = (width != child.width).then_some((msb, lsb));
-                    let expr = ProtoExpression::Variable {
-                        var_offset: from.current,
-                        select,
-                        dynamic_select: None,
-                        width,
-                        var_full_width: child.width,
-                        expr_context: ExpressionContext {
-                            width,
-                            signed: false,
-                        },
-                    };
-                    let assign = ProtoAssignStatement {
-                        dst: to.current,
-                        dst_width: child.width,
-                        select,
-                        dynamic_select: None,
-                        rhs_select: None,
-                        expr,
-                        dst_ff_current_offset: to.current_offset(),
-                        comb_direct: to.is_ff() && !initial,
-                        token: inst.token,
-                    };
-                    // A dual-slot FF read-modify-write preserves other bits
-                    // from its next slot. Keep copied bits there too, matching
-                    // ordinary combinational assignment lowering.
-                    if to.is_ff() && to.next_offset != to.current_offset() {
-                        statements.push(ProtoStatement::Assign(ProtoAssignStatement {
-                            dst: VarOffset::Ff(to.next_offset),
-                            ..assign.clone()
-                        }));
-                    }
-                    statements.push(ProtoStatement::Assign(assign));
-                    bit += 1;
-                }
+                statements.extend(reference_copies(
+                    mask,
+                    from,
+                    to,
+                    child.width,
+                    inst.token,
+                    initial,
+                ));
             }
         }
     }
     Ok((statements, initial_statements))
+}
+
+/// Initial stores operate on the referenced net even when its runtime writer
+/// lives in a child. Recover the binding tree from metas so cached subtrees
+/// receive the same initialization as freshly lowered instances.
+pub(crate) fn propagate_interface_initialization(
+    module: &air::Module,
+    metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+    children: &[ModuleVariableMeta],
+    events: &mut HashMap<Event, Vec<ProtoStatement>>,
+) {
+    if !events.keys().any(Event::is_initial) {
+        return;
+    }
+    struct Binding {
+        parent: super::variable::VariableElement,
+        child: super::variable::VariableElement,
+        mask: num_bigint::BigUint,
+        width: usize,
+        token: TokenRange,
+    }
+    fn collect(
+        module: &air::Module,
+        metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+        children: &[ModuleVariableMeta],
+        bindings: &mut Vec<Binding>,
+    ) {
+        let mut analyzer = None;
+        for decl in &module.declarations {
+            let air::Declaration::Inst(inst) = decl else {
+                continue;
+            };
+            let air::Component::Module(child_module) = inst.component.as_ref() else {
+                continue;
+            };
+            let Some(child_meta) = children
+                .iter()
+                .find(|m| m.name == inst.name && m.hierarchy == inst.hierarchy)
+            else {
+                continue;
+            };
+            for binding in &inst.interface_bindings {
+                let Some(Some(writes)) = child_module.interface_assignments.get(&binding.child)
+                else {
+                    continue;
+                };
+                let (Some(parent), Some(child)) = (
+                    metas.get(&binding.parent),
+                    child_meta.variable_meta.get(&binding.child),
+                ) else {
+                    continue;
+                };
+                let analyzer = analyzer.get_or_insert_with(|| {
+                    let mut analyzer = veryl_analyzer::conv::Context::default();
+                    analyzer.variables = module.variables.clone();
+                    analyzer.functions = module.functions.clone();
+                    analyzer
+                });
+                let Some(selection) = binding.index.eval_selection(analyzer, &parent.r#type.array)
+                else {
+                    continue;
+                };
+                for (element, child_element) in child.elements.iter().enumerate() {
+                    let mask = &writes.definite_mask[element] | &writes.dynamic_mask[element];
+                    if mask != 0u32.into() {
+                        bindings.push(Binding {
+                            parent: parent.elements[selection.source_start + element].clone(),
+                            child: child_element.clone(),
+                            mask,
+                            width: child.width,
+                            token: inst.token,
+                        });
+                    }
+                }
+            }
+            collect(
+                child_module,
+                &child_meta.variable_meta,
+                &child_meta.children,
+                bindings,
+            );
+        }
+    }
+    let mut bindings = vec![];
+    collect(module, metas, children, &mut bindings);
+    if bindings.is_empty() {
+        return;
+    }
+    fn rewrite(statements: &mut Vec<ProtoStatement>, bindings: &[Binding]) {
+        let mut result = vec![];
+        for mut statement in std::mem::take(statements) {
+            match &mut statement {
+                ProtoStatement::If(x) => {
+                    rewrite(&mut x.true_side, bindings);
+                    rewrite(&mut x.false_side, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::Case(x) => {
+                    for arm in &mut x.arms {
+                        rewrite(&mut arm.body, bindings);
+                    }
+                    rewrite(&mut x.default, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::For(x) => {
+                    rewrite(&mut x.body, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::SequentialBlock(body) => {
+                    rewrite(body, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::CompiledBlock(x) if !x.original_stmts.is_empty() => {
+                    let mut body = x.original_stmts.as_ref().clone();
+                    rewrite(&mut body, bindings);
+                    result.extend(body);
+                    continue;
+                }
+                _ => {}
+            }
+            let mut written = vec![];
+            gather_bit_aware_outputs(&statement, &mut written);
+            let mut stores = vec![statement];
+            // Bindings are ordered from parent to child, so a store propagates
+            // through all pass-through levels before any clocked update.
+            for binding in bindings {
+                if !written
+                    .iter()
+                    .any(|(offset, _)| *offset == binding.parent.current)
+                {
+                    continue;
+                }
+                let full = (num_bigint::BigUint::from(1u32) << binding.width) - 1u32;
+                let mut mask = num_bigint::BigUint::default();
+                for (_, range) in written
+                    .iter()
+                    .filter(|(offset, _)| *offset == binding.parent.current)
+                {
+                    let coverage = match range {
+                        Some((msb, lsb)) => {
+                            ((num_bigint::BigUint::from(1u32) << (msb - lsb + 1)) - 1u32) << lsb
+                        }
+                        None => full.clone(),
+                    };
+                    mask |= coverage & &binding.mask;
+                }
+                let copies = reference_copies(
+                    &mask,
+                    &binding.parent,
+                    &binding.child,
+                    binding.width,
+                    binding.token,
+                    true,
+                );
+                for copy in &copies {
+                    gather_bit_aware_outputs(copy, &mut written);
+                }
+                stores.extend(copies);
+            }
+            // A testbench settles comb logic between statements. Keep the
+            // original store and reference updates atomic, or the runtime
+            // output copy can overwrite the new parent value first.
+            if stores.len() > 1 {
+                result.push(ProtoStatement::SequentialBlock(stores));
+            } else {
+                result.extend(stores);
+            }
+        }
+        *statements = result;
+    }
+    for (event, statements) in events {
+        if event.is_initial() {
+            rewrite(statements, &bindings);
+        }
+    }
 }
 
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
