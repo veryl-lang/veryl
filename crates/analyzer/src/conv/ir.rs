@@ -199,6 +199,38 @@ fn collect_interface_members(context: &Context) -> HashMap<ir::VarId, Variable> 
         .collect()
 }
 
+/// A direction-free interface exposes the signals driven by this module as
+/// outputs, and its remaining signals as inputs. Include writes made through
+/// inner instances when deriving the connections.
+fn infer_interface_directions(context: &mut Context, declarations: &[ir::Declaration]) {
+    let ports: Vec<_> = context
+        .port_types
+        .iter()
+        .filter(|(_, (ty, _))| matches!(ty.kind, ir::TypeKind::AbstractInterface(None)))
+        .map(|(path, _)| path.clone())
+        .collect();
+    if ports.is_empty() {
+        return;
+    }
+    context.begin_analysis_transaction();
+    let mut assignments = ir::AssignTable::new(context);
+    for declaration in declarations {
+        declaration.eval_assign(context, &mut assignments);
+    }
+    context.rollback_analysis_transaction();
+    for (id, variable) in &mut context.variables {
+        if variable.kind == VarKind::Inout
+            && ports.iter().any(|port| variable.path.starts_with(&port.0))
+        {
+            variable.kind = if assignments.table.contains_key(id) {
+                VarKind::Output
+            } else {
+                VarKind::Input
+            };
+        }
+    }
+}
+
 impl Conv<&ModuleDeclaration> for ir::Module {
     fn conv(context: &mut Context, value: &ModuleDeclaration) -> IrResult<Self> {
         Conv::conv(context, (value, false))
@@ -331,6 +363,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         declarations.retain(|x| !x.is_null());
+        infer_interface_directions(&mut context, &declarations);
         let interface_members = collect_interface_members(&context);
         let port_types = context.drain_port_types();
         let variables = context.drain_variables();

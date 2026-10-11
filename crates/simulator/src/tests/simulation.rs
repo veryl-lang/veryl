@@ -6957,6 +6957,180 @@ fn interface_modport() {
 }
 
 #[test]
+fn generic_interface_port() {
+    // Issue #3527: generic ports must bind to the connected interface, both
+    // for direct member access and when forwarding to a typed modport port.
+    let code = r#"
+    interface Link {
+        var req: logic<8>;
+        var resp: logic<8>;
+        modport client { req: output, resp: input, }
+        modport server { ..converse(client) }
+    }
+    module Client (bus: modport Link::client, x: input logic<8>, resp: output logic<8>) {
+        assign bus.req = x;
+        assign resp = bus.resp;
+    }
+    module ClientPass (bus: interface::client, x: input logic<8>, resp: output logic<8>) {
+        inst u: Client (bus, x, resp);
+    }
+    module ClientDirect (bus: interface::client, x: input logic<8>, resp: output logic<8>) {
+        assign bus.req = x;
+        assign resp = bus.resp;
+    }
+    module Server (bus: modport Link::server) {
+        assign bus.resp = ~bus.req;
+    }
+    module ServerPass (bus: interface) {
+        inst u: Server (bus);
+    }
+    module ServerDirect (bus: interface) {
+        assign bus.resp = ~bus.req;
+    }
+    module Top (x: input logic<8>, direct: output logic<8>, forwarded: output logic<8>) {
+        inst l_direct: Link;
+        inst l_forwarded: Link;
+        inst c_direct: ClientDirect (bus: l_direct, x, resp: direct);
+        inst s_direct: ServerDirect (bus: l_direct);
+        inst c_forwarded: ClientPass (bus: l_forwarded, x, resp: forwarded);
+        inst s_forwarded: ServerPass (bus: l_forwarded);
+    }
+    #[test(test_generic_port)]
+    module test_generic_port {
+        inst clk: $tb::clock_gen;
+        var x: logic<8>;
+        var direct: logic<8>;
+        var forwarded: logic<8>;
+        inst dut: Top (x, direct, forwarded);
+        initial {
+            x = 8'h0f;
+            clk.next();
+            $assert(direct == 8'hf0);
+            $assert(forwarded == 8'hf0);
+            x = 8'h81;
+            clk.next();
+            $assert(direct == 8'h7e);
+            $assert(forwarded == 8'h7e);
+            $finish();
+        }
+    }
+    "#;
+
+    for client in ["interface", "interface::client"] {
+        for server in ["interface", "interface::server"] {
+            let code = code
+                .replace("bus: interface::client", &format!("bus: {client}"))
+                .replace("(bus: interface)", &format!("(bus: {server})"));
+            for config in Config::all() {
+                let ir = analyze(&code, &config);
+                let mut sim = Simulator::new(ir, None);
+                for x in [0x0f, 0x81] {
+                    sim.set("x", Value::new(x, 8, false));
+                    sim.step(&Event::clock(VarId::SYNTHETIC));
+                    for output in ["direct", "forwarded"] {
+                        assert_eq!(sim.get(output).unwrap(), Value::new(x ^ 0xff, 8, false));
+                    }
+                }
+                let ir = analyze_top(&code, &config, "test_generic_port").unwrap();
+                assert_eq!(
+                    run_native_testbench(ir, None, "test_generic_port".into()).unwrap(),
+                    TestResult::Pass
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_specialization() {
+    // The same generic module must use the actual interface's type and
+    // parameter values at every level of pass-through instantiation.
+    let code = r#"
+    interface Bus #(param W: u32 = 8) {
+        var data: logic<W>;
+        modport writer { data: output, }
+    }
+    interface OtherBus {
+        var data: logic<32>;
+        modport writer { data: output, }
+    }
+    module Writer (bus: interface::writer, data: input logic<32>) {
+        assign bus.data = data;
+    }
+    module Reader (bus: interface, data: output logic<32>) {
+        assign data = bus.data;
+    }
+    module WritePass (bus: interface::writer, data: input logic<32>) {
+        inst u: Writer (bus, data);
+    }
+    module ReadPass (bus: interface, data: output logic<32>) {
+        inst u: Reader (bus, data);
+    }
+    module Top (
+        data: input logic<32>,
+        out8: output logic<32>,
+        out16: output logic<32>,
+        out32: output logic<32>,
+    ) {
+        inst bus8: Bus;
+        inst bus16: Bus #(W: 16);
+        inst bus32: OtherBus;
+        inst w8: WritePass (bus: bus8, data);
+        inst r8: ReadPass (bus: bus8, data: out8);
+        inst w16: WritePass (bus: bus16, data);
+        inst r16: ReadPass (bus: bus16, data: out16);
+        inst w32: WritePass (bus: bus32, data);
+        inst r32: ReadPass (bus: bus32, data: out32);
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for data in [0x12345678, 0xabcdef01] {
+            sim.set("data", Value::new(data, 32, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (output, mask) in [("out8", 0xff), ("out16", 0xffff), ("out32", 0xffffffff)] {
+                assert_eq!(sim.get(output).unwrap(), Value::new(data & mask, 32, false));
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_array_element() {
+    let code = r#"
+    interface Bus {
+        var data: logic<8>;
+        modport reader { data: input, }
+    }
+    module Reader (bus: interface::reader, data: output logic<8>) {
+        assign data = bus.data;
+    }
+    module Pass (bus: interface, data: output logic<8>) {
+        inst u: Reader (bus, data);
+    }
+    module Top (
+        a: input logic<8>, b: input logic<8>,
+        out0: output logic<8>, out1: output logic<8>,
+    ) {
+        inst bus: Bus [2];
+        assign bus[0].data = a;
+        assign bus[1].data = b;
+        inst r0: Pass (bus: bus[0], data: out0);
+        inst r1: Pass (bus: bus[1], data: out1);
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("a", Value::new(0x12, 8, false));
+        sim.set("b", Value::new(0x34, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("out0").unwrap(), Value::new(0x12, 8, false));
+        assert_eq!(sim.get("out1").unwrap(), Value::new(0x34, 8, false));
+    }
+}
+
+#[test]
 fn interface_array_modport_index() {
     // `inst u: Child(port: s_port[i])` where `s_port` is a modport array.
     // Earlier, `get_port_connects` dropped the `[i]` from the input member

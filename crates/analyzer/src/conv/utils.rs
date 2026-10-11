@@ -4366,7 +4366,10 @@ pub fn get_port_connects(
     let mut ret = vec![];
     let mut interface_binding = None;
 
-    if let ir::TypeKind::Modport(_, _) = &port_type.kind {
+    if matches!(
+        port_type.kind,
+        ir::TypeKind::Modport(_, _) | ir::TypeKind::AbstractInterface(_)
+    ) {
         if let Some(x) = &port.inst_port_item_opt {
             // for check_compatibility
             let _ = eval_expr(context, Some(port_type.clone()), &x.expression, false)?;
@@ -4390,7 +4393,32 @@ pub fn get_port_connects(
         };
         interface_binding = Some(VarPathSelect(dst_path.clone(), dst_select.clone(), token));
 
-        let members = port_type.expand_modport(context, &dst_path, token)?;
+        let members = if matches!(port_type.kind, ir::TypeKind::AbstractInterface(_)) {
+            let mut members: Vec<_> = component
+                .variables
+                .iter()
+                .filter(|(_, variable)| {
+                    variable.kind.is_port() && variable.path.starts_with(&port_path.0)
+                })
+                .map(|(id, variable)| {
+                    let mut path = dst_path.clone();
+                    path.append(&variable.path.0[port_path.0.len()..]);
+                    let direction = match variable.kind {
+                        VarKind::Input => symbol::Direction::Input,
+                        VarKind::Output => symbol::Direction::Output,
+                        _ => symbol::Direction::Inout,
+                    };
+                    (*id, path, direction)
+                })
+                .collect();
+            members.sort_by_key(|x| x.0);
+            members
+                .into_iter()
+                .map(|(_, path, direction)| (path, direction))
+                .collect()
+        } else {
+            port_type.expand_modport(context, &dst_path, token)?
+        };
         for member in members {
             if member.1.is_input() | member.1.is_output() {
                 let member_path = member.0.clone();
@@ -4420,7 +4448,7 @@ pub fn get_port_connects(
                 // append member name to port_path
                 let mut port_path = port_path.clone();
                 let mut member_name = member_path.0.clone();
-                member_name.remove(0);
+                member_name.drain(..dst_path.0.len());
                 port_path.append(&member_name);
 
                 ret.push((port_path.clone(), dst, expr));
