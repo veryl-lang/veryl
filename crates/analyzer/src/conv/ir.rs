@@ -199,10 +199,13 @@ fn collect_interface_members(context: &Context) -> HashMap<ir::VarId, Variable> 
         .collect()
 }
 
-/// A direction-free interface exposes the signals driven by this module as
-/// outputs, and its remaining signals as inputs. Include writes made through
-/// inner instances when deriving the connections.
-fn infer_interface_directions(context: &mut Context, declarations: &[ir::Declaration]) {
+/// Keep the exact writes through direction-free interface ports, including
+/// maybe-only SV connections. These members remain references, rather than
+/// acquiring ownership of an entire signal from a single partial write.
+fn collect_interface_assignments(
+    context: &mut Context,
+    declarations: &[ir::Declaration],
+) -> HashMap<ir::VarId, ir::AssignTableEntry> {
     let ports: Vec<_> = context
         .port_types
         .iter()
@@ -210,25 +213,23 @@ fn infer_interface_directions(context: &mut Context, declarations: &[ir::Declara
         .map(|(path, _)| path.clone())
         .collect();
     if ports.is_empty() {
-        return;
+        return HashMap::default();
     }
     context.begin_analysis_transaction();
     let mut assignments = ir::AssignTable::new(context);
     for declaration in declarations {
-        declaration.eval_assign(context, &mut assignments);
+        let mut table = ir::AssignTable::new(context);
+        declaration.eval_assign(context, &mut table);
+        assignments.merge_by_or_from(context, &mut table, false, true);
     }
     context.rollback_analysis_transaction();
-    for (id, variable) in &mut context.variables {
-        if variable.kind == VarKind::Inout
-            && ports.iter().any(|port| variable.path.starts_with(&port.0))
-        {
-            variable.kind = if assignments.table.contains_key(id) {
-                VarKind::Output
-            } else {
-                VarKind::Input
-            };
-        }
-    }
+    assignments.table.retain(|id, _| {
+        context.variables.get(id).is_some_and(|variable| {
+            variable.kind == VarKind::Inout
+                && ports.iter().any(|port| variable.path.starts_with(&port.0))
+        })
+    });
+    assignments.table
 }
 
 impl Conv<&ModuleDeclaration> for ir::Module {
@@ -363,7 +364,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
         }
 
         declarations.retain(|x| !x.is_null());
-        infer_interface_directions(&mut context, &declarations);
+        let interface_assignments = collect_interface_assignments(&mut context, &declarations);
         let interface_members = collect_interface_members(&context);
         let port_types = context.drain_port_types();
         let variables = context.drain_variables();
@@ -389,6 +390,7 @@ impl Conv<(&ModuleDeclaration, bool)> for ir::Module {
             variables,
             functions,
             interface_members,
+            interface_assignments,
             declarations,
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),
@@ -617,6 +619,7 @@ impl Conv<&ProtoModuleDeclaration> for ir::Module {
             variables,
             functions: HashMap::default(),
             interface_members,
+            interface_assignments: HashMap::default(),
             declarations: vec![],
             suppress_unassigned: false,
             per_decl_refs: HashMap::default(),

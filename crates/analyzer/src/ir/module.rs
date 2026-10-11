@@ -3,7 +3,7 @@ use crate::HashMap;
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::conv::Context;
-use crate::ir::assign_table::{AssignTable, ReferencedEntry};
+use crate::ir::assign_table::{AssignTable, AssignTableEntry, ReferencedEntry};
 use crate::ir::{
     Declaration, FfTable, Function, Signature, Type, VarId, VarIndex, VarKind, VarPath, Variable,
 };
@@ -34,6 +34,9 @@ pub struct Module {
     /// function captures them. They have paths and IDs for dependency
     /// analysis, but are not ordinary module variables or signal ports.
     pub interface_members: HashMap<VarId, Variable>,
+    /// Per-element write masks through direction-free interface ports. Retain
+    /// definite, dynamic and unknown-direction writes across instance boundaries.
+    pub interface_assignments: HashMap<VarId, AssignTableEntry>,
     pub declarations: Vec<Declaration>,
     pub suppress_unassigned: bool,
     /// Per-declaration `AssignTable.refernced` snapshot, captured at the end

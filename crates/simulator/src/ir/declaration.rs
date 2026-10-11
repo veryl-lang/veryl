@@ -1423,6 +1423,103 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
     }
 }
 
+fn connect_interface_references(
+    context: &mut Context,
+    inst: &air::InstDeclaration,
+    module: &air::Module,
+    child_metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+) -> Result<Vec<ProtoStatement>, SimulatorError> {
+    let mut statements = vec![];
+    for binding in &inst.interface_bindings {
+        if !module
+            .variables
+            .get(&binding.child)
+            .is_some_and(|v| v.kind == air::VarKind::Inout)
+        {
+            continue;
+        }
+        let child = child_metas
+            .get(&binding.child)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        let scope = context.scope();
+        let parent = scope
+            .variable_meta
+            .get(&binding.parent)
+            .cloned()
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        let indices = binding
+            .index
+            .eval_value(&mut scope.analyzer_context)
+            .filter(|_| binding.index.is_const())
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        let (base, end) = parent
+            .r#type
+            .array
+            .calc_range(&indices)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if !binding.select.is_empty()
+            || parent.width != child.width
+            || end - base + 1 != child.elements.len()
+        {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        let writes = module.interface_assignments.get(&binding.child);
+        let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
+        for (element, child_element) in child.elements.iter().enumerate() {
+            let parent_element = &parent.elements[base + element];
+            let output_mask = writes
+                .and_then(|w| w.mask.get(element))
+                .cloned()
+                .unwrap_or_default()
+                & &full;
+            let input_mask = &full ^ &output_mask;
+            for (mask, from, to) in [
+                (&input_mask, parent_element, child_element),
+                (&output_mask, child_element, parent_element),
+            ] {
+                let mut bit = 0;
+                while bit < child.width {
+                    if !mask.bit(bit as u64) {
+                        bit += 1;
+                        continue;
+                    }
+                    let lsb = bit;
+                    while bit + 1 < child.width && mask.bit((bit + 1) as u64) {
+                        bit += 1;
+                    }
+                    let msb = bit;
+                    let width = msb - lsb + 1;
+                    let select = (width != child.width).then_some((msb, lsb));
+                    let expr = ProtoExpression::Variable {
+                        var_offset: from.current,
+                        select,
+                        dynamic_select: None,
+                        width,
+                        var_full_width: child.width,
+                        expr_context: ExpressionContext {
+                            width,
+                            signed: false,
+                        },
+                    };
+                    statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                        dst: to.current,
+                        dst_width: child.width,
+                        select,
+                        dynamic_select: None,
+                        rhs_select: None,
+                        expr,
+                        dst_ff_current_offset: to.current_offset(),
+                        comb_direct: to.is_ff(),
+                        token: inst.token,
+                    }));
+                    bit += 1;
+                }
+            }
+        }
+    }
+    Ok(statements)
+}
+
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
     fn conv(context: &mut Context, src: &air::InstDeclaration) -> Result<Self, SimulatorError> {
         let air::Component::Module(child_module) = src.component.as_ref() else {
@@ -1742,6 +1839,15 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 );
             }
         }
+
+        // Direction-free interface references exchange only the bits written
+        // on each side. Whole-member copies would overwrite disjoint drivers.
+        all_comb_statements.extend(connect_interface_references(
+            context,
+            src,
+            child_module,
+            &child_variable_meta,
+        )?);
 
         // Input ports: parent expr → child port var
         for input in &src.inputs {
@@ -2136,6 +2242,23 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(base) = base {
                     child_to_parent_var.insert(input.id, (*parent_var_id, base as u32));
                 }
+            }
+        }
+
+        for binding in &src.interface_bindings {
+            if !child_module
+                .variables
+                .get(&binding.child)
+                .is_some_and(|v| v.kind == air::VarKind::Inout)
+            {
+                continue;
+            }
+            let scope = context.scope();
+            if let Some(values) = binding.index.eval_value(&mut scope.analyzer_context)
+                && let Some(meta) = scope.variable_meta.get(&binding.parent)
+                && let Some((base, _)) = meta.r#type.array.calc_range(&values)
+            {
+                child_to_parent_var.insert(binding.child, (binding.parent, base as u32));
             }
         }
 

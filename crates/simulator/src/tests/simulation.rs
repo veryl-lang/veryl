@@ -7042,6 +7042,94 @@ fn generic_interface_port() {
 }
 
 #[test]
+fn generic_interface_port_partial_writes() {
+    let code = r#"
+    interface Bus {
+        var word: logic<8>;
+        var elems: logic<8> [2];
+    }
+    module Child (bus: interface, low: input logic<4>, data: output logic<8>) {
+        assign bus.word[3:0] = low;
+        assign bus.elems[0] = {low, low};
+        assign data = bus.word ^ bus.elems[1];
+    }
+    module Pass (bus: interface, low: input logic<4>, data: output logic<8>) {
+        inst u: Child (bus, low, data);
+    }
+    module Top (
+        low: input logic<4>, high: input logic<4>,
+        data: output logic<8>, word: output logic<8>, elems: output logic<8>,
+    ) {
+        inst bus: Bus [2];
+        // Connecting element 1 also checks the translation of member-array
+        // masks through an indexed interface and a second module boundary.
+        inst u: Pass (bus: bus[1], low, data);
+        assign bus[0].word = '0;
+        assign bus[0].elems = '{default: '0};
+        assign bus[1].word[7:4] = high;
+        assign bus[1].elems[1] = {high, high};
+        assign word = bus[1].word;
+        assign elems = bus[1].elems[0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (low, high) in [(0x5, 0xa), (0x3, 0xc)] {
+            sim.set("low", Value::new(low, 4, false));
+            sim.set("high", Value::new(high, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("word").unwrap(),
+                Value::new((high << 4) | low, 8, false)
+            );
+            assert_eq!(sim.get("elems").unwrap(), Value::new(low * 0x11, 8, false));
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(((high << 4) | low) ^ (high * 0x11), 8, false)
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_clocked_partial_writes() {
+    let code = r#"
+    interface Bus {
+        var clk: clock;
+        var word: logic<8>;
+    }
+    module Child (bus: interface, low: input logic<4>) {
+        always_ff (bus.clk) { bus.word[3:0] = low; }
+    }
+    module Pass (bus: interface, low: input logic<4>) {
+        inst u: Child (bus, low);
+    }
+    module Top (
+        clk: input clock, low: input logic<4>, high: input logic<4>, word: output logic<8>,
+    ) {
+        inst bus: Bus;
+        assign bus.clk = clk;
+        assign bus.word[7:4] = high;
+        inst u: Pass (bus, low);
+        assign word = bus.word;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        for (low, high) in [(0x5, 0xa), (0x3, 0xc)] {
+            sim.set("low", Value::new(low, 4, false));
+            sim.set("high", Value::new(high, 4, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("word").unwrap(),
+                Value::new((high << 4) | low, 8, false)
+            );
+        }
+    }
+}
+
+#[test]
 fn generic_interface_port_specialization() {
     // The same generic module must use the actual interface's type and
     // parameter values at every level of pass-through instantiation.

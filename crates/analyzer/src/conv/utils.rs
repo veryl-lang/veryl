@@ -4393,32 +4393,15 @@ pub fn get_port_connects(
         };
         interface_binding = Some(VarPathSelect(dst_path.clone(), dst_select.clone(), token));
 
-        let members = if matches!(port_type.kind, ir::TypeKind::AbstractInterface(_)) {
-            let mut members: Vec<_> = component
-                .variables
-                .iter()
-                .filter(|(_, variable)| {
-                    variable.kind.is_port() && variable.path.starts_with(&port_path.0)
-                })
-                .map(|(id, variable)| {
-                    let mut path = dst_path.clone();
-                    path.append(&variable.path.0[port_path.0.len()..]);
-                    let direction = match variable.kind {
-                        VarKind::Input => symbol::Direction::Input,
-                        VarKind::Output => symbol::Direction::Output,
-                        _ => symbol::Direction::Inout,
-                    };
-                    (*id, path, direction)
-                })
-                .collect();
-            members.sort_by_key(|x| x.0);
-            members
-                .into_iter()
-                .map(|(_, path, direction)| (path, direction))
-                .collect()
-        } else {
-            port_type.expand_modport(context, &dst_path, token)?
-        };
+        if matches!(port_type.kind, ir::TypeKind::AbstractInterface(_)) {
+            // Direction-free members use reference bindings. Their masks
+            // cannot be represented by ordinary whole-signal output ports.
+            return Ok(PortConnects {
+                connects: ret,
+                interface_binding,
+            });
+        }
+        let members = port_type.expand_modport(context, &dst_path, token)?;
         for member in members {
             if member.1.is_input() | member.1.is_output() {
                 let member_path = member.0.clone();
