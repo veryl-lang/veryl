@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn generic_interface_port_dynamic_unknown_direction() {
+    for default in ["", " = 1'b0", " = 1'b1"] {
+        let code = format!(
+            r#"
+            interface Bus {{ var data: logic<8>; }}
+            module Child (bus: interface) {{ inst u: $sv::Consumer (data: bus.data); }}
+            module Pass (bus: interface) {{ inst u: Child (bus); }}
+            module Top (index: input logic{default}, data: output logic<8>) {{
+                inst bus: Bus [2];
+                inst u: Pass (bus: bus[index]);
+                assign bus[0].data = 8'h12;
+                assign bus[1].data = 8'h34;
+                assign data = bus[1].data;
+            }}
+        "#
+        );
+        assert!(analyze(&code).is_empty(), "default {default}");
+    }
+}
+
+#[test]
 fn generic_interface_port_aliased_writers() {
     for (body, conflict) in [
         ("assign a.data = 8'h12; assign b.data = 8'h34;", true),

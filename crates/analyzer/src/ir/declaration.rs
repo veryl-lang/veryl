@@ -432,7 +432,7 @@ impl InstDeclaration {
                             for (mask, maybe, dynamic) in [
                                 (definite, dynamic_index, dynamic_index),
                                 (dynamic, true, true),
-                                (&unknown, true, dynamic_index),
+                                (&unknown, true, false),
                             ] {
                                 if *mask != 0u32.into() {
                                     let _ = assign_table.insert_assign(
