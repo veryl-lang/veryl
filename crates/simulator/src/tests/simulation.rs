@@ -7130,6 +7130,50 @@ fn generic_interface_port_clocked_partial_writes() {
 }
 
 #[test]
+fn generic_interface_port_disjoint_ff_writes() {
+    // A partial FF update must preserve the bits copied from the other side
+    // of an interface, including in dual-slot 4-state interpreter storage.
+    let code = r#"
+    interface Bus { var data: logic<8>; }
+    module Child (clk: input clock, bus: interface, x: input logic<8>) {
+        // Two writes force dual-slot storage for the lower-half producer.
+        always_ff {
+            bus.data[3:2] = x[3:2];
+            bus.data[1:0] = x[1:0];
+        }
+    }
+    module Top (clk: input clock, x: input logic<8>, data: output logic<8>) {
+        inst bus: Bus;
+        inst u: Child (clk, bus, x);
+        // The upper half samples the previous edge's lower half. Splitting
+        // the write exercises the parent's dual-slot read-modify-write too.
+        always_ff {
+            bus.data[7:6] = bus.data[3:2];
+            bus.data[5:4] = bus.data[1:0];
+        }
+        assign data = bus.data;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        // Warm up both halves so assertions do not depend on the initial Xs.
+        sim.set("x", Value::new(0, 8, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        for (x, expected) in [(1, 0x01), (2, 0x12), (3, 0x23)] {
+            sim.set("x", Value::new(x, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(expected, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn generic_interface_port_specialization() {
     // The same generic module must use the actual interface's type and
     // parameter values at every level of pass-through instantiation.

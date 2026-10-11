@@ -1501,7 +1501,7 @@ fn connect_interface_references(
                             signed: false,
                         },
                     };
-                    statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                    let assign = ProtoAssignStatement {
                         dst: to.current,
                         dst_width: child.width,
                         select,
@@ -1511,7 +1511,17 @@ fn connect_interface_references(
                         dst_ff_current_offset: to.current_offset(),
                         comb_direct: to.is_ff(),
                         token: inst.token,
-                    }));
+                    };
+                    // A dual-slot FF read-modify-write preserves other bits
+                    // from its next slot. Keep copied bits there too, matching
+                    // ordinary combinational assignment lowering.
+                    if to.is_ff() && to.next_offset != to.current_offset() {
+                        statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                            dst: VarOffset::Ff(to.next_offset),
+                            ..assign.clone()
+                        }));
+                    }
+                    statements.push(ProtoStatement::Assign(assign));
                     bit += 1;
                 }
             }
