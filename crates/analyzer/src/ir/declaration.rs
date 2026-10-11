@@ -379,12 +379,13 @@ impl InstDeclaration {
                 let Some(parent) = context.get_variable_info(binding.parent) else {
                     continue;
                 };
-                let indices = binding.index.eval_value(context);
                 let dynamic_index = !binding.index.is_const();
-                let range = parent
-                    .r#type
-                    .array
-                    .calc_range(indices.as_deref().unwrap_or(&[]));
+                let selection = if dynamic_index {
+                    None
+                } else {
+                    binding.index.eval_selection(context, &parent.r#type.array)
+                };
+                let range = binding.index.read_range(context, &parent.r#type.array);
                 let Some((start, end)) = range else {
                     continue;
                 };
@@ -393,11 +394,13 @@ impl InstDeclaration {
                     continue;
                 };
                 for (element, mask) in writes.mask.iter().enumerate() {
-                    let targets = if indices.is_some() {
-                        let index = start + element;
-                        if index > end {
+                    let targets = if let Some(selection) = &selection {
+                        if element < selection.result_start
+                            || element - selection.result_start >= selection.length
+                        {
                             continue;
                         }
+                        let index = selection.source_start + element - selection.result_start;
                         index..=index
                     } else {
                         start..=end

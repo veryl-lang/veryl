@@ -220,6 +220,9 @@ fn collect_interface_assignments(
     for declaration in declarations {
         let mut table = ir::AssignTable::new(context);
         declaration.eval_assign(context, &mut table);
+        if matches!(declaration, ir::Declaration::Initial(_)) {
+            table.exempt_initial_writes(context);
+        }
         assignments.merge_by_or_from(context, &mut table, false, true);
     }
     context.rollback_analysis_transaction();

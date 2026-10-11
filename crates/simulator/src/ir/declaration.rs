@@ -1428,8 +1428,9 @@ fn connect_interface_references(
     inst: &air::InstDeclaration,
     module: &air::Module,
     child_metas: &HashMap<air::VarId, super::variable::VariableMeta>,
-) -> Result<Vec<ProtoStatement>, SimulatorError> {
+) -> Result<(Vec<ProtoStatement>, Vec<ProtoStatement>), SimulatorError> {
     let mut statements = vec![];
+    let mut initial_statements = vec![];
     for binding in &inst.interface_bindings {
         if !module
             .variables
@@ -1447,36 +1448,46 @@ fn connect_interface_references(
             .get(&binding.parent)
             .cloned()
             .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
-        let indices = binding
+        if !binding.index.is_const() {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        let selection = binding
             .index
-            .eval_value(&mut scope.analyzer_context)
-            .filter(|_| binding.index.is_const())
-            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
-        let (base, end) = parent
-            .r#type
-            .array
-            .calc_range(&indices)
+            .eval_selection(&mut scope.analyzer_context, &parent.r#type.array)
             .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
         if !binding.select.is_empty()
             || parent.width != child.width
-            || end - base + 1 != child.elements.len()
+            || selection.result_start != 0
+            || selection.length != child.elements.len()
         {
             return Err(SimulatorError::unsupported_description(&inst.token));
         }
         let writes = module.interface_assignments.get(&binding.child);
         let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
         for (element, child_element) in child.elements.iter().enumerate() {
-            let parent_element = &parent.elements[base + element];
+            let parent_element = &parent.elements[selection.source_start + element];
             let output_mask = writes
-                .and_then(|w| w.mask.get(element))
-                .cloned()
+                .map(|w| &w.definite_mask[element] | &w.dynamic_mask[element])
                 .unwrap_or_default()
                 & &full;
             let input_mask = &full ^ &output_mask;
-            for (mask, from, to) in [
-                (&input_mask, parent_element, child_element),
-                (&output_mask, child_element, parent_element),
+            // Exempt initialization writes still carry assigned coverage, but
+            // must cross the boundary only once, before runtime drivers take over.
+            let initial_mask = writes
+                .and_then(|w| w.mask.get(element))
+                .cloned()
+                .unwrap_or_default()
+                & &input_mask;
+            for (mask, from, to, initial) in [
+                (&input_mask, parent_element, child_element, false),
+                (&output_mask, child_element, parent_element, false),
+                (&initial_mask, child_element, parent_element, true),
             ] {
+                let statements = if initial {
+                    &mut initial_statements
+                } else {
+                    &mut statements
+                };
                 let mut bit = 0;
                 while bit < child.width {
                     if !mask.bit(bit as u64) {
@@ -1509,7 +1520,7 @@ fn connect_interface_references(
                         rhs_select: None,
                         expr,
                         dst_ff_current_offset: to.current_offset(),
-                        comb_direct: to.is_ff(),
+                        comb_direct: to.is_ff() && !initial,
                         token: inst.token,
                     };
                     // A dual-slot FF read-modify-write preserves other bits
@@ -1527,7 +1538,7 @@ fn connect_interface_references(
             }
         }
     }
-    Ok(statements)
+    Ok((statements, initial_statements))
 }
 
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
@@ -1852,12 +1863,16 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         // Direction-free interface references exchange only the bits written
         // on each side. Whole-member copies would overwrite disjoint drivers.
-        all_comb_statements.extend(connect_interface_references(
-            context,
-            src,
-            child_module,
-            &child_variable_meta,
-        )?);
+        let (reference_statements, initial_reference_statements) =
+            connect_interface_references(context, src, child_module, &child_variable_meta)?;
+        all_comb_statements.extend(reference_statements);
+        if !initial_reference_statements.is_empty() {
+            for (event, statements) in &mut all_event_statements {
+                if event.is_initial() {
+                    statements.extend(initial_reference_statements.clone());
+                }
+            }
+        }
 
         // Input ports: parent expr → child port var
         for input in &src.inputs {
@@ -2264,11 +2279,16 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 continue;
             }
             let scope = context.scope();
-            if let Some(values) = binding.index.eval_value(&mut scope.analyzer_context)
+            if binding.index.is_const()
                 && let Some(meta) = scope.variable_meta.get(&binding.parent)
-                && let Some((base, _)) = meta.r#type.array.calc_range(&values)
+                && let Some(selection) = binding
+                    .index
+                    .eval_selection(&mut scope.analyzer_context, &meta.r#type.array)
             {
-                child_to_parent_var.insert(binding.child, (binding.parent, base as u32));
+                child_to_parent_var.insert(
+                    binding.child,
+                    (binding.parent, selection.source_start as u32),
+                );
             }
         }
 

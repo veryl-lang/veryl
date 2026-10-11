@@ -7174,6 +7174,111 @@ fn generic_interface_port_disjoint_ff_writes() {
 }
 
 #[test]
+fn generic_interface_port_array_slices() {
+    for (slice, base) in [("1:2", 1), ("1+:2", 1), ("2-:2", 1), ("1 step 2", 2)] {
+        let independent = (0..4)
+            .filter(|i| *i < base || *i >= base + 2)
+            .map(|i| format!("assign bus[{i}].data = 8'ha5;"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for clocked in [false, true] {
+            let clock_member = if clocked { "var clk: clock;" } else { "" };
+            let clocks = if clocked {
+                "for i in 0..4 :g { assign bus[i].clk = clk; }"
+            } else {
+                ""
+            };
+            let writes = if clocked {
+                "always_ff (bus[0].clk) { bus[0].data = x; }
+             always_ff (bus[1].clk) { bus[1].data = ~x; }"
+            } else {
+                "assign bus[0].data = x; assign bus[1].data = ~x;"
+            };
+            let code = format!(
+                r#"
+        interface Bus {{ var data: logic<8>; {clock_member} }}
+        module Child (bus: interface [2], x: input logic<8>) {{
+            {writes}
+        }}
+        module Pass (bus: interface [2], x: input logic<8>) {{ inst u: Child (bus, x); }}
+        module Top (clk: input clock, x: input logic<8>, a: output logic<8>, b: output logic<8>, c: output logic<8>, d: output logic<8>) {{
+            inst bus: Bus [4];
+            inst u: Pass (bus: bus[{slice}], x);
+            {independent}
+            {clocks}
+            assign a = bus[0].data;
+            assign b = bus[1].data;
+            assign c = bus[2].data;
+            assign d = bus[3].data;
+        }}
+        "#
+            );
+            for config in Config::all() {
+                let mut sim = Simulator::new(analyze(&code, &config), None);
+                let clk = sim.get_clock("clk").unwrap();
+                for x in [0x0f, 0x81] {
+                    sim.set("x", Value::new(x, 8, false));
+                    sim.step(&clk);
+                    for (element, port) in ["a", "b", "c", "d"].into_iter().enumerate() {
+                        let expected = if element == base {
+                            x
+                        } else if element == base + 1 {
+                            x ^ 0xff
+                        } else {
+                            0xa5
+                        };
+                        assert_eq!(
+                            sim.get(port).unwrap(),
+                            Value::new(expected, 8, false),
+                            "{slice}, clocked={clocked}: {config:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_initialization() {
+    let code = r#"
+    interface Bus { var data: logic<8>; }
+    module Child (#[allow(initial_assign)] bus: interface) {
+        initial { bus.data = 8'h3c; }
+    }
+    module Pass (bus: interface) { inst u: Child (bus); }
+    module Top (clk: input clock, x: input logic<8>, data: output logic<8>) {
+        inst bus: Bus;
+        inst u: Pass (bus);
+        always_ff {
+            bus.data[7:4] = x[7:4];
+            bus.data[3:0] = x[3:0];
+        }
+        assign data = bus.data;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.step(&Event::Initial);
+        assert_eq!(
+            sim.get("data").unwrap(),
+            Value::new(0x3c, 8, false),
+            "{config:?}"
+        );
+        for x in [0x12, 0x34] {
+            sim.set("x", Value::new(x, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(x, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn generic_interface_port_specialization() {
     // The same generic module must use the actual interface's type and
     // parameter values at every level of pass-through instantiation.
