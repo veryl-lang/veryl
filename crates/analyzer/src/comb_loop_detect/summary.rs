@@ -27,20 +27,13 @@ thread_local! {
 /// they are reserved or cloned: a small hierarchy cannot expand into its
 /// exponentially large instance tree. Once a copy does not fit, later ones
 /// are not measured again.
+#[derive(Default)]
 pub(super) struct ExpansionBudget {
-    steps: Steps,
     closed: bool,
 }
 
 impl ExpansionBudget {
-    pub(super) fn new(steps: &Steps) -> Self {
-        Self {
-            steps: steps.clone(),
-            closed: false,
-        }
-    }
-
-    pub(super) fn reserve(&mut self, summary: &ModuleCombSummary) -> bool {
+    pub(super) fn reserve(&mut self, steps: &mut Steps, summary: &ModuleCombSummary) -> bool {
         if self.closed {
             return false;
         }
@@ -56,12 +49,16 @@ impl ExpansionBudget {
             )
             .try_fold(0usize, |cost, part| {
                 cost.checked_add(part)
-                    .filter(|&cost| cost <= self.steps.remaining())
+                    .filter(|&cost| cost <= steps.remaining())
             });
-        self.reserve_work(cost.unwrap_or(usize::MAX))
+        self.reserve_work(steps, cost.unwrap_or(usize::MAX))
     }
 
-    pub(super) fn reserve_dag<K>(&mut self, graph: &super::ssa::DependencyDag<K>) -> bool {
+    pub(super) fn reserve_dag<K>(
+        &mut self,
+        steps: &mut Steps,
+        graph: &super::ssa::DependencyDag<K>,
+    ) -> bool {
         let cost = graph
             .domains
             .iter()
@@ -71,11 +68,11 @@ impl ExpansionBudget {
         let cost = graph.edges.iter().fold(cost, |cost, edge| {
             cost.saturating_add(edge.condition.work_size().saturating_add(1))
         });
-        self.reserve_work(cost)
+        self.reserve_work(steps, cost)
     }
 
-    pub(super) fn reserve_work(&mut self, cost: usize) -> bool {
-        self.closed = self.closed || !self.steps.take(cost);
+    pub(super) fn reserve_work(&mut self, steps: &mut Steps, cost: usize) -> bool {
+        self.closed = self.closed || !steps.take(cost);
         !self.closed
     }
 }

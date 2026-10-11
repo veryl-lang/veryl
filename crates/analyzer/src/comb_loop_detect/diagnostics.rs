@@ -70,7 +70,7 @@ pub(super) type DiagnosticReplayCache = HashMap<(Signature, TraceKind), Rc<Depen
 pub(super) fn check_graph(
     module: &Module,
     graph: &DependencyGraph,
-    steps: &Steps,
+    steps: &mut Steps,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     replays: &mut DiagnosticReplayCache,
     errors: &mut Vec<AnalyzerError>,
@@ -86,7 +86,7 @@ pub(super) fn check_graph(
     let decisions = steps.share(
         sccs.len(),
         false,
-        |stage| compatible_cycle(graph, &sccs[stage], steps),
+        |steps, stage| compatible_cycle(graph, &sccs[stage], steps),
         Option::is_none,
     );
     for (scc, decision) in sccs.into_iter().zip(decisions) {
@@ -202,7 +202,11 @@ fn sorted_edges(
     edges
 }
 
-fn dependency_cycle(graph: &DependencyGraph, scc: &[NodeIndex], steps: &Steps) -> Vec<EdgeIndex> {
+fn dependency_cycle(
+    graph: &DependencyGraph,
+    scc: &[NodeIndex],
+    steps: &mut Steps,
+) -> Vec<EdgeIndex> {
     if let Some(path) = super::graph::diagnostic_cycle(graph, scc, steps) {
         return path;
     }
@@ -259,7 +263,7 @@ fn dependency_cycle(graph: &DependencyGraph, scc: &[NodeIndex], steps: &Steps) -
 fn cycle_nodes(
     graph: &DependencyGraph,
     path: &[EdgeIndex],
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> Vec<(NodeKey, SummaryRegion)> {
     let Some(first) = path.first() else {
         return Vec::new();
@@ -299,7 +303,7 @@ fn cycle_positions(
     graph: &DependencyGraph,
     path: &[EdgeIndex],
     nodes: &[NodeIndex],
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> Option<Vec<[AxisBounds; 2]>> {
     let anchors = super::graph::cycle_anchor_bounds(graph, path, steps)?;
     let bounds = node_bounds(&graph[nodes[0]])?;
@@ -369,7 +373,7 @@ fn replay(
     // Construction is deterministic and a replay has the steps the module
     // started with, so it has the same edges.
     let (graph, _) =
-        build_module_graph_with_trace(module, summaries, tracing, &Steps::new()).ok()?;
+        build_module_graph_with_trace(module, summaries, tracing, &mut Steps::new()).ok()?;
     let graph = Rc::new(graph);
     cache.insert(key, Rc::clone(&graph));
     Some(graph)

@@ -512,7 +512,6 @@ type FunctionResultSummary = Vec<(ArraySpan, Vec<(PackedSpan, Option<usize>)>)>;
 
 pub(super) struct FunctionSummaries<'a> {
     pub(super) tracing: bool,
-    steps: Steps,
     module: &'a Module,
     bit_part: &'a BitPartition,
     summaries: HashMap<FunctionSummaryKey, Option<Rc<FunctionSummary>>>,
@@ -899,10 +898,9 @@ fn module_scope_ids(module: &Module) -> HashSet<VarId> {
         .collect()
 }
 impl<'a> FunctionSummaries<'a> {
-    pub(super) fn new(module: &'a Module, bit_part: &'a BitPartition, steps: &Steps) -> Self {
+    pub(super) fn new(module: &'a Module, bit_part: &'a BitPartition) -> Self {
         Self {
             tracing: false,
-            steps: steps.clone(),
             module,
             bit_part,
             summaries: HashMap::default(),
@@ -914,7 +912,12 @@ impl<'a> FunctionSummaries<'a> {
         }
     }
 
-    fn get(&mut self, call: &FunctionCall, caller_ctx: &mut Context) -> FunctionSummaryLookup {
+    fn get(
+        &mut self,
+        call: &FunctionCall,
+        caller_ctx: &mut Context,
+        steps: &mut Steps,
+    ) -> FunctionSummaryLookup {
         let key = FunctionSummaryKey {
             id: call.id,
             index: call.index.clone(),
@@ -943,6 +946,7 @@ impl<'a> FunctionSummaries<'a> {
             call.index.as_deref(),
             &mut context,
             self,
+            steps,
         )
         .map(Rc::new);
         caller_ctx.functions = context.take_functions();
@@ -1059,8 +1063,16 @@ pub(super) fn analyze<'a>(
     branch_namespace: usize,
     context: &mut ProcedureContext,
     summaries: &mut FunctionSummaries<'a>,
+    steps: &mut Steps,
 ) -> ProcedureResult {
-    ProcedureAnalysis::analyze(bit_part, statements, branch_namespace, context, summaries)
+    ProcedureAnalysis::analyze(
+        bit_part,
+        statements,
+        branch_namespace,
+        context,
+        summaries,
+        steps,
+    )
 }
 
 pub(super) struct ProcedureResult {
@@ -1164,10 +1176,12 @@ impl<'a, 's> ExpressionAnalysis<'a, 's> {
         bit_part: &'a BitPartition,
         context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
+        steps: &'s mut Steps,
     ) -> Self {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut inner = ProcedureAnalysis::from_context(bit_part, summaries, ctx, module_scope_ids);
+        let mut inner =
+            ProcedureAnalysis::from_context(bit_part, summaries, steps, ctx, module_scope_ids);
         inner.tracing = summaries.tracing;
         inner.summaries = Some(summaries);
         Self { inner: Some(inner) }
@@ -1272,8 +1286,8 @@ struct ProcedureAnalysis<'a, 's> {
     function_flows: Vec<FunctionFlow>,
     loop_flows: Vec<LoopFlow>,
     path_condition: PathCondition,
-    /// The module's steps, shared with every other stage of its analysis.
-    steps: Steps,
+    /// The steps this procedure may take.
+    steps: &'s mut Steps,
     /// Set once the procedure ran out of steps; it is then abandoned.
     stopped: bool,
     branch_namespace: usize,
@@ -1291,6 +1305,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
     fn from_context(
         bit_part: &'a BitPartition,
         summaries: &FunctionSummaries<'a>,
+        steps: &'s mut Steps,
         ctx: Context,
         module_scope_ids: Rc<HashSet<VarId>>,
     ) -> Self {
@@ -1309,7 +1324,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             function_flows: Vec::new(),
             loop_flows: Vec::new(),
             path_condition: PathCondition::default(),
-            steps: summaries.steps.clone(),
+            steps,
             stopped: false,
             branch_namespace: 0,
             next_branch: 0,
@@ -1329,10 +1344,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         branch_namespace: usize,
         context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
+        steps: &'s mut Steps,
     ) -> ProcedureResult {
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut this = Self::from_context(bit_part, summaries, ctx, module_scope_ids);
+        let mut this = Self::from_context(bit_part, summaries, steps, ctx, module_scope_ids);
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
         #[cfg(test)]
@@ -1360,8 +1376,9 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
             return Vec::new();
         }
         let value = self.ssa.definition(versions);
-        let steps = self.steps.clone();
-        let Some(sources) = steps.lend(|work| self.ssa.try_root_source_keys_guarded(value, work))
+        let Some(sources) = self
+            .steps
+            .lend(|work| self.ssa.try_root_source_keys_guarded(value, work))
         else {
             self.exhaust_work();
             return Vec::new();
@@ -1389,13 +1406,14 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         index: Option<&[usize]>,
         context: &mut ProcedureContext,
         summaries: &'s mut FunctionSummaries<'a>,
+        steps: &'s mut Steps,
     ) -> Option<FunctionSummary> {
         let function = module.functions.get(&id)?;
         let body = function.get_function(index.unwrap_or_default())?;
         let formal_ids = body.arg_map.values().copied().collect::<HashSet<_>>();
         let (mut ctx, module_scope_ids) = context.take();
         ctx.begin_analysis_transaction();
-        let mut this = Self::from_context(bit_part, summaries, ctx, module_scope_ids);
+        let mut this = Self::from_context(bit_part, summaries, steps, ctx, module_scope_ids);
         this.tracing = summaries.tracing;
         this.summaries = Some(summaries);
         this.call_caches.push(None);
@@ -1438,7 +1456,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         });
                 let regions = match this.key_span(destination) {
                     Some(_) if this.stopped => None,
-                    Some(packed) => this.steps.clone().lend(|work| {
+                    Some(packed) => this.steps.lend(|work| {
                         this.ssa.written_regions(
                             version,
                             PositionDomain::new(destination.1, packed),
@@ -1467,7 +1485,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     this.ssa.try_dependency_dag(
                         &roots,
                         |key| {
-                            this.is_visible_source(key)
+                            Self::is_visible_source(&this.module_scope_ids, key)
                                 || (key.call_frame.is_none() && formal_ids.contains(&key.node.0))
                         },
                         work,
@@ -1608,8 +1626,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let graph = (!self.stopped)
             .then(|| {
                 self.steps.lend(|work| {
-                    self.ssa
-                        .try_dependency_dag(roots, |key| self.is_visible_source(key), work)
+                    self.ssa.try_dependency_dag(
+                        roots,
+                        |key| Self::is_visible_source(&self.module_scope_ids, key),
+                        work,
+                    )
                 })
             })
             .flatten();
@@ -1649,12 +1670,12 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         }
     }
 
-    fn is_visible_source(&self, key: &SsaKey) -> bool {
+    fn is_visible_source(module_scope_ids: &HashSet<VarId>, key: &SsaKey) -> bool {
         // Only inspect entries reached by this export. Enumerating every
         // module partition for every declaration makes sparse writes quadratic.
         #[cfg(test)]
         VISIBLE_SOURCE_PROBES.set(VISIBLE_SOURCE_PROBES.get() + 1);
-        key.call_frame.is_none() && self.is_module_scope_key(key.node)
+        key.call_frame.is_none() && module_scope_ids.contains(&key.node.0)
     }
 
     fn process_write_footprint(&mut self, statements: &[Statement]) -> Vec<NodeKey> {
@@ -2141,8 +2162,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         if self.stopped {
             return version;
         }
-        let steps = self.steps.clone();
-        match steps.lend(|work| self.ssa.read_logged(version, domain, work)) {
+        match self
+            .steps
+            .lend(|work| self.ssa.read_logged(version, domain, work))
+        {
             Ok(read) => read.unwrap_or(version),
             Err(RanOut) => {
                 self.exhaust_work();
@@ -3046,8 +3069,8 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 .get(key.node.2)
                 .map(|packed| PositionDomain::new(key.node.1, *packed))
         };
-        let steps = self.steps.clone();
-        if steps
+        if self
+            .steps
             .lend(|work| {
                 self.ssa.try_close_repeated_transfer(
                     &transfer,
@@ -4423,7 +4446,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
         let summary = self
             .summaries
             .as_deref_mut()
-            .map(|summaries| summaries.get(call, &mut self.ctx));
+            .map(|summaries| summaries.get(call, &mut self.ctx, self.steps));
         match summary {
             Some(FunctionSummaryLookup::Ready(summary)) => {
                 return self.apply_function_summary(call, controls, summary.as_ref());
@@ -4840,9 +4863,11 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 PositionDomain::new(requested_array, requested_packed),
             )];
         }
-        let steps = self.steps.clone();
         let Some(sources) = (!self.stopped)
-            .then(|| steps.lend(|work| self.ssa.try_root_source_relations_guarded(version, work)))
+            .then(|| {
+                self.steps
+                    .lend(|work| self.ssa.try_root_source_relations_guarded(version, work))
+            })
             .flatten()
         else {
             self.exhaust_work();

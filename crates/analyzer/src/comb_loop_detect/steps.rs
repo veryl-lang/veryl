@@ -14,8 +14,8 @@
 //!
 //! Steps count work, not time, so a result does not depend on the machine.
 
+#[cfg(test)]
 use std::cell::Cell;
-use std::rc::Rc;
 
 /// Steps one module may take.
 pub(super) const STEP_LIMIT: usize = 1 << 23;
@@ -53,9 +53,11 @@ pub(crate) fn steps_taken() -> usize {
     TAKEN.get()
 }
 
-/// A handle to the steps that remain for one module. Clones share them.
-#[derive(Clone)]
-pub(super) struct Steps(Rc<Cell<usize>>);
+/// The steps that remain for one module. A stage takes them by `&mut`, so
+/// nested work cannot spend the same steps twice.
+pub(super) struct Steps {
+    remaining: usize,
+}
 
 impl Steps {
     pub(super) fn new() -> Self {
@@ -63,46 +65,42 @@ impl Steps {
         let limit = LIMIT.get();
         #[cfg(not(test))]
         let limit = STEP_LIMIT;
-        Self(Rc::new(Cell::new(limit)))
+        Self { remaining: limit }
     }
 
     pub(super) fn remaining(&self) -> usize {
-        self.0.get()
+        self.remaining
     }
 
     /// Take `count` steps, or none when fewer remain.
-    pub(super) fn take(&self, count: usize) -> bool {
-        let Some(remaining) = self.0.get().checked_sub(count) else {
+    pub(super) fn take(&mut self, count: usize) -> bool {
+        let Some(remaining) = self.remaining.checked_sub(count) else {
             return false;
         };
-        self.record(count);
-        self.0.set(remaining);
+        record(count);
+        self.remaining = remaining;
         true
     }
 
     /// Run work that counts its steps down in a plain counter, starting from
-    /// every remaining step, and keep what it leaves. Steps taken through
-    /// another handle while `f` runs find none remaining, so nested work
-    /// cannot spend the same steps twice.
-    pub(super) fn lend<T>(&self, f: impl FnOnce(&mut usize) -> T) -> T {
-        let lent = self.0.replace(0);
-        let mut remaining = lent;
-        let result = f(&mut remaining);
-        let remaining = remaining.min(lent);
-        self.record(lent - remaining);
-        self.0.set(self.0.get() + remaining);
+    /// every remaining step, and keep what it leaves.
+    pub(super) fn lend<T>(&mut self, f: impl FnOnce(&mut usize) -> T) -> T {
+        let lent = self.remaining;
+        let result = f(&mut self.remaining);
+        self.remaining = self.remaining.min(lent);
+        record(lent - self.remaining);
         result
     }
 
     /// Run `f` on at most `share` of the remaining steps. The others stay
     /// set aside for later stages, whatever `f` takes.
-    pub(super) fn confine<T>(&self, share: usize, f: impl FnOnce() -> T) -> T {
-        let remaining = self.0.get();
-        let share = share.min(remaining);
-        self.0.set(share);
-        let result = f();
-        let left = self.0.get().min(share);
-        self.0.set(remaining - share + left);
+    pub(super) fn confine<T>(&mut self, share: usize, f: impl FnOnce(&mut Self) -> T) -> T {
+        let mut confined = Self {
+            remaining: share.min(self.remaining),
+        };
+        self.remaining -= confined.remaining;
+        let result = f(&mut confined);
+        self.remaining += confined.remaining;
         result
     }
 
@@ -117,16 +115,30 @@ impl Steps {
     /// stage pending alone takes all of those at once, and stages still out
     /// of steps then keep their last result.
     pub(super) fn share<T>(
-        &self,
+        &mut self,
         stages: usize,
         reserve: bool,
-        mut run: impl FnMut(usize) -> T,
+        mut run: impl FnMut(&mut Self, usize) -> T,
         ran_out: impl Fn(&T) -> bool,
     ) -> Vec<T> {
         // Set the reserve aside once, so neither the stages nor their
         // retries can reach it.
-        let reserved = if reserve { self.remaining() / 2 } else { 0 };
-        self.0.set(self.remaining() - reserved);
+        let available = if reserve {
+            self.remaining - self.remaining / 2
+        } else {
+            self.remaining
+        };
+        self.confine(available, |steps| {
+            steps.share_all(stages, &mut run, ran_out)
+        })
+    }
+
+    fn share_all<T>(
+        &mut self,
+        stages: usize,
+        run: &mut impl FnMut(&mut Self, usize) -> T,
+        ran_out: impl Fn(&T) -> bool,
+    ) -> Vec<T> {
         let mut results = (0..stages).map(|_| None).collect::<Vec<Option<T>>>();
         let mut pending = (0..stages).collect::<Vec<_>>();
         let mut allowance = FIRST_ALLOWANCE;
@@ -135,14 +147,14 @@ impl Steps {
             let mut next = Vec::new();
             let mut limited = alone;
             for &stage in &pending {
-                let available = self.remaining();
+                let available = self.remaining;
                 limited |= allowance >= available;
                 let share = if alone {
                     available
                 } else {
                     allowance.min(available)
                 };
-                let result = self.confine(share, || run(stage));
+                let result = self.confine(share, |steps| run(steps, stage));
                 if ran_out(&result) {
                     next.push(stage);
                 }
@@ -154,18 +166,16 @@ impl Steps {
             pending = next;
             allowance = allowance.saturating_mul(2);
         }
-        self.0.set(self.remaining() + reserved);
         results
             .into_iter()
             .map(|result| result.expect("every stage runs"))
             .collect()
     }
+}
 
-    #[cfg_attr(not(test), allow(clippy::unused_self))]
-    fn record(&self, _count: usize) {
-        #[cfg(test)]
-        TAKEN.set(TAKEN.get().saturating_add(_count));
-    }
+fn record(_count: usize) {
+    #[cfg(test)]
+    TAKEN.set(TAKEN.get().saturating_add(_count));
 }
 
 #[cfg(test)]
@@ -174,9 +184,14 @@ mod tests {
 
     #[test]
     fn shared_stages_leave_the_reserve_untouched() {
-        let steps = Steps(Rc::new(Cell::new(6500)));
+        let mut steps = Steps { remaining: 6500 };
         // Each stage needs 1,500 steps, taken one at a time.
-        let results = steps.share(2, true, |_| (0..1500).all(|_| steps.take(1)), |done| !done);
+        let results = steps.share(
+            2,
+            true,
+            |steps, _| (0..1500).all(|_| steps.take(1)),
+            |done| !done,
+        );
         assert_eq!(results.len(), 2);
         assert!(
             steps.remaining() >= 3250,

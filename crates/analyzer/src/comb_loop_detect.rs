@@ -109,8 +109,8 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut diagnostic_replays = DiagnosticReplayCache::default();
     let mut reported = HashSet::default();
     for module in module_postorder(ir) {
-        let steps = Steps::new();
-        let (graph, module_complete) = match build_module_graph(module, &summaries, &steps) {
+        let mut steps = Steps::new();
+        let (graph, module_complete) = match build_module_graph(module, &summaries, &mut steps) {
             Ok(result) => result,
             Err(error) => {
                 errors.push(*error);
@@ -122,7 +122,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
         let cycles_complete = check_graph(
             module,
             &graph,
-            &steps,
+            &mut steps,
             &summaries,
             &mut diagnostic_replays,
             &mut errors,
@@ -204,7 +204,7 @@ fn build_bit_partition(module: &Module, ctx: &Context) -> BitPartition {
 fn build_module_graph(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> Result<(DependencyGraph, bool), Box<AnalyzerError>> {
     build_module_graph_with_trace(module, summaries, TraceKind::None, steps)
 }
@@ -213,7 +213,7 @@ fn build_module_graph_with_trace(
     module: &Module,
     summaries: &HashMap<Signature, ModuleCombSummary>,
     tracing: TraceKind,
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> Result<(DependencyGraph, bool), Box<AnalyzerError>> {
     let mut ctx = Context::default();
     ctx.variables = module.variables.clone();
@@ -264,10 +264,10 @@ fn build_module_graph_with_trace(
         })
         .collect::<Vec<_>>();
     // Procedures leave half of the steps for deciding the cycles they form.
-    let analyses = steps.share(
+    let analyses = builder.steps.share(
         combs.len(),
         true,
-        |stage| {
+        |steps, stage| {
             let (declaration_index, comb) = combs[stage];
             procedure::analyze(
                 &bit_part,
@@ -275,6 +275,7 @@ fn build_module_graph_with_trace(
                 declaration_index + 1,
                 &mut builder.procedure_context,
                 &mut builder.function_summaries,
+                steps,
             )
         },
         |analysis| analysis.ran_out,
@@ -322,8 +323,9 @@ fn build_module_graph_with_trace(
     Ok((graph, complete))
 }
 
-struct ModuleGraphBuilder<'a> {
+struct ModuleGraphBuilder<'a, 's> {
     bit_part: &'a BitPartition,
+    steps: &'s mut Steps,
     graph: DependencyGraph,
     node_map: HashMap<NodeKey, NodeIndex>,
     ctx: Context,
@@ -334,16 +336,22 @@ struct ModuleGraphBuilder<'a> {
     complete: bool,
 }
 
-impl<'a> ModuleGraphBuilder<'a> {
-    fn new(module: &'a Module, bit_part: &'a BitPartition, ctx: Context, steps: &Steps) -> Self {
+impl<'a, 's> ModuleGraphBuilder<'a, 's> {
+    fn new(
+        module: &'a Module,
+        bit_part: &'a BitPartition,
+        ctx: Context,
+        steps: &'s mut Steps,
+    ) -> Self {
         Self {
             bit_part,
+            steps,
             graph: DependencyGraph::new(),
             node_map: HashMap::default(),
             ctx,
             procedure_context: procedure::ProcedureContext::new(module),
-            function_summaries: procedure::FunctionSummaries::new(module, bit_part, steps),
-            summary_budget: ExpansionBudget::new(steps),
+            function_summaries: procedure::FunctionSummaries::new(module, bit_part),
+            summary_budget: ExpansionBudget::default(),
             trace_instances: false,
             complete: !module
                 .variables
@@ -374,11 +382,12 @@ impl<'a> ModuleGraphBuilder<'a> {
         child: &Module,
         summary: &ModuleCombSummary,
     ) {
-        if !self.summary_budget.reserve(summary) {
+        if !self.summary_budget.reserve(self.steps, summary) {
             self.complete = false;
             return;
         }
         let bit_part = self.bit_part;
+        let steps = &mut *self.steps;
         let graph = &mut self.graph;
         let node_map = &mut self.node_map;
         let ctx = &mut self.ctx;
@@ -398,6 +407,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                 ctx,
                 procedure_context,
                 function_summaries,
+                steps,
             );
             complete &= actual_complete;
             if let Some(dependencies) = dependencies {
@@ -432,6 +442,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                         ctx,
                         procedure_context,
                         function_summaries,
+                        steps,
                     );
                 complete &= selector_complete;
                 if let Some(dependencies) = dependencies {
@@ -487,6 +498,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                         ctx,
                         &mut actuals,
                         &mut self.summary_budget,
+                        steps,
                     );
                     (mapping, None)
                 }
@@ -578,6 +590,7 @@ impl<'a> ModuleGraphBuilder<'a> {
                                 ctx,
                                 &mut actuals,
                                 &mut self.summary_budget,
+                                steps,
                             );
                             let destinations = resolve_instance_mapping(
                                 graph,
@@ -640,6 +653,7 @@ impl<'a> ModuleGraphBuilder<'a> {
             procedure_context,
             function_summaries,
             &mut self.summary_budget,
+            steps,
         );
         self.complete &= complete;
     }
@@ -795,6 +809,7 @@ fn map_instance_source_region(
     ctx: &mut Context,
     actuals: &mut InstanceActuals,
     budget: &mut ExpansionBudget,
+    steps: &mut Steps,
 ) -> ResolvedInstanceRegionMapping {
     let parent_sources = instance_region_mapping(
         inst,
@@ -839,7 +854,7 @@ fn map_instance_source_region(
         // Connection metadata already gives the exact coordinate mapping;
         // project it directly.
         let sources = resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
-        return actuals.project_mapping(graph, region, &sources, budget);
+        return actuals.project_mapping(graph, region, &sources, budget, steps);
     }
     let Some(_) = inst.inputs.iter().find(|input| input.id == region.id) else {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
@@ -850,7 +865,7 @@ fn map_instance_source_region(
     let Some(_) = variable.total_width() else {
         return resolve_instance_mapping(graph, node_map, bit_part, parent_sources);
     };
-    actuals.defer(graph, region, budget)
+    actuals.defer(graph, region, budget, steps)
 }
 
 #[derive(Default)]
@@ -867,10 +882,11 @@ impl InstanceActuals {
         region: SummaryRegion,
         sources: &ResolvedInstanceRegionMapping,
         budget: &mut ExpansionBudget,
+        steps: &mut Steps,
     ) -> ResolvedInstanceRegionMapping {
         let root = if let Some(&root) = self.projections.get(&region) {
             Some(root)
-        } else if budget.reserve_work(sources.nodes.len().saturating_add(1)) {
+        } else if budget.reserve_work(steps, sources.nodes.len().saturating_add(1)) {
             let root = graph.add_node(GraphNode {
                 region,
                 domains: vec![PositionDomain {
@@ -902,10 +918,11 @@ impl InstanceActuals {
         graph: &mut DependencyGraph,
         region: SummaryRegion,
         budget: &mut ExpansionBudget,
+        steps: &mut Steps,
     ) -> ResolvedInstanceRegionMapping {
         let root = if let Some(&root) = self.roots.get(&region) {
             Some(root)
-        } else if budget.reserve_work(2) {
+        } else if budget.reserve_work(steps, 2) {
             // Resolve all projections together after the child edges have
             // supplied their requested regions. The exported root supplies
             // the bounds; this placeholder only connects its consumers.
@@ -935,6 +952,7 @@ impl InstanceActuals {
         procedure_context: &mut procedure::ProcedureContext,
         summaries: &mut procedure::FunctionSummaries<'a>,
         budget: &mut ExpansionBudget,
+        steps: &mut Steps,
     ) -> bool {
         let mut complete = !self.exhausted;
         let mut regions = self.roots.keys().copied().collect::<Vec<_>>();
@@ -953,11 +971,11 @@ impl InstanceActuals {
             let expression = &input.expr;
             let context_type = &variable.r#type;
             let mut analysis =
-                procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries);
+                procedure::ExpressionAnalysis::new(bit_part, procedure_context, summaries, steps);
             let dag = analysis.eval_regions(expression, regions, width, context_type);
             complete &= analysis.is_complete();
             analysis.restore(procedure_context);
-            if !budget.reserve_dag(&dag) {
+            if !budget.reserve_dag(steps, &dag) {
                 complete = false;
                 continue;
             }
@@ -1687,6 +1705,7 @@ fn analyze_instance_actual<'a>(
     ctx: &mut Context,
     procedure_context: &mut procedure::ProcedureContext,
     summaries: &mut procedure::FunctionSummaries<'a>,
+    steps: &mut Steps,
 ) -> (
     Vec<procedure::RegionSource>,
     Option<procedure::ProcedureResult>,
@@ -1697,6 +1716,7 @@ fn analyze_instance_actual<'a>(
         ctx,
         procedure_context,
         summaries,
+        steps,
         std::ptr::from_ref(expression).addr(),
     );
     analysis.eval(expression);
@@ -1709,6 +1729,7 @@ fn analyze_instance_destination<'a>(
     ctx: &mut Context,
     procedure_context: &mut procedure::ProcedureContext,
     summaries: &mut procedure::FunctionSummaries<'a>,
+    steps: &mut Steps,
 ) -> (
     Vec<procedure::RegionSource>,
     Option<procedure::ProcedureResult>,
@@ -1719,6 +1740,7 @@ fn analyze_instance_destination<'a>(
         ctx,
         procedure_context,
         summaries,
+        steps,
         std::ptr::from_ref(destination).addr(),
     );
     for expression in destination
@@ -1739,7 +1761,7 @@ struct InstanceActualAnalysis<'a, 's, 'c> {
     bit_part: &'a BitPartition,
     ctx: &'c mut Context,
     procedure_context: &'c mut procedure::ProcedureContext,
-    summaries: Option<&'s mut procedure::FunctionSummaries<'a>>,
+    summaries: Option<(&'s mut procedure::FunctionSummaries<'a>, &'s mut Steps)>,
     procedure: Option<procedure::ExpressionAnalysis<'a, 's>>,
     reads: Vec<procedure::RegionSource>,
     namespace: usize,
@@ -1751,13 +1773,14 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
         ctx: &'c mut Context,
         procedure_context: &'c mut procedure::ProcedureContext,
         summaries: &'s mut procedure::FunctionSummaries<'a>,
+        steps: &'s mut Steps,
         namespace: usize,
     ) -> Self {
         Self {
             bit_part,
             ctx,
             procedure_context,
-            summaries: Some(summaries),
+            summaries: Some((summaries, steps)),
             procedure: None,
             reads: Vec::new(),
             namespace,
@@ -1794,11 +1817,12 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
         match expression {
             Expression::Term(factor) => match factor.as_ref() {
                 Factor::FunctionCall(_) => {
-                    let summaries = self.summaries.take().expect("initialized once");
+                    let (summaries, steps) = self.summaries.take().expect("initialized once");
                     let mut procedure = procedure::ExpressionAnalysis::new(
                         self.bit_part,
                         self.procedure_context,
                         summaries,
+                        steps,
                     );
                     procedure.use_namespace(self.namespace);
                     self.procedure = Some(procedure);
@@ -1838,11 +1862,12 @@ impl<'a, 's, 'c> InstanceActualAnalysis<'a, 's, 'c> {
             Expression::Unary(_, operand, _) => self.eval(operand),
             Expression::Binary(_, Op::LogicAnd | Op::LogicOr, _, _)
             | Expression::Ternary(_, _, _, _) => {
-                let summaries = self.summaries.take().expect("initialized once");
+                let (summaries, steps) = self.summaries.take().expect("initialized once");
                 let mut procedure = procedure::ExpressionAnalysis::new(
                     self.bit_part,
                     self.procedure_context,
                     summaries,
+                    steps,
                 );
                 procedure.use_namespace(self.namespace);
                 self.procedure = Some(procedure);

@@ -619,9 +619,8 @@ pub(super) struct SsaStore<K> {
     // created and versions are never discarded, so a result stays valid.
     logged_reads: HashMap<(VersionId, PositionDomain), VersionId>,
     // Per version, whether it may still hold an entry value. Inputs precede
-    // the versions built from them and versions never change, so this is
-    // extended in creation order.
-    retains_entry: std::cell::RefCell<Vec<bool>>,
+    // the versions built from them, so it is set when a version is created.
+    retains_entry: Vec<bool>,
 }
 
 impl<K> Default for SsaStore<K> {
@@ -637,7 +636,7 @@ impl<K> Default for SsaStore<K> {
             logs: HashMap::default(),
             log_floor: 0,
             logged_reads: HashMap::default(),
-            retains_entry: Default::default(),
+            retains_entry: Vec::new(),
         }
     }
 }
@@ -669,7 +668,7 @@ where
             return *version;
         }
         let version = self.versions.len();
-        self.versions.push(Version::Entry(key));
+        self.push_version(Version::Entry(key));
         self.entries.insert(key, version);
         version
     }
@@ -716,7 +715,7 @@ where
         sources.sort_unstable();
         sources.dedup();
         let version = self.versions.len();
-        self.versions.push(Version::Definition {
+        self.push_version(Version::Definition {
             sources,
             condition: condition.clone(),
         });
@@ -731,7 +730,7 @@ where
         branches: Rc<HashMap<BranchId, BranchId>>,
     ) -> VersionId {
         let version = self.versions.len();
-        self.versions.push(Version::Imported {
+        self.push_version(Version::Imported {
             graph,
             root,
             bindings,
@@ -765,7 +764,7 @@ where
             strong,
         });
         let version = self.versions.len();
-        self.versions.push(Version::Overlay {
+        self.push_version(Version::Overlay {
             below,
             retained,
             above,
@@ -1024,22 +1023,24 @@ where
     /// value: the entry is reachable through values that keep retention
     /// rather than read it. Imported values may.
     fn may_retain_entry(&self, version: VersionId) -> bool {
-        let mut retains = self.retains_entry.borrow_mut();
-        for next in retains.len()..=version {
-            let value = match &self.versions[next] {
-                Version::Entry(_) | Version::Imported { .. } => true,
-                Version::Phi(inputs) => inputs.iter().any(|input| retains[*input]),
-                Version::Overlay { below, above, .. } => retains[*below] || retains[*above],
-                Version::Guarded { source, .. } | Version::Restricted { source, .. } => {
-                    retains[*source]
-                }
-                Version::Definition { .. }
-                | Version::Projected { .. }
-                | Version::Replicated { .. } => false,
-            };
-            retains.push(value);
-        }
-        retains[version]
+        self.retains_entry[version]
+    }
+
+    fn push_version(&mut self, version: Version<K>) {
+        let retains = &self.retains_entry;
+        let retains_entry = match &version {
+            Version::Entry(_) | Version::Imported { .. } => true,
+            Version::Phi(inputs) => inputs.iter().any(|input| retains[*input]),
+            Version::Overlay { below, above, .. } => retains[*below] || retains[*above],
+            Version::Guarded { source, .. } | Version::Restricted { source, .. } => {
+                retains[*source]
+            }
+            Version::Definition { .. } | Version::Projected { .. } | Version::Replicated { .. } => {
+                false
+            }
+        };
+        self.retains_entry.push(retains_entry);
+        self.versions.push(version);
     }
 
     /// Make every existing version opaque to regional reads until the
@@ -1075,7 +1076,7 @@ where
             .into_iter()
             .map(|piece| {
                 let version = self.versions.len();
-                self.versions.push(Version::Restricted {
+                self.push_version(Version::Restricted {
                     source: piece.version,
                     domain: piece.domain,
                 });
@@ -1093,7 +1094,7 @@ where
 
     pub(super) fn projected(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
         let version = self.versions.len();
-        self.versions.push(Version::Projected { source, domain });
+        self.push_version(Version::Projected { source, domain });
         version
     }
 
@@ -1104,7 +1105,7 @@ where
     /// entry value as retention.
     pub(super) fn restricted(&mut self, source: VersionId, domain: PositionDomain) -> VersionId {
         let version = self.versions.len();
-        self.versions.push(Version::Restricted { source, domain });
+        self.push_version(Version::Restricted { source, domain });
         version
     }
 
@@ -1129,7 +1130,7 @@ where
             "replication must advance its axis"
         );
         let version = self.versions.len();
-        self.versions.push(Version::Replicated {
+        self.push_version(Version::Replicated {
             source,
             domain,
             replication,
@@ -1295,7 +1296,7 @@ where
                     // A guard is an alias, not a read. Bare entry versions
                     // retained on the skipped path must remain state retention
                     // until another expression actually reads the merged value.
-                    self.versions.push(Version::Guarded {
+                    self.push_version(Version::Guarded {
                         source,
                         condition: condition.clone(),
                     });
@@ -1668,7 +1669,7 @@ where
             return inputs[0];
         }
         let version = self.versions.len();
-        self.versions.push(Version::Phi(inputs));
+        self.push_version(Version::Phi(inputs));
         version
     }
 

@@ -298,7 +298,7 @@ impl SearchBudget {
 
     /// Search with the steps that remain for the module, keeping what the
     /// search leaves.
-    fn with_steps<T>(steps: &Steps, search: impl FnOnce(&mut Self) -> T) -> T {
+    fn with_steps<T>(steps: &mut Steps, search: impl FnOnce(&mut Self) -> T) -> T {
         steps.lend(|remaining| {
             let mut budget = Self {
                 remaining: *remaining,
@@ -450,7 +450,7 @@ fn try_cycle_witness(cycles: &HashSet<GuardedCycle>, budget: &mut SearchBudget) 
 pub(super) fn compatible_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> Option<bool> {
     SearchBudget::with_steps(steps, |budget| {
         #[cfg(test)]
@@ -469,7 +469,7 @@ pub(super) fn compatible_cycle(
 
 #[cfg(test)]
 fn has_compatible_cycle(graph: &DependencyGraph, scc: &[NodeIndex]) -> bool {
-    compatible_cycle(graph, scc, &Steps::new())
+    compatible_cycle(graph, scc, &mut Steps::new())
         .expect("small reference graphs must be decided completely")
 }
 
@@ -690,7 +690,7 @@ pub(super) type Cuts = HashMap<NodeIndex, [Vec<isize>; 2]>;
 /// so a report can name the elements and bits of a cycle. The search takes
 /// the module's steps, so the boundaries follow its work, not the number of
 /// positions.
-pub(super) fn cycle_cuts(graph: &DependencyGraph, scc: &[NodeIndex], steps: &Steps) -> Cuts {
+pub(super) fn cycle_cuts(graph: &DependencyGraph, scc: &[NodeIndex], steps: &mut Steps) -> Cuts {
     let mut cuts = Cuts::default();
     SearchBudget::with_steps(steps, |budget| {
         has_compatible_cycle_with_budget(graph, scc, budget, Some(&mut cuts))
@@ -786,7 +786,7 @@ pub(super) fn split_at_cuts(
     graph: &DependencyGraph,
     nodes: &HashSet<NodeIndex>,
     cuts: &Cuts,
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> Option<DependencyGraph> {
     let mut grids: Vec<Option<[Vec<isize>; 2]>> = Vec::with_capacity(graph.node_count());
     let mut changed = false;
@@ -931,7 +931,7 @@ pub(super) fn split_at_cuts(
 pub(super) fn cycle_anchor_bounds(
     graph: &DependencyGraph,
     path: &[EdgeIndex],
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> Option<[Option<AxisBounds>; 2]> {
     let (start, _) = graph.edge_endpoints(*path.first()?)?;
     SearchBudget::with_steps(steps, |budget| {
@@ -959,7 +959,7 @@ pub(super) fn cycle_anchor_bounds(
 pub(super) fn diagnostic_cycle(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> Option<Vec<EdgeIndex>> {
     SearchBudget::with_steps(steps, |budget| {
         diagnostic_cycle_with_budget(graph, scc, budget)
@@ -977,7 +977,7 @@ pub(super) type ReportedCycle = (Vec<NodeIndex>, Vec<EdgeIndex>);
 pub(super) fn report_cycles(
     graph: &DependencyGraph,
     scc: &[NodeIndex],
-    steps: &Steps,
+    steps: &mut Steps,
 ) -> (Option<DependencyGraph>, Vec<ReportedCycle>) {
     let nodes = scc.iter().copied().collect::<HashSet<_>>();
     let cuts = cycle_cuts(graph, scc, steps);
@@ -2475,7 +2475,7 @@ mod tests {
         ));
         assert!(budget.exhausted);
         assert_eq!(
-            compatible_cycle(&graph, &[node], &Steps::new()),
+            compatible_cycle(&graph, &[node], &mut Steps::new()),
             Some(false)
         );
         for shift in 1..=32 {
@@ -2511,7 +2511,10 @@ mod tests {
             None,
         ));
         assert!(budget.exhausted);
-        assert_eq!(compatible_cycle(&graph, &[node], &Steps::new()), Some(true));
+        assert_eq!(
+            compatible_cycle(&graph, &[node], &mut Steps::new()),
+            Some(true)
+        );
     }
 
     #[test]
@@ -2552,7 +2555,7 @@ mod tests {
             assert!(budget.exhausted);
         }
         assert_eq!(
-            compatible_cycle(&graph, &[node], &Steps::new()),
+            compatible_cycle(&graph, &[node], &mut Steps::new()),
             Some(false)
         );
     }
