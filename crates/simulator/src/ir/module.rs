@@ -4,7 +4,8 @@ use crate::ir::comb_layout;
 use crate::ir::comb_pipeline_cache;
 use crate::ir::context::{Context, Conv, ScopeContext};
 use crate::ir::declaration::{
-    branch_tag, stable_topo_sort_with_blocks, stable_topo_sort_with_pieces,
+    branch_tag, stable_topo_sort_with_blocks, stable_topo_sort_with_blocks_on_cycle,
+    stable_topo_sort_with_pieces,
 };
 use crate::ir::derived_clock::{
     DerivedClockSchedule, build_schedule as build_derived_clock_schedule,
@@ -2138,7 +2139,9 @@ pub(crate) fn analyze_dependency(
     // `x=a; x=b; y=x`, so `y` wrongly reads `b`. `stable_topo_sort` links
     // `y` to its most recent PRIOR writer only. (reorder_by_level applies
     // the matching WAR/WAW leveling downstream.)
-    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(flat, &block_of);
+    let mut on_cycle = Vec::new();
+    let (sorted, passes_hint, fell_back) =
+        stable_topo_sort_with_blocks_on_cycle(flat, &block_of, &mut on_cycle);
     stage.mark("phase2-full");
     if !fell_back {
         pass_diag_phase("phase2-full: flatten + stable_topo_sort");
@@ -2157,18 +2160,31 @@ pub(crate) fn analyze_dependency(
     // down, which the flat split cannot reach.  Splitting in place keeps the
     // flattened program order, and only a design that would otherwise fail to
     // schedule pays for the re-evaluated guards.
+
+    // Only copies on a reported cycle are cut, since every part is one more
+    // statement each settle evaluates; an off-cycle copy still lends the cuts
+    // it would take to one that is.
+    let cycle_blocks: HashSet<usize> = block_of
+        .iter()
+        .zip(&on_cycle)
+        .filter_map(|(&b, &c)| c.then_some(b))
+        .collect();
     let mut deep_stmts = flat;
     let mut deep_block_of: Vec<usize> = Vec::with_capacity(deep_stmts.len());
-    let mut blocks = block_of.into_iter();
+    let mut deep_on_cycle: Vec<bool> = Vec::with_capacity(deep_stmts.len());
+    let mut blocks = block_of.into_iter().zip(on_cycle);
     expand_in_place(&mut deep_stmts, |stmt, out| {
         split_nested(stmt, out, true);
-        deep_block_of.resize(deep_block_of.len() + out.len(), blocks.next().unwrap());
+        let (block, cyclic) = blocks.next().unwrap();
+        deep_block_of.resize(deep_block_of.len() + out.len(), block);
+        deep_on_cycle.resize(deep_on_cycle.len() + out.len(), cyclic);
     });
     let mut deep_group_of = vec![0usize; deep_stmts.len()];
     split_copies_by_source_writes(
         &mut deep_stmts,
         &mut deep_block_of,
         &mut deep_group_of,
+        Some(&mut deep_on_cycle),
         SPECULATIVE_MAX_PARTS,
     );
     // Versions before scheduling: each write is its own statement now, so
@@ -2226,10 +2242,15 @@ pub(crate) fn analyze_dependency(
             }
         }
         if split_any {
+            let mut branch_on_cycle: Vec<bool> = branch_block_of
+                .iter()
+                .map(|b| cycle_blocks.contains(b))
+                .collect();
             split_copies_by_source_writes(
                 &mut branch_stmts,
                 &mut branch_block_of,
                 &mut branch_group_of,
+                Some(&mut branch_on_cycle),
                 SPECULATIVE_MAX_PARTS,
             );
             let renamed = rename_versions(
@@ -2284,7 +2305,13 @@ pub(crate) fn analyze_dependency(
         // `groups` tags branches for `stable_topo_sort_with_pieces`; this
         // phase sorts by block and never reads them.
         let mut groups = vec![0usize; stmts.len()];
-        split_copies_by_source_writes(&mut stmts, &mut blocks, &mut groups, LAST_RESORT_MAX_PARTS);
+        split_copies_by_source_writes(
+            &mut stmts,
+            &mut blocks,
+            &mut groups,
+            None,
+            LAST_RESORT_MAX_PARTS,
+        );
         let (sorted, cycle_indices) = match sort_and_verify_acyclic(stmts, &blocks) {
             Ok((sorted, passes_hint)) => {
                 pass_diag_phase("phase3: stable_topo_sort after the copy split");
@@ -2877,11 +2904,17 @@ fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> Sort
 /// Runs after the splits above, so a concatenation already counts per element;
 /// a source written with unknown bits is left alone, no cut being finer.
 ///
+/// `eligible`, when given, marks the statements that may be split; a part
+/// inherits its statement's mark.  An ineligible copy stays whole but still
+/// lends the cuts it would be split at, so a chain of copies keeps carrying
+/// boundaries to an eligible one further down.
+///
 /// For `max_parts` see [`SPECULATIVE_MAX_PARTS`] and [`LAST_RESORT_MAX_PARTS`].
 fn split_copies_by_source_writes(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
     groups: &mut Vec<usize>,
+    mut eligible: Option<&mut Vec<bool>>,
     max_parts: usize,
 ) {
     /// A buffer chain carries boundaries one link per round.  A split link names
@@ -2889,12 +2922,19 @@ fn split_copies_by_source_writes(
     /// long chains.
     const MAX_ROUNDS: usize = 4;
 
+    // The parts an ineligible copy would split into, aligned with `stmts`.
+    let mut lent: Vec<Option<Vec<ProtoStatement>>> = vec![None; stmts.len()];
     for _ in 0..MAX_ROUNDS {
         let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
         let mut outs = Vec::new();
-        for stmt in stmts.iter() {
+        for (stmt, lent) in stmts.iter().zip(&lent) {
             outs.clear();
-            gather_bit_aware_outputs(stmt, &mut outs);
+            match lent {
+                Some(parts) => parts
+                    .iter()
+                    .for_each(|p| gather_bit_aware_outputs(p, &mut outs)),
+                None => gather_bit_aware_outputs(stmt, &mut outs),
+            }
             for (off, range) in outs.iter() {
                 let entry = bounds.entry(*off).or_insert_with(|| Some(Vec::new()));
                 match range {
@@ -2914,14 +2954,28 @@ fn split_copies_by_source_writes(
         let splits: Vec<(usize, Vec<ProtoStatement>)> = stmts
             .iter()
             .enumerate()
+            .filter(|(i, _)| eligible.as_ref().is_none_or(|e| e[*i]))
             .filter_map(|(i, stmt)| Some((i, split_one_copy(stmt, &bounds, max_parts)?)))
             .collect();
+        let mut lent_more = false;
+        if let Some(e) = &eligible {
+            for (i, stmt) in stmts.iter().enumerate().filter(|(i, _)| !e[*i]) {
+                let parts = split_one_copy(stmt, &bounds, max_parts);
+                lent_more |= parts.as_ref().map(Vec::len) != lent[i].as_ref().map(Vec::len);
+                lent[i] = parts;
+            }
+        }
         if splits.is_empty() {
+            if lent_more {
+                continue;
+            }
             break;
         }
         let len = stmts.len() + splits.iter().map(|(_, p)| p.len() - 1).sum::<usize>();
         let mut out_blocks: Vec<usize> = Vec::with_capacity(len);
         let mut out_groups: Vec<usize> = Vec::with_capacity(len);
+        let mut out_eligible: Vec<bool> = Vec::with_capacity(len);
+        let mut out_lent: Vec<Option<Vec<ProtoStatement>>> = Vec::with_capacity(len);
         let mut splits = splits.into_iter().peekable();
         let mut i = 0;
         expand_in_place(stmts, |stmt, out| {
@@ -2929,13 +2983,22 @@ fn split_copies_by_source_writes(
                 Some((_, parts)) => out.extend(parts),
                 None => out.push(stmt),
             }
+            out_lent.push(lent[i].take());
+            out_lent.resize_with(out_lent.len() + out.len() - 1, || None);
             out_blocks.resize(out_blocks.len() + out.len(), blocks[i]);
             // A part of a split piece is still that piece's branch.
             out_groups.resize(out_groups.len() + out.len(), groups[i]);
+            if let Some(e) = &eligible {
+                out_eligible.resize(out_eligible.len() + out.len(), e[i]);
+            }
             i += 1;
         });
         *blocks = out_blocks;
         *groups = out_groups;
+        lent = out_lent;
+        if let Some(e) = eligible.as_mut() {
+            **e = out_eligible;
+        }
     }
 }
 

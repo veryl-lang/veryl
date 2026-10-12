@@ -30956,6 +30956,146 @@ fn a_whole_variable_copy_is_scheduled_per_written_range() {
     }
 }
 
+/// A copy no cycle runs through is left whole: cutting it breaks nothing and
+/// adds a statement every settle evaluates.
+#[test]
+fn a_copy_off_the_cycle_is_not_split() {
+    let code = r#"
+    module Sink (
+        d: input  logic,
+        y: output logic,
+    ) {
+        assign y = d;
+    }
+    module Cyc (
+        en: input  logic   ,
+        q : output logic<4>,
+    ) {
+        var flat: logic<4>;
+        var s   : logic<4>;
+        var fb  : logic   ;
+        assign flat[0] = en;
+        assign flat[1] = en;
+        assign flat[2] = en;
+        assign flat[3] = fb;
+        assign s = flat;
+        inst u: Sink (
+            d: s[0],
+            y: fb  ,
+        );
+        assign q = s;
+    }
+    module Extra (
+        en: input  logic   ,
+        r : output logic<4>,
+    ) {
+        var g: logic<4>;
+        assign g[0] = en;
+        assign g[1] = ~en;
+        assign g[2] = en;
+        assign g[3] = ~en;
+        assign r = g;
+    }
+    module TopC (
+        en: input  logic   ,
+        q : output logic<4>,
+    ) {
+        inst c: Cyc (
+            en: en,
+            q : q ,
+        );
+    }
+    module TopE (
+        en: input  logic   ,
+        r : output logic<4>,
+    ) {
+        inst e: Extra (
+            en: en,
+            r : r ,
+        );
+    }
+    module Both (
+        en: input  logic   ,
+        q : output logic<4>,
+        r : output logic<4>,
+    ) {
+        inst c: Cyc (
+            en: en,
+            q : q ,
+        );
+        inst e: Extra (
+            en: en,
+            r : r ,
+        );
+    }
+    "#;
+
+    let air_ir = analyze_air(code);
+    let config = Config::default();
+    let count = |top: &str| {
+        build_ir(&air_ir, top.into(), &config)
+            .unwrap()
+            .comb_statements
+            .len()
+    };
+    assert_eq!(count("Both"), count("TopC") + count("TopE"));
+
+    let ir = build_ir(&air_ir, "Both".into(), &config).unwrap();
+    let mut sim = Simulator::new(ir, None);
+    sim.set("en", Value::new(1, 1, false));
+    sim.step(&Event::clock(VarId::SYNTHETIC));
+    assert_eq!(sim.get("q").unwrap(), Value::new(15, 4, false));
+    assert_eq!(sim.get("r").unwrap(), Value::new(5, 4, false));
+}
+
+/// `t = s` sits on the reported cycle but `s = flat` does not; `t` can only be
+/// cut where `s` would be, so the off-cycle copy has to lend its cuts or the
+/// schedule falls through to the last phase.
+#[test]
+fn an_off_cycle_copy_still_lends_its_cuts() {
+    let code = r#"
+    module Sink (
+        d: input  logic,
+        y: output logic,
+    ) {
+        assign y = d;
+    }
+    module Top (
+        en: input  logic   ,
+        q : output logic<2>,
+    ) {
+        var flat: logic<2>;
+        var s   : logic<2>;
+        var t   : logic<2>;
+        var x   : logic   ;
+        assign flat[0] = en;
+        assign flat[1] = ~en;
+        always_comb {
+            s    = flat;
+            s[1] = x;
+        }
+        assign t = s;
+        inst u: Sink (
+            d: t[0],
+            y: x   ,
+        );
+        assign q = t;
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        // The last phase leaves 11 statements here.
+        if config.use_4state && !config.use_jit {
+            assert_eq!(ir.comb_statements.len(), 9, "{config:?}");
+        }
+        let mut sim = Simulator::new(ir, None);
+        sim.set("en", Value::new(1, 1, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("q").unwrap(), Value::new(3, 2, false), "{config:?}");
+    }
+}
+
 #[test]
 fn a_case_deciding_a_request_and_its_next_state_is_not_one_scheduling_node() {
     // A request/acknowledge handshake: the arm raises `req` and, separately,
