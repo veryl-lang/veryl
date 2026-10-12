@@ -4701,12 +4701,13 @@ fn emit_event_ff_assign(a: &ProtoAssignStatement, se_from: Option<usize>) -> Opt
 
 /// Event-path FF write to a dynamic-indexed array.  Writes the element
 /// slot and pushes a WriteLogEntry at `current_base + stride*idx`.
-/// 2-state, narrow; a static bit-select does an element RMW (mirroring
-/// AssignDynamicStatement::eval_step: merge into the NEXT slot — same-event
-/// prior writes must be visible — and push the merged element).  A dynamic
-/// bit-select still bails.
+/// 2-state.  A static or dynamic bit-select does an element RMW, mirroring
+/// AssignDynamicStatement::eval_step: merge into the NEXT slot, since
+/// same-event prior writes must be visible, and push the merged element.
 fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<String> {
-    if a.dynamic_select.is_some() {
+    if let Some(ds) = &a.dynamic_select
+        && (ds.elem_width == 0 || ds.window == 0 || ds.index_expr.width() > 64)
+    {
         ev_diag("dyn FF: dynsel");
         return None;
     }
@@ -4734,7 +4735,34 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
     let idx = emit_expr(&a.dst_index_expr)?;
     let max_idx = a.dst_num_elements.saturating_sub(1);
     let dwmask = width_mask(a.dst_width);
-    let payload = if let Some((hi, lo)) = a.select {
+    // `eval_step` takes the dynamic select over `select`.  The width mask on
+    // the payload clips a window running past the element.
+    let (sel_guard, sel_close) = match &a.dynamic_select {
+        Some(ds) => (
+            format!(
+                "uint64_t _si = (uint64_t)({si}); uint64_t _se = _si * {ew}ull; \
+                 if (_si < {ne}ull && _se < {dw}ull) {{ \
+                 uint64_t _vm = 0x{vm:x}ULL; ",
+                si = emit_expr(&ds.index_expr)?,
+                ew = ds.elem_width,
+                ne = ds.num_elements,
+                dw = a.dst_width,
+                vm = width_mask(ds.window.min(64)),
+            ),
+            " }".to_string(),
+        ),
+        None => (String::new(), String::new()),
+    };
+    let payload = if a.dynamic_select.is_some() {
+        format!(
+            "((((uint64_t)*((const {ct}*)(ff_values + {wbase:#x} + (intptr_t){stride} * (intptr_t)_idx)) & ~(_vm << _se)) \
+              | ((((uint64_t)({rhs})) & _vm) << _se)) & 0x{dw:x}ULL)",
+            ct = cty,
+            wbase = dst_base_raw,
+            stride = a.dst_stride,
+            dw = dwmask,
+        )
+    } else if let Some((hi, lo)) = a.select {
         let nbits = hi.checked_sub(lo)?.checked_add(1)?;
         if hi >= a.dst_width || nbits > 64 {
             ev_diag(&format!("dyn FF: select={:?} w={}", a.select, a.dst_width));
@@ -4779,10 +4807,10 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
     Some(format!(
         "({{ uint64_t _idx_raw = (uint64_t)({idx}); \
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
-            {g0}uint64_t _wval = {pay}; \
+            {g0}{sel_guard}uint64_t _wval = {pay}; \
             {store}\
             unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
-            {push}{g1} }});",
+            {push}{sel_close}{g1} }});",
         idx = idx,
         max = max_idx,
         pay = payload,
@@ -4794,10 +4822,10 @@ fn emit_event_ff_assign_dynamic(a: &ProtoAssignDynamicStatement) -> Option<Strin
 }
 
 /// Wide (>64-bit) analogue of `emit_event_ff_assign_dynamic`, routing through
-/// the wide write-log pool.  2-state only.  A static bit-select into the
-/// indexed element (`mem[idx][15:8] <= b`, a byte lane of a 160-bit word) is a
-/// read-modify-write of that element, mirroring the ≤64-bit sibling; rhs_select
-/// still bails.
+/// the wide write-log pool.  2-state only.  A static or dynamic bit-select
+/// into the indexed element (`mem[idx][15:8] <= b`, a byte lane of a 160-bit
+/// word) is a read-modify-write of that element, mirroring the ≤64-bit
+/// sibling; rhs_select still bails.
 fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<String> {
     if a.rhs_select.is_some() {
         ev_diag(&format!(
@@ -4832,8 +4860,40 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
         wbase = dst_base_raw,
         stride = a.dst_stride,
     );
-    match a.select {
-        None => pre.push_str(&format!(
+    let mut sel_close = "";
+    match (&a.dynamic_select, a.select) {
+        (Some(ds), _) => {
+            if ds.window > nb * 8 {
+                ev_diag(&format!("dyn FF wide: dynsel window={}", ds.window));
+                return None;
+            }
+            pre.push_str(&format!(
+                "uint64_t _si = (uint64_t)({si}); uint64_t _sh = _si * {ew}ull; \
+                 if (_si < {ne}ull && _sh < {dw}ull) {{ ",
+                si = emit_expr(&ds.index_expr)?,
+                ew = ds.elem_width,
+                ne = ds.num_elements,
+                dw = a.dst_width,
+            ));
+            sel_close = " }";
+            pre.push_str(&emit_wide_ff_rmw_prologue(
+                &format!("_w{d}"),
+                a.dst_width,
+                nb,
+                nw,
+                &elem,
+            ));
+            pre.push_str(&emit_wide_dynsel_merge(
+                &format!("(uint8_t*)_w{d}"),
+                &r.addr,
+                "_sh",
+                ds.window,
+                a.dst_width,
+                nb,
+                nw,
+            ));
+        }
+        (None, None) => pre.push_str(&format!(
             "uint64_t _w{d}[{nw}]; vw_copy((uint8_t*)_w{d}, {src}, {nb}u); \
              vw_apply_mask((uint8_t*)_w{d}, (const uint8_t*)0, {p}u); ",
             src = r.addr,
@@ -4843,7 +4903,7 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
         // element has to be read back and merged before the log push (which
         // carries all `nb` bytes).  Same width-clamp restriction as the
         // static sibling, and the same one the ≤64-bit path already applies.
-        Some((hi, lo)) => {
+        (None, Some((hi, lo))) => {
             let nbits = hi.checked_sub(lo)?.checked_add(1)?;
             if nbits == 0 || hi >= a.dst_width || hi >= nb * 8 {
                 ev_diag(&format!(
@@ -4894,7 +4954,7 @@ fn emit_event_ff_assign_dynamic_wide(a: &ProtoAssignDynamicStatement) -> Option<
             uint64_t _idx = _idx_raw < {max} ? _idx_raw : {max}; \
             {g0}{pre}{flag}{store}\
             unsigned int _woff = (unsigned int)((intptr_t){cbase:#x} + (intptr_t){stride} * (intptr_t)_idx); \
-            {push}{g1} }}",
+            {push}{sel_close}{g1} }}",
         idx = idx,
         max = max_idx,
         pre = pre,

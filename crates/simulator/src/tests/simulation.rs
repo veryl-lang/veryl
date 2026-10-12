@@ -1984,6 +1984,114 @@ fn wide_ff_select_sign_extends_a_narrow_signed_rhs() {
 }
 
 #[test]
+fn dynamic_index_ff_field_with_dynamic_select() {
+    // `a[i][j +: w]` with both indices at runtime: an out-of-range element or
+    // field index writes nothing, and a window running past the element width
+    // is clipped to it.  Narrow, wide and pointer-sized (>128-bit) elements
+    // take separate emitter paths.  Every write reads an array back so ff-opt
+    // keeps the arrays in FF storage.
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock,
+        i_rst: input  '_ reset,
+        i_ai : input  logic<2>,
+        i_aj : input  logic<6>,
+        i_bi : input  logic<2>,
+        i_bj : input  logic<7>,
+        i_v  : input  logic<16>,
+        i_w  : input  logic<70>,
+        i_r  : input  logic<2>,
+        o_a  : output logic<39>,
+        o_b  : output logic<76>,
+        o_c  : output logic<150>,
+        o_d  : output logic<42>,
+    ) {
+        var a: logic<39> [3];
+        var b: logic<76> [3];
+        var c: logic<150> [3];
+        var d: logic<6, 7> [3];
+        always_ff {
+            if_reset {
+                a[0] = 0;
+                a[1] = 0;
+                a[2] = 0;
+                b[0] = 0;
+                b[1] = 0;
+                b[2] = 0;
+                c[0] = 0;
+                c[1] = 0;
+                c[2] = 0;
+                d[0] = 0;
+                d[1] = 0;
+                d[2] = 0;
+            } else {
+                a[i_ai][i_aj+:5] = i_v[4:0] ^ a[i_r][4:0];
+                b[i_bi][i_bj+:11] = i_v[10:0] ^ b[i_r][10:0];
+                c[i_ai][i_bj+:70] = i_w;
+                d[i_bi][i_aj[2:0]] = i_v[6:0] ^ d[i_r][0] ^ c[i_r][6:0];
+            }
+        }
+        assign o_a = a[i_r];
+        assign o_b = b[i_r];
+        assign o_c = c[i_r];
+        assign o_d = d[i_r];
+    }
+    "#;
+    let run = |config: &Config| -> Vec<(u128, u128, Value, u128)> {
+        let ir = analyze(code, config);
+        if config.aot_c && !config.use_4state {
+            let missing: Vec<_> = ir
+                .event_statements
+                .keys()
+                .filter(|e| matches!(e, Event::Clock(..)) && !ir.whole_events.contains_key(e))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "clock event not AOT-C-native: {missing:?}"
+            );
+        }
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut out = Vec::new();
+        for _ in 0..400 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            sim.set("i_ai", Value::new(x & 3, 2, false));
+            sim.set("i_aj", Value::new((x >> 2) & 63, 6, false));
+            sim.set("i_bi", Value::new((x >> 8) & 3, 2, false));
+            sim.set("i_bj", Value::new((x >> 10) & 127, 7, false));
+            sim.set("i_v", Value::new((x >> 17) & 0xffff, 16, false));
+            sim.set(
+                "i_w",
+                Value::from_u128((x as u128) << 6 | (x >> 33) as u128, 0, 70, false),
+            );
+            sim.step(&clk);
+            for r in 0..3u64 {
+                sim.set("i_r", Value::new(r, 2, false));
+                out.push((
+                    sim.get("o_a").unwrap().payload_u128(),
+                    sim.get("o_b").unwrap().payload_u128(),
+                    sim.get("o_c").unwrap(),
+                    sim.get("o_d").unwrap().payload_u128(),
+                ));
+            }
+        }
+        out
+    };
+    let reference = run(&Config::default());
+    for config in Config::all().into_iter().filter(|c| !c.use_4state) {
+        assert_eq!(run(&config), reference, "config={config:?}");
+    }
+    if crate::backend::aot_c::cc_available() {
+        assert_eq!(run(&aot_native_validate_config()), reference);
+    }
+}
+
+#[test]
 fn dynsel_window_overrun_clips_to_the_vector() {
     // `x[i +: 32]` on a 1536-bit FF: at i = 1535 the window covers bits
     // 1535..1566, 31 of them past the vector.  The reference behaviour is to
