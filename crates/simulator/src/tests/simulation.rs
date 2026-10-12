@@ -17998,6 +17998,100 @@ fn a_function_loop_bounded_by_an_assigned_variable_keeps_its_count() {
     }
 }
 
+/// Destination selects in `module`'s simulated declarations that are not
+/// literal values.
+fn unfolded_selects(code: &str, module: &str) -> usize {
+    fn literal(e: &air::Expression) -> bool {
+        matches!(e, air::Expression::Term(x) if matches!(x.as_ref(), air::Factor::Value(_)))
+    }
+    fn count(stmts: &[air::Statement]) -> usize {
+        stmts
+            .iter()
+            .map(|s| match s {
+                air::Statement::Assign(x) => x
+                    .dst
+                    .iter()
+                    .map(|d| {
+                        let range = d.select.1.iter().map(|(_, e)| e);
+                        d.select
+                            .0
+                            .iter()
+                            .chain(range)
+                            .filter(|e| !literal(e))
+                            .count()
+                    })
+                    .sum(),
+                air::Statement::For(x) => count(&x.body),
+                air::Statement::If(x) => count(&x.true_side) + count(&x.false_side),
+                air::Statement::IfReset(x) => count(&x.true_side) + count(&x.false_side),
+                _ => 0,
+            })
+            .sum()
+    }
+    let ir = analyzer_ir(code);
+    let module = find_module(&ir, module);
+    let mut context = Context::default();
+    context.variables = module.variables.clone();
+    context.functions = module.functions.clone();
+    let peeled = crate::ir::module::peeled_declarations(module, &mut context);
+    let (declarations, _) =
+        crate::ir::module::simulated_declarations(module, &mut context, false, peeled);
+    declarations
+        .iter()
+        .map(|d| match d {
+            air::Declaration::Comb(x) => count(&x.statements),
+            air::Declaration::Ff(x) => count(&x.statements),
+            _ => 0,
+        })
+        .sum()
+}
+
+/// An unrolled iterator scaled by a parameter or a constant is a fixed
+/// position, so the select it forms is static, not a runtime window.
+#[test]
+fn constant_loop_lowering_folds_a_select_scaled_by_a_constant() {
+    let code = r#"
+    module Top #(
+        param W: u32 = 4,
+    ) (
+        a: input  logic<8, W>,
+        b: input  logic<64>,
+        y: output logic<32>,
+        z: output logic<64>,
+    ) {
+        const V: u32 = 8;
+        always_comb {
+            for j in 0..8 {
+                y[j * W +: W] = a[j];
+            }
+        }
+        always_comb {
+            for j in 0..8 {
+                z[j * V +: V] = b[j * V +: V] + 1;
+            }
+        }
+    }
+    "#;
+    assert_eq!(unfolded_selects(code, "Top"), 0);
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.set("a", Value::new(0x8765_4321, 32, false));
+        sim.set("b", Value::new(0x0123_4567_89ab_cdef, 64, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(
+            sim.get("y").unwrap(),
+            Value::new(0x8765_4321, 32, false),
+            "{config:?}"
+        );
+        assert_eq!(
+            sim.get("z").unwrap(),
+            Value::new(0x0224_4668_8aac_cef0, 64, false),
+            "{config:?}"
+        );
+    }
+}
+
 /// A reset network is not worth an unrolled copy.
 #[test]
 fn constant_loop_lowering_keeps_an_over_budget_loop() {
