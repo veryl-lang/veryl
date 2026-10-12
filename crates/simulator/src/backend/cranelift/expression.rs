@@ -3032,20 +3032,47 @@ impl ProtoExpression {
                     }
                 }
                 Op::LogicAnd | Op::LogicOr => {
+                    let [x_known, y_known] = [
+                        (x_ptr, x_mask_xz, x, x_width),
+                        (y_ptr, y_mask_xz, y, y_width),
+                    ]
+                    .map(|(ptr, mask, operand, operand_width)| {
+                        if let Some(mask) = mask {
+                            let mask_ptr = marshal_wide_operand(
+                                context,
+                                builder,
+                                returns_wide_pointer(operand),
+                                mask,
+                                operand_width,
+                                op_nb,
+                                signed,
+                            );
+                            emit_wide_binary_op(
+                                context,
+                                builder,
+                                wide_fn_addrs::band_not(),
+                                ptr,
+                                mask_ptr,
+                                op_nb,
+                            )
+                        } else {
+                            ptr
+                        }
+                    });
                     let nb_val2 = builder.ins().iconst(I32, op_nb as i64);
                     let x_nz = call_helper_ret(
                         context,
                         builder,
                         HelperSig::Reduce,
                         wide_fn_addrs::is_nonzero(),
-                        &[x_ptr, nb_val],
+                        &[x_known, nb_val],
                     );
                     let y_nz = call_helper_ret(
                         context,
                         builder,
                         HelperSig::Reduce,
                         wide_fn_addrs::is_nonzero(),
-                        &[y_ptr, nb_val2],
+                        &[y_known, nb_val2],
                     );
                     if matches!(op, Op::LogicAnd) {
                         builder.ins().band(x_nz, y_nz)
@@ -3056,7 +3083,7 @@ impl ProtoExpression {
                 _ => unreachable!(),
             };
 
-            // 4-state for comparisons: if any mask is nonzero, result is X
+            // Logical results can be known despite X/Z in either operand.
             let mask_xz = wide_any_xz(
                 context,
                 builder,
@@ -3068,6 +3095,10 @@ impl ProtoExpression {
                 y_width,
             );
             if let Some(mut is_xz) = mask_xz {
+                if matches!(op, Op::LogicAnd | Op::LogicOr) {
+                    let not_one = builder.ins().icmp_imm_s(IntCC::Equal, payload, 0);
+                    is_xz = builder.ins().band(is_xz, not_one);
+                }
                 if *op == Op::LogicAnd {
                     let mut x_nonzero = emit_wide_is_nonzero(context, builder, x_ptr, op_nb);
                     let mut y_nonzero = emit_wide_is_nonzero(context, builder, y_ptr, op_nb);
@@ -3255,6 +3286,21 @@ impl ProtoExpression {
                 signed,
             },
         );
+        let payload = if matches!(op, Op::BitAnd | Op::BitOr)
+            && let Some(mask) = mask_xz
+        {
+            // Bitwise unknown results are X (payload=0), never input Z (payload=1).
+            emit_wide_binary_op(
+                context,
+                builder,
+                wide_fn_addrs::band_not(),
+                payload,
+                mask,
+                op_nb,
+            )
+        } else {
+            payload
+        };
 
         // A ≤128-bit node computed in the wide-ptr domain (a narrowing
         // `as` cast keeps its operand in the source domain): the caller
