@@ -24,6 +24,32 @@ pub(crate) fn dataflow_on() -> bool {
     crate::ir::opt::dataflow::enabled()
 }
 
+/// Whether the AOT-C comb can land on this host. A C compiler is not enough:
+/// where the shared object builds but does not load, the comb silently stays
+/// on Cranelift, so a test asserting native coverage must skip there.
+pub(crate) fn aot_c_loads() -> bool {
+    static LOADS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LOADS.get_or_init(|| {
+        if !crate::backend::aot_c::cc_available() {
+            return false;
+        }
+        let code = r#"
+        module Top (a: input logic<8>, b: output logic<8>) {
+            assign b = a + 1;
+        }
+        "#;
+        let config = Config {
+            use_4state: false,
+            use_jit: true,
+            aot_c: true,
+            aot_c_async: false,
+            aot_c_min_stmts: 0,
+            ..Default::default()
+        };
+        comb_is_aot_native(&analyze(code, &config))
+    })
+}
+
 #[track_caller]
 fn analyze(code: &str, config: &Config) -> Ir {
     analyze_top(code, config, "Top").unwrap()

@@ -1670,7 +1670,7 @@ fn wide_256_aot_native_comb() {
     // dataflow settle, not silently bailed to Cranelift.  The aot_c_validate
     // config additionally checks the settle against a full Cranelift rerun,
     // asserting the wide-op helper codegen is bit-identical.
-    if !crate::backend::aot_c::cc_available() {
+    if !crate::tests::aot_c_loads() {
         return; // no external C compiler on this host
     }
     let code = r#"
@@ -2475,7 +2475,7 @@ fn probe_r4_wide_dynsel_store() {
     // packed-row target `logic<N, W>[idx] = row` — aot_c_validate dual-runs
     // cc vs Cranelift each cycle.  Non-power-of-2 element width (ew=31) and a
     // window that fits exactly ((ne-1)*ew + win == dst_width).
-    if !crate::backend::aot_c::cc_available() {
+    if !crate::tests::aot_c_loads() {
         return;
     }
     let code = r#"
@@ -2564,7 +2564,7 @@ fn probe_r4_shift_left_128() {
     // ROUND 4: 65..128-bit unsigned shift-LEFT with a narrow (≤64-bit) left
     // operand — `(a << s)` promoted to __uint128_t in a 128-bit context (a
     // u64 `<<` would truncate).  aot_c_validate dual-runs cc vs Cranelift.
-    if !crate::backend::aot_c::cc_available() {
+    if !crate::tests::aot_c_loads() {
         return;
     }
     let code = r#"
@@ -2600,7 +2600,7 @@ fn probe_r4_wide_src_rhs_select() {
     // ROUND 4: windowed copy `dst = wide_src[hi:lo]` — a static rhs_select of
     // a >128-bit source into both wide (176-bit) and narrow (48-bit) targets.
     // aot_c_validate dual-runs cc vs Cranelift.
-    if !crate::backend::aot_c::cc_available() {
+    if !crate::tests::aot_c_loads() {
         return;
     }
     let code = r#"
@@ -21047,7 +21047,7 @@ fn wide_signed_compare_asymmetric_width_aot_c() {
     // single common width, mis-reading a negative narrower operand. The cc
     // backend must sign-extend each operand from its own width. The
     // aot_c_validate config also dual-runs cc vs Cranelift every cycle.
-    if !crate::backend::aot_c::cc_available() {
+    if !crate::tests::aot_c_loads() {
         return; // no external C compiler on this host
     }
     let code = r#"
@@ -27058,7 +27058,7 @@ fn comb_display_output_matches_across_backends() {
     // without it the dataflow translation units fail to compile and the
     // module silently drops back to Cranelift, which the values do not
     // show, so pin the native coverage explicitly.
-    if crate::backend::aot_c::cc_available() {
+    if crate::tests::aot_c_loads() {
         let ir = analyze(code, &aot_native_validate_config());
         assert!(
             comb_is_aot_native(&ir),
@@ -27070,7 +27070,7 @@ fn comb_display_output_matches_across_backends() {
     // reference; its AOT output must be rolled back or each print lands
     // twice — so the same-text assertion below covers it.
     let mut configs = Config::all();
-    if crate::backend::aot_c::cc_available() {
+    if crate::tests::aot_c_loads() {
         configs.push(aot_native_validate_config());
     }
     let mut seen: Option<String> = None;
@@ -32235,7 +32235,7 @@ fn narrowing_cast_at_operand_width_still_truncates() {
     // And once more forced onto AOT-C, dual-running against Cranelift: the
     // configs above only reach it when the host has a C compiler AND the
     // module clears the cc heuristics, which this six-statement one need not.
-    if crate::backend::aot_c::cc_available() {
+    if crate::tests::aot_c_loads() {
         let config = aot_native_validate_config();
         let ir = analyze(code, &config);
         assert!(
@@ -32292,7 +32292,7 @@ fn narrowing_cast_of_a_signed_quotient_still_truncates() {
     // The defect is AOT-C only: with no C compiler there is nothing to
     // compare against.
     let (reference, _) = sweep(&Config::default());
-    if !crate::backend::aot_c::cc_available() {
+    if !crate::tests::aot_c_loads() {
         return;
     }
     let (got, native) = sweep(&aot_native_validate_config());
@@ -35288,7 +35288,7 @@ fn wide_ff_dynamic_window_store_marks_its_readers() {
 /// zeroed shadow would take for no change, leaving `o` stale.
 #[test]
 fn dataflow_switch_from_jit_cells_to_the_so_reruns_every_cell() {
-    if !dataflow_on() || !crate::backend::aot_c::cc_available() {
+    if !dataflow_on() || !crate::tests::aot_c_loads() {
         return;
     }
     // A fresh constant keeps the `.so` out of the cache, so the compile is

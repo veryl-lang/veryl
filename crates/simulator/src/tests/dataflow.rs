@@ -231,7 +231,7 @@ fn settle_until_mode(sim: &mut Simulator, coarse: bool, tick: &mut u64) {
 
 #[test]
 fn leaving_the_whole_settle_entry_reruns_every_cell() {
-    if !crate::tests::dataflow_on() || !crate::backend::aot_c::cc_available() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
         return;
     }
     let ir = analyze(TWO_CELLS, &aot_config(false));
@@ -265,7 +265,7 @@ fn leaving_the_whole_settle_entry_reruns_every_cell() {
 
 #[test]
 fn whole_settle_entry_runs_after_an_unmarked_commit() {
-    if !crate::tests::dataflow_on() || !crate::backend::aot_c::cc_available() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
         return;
     }
     let code = r#"
@@ -312,7 +312,7 @@ fn whole_settle_entry_leaves_cell_boundaries_in_the_buffer() {
     // A settle with only the side-effect cells dirty runs the per-cell
     // dispatch even in whole-settle mode, so those cells must find what the
     // whole-settle entry wrote.
-    if !crate::tests::dataflow_on() || !crate::backend::aot_c::cc_available() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
         return;
     }
     let code = r#"
@@ -382,7 +382,7 @@ fn readmemh_in_an_event_reaches_its_comb_readers() {
         assign p = q;
     }}
     "#,
-        hex.to_str().unwrap()
+        hex.to_str().unwrap().replace('\\', "\\\\")
     );
     let mut configs = vec![Config {
         use_jit: true,
