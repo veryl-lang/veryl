@@ -3138,6 +3138,70 @@ endmodule
 }
 
 #[test]
+fn local_concatenation_assignment_in_always_ff() {
+    let code = r#"module ModuleA (
+    clk: input clock,
+    data: input logic<8>,
+    result: output logic<8>,
+) {
+    struct Nibbles {
+        hi: logic<4>,
+        lo: logic<4>,
+    }
+
+    var reg_hi: logic<4>;
+    var reg_lo: logic<4>;
+
+    always_ff {
+        var hi: logic<4>;
+        var lo: logic<4>;
+        var parts: logic<4>[2];
+        var nibbles: Nibbles;
+        {hi, lo} = data;
+        {parts[0], parts[1]} = data;
+        {nibbles.hi, nibbles.lo} = data;
+        {reg_hi, reg_lo} = data;
+        result = {lo, hi};
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input  var logic         clk   ,
+    input  var logic [8-1:0] data  ,
+    output var logic [8-1:0] result
+);
+    typedef struct packed {
+        logic [4-1:0] hi;
+        logic [4-1:0] lo;
+    } Nibbles;
+
+    logic [4-1:0] reg_hi;
+    logic [4-1:0] reg_lo;
+
+    always_ff @ (posedge clk) begin
+        logic   [4-1:0] hi                          ;
+        logic   [4-1:0] lo                          ;
+        logic   [4-1:0] parts                    [2];
+        Nibbles         nibbles                     ;
+        {hi, lo}                 =  data;
+        {parts[0], parts[1]}     =  data;
+        {nibbles.hi, nibbles.lo} =  data;
+        {reg_hi, reg_lo}         <= data;
+        result                   <= {lo, hi};
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn nested_concatenation() {
     let code = r#"module ModuleA {
     let _a: u32 = {1'b1};
