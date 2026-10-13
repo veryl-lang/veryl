@@ -1,7 +1,7 @@
 //! Backend orchestrator.
 //!
-//! At build time: whole-comb / whole-event paths try `compile_whole_*`
-//! on each backend in order, taking the first `Some`.  The chunk path
+//! At build time: the whole-event path tries `compile_whole_event` on
+//! each backend in order, taking the first `Some`.  The chunk path
 //! groups statements by `supports_stmt` and asks the registered
 //! chunk backend to compile each jittable group.  Backends that
 //! decline are skipped; the interpreter is the ultimate fallback.
@@ -29,14 +29,14 @@ pub(crate) type ChunkArtifactCache = Arc<Mutex<HashMap<u128, Arc<ChunkArtifact>>
 /// Lets the IR's `Hash` impls feed XXH3-128 directly, replacing the old sink
 /// that fed `Debug`-formatted strings (its dominant per-test cost). Keying uses
 /// `finish_128`; the trait's 64-bit `finish` is unused.
-struct Fp128(twox_hash::xxhash3_128::Hasher);
+pub(crate) struct Fp128(twox_hash::xxhash3_128::Hasher);
 
 impl Fp128 {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Fp128(twox_hash::xxhash3_128::Hasher::new())
     }
 
-    fn finish_128(&self) -> u128 {
+    pub(crate) fn finish_128(&self) -> u128 {
         self.0.finish_128()
     }
 }
@@ -75,7 +75,7 @@ fn chunk_fingerprint(
 /// `extra` (a caller-supplied digest of the event-statement liveness census and
 /// the DCE protect set — the pieces of dead-var DCE that depend on state outside
 /// the comb list). Token- and pointer-agnostic like `chunk_fingerprint`.
-pub(crate) fn whole_comb_fingerprint(
+pub(crate) fn comb_list_fingerprint(
     use_4state: bool,
     stmts: &[ProtoStatement],
     extra: u128,
@@ -89,9 +89,9 @@ pub(crate) fn whole_comb_fingerprint(
     h.finish_128()
 }
 
-/// `whole_comb_fingerprint` for a caller that hashed the statement list
+/// `comb_list_fingerprint` for a caller that hashed the statement list
 /// earlier than it builds the key.
-pub(crate) fn whole_comb_fingerprint_from(stmts_fp: u128, extra: u128) -> u128 {
+pub(crate) fn comb_list_fingerprint_from(stmts_fp: u128, extra: u128) -> u128 {
     let mut h = Fp128::new();
     h.write_u128(stmts_fp);
     h.write_u8(0xE5);
@@ -99,9 +99,7 @@ pub(crate) fn whole_comb_fingerprint_from(stmts_fp: u128, extra: u128) -> u128 {
     h.finish_128()
 }
 
-/// Ordered collection of backends.  Whole-module backends should come
-/// before chunk backends so a successful whole-module compile elides
-/// the per-chunk grouping pass.
+/// Ordered collection of backends, tried in registration order.
 #[derive(Default)]
 pub struct BackendRegistry {
     backends: Vec<Box<dyn Backend>>,
@@ -134,16 +132,6 @@ impl BackendRegistry {
         self.backends.push(backend);
     }
 
-    pub fn try_compile_whole_comb(
-        &mut self,
-        ctx: &CompileCtx,
-        stmts: &[ProtoStatement],
-    ) -> Option<Arc<dyn CompiledWhole>> {
-        self.backends
-            .iter_mut()
-            .find_map(|b| b.compile_whole_comb(ctx, stmts))
-    }
-
     pub fn try_compile_whole_event(
         &mut self,
         ctx: &CompileCtx,
@@ -167,7 +155,10 @@ impl BackendRegistry {
                 .iter_mut()
                 .find_map(|b| b.compile_chunk(ctx, stmts));
         }
-        let key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
+        let mut key = chunk_fingerprint(ctx.use_4state, ctx.contains_compiled_block, stmts);
+        if let Some((_, marks_fp)) = ctx.df_marks {
+            key = key.rotate_left(1) ^ marks_fp;
+        }
         if let Some(artifact) = self.chunk_cache.lock().unwrap().get(&key) {
             return Some(Arc::clone(artifact));
         }
@@ -178,8 +169,8 @@ impl BackendRegistry {
             .iter_mut()
             .find_map(|b| b.compile_chunk(ctx, stmts));
         if let Some(artifact) = &mut artifact {
-            // Stamp the fingerprint so a fingerprint over a parent chunk (or
-            // whole comb) that embeds this as a nested CompiledBlock prints a
+            // Stamp the fingerprint so a fingerprint over a parent chunk
+            // that embeds this as a nested CompiledBlock prints a
             // stable, content-derived id rather than the `func` address. The
             // Arc is fresh here (refcount 1), so `get_mut` always succeeds.
             if let Some(a) = Arc::get_mut(artifact) {
@@ -199,12 +190,6 @@ impl BackendRegistry {
 
     pub fn is_empty(&self) -> bool {
         self.backends.is_empty()
-    }
-
-    pub fn diagnose_whole_comb_fallback(&self, stmts: &[ProtoStatement]) -> Option<String> {
-        self.backends
-            .iter()
-            .find_map(|b| b.diagnose_whole_comb_fallback(stmts))
     }
 
     /// Group `stmts` by `supports_stmt` and produce `ChunkOutput`s,
@@ -558,6 +543,7 @@ mod tests {
             config: &config,
             use_4state: false,
             contains_compiled_block: false,
+            df_marks: None,
         };
         // 20 entries x 201 statements = 4020 statements, budget 1024.
         let group: Vec<ProtoStatement> = (0..20).map(|_| fat_if(100)).collect();
@@ -593,6 +579,7 @@ mod tests {
             config: &config,
             use_4state: false,
             contains_compiled_block: false,
+            df_marks: None,
         };
         let group: Vec<ProtoStatement> = (0..40).map(|_| fat_if(50)).collect();
         let shape = |out: &[ChunkOutput]| -> Vec<(bool, u128)> {
@@ -631,6 +618,7 @@ mod tests {
             config: &config,
             use_4state: false,
             contains_compiled_block: false,
+            df_marks: None,
         };
         let group = vec![assign(0), fat_if(2000), assign(4)];
         let out = r.build_chunked(&ctx, group, 1024);

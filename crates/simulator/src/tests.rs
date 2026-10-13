@@ -14,6 +14,42 @@ use veryl_analyzer::{Analyzer, AnalyzerError, Context, symbol_table};
 use veryl_metadata::Metadata;
 use veryl_parser::Parser;
 
+/// Whether the comb runs as AOT-C code, i.e. the dataflow settle's `.so`.
+/// With dataflow off the comb has no AOT-C path, so this holds vacuously.
+pub(crate) fn comb_is_aot_native(ir: &Ir) -> bool {
+    !dataflow_on() || ir.dataflow.as_ref().is_some_and(|d| d.cell.get().is_some())
+}
+
+pub(crate) fn dataflow_on() -> bool {
+    crate::ir::opt::dataflow::enabled()
+}
+
+/// Whether the AOT-C comb can land on this host. A C compiler is not enough:
+/// where the shared object builds but does not load, the comb silently stays
+/// on Cranelift, so a test asserting native coverage must skip there.
+pub(crate) fn aot_c_loads() -> bool {
+    static LOADS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LOADS.get_or_init(|| {
+        if !crate::backend::aot_c::cc_available() {
+            return false;
+        }
+        let code = r#"
+        module Top (a: input logic<8>, b: output logic<8>) {
+            assign b = a + 1;
+        }
+        "#;
+        let config = Config {
+            use_4state: false,
+            use_jit: true,
+            aot_c: true,
+            aot_c_async: false,
+            aot_c_min_stmts: 0,
+            ..Default::default()
+        };
+        comb_is_aot_native(&analyze(code, &config))
+    })
+}
+
 #[track_caller]
 fn analyze(code: &str, config: &Config) -> Ir {
     analyze_top(code, config, "Top").unwrap()
@@ -525,6 +561,7 @@ where
 
 mod component;
 mod component_sim;
+mod dataflow;
 mod derived_clock;
 mod dut_reuse;
 mod error;

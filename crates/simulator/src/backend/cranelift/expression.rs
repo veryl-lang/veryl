@@ -3884,7 +3884,7 @@ impl ProtoExpression {
 
 #[cfg(test)]
 mod tests {
-    use super::super::runtime::{LAST_FRAME_SLOTS, build_binary_no_cache};
+    use super::super::runtime::{LAST_FRAME_SLOTS, build_binary_marked};
     use crate::ir::variable::VarOffset;
     use crate::ir::{
         Config, ExpressionContext, Op, ProtoAssignStatement, ProtoExpression, ProtoStatement, Value,
@@ -3966,7 +3966,7 @@ mod tests {
         });
 
         assert!(
-            build_binary_no_cache(&Config::default(), vec![stmt]).is_some(),
+            build_binary_marked(&Config::default(), vec![stmt], true, None).is_some(),
             "the concat must compile"
         );
     }
@@ -3998,7 +3998,7 @@ mod tests {
                 })
                 .collect();
             assert!(
-                build_binary_no_cache(&Config::default(), stmts).is_some(),
+                build_binary_marked(&Config::default(), stmts, true, None).is_some(),
                 "the wide chunk must compile"
             );
             LAST_FRAME_SLOTS.with(|c| c.get().0)
@@ -4034,7 +4034,7 @@ mod tests {
                 token: TokenRange::default(),
             });
             assert!(
-                build_binary_no_cache(&Config::default(), vec![stmt]).is_some(),
+                build_binary_marked(&Config::default(), vec![stmt], true, None).is_some(),
                 "the wide bit-select store must compile"
             );
             LAST_FRAME_SLOTS.with(|c| c.get())
@@ -4112,7 +4112,7 @@ mod tests {
                 comb_direct: false,
                 token: TokenRange::default(),
             });
-            let (func, _mmap) = build_binary_no_cache(&Config::default(), vec![stmt])
+            let (func, _mmap) = build_binary_marked(&Config::default(), vec![stmt], true, None)
                 .unwrap_or_else(|| panic!("{name}: the wide bit-select store must compile"));
 
             // Dense, word-distinct patterns so a misplaced word shows up.

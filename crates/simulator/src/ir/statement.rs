@@ -1126,7 +1126,7 @@ pub struct CompiledBlockStatement {
 // derived deterministically from the compiled statements, and `artifact`'s
 // `content_fp` (a fingerprint of exactly those statements — see
 // `try_compile_chunk`) already identifies them. Excluding them keeps the
-// `Hash`-derived chunk / whole-comb fingerprints from redundantly deep-walking
+// `Hash`-derived chunk / comb-list fingerprints from redundantly deep-walking
 // the pre-JIT originals nested in every block, which dominated the per-test key
 // cost. Sound because a matching `content_fp` implies matching `original_stmts`.
 // The exhaustive destructure in each impl makes adding a codegen-affecting field
@@ -3215,7 +3215,7 @@ pub struct ProtoAssignStatement {
 
 // `token` is a per-test source position (differs even between otherwise
 // identical assigns), so it is excluded from both `Debug` and `Hash`. That makes
-// the `Hash`-derived chunk / whole-comb fingerprints token-agnostic: two
+// the `Hash`-derived chunk / comb-list fingerprints token-agnostic: two
 // structurally identical assigns from different source locations hash the same,
 // which is sound because `token` never affects codegen (it feeds diagnostics
 // only). The exhaustive destructure in each impl makes adding a field a compile

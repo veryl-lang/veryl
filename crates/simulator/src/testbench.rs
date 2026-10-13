@@ -591,8 +591,8 @@ pub fn run_native_testbench_timed(
 ) -> Result<(TestResult, std::time::Duration), SimulatorError> {
     // `Instant::now` panics on wasm, where the playground runs the testbench.
     // The span opens before `Simulator::new` because construction builds the
-    // settle filter's span table, which `derive_testbench` builds instead when
-    // the filter is off.
+    // dataflow settle's span table, which `derive_testbench` builds instead
+    // when the dataflow settle is off.
     #[cfg(not(target_family = "wasm"))]
     let t_build = std::time::Instant::now();
     // The dump attaches after `init_components` so component trace
