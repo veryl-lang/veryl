@@ -69,8 +69,8 @@ pub fn plan_hoists(
             return None;
         }
         let var = variables.get(&var_id)?;
-        // Clock-typed lets must stay in comb scope: the simulator's
-        // derived-clock partial-settle re-runs them per step toggle.
+        // Clock-typed lets must stay in comb scope: the simulator detects a
+        // derived clock's edges from the value a comb settle leaves in it.
         if var.r#type.is_clock() {
             return None;
         }

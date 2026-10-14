@@ -141,7 +141,7 @@ fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
 /// more coarsely than the circuit, and the cure is to split them.  The
 /// cycle is reported to the caller, which splits and asks again.
 pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
-    stable_topo_sort_impl(statements, None, None).0
+    stable_topo_sort_impl(statements, None, None, None).0
 }
 
 /// Which branch a piece kept (1-based; `0` = not a branch of a conditional).
@@ -177,7 +177,17 @@ pub(crate) fn stable_topo_sort_with_blocks(
     statements: Vec<ProtoStatement>,
     blocks: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks), None)
+    stable_topo_sort_impl(statements, Some(blocks), None, None)
+}
+
+/// As [`stable_topo_sort_with_blocks`]; on a cycle, `on_cycle[i]` also says
+/// whether statement `i` sits in a nontrivial strongly connected component.
+pub(crate) fn stable_topo_sort_with_blocks_on_cycle(
+    statements: Vec<ProtoStatement>,
+    blocks: &[usize],
+    on_cycle: &mut Vec<bool>,
+) -> SortOutcome {
+    stable_topo_sort_impl(statements, Some(blocks), None, Some(on_cycle))
 }
 
 /// As [`stable_topo_sort_with_blocks`], plus the conditional each statement is
@@ -187,7 +197,7 @@ pub(crate) fn stable_topo_sort_with_pieces(
     blocks: &[usize],
     groups: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks), Some(groups))
+    stable_topo_sort_impl(statements, Some(blocks), Some(groups), None)
 }
 
 /// First token anywhere in a statement tree.  Only `Assign` carries one, so a
@@ -286,6 +296,7 @@ fn stable_topo_sort_impl(
     statements: Vec<ProtoStatement>,
     blocks: Option<&[usize]>,
     groups: Option<&[usize]>,
+    on_cycle: Option<&mut Vec<bool>>,
 ) -> SortOutcome {
     let n = statements.len();
     if n <= 1 {
@@ -923,7 +934,8 @@ fn stable_topo_sort_impl(
     mark("kahn", &mut t);
 
     let Some(sorted_indices) = order else {
-        if std::env::var("VERYL_PASS_DIAG").is_ok() {
+        let diag = std::env::var("VERYL_PASS_DIAG").is_ok();
+        if diag || on_cycle.is_some() {
             use daggy::petgraph::Graph;
             use daggy::petgraph::algo::tarjan_scc;
             let mut g: Graph<(), ()> = Graph::new();
@@ -948,11 +960,16 @@ fn stable_topo_sort_impl(
                     }
                 }
             }
-            log::info!(
-                "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
-                 reporting it for the caller to split",
-            );
-            trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+            if let Some(on_cycle) = on_cycle {
+                *on_cycle = scc_id.iter().map(|&id| id != usize::MAX).collect();
+            }
+            if diag {
+                log::info!(
+                    "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
+                     reporting it for the caller to split",
+                );
+                trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+            }
         }
         return (statements, None, true);
     };
@@ -1200,8 +1217,8 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // allocator as function locals; instance-reuse records
                     // the post-conv size, so cache replay stays consistent.
                     // A temp has no `VariableMeta`; recording it as a
-                    // relocation of the variable it serves lets the cone-gate
-                    // owner table adopt it (see `Context::comb_reloc`).
+                    // relocation of the variable it serves lets the owner
+                    // tables adopt it (see `Context::comb_reloc`).
                     let use_4state = context.config.use_4state;
                     let comb_total = &mut context.comb_total_bytes;
                     let comb_reloc = &mut context.comb_reloc;
@@ -1434,6 +1451,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut child_analyzer_context = veryl_analyzer::conv::Context::default();
         child_analyzer_context.variables = child_module.variables.clone();
         child_analyzer_context.functions = child_module.functions.clone();
+        crate::ir::module::lower_function_loops(child_module, &mut child_analyzer_context);
         let peeled = context
             .peel_cache
             .entry(Arc::as_ptr(&src.component))

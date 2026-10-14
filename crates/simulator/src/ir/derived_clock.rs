@@ -6,9 +6,7 @@
 //! 0→1 transitions after each `step()` and synthesizes
 //! `Event::Clock` for downstream `always_ff(derived_clk)`.
 //!
-//! Derived-clock values are refreshed by a dedicated
-//! `derived_clock_eval` ProtoStatements chunk (dependency closure only),
-//! JIT-compiled separately so the main comb JIT/AOT-C blob is untouched.
+//! Derived-clock values are refreshed by the regular comb settle.
 //!
 //! A non-port ASYNC RESET the design produces itself rides the same
 //! machinery: no testbench drives it, so its assertion is a transition of
@@ -18,7 +16,6 @@
 
 use crate::HashMap;
 use crate::HashSet;
-use crate::ir::big_array::BigArrayFold;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::VarOffset;
 use smallvec::SmallVec;
@@ -78,21 +75,14 @@ impl DerivedClockSchedule {
     }
 }
 
-/// Returns `(schedule, eval_indices, master_indices)` where `eval_indices`
-/// are dependency-closure stmt indices into `pre_jit_stmts` (already
-/// topo-sorted by `analyze_dependency`) and `master_indices` the subset a
-/// master input clock alone can change (see `master_downstream`).
 pub fn build_schedule(
     candidates: &[EdgeCandidate],
     pre_jit_stmts: &[ProtoStatement],
     input_clock_offsets: &HashMap<VarOffset, VarId>,
-) -> (DerivedClockSchedule, Vec<usize>, Vec<usize>) {
+) -> DerivedClockSchedule {
     // FF outputs go through the event/commit path.  Every writer, not the
     // last: an offset written by sibling conditional arms has one fragment
-    // per arm, and keeping only the last leaves the extracted subsequence
-    // with a read whose producer runs later.  The schedule then asks for
-    // settle passes it cannot justify — measured 3, and 1 once the closure
-    // is complete.
+    // per arm, and keeping only the last drops the others from the closure.
     let mut output_to_writer: HashMap<VarOffset, Writers> = HashMap::default();
     let mut scratch_in: Vec<VarOffset> = Vec::new();
     let mut scratch_out: Vec<VarOffset> = Vec::new();
@@ -163,7 +153,6 @@ pub fn build_schedule(
         }
     });
 
-    let mut dep_set: HashSet<usize> = HashSet::default();
     let mut master_set: HashSet<VarId> = HashSet::default();
     for clk in &mut clocks {
         if clk.current_offset.is_ff() {
@@ -182,252 +171,17 @@ pub fn build_schedule(
             &mut local_master,
         );
         clk.master_gated = !local_master.is_empty();
-        dep_set.extend(local_dep);
         master_set.extend(local_master);
     }
-    for rst in &resets {
-        if rst.current_offset.is_ff() {
-            continue;
-        }
-        // Same closure, for `partial_settle` only: a reset has no ICG
-        // reading, so its master inputs stay out of `master_input_clocks`
-        // (toggling one would fabricate a clock edge nothing asked for).
-        let mut local_dep: HashSet<usize> = HashSet::default();
-        let mut local_master: HashSet<VarId> = HashSet::default();
-        collect_comb_closure(
-            rst.current_offset,
-            pre_jit_stmts,
-            &output_to_writer,
-            input_clock_offsets,
-            &mut local_dep,
-            &mut local_master,
-        );
-        dep_set.extend(local_dep);
-    }
-
-    // Sort by pre_jit_stmts index so partial_settle runs deps first.
-    let mut eval_indices: Vec<usize> = dep_set.into_iter().collect();
-    absorb_forwarders(&mut eval_indices, pre_jit_stmts);
-    eval_indices.sort_unstable();
-    let master_indices = master_downstream(&eval_indices, pre_jit_stmts, input_clock_offsets);
-
     let mut master_input_clocks: SmallVec<[VarId; 4]> = SmallVec::new();
     for vid in master_set {
         master_input_clocks.push(vid);
     }
 
-    (
-        DerivedClockSchedule {
-            clocks,
-            resets,
-            master_input_clocks,
-        },
-        eval_indices,
-        master_indices,
-    )
-}
-
-/// Extend the closure with the plain comb assigns outside it that read only
-/// what it already keeps current (its inputs and outputs, transitively).
-/// Left outside, such a statement (a clock net copied onto a port nobody
-/// reads, say) is a reader of the closure's inputs that the settle filter
-/// must honour, so every change of those inputs forces a full settle;
-/// evaluated with the closure it is refreshed at the closure's cost.  Bounded
-/// so the closure stays small.
-fn absorb_forwarders(eval_indices: &mut Vec<usize>, pre_jit_stmts: &[ProtoStatement]) {
-    const CAP: usize = 64;
-    let mut in_closure: HashSet<usize> = eval_indices.iter().copied().collect();
-    let mut visible: HashSet<VarOffset> = HashSet::default();
-    let (mut ins, mut outs) = (Vec::new(), Vec::new());
-    for &i in eval_indices.iter() {
-        ins.clear();
-        outs.clear();
-        pre_jit_stmts[i].gather_variable_offsets(&mut ins, &mut outs);
-        visible.extend(ins.iter().copied());
-        visible.extend(outs.iter().copied());
-    }
-    let mut absorbed = 0usize;
-    let mut grew = true;
-    while grew && absorbed < CAP {
-        grew = false;
-        for (i, stmt) in pre_jit_stmts.iter().enumerate() {
-            if in_closure.contains(&i)
-                || !matches!(stmt, ProtoStatement::Assign(a) if !a.dst.is_ff())
-            {
-                continue;
-            }
-            ins.clear();
-            outs.clear();
-            stmt.gather_variable_offsets(&mut ins, &mut outs);
-            if ins.is_empty() || !ins.iter().all(|o| visible.contains(o)) {
-                continue;
-            }
-            in_closure.insert(i);
-            eval_indices.push(i);
-            visible.extend(outs.iter().copied());
-            absorbed += 1;
-            grew = true;
-            if absorbed == CAP {
-                break;
-            }
-        }
-    }
-}
-
-/// The closure statements a master input clock can change: those reading a
-/// master, plus everything downstream of them within `eval_indices`.  With the
-/// rest of the design settled, toggling the master alone leaves every other
-/// closure statement's value in place.  Sorted like `eval_indices`.
-pub fn master_downstream(
-    eval_indices: &[usize],
-    pre_jit_stmts: &[ProtoStatement],
-    input_clock_offsets: &HashMap<VarOffset, VarId>,
-) -> Vec<usize> {
-    let mut readers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
-    let mut outs_of: HashMap<usize, Vec<VarOffset>> = HashMap::default();
-    let mut seeds: Vec<usize> = Vec::new();
-    let mut ins = Vec::new();
-    let mut outs = Vec::new();
-    for &i in eval_indices {
-        let Some(stmt) = pre_jit_stmts.get(i) else {
-            continue;
-        };
-        ins.clear();
-        outs.clear();
-        stmt.gather_variable_offsets(&mut ins, &mut outs);
-        if ins.iter().any(|o| input_clock_offsets.contains_key(o)) {
-            seeds.push(i);
-        }
-        for o in &ins {
-            readers.entry(*o).or_default().push(i);
-        }
-        outs_of.insert(i, outs.clone());
-    }
-    let mut set: HashSet<usize> = HashSet::default();
-    let mut stack = seeds;
-    while let Some(i) = stack.pop() {
-        if !set.insert(i) {
-            continue;
-        }
-        for o in outs_of.get(&i).into_iter().flatten() {
-            for &r in readers.get(o).into_iter().flatten() {
-                if !set.contains(&r) {
-                    stack.push(r);
-                }
-            }
-        }
-    }
-    let mut v: Vec<usize> = set.into_iter().collect();
-    v.sort_unstable();
-    v
-}
-
-pub fn extract_eval_proto_stmts(
-    eval_indices: &[usize],
-    pre_jit_stmts: &[ProtoStatement],
-) -> Vec<ProtoStatement> {
-    eval_indices
-        .iter()
-        .filter_map(|i| pre_jit_stmts.get(*i).cloned())
-        .collect()
-}
-
-/// Backward closures over the comb, for arbitrary read sets.
-///
-/// A runtime-indexed access reports only its first and last element to
-/// `gather_variable_offsets`, which would miss the writer of a middle element,
-/// so both sides are expanded to every element through one fold.
-pub(crate) struct ReadClosure<'a> {
-    stmts: &'a [ProtoStatement],
-    fold: BigArrayFold,
-    writers: HashMap<VarOffset, Writers>,
-    reads: HashMap<usize, Vec<VarOffset>>,
-}
-
-impl<'a> ReadClosure<'a> {
-    /// `readers` are the statements whose reads will seed a closure; they
-    /// join the fold so an array they alone index is folded too.
-    pub(crate) fn new<'b>(
-        stmts: &'a [ProtoStatement],
-        readers: impl IntoIterator<Item = &'b ProtoStatement>,
-    ) -> Self {
-        let mut fold = BigArrayFold::default();
-        for s in stmts {
-            s.collect_big_arrays(&mut fold);
-        }
-        for s in readers {
-            s.collect_big_arrays(&mut fold);
-        }
-        fold.finish();
-        let mut writers: HashMap<VarOffset, Writers> = HashMap::default();
-        let mut ins: Vec<VarOffset> = Vec::new();
-        let mut outs: Vec<VarOffset> = Vec::new();
-        for (i, stmt) in stmts.iter().enumerate() {
-            ins.clear();
-            outs.clear();
-            stmt.gather_variable_offsets_expanded(&fold, &mut ins, &mut outs);
-            for off in &outs {
-                if !off.is_ff() {
-                    let w = writers.entry(*off).or_default();
-                    if w.last() != Some(&i) {
-                        w.push(i);
-                    }
-                }
-            }
-        }
-        Self {
-            stmts,
-            fold,
-            writers,
-            reads: HashMap::default(),
-        }
-    }
-
-    /// The comb statements that write `off`, ascending.
-    pub(crate) fn writers_of(&self, off: VarOffset) -> &[usize] {
-        self.writers.get(&off).map_or(&[], |w| w.as_slice())
-    }
-
-    pub(crate) fn comb_reads(&self, stmt: &ProtoStatement, out: &mut Vec<VarOffset>) {
-        let (mut ins, mut outs) = (Vec::new(), Vec::new());
-        stmt.gather_variable_offsets_expanded(&self.fold, &mut ins, &mut outs);
-        out.extend(ins.into_iter().filter(|o| !o.is_ff()));
-    }
-
-    /// The statements `seeds` depend on, ascending: running exactly these,
-    /// in schedule order, gives those reads the values a full settle would.
-    /// `None` once the closure grows past `limit`.
-    pub(crate) fn closure(&mut self, seeds: &[VarOffset], limit: usize) -> Option<Vec<usize>> {
-        let mut dep: HashSet<usize> = HashSet::default();
-        let mut stack: Vec<usize> = Vec::new();
-        for &off in seeds {
-            stack.extend_from_slice(self.writers_of(off));
-        }
-        while let Some(idx) = stack.pop() {
-            if !dep.insert(idx) {
-                continue;
-            }
-            if dep.len() > limit {
-                return None;
-            }
-            if !self.reads.contains_key(&idx) {
-                let mut r = Vec::new();
-                self.comb_reads(&self.stmts[idx], &mut r);
-                r.sort_unstable_by_key(|o| (o.is_ff(), o.raw()));
-                r.dedup();
-                self.reads.insert(idx, r);
-            }
-            for off in &self.reads[&idx] {
-                for &w in self.writers_of(*off) {
-                    if !dep.contains(&w) {
-                        stack.push(w);
-                    }
-                }
-            }
-        }
-        let mut dep: Vec<usize> = dep.into_iter().collect();
-        dep.sort_unstable();
-        Some(dep)
+    DerivedClockSchedule {
+        clocks,
+        resets,
+        master_input_clocks,
     }
 }
 
