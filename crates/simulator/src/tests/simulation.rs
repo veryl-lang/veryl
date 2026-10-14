@@ -35650,3 +35650,69 @@ fn a_reader_of_a_version_and_of_other_bits_waits_for_both() {
         },
     );
 }
+
+#[test]
+fn a_childs_comb_keeps_its_one_pass_order() {
+    // Inside `Sub`, `v6[7:4]` reads `v2[3:0]` and `v2[7:4]` reads `v6[5:4]`:
+    // as blocks the two feed each other, bit by bit they are a chain.  The
+    // child's comb runs as one compiled unit, so the unit's own order has to
+    // be the one-pass one.
+    let code = r#"
+    module Sub (
+        i0: input  logic<8>,
+        i1: input  logic<8>,
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v6: logic<8>;
+        assign o0 = v1;
+        assign o1 = v2;
+        assign o2 = v6;
+        always_comb {
+            v1[7:4] = i0[7:4];
+            v1[3:0] = i1[3:0];
+        }
+        always_comb {
+            v6[3:0] = i2[3:0];
+            v6[7:4] = v2[3:0] | v1[3:0];
+        }
+        always_comb {
+            v2[3:0] = i3[3:0];
+            v2[7:4] = v2[3:0] ^ v6[5:2];
+        }
+    }
+
+    module Top (
+        i0: input  logic<8>,
+        i1: input  logic<8>,
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        inst u: Sub (i0, i1, i2, i3, o0, o1, o2);
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i0", 8), ("i1", 8), ("i2", 8), ("i3", 8)],
+        &[
+            &[0x41, 0xbb, 0x5f, 0x68],
+            &[0x12, 0x34, 0x56, 0x78],
+            &[0xf0, 0x0f, 0xaa, 0x55],
+            &[0x5a, 0xa5, 0x3c, 0xc3],
+        ],
+        &|k| {
+            let v1 = (k[0] & 0xf0) | (k[1] & 0xf);
+            let v6 = (((k[3] | k[1]) & 0xf) << 4) | (k[2] & 0xf);
+            let v2 = (((k[3] ^ (v6 >> 2)) & 0xf) << 4) | (k[3] & 0xf);
+            vec![("o0", v1, 8), ("o1", v2, 8), ("o2", v6, 8)]
+        },
+    );
+}

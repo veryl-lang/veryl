@@ -121,29 +121,6 @@ fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
     }
 }
 
-/// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
-///
-/// Dependency edges come in two classes:
-///
-/// - SEMANTIC edges the final order must respect for sequential
-///   correctness: single-writer RAW, (same-block) prior-writer binding,
-///   WAR, and WAW.
-/// - BEST-EFFORT edges that only improve settle locality: a reader with no
-///   same-block prior writer (split-driver nets, cross-block reads) is
-///   placed after every overlapping writer so it sees settled values in
-///   one pass.
-///
-/// Offset- and statement-granularity conflation (whole `if` statements,
-/// dynamic indices, shared inlined-function scratch) can fabricate a cycle
-/// out of edges no wire of the circuit closes.  The sort does NOT answer
-/// one by dropping edges: a synthesisable design has an order that needs a
-/// single settle pass, so a cycle here means the statements are tracked
-/// more coarsely than the circuit, and the cure is to split them.  The
-/// cycle is reported to the caller, which splits and asks again.
-pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
-    stable_topo_sort_impl(statements, None, None, None).0
-}
-
 /// Which branch a piece kept (1-based; `0` = not a branch of a conditional).
 /// Two pieces of one group with DIFFERENT nonzero tags never both run; the
 /// SAME tag does not imply that -- one branch can yield several pieces.
@@ -163,8 +140,8 @@ pub(crate) fn branch_tag(stmt: &ProtoStatement) -> usize {
 
 /// Result of the block-aware sort: the schedule, an exact required-pass
 /// hint (`Some(1)` when one settle pass provably suffices), and whether
-/// the sort fell back to source order (the caller then runs its
-/// combinational-loop diagnostic).
+/// the sort fell back to source order (callers split and ask again, or
+/// decline to use the order).
 pub(crate) type SortOutcome = (Vec<ProtoStatement>, Option<usize>, bool);
 
 /// Block-aware variant: `blocks[i]` is the source block (always_comb /
@@ -292,6 +269,26 @@ fn where_branch(stmt: &ProtoStatement) -> String {
     }
 }
 
+/// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
+///
+/// Dependency edges come in two classes:
+///
+/// - SEMANTIC edges the final order must respect for sequential
+///   correctness: single-writer RAW, (same-block) prior-writer binding,
+///   WAR, and WAW.
+/// - SETTLED-READ edges: a reader with no same-block prior writer
+///   (split-driver nets, cross-block reads) is placed after every
+///   overlapping writer so it sees settled values; without them the order
+///   needs extra settle passes.
+///
+/// Offset- and statement-granularity conflation (whole `if` statements,
+/// dynamic indices, shared inlined-function scratch) can fabricate a cycle
+/// out of edges no wire of the circuit closes.  The sort does NOT answer
+/// one by dropping edges: a synthesisable design has an order that needs a
+/// single settle pass, so a cycle here means the statements are tracked
+/// more coarsely than the circuit, and the cure is to split them.  The
+/// cycle is reported to the caller, which splits and asks again, or declines
+/// to use the order.
 fn stable_topo_sort_impl(
     statements: Vec<ProtoStatement>,
     blocks: Option<&[usize]>,
