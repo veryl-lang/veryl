@@ -52,6 +52,8 @@ pub struct RunStats {
     pub skip_read: usize,
     pub skip_unstable: usize,
     pub skip_width: usize,
+    /// Chain skipped: the bits it writes are not one contiguous range.
+    pub skip_partial: usize,
     pub skip_fold: usize,
     /// Chain skipped: the folded expression exceeds [`MAX_FUSED_NODES`].
     pub skip_budget: usize,
@@ -67,7 +69,7 @@ type Counter = (&'static str, fn(&RunStats) -> usize);
 
 /// Report order.  Pairing each label with its accessor here is what keeps a
 /// counter from being reported under another one's name.
-const COUNTERS: [Counter; 12] = [
+const COUNTERS: [Counter; 13] = [
     ("blocks", |s| s.blocks),
     ("fused_vars", |s| s.fused_vars),
     ("fused_writes", |s| s.fused_writes),
@@ -76,6 +78,7 @@ const COUNTERS: [Counter; 12] = [
     ("skip.read", |s| s.skip_read),
     ("skip.unstable", |s| s.skip_unstable),
     ("skip.width", |s| s.skip_width),
+    ("skip.partial", |s| s.skip_partial),
     ("skip.fold", |s| s.skip_fold),
     ("skip.budget", |s| s.skip_budget),
     ("skip.break", |s| s.skip_break),
@@ -557,11 +560,16 @@ fn split_block(
             evs[0].token,
         );
         match folded {
-            Some((temps, expr)) => {
+            Some(Folded::Expr {
+                temps,
+                expr,
+                select,
+            }) => {
+                let span_width = select.map_or(width, |(hi, lo)| hi - lo + 1);
                 // The fold's rename temps stay: a surviving leaf expression
                 // may read a snapshot; unreferenced ones are dead stores.
                 let (temps, expr) = if lut_enabled() {
-                    match try_lut_compress(&expr, width, &mut alloc_for, evs[0].token)
+                    match try_lut_compress(&expr, span_width, &mut alloc_for, evs[0].token)
                         .filter(|_| lut_budget_ok())
                     {
                         Some((lut_temps, lut_expr)) => {
@@ -597,7 +605,7 @@ fn split_block(
                     assign: ProtoAssignStatement {
                         dst: VarOffset::Comb(dst as isize),
                         dst_width: width,
-                        select: None,
+                        select,
                         dynamic_select: None,
                         rhs_select: None,
                         expr,
@@ -608,6 +616,9 @@ fn split_block(
                     writes: evs.len(),
                 });
                 fused_dsts.insert(dst);
+            }
+            Some(Folded::Holes) => {
+                stats.skip_partial += 1;
             }
             None => {
                 stats.skip_fold += 1;
@@ -853,9 +864,9 @@ impl IMap {
     /// snapshot).  The temp assign lands just before the fused write.
     ///
     /// Self-read intervals stay put and the temp holds zero over their bits.
-    /// The fused write is `dst`'s only writer, so a self-read inside the temp
-    /// becomes a read that write answers — turning a self-loop into a
-    /// two-statement cycle the comb scheduler rejects.
+    /// The fused write is the only writer of its bits, so a self-read inside
+    /// the temp becomes a read that write answers, turning a self-loop into
+    /// a two-statement cycle the comb scheduler rejects.
     fn snapshot_to_temp(
         &mut self,
         width: usize,
@@ -1070,6 +1081,63 @@ impl IMap {
         }
     }
 
+    /// Which bits the chain writes: an interval still holding `dst`'s own
+    /// bits unchanged is unwritten.
+    fn written_span(&self, width: usize) -> Span {
+        let untouched = |iv: &Interval| match &iv.fe {
+            Fe::Var {
+                var_offset: VarOffset::Comb(o),
+                hi,
+                lo,
+                ..
+            } => *o as i64 == self.dst && *hi == iv.hi && *lo == iv.lo,
+            _ => false,
+        };
+        let written: Vec<&Interval> = self.iv.iter().filter(|iv| !untouched(iv)).collect();
+        let (Some(first), Some(last)) = (written.first(), written.last()) else {
+            return Span::Full;
+        };
+        let (lo, hi) = (first.lo, last.hi);
+        if self
+            .iv
+            .iter()
+            .any(|iv| iv.lo >= lo && iv.hi <= hi && untouched(iv))
+        {
+            return Span::Holes;
+        }
+        if lo == 0 && hi as usize + 1 >= width {
+            Span::Full
+        } else {
+            Span::Part(hi, lo)
+        }
+    }
+
+    /// The value of bits [hi:lo], which interval boundaries must delimit.
+    fn window_expr(&self, hi: u32, lo: u32) -> Option<ProtoExpression> {
+        let inside: Vec<&Interval> = self
+            .iv
+            .iter()
+            .filter(|iv| iv.lo >= lo && iv.hi <= hi)
+            .collect();
+        let width = (hi - lo + 1) as usize;
+        if let [iv] = inside.as_slice() {
+            return iv.fe.to_expr(width);
+        }
+        let mut elements = Vec::with_capacity(inside.len());
+        for iv in inside.iter().rev() {
+            let w = (iv.hi - iv.lo + 1) as usize;
+            elements.push((Box::new(iv.fe.to_expr(w)?), 1usize, w));
+        }
+        Some(ProtoExpression::Concatenation {
+            elements,
+            width,
+            expr_context: ExpressionContext {
+                width,
+                signed: false,
+            },
+        })
+    }
+
     fn to_expr(&self, total_width: usize) -> Option<ProtoExpression> {
         if self.iv.len() == 1 {
             return self.iv[0].fe.to_expr(total_width);
@@ -1092,10 +1160,12 @@ impl IMap {
 }
 
 /// Fold the value of `dst` across `writer_stmts` (top-level statements of
-/// the block, program order).  Returns rename temps (in program order) plus
-/// the fused full-width RHS, or None when the shape is unsupported.
-/// Intervals never written materialize as self-reads (previous-pass value),
-/// so guard-only chains fold too.
+/// the block, program order).  Returns `Folded::Expr` with the rename temps
+/// (program order), the fused RHS over the bits the chain writes, and those
+/// bits as `select` unless they are the whole variable; `Folded::Holes` when
+/// the written bits are not contiguous; None when the shape is unsupported.
+/// A bit a guard may leave unwritten reads its previous-pass value, so
+/// guard-only chains fold too.
 fn fold_var(
     body: &[ProtoStatement],
     writer_stmts: &[usize],
@@ -1103,14 +1173,46 @@ fn fold_var(
     width: usize,
     alloc: &mut dyn FnMut(usize) -> isize,
     token: TokenRange,
-) -> Option<(Vec<ProtoAssignStatement>, ProtoExpression)> {
+) -> Option<Folded> {
     let mut map = IMap::new(width, dst);
     let mut temps: Vec<ProtoAssignStatement> = Vec::new();
     for &si in writer_stmts {
         fold_stmt(&body[si], dst, &mut map, &mut temps, alloc, token)?;
     }
-    let expr = map.to_expr(width)?;
-    Some((temps, expr))
+    let span = map.written_span(width);
+    let expr = match span {
+        Span::Full => map.to_expr(width)?,
+        Span::Part(hi, lo) => map.window_expr(hi, lo)?,
+        Span::Holes => return Some(Folded::Holes),
+    };
+    Some(Folded::Expr {
+        temps,
+        expr,
+        select: match span {
+            Span::Part(hi, lo) => Some((hi as usize, lo as usize)),
+            _ => None,
+        },
+    })
+}
+
+enum Folded {
+    Expr {
+        temps: Vec<ProtoAssignStatement>,
+        expr: ProtoExpression,
+        /// The bits the chain writes, when not the whole variable.
+        select: Option<(usize, usize)>,
+    },
+    /// The chain leaves bits alone between bits it writes.
+    Holes,
+}
+
+/// The bits a fold writes.  A full-width fused write would also rewrite the
+/// bits the chain leaves alone from themselves, becoming a second writer of
+/// bits another statement may own.
+enum Span {
+    Full,
+    Part(u32, u32),
+    Holes,
 }
 
 // ---------------------------------------------------------------------------
@@ -2087,6 +2189,58 @@ mod tests {
                 "a fused statement reads the destination the chain fully covers"
             );
         }
+    }
+
+    #[test]
+    fn a_chain_writing_part_of_a_variable_fuses_into_a_write_of_that_part() {
+        // `if c { v[3:0] = a } else { v[3:0] = b }` leaves `v[7:4]` to other
+        // statements.  A full-width fused write would rewrite those bits from
+        // themselves, a second writer of those bits.
+        let mut body = vec![ProtoStatement::If(ProtoIfStatement {
+            cond: Some(cvar(0x100, 1)),
+            true_side: vec![assign_bits(0x0, 8, 3, 0, cvar(0x108, 4))],
+            false_side: vec![assign_bits(0x0, 8, 3, 0, cvar(0x110, 4))],
+        })];
+        let mut alloc_at = 0x1000isize;
+        let mut alloc = |w: usize, _: isize| -> isize {
+            let off = alloc_at;
+            alloc_at += crate::ir::variable::native_bytes(w) as isize;
+            off
+        };
+        let mut stats = RunStats::default();
+        split_block(&mut body, &mut stats, &mut alloc);
+
+        assert_eq!(stats.fused_vars, 1, "the chain must fuse");
+        let fused: Vec<&ProtoAssignStatement> = body
+            .iter()
+            .filter_map(|s| match s {
+                ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x0) => Some(a),
+                _ => None,
+            })
+            .collect();
+        let [a] = fused.as_slice() else {
+            panic!("one fused write expected: {body:?}");
+        };
+        assert_eq!(a.select, Some((3, 0)));
+        assert!(!a.expr.reads_offset(VarOffset::Comb(0x0)));
+    }
+
+    #[test]
+    fn a_chain_writing_two_separate_parts_stays_unfused() {
+        // `v[1:0]` and `v[7:6]` only: one write of the bits between would
+        // rewrite them from themselves, so the chain is left as written.
+        let mut body = vec![
+            assign_bits(0x0, 8, 1, 0, cvar(0x108, 2)),
+            assign_bits(0x0, 8, 7, 6, cvar(0x110, 2)),
+        ];
+        let before = format!("{body:?}");
+        let mut alloc = |_: usize, _: isize| -> isize { unreachable!("nothing to rename") };
+        let mut stats = RunStats::default();
+        split_block(&mut body, &mut stats, &mut alloc);
+
+        assert_eq!(stats.skip_partial, 1);
+        assert_eq!(stats.fused_vars, 0);
+        assert_eq!(format!("{body:?}"), before);
     }
 
     #[test]
