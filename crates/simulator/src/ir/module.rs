@@ -7334,8 +7334,10 @@ fn walk_touched_offsets(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) 
 /// A reader between two versions observes the earlier one, but sharing one
 /// offset forces a WAR edge to the later write, which can close a cycle the
 /// circuit does not have.  Copying the earlier version into a temp right after
-/// its write removes the edge without moving any computation.  Runs on the
-/// DEEP-SPLIT table because only there is each write a separate statement.
+/// its write removes the edge without moving any computation; where the
+/// versions this block produced form one static range, only that range is
+/// copied and only readers within it are redirected.  Runs on the DEEP-SPLIT
+/// table because only there is each write a separate statement.
 fn rename_versions(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
@@ -7380,6 +7382,7 @@ fn rename_versions(
         from: VarOffset,
         to: VarOffset,
         width: usize,
+        select: BitRange,
     }
     let mut plans: Vec<Plan> = Vec::new();
     let mut declined = 0usize;
@@ -7412,6 +7415,61 @@ fn rename_versions(
         if mids.iter().any(|&r| blocks[r] != blocks[after]) {
             continue;
         }
+        // The copy holds the versions this block produced up to `after`.  A
+        // whole-variable copy would also read bits only other statements
+        // write, binding it to them for nothing, so where those versions
+        // cover one range, copy just that range for the readers inside it.
+        // Any other reader keeps the variable and its edges.
+        let mut produced_spans: Vec<BitRange> = Vec::new();
+        for &w in ws
+            .iter()
+            .filter(|&&w| w <= after && blocks[w] == blocks[after])
+        {
+            let mut outs = vec![];
+            gather_bit_aware_outputs(&stmts[w], &mut outs);
+            produced_spans.extend(outs.iter().filter(|(o, _)| o == off).map(|(_, r)| *r));
+        }
+        let produced = if produced_spans.iter().any(|r| r.is_none()) {
+            None
+        } else {
+            let mut spans: Vec<(usize, usize)> = produced_spans
+                .iter()
+                .flatten()
+                .map(|&(h, l)| (l, h))
+                .collect();
+            spans.sort_unstable();
+            spans
+                .into_iter()
+                .try_fold(None::<(usize, usize)>, |acc, (l, h)| match acc {
+                    None => Some(Some((l, h))),
+                    Some((al, ah)) if l <= ah + 1 => Some(Some((al, ah.max(h)))),
+                    Some(_) => None,
+                })
+                .flatten()
+                .map(|(l, h)| (h, l))
+                .filter(|&(hi, _)| hi < width)
+        };
+        let (select, readers) = match produced {
+            Some((hi, lo)) => {
+                let inside: Vec<usize> = mids
+                    .iter()
+                    .copied()
+                    .filter(|&r| {
+                        let mut reads = vec![];
+                        stmts[r].gather_reads_with_ranges(&mut reads);
+                        reads
+                            .iter()
+                            .filter(|(o, _)| o == off)
+                            .all(|(_, rr)| rr.is_some_and(|(rh, rl)| lo <= rl && rh <= hi))
+                    })
+                    .collect();
+                if inside.is_empty() {
+                    continue;
+                }
+                (produced, inside)
+            }
+            None => (None, mids.clone()),
+        };
         // The WAR edge this copy breaks is false when every write and
         // mid-reader is a piece of one conditional with differing tags.
         let group = groups[ws[0]];
@@ -7433,10 +7491,11 @@ fn rename_versions(
         let to = VarOffset::Comb(alloc(width, off.raw()));
         plans.push(Plan {
             after,
-            readers: mids,
+            readers,
             from: *off,
             to,
             width,
+            select,
         });
     }
     if plans.is_empty() {
@@ -7452,26 +7511,33 @@ fn rename_versions(
             let (from, to) = (p.from, p.to);
             stmts[r].remap_offsets_with(&|o| if o == from { to } else { o });
         }
+        let whole = ProtoExpression::Variable {
+            var_offset: p.from,
+            select: None,
+            dynamic_select: None,
+            width: p.width,
+            var_full_width: p.width,
+            expr_context: crate::ir::ExpressionContext {
+                width: p.width,
+                signed: false,
+            },
+        };
+        let expr = match p.select {
+            Some((hi, lo)) => whole
+                .bit_parallel_window(hi, lo)
+                .expect("a plain variable read has every window"),
+            None => whole,
+        };
         insert_at
             .entry(p.after)
             .or_default()
             .push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst: p.to,
                 dst_width: p.width,
-                select: None,
+                select: p.select,
                 dynamic_select: None,
                 rhs_select: None,
-                expr: ProtoExpression::Variable {
-                    var_offset: p.from,
-                    select: None,
-                    dynamic_select: None,
-                    width: p.width,
-                    var_full_width: p.width,
-                    expr_context: crate::ir::ExpressionContext {
-                        width: p.width,
-                        signed: false,
-                    },
-                },
+                expr,
                 dst_ff_current_offset: 0,
                 comb_direct: false,
                 token: stmts[p.after].token().unwrap_or_default(),
