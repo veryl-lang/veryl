@@ -35716,3 +35716,73 @@ fn a_childs_comb_keeps_its_one_pass_order() {
         },
     );
 }
+
+#[test]
+fn a_signed_read_of_the_destination_keeps_its_sign() {
+    // Each guarded write reads back bits of its own destination as signed;
+    // folding the guard into one write must not read them zero-extended.
+    let code = r#"
+    module Top (
+        i0: input  logic<8>,
+        c : input  logic   ,
+        o1: output logic<16>,
+        o2: output logic<16>,
+        o3: output logic<16>,
+        o4: output logic<3>,
+    ) {
+        var v1: logic<16>;
+        var v2: logic<16>;
+        var v3: logic<16>;
+        var t : logic<3>;
+        assign o1 = v1;
+        assign o2 = v2;
+        assign o3 = v3;
+        assign o4 = t;
+        assign v1[7:0] = i0;
+        assign v2[7:0] = i0;
+        assign v3[7:0] = i0;
+        always_comb {
+            t[0] = c;
+            if c {
+                v1[15:8] = $signed(v1[7:4]) >>> 1;
+            } else {
+                v1[15:8] = 0;
+            }
+        }
+        always_comb {
+            t[1] = c;
+            if c {
+                v2[15:8] = $signed(v2[7:4]) * $signed(v2[3:0]);
+            } else {
+                v2[15:8] = 0;
+            }
+        }
+        always_comb {
+            t[2] = c;
+            if c {
+                v3[15:8] = $signed(v3[7:4]) / 4'sd2;
+            } else {
+                v3[15:8] = 0;
+            }
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i0", 8), ("c", 1)],
+        &[&[0xc9, 1], &[0x73, 1], &[0x8f, 1], &[0xc9, 0]],
+        &|k| {
+            let sext = |x: u64| ((x as i64) << 60 >> 60) as u64;
+            let (hi, lo) = ((k[0] >> 4) & 0xf, k[0] & 0xf);
+            let top = |x: u64| if k[1] == 1 { x & 0xff } else { 0 };
+            let sra = top(((sext(hi) as i64) >> 1) as u64);
+            let mul = top(sext(hi).wrapping_mul(sext(lo)));
+            let div = top(((sext(hi) as i64) / 2) as u64);
+            vec![
+                ("o1", (sra << 8) | k[0], 16),
+                ("o2", (mul << 8) | k[0], 16),
+                ("o3", (div << 8) | k[0], 16),
+            ]
+        },
+    );
+}

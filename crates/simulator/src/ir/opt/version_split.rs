@@ -1666,12 +1666,15 @@ fn replace_dst_reads(e: &mut ProtoExpression, dst: i64, base: &IMap) -> Option<(
         select,
         dynamic_select,
         width,
+        expr_context,
         ..
     } = e
         && let VarOffset::Comb(o) = var_offset
         && *o as i64 == dst
     {
-        if dynamic_select.is_some() {
+        // The substitute is built unsigned at the read's own width, so a
+        // read that extends as signed would lose its sign.
+        if dynamic_select.is_some() || expr_context.signed {
             return None;
         }
         let w = *width;
