@@ -35565,3 +35565,88 @@ fn a_read_of_settled_bits_does_not_wait_for_their_writer_to_come_after() {
         },
     );
 }
+
+#[test]
+fn a_reader_of_bits_it_writes_itself_waits_for_the_rest() {
+    // `v0[5:4] = v0[6:5]` reads bit 5, which it writes itself, and bit 6,
+    // which the statement above writes.  Only bit 6 orders it, and must.
+    let code = r#"
+    module Top (
+        i1: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+    ) {
+        var v0: logic<8>;
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v3: logic<8>;
+        assign o0 = v0;
+        always_comb {
+            v0[3:0] = i3[5:2];
+            v3[3:0] = v0[3:0];
+            v0[3:0] = v3[3:0] & v1[7:4];
+        }
+        always_comb {
+            v2      = i1;
+            v0[7:4] = v2[4:1];
+            v2      = i3;
+            v1[7:4] = v2[6:3];
+            v0[7:6] = v0[1:0];
+            v0[5:4] = v0[6:5];
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i1", 8), ("i3", 8)],
+        &[&[0x63, 0xcd], &[0x34, 0x78], &[0x08, 0xfe]],
+        &|k| {
+            let (i1, i3) = (k[0], k[1]);
+            let lo = ((i3 >> 2) & 0xf) & ((i3 >> 3) & 0xf);
+            let mut v0 = (((i1 >> 1) & 0xf) << 4) | lo;
+            v0 = (v0 & 0x3f) | ((lo & 3) << 6);
+            v0 = (v0 & !0x30) | (((v0 >> 5) & 3) << 4);
+            vec![("o0", v0, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_reader_of_a_version_and_of_other_bits_waits_for_both() {
+    // `z = v[5:2]` reads `v[3:2]` from the version above and `v[5:4]` from
+    // the other block, which reads `y` back from this one.  Bit by bit the
+    // blocks only pass values forward.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        c: input  logic<4>,
+        v: output logic<8>,
+        y: output logic<4>,
+        z: output logic<4>,
+    ) {
+        always_comb {
+            v[3:0] = a;
+            y      = v[3:0] ^ c;
+            z      = v[5:2];
+            v[3:0] = y + 1;
+        }
+        always_comb {
+            v[7:4] = y;
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("c", 4)],
+        &[&[5, 1], &[0xa, 3], &[0xf, 0], &[3, 2]],
+        &|k| {
+            let y = k[0] ^ k[1];
+            let z = ((y & 3) << 2) | (k[0] >> 2);
+            vec![
+                ("v", (y << 4) | ((y + 1) & 0xf), 8),
+                ("y", y, 4),
+                ("z", z, 4),
+            ]
+        },
+    );
+}

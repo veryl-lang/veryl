@@ -565,8 +565,81 @@ fn stable_topo_sort_impl(
     // RAW, range-filtered: a read of `x[A]` does not depend on a writer
     // of `x[B]` (packed per-bit drivers, pipeline-phase vectors).
     let mut relevant: Vec<usize> = Vec::new();
+    let mut split_reads: Vec<(VarOffset, BitRange)> = Vec::new();
+    // `[lo, hi]` minus `spans`, and its part inside them, as `(hi, lo)`.
+    let carve = |lo: usize, hi: usize, spans: &[BitRange]| -> (Vec<BitRange>, Vec<BitRange>) {
+        let mut sorted: Vec<(usize, usize)> =
+            spans.iter().flatten().map(|&(h, l)| (l, h)).collect();
+        sorted.sort_unstable();
+        let (mut outside, mut inside) = (Vec::new(), Vec::new());
+        let mut next = lo;
+        for (l, h) in sorted {
+            if next > hi {
+                break;
+            }
+            if h < next {
+                continue;
+            }
+            if l > next {
+                outside.push(Some(((l - 1).min(hi), next)));
+            }
+            let start = l.max(next);
+            if start <= hi {
+                inside.push(Some((h.min(hi), start)));
+            }
+            next = h + 1;
+        }
+        if next <= hi {
+            outside.push(Some((hi, next)));
+        }
+        (outside, inside)
+    };
     for (reader_idx, reads) in stmt_reads.iter().enumerate() {
+        // Bits the reader writes itself are produced inside it; of the rest,
+        // the bits an earlier statement of its block writes bind to that
+        // statement, and the others are settled values of other writers.
+        // Each part takes its own edges.
+        split_reads.clear();
         for (key, rr) in reads {
+            let ranges_where = |keep: &dyn Fn(usize) -> bool| -> Vec<BitRange> {
+                writer_ranges
+                    .get(key)
+                    .into_iter()
+                    .flatten()
+                    .filter(|(p, _)| keep(*p))
+                    .map(|(_, wr)| *wr)
+                    .collect()
+            };
+            let Some((hi, lo)) = *rr else {
+                split_reads.push((*key, *rr));
+                continue;
+            };
+            let bound_here = writer_ranges.get(key).is_some_and(|ws| {
+                ws.iter().any(|(p, _)| {
+                    *p == reader_idx || (*p < reader_idx && same_block(*p, reader_idx))
+                })
+            });
+            if !bound_here {
+                split_reads.push((*key, *rr));
+                continue;
+            }
+            let own = ranges_where(&|p| p == reader_idx);
+            if own.iter().any(|w| w.is_none()) {
+                continue;
+            }
+            let prior = ranges_where(&|p| p < reader_idx && same_block(p, reader_idx));
+            if prior.iter().any(|w| w.is_none()) {
+                let (outside, _) = carve(lo, hi, &own);
+                split_reads.extend(outside.into_iter().map(|r| (*key, r)));
+                continue;
+            }
+            let (outside, _) = carve(lo, hi, &own);
+            for piece in outside.into_iter().flatten() {
+                let (unbound, bound) = carve(piece.1, piece.0, &prior);
+                split_reads.extend(unbound.into_iter().chain(bound).map(|r| (*key, r)));
+            }
+        }
+        for (key, rr) in &split_reads {
             let Some(wranges) = writer_ranges.get(key) else {
                 continue;
             };
@@ -592,18 +665,15 @@ fn stable_topo_sort_impl(
                     cause!(writer_idx, reader_idx, "raw");
                 } else {
                     // Sole overlapping writer comes later: a settled-value
-                    // read, so the edge is best-effort rather than semantic.
+                    // read, so the edge is a settled-read edge, not semantic.
                     adj_opt[writer_idx].insert(reader_idx);
                     cause!(writer_idx, reader_idx, "raw-settled");
                 }
             } else if relevant.binary_search(&reader_idx).is_ok() {
-                // The reader itself writes overlapping bits (shared inlined
-                // scratch, carry chains): the value is produced
-                // intra-statement, so it stays in source order.  KNOWN
-                // LIMITATION: a read its own write does not cover also
-                // depends on the other writers, but edges here close
-                // sem/opt cycles across shared-scratch statement clusters
-                // and collapse real designs to source order.
+                // A read of unknown range from a statement that also writes
+                // the variable: produced intra-statement, so it stays in
+                // source order.  It gets no edges from the other writers, so
+                // a dependency on them is not ordered.
             } else if let Some(&writer_idx) = (!split_driver.contains(key))
                 .then(|| {
                     relevant
