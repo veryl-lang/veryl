@@ -328,6 +328,21 @@ fn synth_factor(
             let width = ct.r#type.total_width().unwrap_or(value.width());
             Ok(value_to_nets(value, width))
         }
+        Factor::ResetValue(kind, polarity, _) => {
+            let active_high = match polarity {
+                air::ResetPolarity::High => true,
+                air::ResetPolarity::Low => false,
+                // `reset` without explicit polarity is treated as active-low
+                // as the reset of always_ff is.
+                air::ResetPolarity::Default => false,
+            };
+            let is_active = matches!(kind, air::ResetValueKind::Active);
+            Ok(vec![if active_high == is_active {
+                NET_CONST1
+            } else {
+                NET_CONST0
+            }])
+        }
         // Testbench-only construct; never appears in synthesizable code.
         Factor::HierVariable(x) => Err(SynthesizerError::unsupported(
             UnsupportedKind::NonNumericValueFactor,
