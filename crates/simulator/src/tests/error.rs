@@ -558,3 +558,30 @@ fn parent_array_shorter_than_the_port_it_is_wired_to() {
         "pk::e3_t [2]",
     );
 }
+
+#[test]
+fn a_loop_diagnostic_carries_its_file_once() {
+    // Every label points into one file; the report must not copy it per label.
+    let code = r#"
+    module Top (
+        a: input  logic<32>,
+        b: output logic<32>,
+    ) {
+        var x: logic<32>;
+        assign x = b + a;
+        assign b = x;
+    }
+    "#;
+
+    let result = analyze_top_allowing_comb_loop(code, &Config::default(), "Top");
+    let Err(SimulatorError::CombinationalLoop {
+        input,
+        loop_participants,
+        ..
+    }) = result
+    else {
+        panic!("a combinational loop is reported");
+    };
+    assert!(!loop_participants.is_empty());
+    assert_eq!(input.sources.len(), 1);
+}

@@ -96,26 +96,28 @@ fn source_with_context(
     token: &TokenRange,
     context: &[TokenRange],
 ) -> (MultiSources, Vec<SourceSpan>) {
-    let path = token.beg.source.to_string();
-    let text = token.beg.source.get_text();
-
-    let mut base = text.len();
-    let mut ranges = Vec::new();
+    // Each file goes in once, however many labels point into it.
+    let mut bases: Vec<(TokenSource, usize)> = Vec::new();
     let mut sources = Vec::new();
+    let mut end = 0;
+    let mut base_of = |source: TokenSource, sources: &mut Vec<Source>| -> usize {
+        if let Some((_, base)) = bases.iter().find(|(s, _)| *s == source) {
+            return *base;
+        }
+        let text = source.get_text();
+        let base = end;
+        end += text.len();
+        bases.push((source, base));
+        sources.push(Source::new(source.to_string(), text));
+        base
+    };
+    base_of(token.beg.source, &mut sources);
 
-    sources.push(Source::new(path, text));
-
+    let mut ranges = Vec::new();
     for x in context.iter().rev() {
-        let path = x.beg.source.to_string();
-        let text = x.beg.source.get_text();
-
         let mut range = *x;
-        range.offset(base as u32);
+        range.offset(base_of(x.beg.source, &mut sources) as u32);
         ranges.push(range.into());
-
-        base += text.len();
-
-        sources.push(Source::new(path, text));
     }
 
     let sources = MultiSources { sources };
