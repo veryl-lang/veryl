@@ -35354,3 +35354,50 @@ fn dataflow_switch_from_jit_cells_to_the_so_reruns_every_cell() {
         "the .so landed before the first settle; nothing was handed over"
     );
 }
+
+#[test]
+fn a_block_reading_bits_another_block_writes_waits_for_them() {
+    // Each block writes one half of `v` and of `w` and reads the half the
+    // other block writes.  As blocks they feed each other; bit by bit
+    // `v[3:0] -> v[7:4] -> w[7:4] -> w[3:0]` is a chain.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        c: input  logic<4>,
+        d: input  logic<4>,
+        v: output logic<8>,
+        w: output logic<8>,
+    ) {
+        always_comb {
+            w[3:0] = w[7:4] & d;
+            v[7:4] = v[3:0] ^ c;
+        }
+        always_comb {
+            v[3:0] = a;
+            w[7:4] = v[7:4] | b;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (a, b, c, d) in [
+            (0x5u64, 0x2u64, 0x9u64, 0xfu64),
+            (0xa, 0x1, 0x3, 0x6),
+            (0xf, 0x0, 0xf, 0xb),
+        ] {
+            sim.set("a", Value::new(a, 4, false));
+            sim.set("b", Value::new(b, 4, false));
+            sim.set("c", Value::new(c, 4, false));
+            sim.set("d", Value::new(d, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            let v = ((a ^ c) << 4) | a;
+            let w_hi = (a ^ c) | b;
+            let w = (w_hi << 4) | (w_hi & d);
+            assert_eq!(sim.get("v").unwrap(), Value::new(v, 8, false), "{config:?}");
+            assert_eq!(sim.get("w").unwrap(), Value::new(w, 8, false), "{config:?}");
+        }
+    }
+}
