@@ -304,36 +304,38 @@ impl OwnerInputs {
         a
     }
 
-    /// Own comb storage allocated after `build_inputs`, given as
-    /// `(from, to, bytes)` entries in the `Context::comb_reloc` shape, as the
-    /// owner of `from`.
     /// Follow a comb relayout: the comb intervals move with the units the
     /// schedule placed, one becoming several where its bytes landed apart.
-    /// FF storage is never relaid.
+    /// FF storage is never relaid.  A byte the schedule leaves unplaced is
+    /// storage no statement references, and keeping it at its old offset
+    /// would claim whatever unit now sits there.
     pub fn relayout(&mut self, sched: &crate::ir::comb_layout::CombLayoutSchedule) {
-        let moved = |s: usize, e: usize| {
-            sched
-                .translate_range(s as isize, e as isize)
-                .into_iter()
+        let valid = |v: Vec<(isize, isize)>| {
+            v.into_iter()
                 .filter(|&(ns, ne)| ns >= 0 && ne > ns)
                 .map(|(ns, ne)| (ns as usize, ne as usize))
         };
         for owned in [&mut self.comb_owner, &mut self.comb_var] {
             let mut out = Vec::with_capacity(owned.len());
             for &(s, e, id) in owned.iter() {
-                out.extend(moved(s, e).map(|(ns, ne)| (ns, ne, id)));
+                out.extend(
+                    valid(sched.placed_range(s as isize, e as isize)).map(|(ns, ne)| (ns, ne, id)),
+                );
             }
             out.sort_unstable();
             *owned = out;
         }
         let mut written = Vec::with_capacity(self.event_written_comb.len());
         for &(s, e) in &self.event_written_comb {
-            written.extend(moved(s, e));
+            written.extend(valid(sched.placed_range(s as isize, e as isize)));
         }
         merge_ranges(&mut written);
         self.event_written_comb = written;
     }
 
+    /// Own comb storage allocated after `build_inputs`, given as
+    /// `(from, to, bytes)` entries in the `Context::comb_reloc` shape, as the
+    /// owner of `from`.
     pub fn adopt_relocations(&mut self, reloc: &[(isize, isize, usize)]) {
         let before = self.comb_owner.len();
         inherit_reloc_owners(&mut self.comb_owner, reloc);
@@ -645,6 +647,32 @@ pub(crate) fn intersect_ranges(a: &[(usize, usize)], b: &[(usize, usize)]) -> Ve
 mod tests {
     use super::*;
     use crate::ir::variable::VarOffset;
+
+    #[test]
+    fn a_relayout_drops_the_owners_of_unplaced_storage() {
+        // Node 1's variable at [0, 8) moves to [8, 16); node 2's at [16, 24)
+        // moves to [0, 8).  The dead temp at [8, 16), adopted by node 3, is
+        // placed nowhere and must not claim node 1's new bytes.
+        let mut ci = OwnerInputs {
+            node_parent: vec![u32::MAX, 0, 0, 0],
+            node_path: vec![String::new(); 4],
+            comb_owner: vec![(0, 8, 1), (8, 16, 3), (16, 24, 2)],
+            ff_owner: FfOwner { runs: Vec::new() },
+            ff_node: Vec::new(),
+            comb_var: vec![(0, 8, 1), (8, 16, 3), (16, 24, 2)],
+            event_written_comb: vec![(0, 24)],
+            ff_next_alias: Vec::new(),
+            tour: std::sync::OnceLock::new(),
+        };
+        let sched = crate::ir::comb_layout::CombLayoutSchedule::from_units(
+            vec![(0, 8, 8), (16, 24, 0)],
+            16,
+        );
+        ci.relayout(&sched);
+        assert_eq!(ci.comb_owner, vec![(0, 8, 2), (8, 16, 1)]);
+        assert_eq!(ci.comb_var, vec![(0, 8, 2), (8, 16, 1)]);
+        assert_eq!(ci.event_written_comb, vec![(0, 16)]);
+    }
 
     #[test]
     fn reloc_owners_follow_temp_chains() {

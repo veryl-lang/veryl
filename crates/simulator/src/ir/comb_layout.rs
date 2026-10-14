@@ -40,12 +40,13 @@ use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableMeta, value_siz
 use veryl_analyzer::ir::VarId;
 
 /// Old-offset → new-offset translation for the comb space, as a sorted set of
-/// relocated intervals.  Anything outside every interval stays in place.
+/// placed intervals.  Anything outside every interval stays in place.
 #[derive(Debug, Default)]
 pub struct CombLayoutSchedule {
-    /// `(old_start, old_end, new_start)`, sorted by `old_start`, pairwise
-    /// disjoint.  A unit keeps its internal layout: `x` in `[old_start,
-    /// old_end)` lands at `new_start + (x - old_start)`.
+    /// `(old_start, old_end, new_start)` of every placed unit, moved or not,
+    /// sorted by `old_start`, pairwise disjoint.  A unit keeps its internal
+    /// layout: `x` in `[old_start, old_end)` lands at `new_start + (x -
+    /// old_start)`.
     units: Vec<(isize, isize, isize)>,
     /// One past the highest byte any placed unit occupies.  The comb buffer
     /// must be at least this large (it never exceeds the old total by more
@@ -69,31 +70,28 @@ impl CombLayoutSchedule {
         }
     }
 
-    /// Translate a byte RANGE through the schedule, piecewise: a unit moves
-    /// as a whole (intra-unit deltas preserved) but adjacent units may land
-    /// apart, so one input range can map to several output ranges.
-    pub fn translate_range(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
+    #[cfg(test)]
+    pub(crate) fn from_units(units: Vec<(isize, isize, isize)>, buffer_end: usize) -> Self {
+        Self {
+            total_units: units.len(),
+            units,
+            buffer_end,
+            hot_units: 0,
+        }
+    }
+
+    /// The parts of a byte range that some unit places, translated.  Unplaced
+    /// bytes are dead: `translate` leaves them at their old offsets, where
+    /// the packed layout may have put another unit.
+    pub fn placed_range(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
         let mut out: Vec<(isize, isize)> = Vec::new();
-        let mut x = start;
-        while x < end {
-            let i = self.units.partition_point(|&(s, _, _)| s <= x);
-            let (seg_end, nx) = match i.checked_sub(1) {
-                Some(i) => {
-                    let (s, e, n) = self.units[i];
-                    if x < e {
-                        (e.min(end), n + (x - s))
-                    } else {
-                        let next = self.units.get(i + 1).map(|u| u.0).unwrap_or(isize::MAX);
-                        (next.min(end), x)
-                    }
-                }
-                None => {
-                    let next = self.units.first().map(|u| u.0).unwrap_or(isize::MAX);
-                    (next.min(end), x)
-                }
-            };
-            out.push((nx, nx + (seg_end - x)));
-            x = seg_end;
+        let first = self.units.partition_point(|&(_, e, _)| e <= start);
+        for &(s, e, n) in &self.units[first..] {
+            if s >= end {
+                break;
+            }
+            let (a, b) = (s.max(start), e.min(end));
+            out.push((n + (a - s), n + (b - s)));
         }
         out
     }
@@ -606,19 +604,19 @@ pub fn build_schedule(
     };
     let mut pos: isize = 0;
     let mut placed: Vec<(isize, isize, isize)> = Vec::with_capacity(order.len());
+    let mut moved = 0usize;
     for i in order {
         let u = &units[i];
         let a = align_of(u.start, u.end - u.start);
         pos = (pos + a - 1) & !(a - 1);
-        if pos != u.start {
-            placed.push((u.start, u.end, pos));
-        }
+        moved += usize::from(pos != u.start);
+        placed.push((u.start, u.end, pos));
         pos += u.end - u.start;
     }
     let buffer_end = pos as usize;
     placed.sort_by_key(|&(s, _, _)| s);
 
-    if placed.is_empty() {
+    if moved == 0 {
         return None;
     }
     let sched = CombLayoutSchedule {
@@ -630,12 +628,7 @@ pub fn build_schedule(
     if diag() {
         eprintln!(
             "[comb_layout] units={} hot={} moved={} orphans={} comb_total={} buffer_end={}",
-            sched.total_units,
-            sched.hot_units,
-            sched.units.len(),
-            orphan_count,
-            comb_total,
-            sched.buffer_end,
+            sched.total_units, sched.hot_units, moved, orphan_count, comb_total, sched.buffer_end,
         );
     }
     Some(sched)
@@ -769,6 +762,15 @@ mod tests {
         assert_eq!(s.translate(64), 144);
         assert_eq!(s.translate(71), 151);
         assert_eq!(s.translate(100), 100); // past every unit
+    }
+
+    #[test]
+    fn a_placed_range_drops_the_bytes_no_unit_places() {
+        // [16, 24) is placed where it was; [24, 32) belongs to no unit.
+        let s = sched(vec![(0, 8, 8), (8, 16, 0), (16, 24, 16), (32, 40, 24)], 32);
+        assert_eq!(s.placed_range(20, 36), vec![(20, 24), (24, 28)]);
+        assert_eq!(s.placed_range(4, 12), vec![(12, 16), (0, 4)]);
+        assert_eq!(s.placed_range(24, 32), vec![]);
     }
 
     #[test]
