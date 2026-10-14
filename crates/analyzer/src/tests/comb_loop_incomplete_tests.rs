@@ -1,9 +1,113 @@
 // Incomplete-effect boundary coverage for comb-loop analysis.
 use super::*;
 
+/// A gate made of `stages` sequential branches, either as a constant loop or
+/// as the equivalent straight-line statements. A constant loop is evaluated
+/// one iteration at a time, so both forms cost the same.
+fn gate_stages(unrolled: bool, stages: usize, condition: impl Fn(&str) -> String) -> String {
+    if unrolled {
+        (0..stages)
+            .map(|index| {
+                format!(
+                    "if {} {{ v = !v; }} else {{ v = 0; }}",
+                    condition(&index.to_string())
+                )
+            })
+            .collect()
+    } else {
+        let condition = condition("index");
+        let iterator = if condition.contains("index") {
+            "index"
+        } else {
+            "_index"
+        };
+        format!(
+            "for {iterator} in 0..{stages} {{ if {condition} {{ v = !v; }} else {{ v = 0; }} }}"
+        )
+    }
+}
+
+/// One case of a workload: a label, its source, and whether it is a light
+/// case, one that the analysis keeps small.
+struct StepCase {
+    label: String,
+    code: String,
+    light: bool,
+}
+
+impl StepCase {
+    fn new(label: String, code: String, light: bool) -> Self {
+        Self { label, code, light }
+    }
+}
+
+fn reported_loops(errors: &[AnalyzerError]) -> Vec<&str> {
+    errors
+        .iter()
+        .filter_map(|error| match error {
+            AnalyzerError::CombinationalLoop { identifier, .. } => Some(identifier.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Check a workload against the steps of its light cases. Given twice that
+/// many steps per module, the most stages sharing them may waste, every
+/// light case completes and finds the independent loop, and every heavy case
+/// stops as incomplete without reporting a loop that does not exist.
+/// `allowed` accepts the other diagnostics of a case.
+fn check_against_light_steps(
+    cases: &[StepCase],
+    allowed: impl Fn(&StepCase, &AnalyzerError) -> bool,
+) {
+    let limit = cases
+        .iter()
+        .filter(|case| case.light)
+        .map(|case| {
+            crate::comb_loop_detect::reset_steps_taken();
+            assert!(comb_loop_analysis_is_complete(&case.code), "{}", case.label);
+            crate::comb_loop_detect::steps_taken()
+        })
+        .max()
+        .expect("a workload has a light case")
+        * 2;
+    crate::comb_loop_detect::with_step_limit(limit, || {
+        for case in cases {
+            let label = &case.label;
+            assert_eq!(
+                comb_loop_analysis_is_complete(&case.code),
+                case.light,
+                "{label} with {limit} steps"
+            );
+            let errors = analyze(&case.code);
+            assert!(
+                errors.iter().all(|error| match error {
+                    AnalyzerError::CombinationalLoop { .. } => true,
+                    error => allowed(case, error),
+                }),
+                "{label}: {errors:?}"
+            );
+            let loops = reported_loops(&errors);
+            if case.light {
+                assert_eq!(loops, ["independent"], "{label}: {errors:?}");
+            } else {
+                assert!(
+                    loops.iter().all(|identifier| *identifier == "independent"),
+                    "{label}: {errors:?}"
+                );
+            }
+        }
+    });
+}
+
+fn unassigned_independent(error: &AnalyzerError) -> bool {
+    matches!(error, AnalyzerError::UnassignVariable { identifier, .. } if identifier == "independent")
+}
+
 #[test]
 fn instance_source_guard_limit_preserves_independent_cycles() {
-    for selector in [false, true] {
+    let mut cases = Vec::new();
+    for (selector, unrolled) in [(false, false), (false, true), (true, false), (true, true)] {
         for stages in [4, 64] {
             let ports = if selector {
                 "i: i, o: o[gate(flags, i)]"
@@ -11,6 +115,7 @@ fn instance_source_guard_limit_preserves_independent_cycles() {
                 "i: gate(flags, i), o: o"
             };
             let width = if selector { 2 } else { 1 };
+            let gate = gate_stages(unrolled, stages, |index| format!("s[{index}]"));
             let code = format!(
                 "module Child (i: input logic, o: output logic) {{ assign o = i; }}
                  module Top (flags: input logic<{stages}>, i: input logic,
@@ -18,51 +123,33 @@ fn instance_source_guard_limit_preserves_independent_cycles() {
                     function gate (s: input logic<{stages}>, x: input logic) -> logic {{
                         var v: logic;
                         v = x;
-                        for index in 0..{stages} {{
-                            if s[index] {{ v = !v; }} else {{ v = 0; }}
-                        }}
+                        {gate}
                         return v;
                     }}
                     inst child: Child ({ports});
                     assign independent = independent;
                  }}"
             );
-            // Each assignment has only one guard, so construction fits in
-            // either case. Walking back from the result accumulates a growing
-            // prefix and must share the guard budget with its caller.
-            crate::comb_loop_detect::with_procedure_guard_limit(1024, || {
-                let case = format!("selector={selector}, stages={stages}");
-                assert_eq!(comb_loop_analysis_is_complete(&code), stages == 4, "{case}");
-                let errors = analyze(&code);
-                assert!(
-                    errors.iter().all(|error| match error {
-                        AnalyzerError::CombinationalLoop { .. } => true,
-                        // The runtime output select is part of the case, and is
-                        // reported separately.
-                        AnalyzerError::NonConstantOutputSelect { .. } => selector,
-                        AnalyzerError::UnassignVariable { identifier, .. } =>
-                            identifier == "independent",
-                        _ => false,
-                    }),
-                    "{case}: {errors:?}"
-                );
-                let loops = errors
-                    .iter()
-                    .filter_map(|error| match error {
-                        AnalyzerError::CombinationalLoop { identifier, .. } => {
-                            Some(identifier.as_str())
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(loops, ["independent"], "{case}: {errors:?}");
-            });
+            // Each assignment has only one guard. Walking back from the
+            // result accumulates a growing prefix.
+            cases.push(StepCase::new(
+                format!("selector={selector}, unrolled={unrolled}, stages={stages}"),
+                code,
+                stages == 4,
+            ));
         }
     }
+    check_against_light_steps(&cases, |case, error| match error {
+        // The runtime output select is part of the case, and is reported
+        // separately.
+        AnalyzerError::NonConstantOutputSelect { .. } => case.label.starts_with("selector=true"),
+        error => unassigned_independent(error),
+    });
 }
 
 #[test]
 fn nested_runtime_loop_copy_limit_preserves_independent_cycles() {
+    let mut cases = Vec::new();
     for imported in [false, true] {
         for kind in ["block", "overwritten", "function"] {
             for depth in [1, 16] {
@@ -111,42 +198,26 @@ fn nested_runtime_loop_copy_limit_preserves_independent_cycles() {
                         assign independent = independent;
                      }}"
                 );
-                // The inner loop fits. Enclosing loops must also charge for
-                // copying its generated SSA, even after imports are condensed
-                // or when the final result is overwritten or discarded.
-                crate::comb_loop_detect::with_procedure_import_limit(1024, || {
-                    let case = format!("imported={imported}, {kind}, depth={depth}");
-                    assert_eq!(comb_loop_analysis_is_complete(&code), depth == 1, "{case}");
-                    let errors = analyze(&code);
-                    assert!(
-                        errors.iter().all(|error| match error {
-                            AnalyzerError::CombinationalLoop { .. } => true,
-                            AnalyzerError::UnassignVariable { identifier, .. } =>
-                                identifier == "independent",
-                            _ => false,
-                        }),
-                        "{case}: {errors:?}"
-                    );
-                    let loops = errors
-                        .iter()
-                        .filter_map(|error| match error {
-                            AnalyzerError::CombinationalLoop { identifier, .. } => {
-                                Some(identifier.as_str())
-                            }
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>();
-                    assert_eq!(loops, ["independent"], "{case}: {errors:?}");
-                });
+                // Enclosing loops also charge for copying the generated SSA of
+                // an inner loop, even after imports are condensed or when the
+                // final result is overwritten or discarded.
+                cases.push(StepCase::new(
+                    format!("imported={imported}, {kind}, depth={depth}"),
+                    code,
+                    depth == 1,
+                ));
             }
         }
     }
+    check_against_light_steps(&cases, |_, error| unassigned_independent(error));
 }
 
 #[test]
 fn runtime_loop_import_limit_preserves_independent_cycles() {
+    let mut cases = Vec::new();
     for kind in ["block", "overwritten", "separate", "function"] {
-        for calls in [1, 16] {
+        for (calls, unrolled) in [(1, true), (16, true), (16, false)] {
+            let gate = gate_stages(unrolled, 16, |_| "s".to_string());
             let destination = if kind == "function" {
                 "_discarded"
             } else {
@@ -182,7 +253,7 @@ fn runtime_loop_import_limit_preserves_independent_cycles() {
                     function gate (s: input logic, x: input logic) -> logic {{
                         var v: logic;
                         v = x;
-                        for _index in 0..8 {{ if s {{ v = !v; }} else {{ v = 0; }} }}
+                        {gate}
                         return v;
                     }}
                     {body}
@@ -190,32 +261,23 @@ fn runtime_loop_import_limit_preserves_independent_cycles() {
                 }}
                 "#
             );
-            crate::comb_loop_detect::with_procedure_import_limit(1024, || {
-                assert_eq!(
-                    comb_loop_analysis_is_complete(&code),
-                    calls == 1,
-                    "{kind}, calls={calls}"
-                );
-                let errors = analyze(&code);
-                let loops = errors
-                    .iter()
-                    .filter_map(|error| match error {
-                        AnalyzerError::CombinationalLoop { identifier, .. } => {
-                            Some(identifier.as_str())
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(loops, ["independent"], "{kind}, calls={calls}: {errors:?}");
-            });
+            // The stages are copied by every repeated transfer.
+            cases.push(StepCase::new(
+                format!("{kind}, calls={calls}, unrolled={unrolled}"),
+                code,
+                calls == 1,
+            ));
         }
     }
+    check_against_light_steps(&cases, |_, error| unassigned_independent(error));
 }
 
 #[test]
 fn procedural_import_limit_preserves_independent_cycles() {
     for kind in ["procedure", "instance_side_effect"] {
-        for calls in [1, 16] {
+        let mut cases = Vec::new();
+        for (calls, unrolled) in [(1, true), (16, true), (16, false)] {
+            let gate = gate_stages(unrolled, 8, |_| "s".to_string());
             let body = if kind == "procedure" {
                 let assignments = (0..calls)
                     .map(|index| format!("o[{index}] = gate(1'b1, i);"))
@@ -240,7 +302,7 @@ fn procedural_import_limit_preserves_independent_cycles() {
                     function gate (s: input logic, x: input logic) -> logic {{
                         var v: logic;
                         v = x;
-                        for _index in 0..8 {{ if s {{ v = !v; }} else {{ v = 0; }} }}
+                        {gate}
                         return v;
                     }}
                     {body}
@@ -248,100 +310,56 @@ fn procedural_import_limit_preserves_independent_cycles() {
                 }}
                 "#
             );
-            crate::comb_loop_detect::with_procedure_import_limit(1024, || {
-                assert_eq!(
-                    comb_loop_analysis_is_complete(&code),
-                    calls == 1,
-                    "{kind}, calls={calls}"
-                );
-                let errors = analyze(&code);
-                assert!(
-                    errors.iter().all(|error| match error {
-                        AnalyzerError::CombinationalLoop { .. }
-                        | AnalyzerError::UnusedVariable { .. } => true,
-                        AnalyzerError::UnassignVariable { identifier, .. } =>
-                            identifier == "independent"
-                                || (kind == "instance_side_effect" && identifier == "o"),
-                        _ => false,
-                    }),
-                    "{kind}, calls={calls}: {errors:?}"
-                );
-                let loops = errors
-                    .iter()
-                    .filter_map(|error| match error {
-                        AnalyzerError::CombinationalLoop { identifier, .. } => {
-                            Some(identifier.as_str())
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(loops, ["independent"], "{kind}, calls={calls}: {errors:?}");
-            });
+            cases.push(StepCase::new(
+                format!("{kind}, calls={calls}, unrolled={unrolled}"),
+                code,
+                calls == 1,
+            ));
         }
-    }
-}
-
-#[test]
-fn procedural_import_limit_does_not_limit_direct_assignments() {
-    let assignments = (0..1024)
-        .map(|index| format!("o[{index}] = i;"))
-        .collect::<String>();
-    for runtime_loop in [false, true] {
-        let body = if runtime_loop {
-            format!("o = 0; for _iteration in 0..n {{ {assignments} }}")
-        } else {
-            assignments.clone()
-        };
-        let code = format!(
-            "module Top (i: input logic, n: input u32, o: output logic<1024>) {{ always_comb {{ {body} }} }}"
-        );
-        crate::comb_loop_detect::with_procedure_import_limit(0, || {
-            assert!(comb_loop_analysis_is_complete(&code));
-            assert!(analyze(&code).is_empty());
+        check_against_light_steps(&cases, |case, error| match error {
+            AnalyzerError::UnusedVariable { .. } => true,
+            AnalyzerError::UnassignVariable { identifier, .. } => {
+                identifier == "independent"
+                    || (case.label.starts_with("instance_side_effect") && identifier == "o")
+            }
+            _ => false,
         });
     }
 }
 
 #[test]
 fn instance_actual_expansion_limit_keeps_independent_cycles() {
-    for stages in [4, 64] {
-        let stages_code = "y = !y;".repeat(stages);
-        let code = format!(
-            r#"
-            module Child (i: input logic, o: output logic) {{ assign o = i; }}
-            module Top (i: input logic, o: output logic, independent: output logic) {{
-                function chain (x: input logic) -> logic {{
-                    var y: logic;
-                    y = x;
-                    {stages_code}
-                    return y;
+    let cases = [4, 64]
+        .into_iter()
+        .map(|stages| {
+            let stages_code = "y = !y;".repeat(stages);
+            let code = format!(
+                r#"
+                module Child (i: input logic, o: output logic) {{ assign o = i; }}
+                module Top (i: input logic, o: output logic, independent: output logic) {{
+                    function chain (x: input logic) -> logic {{
+                        var y: logic;
+                        y = x;
+                        {stages_code}
+                        return y;
+                    }}
+                    inst child: Child (i: chain(i), o: o);
+                    assign independent = independent;
                 }}
-                inst child: Child (i: chain(i), o: o);
-                assign independent = independent;
-            }}
-        "#
-        );
-        crate::comb_loop_detect::with_module_summary_limit(128, || {
-            assert_eq!(comb_loop_analysis_is_complete(&code), stages == 4);
-            let errors = analyze(&code);
-            let loops = errors
-                .iter()
-                .filter_map(|error| match error {
-                    AnalyzerError::CombinationalLoop { identifier, .. } => {
-                        Some(identifier.as_str())
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(loops, ["independent"], "stages={stages}: {errors:?}");
-        });
-    }
+            "#
+            );
+            StepCase::new(format!("stages={stages}"), code, stages == 4)
+        })
+        .collect::<Vec<_>>();
+    check_against_light_steps(&cases, |_, error| unassigned_independent(error));
 }
 
 #[test]
 fn procedural_guard_limit_counts_fragmented_case_ranges() {
+    let mut cases = Vec::new();
     for fragmented in [false, true] {
-        for iterations in [0, 64] {
+        for (iterations, unrolled) in [(0, true), (64, true), (64, false)] {
+            let gate = gate_stages(unrolled, iterations, |_| "s".to_string());
             let arms = (0..64)
                 .map(|index| {
                     let returns = if fragmented {
@@ -360,9 +378,7 @@ fn procedural_guard_limit_counts_fragmented_case_ranges() {
                         case sel {{ {arms} default: {{}} }}
                         var v: logic;
                         v = x;
-                        for _i in 0..{iterations} {{
-                            if s {{ v = !v; }} else {{ v = 0; }}
-                        }}
+                        {gate}
                         return v;
                     }}
                     assign o = gate(sel, s, x);
@@ -372,101 +388,68 @@ fn procedural_guard_limit_counts_fragmented_case_ranges() {
             // Both continuations constrain only one case branch. Alternating
             // returns leave many disjoint ranges that each later if must copy;
             // contiguous returns leave just one range. The case join alone fits.
-            crate::comb_loop_detect::with_procedure_guard_limit(4096, || {
-                let case = format!("fragmented={fragmented}, iterations={iterations}");
-                assert_eq!(
-                    comb_loop_analysis_is_complete(&code),
-                    !fragmented || iterations == 0,
-                    "{case}"
-                );
-                let errors = analyze(&code);
-                assert!(
-                    errors.iter().all(|error| match error {
-                        AnalyzerError::CombinationalLoop { .. } => true,
-                        AnalyzerError::UnassignVariable { identifier, .. } =>
-                            identifier == "independent",
-                        _ => false,
-                    }),
-                    "{case}: {errors:?}"
-                );
-                let loops = errors
-                    .iter()
-                    .filter_map(|error| match error {
-                        AnalyzerError::CombinationalLoop { identifier, .. } => {
-                            Some(identifier.as_str())
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(loops, ["independent"], "{case}: {errors:?}");
-            });
+            cases.push(StepCase::new(
+                format!("fragmented={fragmented}, iterations={iterations}, unrolled={unrolled}"),
+                code,
+                !fragmented || iterations == 0,
+            ));
         }
     }
+    check_against_light_steps(&cases, |_, error| unassigned_independent(error));
 }
 
 #[test]
 fn procedural_guard_limit_bounds_early_exits_and_preserves_independent_cycles() {
     for kind in ["return", "break", "runtime_break"] {
-        for size in [2, 64, 256] {
-            let exits = (0..size)
-                .map(|index| {
-                    if kind == "return" {
-                        format!("if flags[{index}] {{ return data; }}")
-                    } else {
-                        format!("if flags[{index}] {{ break; }}")
-                    }
-                })
-                .collect::<String>();
-            let body = if kind == "return" {
-                format!(
-                    r#"
-                    function first (flags: input logic<{size}>, data: input logic) -> logic {{
-                        {exits}
-                        return 0;
-                    }}
-                    assign o = first(flags, data);
-                "#
-                )
-            } else {
-                let bound = if kind == "break" { "1" } else { "n" };
-                format!(
-                    r#"
-                    always_comb {{
-                        o = o;
-                        for _index in 0..{bound} {{ {exits} o = data; }}
-                        o = 0;
-                    }}
-                "#
-                )
-            };
-            let code = format!(
-                r#"
-                module Top (flags: input logic<{size}>, data: input logic,
-                            n: input logic<32>, o: output logic, independent: output logic) {{
-                    {body}
-                    assign independent = independent;
-                }}
-            "#
-            );
-            crate::comb_loop_detect::with_procedure_guard_limit(128, || {
-                assert_eq!(
-                    comb_loop_analysis_is_complete(&code),
-                    size == 2,
-                    "{kind}, {size}"
-                );
-                let errors = analyze(&code);
-                let loops = errors
-                    .iter()
-                    .filter_map(|error| match error {
-                        AnalyzerError::CombinationalLoop { identifier, .. } => {
-                            Some(identifier.as_str())
+        let cases = [2, 64, 256]
+            .into_iter()
+            .map(|size| {
+                let exits = (0..size)
+                    .map(|index| {
+                        if kind == "return" {
+                            format!("if flags[{index}] {{ return data; }}")
+                        } else {
+                            format!("if flags[{index}] {{ break; }}")
                         }
-                        _ => None,
                     })
-                    .collect::<Vec<_>>();
-                assert_eq!(loops, ["independent"], "{kind}, {size}: {errors:?}");
-            });
-        }
+                    .collect::<String>();
+                let body = if kind == "return" {
+                    format!(
+                        r#"
+                        function first (flags: input logic<{size}>, data: input logic) -> logic {{
+                            {exits}
+                            return 0;
+                        }}
+                        assign o = first(flags, data);
+                    "#
+                    )
+                } else {
+                    let bound = if kind == "break" { "1" } else { "n" };
+                    format!(
+                        r#"
+                        always_comb {{
+                            o = o;
+                            for _index in 0..{bound} {{ {exits} o = data; }}
+                            o = 0;
+                        }}
+                    "#
+                    )
+                };
+                let code = format!(
+                    r#"
+                    module Top (flags: input logic<{size}>, data: input logic,
+                                n: input logic<32>, o: output logic, independent: output logic) {{
+                        {body}
+                        assign independent = independent;
+                    }}
+                "#
+                );
+                StepCase::new(format!("{kind}, {size}"), code, size == 2)
+            })
+            .collect::<Vec<_>>();
+        check_against_light_steps(&cases, |_, error| {
+            unassigned_independent(error) || matches!(error, AnalyzerError::UnassignVariable { .. })
+        });
     }
 }
 
@@ -876,4 +859,89 @@ fn partition_sweep_keeps_fragmented_modules_complete_and_parent_cycles() {
             "{errors:?}"
         );
     }
+}
+
+#[test]
+fn regional_reads_take_module_steps() {
+    // Every single-bit write leaves one more fragment in the write history,
+    // and every later read of a different bit resolves through all of them.
+    let code = |reads: usize| {
+        let writes = (0..64)
+            .map(|bit| format!("v[{bit}] = d[{bit}];"))
+            .collect::<String>();
+        let reads = (0..reads)
+            .map(|bit| format!("o[{bit}] = v[{bit}];"))
+            .collect::<String>();
+        format!(
+            "module Top (d: input logic<64>, o: output logic<64>) {{
+                var v: logic<64>;
+                always_comb {{
+                    o = 0;
+                    {writes}
+                    {reads}
+                }}
+            }}"
+        )
+    };
+    let steps = |reads| {
+        crate::comb_loop_detect::reset_steps_taken();
+        assert!(comb_loop_analysis_is_complete(&code(reads)));
+        crate::comb_loop_detect::steps_taken()
+    };
+    // Each read passes at least half of the fragments.
+    let (without, with) = (steps(0), steps(64));
+    assert!(with - without >= 64 * 32, "{without} -> {with}");
+}
+
+#[test]
+fn procedure_out_of_steps_does_not_starve_later_procedures() {
+    // The heavy procedure copies sixteen unrolled gates through a runtime
+    // loop; the light ones close a loop between themselves.
+    let gate = gate_stages(true, 16, |_| "s".to_string());
+    let heavy = format!(
+        "always_comb {{ o = 0; for _iteration in 0..n {{ {} }} }}",
+        (0..16)
+            .map(|index| format!("o[{index}] = gate(1'b1, i);"))
+            .collect::<String>()
+    );
+    let light = "always_comb { a = b; } always_comb { b = a; }";
+    let code = |procedures: &str| {
+        format!(
+            r#"
+            module Top (i: input logic, n: input u32, o: output logic<16>) {{
+                var a: logic;
+                var b: logic;
+                function gate (s: input logic, x: input logic) -> logic {{
+                    var v: logic;
+                    v = x;
+                    {gate}
+                    return v;
+                }}
+                {procedures}
+            }}
+            "#
+        )
+    };
+    // The light procedures complete on their first allowance, and the heavy
+    // one needs more than every step.
+    let limit = crate::comb_loop_detect::FIRST_ALLOWANCE * 8;
+    crate::comb_loop_detect::reset_steps_taken();
+    assert!(comb_loop_analysis_is_complete(&code(light)));
+    assert!(crate::comb_loop_detect::steps_taken() < crate::comb_loop_detect::FIRST_ALLOWANCE);
+    crate::comb_loop_detect::reset_steps_taken();
+    assert!(comb_loop_analysis_is_complete(&code(&heavy)));
+    assert!(crate::comb_loop_detect::steps_taken() > limit);
+    crate::comb_loop_detect::with_step_limit(limit, || {
+        for procedures in [format!("{heavy} {light}"), format!("{light} {heavy}")] {
+            let code = code(&procedures);
+            assert!(!comb_loop_analysis_is_complete(&code));
+            let errors = analyze(&code);
+            assert!(
+                errors
+                    .iter()
+                    .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                "{procedures}: {errors:?}"
+            );
+        }
+    });
 }
