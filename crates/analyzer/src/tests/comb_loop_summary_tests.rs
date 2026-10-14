@@ -225,46 +225,49 @@ fn wire_hierarchy_summaries_grow_linearly() {
 
 #[test]
 fn nontrivial_hierarchy_expansion_is_bounded_and_reports_incomplete() {
-    const LIMIT: usize = 512;
-    for body in [
-        "var half: logic<8>; assign half = i; assign o = half;",
-        "assign o = i << 1;",
-        "always_comb { if c { o = i; } else { o = 0; } }",
-    ] {
-        for depth in [2, 16, 32] {
-            let mut code = format!(
-                "module Leaf (i: input logic<16>, c: input logic, o: output logic<16>) {{ {body} }}\n"
-            );
-            let mut previous = "Leaf".to_string();
-            for level in 0..depth {
-                code.push_str(&format!(
-                    r#"
-                    module Wrapper{level} (i: input logic<16>, c: input logic, o: output logic<16>) {{
-                        var middle: logic<16>;
-                        inst left: {previous} (i: i, c: c, o: middle);
-                        inst right: {previous} (i: middle, c: c, o: o);
-                    }}
-                    "#
-                ));
-                previous = format!("Wrapper{level}");
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        const LIMIT: usize = 512;
+        for body in [
+            "var half: logic<8>; assign half = i; assign o = half;",
+            "assign o = i << 1;",
+            "always_comb { if c { o = i; } else { o = 0; } }",
+        ] {
+            for depth in [2, 16, 32] {
+                let mut code = format!(
+                    "module Leaf (i: input logic<16>, c: input logic, o: output logic<16>) {{ {body} }}\n"
+                );
+                let mut previous = "Leaf".to_string();
+                for level in 0..depth {
+                    code.push_str(&format!(
+                        r#"
+                        module Wrapper{level} (i: input logic<16>, c: input logic, o: output logic<16>) {{
+                            var middle: logic<16>;
+                            inst left: {previous} (i: i, c: c, o: middle);
+                            inst right: {previous} (i: middle, c: c, o: o);
+                        }}
+                        "#
+                    ));
+                    previous = format!("Wrapper{level}");
+                }
+                crate::comb_loop_detect::with_step_limit(LIMIT, || {
+                    reset_module_summary_work();
+                    assert!(analyze(&code).is_empty(), "{code}");
+                    let (input_edges, walked_edges) = module_summary_work();
+                    assert!(walked_edges <= input_edges);
+                    assert!(
+                        input_edges <= LIMIT * (depth + 1),
+                        "hierarchy expansion must stay bounded per module: depth={depth}, edges={input_edges}"
+                    );
+                    assert_eq!(
+                        comb_loop_analysis_is_complete(&code),
+                        depth == 2,
+                        "a cutoff must propagate through the remaining hierarchy: {code}"
+                    );
+                });
             }
-            crate::comb_loop_detect::with_step_limit(LIMIT, || {
-                reset_module_summary_work();
-                assert!(analyze(&code).is_empty(), "{code}");
-                let (input_edges, walked_edges) = module_summary_work();
-                assert!(walked_edges <= input_edges);
-                assert!(
-                    input_edges <= LIMIT * (depth + 1),
-                    "hierarchy expansion must stay bounded per module: depth={depth}, edges={input_edges}"
-                );
-                assert_eq!(
-                    comb_loop_analysis_is_complete(&code),
-                    depth == 2,
-                    "a cutoff must propagate through the remaining hierarchy: {code}"
-                );
-            });
         }
-    }
+    })
 }
 
 #[test]

@@ -1,16 +1,27 @@
 //! Combinational loop detection on the analyzer IR (issue #931).
 //!
-//! The analysis pipeline is split by responsibility:
+//! The analysis runs in two tiers. The coarse tier ([`coarse`]) builds a
+//! graph on the regions each module accesses, ignoring versions and path
+//! conditions; a module whose coarse graph is acyclic has no loop the
+//! precise tier could find, and is decided without it, complete unless it
+//! holds constructs the precise tier cannot see through either. Most
+//! modules end there. The precise tier runs on the rest, and builds the
+//! summaries of their children on demand:
 //!
 //! 1. discover sparse bit and array regions used by each module;
 //! 2. evaluate procedures in statement order and build dependency edges;
 //! 3. detect compatible cycles in the graph;
 //! 4. summarize module feedthrough bottom-up for parent instances.
 //!
+//! A child the precise tier could not finish leaves its parent incomplete
+//! only when the parent needs the precise tier itself: the coarse summary
+//! of the child stays exact enough to clear the parent.
+//!
 //! Under-detect by design: opaque constructs (SystemVerilog black
 //! boxes, `inout` ports, recursive functions) add no edges; the
 //! simulator's `analyze_dependency` is the backup safety net.
 
+mod coarse;
 mod diagnostics;
 mod graph;
 mod hierarchy;
@@ -101,14 +112,118 @@ pub(crate) fn is_complete(ir: &Ir) -> bool {
     check_inner(ir).1
 }
 
+#[cfg(test)]
+thread_local! {
+    static PRECISE_ONLY: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Run `f` with the precise tier deciding every module, as if the coarse
+/// tier proved nothing. Tests of the precise tier's own limits and costs
+/// use it, and every module it decides checks that the coarse tier sees
+/// each loop the precise tier reports.
+#[cfg(test)]
+pub(crate) fn with_precise_tier_only<T>(f: impl FnOnce() -> T) -> T {
+    with_tiers(Some(true), f)
+}
+
+/// Run `f` with both tiers, whatever `VERYL_COMB_LOOP_PRECISE_ONLY` says.
+/// Tests of the tiering itself use it.
+#[cfg(test)]
+pub(crate) fn with_both_tiers<T>(f: impl FnOnce() -> T) -> T {
+    with_tiers(Some(false), f)
+}
+
+#[cfg(test)]
+fn with_tiers<T>(precise_only: Option<bool>, f: impl FnOnce() -> T) -> T {
+    steps::with_override(&PRECISE_ONLY, precise_only, f)
+}
+
+/// `VERYL_COMB_LOOP_PRECISE_ONLY=1` runs the whole test suite this way, so
+/// that every loop it reports checks the coarse tier.
+fn precise_tier_only() -> bool {
+    #[cfg(test)]
+    {
+        static FROM_ENVIRONMENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        PRECISE_ONLY.get().unwrap_or_else(|| {
+            *FROM_ENVIRONMENT.get_or_init(|| {
+                std::env::var_os("VERYL_COMB_LOOP_PRECISE_ONLY").is_some_and(|value| value == "1")
+            })
+        })
+    }
+    #[cfg(not(test))]
+    false
+}
+
+/// Checks that the coarse tier sees every cycle the precise tier finds: a
+/// module whose coarse graph and those of every module below it are acyclic
+/// must have none. The precise tier may find a child's own cycle again
+/// through its summary, which the child reports itself.
+#[cfg(test)]
+#[derive(Default)]
+struct CoarseMissCheck {
+    acyclic_below: HashSet<Signature>,
+}
+
+#[cfg(test)]
+struct ModuleMissCheck {
+    acyclic: bool,
+    found_before: usize,
+}
+
+#[cfg(test)]
+impl CoarseMissCheck {
+    fn enter(&mut self, module: &Module, verdict: &coarse::CoarseVerdict) -> ModuleMissCheck {
+        let acyclic = verdict.proves_acyclic()
+            && hierarchy::child_modules(module)
+                .all(|child| self.acyclic_below.contains(&child.signature));
+        if acyclic {
+            self.acyclic_below.insert(module.signature.clone());
+        }
+        ModuleMissCheck {
+            acyclic,
+            found_before: diagnostics::found_cycles(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl ModuleMissCheck {
+    fn check(&self, module: &Module) {
+        assert!(
+            diagnostics::found_cycles() == self.found_before || !self.acyclic,
+            "the coarse tier missed a loop in {}",
+            module.name
+        );
+    }
+}
+
 fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
     let mut errors = Vec::new();
     let mut complete = true;
     let mut summaries: HashMap<Signature, ModuleCombSummary> = HashMap::default();
+    let mut coarse_summaries: HashMap<Signature, coarse::CoarseSummary> = HashMap::default();
+    // Modules the coarse tier cleared, whose precise summaries are built
+    // only if a parent needs them.
+    let mut cleared = HashSet::default();
+    #[cfg(test)]
+    let mut misses = CoarseMissCheck::default();
 
     let mut diagnostic_replays = DiagnosticReplayCache::default();
     let mut reported = HashSet::default();
     for module in module_postorder(ir) {
+        let (verdict, coarse_summary) = coarse::analyze(module, &coarse_summaries);
+        #[cfg(test)]
+        let miss_check = misses.enter(module, &verdict);
+        coarse_summaries.insert(module.signature.clone(), coarse_summary);
+        if verdict.proves_acyclic() && !precise_tier_only() {
+            complete &= verdict.is_complete();
+            cleared.insert(module.signature.clone());
+            continue;
+        }
+        for child in hierarchy::child_modules(module) {
+            complete &= summarize_precisely(child, &mut cleared, &mut summaries, &mut errors);
+        }
+
         let mut steps = Steps::new();
         let (graph, module_complete) = match build_module_graph(module, &summaries, &mut steps) {
             Ok(result) => result,
@@ -128,13 +243,117 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
             &mut errors,
             &mut reported,
         );
-        let mut summary = compute_module_summary(module, &graph);
-        summary.complete = module_complete && cycles_complete;
-        summaries.insert(module.signature.clone(), summary);
+        #[cfg(test)]
+        miss_check.check(module);
+        summaries.insert(
+            module.signature.clone(),
+            module_summary(module, &graph, module_complete && cycles_complete),
+        );
         complete &= module_complete && cycles_complete;
     }
 
     (errors, complete)
+}
+
+/// Build the precise summaries of a module the coarse tier cleared and of
+/// the cleared modules below it, children first, for a parent the precise
+/// tier decides. Their own cycles need no search: there are none. Modules
+/// the analysis did not visit keep no summary, as before. Returns false when
+/// a module failed to build, which leaves the analysis incomplete.
+fn summarize_precisely(
+    root: &Module,
+    cleared: &mut HashSet<Signature>,
+    summaries: &mut HashMap<Signature, ModuleCombSummary>,
+    errors: &mut Vec<AnalyzerError>,
+) -> bool {
+    let mut complete = true;
+    // A worklist instead of recursion, so a deep hierarchy needs no stack.
+    let mut work = vec![(root, false)];
+    while let Some((module, children_done)) = work.pop() {
+        if !children_done {
+            if cleared.remove(&module.signature) {
+                work.push((module, true));
+                work.extend(hierarchy::child_modules(module).map(|child| (child, false)));
+            }
+            continue;
+        }
+        // The coarse tier clears only modules within the precise tier's
+        // positions, so this builds; an error is still the user's to see.
+        let summary = match build_module_graph(module, summaries, &mut Steps::new()) {
+            Ok((graph, module_complete)) => module_summary(module, &graph, module_complete),
+            Err(error) => {
+                errors.push(*error);
+                complete = false;
+                ModuleCombSummary::default()
+            }
+        };
+        summaries.insert(module.signature.clone(), summary);
+    }
+    complete
+}
+
+/// The summary parents import, complete when the graph and its cycle
+/// decisions are.
+fn module_summary(module: &Module, graph: &DependencyGraph, complete: bool) -> ModuleCombSummary {
+    let mut summary = compute_module_summary(module, graph);
+    summary.complete = complete;
+    summary
+}
+
+/// Where a position of the module would leave the precise tier's range: a
+/// variable, or a function argument or result without one, whose elements
+/// or bits exceed `isize::MAX`. Both tiers leave such a module to this
+/// diagnostic.
+fn position_overflow(module: &Module) -> Option<veryl_parser::token_range::TokenRange> {
+    let limit = isize::MAX as usize;
+    let oversized = |r#type: &crate::ir::Type| {
+        r#type.total_array().is_some_and(|size| size > limit)
+            || r#type.total_width().is_some_and(|width| width > limit)
+    };
+    if let Some(variable) = module
+        .variables
+        .values()
+        .chain(module.interface_members.values())
+        .find(|variable| oversized(&variable.r#type))
+    {
+        return Some(variable.token);
+    }
+    let known =
+        |id: &VarId| module.variables.contains_key(id) || module.interface_members.contains_key(id);
+    for function in module.functions.values() {
+        for body in &function.functions {
+            for (path, id) in &body.arg_map {
+                if known(id) {
+                    continue;
+                }
+                let r#type = function
+                    .args
+                    .iter()
+                    .flat_map(|argument| &argument.members)
+                    .find_map(|(member, comptime, _)| (member == path).then_some(&comptime.r#type));
+                if r#type.is_some_and(oversized) {
+                    return Some(module.token);
+                }
+            }
+            if let Some(id) = body.ret
+                && !known(&id)
+                && oversized(&function.r#type.r#type)
+            {
+                return Some(module.token);
+            }
+        }
+    }
+    None
+}
+
+/// The context that evaluates a module's constant indices, selects and
+/// calls. Both tiers must evaluate them alike.
+fn module_context(module: &Module) -> Context {
+    let mut ctx = Context::default();
+    ctx.variables = module.variables.clone();
+    ctx.variables.extend(module.interface_members.clone());
+    ctx.functions = module.functions.clone();
+    ctx
 }
 
 /// One storage region per variable: its whole declared extent. Procedure SSA
@@ -215,29 +434,15 @@ fn build_module_graph_with_trace(
     tracing: TraceKind,
     steps: &mut Steps,
 ) -> Result<(DependencyGraph, bool), Box<AnalyzerError>> {
-    let mut ctx = Context::default();
-    ctx.variables = module.variables.clone();
-    ctx.variables.extend(module.interface_members.clone());
-    ctx.functions = module.functions.clone();
-    let limit = isize::MAX as usize;
-    let oversized = module
-        .variables
-        .values()
-        .chain(module.interface_members.values())
-        .find(|variable| {
-            variable
-                .r#type
-                .total_array()
-                .is_some_and(|size| size > limit)
-                || variable.total_width().is_some_and(|width| width > limit)
-        })
-        .map(|variable| variable.token);
-    if let Some(token) = oversized {
+    if let Some(token) = position_overflow(module) {
         return Err(Box::new(
             AnalyzerError::combinational_loop_position_overflow(&token),
         ));
     }
+    let ctx = module_context(module);
     let bit_part = build_bit_partition(module, &ctx);
+    // `position_overflow` covers every storage the partition takes; this
+    // stays in case they part.
     if let Some(token) = bit_part.position_overflow().map(|id| {
         module
             .variables

@@ -530,10 +530,7 @@ pub(super) struct ProcedureContext {
 
 impl ProcedureContext {
     pub(super) fn new(module: &Module) -> Self {
-        let mut ctx = Context::default();
-        ctx.variables = module.variables.clone();
-        ctx.variables.extend(module.interface_members.clone());
-        ctx.functions = module.functions.clone();
+        let ctx = super::module_context(module);
         let module_scope_ids = ctx
             .variables
             .iter()
