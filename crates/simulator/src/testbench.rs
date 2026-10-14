@@ -996,7 +996,7 @@ struct TbClock<'a> {
 
 /// A `rst.assert` in progress: the level is held while its process waits
 /// for the clock, and the first of those edges carries the assertion.
-struct ResetHold<'a> {
+struct ResetActive<'a> {
     reset: &'a Event,
     assertion_pending: bool,
 }
@@ -1010,7 +1010,7 @@ enum TaskState<'a> {
     Waiting {
         clock: usize,
         remaining: u64,
-        reset: Option<ResetHold<'a>>,
+        reset: Option<ResetActive<'a>>,
     },
     Done,
 }
@@ -1302,7 +1302,7 @@ fn run_task<'a>(
                 task.state = TaskState::Waiting {
                     clock: clock_index(clocks, clock, high_time, low_time),
                     remaining: duration,
-                    reset: Some(ResetHold {
+                    reset: Some(ResetActive {
                         reset,
                         assertion_pending: true,
                     }),

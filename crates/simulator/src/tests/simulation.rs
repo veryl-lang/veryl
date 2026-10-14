@@ -36366,3 +36366,129 @@ fn an_event_gate_keeps_state_only_its_own_statements_read() {
     }
     assert!(any_gated, "the test needs a gate");
 }
+
+#[test]
+fn reset_value_literal_polarity() {
+    let code = r#"
+    module Top (
+        o_hold0   : output reset_async_high,
+        o_hold1   : output reset_async_low,
+        o_hold2   : output reset_sync_high,
+        o_hold3   : output reset_sync_low,
+        o_release0: output reset_async_high,
+        o_release1: output reset_async_low,
+        o_release2: output reset_sync_high,
+        o_release3: output reset_sync_low,
+    ) {
+        assign o_hold0    = reset_active;
+        assign o_hold1    = reset_active;
+        assign o_hold2    = reset_active;
+        assign o_hold3    = reset_active;
+        assign o_release0 = reset_inactive;
+        assign o_release1 = reset_inactive;
+        assign o_release2 = reset_inactive;
+        assign o_release3 = reset_inactive;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+
+        for (name, exp) in [
+            ("o_hold0", 1),
+            ("o_hold1", 0),
+            ("o_hold2", 1),
+            ("o_hold3", 0),
+            ("o_release0", 0),
+            ("o_release1", 1),
+            ("o_release2", 0),
+            ("o_release3", 1),
+        ] {
+            assert_eq!(sim.get(name).unwrap(), Value::new(exp, 1, false), "{name}");
+        }
+    }
+}
+
+#[test]
+fn reset_value_literal_reset_type() {
+    let code = r#"
+    module Top (
+        o_hold   : output reset,
+        o_release: output reset,
+    ) {
+        assign o_hold    = reset_active;
+        assign o_release = reset_inactive;
+    }
+    "#;
+
+    for base in Config::all() {
+        for active_high in [false, true] {
+            let config = Config {
+                abstract_reset_active_high: active_high,
+                ..base.clone()
+            };
+            dbg!(&config);
+
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+
+            let (hold, release) = if active_high { (1, 0) } else { (0, 1) };
+            assert_eq!(sim.get("o_hold").unwrap(), Value::new(hold, 1, false));
+            assert_eq!(sim.get("o_release").unwrap(), Value::new(release, 1, false));
+        }
+    }
+}
+
+#[test]
+fn reset_value_literal_context() {
+    let code = r#"
+    module Sub (
+        i_rst0: input  reset_async_low,
+        i_rst1: input  reset_sync_high,
+        o_rst0: output logic,
+        o_rst1: output logic,
+    ) {
+        assign o_rst0 = i_rst0;
+        assign o_rst1 = i_rst1;
+    }
+    module Top (
+        i_rst : input  reset_async_high,
+        o_rst0: output logic,
+        o_rst1: output logic,
+        o_eq  : output logic,
+        o_ne  : output logic,
+    ) {
+        inst u: Sub (
+            i_rst0: reset_active,
+            i_rst1: reset_active,
+            o_rst0,
+            o_rst1,
+        );
+
+        assign o_eq = i_rst == reset_active;
+        assign o_ne = reset_inactive != i_rst;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for (i_rst, exp_eq, exp_ne) in [(1, 1, 1), (0, 0, 0)] {
+            sim.set("i_rst", Value::new(i_rst, 1, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+
+            assert_eq!(sim.get("o_rst0").unwrap(), Value::new(0, 1, false));
+            assert_eq!(sim.get("o_rst1").unwrap(), Value::new(1, 1, false));
+            assert_eq!(sim.get("o_eq").unwrap(), Value::new(exp_eq, 1, false));
+            assert_eq!(sim.get("o_ne").unwrap(), Value::new(exp_ne, 1, false));
+        }
+    }
+}

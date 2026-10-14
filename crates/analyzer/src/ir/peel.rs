@@ -1182,7 +1182,10 @@ impl<'a> Subst<'a> {
             },
             Factor::FunctionCall(call) if self.analysis => self.call(call),
             Factor::FunctionCall(_) => None,
-            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => Some(()),
+            Factor::Value(_)
+            | Factor::ResetValue(..)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => Some(()),
         }
     }
 
@@ -1656,7 +1659,9 @@ fn factor_has_call(factor: &Factor) -> bool {
             // free.
             _ => !x.comptime.is_const,
         },
-        Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => false,
+        Factor::Value(_) | Factor::ResetValue(..) | Factor::Anonymous(_) | Factor::Unknown(_) => {
+            false
+        }
     }
 }
 
@@ -1956,7 +1961,10 @@ fn expr_reads(expr: &Expression, f: &mut impl FnMut(VarId)) {
             Factor::HierVariable(x) => selector_reads(&x.index, &x.select, f),
             Factor::FunctionCall(x) => call_reads(x, f),
             Factor::SystemFunctionCall(x) => system_reads(x, f),
-            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => {}
+            Factor::Value(_)
+            | Factor::ResetValue(..)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => {}
         },
         Expression::Unary(_, x, _) => expr_reads(x, f),
         Expression::Binary(x, _, y, _) => {
