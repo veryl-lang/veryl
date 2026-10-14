@@ -859,8 +859,8 @@ impl IMap {
     }
 
     /// Snapshot the accumulated value into a fresh comb temp so RMW
-    /// self-reads can slice it cheaply.  No-op when the map is already one
-    /// full-width variable read (the initial self-read state or a previous
+    /// self-reads can slice it cheaply.  No-op when the map already reads one
+    /// variable in place (the initial self-read state or a previous
     /// snapshot).  The temp assign lands just before the fused write.
     ///
     /// Self-read intervals stay put and the temp holds zero over their bits.
@@ -874,17 +874,7 @@ impl IMap {
         alloc: &mut dyn FnMut(usize) -> isize,
         token: TokenRange,
     ) -> Option<()> {
-        if self.iv.len() == 1
-            && let Fe::Var {
-                hi,
-                lo,
-                var_full_width,
-                ..
-            } = &self.iv[0].fe
-            && *lo == 0
-            && (*hi as usize) == width - 1
-            && *var_full_width == width
-        {
+        if self.reads_one_variable_in_place(width) {
             return Some(());
         }
         let keep: Vec<bool> = self
@@ -914,15 +904,20 @@ impl IMap {
             comb_direct: false,
             token,
         });
-        let ver = self.next_ver;
-        self.next_ver += 1;
-        // Adjacent snapshotted intervals coalesce: the temp holds them at
-        // their own bit positions, so one read spans the whole run — and an
-        // all-snapshotted map collapses back to the single full-width read.
+        // A snapshot moves a value, it does not write one, so each interval
+        // keeps its generation: a branch that only snapshots has not touched
+        // the bits, and merging it must not make them conditional.  Adjacent
+        // snapshotted intervals of one generation coalesce; the temp holds
+        // them at their own bit positions, so one read spans the run, and
+        // `concat_expr` joins runs of different generations when it builds
+        // the expression.
         let mut iv: Vec<Interval> = Vec::with_capacity(self.iv.len());
         let mut snapped: Vec<bool> = Vec::with_capacity(self.iv.len());
         for (old, &k) in self.iv.iter().zip(&keep) {
-            if !k && snapped.last() == Some(&true) {
+            if !k
+                && snapped.last() == Some(&true)
+                && iv.last().is_some_and(|last| last.ver == old.ver)
+            {
                 iv.last_mut()?.hi = old.hi;
                 continue;
             }
@@ -930,7 +925,7 @@ impl IMap {
                 hi: old.hi,
                 lo: old.lo,
                 fe: old.fe.clone(),
-                ver: if k { old.ver } else { ver },
+                ver: old.ver,
             });
             snapped.push(!k);
         }
@@ -1119,44 +1114,76 @@ impl IMap {
             .iter()
             .filter(|iv| iv.lo >= lo && iv.hi <= hi)
             .collect();
-        let width = (hi - lo + 1) as usize;
-        if let [iv] = inside.as_slice() {
-            return iv.fe.to_expr(width);
-        }
-        let mut elements = Vec::with_capacity(inside.len());
-        for iv in inside.iter().rev() {
-            let w = (iv.hi - iv.lo + 1) as usize;
-            elements.push((Box::new(iv.fe.to_expr(w)?), 1usize, w));
-        }
-        Some(ProtoExpression::Concatenation {
-            elements,
-            width,
-            expr_context: ExpressionContext {
-                width,
-                signed: false,
-            },
+        concat_expr(&inside, (hi - lo + 1) as usize)
+    }
+
+    /// Whether the map is one variable read whole, each interval at its own
+    /// bit positions: the initial self-read, or a previous snapshot.
+    fn reads_one_variable_in_place(&self, width: usize) -> bool {
+        let Some(Fe::Var {
+            var_offset: first, ..
+        }) = self.iv.first().map(|iv| &iv.fe)
+        else {
+            return false;
+        };
+        self.iv.iter().all(|iv| {
+            matches!(&iv.fe, Fe::Var { var_offset, var_full_width, hi, lo }
+                if var_offset == first && *var_full_width == width && *lo == iv.lo && *hi == iv.hi)
         })
     }
 
     fn to_expr(&self, total_width: usize) -> Option<ProtoExpression> {
-        if self.iv.len() == 1 {
-            return self.iv[0].fe.to_expr(total_width);
-        }
-        // MSB-first concatenation.
-        let mut elements = Vec::with_capacity(self.iv.len());
-        for iv in self.iv.iter().rev() {
-            let w = (iv.hi - iv.lo + 1) as usize;
-            elements.push((Box::new(iv.fe.to_expr(w)?), 1usize, w));
-        }
-        Some(ProtoExpression::Concatenation {
-            elements,
-            width: total_width,
-            expr_context: ExpressionContext {
-                width: total_width,
-                signed: false,
-            },
-        })
+        concat_expr(&self.iv.iter().collect::<Vec<_>>(), total_width)
     }
+}
+
+/// LSB-first, contiguous intervals as one expression, MSB first.  Neighbours
+/// reading consecutive bits of one variable become one read.
+fn concat_expr(ivs: &[&Interval], width: usize) -> Option<ProtoExpression> {
+    let mut runs: Vec<(u32, u32, Fe)> = Vec::with_capacity(ivs.len());
+    for iv in ivs {
+        if let Some((
+            _,
+            run_hi,
+            Fe::Var {
+                var_offset,
+                var_full_width,
+                hi,
+                ..
+            },
+        )) = runs.last_mut()
+            && let Fe::Var {
+                var_offset: o,
+                var_full_width: fw,
+                hi: next_hi,
+                lo: next_lo,
+            } = &iv.fe
+            && o == var_offset
+            && fw == var_full_width
+            && *next_lo == *hi + 1
+        {
+            *hi = *next_hi;
+            *run_hi = iv.hi;
+            continue;
+        }
+        runs.push((iv.lo, iv.hi, iv.fe.clone()));
+    }
+    if let [(_, _, fe)] = runs.as_slice() {
+        return fe.to_expr(width);
+    }
+    let mut elements = Vec::with_capacity(runs.len());
+    for (lo, hi, fe) in runs.iter().rev() {
+        let w = (hi - lo + 1) as usize;
+        elements.push((Box::new(fe.to_expr(w)?), 1usize, w));
+    }
+    Some(ProtoExpression::Concatenation {
+        elements,
+        width,
+        expr_context: ExpressionContext {
+            width,
+            signed: false,
+        },
+    })
 }
 
 /// Fold the value of `dst` across `writer_stmts` (top-level statements of
@@ -2241,6 +2268,47 @@ mod tests {
         assert_eq!(stats.skip_partial, 1);
         assert_eq!(stats.fused_vars, 0);
         assert_eq!(format!("{body:?}"), before);
+    }
+
+    #[test]
+    fn a_snapshot_in_a_branch_leaves_bits_it_does_not_write_unconditional() {
+        // `v[7:4] = a; if c { v[3:0] = b } else { v[3:0] = v[7:4] }`: the else
+        // arm reads `v`, which snapshots it, but writes only `v[3:0]`.  The
+        // fused `v[7:4]` must not depend on `c`, or a reader of `v[7:4]` that
+        // feeds `c` closes a loop the circuit does not have.
+        let mut body = vec![
+            assign_bits(0x0, 8, 7, 4, cvar(0x108, 4)),
+            ProtoStatement::If(ProtoIfStatement {
+                cond: Some(cvar(0x100, 1)),
+                true_side: vec![assign_bits(0x0, 8, 3, 0, cvar(0x110, 4))],
+                false_side: vec![assign_bits(0x0, 8, 3, 0, cvar_bits(0x0, 8, 7, 4))],
+            }),
+        ];
+        let mut alloc_at = 0x1000isize;
+        let mut alloc = |w: usize, _: isize| -> isize {
+            let off = alloc_at;
+            alloc_at += crate::ir::variable::native_bytes(w) as isize;
+            off
+        };
+        let mut stats = RunStats::default();
+        split_block(&mut body, &mut stats, &mut alloc);
+
+        assert_eq!(stats.fused_vars, 1, "the chain must fuse");
+        let fused = body
+            .iter()
+            .find_map(|s| match s {
+                ProtoStatement::Assign(a) if a.dst == VarOffset::Comb(0x0) => Some(a),
+                _ => None,
+            })
+            .expect("a fused write");
+        let ProtoExpression::Concatenation { elements, .. } = &fused.expr else {
+            panic!("halves fold to a concatenation: {:?}", fused.expr);
+        };
+        assert!(
+            !elements[0].0.reads_offset(VarOffset::Comb(0x100)),
+            "the high half depends on the condition: {:?}",
+            fused.expr
+        );
     }
 
     #[test]

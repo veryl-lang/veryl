@@ -35401,3 +35401,74 @@ fn a_block_reading_bits_another_block_writes_waits_for_them() {
         }
     }
 }
+
+/// `(output, value, width)` per output a case checks.
+type Expected = Vec<(&'static str, u64, usize)>;
+
+/// `code` under every config, inputs set per case and outputs checked.
+fn check_cases(
+    code: &str,
+    inputs: &[(&str, usize)],
+    cases: &[&[u64]],
+    expect: &dyn Fn(&[u64]) -> Expected,
+) {
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for case in cases {
+            for ((name, width), value) in inputs.iter().zip(*case) {
+                sim.set(name, Value::new(*value, *width, false));
+            }
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (name, value, width) in expect(case) {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(value, width, false),
+                    "{name} {case:x?} {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_snapshot_across_generations_leaves_untouched_bits_unconditional() {
+    // The else arm reads `v[7:6]` after writing `v[3:0]`, so the snapshot
+    // spans bits of two generations.  `v[7:4]` is written before the `if`
+    // only; folding it under `c` would close a loop through `c = v[7]`.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        d: input  logic<4>,
+        o: output logic<8>,
+    ) {
+        var v: logic<8>;
+        var c: logic;
+        always_comb {
+            v[7:4] = a;
+            if c {
+                v[3:0] = b;
+            } else {
+                v[3:0] = d;
+                v[1:0] = v[7:6];
+            }
+        }
+        assign c = v[7];
+        assign o = v;
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("b", 4), ("d", 4)],
+        &[&[0x8, 0x5, 0xa], &[0x4, 0x5, 0xa], &[0xc, 0x3, 0x0]],
+        &|k| {
+            let lo = if k[0] & 8 != 0 {
+                k[1]
+            } else {
+                (k[2] & 0xc) | (k[0] >> 2)
+            };
+            vec![("o", (k[0] << 4) | lo, 8)]
+        },
+    );
+}
