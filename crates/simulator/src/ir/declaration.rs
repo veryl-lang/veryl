@@ -696,11 +696,52 @@ fn stable_topo_sort_impl(
             if !has_prior {
                 continue;
             }
-            if let Some(&(next_writer, _)) = wranges.iter().find(|(p, wr)| {
-                *p > reader_idx && ranges_overlap(*wr, *rr) && !exclusive_pieces(reader_idx, *p)
-            }) {
-                adj_sem[reader_idx].insert(next_writer);
-                cause!(reader_idx, next_writer, "war");
+            // Every bit read must be read before the first later write of it,
+            // and that is not one writer when the later ones are partial.
+            // Only bits a prior same-block writer produces are read as a
+            // version; the rest are settled values a later writer supplies.
+            let (r_lo, r_hi) = match rr {
+                Some((hi, lo)) => (*lo, *hi),
+                None => (0, usize::MAX),
+            };
+            let mut unclobbered: Vec<(usize, usize)> = merge_spans(
+                wranges
+                    .iter()
+                    .filter(|(p, _)| *p < reader_idx && same_block(*p, reader_idx))
+                    .filter_map(|(_, wr)| {
+                        let (lo, hi) = match wr {
+                            Some((hi, lo)) => (*lo, *hi),
+                            None => (0, usize::MAX),
+                        };
+                        let (lo, hi) = (lo.max(r_lo), hi.min(r_hi));
+                        (lo <= hi).then_some((lo, hi))
+                    })
+                    .collect(),
+            );
+            for (p, wr) in wranges.iter() {
+                if unclobbered.is_empty() {
+                    break;
+                }
+                if *p <= reader_idx || exclusive_pieces(reader_idx, *p) {
+                    continue;
+                }
+                let (w_lo, w_hi) = match wr {
+                    Some((hi, lo)) => (*lo, *hi),
+                    None => (0, usize::MAX),
+                };
+                if !unclobbered.iter().any(|&(lo, hi)| lo <= w_hi && w_lo <= hi) {
+                    continue;
+                }
+                adj_sem[reader_idx].insert(*p);
+                cause!(reader_idx, *p, "war");
+                unclobbered = unclobbered
+                    .into_iter()
+                    .flat_map(|(lo, hi)| {
+                        let below = (lo < w_lo).then(|| (lo, (w_lo - 1).min(hi)));
+                        let above = (hi > w_hi).then(|| ((w_hi + 1).max(lo), hi));
+                        below.into_iter().chain(above)
+                    })
+                    .collect();
             }
         }
     }

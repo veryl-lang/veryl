@@ -35472,3 +35472,96 @@ fn a_snapshot_across_generations_leaves_untouched_bits_unconditional() {
         },
     );
 }
+
+#[test]
+fn a_read_comes_before_every_later_write_of_its_bits() {
+    // `v3[7:4] = v2[3:0]` reads the version of `v2[3:0]` written above it, and
+    // two later writes each replace half of it.  Both must wait for the read;
+    // ordering only the first leaves `v2[3:2] = ...` free to run ahead.
+    let code = r#"
+    module Top (
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+        o3: output logic<8>,
+        o4: output logic<8>,
+    ) {
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v3: logic<8>;
+        var v4: logic<8>;
+        assign o1 = v1;
+        assign o2 = v2;
+        assign o3 = v3;
+        assign o4 = v4;
+        always_comb {
+            v4[3:0] = i3[3:0];
+            v1      = i2;
+            v4[7:4] = v3[3:0];
+        }
+        always_comb {
+            v2[7:4] = i3[6:3];
+        }
+        always_comb {
+            v2[3:0] = i2[6:3];
+            v3[3:0] = v1[3:0];
+            v3[7:4] = v3[3:0];
+            v3[7:4] = v2[3:0];
+            v2[1:0] = i2[4:3];
+            v2[3:2] = v1[4:3];
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i2", 8), ("i3", 8)],
+        &[&[0xb1, 0xd0], &[0x0f, 0xa8], &[0x70, 0x2c], &[0x00, 0xff]],
+        &|k| {
+            let (i2, i3) = (k[0], k[1]);
+            let v2 = (((i3 >> 3) & 0xf) << 4) | (((i2 >> 3) & 3) << 2) | ((i2 >> 3) & 3);
+            let v3 = (((i2 >> 3) & 0xf) << 4) | (i2 & 0xf);
+            let v4 = ((i2 & 0xf) << 4) | (i3 & 0xf);
+            vec![("o1", i2, 8), ("o2", v2, 8), ("o3", v3, 8), ("o4", v4, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_read_of_settled_bits_does_not_wait_for_their_writer_to_come_after() {
+    // `y` reads `x[3:1]`, versions this block wrote, and `x[7:4]`, settled
+    // bits the assign below supplies.  Only the versions are bound to come
+    // before a later write; ordering the settled bits that way too would
+    // contradict their own edge and reject the design.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        c: input  logic<2>,
+        e: input  logic<4>,
+        o: output logic<8>,
+        q: output logic   ,
+    ) {
+        var x: logic<8>;
+        var s: logic<4>;
+        var y: logic;
+        always_comb {
+            x[3:0] = a;
+            x[1:0] = c;
+            y      = ^x[7:1];
+            s      = e;
+        }
+        assign x[7:4] = s;
+        assign o      = x;
+        assign q      = y;
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("c", 2), ("e", 4)],
+        &[&[0x8, 0x1, 0xa], &[0x4, 0x2, 0x1], &[0xc, 0x3, 0x0]],
+        &|k| {
+            let x = (k[2] << 4) | (k[0] & 0xc) | k[1];
+            vec![("o", x, 8), ("q", ((x >> 1).count_ones() & 1) as u64, 1)]
+        },
+    );
+}
