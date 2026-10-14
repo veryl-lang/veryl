@@ -1,0 +1,4 @@
+module invalid_select_plus_colon_upper {
+    var a : logic<8>;
+    let _b: logic<4> = a[6+:4];
+}

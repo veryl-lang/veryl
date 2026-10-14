@@ -1253,9 +1253,9 @@ fn component_on_gated_clock_fires_with_the_gate() {
 
 #[test]
 fn component_on_a_falling_edge_stages_settled_inputs() {
-    // Staging reads the component's inputs, which the falling-edge subset
-    // was not built from: a batch a component listens to must be settled in
-    // full, or the mirror samples `w` from before the rising edge.
+    // Staging reads the component's inputs, so a falling-edge batch a
+    // component listens to must see a settled comb, or the mirror samples
+    // `w` from before the rising edge.
     let code = r#"
     module Counter (
         clk: input clock,
@@ -1300,17 +1300,7 @@ fn component_on_a_falling_edge_stages_settled_inputs() {
         }
     }
     "#;
-    use crate::ir::module::TEST_FALL_PARTIAL_CAPS;
-    TEST_FALL_PARTIAL_CAPS.with(|c| c.set(Some((usize::MAX, usize::MAX))));
-    let results = run_component_test(code, "comp_test");
-    TEST_FALL_PARTIAL_CAPS.with(|c| c.set(None));
-    for (config, _, sim) in &results {
-        assert!(
-            sim.ir.fall_partial_group_of.iter().any(|g| *g != u32::MAX),
-            "the falling-edge clock is not covered, {config:?}"
-        );
-    }
-    assert_all_pass(&results);
+    assert_all_pass(&run_component_test(code, "comp_test"));
 }
 
 #[test]

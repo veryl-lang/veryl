@@ -1691,3 +1691,51 @@ fn comb_loop_generic_specializations_report_one_diagnostic() {
         .count();
     assert_eq!(loops, 1, "{errors:?}");
 }
+
+comb_loop_case!(
+    comb_loop_instance_outputs_reach_only_their_packed_elements,
+    "an instance output reaches only the packed element bound to it",
+    r#"
+    module Cell (a_di: input logic<8>, carry: output logic, sum_do: output logic<8>) {
+        var sum_ext: logic<9>;
+        assign sum_ext = {1'b0, a_di} + 9'd1;
+        assign carry   = sum_ext[8];
+        assign sum_do  = sum_ext[7:0];
+    }
+    module Top (i: input logic<8>, q: output logic<8>) {
+        var a : logic<3, 8>;
+        var s : logic<3, 8>;
+        var cy: logic<3>   ;
+        assign a[0] = i;
+        assign a[1] = {s[0][6:0], ~s[0][7]};
+        assign a[2] = {s[1][6:0], ~s[1][7]};
+        for k in 0..3 :g {
+            inst u: Cell (a_di: a[k], carry: cy[k], sum_do: s[k]);
+        }
+        assign q = s[2];
+    }
+    "#,
+    false
+);
+
+comb_loop_case!(
+    comb_loop_instance_output_element_feeds_its_own_input,
+    "an instance output feeding its own packed element is a loop",
+    r#"
+    module Cell (a_di: input logic<8>, sum_do: output logic<8>) {
+        assign sum_do = a_di + 8'd1;
+    }
+    module Top (i: input logic<8>, q: output logic<8>) {
+        var a: logic<3, 8>;
+        var s: logic<3, 8>;
+        assign a[0] = i;
+        assign a[1] = s[1];
+        assign a[2] = s[1];
+        for k in 0..3 :g {
+            inst u: Cell (a_di: a[k], sum_do: s[k]);
+        }
+        assign q = s[2];
+    }
+    "#,
+    true
+);

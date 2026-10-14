@@ -1083,26 +1083,31 @@ impl VarSelect {
                     return None;
                 }
 
-                for (i, beg) in self.0.iter().enumerate() {
+                for (i, index) in self.0.iter().enumerate() {
                     if let Some(size) = r#type.get(i)
                         && let Some(size) = size
                     {
                         let size = *size;
-                        let beg = beg.eval_value(context)?;
+                        let index = index.eval_value(context)?;
 
-                        if beg.is_xz() {
+                        if index.is_xz() {
                             // skip out_of_range check
                             continue;
                         }
 
-                        let beg = beg.to_usize_saturating().unwrap_or(0);
-                        let mut out_of_range = beg >= size;
+                        let index = index.to_usize_saturating().unwrap_or(0);
+                        // The last coordinate is the operator's leading
+                        // expression, and `+:` and `step` lead with the LOW
+                        // bound.  `beg`/`end` hold the normalised pair, high
+                        // first when packed and low first for an array slice.
+                        let (beg, end) = if i == dim - 1 {
+                            (beg, end)
+                        } else {
+                            (index, index)
+                        };
+                        let high = if is_array { end } else { beg };
 
-                        if i == dim - 1 {
-                            out_of_range |= end >= size;
-                        }
-
-                        if out_of_range {
+                        if high >= size {
                             context.insert_error(AnalyzerError::invalid_select(
                                 &InvalidSelectKind::OutOfRange { beg, end, size },
                                 &range,

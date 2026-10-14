@@ -589,6 +589,7 @@ pub fn try_compile_inst_chunks(
                     config: &context.config,
                     use_4state: context.config.use_4state,
                     contains_compiled_block: false,
+                    df_marks: None,
                 };
                 context.backends.try_compile_chunk(&ctx, stmts.as_slice())
             };
@@ -647,6 +648,7 @@ pub fn try_compile_inst_chunks(
                     config: &context.config,
                     use_4state: context.config.use_4state,
                     contains_compiled_block: false,
+                    df_marks: None,
                 };
                 context
                     .backends

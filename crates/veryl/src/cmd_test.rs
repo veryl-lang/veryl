@@ -41,7 +41,7 @@ struct TestSuiteReport {
     /// exact; non-empty is not a measure -- compare timings on `dispatch`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     degraded_modules: Vec<String>,
-    /// Per-module dispatch tallies for the whole-comb / whole-event handles:
+    /// Per-module dispatch tallies for the dataflow / whole-event handles:
     /// how many dispatches ran the requested artifact vs fell back.  Present
     /// only for modules that held such a handle.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -52,7 +52,7 @@ struct TestSuiteReport {
     tests: Vec<TestReport>,
 }
 
-/// One module's whole-* dispatch tally; see `TestSuiteReport::dispatch`.
+/// One module's AOT-C dispatch tally; see `TestSuiteReport::dispatch`.
 #[derive(serde::Serialize)]
 struct DispatchReport {
     /// `kind:module`, matching the `degraded_modules` spelling.
@@ -1334,7 +1334,7 @@ fn run_doc_test(
         sim.ir
             .event_statements
             .keys()
-            .find(|e| matches!(e, veryl_simulator::ir::Event::Clock(_)))
+            .find(|e| matches!(e, veryl_simulator::ir::Event::Clock(..)))
             .cloned()
             .unwrap_or(veryl_simulator::ir::Event::Initial)
     };
@@ -1362,7 +1362,7 @@ fn run_doc_test(
             sim.ir
                 .reset_ports()
                 .first()
-                .map(|id| veryl_simulator::ir::Event::Reset(*id))
+                .map(|id| veryl_simulator::ir::Event::reset(*id))
         });
 
     remap_signal_names(&mut scenario, ports);

@@ -338,7 +338,7 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
 /// full-width `Assign`s.  No-op (empty set) when the env knob is off.
 /// Hash of the DCE-relevant liveness of `slices`: the per-comb-offset read /
 /// full-write / partial-write flags plus the runtime-indexed array ranges —
-/// exactly the inputs `collect_dead_offsets` reads. Used to key the whole-comb
+/// exactly the inputs `collect_dead_offsets` reads. Used to key the comb
 /// pipeline cache on the event statements' contribution to dead-var DCE without
 /// pinning to their full content (per-test constants, `$readmemh` paths, and
 /// `$display` strings vary between tests but don't change which offsets are

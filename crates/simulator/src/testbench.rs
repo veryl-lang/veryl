@@ -222,12 +222,12 @@ pub fn build_event_map(
 
     for inst in clock_insts {
         let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
-        event_map.entry(inst).or_insert(Event::Clock(var_id));
+        event_map.entry(inst).or_insert(Event::clock(var_id));
     }
 
     for inst in reset_insts {
         let var_id = find_var_id_by_name(module_variables, inst).unwrap_or(VarId::SYNTHETIC);
-        event_map.entry(inst).or_insert(Event::Reset(var_id));
+        event_map.entry(inst).or_insert(Event::reset(var_id));
     }
 
     event_map
@@ -281,8 +281,8 @@ pub fn build_clock_periods(
 /// Convert a list of simulator Statements (from initial block) into TestbenchStatements.
 ///
 /// `event_map` maps $tb instance names (StrId) to their corresponding Events.
-/// For clock_gen instances, the value is Event::Clock(VarId).
-/// For reset_gen instances, the value is Event::Reset(VarId).
+/// For clock_gen instances, the value is `Event::Clock`.
+/// For reset_gen instances, the value is `Event::Reset`.
 pub fn convert_initial_to_testbench(
     stmts: &[Statement],
     event_map: &HashMap<StrId, Event>,
@@ -591,8 +591,8 @@ pub fn run_native_testbench_timed(
 ) -> Result<(TestResult, std::time::Duration), SimulatorError> {
     // `Instant::now` panics on wasm, where the playground runs the testbench.
     // The span opens before `Simulator::new` because construction builds the
-    // settle filter's span table, which `derive_testbench` builds instead when
-    // the filter is off.
+    // dataflow settle's span table, which `derive_testbench` builds instead
+    // when the dataflow settle is off.
     #[cfg(not(target_family = "wasm"))]
     let t_build = std::time::Instant::now();
     // The dump attaches after `init_components` so component trace

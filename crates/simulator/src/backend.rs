@@ -4,8 +4,11 @@
 //! artifact.  Two granularities:
 //! - **chunk** (Cranelift): one function per contiguous group, slotted
 //!   into a per-comb / per-event dispatch list.
-//! - **whole** (AOT-C): one function per comb / event statement list,
-//!   invoked in place of per-chunk dispatch.
+//! - **whole** (AOT-C): one function per event statement list, invoked
+//!   in place of per-chunk dispatch.
+//!
+//! The AOT-C comb settle is the dataflow module (`ir::opt::dataflow`), which
+//! the module builder compiles directly rather than through a `Backend`.
 //!
 //! The interpreter is the fallback when every backend declines.  The
 //! orchestrator lives in [`registry`].
@@ -22,13 +25,11 @@ pub mod cranelift;
 pub mod eq_chain;
 pub mod inst;
 pub mod registry;
-pub mod whole;
 
 /// Comb offsets the AOT-C emitter must not localize + runtime-indexed array
 /// ranges, precomputed in `ProtoModule::conv` while events and derived-clock
 /// candidates are in scope (see `aot_c::emit::set_localize_blocklist`).
 pub type LocalizeInfo = (crate::HashSet<isize>, Vec<(isize, usize, isize)>);
-pub mod validate;
 
 #[cfg(not(target_family = "wasm"))]
 pub use aot_c::AotCBackend;
@@ -64,14 +65,6 @@ pub trait Backend: Send {
         None
     }
 
-    fn compile_whole_comb(
-        &mut self,
-        _ctx: &CompileCtx,
-        _stmts: &[ProtoStatement],
-    ) -> Option<Arc<dyn CompiledWhole>> {
-        None
-    }
-
     fn compile_whole_event(
         &mut self,
         _ctx: &CompileCtx,
@@ -81,35 +74,37 @@ pub trait Backend: Send {
     ) -> Option<Arc<dyn CompiledWhole>> {
         None
     }
-
-    /// Diagnostic hook: `Some(reason)` produces an eprintln after a
-    /// failed `compile_whole_comb`.  Backends typically gate this on
-    /// their own env var (e.g. `VERYL_AOT_C_DIAG`).
-    fn diagnose_whole_comb_fallback(&self, _stmts: &[ProtoStatement]) -> Option<String> {
-        None
-    }
 }
 
-/// A compiled whole-module / whole-event function dispatched in place
-/// of per-statement evaluation.  Shared via `Arc` across instances.
+/// A compiled whole-event function dispatched in place of per-statement
+/// evaluation.  Shared via `Arc` across instances.
 pub trait CompiledWhole: Send + Sync {
     /// `Done`: function ran.  `NotReady`: artifact unavailable (e.g.
     /// async compile pending) — caller must fall back.
     fn try_dispatch(&self, ff: *const u8, comb: *mut u8, log: *mut u8) -> DispatchOutcome;
 
-    /// Constant-cone entry: statements whose inputs never change, split out
-    /// by the backend so the runtime can run them once per simulator
-    /// instance (see `Ir::const_cone_done`) instead of every settle.
-    fn try_dispatch_const(&self, _ff: *const u8, _comb: *mut u8, _log: *mut u8) -> DispatchOutcome {
-        DispatchOutcome::Done
+    /// `try_dispatch` with `ff_delta` set: a dataflow-marked event takes the
+    /// dirty words there.
+    fn try_dispatch_delta(
+        &self,
+        ff: *const u8,
+        comb: *mut u8,
+        log: *mut u8,
+        _delta: isize,
+    ) -> DispatchOutcome {
+        self.try_dispatch(ff, comb, log)
     }
 
-    /// Comb byte ranges `(offset, native_bytes)` this backend intentionally
-    /// leaves stale in `comb_values` (chunk-local intermediate localization).
-    /// The validate dual-run skips these when diffing against the full-buffer
-    /// reference backend.  Empty by default (no localization).
-    fn localized_comb_bytes(&self) -> &[(isize, usize)] {
-        &[]
+    /// Whether every comb store a dataflow cell can read marks the readers
+    /// itself (see `aot_c::emit::set_dataflow_event_marks`).
+    fn dataflow_marked(&self) -> bool {
+        false
+    }
+
+    /// Whether every log push that can change an FF a dataflow cell reads
+    /// marks the readers itself.
+    fn dataflow_ff_marked(&self) -> bool {
+        false
     }
 }
 
@@ -174,4 +169,6 @@ pub struct CompileCtx<'a> {
     /// Cranelift disables load-cache CSE in this case because nested
     /// helpers can mutate comb storage between cached loads.
     pub contains_compiled_block: bool,
+    /// Event code only: the dataflow store marks and their fingerprint.
+    pub df_marks: Option<&'a (crate::ir::opt::dataflow::StoreMarks, u128)>,
 }

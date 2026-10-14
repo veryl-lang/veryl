@@ -1176,3 +1176,120 @@ fn hier_ref_array_slice_in_testbench_assignment() {
         assert_eq!(result, TestResult::Pass, "{config:?}");
     }
 }
+
+/// A testbench `for` is a runtime loop, so a select built from its variable
+/// reaches the hierarchical build sites as a RUNTIME select; the constant arm
+/// is pinned by `storage_bounded_read_clips_to_the_variable` instead.
+#[test]
+fn hier_ref_runtime_select_past_the_variable() {
+    // `extra` holds what only 2-state can check: `==` against an x operand
+    // is x, so a 4-state run could not assert on those bits.
+    let code = |extra: &str| {
+        format!(
+            r#"
+    module Sub (
+        clk: input clock,
+        rst: input reset,
+        din: input logic<4>,
+    ) {{
+        #[allow(unused_variable)]
+        var wide: logic<80>;
+        #[allow(unused_variable)]
+        var arr : logic<32> [4];
+        #[allow(unused_variable)]
+        var sel : logic<2>;
+        always_ff {{
+            if_reset {{
+                wide = 0;
+                arr  = '{{0, 0, 0, 0}};
+                sel  = 0;
+            }} else {{
+                sel  = din[1:0];
+                wide = {{8'hab, 72'h0}} | {{76'h0, din}};
+                arr  = '{{32'h1122_3344, 32'h5566_7788, 32'h99aa_bbcc, 32'hddee_ff00}};
+            }}
+        }}
+    }}
+
+    module Top (
+        clk: input clock,
+        rst: input reset,
+        din: input logic<4>,
+    ) {{
+        inst u_sub: Sub (clk, rst, din);
+    }}
+
+    #[test(hier_select)]
+    module hier_select {{
+        inst clk: $tb::clock_gen;
+        inst rst: $tb::reset_gen(clk);
+
+        var din: logic<4>;
+        var idx: logic<2>;
+        var g  : logic<24> [8];
+        var e  : logic<24> [4];
+
+        inst dut: Top (clk, rst, din);
+
+        initial {{
+            rst.assert();
+            din = 4'b0001;
+            clk.next();
+            // Read out of the DUT so the index is not comptime: that is what
+            // puts the select on the runtime-index build site.
+            idx = dut.u_sub.sel;
+            for i in 0..8 {{
+                g[i] = dut.u_sub.wide[24 * i+:24];
+            }}
+            for i in 0..4 {{
+                e[i] = dut.u_sub.arr[idx][24 * i+:24];
+            }}
+            $assert(g[2] == 24'h0, "in range");
+            // Masking the lost bits away keeps the comparison defined in
+            // 4-state, where they read x.
+            $assert((g[3] & 24'h0000ff) == 24'h0000ab, "overhang keeps the low bits");
+            $assert((e[1] & 24'h0000ff) == 24'h000055, "element overhang keeps them too");
+            {extra}
+            $finish();
+        }}
+    }}
+    "#
+        )
+    };
+
+    // Compared straight out of the read: a stored copy would already have
+    // dropped the x that tells a clipped read from an unbounded one.
+    let exact = r#"for i in 4..8 {
+                $assert(dut.u_sub.wide[24 * i+:24] == 24'h0, "wholly past");
+            }
+            for i in 2..4 {
+                $assert(dut.u_sub.arr[idx][24 * i+:24] == 24'h0, "element wholly past");
+            }"#;
+
+    let mut ran = (0, 0);
+    for (source, only_2state) in [(code(""), false), (code(exact), true)] {
+        for config in Config::all() {
+            if only_2state && config.use_4state {
+                continue;
+            }
+            let ir = analyze_top(&source, &config, "hier_select")
+                .unwrap_or_else(|x| panic!("build failed for {config:?}: {x:?}"));
+            let mut sim = Simulator::new(ir, None);
+            let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
+            let clock_periods = build_clock_periods(&sim.ir.event_statements);
+            let stmts = sim.ir.event_statements.get(&Event::Initial).unwrap();
+            let tb_stmts = convert_initial_to_testbench(stmts, &event_map, &clock_periods, 3);
+            assert_eq!(
+                run_testbench(&mut sim, &tb_stmts),
+                TestResult::Pass,
+                "config: {config:?}"
+            );
+            if config.use_4state {
+                ran.1 += 1;
+            } else {
+                ran.0 += 1;
+            }
+        }
+    }
+    assert!(ran.0 > 0 && ran.1 > 0, "both states must be covered");
+}

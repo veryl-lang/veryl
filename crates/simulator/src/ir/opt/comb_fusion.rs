@@ -74,13 +74,14 @@ pub fn sel_enabled() -> bool {
 }
 
 /// Least share of the comb statements the field-def inliner must retire for
-/// its list to be adopted: below it the cone plan is perturbed with too little
-/// volume to repay it.
+/// its list to be adopted: below it, a list that reorders differently from
+/// the baseline's retires too little to justify the change.
 const SEL_MIN_RETIRED: f64 = 0.20;
 
 /// Whether the field-def inliner's list is adopted over the baseline's, from
-/// the segment count each one's cone plan gates (`None`: no plan).  Gating more
-/// segments costs more dispatches than the retired statements save.
+/// the segment count of each one's cone reorder (`None`: not reordered).  More
+/// segments is taken as a more fragmented schedule, a static proxy for a
+/// costlier one.
 pub(crate) fn adopt_field_defs(
     n_sel: Option<usize>,
     n_base: Option<usize>,

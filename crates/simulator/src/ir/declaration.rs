@@ -81,6 +81,34 @@ fn reset_active_low(context: &mut Context, id: air::VarId) -> bool {
     }
 }
 
+/// Which element of a `clock [N]` / `reset [N]` an `always_ff` sits on.
+/// A scalar indexes nothing and is element 0.
+fn edge_element(
+    context: &mut Context,
+    id: air::VarId,
+    index: &air::VarIndex,
+    token: &TokenRange,
+) -> Result<u32, SimulatorError> {
+    if index.dimension() == 0 {
+        return Ok(0);
+    }
+    let scope = context.scope();
+    let Some(values) = index
+        .is_const()
+        .then(|| index.eval_value(&mut scope.analyzer_context))
+        .flatten()
+    else {
+        return Err(SimulatorError::unsupported_description(token));
+    };
+    let Some(meta) = scope.variable_meta.get(&id) else {
+        return Ok(0);
+    };
+    let Some(elem) = meta.r#type.array.calc_index(&values) else {
+        return Err(SimulatorError::unsupported_description(token));
+    };
+    Ok(elem as u32)
+}
+
 /// True when the reset asserts as an event of its own rather than being
 /// sampled at a clock edge.
 fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
@@ -113,7 +141,7 @@ fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
 /// more coarsely than the circuit, and the cure is to split them.  The
 /// cycle is reported to the caller, which splits and asks again.
 pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
-    stable_topo_sort_impl(statements, None, None).0
+    stable_topo_sort_impl(statements, None, None, None).0
 }
 
 /// Which branch a piece kept (1-based; `0` = not a branch of a conditional).
@@ -149,7 +177,17 @@ pub(crate) fn stable_topo_sort_with_blocks(
     statements: Vec<ProtoStatement>,
     blocks: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks), None)
+    stable_topo_sort_impl(statements, Some(blocks), None, None)
+}
+
+/// As [`stable_topo_sort_with_blocks`]; on a cycle, `on_cycle[i]` also says
+/// whether statement `i` sits in a nontrivial strongly connected component.
+pub(crate) fn stable_topo_sort_with_blocks_on_cycle(
+    statements: Vec<ProtoStatement>,
+    blocks: &[usize],
+    on_cycle: &mut Vec<bool>,
+) -> SortOutcome {
+    stable_topo_sort_impl(statements, Some(blocks), None, Some(on_cycle))
 }
 
 /// As [`stable_topo_sort_with_blocks`], plus the conditional each statement is
@@ -159,7 +197,7 @@ pub(crate) fn stable_topo_sort_with_pieces(
     blocks: &[usize],
     groups: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks), Some(groups))
+    stable_topo_sort_impl(statements, Some(blocks), Some(groups), None)
 }
 
 /// First token anywhere in a statement tree.  Only `Assign` carries one, so a
@@ -258,6 +296,7 @@ fn stable_topo_sort_impl(
     statements: Vec<ProtoStatement>,
     blocks: Option<&[usize]>,
     groups: Option<&[usize]>,
+    on_cycle: Option<&mut Vec<bool>>,
 ) -> SortOutcome {
     let n = statements.len();
     if n <= 1 {
@@ -895,7 +934,8 @@ fn stable_topo_sort_impl(
     mark("kahn", &mut t);
 
     let Some(sorted_indices) = order else {
-        if std::env::var("VERYL_PASS_DIAG").is_ok() {
+        let diag = std::env::var("VERYL_PASS_DIAG").is_ok();
+        if diag || on_cycle.is_some() {
             use daggy::petgraph::Graph;
             use daggy::petgraph::algo::tarjan_scc;
             let mut g: Graph<(), ()> = Graph::new();
@@ -920,11 +960,16 @@ fn stable_topo_sort_impl(
                     }
                 }
             }
-            log::info!(
-                "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
-                 reporting it for the caller to split",
-            );
-            trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+            if let Some(on_cycle) = on_cycle {
+                *on_cycle = scc_id.iter().map(|&id| id != usize::MAX).collect();
+            }
+            if diag {
+                log::info!(
+                    "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
+                     reporting it for the caller to split",
+                );
+                trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+            }
         }
         return (statements, None, true);
     };
@@ -1172,8 +1217,8 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // allocator as function locals; instance-reuse records
                     // the post-conv size, so cache replay stays consistent.
                     // A temp has no `VariableMeta`; recording it as a
-                    // relocation of the variable it serves lets the cone-gate
-                    // owner table adopt it (see `Context::comb_reloc`).
+                    // relocation of the variable it serves lets the owner
+                    // tables adopt it (see `Context::comb_reloc`).
                     let use_4state = context.config.use_4state;
                     let comb_total = &mut context.comb_total_bytes;
                     let comb_reloc = &mut context.comb_reloc;
@@ -1216,7 +1261,9 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     statements.extend(stmts);
                 }
 
-                let clock_event = Event::Clock(x.clock.id);
+                let clock_elem =
+                    edge_element(context, x.clock.id, &x.clock.index, &x.clock.comptime.token)?;
+                let clock_event = Event::Clock(x.clock.id, clock_elem);
                 let mut event_statements: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
 
                 if let Some(reset) = &x.reset {
@@ -1234,7 +1281,9 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // through both arms in one step runs its reset branch twice,
                     // as it does in SystemVerilog.  A sync reset has no such arm.
                     if reset_is_async(context, reset.id) {
-                        event_statements.insert(Event::Reset(reset.id), true_side.clone());
+                        let elem =
+                            edge_element(context, reset.id, &reset.index, &reset.comptime.token)?;
+                        event_statements.insert(Event::Reset(reset.id, elem), true_side.clone());
                     }
 
                     // The `if (rst)` of the emitted body: a reset produced by
@@ -1402,6 +1451,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut child_analyzer_context = veryl_analyzer::conv::Context::default();
         child_analyzer_context.variables = child_module.variables.clone();
         child_analyzer_context.functions = child_module.functions.clone();
+        crate::ir::module::lower_function_loops(child_module, &mut child_analyzer_context);
         let peeled = context
             .peel_cache
             .entry(Arc::as_ptr(&src.component))
@@ -1594,7 +1644,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
             };
             for ev in reuse.event_statements.keys() {
-                if let Event::Clock(v) | Event::Reset(v) = ev {
+                if let Event::Clock(v, _) | Event::Reset(v, _) = ev {
                     intern(*v, context);
                 }
             }
@@ -1603,8 +1653,8 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
             let rekey = |ev: Event| -> Event {
                 match ev {
-                    Event::Clock(v) => Event::Clock(id_map.get(&v).copied().unwrap_or(v)),
-                    Event::Reset(v) => Event::Reset(id_map.get(&v).copied().unwrap_or(v)),
+                    Event::Clock(v, e) => Event::Clock(id_map.get(&v).copied().unwrap_or(v), e),
+                    Event::Reset(v, e) => Event::Reset(id_map.get(&v).copied().unwrap_or(v), e),
                     other => other,
                 }
             };
@@ -2079,29 +2129,46 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
         }
 
-        // Remap child event keys (clock/reset) to parent VarIds via input port connections
-        let mut child_to_parent_var: HashMap<air::VarId, air::VarId> = HashMap::default();
+        // Remap child event keys to the parent net the port is tied to.  The
+        // element rides along as a base: handing over the whole array lines
+        // the child's element k up with the parent's, handing over one
+        // element ties the child's scalar to that element alone.
+        let mut child_to_parent_var: HashMap<air::VarId, (air::VarId, u32)> = HashMap::default();
         for input in &src.inputs {
             if let air::Expression::Term(factor) = &input.expr
-                && let air::Factor::Variable(parent_var_id, _, _, _) = factor.as_ref()
+                && let air::Factor::Variable(parent_var_id, index, _, _) = factor.as_ref()
             {
-                child_to_parent_var.insert(input.id, *parent_var_id);
+                let base = if index.dimension() == 0 {
+                    Some(0)
+                } else if index.is_const() {
+                    let parent_scope = context.scope();
+                    let values = index.eval_value(&mut parent_scope.analyzer_context);
+                    match (values, parent_scope.variable_meta.get(parent_var_id)) {
+                        (Some(values), Some(meta)) => meta.r#type.array.calc_index(&values),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(base) = base {
+                    child_to_parent_var.insert(input.id, (*parent_var_id, base as u32));
+                }
             }
         }
 
         let mut remapped_events: HashMap<Event, Vec<ProtoStatement>> = HashMap::default();
         for (event, stmts) in all_event_statements {
             let new_event = match &event {
-                Event::Clock(child_id) => {
-                    if let Some(parent_id) = child_to_parent_var.get(child_id) {
-                        Event::Clock(*parent_id)
+                Event::Clock(child_id, elem) => {
+                    if let Some((parent_id, base)) = child_to_parent_var.get(child_id) {
+                        Event::Clock(*parent_id, base + elem)
                     } else {
                         event.clone()
                     }
                 }
-                Event::Reset(child_id) => {
-                    if let Some(parent_id) = child_to_parent_var.get(child_id) {
-                        Event::Reset(*parent_id)
+                Event::Reset(child_id, elem) => {
+                    if let Some((parent_id, base)) = child_to_parent_var.get(child_id) {
+                        Event::Reset(*parent_id, base + elem)
                     } else {
                         event.clone()
                     }
@@ -2142,22 +2209,31 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             if child_port_var_set.contains(vid) {
                 continue;
             }
+            // Inside the child the element told the nets apart; the monitor
+            // below keys on the id alone, so each takes one of its own here.
+            let Some(meta) = child_variable_meta.get(vid) else {
+                continue;
+            };
             if is_reset {
-                if let Some(stmts) = remapped_events.remove(&Event::Reset(*vid)) {
+                let mut reset_kind = None;
+                for (elem_idx, elem) in meta.elements.iter().enumerate() {
+                    let Some(stmts) = remapped_events.remove(&Event::Reset(*vid, elem_idx as u32))
+                    else {
+                        continue;
+                    };
                     let unique_id = context.alloc_internal_event_id();
-                    remapped_events.insert(Event::Reset(unique_id), stmts);
-                    let inst_kinds = child_inst_reset_kinds.get_or_insert_with(|| {
-                        crate::ir::module::collect_inst_reset_kinds(&child_module.declarations)
+                    remapped_events.insert(Event::reset(unique_id), stmts);
+                    let (active_low, is_async) = *reset_kind.get_or_insert_with(|| {
+                        let inst_kinds = child_inst_reset_kinds.get_or_insert_with(|| {
+                            crate::ir::module::collect_inst_reset_kinds(&child_module.declarations)
+                        });
+                        crate::ir::module::resolved_reset_kind(
+                            &var.r#type.kind,
+                            inst_kinds.get(vid).copied().flatten(),
+                            &context.config,
+                        )
                     });
-                    let (active_low, is_async) = crate::ir::module::resolved_reset_kind(
-                        &var.r#type.kind,
-                        inst_kinds.get(vid).copied().flatten(),
-                        &context.config,
-                    );
-                    if is_async
-                        && let Some(meta) = child_variable_meta.get(vid)
-                        && let Some(elem) = meta.elements.first()
-                    {
+                    if is_async {
                         all_derived_clock_candidates.push((
                             unique_id,
                             elem.current,
@@ -2169,12 +2245,10 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 }
                 continue;
             }
-            if let Some(meta) = child_variable_meta.get(vid)
-                && let Some(elem) = meta.elements.first()
-            {
+            for (elem_idx, elem) in meta.elements.iter().enumerate() {
                 let unique_id = context.alloc_internal_event_id();
-                if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid)) {
-                    remapped_events.insert(Event::Clock(unique_id), stmts);
+                if let Some(stmts) = remapped_events.remove(&Event::Clock(*vid, elem_idx as u32)) {
+                    remapped_events.insert(Event::clock(unique_id), stmts);
                 }
                 all_derived_clock_candidates.push((
                     unique_id,
