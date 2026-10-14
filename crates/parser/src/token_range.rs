@@ -409,6 +409,8 @@ impl_token_range_singular!(ResetAsyncHigh);
 impl_token_range_singular!(ResetAsyncLow);
 impl_token_range_singular!(ResetSyncHigh);
 impl_token_range_singular!(ResetSyncLow);
+impl_token_range_singular!(ResetHold);
+impl_token_range_singular!(ResetRelease);
 impl_token_range_singular!(Return);
 impl_token_range_singular!(Same);
 impl_token_range_singular!(Signed);
@@ -573,6 +575,7 @@ impl From<&Factor> for TokenRange {
         match value {
             Factor::Number(x) => x.number.as_ref().into(),
             Factor::BooleanLiteral(x) => x.boolean_literal.as_ref().into(),
+            Factor::ResetValueLiteral(x) => x.reset_value_literal.as_ref().into(),
             Factor::IdentifierFactor(x) => {
                 x.identifier_factor.expression_identifier.as_ref().into()
             }
@@ -608,6 +611,8 @@ impl From<&Factor> for TokenRange {
 impl_token_ext!(Factor);
 
 impl_token_range_enum!(BooleanLiteral, r#true, r#false);
+
+impl_token_range_enum!(ResetValueLiteral, reset_hold, reset_release);
 
 impl From<&IdentifierFactor> for TokenRange {
     fn from(value: &IdentifierFactor) -> Self {

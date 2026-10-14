@@ -572,6 +572,8 @@ token_with_comments!(ResetAsyncHigh);
 token_with_comments!(ResetAsyncLow);
 token_with_comments!(ResetSyncHigh);
 token_with_comments!(ResetSyncLow);
+token_with_comments!(ResetHold);
+token_with_comments!(ResetRelease);
 token_with_comments!(Return);
 token_with_comments!(Rev);
 token_with_comments!(Same);

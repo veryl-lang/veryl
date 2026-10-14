@@ -1,0 +1,5 @@
+module invalid_factor_reset_value_literal (
+    o_a: output logic,
+) {
+    assign o_a = reset_hold;
+}

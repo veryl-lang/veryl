@@ -5503,3 +5503,188 @@ endmodule
 
     assert_eq!(emit(&metadata, code), expect);
 }
+
+#[test]
+fn reset_value_literal_polarity() {
+    let code = r#"module ModuleA (
+    i_rst0: input reset_async_high,
+    i_rst1: input reset_async_low,
+    i_rst2: input reset_sync_high,
+    i_rst3: input reset_sync_low,
+) {}
+
+module ModuleB {
+    inst u0: ModuleA (
+        i_rst0: reset_hold,
+        i_rst1: reset_hold,
+        i_rst2: reset_hold,
+        i_rst3: reset_hold,
+    );
+    inst u1: ModuleA (
+        i_rst0: reset_release,
+        i_rst1: reset_release,
+        i_rst2: reset_release,
+        i_rst3: reset_release,
+    );
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic i_rst0,
+    input var logic i_rst1,
+    input var logic i_rst2,
+    input var logic i_rst3
+);
+endmodule
+
+module prj_ModuleB;
+    prj_ModuleA u0 (
+        .i_rst0 (1'b1),
+        .i_rst1 (1'b0),
+        .i_rst2 (1'b1),
+        .i_rst3 (1'b0)
+    );
+    prj_ModuleA u1 (
+        .i_rst0 (1'b0),
+        .i_rst1 (1'b1),
+        .i_rst2 (1'b0),
+        .i_rst3 (1'b1)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn reset_value_literal_reset_type() {
+    let code = r#"module ModuleA (
+    i_rst0: input reset,
+    i_rst1: input reset,
+) {}
+
+module ModuleB {
+    inst u: ModuleA (
+        i_rst0: reset_hold,
+        i_rst1: reset_release,
+    );
+}
+"#;
+
+    for (reset_type, hold, release) in [
+        (ResetType::AsyncHigh, "1'b1", "1'b0"),
+        (ResetType::AsyncLow, "1'b0", "1'b1"),
+        (ResetType::SyncHigh, "1'b1", "1'b0"),
+        (ResetType::SyncLow, "1'b0", "1'b1"),
+    ] {
+        let expect = format!(
+            r#"module prj_ModuleA (
+    input var logic i_rst0,
+    input var logic i_rst1
+);
+endmodule
+
+module prj_ModuleB;
+    prj_ModuleA u (
+        .i_rst0 ({hold}),
+        .i_rst1 ({release})
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#
+        );
+
+        let mut metadata = Metadata::create_default("prj").unwrap();
+        metadata.build.reset_type = reset_type;
+        let ret = emit(&metadata, code);
+
+        assert_eq!(ret, expect);
+    }
+}
+
+#[test]
+fn reset_value_literal_context() {
+    let code = r#"interface InterfaceA {
+    var rst: reset_async_low;
+    modport mp {
+        rst: output,
+    }
+}
+
+module ModuleA (
+    i_rst : input  reset_sync_low,
+    i_rsts: input  reset_async_high[2],
+    if_a  : modport InterfaceA::mp,
+    o_rst0: output reset_async_low,
+    o_rst1: output reset_sync_high,
+    o_a   : output logic<4>,
+) {
+    struct StructA {
+        rst: reset_sync_high,
+    }
+
+    let a: reset_async_high = reset_hold;
+    var b: StructA;
+
+    assign b.rst    = reset_release;
+    assign if_a.rst = (reset_hold);
+    assign o_rst0   = reset_release;
+
+    always_comb {
+        o_rst1 = reset_hold;
+    }
+
+    assign o_a[0] = a == reset_hold;
+    assign o_a[1] = reset_release != i_rst;
+    assign o_a[2] = i_rsts[1] == reset_release;
+    assign o_a[3] = b.rst != reset_hold;
+}
+"#;
+
+    let expect = r#"interface prj_InterfaceA;
+    logic rst;
+    modport mp (
+        output rst
+    );
+endinterface
+
+module prj_ModuleA (
+    input var logic                 i_rst     ,
+    input var logic                 i_rsts [2],
+    prj_InterfaceA.mp         if_a      ,
+    output var logic                 o_rst0    ,
+    output var logic                 o_rst1    ,
+    output var logic         [4-1:0] o_a   
+);
+    typedef struct packed {
+        logic rst;
+    } StructA;
+
+    logic   a; always_comb a = 1'b1;
+    StructA b;
+
+    always_comb b.rst    = 1'b0;
+    always_comb if_a.rst = (1'b0);
+    always_comb o_rst0   = 1'b1;
+
+    always_comb begin
+        o_rst1 = 1'b1;
+    end
+
+    always_comb o_a[0] = a == 1'b1;
+    always_comb o_a[1] = 1'b1 != i_rst;
+    always_comb o_a[2] = i_rsts[1] == 1'b0;
+    always_comb o_a[3] = b.rst != 1'b1;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}

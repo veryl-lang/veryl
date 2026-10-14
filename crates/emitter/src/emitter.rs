@@ -18,6 +18,7 @@ use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::msb_table;
 use veryl_analyzer::namespace::{DefineContext, Namespace};
+use veryl_analyzer::reset_value_table;
 use veryl_analyzer::resolved_type_table;
 use veryl_analyzer::scope;
 use veryl_analyzer::symbol::Direction as SymDirection;
@@ -1131,6 +1132,24 @@ impl Emitter {
             }
         } else {
             false
+        }
+    }
+
+    /// Value of a reset value literal according to the polarity of its counterpart
+    fn reset_value_text(&self, token: &VerylToken, is_hold: bool) -> &'static str {
+        let reset_type = match reset_value_table::get(token.token.id).unwrap() {
+            TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
+            TypeKind::ResetAsyncLow => ResetType::AsyncLow,
+            TypeKind::ResetSyncHigh => ResetType::SyncHigh,
+            TypeKind::ResetSyncLow => ResetType::SyncLow,
+            TypeKind::Reset => self.build_opt.reset_type,
+            _ => unreachable!(),
+        };
+        let active_high = matches!(reset_type, ResetType::AsyncHigh | ResetType::SyncHigh);
+        if active_high == is_hold {
+            "1'b1"
+        } else {
+            "1'b0"
         }
     }
 
@@ -3320,6 +3339,20 @@ impl VerylWalker for Emitter {
         self.token(&arg.msb_token.replace(&text));
     }
 
+    /// Semantic action for non-terminal 'ResetHold'
+    fn reset_hold(&mut self, arg: &ResetHold) {
+        let token = &arg.reset_hold_token;
+        let text = self.reset_value_text(token, true);
+        self.veryl_token(&token.replace(text));
+    }
+
+    /// Semantic action for non-terminal 'ResetRelease'
+    fn reset_release(&mut self, arg: &ResetRelease) {
+        let token = &arg.reset_release_token;
+        let text = self.reset_value_text(token, false);
+        self.veryl_token(&token.replace(text));
+    }
+
     /// Semantic action for non-terminal 'Param'
     fn param(&mut self, arg: &Param) {
         self.veryl_token(&arg.param_token.replace("parameter"));
@@ -3848,6 +3881,7 @@ impl VerylWalker for Emitter {
         match arg {
             Factor::Number(x) => self.number(&x.number),
             Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
+            Factor::ResetValueLiteral(x) => self.reset_value_literal(&x.reset_value_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);

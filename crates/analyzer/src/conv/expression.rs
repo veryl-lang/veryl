@@ -9,9 +9,11 @@ use crate::conv::{Context, Conv};
 use crate::ir::{
     self, Comptime, IrResult, Op, Shape, Type, TypeKind, ValueVariant, VarPath, VarPathSelect,
 };
-use crate::symbol::SymbolKind;
+use crate::reset_value_table;
+use crate::symbol::{SymbolKind, TypeKind as SymTypeKind};
 use crate::symbol_path::GenericSymbolPath;
 use crate::symbol_table;
+use crate::utils::{resolve_op, split_index};
 use crate::value::{Value, string_to_byte_value};
 use crate::{ir_error, msb_table};
 use veryl_parser::token_range::TokenRange;
@@ -135,65 +137,6 @@ fn arm_type(context: &mut Context, arm: &ir::Expression) -> Option<ir::Type> {
     }
 }
 
-fn resolve_op(op: &Expression01Op) -> (Op, u32) {
-    match op {
-        Expression01Op::Operator01(x) => {
-            let tok = x.operator01.operator01_token.to_string();
-            match tok.as_str() {
-                "||" => (Op::LogicOr, 1),
-                "&&" => (Op::LogicAnd, 2),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Operator03(_) => (Op::BitOr, 3),
-        Expression01Op::Operator04(x) => {
-            let tok = x.operator04.operator04_token.to_string();
-            match tok.as_str() {
-                "^" => (Op::BitXor, 4),
-                "~^" => (Op::BitXnor, 4),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Operator05(_) => (Op::BitAnd, 5),
-        Expression01Op::Operator02(x) => {
-            let tok = x.operator02.operator02_token.to_string();
-            match tok.as_str() {
-                "==" => (Op::Eq, 6),
-                "!=" => (Op::Ne, 6),
-                "==?" => (Op::EqWildcard, 6),
-                "!=?" => (Op::NeWildcard, 6),
-                "<=" => (Op::LessEq, 7),
-                ">=" => (Op::GreaterEq, 7),
-                "<:" => (Op::Less, 7),
-                ">:" => (Op::Greater, 7),
-                "<<<" => (Op::ArithShiftL, 8),
-                ">>>" => (Op::ArithShiftR, 8),
-                "<<" => (Op::LogicShiftL, 8),
-                ">>" => (Op::LogicShiftR, 8),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Operator06(x) => {
-            let tok = x.operator06.operator06_token.to_string();
-            match tok.as_str() {
-                "+" => (Op::Add, 9),
-                "-" => (Op::Sub, 9),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Operator07(x) => {
-            let tok = x.operator07.operator07_token.to_string();
-            match tok.as_str() {
-                "/" => (Op::Div, 10),
-                "%" => (Op::Rem, 10),
-                _ => unreachable!(),
-            }
-        }
-        Expression01Op::Star(_) => (Op::Mul, 10),
-        Expression01Op::Operator08(_) => (Op::Pow, 11),
-    }
-}
-
 fn prec_climb(
     context: &mut Context,
     exprs: &[&Expression02],
@@ -204,27 +147,7 @@ fn prec_climb(
     if lo == hi {
         return Conv::conv(context, exprs[lo]);
     }
-    // Find the lowest-precedence operator in [lo..hi) to use as the subtree
-    // root. For left-associative operators pick the rightmost one at the
-    // minimum precedence (so `a - b - c` groups as `(a - b) - c`); for the
-    // right-associative power operator (precedence 11) pick the leftmost
-    // (so `a ** b ** c` groups as `a ** (b ** c)`, matching SystemVerilog).
-    let mut min_idx = lo;
-    let mut min_prec = ops[lo].1;
-    for (i, op) in ops.iter().enumerate().take(hi).skip(lo + 1) {
-        // `**` is the only right-associative operator; identify it by Op, not
-        // by its precedence number, so the rule survives precedence changes.
-        let right_assoc = matches!(op.0, Op::Pow);
-        let better = if right_assoc {
-            op.1 < min_prec
-        } else {
-            op.1 <= min_prec
-        };
-        if better {
-            min_idx = i;
-            min_prec = op.1;
-        }
-    }
+    let min_idx = split_index(ops, lo, hi);
     let left = prec_climb(context, exprs, ops, lo, min_idx)?;
     let right = prec_climb(context, exprs, ops, min_idx + 1, hi)?;
     let token = TokenRange::from_range(&left.token_range(), &right.token_range());
@@ -564,6 +487,33 @@ impl Conv<&Factor> for ir::Expression {
                     ..Default::default()
                 };
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(ret))))
+            }
+            Factor::ResetValueLiteral(x) => {
+                let (kind, literal) = match x.reset_value_literal.as_ref() {
+                    ResetValueLiteral::ResetHold(x) => {
+                        (ir::ResetValueKind::Hold, &x.reset_hold.reset_hold_token)
+                    }
+                    ResetValueLiteral::ResetRelease(x) => (
+                        ir::ResetValueKind::Release,
+                        &x.reset_release.reset_release_token,
+                    ),
+                };
+                // An invalid literal is not registered, and reported as an error.
+                let polarity = match reset_value_table::get(literal.token.id) {
+                    Some(SymTypeKind::ResetAsyncHigh | SymTypeKind::ResetSyncHigh) => {
+                        ir::ResetPolarity::High
+                    }
+                    Some(SymTypeKind::ResetAsyncLow | SymTypeKind::ResetSyncLow) => {
+                        ir::ResetPolarity::Low
+                    }
+                    _ => ir::ResetPolarity::Default,
+                };
+                let mut comptime = Comptime::create_unknown(token);
+                comptime.is_const = true;
+                comptime.is_global = true;
+                Ok(ir::Expression::Term(Box::new(ir::Factor::ResetValue(
+                    kind, polarity, comptime,
+                ))))
             }
             Factor::IdentifierFactor(x) => Conv::conv(context, x.identifier_factor.as_ref()),
             Factor::LParenExpressionRParen(x) => Conv::conv(context, x.expression.as_ref()),

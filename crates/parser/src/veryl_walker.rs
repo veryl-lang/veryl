@@ -818,6 +818,20 @@ pub trait VerylWalker {
         after!(self, reset_sync_low, arg);
     }
 
+    /// Semantic action for non-terminal 'ResetHold'
+    fn reset_hold(&mut self, arg: &ResetHold) {
+        before!(self, reset_hold, arg);
+        self.veryl_token(&arg.reset_hold_token);
+        after!(self, reset_hold, arg);
+    }
+
+    /// Semantic action for non-terminal 'ResetRelease'
+    fn reset_release(&mut self, arg: &ResetRelease) {
+        before!(self, reset_release, arg);
+        self.veryl_token(&arg.reset_release_token);
+        after!(self, reset_release, arg);
+    }
+
     /// Semantic action for non-terminal 'Return'
     fn r#return(&mut self, arg: &Return) {
         before!(self, r#return, arg);
@@ -1185,6 +1199,7 @@ pub trait VerylWalker {
         match arg {
             Factor::Number(x) => self.number(&x.number),
             Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
+            Factor::ResetValueLiteral(x) => self.reset_value_literal(&x.reset_value_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
@@ -1238,6 +1253,16 @@ pub trait VerylWalker {
             BooleanLiteral::False(x) => self.r#false(&x.r#false),
         }
         after!(self, boolean_literal, arg);
+    }
+
+    /// Semantic action for non-terminal 'ResetValueLiteral'
+    fn reset_value_literal(&mut self, arg: &ResetValueLiteral) {
+        before!(self, reset_value_literal, arg);
+        match arg {
+            ResetValueLiteral::ResetHold(x) => self.reset_hold(&x.reset_hold),
+            ResetValueLiteral::ResetRelease(x) => self.reset_release(&x.reset_release),
+        }
+        after!(self, reset_value_literal, arg);
     }
 
     /// Semantic action for non-terminal 'IdentifierFactor'
