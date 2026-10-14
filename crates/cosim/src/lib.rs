@@ -37,8 +37,10 @@ pub unsafe extern "C" fn cosim_open(
     let top = unsafe { CStr::from_ptr(top) };
     let top = top.to_str().unwrap();
 
+    // Not `Config::apply_env`: that also turns DUT reuse on.
     let config = Config {
         use_4state,
+        allow_multi_pass: std::env::var("VERYL_ALLOW_MULTI_PASS").as_deref() == Ok("1"),
         ..Default::default()
     };
 

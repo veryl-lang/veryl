@@ -29,6 +29,16 @@ use super::variable::VarOffset;
 use crate::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 
+/// Why a comb list needs more than one settle pass.
+pub struct MultiPass {
+    /// Whether some granularity of the dependency analysis ordered it; if
+    /// one did, the extra passes are the simulator's own error.
+    pub linearized: bool,
+    /// Statements on a backward edge, both the reader and the later writer it
+    /// reads, in source order; truncated to the first few.
+    pub participants: Vec<veryl_parser::token_range::TokenRange>,
+}
+
 /// Memoised result of the whole comb pipeline for one comb-list key.
 pub struct CombPipeline {
     /// Post-sort, post-DCE comb stmts (the `pre_jit_stmts` snapshot). `Arc` so a
@@ -36,6 +46,8 @@ pub struct CombPipeline {
     /// per test — the dominant per-test cost the cache would otherwise add.
     pub pre_jit_stmts: Arc<Vec<ProtoStatement>>,
     pub required_comb_passes: usize,
+    /// Set when `required_comb_passes` is above one.
+    pub multi_pass: Option<MultiPass>,
     /// Compiled comb (`try_jit_no_cache` output). Its chunk artifacts bake in
     /// absolute offsets, valid verbatim because a key match implies an
     /// identical comb layout (delta = 0). Mostly `Compiled(Arc)` blocks, so a

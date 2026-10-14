@@ -24,6 +24,32 @@ pub(crate) fn dataflow_on() -> bool {
     crate::ir::opt::dataflow::enabled()
 }
 
+/// xorshift64*, for generated tests: deterministic across platforms.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+
+    fn chance(&mut self, percent: u64) -> bool {
+        self.next() % 100 < percent
+    }
+
+    fn shuffle<T>(&mut self, items: &mut [T]) {
+        for i in (1..items.len()).rev() {
+            items.swap(i, self.below(i + 1));
+        }
+    }
+}
+
 /// Whether the AOT-C comb can land on this host. A C compiler is not enough:
 /// where the shared object builds but does not load, the comb silently stays
 /// on Cranelift, so a test asserting native coverage must skip there.
@@ -559,6 +585,9 @@ where
     }
 }
 
+mod comb_order;
+mod comb_rewrite;
+mod comb_wide;
 mod component;
 mod component_sim;
 mod dataflow;

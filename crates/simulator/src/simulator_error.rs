@@ -79,6 +79,36 @@ pub enum SimulatorError {
         token_source: TokenSource,
     },
 
+    #[diagnostic(
+        severity(Error),
+        code(unordered_combinational_logic),
+        help(
+            "the simulator orders combinational logic statement by statement and found no order in which each of these reads only values already computed; splitting the `always_comb` blocks involved usually resolves it, and `veryl test --allow-multi-pass` (or `VERYL_ALLOW_MULTI_PASS=1`) evaluates them repeatedly until they settle instead"
+        )
+    )]
+    #[error("combinational logic has no one-pass evaluation order")]
+    UnorderedCombinationalLogic {
+        #[source_code]
+        input: MultiSources,
+        #[label("Error location")]
+        error_location: SourceSpan,
+        #[label(collection, "part of a dependency the simulator could not order")]
+        participants: Vec<SourceSpan>,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
+        code(unproven_pass_count),
+        help(
+            "this is a simulator bug, please report it; `veryl test --allow-multi-pass` (or `VERYL_ALLOW_MULTI_PASS=1`) works around it"
+        )
+    )]
+    #[error(
+        "internal error: the combinational logic of module \"{module_name}\" was ordered but needs {passes} settle passes"
+    )]
+    UnprovenPassCount { module_name: String, passes: usize },
+
     #[diagnostic(severity(Error), code(combinational_loop))]
     #[error("combinational loop detected")]
     CombinationalLoop {
@@ -188,6 +218,16 @@ impl SimulatorError {
             function_name: function_name.to_string(),
             input,
             error_location: (*token).into(),
+            token_source: token.beg.source,
+        }
+    }
+
+    pub fn unordered_combinational_logic(token: &TokenRange, participants: &[TokenRange]) -> Self {
+        let (input, participants) = source_with_context(token, participants);
+        SimulatorError::UnorderedCombinationalLogic {
+            input,
+            error_location: (*token).into(),
+            participants,
             token_source: token.beg.source,
         }
     }

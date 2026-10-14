@@ -30152,6 +30152,16 @@ fn a_handshake_closed_across_two_arms_is_split_per_arm() {
     }
 }
 
+/// `Config::all()` allowing a multi-pass settle: for designs built to reach
+/// the phase that orders what no granularity linearized.
+fn multi_pass_configs() -> Vec<Config> {
+    let mut configs = Config::all();
+    for config in &mut configs {
+        config.allow_multi_pass = true;
+    }
+    configs
+}
+
 #[test]
 fn an_arm_writing_the_selector_keeps_the_case_whole() {
     // The first arm writes the SELECTOR: one `case` picks a branch once,
@@ -30197,7 +30207,7 @@ fn an_arm_writing_the_selector_keeps_the_case_whole() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (st, hold, ready) -> (valid, en, sel)
@@ -30280,7 +30290,7 @@ fn a_dynamic_element_write_keeps_the_scope_in_source_order() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (st, sel, hold, ready, idx, a2) -> o
@@ -30472,7 +30482,7 @@ fn a_read_and_a_write_in_different_arms_are_not_a_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (s, st, a, c, d) -> (y, en, sel, eno)
@@ -30601,7 +30611,7 @@ fn two_arms_reading_each_other_back_are_not_a_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (s, st, c, d) -> (po, qo, sel, eno)
@@ -30721,7 +30731,7 @@ fn struct_members_across_a_boundary_are_not_one_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // Elaborating at all is the regression, so it is checked under every
@@ -30807,7 +30817,7 @@ fn disjoint_halves_of_a_vector_are_not_one_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // As above: elaboration under every config, values where the undriven
