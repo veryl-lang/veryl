@@ -35969,3 +35969,210 @@ module Top (i0: input logic<8>, o: output logic<8>, p: output logic<8>) {
         vec![("p", (c[0] & 0xf) << 4 | c[0] >> 4, 8)]
     });
 }
+
+#[test]
+fn a_concatenation_in_a_branch_schedules_beside_a_whole_write() {
+    // `w[k]` reads `v[k]`, which reads `w[k-1]`: acyclic only per element,
+    // and the other arm writes `w` whole.
+    for (arm, other) in [
+        ("if en {", "} else {"),
+        ("case en { 1'b1: {", "} default: {"),
+    ] {
+        for (fill, fill_value) in [("0", 0u64), ("-1", 0xff)] {
+            let close = if arm.starts_with("case") { "} }" } else { "}" };
+            let w: Vec<String> = (0..8).rev().map(|k| format!("v[{k}] ^ i0[{k}]")).collect();
+            let v: Vec<String> = (1..8)
+                .rev()
+                .map(|k| format!("w[{}] & i1[{k}]", k - 1))
+                .chain(["i1[0]".to_string()])
+                .collect();
+            let code = format!(
+                "module Top (en: input logic, i0: input logic<8>, i1: input logic<8>, o: output logic<8>) {{
+    var v: logic<8>;
+    var w: logic<8>;
+    always_comb {{
+        {arm}
+            w = {{{}}};
+        {other}
+            w = {fill};
+        {close}
+    }}
+    assign v = {{{}}};
+    assign o = w;
+}}
+",
+                w.join(", "),
+                v.join(", ")
+            );
+            check_cases(
+                &code,
+                &[("en", 1), ("i0", 8), ("i1", 8)],
+                &[&[1, 0x03, 0x05], &[1, 0xa5, 0xff], &[0, 0x03, 0x05]],
+                &|c| {
+                    if c[0] == 0 {
+                        return vec![("o", fill_value, 8)];
+                    }
+                    let (mut w, mut prev) = (0u64, 0u64);
+                    for k in 0..8 {
+                        let v = if k == 0 {
+                            c[2] & 1
+                        } else {
+                            prev & (c[2] >> k) & 1
+                        };
+                        prev = v ^ ((c[1] >> k) & 1);
+                        w |= prev << k;
+                    }
+                    vec![("o", w, 8)]
+                },
+            );
+        }
+    }
+}
+
+#[test]
+fn a_destructured_literal_beside_a_cut_branch_keeps_its_value() {
+    // The arms are cut at `p1`'s bit 0, but the destructure takes its slice of
+    // the literal only at the store, so it must stay as written.
+    let w: Vec<String> = (0..8).rev().map(|k| format!("v[{k}] ^ i0[{k}]")).collect();
+    let v: Vec<String> = (1..8)
+        .rev()
+        .map(|k| format!("w[{}] & i1[{k}]", k - 1))
+        .chain(["i1[0]".to_string()])
+        .collect();
+    let code = format!(
+        "module Top (en: input logic, i0: input logic<8>, i1: input logic<8>, q1: output logic<8>, q0: output logic<8>) {{
+    var v: logic<8>;
+    var w: logic<8>;
+    var p1: logic<8>;
+    var p0: logic<8>;
+    always_comb {{
+        p1 = 0;
+        p0 = 0;
+        if en {{
+            p1[0] = 1;
+            w = {{{}}};
+        }} else {{
+            w = 0;
+            {{p1, p0}} = 16'h12_34;
+        }}
+    }}
+    assign v = {{{}}};
+    assign q1 = p1;
+    assign q0 = p0;
+}}
+",
+        w.join(", "),
+        v.join(", ")
+    );
+    check_cases(
+        &code,
+        &[("en", 1), ("i0", 8), ("i1", 8)],
+        &[&[0, 0x03, 0x05], &[1, 0x03, 0x05]],
+        &|c| {
+            if c[0] == 0 {
+                vec![("q1", 0x12, 8), ("q0", 0x34, 8)]
+            } else {
+                vec![("q1", 0x01, 8), ("q0", 0, 8)]
+            }
+        },
+    );
+}
+
+#[test]
+fn a_read_between_cut_writes_sees_every_part() {
+    // `y = w` reads both parts of the whole write above it; a later write of
+    // one part must not run ahead of the read.
+    for (whole, later, mask) in [
+        ("x", "w[3:0] = 0", 0xf0u64),
+        ("{x[7:4], x[3:0]}", "w[7:4] = 0", 0x0f),
+    ] {
+        let code = format!(
+            "module Top (en: input logic, x: input logic<8>, c: input logic<4>, e: input logic<4>, y: output logic<8>, wo: output logic<8>) {{
+    var w: logic<8>;
+    var d: logic<4>;
+    always_comb {{
+        if en {{
+            w[7:4] = d;
+            w[3:0] = e;
+            y = {{c, c}};
+        }} else {{
+            w = {whole};
+            y = w;
+            {later};
+        }}
+    }}
+    assign d = w[3:0];
+    assign wo = w;
+}}
+"
+        );
+        for config in Config::all() {
+            let config = Config {
+                allow_multi_pass: true,
+                ..config
+            };
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            for (en, x, c, e) in [(0u64, 0xa5u64, 3u64, 6u64), (1, 0x3c, 3, 6)] {
+                sim.set("en", Value::new(en, 1, false));
+                sim.set("x", Value::new(x, 8, false));
+                sim.set("c", Value::new(c, 4, false));
+                sim.set("e", Value::new(e, 4, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                let (y, wo) = if en == 0 {
+                    (x, x & mask)
+                } else {
+                    (c << 4 | c, e << 4 | e)
+                };
+                assert_eq!(
+                    sim.get("y").unwrap(),
+                    Value::new(y, 8, false),
+                    "{whole} {config:?}"
+                );
+                assert_eq!(
+                    sim.get("wo").unwrap(),
+                    Value::new(wo, 8, false),
+                    "{whole} {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_default_then_override_in_a_branch_keeps_its_order() {
+    // `o` reads only `w[1]`; ordering it after `w[0] = 0` as well would weld
+    // it to the `w[0]` write it guards through `p`.
+    let code = r#"
+module Top (en: input logic, q0: input logic, b: input logic, o: output logic, wo: output logic<2>) {
+    var w: logic<2>;
+    var p: logic;
+    always_comb {
+        w = 0;
+        o = 0;
+        if en {
+            w[0] = 0;
+            w[1] = b;
+            o    = w[1];
+            if p {
+                w[0] = q0;
+            }
+        }
+    }
+    assign p  = ~o;
+    assign wo = w;
+}
+"#;
+    check_cases(
+        code,
+        &[("en", 1), ("q0", 1), ("b", 1)],
+        &[&[1, 1, 1], &[1, 1, 0], &[0, 1, 1]],
+        &|c| {
+            if c[0] == 0 {
+                return vec![("o", 0, 1), ("wo", 0, 2)];
+            }
+            let o = c[2];
+            let w0 = if o == 0 { c[1] } else { 0 };
+            vec![("o", o, 1), ("wo", c[2] << 1 | w0, 2)]
+        },
+    );
+}

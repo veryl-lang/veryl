@@ -592,6 +592,15 @@ impl ProtoExpression {
             signed,
         };
         match self {
+            ProtoExpression::Value {
+                value,
+                expr_context,
+                ..
+            } if value.width() == width => Some(ProtoExpression::Value {
+                value: value.select(hi, lo),
+                width: out_width,
+                expr_context: ctx(expr_context.signed),
+            }),
             ProtoExpression::Variable {
                 var_offset,
                 select,
