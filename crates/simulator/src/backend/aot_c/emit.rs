@@ -3981,6 +3981,8 @@ pub struct EmittedModule {
     /// A dataflow comb's whole-settle entry (`veryl_aot_eval_coarse`): every
     /// statement, no per-cell test.  Same ABI as `func`.
     pub coarse_func: Option<FuncPtr>,
+    /// `func` counting `[statements, calls]` through its log argument.
+    pub counted: Option<FuncPtr>,
     /// Keep-alive: dropping unloads the library and invalidates `func`.
     _lib: libloading::Library,
 }
@@ -5195,6 +5197,9 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     let coarse_func: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_coarse\0") }
         .ok()
         .map(|s| *s);
+    let counted: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_counted\0") }
+        .ok()
+        .map(|f| *f);
     // Publish the wide-op helper table into the .so so emitted wide-op calls
     // dispatch to the same `wide_ops::*` Rust helpers Cranelift uses.  The
     // setter is always present (decls emitted unconditionally) and copies the
@@ -5219,6 +5224,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     Ok(EmittedModule {
         func,
         coarse_func,
+        counted,
         _lib: lib,
     })
 }
@@ -10359,23 +10365,44 @@ pub fn emit_dataflow_function(
     body.push_str("};\n");
     // A cell marks only cells after it: its own word through the return
     // value, later words in memory, read when the scan reaches them.
-    body.push_str(&format!(
-        "{ENTRY_ATTR}\n\
-         void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
-         \x20   (void)write_log;\n\
-         \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n\
-         \x20   for (unsigned w = 0; w < {nw}u; w++) {{\n\
-         \x20       uint64_t b = dirty[w];\n\
-         \x20       if (!b) continue;\n\
-         \x20       dirty[w] = 0;\n\
-         \x20       do {{\n\
-         \x20           unsigned k = w * 64u + (unsigned)__builtin_ctzll(b);\n\
-         \x20           b &= b - 1;\n\
-         \x20           b |= veryl_cells[k](ff_values, comb_values, dirty);\n\
-         \x20       }} while (b);\n\
-         \x20   }}\n\
-         }}\n"
-    ));
+    let entry = |name: &str, count: &str| {
+        format!(
+            "{ENTRY_ATTR}\n\
+             void {name}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+             \x20   (void)write_log;\n\
+             \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n\
+             \x20   for (unsigned w = 0; w < {nw}u; w++) {{\n\
+             \x20       uint64_t b = dirty[w];\n\
+             \x20       if (!b) continue;\n\
+             \x20       dirty[w] = 0;\n\
+             \x20       do {{\n\
+             \x20           unsigned k = w * 64u + (unsigned)__builtin_ctzll(b);\n\
+             {count}\
+             \x20           b &= b - 1;\n\
+             \x20           b |= veryl_cells[k](ff_values, comb_values, dirty);\n\
+             \x20       }} while (b);\n\
+             \x20   }}\n\
+             }}\n"
+        )
+    };
+    body.push_str(&entry("veryl_aot_eval", ""));
+    // A counting copy for the runtime to weigh against the whole-settle
+    // entry; only probes take it, as counting costs every call.
+    if coarse {
+        body.push_str(&format!(
+            "static const uint32_t veryl_cell_stmts[{n}] = {{{}}};\n",
+            cells
+                .iter()
+                .map(|c| c.len().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        body.push_str(&entry(
+            "veryl_aot_eval_counted",
+            "\x20           write_log[0] += veryl_cell_stmts[k];\n\
+             \x20           write_log[1]++;\n",
+        ));
+    }
     if coarse {
         body.push_str(&format!(
             "{ENTRY_ATTR}\n\
