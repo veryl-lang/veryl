@@ -2129,7 +2129,7 @@ pub(crate) fn analyze_dependency(
                     flatten(sub, out);
                 }
             }
-            other => split_nested(other.clone(), out, false),
+            other => split_nested(other.clone(), out, false, false),
         }
     }
 
@@ -2184,7 +2184,7 @@ pub(crate) fn analyze_dependency(
     let mut deep_on_cycle: Vec<bool> = Vec::with_capacity(deep_stmts.len());
     let mut blocks = block_of.into_iter().zip(on_cycle);
     expand_in_place(&mut deep_stmts, |stmt, out| {
-        split_nested(stmt, out, true);
+        split_nested(stmt, out, true, false);
         let (block, cyclic) = blocks.next().unwrap();
         deep_block_of.resize(deep_block_of.len() + out.len(), block);
         deep_on_cycle.resize(deep_on_cycle.len() + out.len(), cyclic);
@@ -2302,19 +2302,34 @@ pub(crate) fn analyze_dependency(
         // DAG-based sort failed (false cycle from inlined function bodies).
         // Fall back to the block-aware statement-level sort over what Phase 2
         // flattened.
-        if let Ok((sorted, passes_hint)) = sort_and_verify_acyclic(table.clone(), &block_of) {
-            pass_diag_phase("phase3: stable_topo_sort (no non-expandable CB)");
-            return Ok((sorted, passes_hint, false));
+        // An order the verification accepts may still be known to need extra
+        // passes, so the cuts below get their chance at a better one before
+        // the first acyclic order is taken.
+        let multi_pass = |sorted: &[ProtoStatement], hint: Option<usize>| match hint {
+            Some(n) => n > 1,
+            None => compute_required_passes("phase3", sorted) > 1,
+        };
+        let mut fallback = None;
+        match sort_and_verify_acyclic(table.clone(), &block_of) {
+            Ok((sorted, passes_hint)) if !multi_pass(&sorted, passes_hint) => {
+                pass_diag_phase("phase3: stable_topo_sort (no non-expandable CB)");
+                return Ok((sorted, passes_hint, false));
+            }
+            Ok(ordered) => fallback = Some(ordered),
+            Err(_) => {}
         }
-        // Every part costs each settle, so concatenations are cut only where
-        // the copies alone do not order it.
-        let attempt = |mut stmts: Vec<ProtoStatement>, split_concats: bool| {
+        // Every part costs each settle, so concatenations, then conditional
+        // arms, are cut only where the cuts before them do not order it.
+        let attempt = |mut stmts: Vec<ProtoStatement>, split_concats: bool, cut_arms: bool| {
             let mut blocks = Vec::with_capacity(stmts.len());
             let mut by_block = block_of.iter().copied();
             expand_in_place(&mut stmts, |stmt, out| {
                 match stmt {
                     ProtoStatement::Assign(a) if split_concats => {
                         split_assign_by_concat(a, out, LAST_RESORT_MAX_PARTS)
+                    }
+                    stmt @ (ProtoStatement::If(_) | ProtoStatement::Case(_)) if cut_arms => {
+                        split_nested(stmt, out, true, true)
                     }
                     other => out.push(other),
                 }
@@ -2333,17 +2348,40 @@ pub(crate) fn analyze_dependency(
             );
             sort_and_verify_acyclic(stmts, &blocks)
         };
-        if let Ok((sorted, passes_hint)) = attempt(table.clone(), false) {
-            pass_diag_phase("phase3: stable_topo_sort after the copy split");
+        let mut rejected = None;
+        for (split_concats, cut_arms, phase) in [
+            (
+                false,
+                false,
+                "phase3: stable_topo_sort after the copy split",
+            ),
+            (
+                true,
+                false,
+                "phase3: stable_topo_sort after the concatenation and copy split",
+            ),
+            (
+                true,
+                true,
+                "phase3: stable_topo_sort after cutting conditional arms",
+            ),
+        ] {
+            match attempt(table.clone(), split_concats, cut_arms) {
+                Ok((sorted, passes_hint)) if !multi_pass(&sorted, passes_hint) => {
+                    pass_diag_phase(phase);
+                    return Ok((sorted, passes_hint, false));
+                }
+                Ok(ordered) => {
+                    fallback.get_or_insert(ordered);
+                }
+                Err(x) => rejected = Some(x),
+            }
+        }
+        if let Some((sorted, passes_hint)) = fallback {
+            pass_diag_phase("phase3: stable_topo_sort, more than one pass");
             return Ok((sorted, passes_hint, false));
         }
-        let (sorted, cycle_indices) = match attempt(table, true) {
-            Ok((sorted, passes_hint)) => {
-                pass_diag_phase("phase3: stable_topo_sort after the concatenation and copy split");
-                return Ok((sorted, passes_hint, false));
-            }
-            Err(x) => x,
-        };
+        let (sorted, cycle_indices) = rejected.expect("every attempt was rejected");
         // The split turns one assign into a part per written range, each
         // carrying its token, so a ring through a widely split copy would
         // name one line once per part.  First of each keeps program order.
@@ -2564,7 +2602,12 @@ fn group_emission_order(
     let mut i = 0;
     for body in bodies {
         // Bodies are mutually exclusive, so each starts with a clean history.
-        let mut last_write: HashMap<VarOffset, usize> = HashMap::default();
+        // A reader follows the last writer of the variable and every earlier
+        // one writing bits it reads: a write cut into parts leaves its other
+        // parts in other groups.
+        let mut writers: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
+        let mut read_ranges = vec![];
+        let mut write_ranges = vec![];
         let mut readers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
         for stmt in *body {
             ins.clear();
@@ -2578,13 +2621,26 @@ fn group_emission_order(
                     succ[r].insert(ids[i]);
                 }
             }
+            read_ranges.clear();
+            stmt.gather_reads_with_ranges(&mut read_ranges);
             for o in ins.iter().filter(|o| !o.is_ff()) {
-                if let Some(&w) = last_write.get(o) {
+                let Some(ws) = writers.get(o) else { continue };
+                if let Some(&(w, _)) = ws.last() {
                     succ[w].insert(ids[i]);
                 }
+                for &(w, wr) in ws {
+                    if read_ranges
+                        .iter()
+                        .any(|&(ro, rr)| ro == *o && ranges_overlap(rr, wr))
+                    {
+                        succ[w].insert(ids[i]);
+                    }
+                }
             }
-            for o in outs.iter().filter(|o| !o.is_ff()) {
-                last_write.insert(*o, ids[i]);
+            write_ranges.clear();
+            gather_bit_aware_outputs(stmt, &mut write_ranges);
+            for &(o, wr) in write_ranges.iter().filter(|(o, _)| !o.is_ff()) {
+                writers.entry(o).or_default().push((ids[i], wr));
             }
             for o in ins.iter().filter(|o| !o.is_ff()) {
                 readers.entry(*o).or_default().push(ids[i]);
@@ -2626,13 +2682,13 @@ fn group_emission_order(
 /// Off unless the flat split already failed: every group re-evaluates the
 /// guards it sits under, so the extra code is only worth emitting where it
 /// buys a schedule.
-fn split_body(body: Vec<ProtoStatement>, deep: bool) -> Vec<ProtoStatement> {
+fn split_body(body: Vec<ProtoStatement>, deep: bool, cut: bool) -> Vec<ProtoStatement> {
     if !deep {
         return body;
     }
     let mut out = Vec::with_capacity(body.len());
     for stmt in body {
-        split_nested(stmt, &mut out, deep);
+        split_nested(stmt, &mut out, deep, cut);
     }
     out
 }
@@ -2640,10 +2696,13 @@ fn split_body(body: Vec<ProtoStatement>, deep: bool) -> Vec<ProtoStatement> {
 /// One statement of a body, split by write set when it is a conditional, or
 /// by concatenation element when it assigns a whole variable or a static
 /// select.
-fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
+///
+/// `cut` also cuts the assigns of a conditional's arms at shared bounds (see
+/// [`cut_at_shared_bounds`]).
+fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool, cut: bool) {
     match stmt {
-        ProtoStatement::If(x) => split_if_by_write_set(x, out, deep),
-        ProtoStatement::Case(x) => split_case_by_write_set(x, out, deep),
+        ProtoStatement::If(x) => split_if_by_write_set(x, out, deep, cut),
+        ProtoStatement::Case(x) => split_case_by_write_set(x, out, deep, cut),
         ProtoStatement::Assign(a) if deep => split_assign_by_concat(a, out, SPECULATIVE_MAX_PARTS),
         other => out.push(other),
     }
@@ -3177,12 +3236,21 @@ fn split_one_copy(
 /// through either closes a cycle the design does not have.  Write sets that
 /// intersect stay together, and a split a read would be reordered across is
 /// not taken.
-fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
-    let x = ProtoIfStatement {
+fn split_if_by_write_set(
+    x: ProtoIfStatement,
+    out: &mut Vec<ProtoStatement>,
+    deep: bool,
+    cut: bool,
+) {
+    let mut x = ProtoIfStatement {
         cond: x.cond,
-        true_side: split_body(x.true_side, deep),
-        false_side: split_body(x.false_side, deep),
+        true_side: split_body(x.true_side, deep, cut),
+        false_side: split_body(x.false_side, deep, cut),
     };
+    let uncut = cut.then(|| (x.true_side.clone(), x.false_side.clone()));
+    if cut {
+        cut_at_shared_bounds(&mut [&mut x.true_side, &mut x.false_side]);
+    }
     let arm_count = x.true_side.len() + x.false_side.len();
     if arm_count < 2 {
         out.push(ProtoStatement::If(x));
@@ -3195,7 +3263,12 @@ fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>, dee
         .flatten();
     drop(guards);
     let Some(order) = order else {
-        // One group: splitting would only duplicate the condition.
+        // One group: splitting would only duplicate the condition, and the
+        // cut parts would only cost settles.
+        if let Some((true_side, false_side)) = uncut {
+            x.true_side = true_side;
+            x.false_side = false_side;
+        }
         out.push(ProtoStatement::If(x));
         return;
     };
@@ -3220,24 +3293,149 @@ fn split_if_by_write_set(x: ProtoIfStatement, out: &mut Vec<ProtoStatement>, dee
     }
 }
 
+/// Cut each top-level assign in `bodies` at the bounds of every other write of
+/// its destination there: an arm writing a variable whole would otherwise put
+/// the parts another arm writes into one write set.  A nested conditional is
+/// not cut, so one writing the variable whole still welds them.
+fn cut_at_shared_bounds(bodies: &mut [&mut Vec<ProtoStatement>]) {
+    let mut cuts: HashMap<VarOffset, Vec<usize>> = HashMap::default();
+    let mut outs = Vec::new();
+    for stmt in bodies.iter().flat_map(|b| b.iter()) {
+        outs.clear();
+        gather_bit_aware_outputs(stmt, &mut outs);
+        for &(off, range) in &outs {
+            if let Some((hi, lo)) = range {
+                let c = cuts.entry(off).or_default();
+                c.push(lo);
+                c.push(hi + 1);
+            }
+        }
+    }
+    if cuts.is_empty() {
+        return;
+    }
+    for c in cuts.values_mut() {
+        c.sort_unstable();
+        c.dedup();
+    }
+    for body in bodies.iter_mut() {
+        expand_in_place(body, |stmt, out| match stmt {
+            ProtoStatement::Assign(a) => cut_assign(a, &cuts, out),
+            other => out.push(other),
+        });
+    }
+}
+
+fn cut_assign(
+    a: ProtoAssignStatement,
+    cuts: &HashMap<VarOffset, Vec<usize>>,
+    out: &mut Vec<ProtoStatement>,
+) {
+    let (base, width) = match a.select {
+        None => (0, a.dst_width),
+        Some((hi, lo)) if hi >= lo => (lo, hi - lo + 1),
+        Some(_) => (0, 0),
+    };
+    let at: &[usize] = match cuts.get(&a.dst) {
+        Some(c) if width > 0 => {
+            let from = c.partition_point(|&x| x <= base);
+            let to = c.partition_point(|&x| x < base + width);
+            &c[from..to]
+        }
+        _ => &[],
+    };
+    if at.is_empty()
+        || at.len() >= SPECULATIVE_MAX_PARTS
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+        || reads_written_window(&a, base, base + width - 1)
+    {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    // Only the store fits a literal to the destination; fit it here to slice
+    // it, where the result is certain: the store keeps the low bits of a
+    // wider literal and zero-extends an unsigned narrower one.
+    let mut expr = a.expr.clone();
+    crate::ir::statement::size_literal_rhs(&mut expr, a.select, None, a.dst_width);
+    if let ProtoExpression::Value {
+        value,
+        width: w,
+        expr_context,
+    } = &mut expr
+        && (*w > width || (*w < width && !value.signed()))
+        && value.width() == *w
+    {
+        *value = if *w > width {
+            value.select(width - 1, 0)
+        } else {
+            value.expand(width, false).into_owned()
+        };
+        *w = width;
+        *expr_context = crate::ir::expression::ExpressionContext {
+            width,
+            signed: false,
+        };
+    }
+    if expr.width() != width {
+        out.push(ProtoStatement::Assign(a));
+        return;
+    }
+    let bounds: Vec<usize> = std::iter::once(base)
+        .chain(at.iter().copied())
+        .chain(std::iter::once(base + width))
+        .collect();
+    let mut parts = Vec::with_capacity(bounds.len() - 1);
+    for w in bounds.windows(2) {
+        let (lo, hi) = (w[0], w[1] - 1);
+        let Some(part) = expr.bit_parallel_window(hi - base, lo - base) else {
+            out.push(ProtoStatement::Assign(a));
+            return;
+        };
+        parts.push(ProtoStatement::Assign(ProtoAssignStatement {
+            select: Some((hi, lo)),
+            expr: part,
+            ..a.clone()
+        }));
+    }
+    out.extend(parts);
+}
+
 /// `split_if_by_write_set` for a `case`; a whole `always_comb` lowered to one
 /// of these is a single node, so the cycle it closes is per BLOCK.
 ///
 /// Only the bodies are partitioned — every group keeps every arm and its
 /// condition — so which arm fires and what an unwritten variable holds are
 /// unchanged.
-fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>, deep: bool) {
-    let x = ProtoCaseStatement {
+fn split_case_by_write_set(
+    x: ProtoCaseStatement,
+    out: &mut Vec<ProtoStatement>,
+    deep: bool,
+    cut: bool,
+) {
+    let mut x = ProtoCaseStatement {
         arms: x
             .arms
             .into_iter()
             .map(|a| ProtoCaseArm {
                 cond: a.cond,
-                body: split_body(a.body, deep),
+                body: split_body(a.body, deep, cut),
             })
             .collect(),
-        default: split_body(x.default, deep),
+        default: split_body(x.default, deep, cut),
     };
+    let uncut = cut.then(|| {
+        (
+            x.arms.iter().map(|a| a.body.clone()).collect::<Vec<_>>(),
+            x.default.clone(),
+        )
+    });
+    if cut {
+        let mut bodies: Vec<&mut Vec<ProtoStatement>> =
+            x.arms.iter_mut().map(|a| &mut a.body).collect();
+        bodies.push(&mut x.default);
+        cut_at_shared_bounds(&mut bodies);
+    }
     let stmt_count: usize = x.arms.iter().map(|a| a.body.len()).sum::<usize>() + x.default.len();
     if stmt_count < 2 {
         out.push(ProtoStatement::Case(x));
@@ -3262,6 +3460,12 @@ fn split_case_by_write_set(x: ProtoCaseStatement, out: &mut Vec<ProtoStatement>,
         .flatten();
     drop((guards, bodies));
     let Some(order) = order else {
+        if let Some((arms, default)) = uncut {
+            for (arm, body) in x.arms.iter_mut().zip(arms) {
+                arm.body = body;
+            }
+            x.default = default;
+        }
         out.push(ProtoStatement::Case(x));
         return;
     };
@@ -3644,7 +3848,7 @@ fn split_by_branch(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>) -> bool 
         // Not a conditional: apply the deep split anyway, since this phase
         // starts from the unsplit blocks.
         other => {
-            split_nested(other, out, true);
+            split_nested(other, out, true, false);
             false
         }
     }
