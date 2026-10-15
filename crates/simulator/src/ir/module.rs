@@ -2196,6 +2196,7 @@ pub(crate) fn analyze_dependency(
         &mut deep_group_of,
         Some(&mut deep_on_cycle),
         SPECULATIVE_MAX_PARTS,
+        SPECULATIVE_MAX_ROUNDS,
     );
     // Versions before scheduling: each write is its own statement now, so
     // a reader between two of them can be given the earlier version's
@@ -2262,6 +2263,7 @@ pub(crate) fn analyze_dependency(
                 &mut branch_group_of,
                 Some(&mut branch_on_cycle),
                 SPECULATIVE_MAX_PARTS,
+                SPECULATIVE_MAX_ROUNDS,
             );
             let renamed = rename_versions(
                 &mut branch_stmts,
@@ -2304,23 +2306,40 @@ pub(crate) fn analyze_dependency(
             pass_diag_phase("phase3: stable_topo_sort (no non-expandable CB)");
             return Ok((sorted, passes_hint, false));
         }
-        // Each part is one more statement every settle evaluates, so a copy
-        // no ring runs through would be cut for nothing.
-        let mut stmts = table;
-        let mut blocks = block_of;
-        // `groups` tags branches for `stable_topo_sort_with_pieces`; this
-        // phase sorts by block and never reads them.
-        let mut groups = vec![0usize; stmts.len()];
-        split_copies_by_source_writes(
-            &mut stmts,
-            &mut blocks,
-            &mut groups,
-            None,
-            LAST_RESORT_MAX_PARTS,
-        );
-        let (sorted, cycle_indices) = match sort_and_verify_acyclic(stmts, &blocks) {
+        // Every part costs each settle, so concatenations are cut only where
+        // the copies alone do not order it.
+        let attempt = |mut stmts: Vec<ProtoStatement>, split_concats: bool| {
+            let mut blocks = Vec::with_capacity(stmts.len());
+            let mut by_block = block_of.iter().copied();
+            expand_in_place(&mut stmts, |stmt, out| {
+                match stmt {
+                    ProtoStatement::Assign(a) if split_concats => {
+                        split_assign_by_concat(a, out, LAST_RESORT_MAX_PARTS)
+                    }
+                    other => out.push(other),
+                }
+                blocks.resize(blocks.len() + out.len(), by_block.next().unwrap());
+            });
+            // `groups` tags branches for `stable_topo_sort_with_pieces`; this
+            // phase sorts by block and never reads them.
+            let mut groups = vec![0usize; stmts.len()];
+            split_copies_by_source_writes(
+                &mut stmts,
+                &mut blocks,
+                &mut groups,
+                None,
+                LAST_RESORT_MAX_PARTS,
+                LAST_RESORT_MAX_ROUNDS,
+            );
+            sort_and_verify_acyclic(stmts, &blocks)
+        };
+        if let Ok((sorted, passes_hint)) = attempt(table.clone(), false) {
+            pass_diag_phase("phase3: stable_topo_sort after the copy split");
+            return Ok((sorted, passes_hint, false));
+        }
+        let (sorted, cycle_indices) = match attempt(table, true) {
             Ok((sorted, passes_hint)) => {
-                pass_diag_phase("phase3: stable_topo_sort after the copy split");
+                pass_diag_phase("phase3: stable_topo_sort after the concatenation and copy split");
                 return Ok((sorted, passes_hint, false));
             }
             Err(x) => x,
@@ -2625,7 +2644,7 @@ fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool)
     match stmt {
         ProtoStatement::If(x) => split_if_by_write_set(x, out, deep),
         ProtoStatement::Case(x) => split_case_by_write_set(x, out, deep),
-        ProtoStatement::Assign(a) if deep => split_assign_by_concat(a, out),
+        ProtoStatement::Assign(a) if deep => split_assign_by_concat(a, out, SPECULATIVE_MAX_PARTS),
         other => out.push(other),
     }
 }
@@ -2639,12 +2658,15 @@ fn split_nested(stmt: ProtoStatement, out: &mut Vec<ProtoStatement>, deep: bool)
 /// extension or truncation rule changes.  The window may be a static select:
 /// `v[W-1:0] = {a, b}` is how Verilog spells a whole-port assign, and keeping
 /// it whole welds a flop-driven element to a combinational one.
-fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>) {
-    /// Bounded because every element becomes a statement that each settle
-    /// evaluates.  Lifting it to 256 — enough for the 109..132-element
-    /// concatenations this declines on real designs — costs 0.2-0.9% of the
-    /// run, and those schedule without the split anyway.
-    const MAX_ELEMENTS: usize = 64;
+///
+/// Lifting [`SPECULATIVE_MAX_PARTS`] to 256 for the 109..132-element
+/// concatenations of real designs costs 0.2-0.9% of the run, and those
+/// schedule without the split anyway.
+fn split_assign_by_concat(
+    a: ProtoAssignStatement,
+    out: &mut Vec<ProtoStatement>,
+    max_elements: usize,
+) {
     let ProtoExpression::Concatenation { elements, .. } = &a.expr else {
         out.push(ProtoStatement::Assign(a));
         return;
@@ -2663,14 +2685,15 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
         || a.rhs_select.is_some()
         || width == 0
         || total != width
-        || !(2..=MAX_ELEMENTS).contains(&parts)
+        || !(2..=max_elements).contains(&parts)
         || elements.iter().any(|(_, _, width)| *width == 0)
+        || reads_written_window(&a, base, base + width - 1)
     {
         // Say when the bound is what stopped it: a design that needs this
         // split to schedule would otherwise fail with no trace of why.
-        if parts > MAX_ELEMENTS && std::env::var("VERYL_PASS_DIAG").is_ok() {
+        if parts > max_elements && std::env::var("VERYL_PASS_DIAG").is_ok() {
             log::info!(
-                "pass_diag: concatenation of {parts} elements left unsplit (bound {MAX_ELEMENTS})"
+                "pass_diag: concatenation of {parts} elements left unsplit (bound {max_elements})"
             );
         }
         out.push(ProtoStatement::Assign(a));
@@ -2698,17 +2721,24 @@ fn split_assign_by_concat(a: ProtoAssignStatement, out: &mut Vec<ProtoStatement>
     }
 }
 
-/// How finely [`split_copies_by_source_writes`] cuts one copy for a phase that
-/// can still fall through to another.  Each part is a statement every settle
-/// evaluates, so a copy wider than this is left for the last phase to judge.
+/// Most parts a copy or a concatenation is cut into while a later phase
+/// remains: each part is a statement every settle evaluates.
 const SPECULATIVE_MAX_PARTS: usize = 64;
 
 /// The same cap for the last phase, where refusing to cut costs the whole
-/// design rather than granularity — capped at all only because each part
+/// design rather than granularity.  It is capped at all only because each part
 /// read-modify-writes the full destination, making the split O(parts * width)
 /// per settle.  Clears a real register bundle (~100 boundaries) by enough to
 /// rule out only a bus assembled a bit at a time.
 const LAST_RESORT_MAX_PARTS: usize = 4096;
+
+/// Most rounds of [`split_copies_by_source_writes`] while a later phase
+/// remains: each round rescans every statement.
+const SPECULATIVE_MAX_ROUNDS: usize = 4;
+
+/// The same for the last phase, where it keeps a ring of shifted copies, which
+/// gains one cut per lap, from taking a round per bit.
+const LAST_RESORT_MAX_ROUNDS: usize = 64;
 
 /// A verified order and its pass count, or that order plus the statements the
 /// surviving cycle runs through.
@@ -2907,21 +2937,18 @@ fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> Sort
 /// boundaries to an eligible one further down.
 ///
 /// For `max_parts` see [`SPECULATIVE_MAX_PARTS`] and [`LAST_RESORT_MAX_PARTS`].
+/// A copy chain carries boundaries one link per round.
 fn split_copies_by_source_writes(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
     groups: &mut Vec<usize>,
     mut eligible: Option<&mut Vec<bool>>,
     max_parts: usize,
+    max_rounds: usize,
 ) {
-    /// A buffer chain carries boundaries one link per round.  A split link names
-    /// its bits and never splits again, so this terminates; the bound only caps
-    /// long chains.
-    const MAX_ROUNDS: usize = 4;
-
     // The parts an ineligible copy would split into, aligned with `stmts`.
     let mut lent: Vec<Option<Vec<ProtoStatement>>> = vec![None; stmts.len()];
-    for _ in 0..MAX_ROUNDS {
+    for _ in 0..max_rounds {
         let mut bounds: HashMap<VarOffset, Option<Vec<usize>>> = HashMap::default();
         let mut outs = Vec::new();
         for (stmt, lent) in stmts.iter().zip(&lent) {
@@ -2997,6 +3024,16 @@ fn split_copies_by_source_writes(
             **e = out_eligible;
         }
     }
+}
+
+/// Whether `a` reads its destination within `[lo, hi]`: split, a later part
+/// would read what an earlier one just wrote.
+fn reads_written_window(a: &ProtoAssignStatement, lo: usize, hi: usize) -> bool {
+    let mut reads = Vec::new();
+    a.expr.gather_reads_with_ranges(&mut reads);
+    reads
+        .iter()
+        .any(|&(off, range)| off == a.dst && range.is_none_or(|(rhi, rlo)| rlo <= hi && lo <= rhi))
 }
 
 /// Every variable a bit-parallel expression reads, with where bit 0 of the
@@ -3084,12 +3121,8 @@ fn split_one_copy(
     if !bit_parallel_sources(&a.expr, &mut sources) {
         return None;
     }
-    // A copy that reads its own destination carries no bits between two
-    // variables, so there is no weld to break.  Splitting one buys nothing and
-    // costs a writer per part: the carry-over a version split leaves behind
-    // covers a whole bundle, and cutting it per field turns one writer of that
-    // variable into dozens.
-    if sources.iter().any(|(src, _)| *src == a.dst) {
+    // A move between disjoint parts of one variable welds them like any copy.
+    if reads_written_window(a, dst_base, dst_base + width - 1) {
         return None;
     }
     // A source written with unknown bits contributes no cut, but it does not
