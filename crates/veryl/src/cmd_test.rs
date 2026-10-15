@@ -343,6 +343,7 @@ impl CmdTest {
         let mut config = Config {
             use_jit,
             disable_ff_opt: self.opt.disable_ff_opt,
+            allow_multi_pass: self.opt.allow_multi_pass,
             aot_c,
             aot_c_event: aot_c,
             aot_c_async: aot_c && !validate,

@@ -8,6 +8,7 @@ use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
     build_linear_index_expr, inline_function_call,
 };
+use crate::ir::module::BitRange;
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::variable::{
     VarOffset, clip_select_to_width, native_bytes as calc_native_bytes, read_native_value,
@@ -1891,12 +1892,30 @@ impl ProtoStatement {
                 for s in body {
                     s.gather_variable_offsets(&mut all_ins, &mut all_outs);
                 }
-                let input_set: HashSet<VarOffset> = all_ins.iter().cloned().collect();
                 let output_set: HashSet<VarOffset> = all_outs.iter().cloned().collect();
-                let internal: HashSet<VarOffset> =
-                    input_set.intersection(&output_set).cloned().collect();
+                let shared: HashSet<VarOffset> = all_ins
+                    .iter()
+                    .filter(|off| output_set.contains(off))
+                    .copied()
+                    .collect();
+                let mut external: HashSet<VarOffset> = HashSet::default();
+                if !shared.is_empty() {
+                    let writes = BlockWrites::of(body);
+                    let mut reads = vec![];
+                    for s in body {
+                        s.gather_reads_with_ranges(&mut reads);
+                    }
+                    external.extend(
+                        reads
+                            .iter()
+                            .filter(|(off, range)| {
+                                shared.contains(off) && !writes.covers(*off, *range)
+                            })
+                            .map(|(off, _)| *off),
+                    );
+                }
                 for off in all_ins {
-                    if !internal.contains(&off) {
+                    if !output_set.contains(&off) || external.contains(&off) {
                         inputs.push(off);
                     }
                 }
@@ -1997,15 +2016,12 @@ impl ProtoStatement {
             }
             ProtoStatement::SequentialBlock(body) => {
                 let mut all_reads = vec![];
-                let mut all_outs = vec![];
                 for s in body {
                     s.gather_reads_with_ranges(&mut all_reads);
-                    let mut ins = vec![];
-                    s.gather_variable_offsets(&mut ins, &mut all_outs);
                 }
-                let output_set: HashSet<VarOffset> = all_outs.into_iter().collect();
+                let writes = BlockWrites::of(body);
                 for (off, range) in all_reads {
-                    if !output_set.contains(&off) {
+                    if !writes.covers(off, range) {
                         out.push((off, range));
                     }
                 }
@@ -5602,6 +5618,59 @@ fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -
                 return;
             }
         }
+    }
+}
+
+/// The bits a sequential block writes, per offset.  A read of bits the block
+/// writes itself stays internal; a read of any bit only other statements
+/// write makes the variable an input, so the block is ordered after them.
+/// Coverage ignores order within the block.
+///
+/// Per offset: `None` when some write covers the whole variable, otherwise
+/// the written bits as sorted, merged, disjoint `(lo, hi)` spans.
+struct BlockWrites(crate::HashMap<VarOffset, Option<Vec<(usize, usize)>>>);
+
+impl BlockWrites {
+    fn of(body: &[ProtoStatement]) -> Self {
+        let mut outs = vec![];
+        for s in body {
+            crate::ir::module::gather_bit_aware_outputs(s, &mut outs);
+        }
+        let mut map: crate::HashMap<VarOffset, Option<Vec<(usize, usize)>>> =
+            crate::HashMap::default();
+        for (off, range) in outs {
+            let e = map.entry(off).or_insert_with(|| Some(Vec::new()));
+            match (e.as_mut(), range) {
+                (Some(v), Some((h, l))) => v.push((l, h)),
+                _ => *e = None,
+            }
+        }
+        for spans in map.values_mut().flatten() {
+            spans.sort_unstable();
+            let mut merged: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+            for &(l, h) in spans.iter() {
+                match merged.last_mut() {
+                    Some(last) if l <= last.1.saturating_add(1) => last.1 = last.1.max(h),
+                    _ => merged.push((l, h)),
+                }
+            }
+            *spans = merged;
+        }
+        BlockWrites(map)
+    }
+
+    fn covers(&self, off: VarOffset, read: BitRange) -> bool {
+        let Some(writes) = self.0.get(&off) else {
+            return false;
+        };
+        let Some(spans) = writes else {
+            return true;
+        };
+        let Some((hi, lo)) = read else {
+            return false;
+        };
+        let i = spans.partition_point(|&(l, _)| l <= lo);
+        i > 0 && spans[i - 1].1 >= hi
     }
 }
 

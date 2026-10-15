@@ -1491,7 +1491,7 @@ fn run_comb_pipeline(
     };
     stage.mark("version_split");
     dump_stmt_order("post-vsplit", module_name, &unified);
-    let (unified_sorted, passes_hint) = {
+    let (unified_sorted, passes_hint, linearized) = {
         let use_4state = context.config.use_4state;
         let comb_total = &mut context.comb_total_bytes;
         let mut alloc = |width: usize, from: isize| -> isize {
@@ -1738,6 +1738,10 @@ fn run_comb_pipeline(
     } else {
         required_comb_passes
     };
+    let pass_witness = (required_comb_passes > 1).then(|| comb_pipeline_cache::MultiPass {
+        linearized,
+        participants: backward_edge_tokens(&unified_sorted),
+    });
 
     // Settle-order relayout (`VERYL_COMB_LAYOUT`): derive the storage
     // permutation from the final execution order and rewrite the comb
@@ -1793,6 +1797,7 @@ fn run_comb_pipeline(
         unfuse_comb_reloc: Vec::new(),
         pre_jit_stmts,
         required_comb_passes,
+        multi_pass: pass_witness,
         comb_statements,
         dead_offsets: dead_union.into_iter().collect(),
         // Fused (retired) offsets in the FINAL storage space: the checker
@@ -1850,12 +1855,17 @@ fn expand_in_place<T>(v: &mut Vec<T>, mut f: impl FnMut(T, &mut Vec<T>)) {
 /// Returns the scheduled statements plus an exact required-pass hint when the
 /// block-aware sort could derive one (see `stable_topo_sort_with_blocks`);
 /// `None` means the caller must fall back to `compute_required_passes`.
+/// The flag says whether some granularity found an order honouring every
+/// edge.  An order needing more than one pass is rejected by
+/// `check_multi_pass` either way, as unordered logic when the flag is false
+/// and as an internal error when it is true, unless multi-pass settling is
+/// allowed.
 /// `alloc(width, from)` reserves a version-rename temp standing in for the
 /// comb variable at offset `from` (see `rename_versions`).
 pub(crate) fn analyze_dependency(
     statements: Vec<ProtoStatement>,
     alloc: &mut dyn FnMut(usize, isize) -> isize,
-) -> Result<(Vec<ProtoStatement>, Option<usize>), SimulatorError> {
+) -> Result<(Vec<ProtoStatement>, Option<usize>, bool), SimulatorError> {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     enum Node {
         /// `(variable, bit atom)`. Atom 0 is the whole variable unless
@@ -2033,7 +2043,7 @@ pub(crate) fn analyze_dependency(
         pass_diag_phase("phase1: bipartite, CBs atomic");
         let mut statements = statements;
         permute_in_place(&mut statements, &order);
-        return Ok((statements, Some(1)));
+        return Ok((statements, Some(1), true));
     }
 
     // Phase 1 has already failed, so its cycle is either real or an artefact
@@ -2096,7 +2106,7 @@ pub(crate) fn analyze_dependency(
                 nested.unwrap_or_else(|| statements[top_of[i].unwrap()].take().unwrap())
             })
             .collect();
-        return Ok((sorted, Some(1)));
+        return Ok((sorted, Some(1), true));
     }
     drop(fast);
 
@@ -2145,7 +2155,7 @@ pub(crate) fn analyze_dependency(
     stage.mark("phase2-full");
     if !fell_back {
         pass_diag_phase("phase2-full: flatten + stable_topo_sort");
-        return Ok((sorted, passes_hint));
+        return Ok((sorted, passes_hint, true));
     }
     // A reported cycle hands the statements back in program order.
     let flat = sorted;
@@ -2202,7 +2212,7 @@ pub(crate) fn analyze_dependency(
     stage.mark("phase2-deep sort");
     if !fell_back {
         pass_diag_phase("phase2-deep: nested split + stable_topo_sort");
-        return Ok((sorted, passes_hint));
+        return Ok((sorted, passes_hint, true));
     }
     let deep_stmts = sorted;
 
@@ -2265,20 +2275,16 @@ pub(crate) fn analyze_dependency(
                 pass_diag_phase(&format!(
                     "phase2-branch: per-branch split ({renamed} version(s) renamed)"
                 ));
-                return Ok((sorted, passes_hint));
+                return Ok((sorted, passes_hint, true));
             }
         }
     }
 
     // No granularity linearized it, so no order here honours every edge.
     // Phase 3 below still produces one, but it is not the one-pass order a
-    // synthesisable design has: say so rather than let the extra settle
-    // passes pass for normal.
-    log::warn!(
-        "the statement order for this scope could not be linearized at any granularity; \
-         simulation stays correct but settles in more than one pass. \
-         Re-run with VERYL_PASS_DIAG=1 to see the cycle."
-    );
+    // synthesisable design has, so the returns below report that nothing
+    // linearized it, which the comb pipeline turns into an error unless
+    // multi-pass settling is allowed.
 
     // Phase 3: Check for genuine combinational loop vs false positive
     // from non-expandable CompiledBlocks (shared JIT cache).
@@ -2296,7 +2302,7 @@ pub(crate) fn analyze_dependency(
         // flattened.
         if let Ok((sorted, passes_hint)) = sort_and_verify_acyclic(table.clone(), &block_of) {
             pass_diag_phase("phase3: stable_topo_sort (no non-expandable CB)");
-            return Ok((sorted, passes_hint));
+            return Ok((sorted, passes_hint, false));
         }
         // Each part is one more statement every settle evaluates, so a copy
         // no ring runs through would be cut for nothing.
@@ -2315,7 +2321,7 @@ pub(crate) fn analyze_dependency(
         let (sorted, cycle_indices) = match sort_and_verify_acyclic(stmts, &blocks) {
             Ok((sorted, passes_hint)) => {
                 pass_diag_phase("phase3: stable_topo_sort after the copy split");
-                return Ok((sorted, passes_hint));
+                return Ok((sorted, passes_hint, false));
             }
             Err(x) => x,
         };
@@ -2426,7 +2432,7 @@ pub(crate) fn analyze_dependency(
         .collect();
     let mut ret = table;
     permute_in_place(&mut ret, &order);
-    Ok((ret, None))
+    Ok((ret, None, false))
 }
 
 /// Bit range for a partial comb assignment. `None` = full-width write/read.
@@ -2711,7 +2717,7 @@ type SortOutcome = Result<(Vec<ProtoStatement>, Option<usize>), (Vec<ProtoStatem
 /// Sort `stmts`, then verify no cycle survives a bit- and branch-aware
 /// reading of the result.
 fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> SortOutcome {
-    let (sorted, passes_hint, fell_back) = stable_topo_sort_with_blocks(stmts, blocks);
+    let (sorted, passes_hint, _) = stable_topo_sort_with_blocks(stmts, blocks);
     // Verify no genuine combinational loop remains.  One `VarOffset` is a
     // whole struct and a conditional's reads are the union over its
     // branches, so key by bits AND by per-branch piece; `sorted` still runs.
@@ -2858,17 +2864,8 @@ fn sort_and_verify_acyclic(stmts: Vec<ProtoStatement>, blocks: &[usize]) -> Sort
         }
     }
     if cnt == n {
-        // The sort refused to linearize, so `sorted` is the UNSORTED input and
-        // every reader that precedes its writer costs a settle pass.  The pass
-        // count alone does not distinguish that from a design that really has
-        // a loop.
-        if fell_back {
-            log::warn!(
-                "no cycle survives a bit-aware reading of the order, but the sort \
-                 could not linearize it: the statements run in source order and \
-                 settle in several passes"
-            );
-        }
+        // Where the sort refused to linearize, `sorted` is the unsorted input
+        // and may settle in several passes; `check_multi_pass` decides.
         return Ok((sorted, passes_hint));
     }
     // `deg > 0` includes the cycle's downstream cone; isolate just the
@@ -4613,24 +4610,56 @@ fn preserves_edge_directions(sorted: &[ProtoStatement], new_of: &[usize]) -> boo
     true
 }
 
-/// Number of eval_comb passes needed for the comb list to converge.
-///
-/// A backward dataflow edge (a statement reads a value written later in
-/// the sorted order) costs one extra pass; the result is the longest
-/// backward-edge chain + 1 over the statement dependency graph.
-fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
-    use daggy::petgraph::Graph;
-    use daggy::petgraph::algo::tarjan_scc;
-
-    let n = sorted.len();
-    if n == 0 {
-        return 1;
+/// A comb list that settles in more than one pass is rejected unless the
+/// configuration allows it: a synthesisable design always has a one-pass
+/// order, so the extra passes mean the analysis failed somewhere.
+fn check_multi_pass(
+    context: &Context,
+    src: &air::Module,
+    multi: &comb_pipeline_cache::MultiPass,
+    passes: usize,
+) -> Result<(), SimulatorError> {
+    if context.config.allow_multi_pass {
+        if multi.linearized {
+            log::warn!(
+                "module \"{}\" was ordered but settles in {passes} passes, a simulator bug. \
+                 Re-run with VERYL_PASS_DIAG=1 to see the backward edges.",
+                src.name
+            );
+        } else {
+            log::warn!(
+                "module \"{}\" settles in {passes} passes: no one-pass order was found. \
+                 Re-run with VERYL_PASS_DIAG=1 to see the backward edges.",
+                src.name
+            );
+        }
+        return Ok(());
     }
-
-    if std::env::var("VERYL_SCC_DIAG").is_ok() {
-        compute_scc_stats(sorted);
+    if multi.linearized {
+        return Err(SimulatorError::UnprovenPassCount {
+            module_name: src.name.to_string(),
+            passes,
+        });
     }
+    let (trigger, rest) = match multi.participants.split_first() {
+        Some((first, rest)) => (*first, rest),
+        None => (src.token, &[][..]),
+    };
+    Err(SimulatorError::unordered_combinational_logic(
+        &trigger, rest,
+    ))
+}
 
+/// The writer-to-reader edges [`compute_required_passes`] counts between the
+/// statements of a sorted comb list, stored per reader (`in_edges[reader]`
+/// lists its writers), plus the write maps the pass diagnostics use.
+struct PassEdges {
+    in_edges: Vec<Vec<usize>>,
+    writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>>,
+    full_writers: HashMap<VarOffset, Vec<usize>>,
+}
+
+fn pass_edges(sorted: &[ProtoStatement]) -> PassEdges {
     let mut writer_ranges: HashMap<VarOffset, Vec<(usize, BitRange)>> = HashMap::default();
     let mut full_writers: HashMap<VarOffset, Vec<usize>> = HashMap::default();
     for (pos, stmt) in sorted.iter().enumerate() {
@@ -4653,9 +4682,7 @@ fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
     // produced the value (the read is stable on re-execution).  Forward
     // edges stay: the read inherits whatever extra passes its producer
     // needs.
-    let mut graph: Graph<usize, ()> = Graph::new();
-    let nodes: Vec<_> = (0..n).map(|i| graph.add_node(i)).collect();
-    let mut in_edges: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut in_edges: Vec<Vec<usize>> = vec![Vec::new(); sorted.len()];
     {
         let mut edge_set: HashSet<(usize, usize)> = HashSet::default();
         let mut ins = vec![];
@@ -4687,12 +4714,80 @@ fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
                             continue;
                         }
                         if edge_set.insert((*writer_pos, pos)) {
-                            graph.add_edge(nodes[*writer_pos], nodes[pos], ());
                             in_edges[pos].push(*writer_pos);
                         }
                     }
                 }
             }
+        }
+    }
+
+    PassEdges {
+        in_edges,
+        writer_ranges,
+        full_writers,
+    }
+}
+
+/// Tokens of the statements on a backward edge, each once in program order:
+/// what a pass count above one is made of.
+fn backward_edge_tokens(sorted: &[ProtoStatement]) -> Vec<veryl_parser::token_range::TokenRange> {
+    use veryl_parser::token_range::TokenRange;
+    let edges = pass_edges(sorted);
+    let mut on_edge = vec![false; sorted.len()];
+    for (r, writers) in edges.in_edges.iter().enumerate() {
+        for &w in writers {
+            if w > r {
+                on_edge[w] = true;
+                on_edge[r] = true;
+            }
+        }
+    }
+    let mut tokens: Vec<TokenRange> = sorted
+        .iter()
+        .zip(&on_edge)
+        .filter(|(_, on)| **on)
+        .filter_map(|(s, _)| s.token())
+        .filter(|t| *t != TokenRange::default())
+        .collect();
+    tokens.sort_by_key(|t| (t.beg.source, t.beg.pos, t.end.pos));
+    tokens.dedup_by_key(|t| (t.beg.source, t.beg.pos, t.end.pos));
+    // A large design can put thousands of statements on backward edges; a
+    // diagnostic naming that many helps no one.
+    tokens.truncate(MAX_REPORTED_PARTICIPANTS);
+    tokens
+}
+
+const MAX_REPORTED_PARTICIPANTS: usize = 16;
+
+/// Number of eval_comb passes needed for the comb list to converge.
+///
+/// A backward dataflow edge (a statement reads a value written later in
+/// the sorted order) costs one extra pass; the result is the longest
+/// backward-edge chain + 1 over the statement dependency graph.
+fn compute_required_passes(scope: &str, sorted: &[ProtoStatement]) -> usize {
+    use daggy::petgraph::Graph;
+    use daggy::petgraph::algo::tarjan_scc;
+
+    let n = sorted.len();
+    if n == 0 {
+        return 1;
+    }
+
+    if std::env::var("VERYL_SCC_DIAG").is_ok() {
+        compute_scc_stats(sorted);
+    }
+
+    let PassEdges {
+        in_edges,
+        writer_ranges,
+        full_writers,
+    } = pass_edges(sorted);
+    let mut graph: Graph<usize, ()> = Graph::new();
+    let nodes: Vec<_> = (0..n).map(|i| graph.add_node(i)).collect();
+    for (r, writers) in in_edges.iter().enumerate() {
+        for &w in writers {
+            graph.add_edge(nodes[w], nodes[r], ());
         }
     }
 
@@ -6003,6 +6098,11 @@ impl Conv<&air::Module> for ProtoModule {
         // `pre_jit_stmts` is shared read-only downstream (Arc, no deep clone);
         // `comb_statements` is cloned into the ProtoModule (mostly `Arc::clone`s
         // of compiled chunks).
+        // Checked on every build, not when the pipeline ran: a cached
+        // pipeline may have been built under another configuration.
+        if let Some(multi) = &cached.multi_pass {
+            check_multi_pass(context, src, multi, cached.required_comb_passes)?;
+        }
         let pre_jit_stmts = Arc::clone(&cached.pre_jit_stmts);
         let required_comb_passes = cached.required_comb_passes;
         let comb_statements = cached.comb_statements.clone();
@@ -7334,8 +7434,10 @@ fn walk_touched_offsets(stmts: &[ProtoStatement], acc: &mut HashSet<VarOffset>) 
 /// A reader between two versions observes the earlier one, but sharing one
 /// offset forces a WAR edge to the later write, which can close a cycle the
 /// circuit does not have.  Copying the earlier version into a temp right after
-/// its write removes the edge without moving any computation.  Runs on the
-/// DEEP-SPLIT table because only there is each write a separate statement.
+/// its write removes the edge without moving any computation; where the
+/// versions this block produced form one static range, only that range is
+/// copied and only readers within it are redirected.  Runs on the DEEP-SPLIT
+/// table because only there is each write a separate statement.
 fn rename_versions(
     stmts: &mut Vec<ProtoStatement>,
     blocks: &mut Vec<usize>,
@@ -7380,6 +7482,7 @@ fn rename_versions(
         from: VarOffset,
         to: VarOffset,
         width: usize,
+        select: BitRange,
     }
     let mut plans: Vec<Plan> = Vec::new();
     let mut declined = 0usize;
@@ -7412,6 +7515,61 @@ fn rename_versions(
         if mids.iter().any(|&r| blocks[r] != blocks[after]) {
             continue;
         }
+        // The copy holds the versions this block produced up to `after`.  A
+        // whole-variable copy would also read bits only other statements
+        // write, binding it to them for nothing, so where those versions
+        // cover one range, copy just that range for the readers inside it.
+        // Any other reader keeps the variable and its edges.
+        let mut produced_spans: Vec<BitRange> = Vec::new();
+        for &w in ws
+            .iter()
+            .filter(|&&w| w <= after && blocks[w] == blocks[after])
+        {
+            let mut outs = vec![];
+            gather_bit_aware_outputs(&stmts[w], &mut outs);
+            produced_spans.extend(outs.iter().filter(|(o, _)| o == off).map(|(_, r)| *r));
+        }
+        let produced = if produced_spans.iter().any(|r| r.is_none()) {
+            None
+        } else {
+            let mut spans: Vec<(usize, usize)> = produced_spans
+                .iter()
+                .flatten()
+                .map(|&(h, l)| (l, h))
+                .collect();
+            spans.sort_unstable();
+            spans
+                .into_iter()
+                .try_fold(None::<(usize, usize)>, |acc, (l, h)| match acc {
+                    None => Some(Some((l, h))),
+                    Some((al, ah)) if l <= ah + 1 => Some(Some((al, ah.max(h)))),
+                    Some(_) => None,
+                })
+                .flatten()
+                .map(|(l, h)| (h, l))
+                .filter(|&(hi, _)| hi < width)
+        };
+        let (select, readers) = match produced {
+            Some((hi, lo)) => {
+                let inside: Vec<usize> = mids
+                    .iter()
+                    .copied()
+                    .filter(|&r| {
+                        let mut reads = vec![];
+                        stmts[r].gather_reads_with_ranges(&mut reads);
+                        reads
+                            .iter()
+                            .filter(|(o, _)| o == off)
+                            .all(|(_, rr)| rr.is_some_and(|(rh, rl)| lo <= rl && rh <= hi))
+                    })
+                    .collect();
+                if inside.is_empty() {
+                    continue;
+                }
+                (produced, inside)
+            }
+            None => (None, mids.clone()),
+        };
         // The WAR edge this copy breaks is false when every write and
         // mid-reader is a piece of one conditional with differing tags.
         let group = groups[ws[0]];
@@ -7433,10 +7591,11 @@ fn rename_versions(
         let to = VarOffset::Comb(alloc(width, off.raw()));
         plans.push(Plan {
             after,
-            readers: mids,
+            readers,
             from: *off,
             to,
             width,
+            select,
         });
     }
     if plans.is_empty() {
@@ -7452,26 +7611,33 @@ fn rename_versions(
             let (from, to) = (p.from, p.to);
             stmts[r].remap_offsets_with(&|o| if o == from { to } else { o });
         }
+        let whole = ProtoExpression::Variable {
+            var_offset: p.from,
+            select: None,
+            dynamic_select: None,
+            width: p.width,
+            var_full_width: p.width,
+            expr_context: crate::ir::ExpressionContext {
+                width: p.width,
+                signed: false,
+            },
+        };
+        let expr = match p.select {
+            Some((hi, lo)) => whole
+                .bit_parallel_window(hi, lo)
+                .expect("a plain variable read has every window"),
+            None => whole,
+        };
         insert_at
             .entry(p.after)
             .or_default()
             .push(ProtoStatement::Assign(ProtoAssignStatement {
                 dst: p.to,
                 dst_width: p.width,
-                select: None,
+                select: p.select,
                 dynamic_select: None,
                 rhs_select: None,
-                expr: ProtoExpression::Variable {
-                    var_offset: p.from,
-                    select: None,
-                    dynamic_select: None,
-                    width: p.width,
-                    var_full_width: p.width,
-                    expr_context: crate::ir::ExpressionContext {
-                        width: p.width,
-                        signed: false,
-                    },
-                },
+                expr,
                 dst_ff_current_offset: 0,
                 comb_direct: false,
                 token: stmts[p.after].token().unwrap_or_default(),

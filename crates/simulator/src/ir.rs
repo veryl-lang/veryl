@@ -1338,6 +1338,13 @@ pub struct Config {
     pub dump_asm: bool,
     /// Force all always_ff variables to FF (disable is_ff refinement).
     pub disable_ff_opt: bool,
+    /// Settle a comb list that has no one-pass order in as many passes as it
+    /// takes, instead of rejecting it.  A synthesisable design has such an
+    /// order bit by bit; the analysis works per statement and may not find
+    /// it, and this trades the error for extra settle passes.
+    /// `VERYL_ALLOW_MULTI_PASS=1` or `=0` overrides it, including where no
+    /// flag reaches.
+    pub allow_multi_pass: bool,
     /// `cc` backend: emit the dataflow comb settle as C, compile externally,
     /// and dispatch the `.so` instead of the Cranelift loop (which still
     /// covers modules the settle declines, so keep `use_jit` true).  Default
@@ -1410,6 +1417,9 @@ impl Config {
             && let Ok(n) = n.parse::<usize>()
         {
             self.aot_c_min_stmts = n;
+        }
+        if let Some(v) = env_bool("VERYL_ALLOW_MULTI_PASS") {
+            self.allow_multi_pass = v;
         }
         // On by default for the CLI; `VERYL_DUT_REUSE=0` opts out.  Off in the
         // unit-test harness, which never calls `apply_env` (see `Config::dut_reuse`).

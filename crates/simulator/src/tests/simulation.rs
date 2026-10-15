@@ -30152,6 +30152,16 @@ fn a_handshake_closed_across_two_arms_is_split_per_arm() {
     }
 }
 
+/// `Config::all()` allowing a multi-pass settle: for designs built to reach
+/// the phase that orders what no granularity linearized.
+fn multi_pass_configs() -> Vec<Config> {
+    let mut configs = Config::all();
+    for config in &mut configs {
+        config.allow_multi_pass = true;
+    }
+    configs
+}
+
 #[test]
 fn an_arm_writing_the_selector_keeps_the_case_whole() {
     // The first arm writes the SELECTOR: one `case` picks a branch once,
@@ -30197,7 +30207,7 @@ fn an_arm_writing_the_selector_keeps_the_case_whole() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (st, hold, ready) -> (valid, en, sel)
@@ -30280,7 +30290,7 @@ fn a_dynamic_element_write_keeps_the_scope_in_source_order() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (st, sel, hold, ready, idx, a2) -> o
@@ -30472,7 +30482,7 @@ fn a_read_and_a_write_in_different_arms_are_not_a_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (s, st, a, c, d) -> (y, en, sel, eno)
@@ -30601,7 +30611,7 @@ fn two_arms_reading_each_other_back_are_not_a_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (s, st, c, d) -> (po, qo, sel, eno)
@@ -30721,7 +30731,7 @@ fn struct_members_across_a_boundary_are_not_one_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // Elaborating at all is the regression, so it is checked under every
@@ -30807,7 +30817,7 @@ fn disjoint_halves_of_a_vector_are_not_one_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // As above: elaboration under every config, values where the undriven
@@ -35352,5 +35362,437 @@ fn dataflow_switch_from_jit_cells_to_the_so_reruns_every_cell() {
     assert!(
         on_jit,
         "the .so landed before the first settle; nothing was handed over"
+    );
+}
+
+#[test]
+fn a_block_reading_bits_another_block_writes_waits_for_them() {
+    // Each block writes one half of `v` and of `w` and reads the half the
+    // other block writes.  As blocks they feed each other; bit by bit
+    // `v[3:0] -> v[7:4] -> w[7:4] -> w[3:0]` is a chain.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        c: input  logic<4>,
+        d: input  logic<4>,
+        v: output logic<8>,
+        w: output logic<8>,
+    ) {
+        always_comb {
+            w[3:0] = w[7:4] & d;
+            v[7:4] = v[3:0] ^ c;
+        }
+        always_comb {
+            v[3:0] = a;
+            w[7:4] = v[7:4] | b;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (a, b, c, d) in [
+            (0x5u64, 0x2u64, 0x9u64, 0xfu64),
+            (0xa, 0x1, 0x3, 0x6),
+            (0xf, 0x0, 0xf, 0xb),
+        ] {
+            sim.set("a", Value::new(a, 4, false));
+            sim.set("b", Value::new(b, 4, false));
+            sim.set("c", Value::new(c, 4, false));
+            sim.set("d", Value::new(d, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            let v = ((a ^ c) << 4) | a;
+            let w_hi = (a ^ c) | b;
+            let w = (w_hi << 4) | (w_hi & d);
+            assert_eq!(sim.get("v").unwrap(), Value::new(v, 8, false), "{config:?}");
+            assert_eq!(sim.get("w").unwrap(), Value::new(w, 8, false), "{config:?}");
+        }
+    }
+}
+
+/// `(output, value, width)` per output a case checks.
+type Expected = Vec<(&'static str, u64, usize)>;
+
+/// `code` under every config, inputs set per case and outputs checked.
+fn check_cases(
+    code: &str,
+    inputs: &[(&str, usize)],
+    cases: &[&[u64]],
+    expect: &dyn Fn(&[u64]) -> Expected,
+) {
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for case in cases {
+            for ((name, width), value) in inputs.iter().zip(*case) {
+                sim.set(name, Value::new(*value, *width, false));
+            }
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (name, value, width) in expect(case) {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(value, width, false),
+                    "{name} {case:x?} {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_snapshot_across_generations_leaves_untouched_bits_unconditional() {
+    // The else arm reads `v[7:6]` after writing `v[3:0]`, so the snapshot
+    // spans bits of two generations.  `v[7:4]` is written before the `if`
+    // only; folding it under `c` would close a loop through `c = v[7]`.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        d: input  logic<4>,
+        o: output logic<8>,
+    ) {
+        var v: logic<8>;
+        var c: logic;
+        always_comb {
+            v[7:4] = a;
+            if c {
+                v[3:0] = b;
+            } else {
+                v[3:0] = d;
+                v[1:0] = v[7:6];
+            }
+        }
+        assign c = v[7];
+        assign o = v;
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("b", 4), ("d", 4)],
+        &[&[0x8, 0x5, 0xa], &[0x4, 0x5, 0xa], &[0xc, 0x3, 0x0]],
+        &|k| {
+            let lo = if k[0] & 8 != 0 {
+                k[1]
+            } else {
+                (k[2] & 0xc) | (k[0] >> 2)
+            };
+            vec![("o", (k[0] << 4) | lo, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_read_comes_before_every_later_write_of_its_bits() {
+    // `v3[7:4] = v2[3:0]` reads the version of `v2[3:0]` written above it, and
+    // two later writes each replace half of it.  Both must wait for the read;
+    // ordering only the first leaves `v2[3:2] = ...` free to run ahead.
+    let code = r#"
+    module Top (
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+        o3: output logic<8>,
+        o4: output logic<8>,
+    ) {
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v3: logic<8>;
+        var v4: logic<8>;
+        assign o1 = v1;
+        assign o2 = v2;
+        assign o3 = v3;
+        assign o4 = v4;
+        always_comb {
+            v4[3:0] = i3[3:0];
+            v1      = i2;
+            v4[7:4] = v3[3:0];
+        }
+        always_comb {
+            v2[7:4] = i3[6:3];
+        }
+        always_comb {
+            v2[3:0] = i2[6:3];
+            v3[3:0] = v1[3:0];
+            v3[7:4] = v3[3:0];
+            v3[7:4] = v2[3:0];
+            v2[1:0] = i2[4:3];
+            v2[3:2] = v1[4:3];
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i2", 8), ("i3", 8)],
+        &[&[0xb1, 0xd0], &[0x0f, 0xa8], &[0x70, 0x2c], &[0x00, 0xff]],
+        &|k| {
+            let (i2, i3) = (k[0], k[1]);
+            let v2 = (((i3 >> 3) & 0xf) << 4) | (((i2 >> 3) & 3) << 2) | ((i2 >> 3) & 3);
+            let v3 = (((i2 >> 3) & 0xf) << 4) | (i2 & 0xf);
+            let v4 = ((i2 & 0xf) << 4) | (i3 & 0xf);
+            vec![("o1", i2, 8), ("o2", v2, 8), ("o3", v3, 8), ("o4", v4, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_read_of_settled_bits_does_not_wait_for_their_writer_to_come_after() {
+    // `y` reads `x[3:1]`, versions this block wrote, and `x[7:4]`, settled
+    // bits the assign below supplies.  Only the versions are bound to come
+    // before a later write; ordering the settled bits that way too would
+    // contradict their own edge and reject the design.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        c: input  logic<2>,
+        e: input  logic<4>,
+        o: output logic<8>,
+        q: output logic   ,
+    ) {
+        var x: logic<8>;
+        var s: logic<4>;
+        var y: logic;
+        always_comb {
+            x[3:0] = a;
+            x[1:0] = c;
+            y      = ^x[7:1];
+            s      = e;
+        }
+        assign x[7:4] = s;
+        assign o      = x;
+        assign q      = y;
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("c", 2), ("e", 4)],
+        &[&[0x8, 0x1, 0xa], &[0x4, 0x2, 0x1], &[0xc, 0x3, 0x0]],
+        &|k| {
+            let x = (k[2] << 4) | (k[0] & 0xc) | k[1];
+            vec![("o", x, 8), ("q", ((x >> 1).count_ones() & 1) as u64, 1)]
+        },
+    );
+}
+
+#[test]
+fn a_reader_of_bits_it_writes_itself_waits_for_the_rest() {
+    // `v0[5:4] = v0[6:5]` reads bit 5, which it writes itself, and bit 6,
+    // which the statement above writes.  Only bit 6 orders it, and must.
+    let code = r#"
+    module Top (
+        i1: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+    ) {
+        var v0: logic<8>;
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v3: logic<8>;
+        assign o0 = v0;
+        always_comb {
+            v0[3:0] = i3[5:2];
+            v3[3:0] = v0[3:0];
+            v0[3:0] = v3[3:0] & v1[7:4];
+        }
+        always_comb {
+            v2      = i1;
+            v0[7:4] = v2[4:1];
+            v2      = i3;
+            v1[7:4] = v2[6:3];
+            v0[7:6] = v0[1:0];
+            v0[5:4] = v0[6:5];
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i1", 8), ("i3", 8)],
+        &[&[0x63, 0xcd], &[0x34, 0x78], &[0x08, 0xfe]],
+        &|k| {
+            let (i1, i3) = (k[0], k[1]);
+            let lo = ((i3 >> 2) & 0xf) & ((i3 >> 3) & 0xf);
+            let mut v0 = (((i1 >> 1) & 0xf) << 4) | lo;
+            v0 = (v0 & 0x3f) | ((lo & 3) << 6);
+            v0 = (v0 & !0x30) | (((v0 >> 5) & 3) << 4);
+            vec![("o0", v0, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_reader_of_a_version_and_of_other_bits_waits_for_both() {
+    // `z = v[5:2]` reads `v[3:2]` from the version above and `v[5:4]` from
+    // the other block, which reads `y` back from this one.  Bit by bit the
+    // blocks only pass values forward.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        c: input  logic<4>,
+        v: output logic<8>,
+        y: output logic<4>,
+        z: output logic<4>,
+    ) {
+        always_comb {
+            v[3:0] = a;
+            y      = v[3:0] ^ c;
+            z      = v[5:2];
+            v[3:0] = y + 1;
+        }
+        always_comb {
+            v[7:4] = y;
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("c", 4)],
+        &[&[5, 1], &[0xa, 3], &[0xf, 0], &[3, 2]],
+        &|k| {
+            let y = k[0] ^ k[1];
+            let z = ((y & 3) << 2) | (k[0] >> 2);
+            vec![
+                ("v", (y << 4) | ((y + 1) & 0xf), 8),
+                ("y", y, 4),
+                ("z", z, 4),
+            ]
+        },
+    );
+}
+
+#[test]
+fn a_childs_comb_keeps_its_one_pass_order() {
+    // Inside `Sub`, `v6[7:4]` reads `v2[3:0]` and `v2[7:4]` reads `v6[5:4]`:
+    // as blocks the two feed each other, bit by bit they are a chain.  The
+    // child's comb runs as one compiled unit, so the unit's own order has to
+    // be the one-pass one.
+    let code = r#"
+    module Sub (
+        i0: input  logic<8>,
+        i1: input  logic<8>,
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v6: logic<8>;
+        assign o0 = v1;
+        assign o1 = v2;
+        assign o2 = v6;
+        always_comb {
+            v1[7:4] = i0[7:4];
+            v1[3:0] = i1[3:0];
+        }
+        always_comb {
+            v6[3:0] = i2[3:0];
+            v6[7:4] = v2[3:0] | v1[3:0];
+        }
+        always_comb {
+            v2[3:0] = i3[3:0];
+            v2[7:4] = v2[3:0] ^ v6[5:2];
+        }
+    }
+
+    module Top (
+        i0: input  logic<8>,
+        i1: input  logic<8>,
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        inst u: Sub (i0, i1, i2, i3, o0, o1, o2);
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i0", 8), ("i1", 8), ("i2", 8), ("i3", 8)],
+        &[
+            &[0x41, 0xbb, 0x5f, 0x68],
+            &[0x12, 0x34, 0x56, 0x78],
+            &[0xf0, 0x0f, 0xaa, 0x55],
+            &[0x5a, 0xa5, 0x3c, 0xc3],
+        ],
+        &|k| {
+            let v1 = (k[0] & 0xf0) | (k[1] & 0xf);
+            let v6 = (((k[3] | k[1]) & 0xf) << 4) | (k[2] & 0xf);
+            let v2 = (((k[3] ^ (v6 >> 2)) & 0xf) << 4) | (k[3] & 0xf);
+            vec![("o0", v1, 8), ("o1", v2, 8), ("o2", v6, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_signed_read_of_the_destination_keeps_its_sign() {
+    // Each guarded write reads back bits of its own destination as signed;
+    // folding the guard into one write must not read them zero-extended.
+    let code = r#"
+    module Top (
+        i0: input  logic<8>,
+        c : input  logic   ,
+        o1: output logic<16>,
+        o2: output logic<16>,
+        o3: output logic<16>,
+        o4: output logic<3>,
+    ) {
+        var v1: logic<16>;
+        var v2: logic<16>;
+        var v3: logic<16>;
+        var t : logic<3>;
+        assign o1 = v1;
+        assign o2 = v2;
+        assign o3 = v3;
+        assign o4 = t;
+        assign v1[7:0] = i0;
+        assign v2[7:0] = i0;
+        assign v3[7:0] = i0;
+        always_comb {
+            t[0] = c;
+            if c {
+                v1[15:8] = $signed(v1[7:4]) >>> 1;
+            } else {
+                v1[15:8] = 0;
+            }
+        }
+        always_comb {
+            t[1] = c;
+            if c {
+                v2[15:8] = $signed(v2[7:4]) * $signed(v2[3:0]);
+            } else {
+                v2[15:8] = 0;
+            }
+        }
+        always_comb {
+            t[2] = c;
+            if c {
+                v3[15:8] = $signed(v3[7:4]) / 4'sd2;
+            } else {
+                v3[15:8] = 0;
+            }
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i0", 8), ("c", 1)],
+        &[&[0xc9, 1], &[0x73, 1], &[0x8f, 1], &[0xc9, 0]],
+        &|k| {
+            let sext = |x: u64| ((x as i64) << 60 >> 60) as u64;
+            let (hi, lo) = ((k[0] >> 4) & 0xf, k[0] & 0xf);
+            let top = |x: u64| if k[1] == 1 { x & 0xff } else { 0 };
+            let sra = top(((sext(hi) as i64) >> 1) as u64);
+            let mul = top(sext(hi).wrapping_mul(sext(lo)));
+            let div = top(((sext(hi) as i64) / 2) as u64);
+            vec![
+                ("o1", (sra << 8) | k[0], 16),
+                ("o2", (mul << 8) | k[0], 16),
+                ("o3", (div << 8) | k[0], 16),
+            ]
+        },
     );
 }
