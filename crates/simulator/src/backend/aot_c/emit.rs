@@ -6245,7 +6245,18 @@ fn df_ff_push_target(
     Some((slot, words))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Leaves every dataflow mark out of the event code, for tests that need
+    /// an event which misses its marks.
+    pub(crate) static DROP_DF_MARKS: Cell<bool> = const { Cell::new(false) };
+}
+
 fn df_mark_set(words: &[(u32, u64)]) -> String {
+    #[cfg(test)]
+    if DROP_DF_MARKS.with(|d| d.get()) {
+        return String::new();
+    }
     words
         .iter()
         .map(|&(w, m)| format!("_dfm[{w}] |= {m:#x}ULL; "))
@@ -6333,10 +6344,7 @@ impl DfWatch {
     }
 
     fn set(&self) -> String {
-        self.words
-            .iter()
-            .map(|&(w, m)| format!("_dfm[{w}] |= {m:#x}ULL; "))
-            .collect()
+        df_mark_set(&self.words)
     }
 
     /// Snapshot declaration `k`, before the first store.

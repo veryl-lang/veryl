@@ -57,6 +57,58 @@ fn validated_event_keeps_the_marks_of_the_code_it_keeps() {
 }
 
 #[test]
+fn validate_reports_an_event_that_misses_its_marks() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module ValidateMissingMarks (clk: input clock, rst: input reset, o: output logic<8>) {
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; } else { r = r + 3; }
+        }
+        assign o = r ^ 8'h5a;
+    }
+    "#;
+    // With the FF optimisation `r` is stored in comb storage, so the event
+    // marks at a comb store; without it, at its log push.
+    for disable_ff_opt in [false, true] {
+        let config = Config {
+            disable_ff_opt,
+            ..aot_config(true)
+        };
+        let run = |drop_marks: bool| -> Option<String> {
+            crate::backend::aot_c::emit::DROP_DF_MARKS.with(|d| d.set(drop_marks));
+            let result = std::panic::catch_unwind(|| {
+                let ir = crate::tests::analyze_top(code, &config, "ValidateMissingMarks").unwrap();
+                assert!(ir.dataflow_ready());
+                let mut sim = Simulator::new(ir, None);
+                let clk = sim.get_clock("clk").unwrap();
+                let rst = sim.get_reset("rst").unwrap();
+                sim.step_reset(&clk, &rst);
+                for _ in 0..4 {
+                    sim.step(&clk);
+                    sim.ensure_comb_updated();
+                }
+            });
+            crate::backend::aot_c::emit::DROP_DF_MARKS.with(|d| d.set(false));
+            result.err().map(|e| {
+                e.downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| e.downcast_ref::<String>().cloned())
+                    .unwrap_or_default()
+            })
+        };
+        assert_eq!(run(false), None, "disable_ff_opt={disable_ff_opt}");
+        let panic = run(true).expect("an event without its marks is reported");
+        assert!(
+            panic.contains("unmarked"),
+            "disable_ff_opt={disable_ff_opt}: {panic}"
+        );
+    }
+}
+
+#[test]
 fn validated_wide_select_reaches_its_readers() {
     if !crate::backend::aot_c::cc_available() {
         return;
