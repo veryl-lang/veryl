@@ -36176,3 +36176,104 @@ module Top (en: input logic, q0: input logic, b: input logic, o: output logic, w
         },
     );
 }
+
+#[test]
+fn an_event_gate_keeps_state_only_its_own_statements_read() {
+    // Only its own update reads `cnt`, yet it carries a value to the next
+    // fire: a gate idle on the other registers must not skip it.
+    const N: usize = 64;
+    let (mut decls, mut resets, mut steps) = (String::new(), String::new(), String::new());
+    for i in 0..N {
+        decls.push_str(&format!("        var r{i}: logic<16>;\n"));
+        resets.push_str(&format!("                r{i} = 0;\n"));
+    }
+    steps.push_str("                    r0 = r0 + 16'd1;\n");
+    for i in 1..N {
+        steps.push_str(&format!(
+            "                    r{i} = r{p} + r{i};\n",
+            p = i - 1
+        ));
+    }
+    let code = format!(
+        r#"
+    module Idle (
+        clk: input  clock,
+        rst: input  reset,
+        en:  input  logic,
+        o:   output logic<16>,
+    ) {{
+        var cnt: logic<64>;
+{decls}
+        always_ff {{
+            if_reset {{
+                cnt = 0;
+{resets}
+            }} else {{
+                cnt = cnt + 64'd1;
+                if en {{
+{steps}
+                }}
+            }}
+        }}
+        assign o = r{last};
+    }}
+
+    module Busy (
+        clk: input  clock,
+        rst: input  reset,
+        o:   output logic<16>,
+    ) {{
+        var c: logic<16>;
+        always_ff {{
+            if_reset {{
+                c = 0;
+            }} else {{
+                c = c + 16'd1;
+            }}
+        }}
+        assign o = c;
+    }}
+
+    module Top (
+        clk:    input  clock,
+        rst:    input  reset,
+        rst2:   input  reset,
+        en:     input  logic,
+        o_idle: output logic<16>,
+        o_busy: output logic<16>,
+    ) {{
+        inst u: Idle (clk, rst, en, o: o_idle);
+        inst v: Busy (clk, rst: rst2, o: o_busy);
+    }}
+"#,
+        last = N - 1,
+    );
+    let mut any_gated = false;
+    for mut config in Config::all() {
+        config.aot_c_min_stmts = 0;
+        let ir = analyze(&code, &config);
+        let gated = !ir.event_gate_flags.is_empty();
+        any_gated |= gated;
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        let rst2 = sim.get_reset("rst2").unwrap();
+        sim.set("en", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+        sim.step_reset(&clk, &rst2);
+        let mut edges = sim.get_var("u.cnt").unwrap().payload_u64();
+        for en in [1u64, 0, 1, 0] {
+            sim.set("en", Value::new(en, 1, false));
+            for _ in 0..6 {
+                sim.step(&clk);
+                edges += 1;
+                assert_eq!(
+                    sim.get_var("u.cnt").unwrap().payload_u64(),
+                    edges,
+                    "gated={gated} {config:?}"
+                );
+            }
+        }
+    }
+    assert!(any_gated, "the test needs a gate");
+}
