@@ -1576,7 +1576,7 @@ impl Simulator {
                 // native (BackendRegistry stays empty on wasm), so this
                 // branch is effectively native-only at runtime.  NotReady
                 // returns false → normal per-stmt fallback below.
-                self.validate_event_aot(whole, stmts_ptr)
+                self.validate_event_aot(whole, stmts_ptr, df_marked && !unmarked)
             }
         } else {
             false
@@ -1598,7 +1598,7 @@ impl Simulator {
         }
 
         // A validated fire keeps the Cranelift result, and the whole-event
-        // run it compared against set no marks.
+        // run it compared against marked only a copy.
         let whole_ran = dispatched && !self.ir.aot_c_validate;
         let ff_marked = whole_event_ptr.is_some_and(|w| {
             // SAFETY: see the dispatch above.
@@ -2065,10 +2065,16 @@ impl Simulator {
     /// a green VALIDATE run covers the events AOT-C already compiled, not the
     /// ones that most need checking.  Read `VERYL_BACKEND_DIAG` alongside it to
     /// know what was actually compared.
+    ///
+    /// `marked` is whether the unvalidated fire would hand the function the
+    /// dirty words.  It then gets a copy here, and every cell that reads (or
+    /// co-writes) a byte the event changed must come out marked, FF bytes
+    /// only when the event marks its pushes.
     fn validate_event_aot(
         &mut self,
         whole: &dyn CompiledWhole,
         stmts_ptr: *const Vec<Statement>,
+        marked: bool,
     ) -> bool {
         // On off-stride cycles return false (skipping the AOT-C compare) so the
         // caller runs the per-stmt Cranelift dispatch — the ground truth.
@@ -2098,10 +2104,12 @@ impl Simulator {
         // Whole-event backend, then capture its pushed entries + ff/comb.
         // A compared dispatch ran the artifact, so it counts; an off-stride
         // cycle returned above and stays uncounted.
-        if matches!(
-            whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
-            DispatchOutcome::NotReady,
-        ) {
+        let mut marks = marked.then(|| self.ir.dataflow_dirty.borrow().clone());
+        let outcome = match marks.as_mut() {
+            Some(m) => whole.try_dispatch_delta(ff_ptr, comb_ptr, log_ptr, m.as_mut_ptr() as isize),
+            None => whole.try_dispatch(ff_ptr, comb_ptr, log_ptr),
+        };
+        if matches!(outcome, DispatchOutcome::NotReady) {
             self.ir.whole_event_dispatch[1].fetch_add(1, Ordering::Relaxed);
             if !self
                 .ir
@@ -2153,6 +2161,11 @@ impl Simulator {
         // the event path then writes it directly rather than through the log —
         // invisible to the committed-FF compare below.
         let aot_comb = self.ir.comb_values.to_vec();
+        if let (Some(marks), Some(df)) = (&marks, &self.ir.dataflow) {
+            self.check_event_marks(
+                df, marks, &comb_snap, &aot_comb, &ff_snap, &aot_bytes, whole,
+            );
+        }
 
         // Restore inputs + log count, then run the Cranelift event.
         unsafe {
@@ -2250,6 +2263,59 @@ impl Simulator {
             panic!("AOT-C event validate divergence (see above)");
         }
         true
+    }
+
+    /// Panics when a cell that has to rerun after the event, because it reads
+    /// or co-writes a byte the event changed, is not set in `marks`, the
+    /// dirty words the event started from plus its own marks.
+    #[allow(clippy::too_many_arguments)]
+    fn check_event_marks(
+        &self,
+        df: &crate::ir::opt::dataflow::DataflowRt,
+        marks: &[u64],
+        comb_before: &[u8],
+        comb_after: &[u8],
+        ff_before: &[u8],
+        ff_committed: &HashMap<u32, u8>,
+        whole: &dyn CompiledWhole,
+    ) {
+        let words = df.plan.words();
+        let mut need = vec![0u64; words];
+        let logic = (self.ir.gate_state_base as usize).min(comb_after.len());
+        for (off, (b, a)) in comb_before[..logic]
+            .iter()
+            .zip(&comb_after[..logic])
+            .enumerate()
+        {
+            if b != a {
+                crate::ir::mark_readers(&df.plan.comb_marked, &mut need, off, off + 1);
+            }
+        }
+        if whole.dataflow_ff_marked() {
+            for (&off, &v) in ff_committed {
+                if ff_before.get(off as usize) != Some(&v) {
+                    let off = off as usize;
+                    crate::ir::mark_readers(&df.plan.ff_marked, &mut need, off, off + 1);
+                }
+            }
+        }
+        let missing: Vec<usize> = (0..words)
+            .flat_map(|w| {
+                let lost = need[w] & !marks[w];
+                (0..64)
+                    .filter(move |b| lost >> b & 1 == 1)
+                    .map(move |b| w * 64 + b)
+            })
+            .collect();
+        if !missing.is_empty() {
+            eprintln!(
+                "[aot_event_validate] MISSING MARKS module={} event={:?}: cells {:?}",
+                self.ir.name,
+                self.last_event,
+                &missing[..missing.len().min(32)],
+            );
+            panic!("AOT-C event validate: the event left cells it changed unmarked (see above)");
+        }
     }
 
     /// Set a variable value by VarId. Used to write clock/reset signal values
