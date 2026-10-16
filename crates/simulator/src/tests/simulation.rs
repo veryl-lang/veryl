@@ -5487,6 +5487,95 @@ fn binary_corner_case() {
 }
 
 #[test]
+fn logical_and_known_zero_controls_unknown_operand() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'h0");
+        let one = format!("{width}'h1");
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&zero, "&&", &unknown, 1, "1'b0", true);
+            binary_test(&unknown, "&&", &zero, 1, "1'b0", true);
+            binary_test(&one, "&&", &unknown, 1, "1'bx", true);
+            binary_test(&unknown, "&&", &one, 1, "1'bx", true);
+            let mixed = format!("{width}'b1{}", digit.to_string().repeat(width - 1));
+            binary_test(&mixed, "&&", &one, 1, "1'b1", true);
+            binary_test(&one, "&&", &mixed, 1, "1'b1", true);
+        }
+    }
+    binary_test("8'b1xxxxxxx", "&&", "8'bxxxxxxx1", 1, "1'b1", true);
+}
+
+#[test]
+fn logical_or_known_one_controls_unknown_operand() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'h0");
+        // Put the controlling bit above the low word for wide operands.
+        let one = format!("{width}'b1{}", "0".repeat(width - 1));
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&one, "||", &unknown, 1, "1'b1", true);
+            binary_test(&unknown, "||", &one, 1, "1'b1", true);
+            binary_test(&zero, "||", &unknown, 1, "1'bx", true);
+            binary_test(&unknown, "||", &zero, 1, "1'bx", true);
+        }
+    }
+    binary_test("8'b1xxxxxxx", "||", "8'bzzzzzzzz", 1, "1'b1", true);
+    binary_test("8'bzzzzzzzz", "||", "8'b1xxxxxxx", 1, "1'b1", true);
+}
+
+#[test]
+fn bitwise_and_known_zero_controls_unknown_bits() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'b{}", "0".repeat(width));
+        let ones = format!("{width}'b{}", "1".repeat(width));
+        let unknown_result = format!("{width}'b{}", "x".repeat(width));
+        let mixed = format!(
+            "{width}'b{}",
+            "01".repeat(width).chars().take(width).collect::<String>()
+        );
+        let mixed_result = format!(
+            "{width}'b{}",
+            "0x".repeat(width).chars().take(width).collect::<String>()
+        );
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&zero, "&", &unknown, width, &zero, true);
+            binary_test(&unknown, "&", &zero, width, &zero, true);
+            binary_test(&ones, "&", &unknown, width, &unknown_result, true);
+            binary_test(&unknown, "&", &ones, width, &unknown_result, true);
+            binary_test(&mixed, "&", &unknown, width, &mixed_result, true);
+            binary_test(&unknown, "&", &mixed, width, &mixed_result, true);
+        }
+    }
+}
+
+#[test]
+fn bitwise_or_known_one_controls_unknown_bits() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'b{}", "0".repeat(width));
+        let ones = format!("{width}'b{}", "1".repeat(width));
+        let unknown_result = format!("{width}'b{}", "x".repeat(width));
+        let mixed = format!(
+            "{width}'b{}",
+            "01".repeat(width).chars().take(width).collect::<String>()
+        );
+        let mixed_result = format!(
+            "{width}'b{}",
+            "x1".repeat(width).chars().take(width).collect::<String>()
+        );
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&ones, "|", &unknown, width, &ones, true);
+            binary_test(&unknown, "|", &ones, width, &ones, true);
+            binary_test(&zero, "|", &unknown, width, &unknown_result, true);
+            binary_test(&unknown, "|", &zero, width, &unknown_result, true);
+            binary_test(&mixed, "|", &unknown, width, &mixed_result, true);
+            binary_test(&unknown, "|", &mixed, width, &mixed_result, true);
+        }
+    }
+}
+
+#[test]
 fn inout_function_argument_copies_back() {
     // https://github.com/veryl-lang/veryl/issues/3308
     let code = r#"
