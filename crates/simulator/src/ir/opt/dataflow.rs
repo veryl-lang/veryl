@@ -67,9 +67,9 @@ pub(crate) fn decline_reason(
     config: &crate::ir::Config,
     required_comb_passes: usize,
 ) -> Option<String> {
-    if !config.aot_c {
-        Some("aot_c off".into())
-    } else if !crate::component::loader::native_loading_supported() {
+    if !config.aot_c && !config.use_jit {
+        Some("no compiled backend".into())
+    } else if config.aot_c && !crate::component::loader::native_loading_supported() {
         Some("native loading unsupported".into())
     } else if config.use_4state {
         Some("4-state".into())
@@ -1034,15 +1034,16 @@ pub fn plan(stmts: &[ProtoStatement], inputs: &OwnerInputs) -> Option<DataflowPl
 /// A planned dataflow settle and its compiled module.
 pub struct DataflowRt {
     pub plan: DataflowPlan,
-    /// Empty until the `.so` lands; the settle stays on the regular path
-    /// meanwhile.
+    /// Empty until the `.so` lands, and for good without AOT-C.
     #[cfg(not(target_family = "wasm"))]
     pub cell: crate::backend::aot_c::emit::AotCell,
     /// `(offset, bytes)` kept in C locals, never stored to the buffer.
     pub localized: Vec<(isize, usize)>,
-    /// The same cells compiled by Cranelift, run until the `.so` lands.
+    /// The same cells compiled by Cranelift, run while `cell` is empty.
     #[cfg(not(target_family = "wasm"))]
     pub jit: Option<DataflowJit>,
+    /// No `.so` is coming: the Cranelift cells are the settle, not a stopgap.
+    pub jit_only: bool,
 }
 
 /// One Cranelift function per cell, indexed like `DataflowPlan::cells`.
@@ -1153,6 +1154,7 @@ pub fn cache_key(
     let mut h = std::collections::hash_map::DefaultHasher::new();
     // An async cell lands later, with Cranelift cells built to bridge the gap.
     config.aot_c_async.hash(&mut h);
+    config.aot_c.hash(&mut h);
     // The FF layout the plan's FF spans and next-slot aliases come from.
     config.disable_ff_opt.hash(&mut h);
     // A dump comes from the compile that asked for it.

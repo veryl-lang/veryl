@@ -551,3 +551,96 @@ fn a_flop_driven_clock_beside_a_gated_one_fires_on_the_master_step() {
         }
     }
 }
+
+#[test]
+fn without_aot_c_the_cranelift_cells_settle_the_comb() {
+    if !crate::tests::dataflow_on() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+        p  : output logic<8>,
+    ) {
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; } else { r = r + 1; }
+        }
+        let x: logic<8> = a + 8'd3;
+        assign o = x ^ r;
+        assign p = a * 8'd2;
+    }
+    "#;
+    let config = Config {
+        use_jit: true,
+        ..Default::default()
+    };
+    assert!(!config.aot_c);
+    let ir = analyze(code, &config);
+    let df = ir.dataflow.as_ref().expect("no dataflow without AOT-C");
+    assert!(df.jit_only && df.jit.is_some());
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let rst = sim.get_reset("rst").unwrap();
+    sim.step_reset(&clk, &rst);
+    let v = |x: u64| Value::new(x, 8, false);
+    for (i, a) in [5u64, 5, 9, 250, 250, 0].into_iter().enumerate() {
+        sim.set("a", v(a));
+        sim.step(&clk);
+        let r = (i as u64 + 1) & 0xff;
+        assert_eq!(
+            sim.get("o").unwrap().payload_u64(),
+            ((a + 3) & 0xff) ^ r,
+            "cycle {i}"
+        );
+        assert_eq!(
+            sim.get("p").unwrap().payload_u64(),
+            (a * 2) & 0xff,
+            "cycle {i}"
+        );
+    }
+}
+
+#[test]
+fn leaving_the_chunked_settle_reruns_every_cranelift_cell() {
+    if !crate::tests::dataflow_on() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        a  : input  logic<8>,
+        c  : input  logic<8>,
+        o  : output logic<8>,
+        q  : output logic<8>,
+    ) {
+        var r: logic<8>;
+        always_ff (clk) { r = a; }
+        assign o = r + 1;
+        assign q = c + 1;
+    }
+    "#;
+    let config = Config {
+        use_jit: true,
+        ..Default::default()
+    };
+    let ir = analyze(code, &config);
+    assert!(ir.dataflow.as_ref().unwrap().jit_only);
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let v = |x: u64| Value::new(x, 8, false);
+    sim.set("a", v(3));
+    sim.step(&clk);
+    assert_eq!(sim.get("o").unwrap(), v(4));
+    let mut tick = 0;
+    settle_until_mode(&mut sim, true, &mut tick);
+    // Under the chunked settle the commit marks nothing, so the cells see
+    // `r` move only by rerunning all of them.
+    sim.set("a", v(9));
+    sim.step(&clk);
+    sim.ir.dataflow_mode.restart_period();
+    assert_eq!(sim.get("o").unwrap(), v(10));
+}

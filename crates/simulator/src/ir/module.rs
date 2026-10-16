@@ -6944,12 +6944,13 @@ impl Conv<&air::Module> for ProtoModule {
             );
         }
         // A module below the size threshold, or one built with dataflow or
-        // AOT-C switched off on purpose, is not expected to have it;
-        // reporting those would bury the declines that cost a big module
-        // its settle.
+        // both compiled backends switched off on purpose, is not expected to
+        // have it; reporting those would bury the declines that cost a big
+        // module its settle.
         #[cfg(not(target_family = "wasm"))]
-        let dataflow_candidate =
-            size_ok && context.config.aot_c && crate::ir::opt::dataflow::enabled();
+        let dataflow_candidate = size_ok
+            && (context.config.aot_c || context.config.use_jit)
+            && crate::ir::opt::dataflow::enabled();
         #[cfg(not(target_family = "wasm"))]
         let mut dataflow_declined: Option<String> = if dataflow_candidate {
             crate::ir::opt::dataflow::decline_reason(&context.config, cached.required_comb_passes)
@@ -7195,6 +7196,22 @@ impl Conv<&air::Module> for ProtoModule {
         let dataflow: Option<Arc<crate::ir::opt::dataflow::DataflowRt>> =
             dataflow_cached.or_else(|| {
                 dataflow_plan.and_then(|plan| {
+                    if !context.config.aot_c {
+                        let jit = crate::ir::opt::dataflow::compile_jit(
+                            &context.config,
+                            &pre_jit_stmts,
+                            &plan,
+                        )?;
+                        let rt = Arc::new(crate::ir::opt::dataflow::DataflowRt {
+                            plan,
+                            cell: Default::default(),
+                            localized: Vec::new(),
+                            jit: Some(jit),
+                            jit_only: true,
+                        });
+                        crate::ir::opt::dataflow::cache_put(dataflow_key, Arc::clone(&rt));
+                        return Some(rt);
+                    }
                     if let Some((block, ranges)) = localize_info.as_ref() {
                         crate::backend::aot_c::emit::set_localize_blocklist(
                             block.clone(),
@@ -7240,6 +7257,7 @@ impl Conv<&air::Module> for ProtoModule {
                         cell,
                         localized,
                         jit,
+                        jit_only: false,
                     });
                     crate::ir::opt::dataflow::cache_put(dataflow_key, Arc::clone(&rt));
                     Some(rt)
@@ -7247,7 +7265,7 @@ impl Conv<&air::Module> for ProtoModule {
             });
         #[cfg(not(target_family = "wasm"))]
         if dataflow_wanted && dataflow.is_none() && dataflow_declined.is_none() {
-            dataflow_declined = Some("emitter could not cover the cells".into());
+            dataflow_declined = Some("the cells did not compile".into());
         }
         #[cfg(not(target_family = "wasm"))]
         if let Some(why) = dataflow_declined {
