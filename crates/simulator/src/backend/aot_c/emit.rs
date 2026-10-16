@@ -4885,13 +4885,13 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
 
     let header = &lines[..chunk_starts[0]];
     let entries = &lines[entry_start..];
-    // Only the wide-op table may cross units, and only because the split gives
-    // it one definition and the rest a declaration.  Anything else exported
+    // Only the `CROSS_UNIT` globals may cross units, and only because the split
+    // gives them one definition and the rest a declaration.  Anything else exported
     // from the header would lose its definition in the non-entry units, so
     // leave such a source whole.
     if header
         .iter()
-        .any(|l| l.starts_with(ENTRY_ATTR) && !l.contains(WIDEOPS_DEF) && !l.contains(WIDEOPS_SET))
+        .any(|l| l.starts_with(ENTRY_ATTR) && !CROSS_UNIT.iter().any(|x| l.contains(x)))
     {
         return None;
     }
@@ -4960,12 +4960,12 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
         };
         let mut out: Vec<String> = Vec::with_capacity(header.len() + decls.len() + (hi - lo) + 16);
         for l in header {
-            // The wide-op table has one definition, in the entry unit; the
-            // others reach it through the dynamic symbol the setter publishes.
+            // The cross-unit globals have one definition, in the entry unit;
+            // a weak one per unit would leave PE targets without the setters.
             if part == 0 || !l.starts_with(ENTRY_ATTR) {
                 out.push((*l).to_string());
-            } else if l.contains(WIDEOPS_DEF) {
-                out.push(format!("extern {WIDEOPS_DEF}"));
+            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF].into_iter().find(|x| l.contains(x)) {
+                out.push(format!("extern {def}"));
             }
         }
         out.extend(decls.iter().cloned());
@@ -4988,6 +4988,10 @@ const ENTRY_ATTR: &str = "__attribute__((visibility(\"default\")))";
 const ENTRY_SECTION_MARKER: &str = "// AOT-C entry section; keep with the entry unit.";
 const WIDEOPS_DEF: &str = "veryl_wideops_t veryl_wideops;";
 const WIDEOPS_SET: &str = "void veryl_set_wideops(";
+const SYSFN_DEF: &str = "veryl_sysfn_t veryl_sysfn_cb;";
+const SYSFN_SET: &str = "void veryl_set_sysfn_cb(";
+/// Exported header lines a split keeps defined in the entry unit only.
+const CROSS_UNIT: [&str; 4] = [WIDEOPS_DEF, WIDEOPS_SET, SYSFN_DEF, SYSFN_SET];
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
 const CHUNK_DEF_PREFIX: &str =
     "__attribute__((noinline,visibility(\"hidden\"))) void veryl_aot_chunk_";
@@ -10240,8 +10244,8 @@ pub fn emit_dataflow_function(
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
          typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
-         __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
-         __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+         __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb;\n\
+         __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
@@ -10469,8 +10473,8 @@ mod tests {
              typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
              typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
              typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
-             __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
-             __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+             __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb;\n\
+             __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
         );
         src.push_str(WIDEOPS_C_DECLS);
         src.push_str(WIDEOPS_C_INLINE);
