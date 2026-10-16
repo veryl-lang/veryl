@@ -680,7 +680,7 @@ impl Ir {
         }
         if aot.is_some() {
             self.dataflow_dispatch[0].fetch_add(1, Ordering::Relaxed);
-        } else {
+        } else if !df.jit_only {
             self.dataflow_dispatch[1].fetch_add(1, Ordering::Relaxed);
             if !self
                 .dataflow_fallback_recorded
@@ -696,11 +696,12 @@ impl Ir {
             self.dataflow_live.set(false);
         }
         let coarse_fn = aot.and_then(|m| m.coarse_func);
-        let (coarse, probing) = match coarse_fn {
-            Some(_) => self
-                .dataflow_mode
-                .next(|| df.plan.cells.iter().map(Vec::len).sum()),
-            None => (false, false),
+        // With no `.so` coming, the whole settle is the chunked one.
+        let (coarse, probing) = if coarse_fn.is_some() || df.jit_only {
+            self.dataflow_mode
+                .next(|| df.plan.cells.iter().map(Vec::len).sum())
+        } else {
+            (false, false)
         };
         // Under the whole-settle entry no event or commit needs to mark;
         // the Cranelift events find no dirty words to mark in.
@@ -721,6 +722,9 @@ impl Ir {
         // so back on the cells every one of them runs once.
         if self.dataflow_mode.was_coarse.replace(coarse) && !coarse {
             self.dataflow_live.set(false);
+        }
+        if coarse && aot.is_none() {
+            return false;
         }
         static LANDED: std::sync::Once = std::sync::Once::new();
         LANDED.call_once(|| {
@@ -779,6 +783,7 @@ impl Ir {
             None
         };
         let counted = aot.and_then(|m| m.counted).filter(|_| probing);
+        let count_jit = probing && aot.is_none();
         // Through the log argument, which the per-cell entries leave unused.
         let mut counts = [0u64; 2];
         // SAFETY: the dataflow entry has the `FuncPtr` ABI, reading and
@@ -828,6 +833,10 @@ impl Ir {
                         }
                         *bits.add(w) = b & (b - 1);
                         let k = w * 64 + b.trailing_zeros() as usize;
+                        if count_jit {
+                            counts[0] += df.plan.cells[k].len() as u64;
+                            counts[1] += 1;
+                        }
                         match j.funcs[k] {
                             Some(f) => f(ff_ptr, comb_ptr, log_ptr, bits as isize),
                             None => self.interpret_cell(df, k, bits),
@@ -836,7 +845,7 @@ impl Ir {
                 }
             }
         }
-        if counted.is_some() {
+        if counted.is_some() || count_jit {
             self.dataflow_mode.record(counts[0], counts[1]);
         }
         drop(dirty);
@@ -1397,6 +1406,15 @@ pub struct Config {
 }
 
 impl Config {
+    /// Run on Cranelift alone, for a host where AOT-C modules cannot load.
+    pub fn fall_back_to_cranelift(&mut self) {
+        self.use_jit = true;
+        self.aot_c = false;
+        self.aot_c_event = false;
+        self.aot_c_async = false;
+        self.aot_c_validate = false;
+    }
+
     /// Apply environment-variable overrides on top of an existing config.
     pub fn apply_env(&mut self) {
         if env::var("VERYL_DUMP_ASM").ok().as_deref() == Some("1") {
@@ -1535,9 +1553,8 @@ pub(crate) fn mark_readers(
 /// Which pays depends on how many cells a settle dirties, which only a run
 /// shows, so a probe window at the start of each period counts the per-cell
 /// entry's work.  Counting rather than timing keeps the choice the same on
-/// any machine once the `.so` has landed.  A choice that holds doubles the
-/// next period, so a design that keeps its character stops paying for
-/// probes.
+/// any machine.  A choice that holds doubles the next period, so a design
+/// that keeps its character stops paying for probes.
 #[derive(Default)]
 pub(crate) struct DataflowMode {
     settles: std::cell::Cell<u64>,
