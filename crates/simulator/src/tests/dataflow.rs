@@ -268,8 +268,12 @@ const TWO_CELLS: &str = r#"
     }
 "#;
 
-/// Settles through `c` and `q` until the runtime picks the given mode.
+/// Settles through `c` and `q` until the runtime picks the given mode; a
+/// period's probe window runs the per-cell entry.
 fn settle_until_mode(sim: &mut Simulator, coarse: bool, tick: &mut u64) {
+    if !coarse {
+        sim.ir.dataflow_mode.restart_period();
+    }
     for _ in 0..8192 {
         if sim.ir.dataflow_mode.was_coarse.get() == coarse {
             return;
