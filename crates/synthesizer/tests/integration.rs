@@ -5777,3 +5777,56 @@ fn single_element_dimension_still_rejects_an_out_of_range_selector() {
         }
     }
 }
+
+#[test]
+fn reset_value_literal() {
+    use veryl_synthesizer::ir::{NET_CONST0, NET_CONST1};
+    let code = r#"
+        module Top (
+            o_hold0   : output reset_async_high,
+            o_hold1   : output reset_async_low,
+            o_hold2   : output reset_sync_high,
+            o_hold3   : output reset_sync_low,
+            o_hold4   : output reset,
+            o_release0: output reset_async_high,
+            o_release1: output reset_async_low,
+            o_release2: output reset_sync_high,
+            o_release3: output reset_sync_low,
+            o_release4: output reset,
+        ) {
+            assign o_hold0    = reset_active;
+            assign o_hold1    = reset_active;
+            assign o_hold2    = reset_active;
+            assign o_hold3    = reset_active;
+            assign o_hold4    = reset_active;
+            assign o_release0 = reset_inactive;
+            assign o_release1 = reset_inactive;
+            assign o_release2 = reset_inactive;
+            assign o_release3 = reset_inactive;
+            assign o_release4 = reset_inactive;
+        }
+    "#;
+    let (ir, top) = analyze(code, "Top");
+    let gate = build_gate_ir(&ir, top).expect("synthesize");
+    // `reset` without explicit polarity is active-low.
+    for (name, exp) in [
+        ("o_hold0", NET_CONST1),
+        ("o_hold1", NET_CONST0),
+        ("o_hold2", NET_CONST1),
+        ("o_hold3", NET_CONST0),
+        ("o_hold4", NET_CONST0),
+        ("o_release0", NET_CONST0),
+        ("o_release1", NET_CONST1),
+        ("o_release2", NET_CONST0),
+        ("o_release3", NET_CONST1),
+        ("o_release4", NET_CONST1),
+    ] {
+        let port = gate
+            .module
+            .ports
+            .iter()
+            .find(|p| format!("{}", p.name) == name)
+            .unwrap();
+        assert_eq!(port.nets, [exp], "{name}");
+    }
+}
