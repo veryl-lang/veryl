@@ -64,6 +64,8 @@ pub(super) struct DependencyGraph {
     pub(super) active_summary: Option<SummaryEdgeCause>,
     // Region-restricted entries into storage nodes, by node and region.
     pub(super) carriers: HashMap<(NodeIndex, PositionDomain), NodeIndex>,
+    // Region-restricted exits from storage nodes, by node and region.
+    pub(super) exits: HashMap<(NodeIndex, PositionDomain), NodeIndex>,
     // In a split graph, the edge of the original graph each edge comes from.
     pub(super) origins: HashMap<EdgeIndex, EdgeIndex>,
 }
@@ -77,6 +79,7 @@ impl DependencyGraph {
             summary_causes: HashMap::default(),
             active_summary: None,
             carriers: HashMap::default(),
+            exits: HashMap::default(),
             origins: HashMap::default(),
         }
     }

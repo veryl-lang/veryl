@@ -1643,9 +1643,16 @@ fn add_resolved_dependency_edges(
             let target = destination.region.map_or(destination.node, |region| {
                 region_carrier(graph, destination.node, region)
             });
+            // A positionless axis would otherwise start at any bit of the storage.
+            let origin = match source.region {
+                Some(region) if kind.array.is_none() || kind.packed.is_none() => {
+                    region_exit(graph, source.node, region)
+                }
+                _ => source.node,
+            };
             add_dependency_edge(
                 graph,
-                source.node,
+                origin,
                 target,
                 GraphDependency {
                     kind,
@@ -1686,6 +1693,32 @@ fn region_carrier(
     graph.active_summary = active_summary;
     graph.carriers.insert((node, region), carrier);
     carrier
+}
+
+/// The source-side counterpart of [`region_carrier`].
+fn region_exit(graph: &mut DependencyGraph, node: NodeIndex, region: PositionDomain) -> NodeIndex {
+    if graph[node].domains.as_slice() == [region] {
+        return node;
+    }
+    if let Some(&exit) = graph.exits.get(&(node, region)) {
+        return exit;
+    }
+    let storage = graph[node].region;
+    let exit = graph.add_node(GraphNode {
+        region: storage,
+        domains: vec![region],
+        diagnostic: None,
+    });
+    let active_summary = graph.active_summary.take();
+    add_dependency_edge(
+        graph,
+        node,
+        exit,
+        GraphDependency::unconditional(BitDependency::identity()),
+    );
+    graph.active_summary = active_summary;
+    graph.exits.insert((node, region), exit);
+    exit
 }
 
 fn is_pure_input_or_output(id: VarId, vars: &HashMap<VarId, Variable>, want: Direction) -> bool {

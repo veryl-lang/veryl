@@ -1739,3 +1739,69 @@ comb_loop_case!(
     "#,
     true
 );
+
+const OUTPUT_GATED_BY_OUTPUT: &str = r#"
+    module Child (
+        a_i : input  logic<8>,
+        we_o: output logic   ,
+        d_o : output logic<8>,
+    ) {
+        assign we_o = a_i[0];
+        assign d_o  = if we_o ? a_i : 8'd0;
+    }
+"#;
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_member_is_not_a_loop,
+    "an output selected by another output of the same instance reads only that output's member",
+    format!(
+        r#"{OUTPUT_GATED_BY_OUTPUT}
+        module Top (a: input logic<8>, o: output logic<8>) {{
+            struct s_t {{ we: logic, data: logic<8> }}
+            var p: s_t;
+            inst u: Child (a_i: a, we_o: p.we, d_o: p.data);
+            assign o = p.data;
+        }}
+        "#
+    ),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_in_an_array_element_is_not_a_loop,
+    "an output selected by another output reads only that output's member of the element",
+    format!(
+        r#"{OUTPUT_GATED_BY_OUTPUT}
+        module Top (a: input logic<8>, o: output logic<8>) {{
+            struct s_t {{ we: logic, data: logic<8> }}
+            var p: s_t [2];
+            inst u: Child (a_i: a, we_o: p[1].we, d_o: p[1].data);
+            assign p[0] = 0;
+            assign o = p[1].data;
+        }}
+        "#
+    ),
+    false
+);
+
+comb_loop_case!(
+    comb_loop_output_gated_by_a_sibling_output_keeps_a_real_feedback,
+    "an output selected by another output still loops through the member that selects it",
+    r#"
+    module Child (
+        a_i : input  logic<8>,
+        we_o: output logic   ,
+        d_o : output logic<8>,
+    ) {
+        assign we_o = a_i[0];
+        assign d_o  = if we_o ? 8'd1 : 8'd0;
+    }
+    module Top (o: output logic<8>) {
+        struct s_t { we: logic, data: logic<8> }
+        var p: s_t;
+        inst u: Child (a_i: p.data, we_o: p.we, d_o: p.data);
+        assign o = p.data;
+    }
+    "#,
+    true
+);
