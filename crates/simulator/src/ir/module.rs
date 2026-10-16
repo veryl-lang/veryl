@@ -5847,7 +5847,7 @@ impl Conv<&air::Module> for ProtoModule {
 
         let (mut variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
             &src.variables,
-            &collect_string_widths(&src.variables, declarations),
+            &collect_string_widths(&src.variables, declarations)?,
             &ff_table,
             &multi_rmw_set,
             &dyn_indexed,

@@ -357,7 +357,7 @@ fn report_subject(v: &air::Variable) -> String {
 pub fn collect_string_widths(
     variables: &HashMap<VarId, air::Variable>,
     decls: &[air::Declaration],
-) -> HashMap<VarId, usize> {
+) -> Result<HashMap<VarId, usize>, SimulatorError> {
     let mut assigns: Vec<(VarId, &air::Expression)> = Vec::new();
     for decl in decls {
         let stmts = match decl {
@@ -375,6 +375,17 @@ pub fn collect_string_widths(
     let mut widths: HashMap<VarId, usize> = HashMap::default();
     for (id, v) in variables {
         if v.r#type.is_string() && !matches!(v.kind, air::VarKind::Param | air::VarKind::Const) {
+            // A port is driven from the other side of a connection or a
+            // call, which this scan cannot size.
+            if matches!(
+                v.kind,
+                air::VarKind::Input | air::VarKind::Output | air::VarKind::Inout
+            ) {
+                return Err(SimulatorError::unsupported_string(
+                    &format!("port \"{}\"", v.path),
+                    &v.token,
+                ));
+            }
             let init = v.value.iter().map(|x| x.width()).max().unwrap_or(0);
             widths.insert(*id, init);
         }
@@ -395,7 +406,7 @@ pub fn collect_string_widths(
             break;
         }
     }
-    widths
+    Ok(widths)
 }
 
 fn collect_string_assigns<'a>(

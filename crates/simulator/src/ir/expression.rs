@@ -2750,6 +2750,14 @@ impl Conv<&air::Expression> for ProtoExpression {
         match src {
             air::Expression::Term(x) => match x.as_ref() {
                 air::Factor::HierVariable(x) => {
+                    // The child sizes its `string` storage from its own
+                    // assignments, which this reference cannot see here.
+                    if x.comptime.r#type.is_string() {
+                        return Err(SimulatorError::unsupported_string(
+                            "a hierarchical reference",
+                            &x.comptime.token,
+                        ));
+                    }
                     let width = x.comptime.r#type.total_width().ok_or_else(|| {
                         SimulatorError::unsupported_description(&x.comptime.token)
                     })?;
