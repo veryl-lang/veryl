@@ -863,85 +863,91 @@ fn partition_sweep_keeps_fragmented_modules_complete_and_parent_cycles() {
 
 #[test]
 fn regional_reads_take_module_steps() {
-    // Every single-bit write leaves one more fragment in the write history,
-    // and every later read of a different bit resolves through all of them.
-    let code = |reads: usize| {
-        let writes = (0..64)
-            .map(|bit| format!("v[{bit}] = d[{bit}];"))
-            .collect::<String>();
-        let reads = (0..reads)
-            .map(|bit| format!("o[{bit}] = v[{bit}];"))
-            .collect::<String>();
-        format!(
-            "module Top (d: input logic<64>, o: output logic<64>) {{
-                var v: logic<64>;
-                always_comb {{
-                    o = 0;
-                    {writes}
-                    {reads}
-                }}
-            }}"
-        )
-    };
-    let steps = |reads| {
-        crate::comb_loop_detect::reset_steps_taken();
-        assert!(comb_loop_analysis_is_complete(&code(reads)));
-        crate::comb_loop_detect::steps_taken()
-    };
-    // Each read passes at least half of the fragments.
-    let (without, with) = (steps(0), steps(64));
-    assert!(with - without >= 64 * 32, "{without} -> {with}");
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        // Every single-bit write leaves one more fragment in the write history,
+        // and every later read of a different bit resolves through all of them.
+        let code = |reads: usize| {
+            let writes = (0..64)
+                .map(|bit| format!("v[{bit}] = d[{bit}];"))
+                .collect::<String>();
+            let reads = (0..reads)
+                .map(|bit| format!("o[{bit}] = v[{bit}];"))
+                .collect::<String>();
+            format!(
+                "module Top (d: input logic<64>, o: output logic<64>) {{
+                    var v: logic<64>;
+                    always_comb {{
+                        o = 0;
+                        {writes}
+                        {reads}
+                    }}
+                }}"
+            )
+        };
+        let steps = |reads| {
+            crate::comb_loop_detect::reset_steps_taken();
+            assert!(comb_loop_analysis_is_complete(&code(reads)));
+            crate::comb_loop_detect::steps_taken()
+        };
+        // Each read passes at least half of the fragments.
+        let (without, with) = (steps(0), steps(64));
+        assert!(with - without >= 64 * 32, "{without} -> {with}");
+    })
 }
 
 #[test]
 fn procedure_out_of_steps_does_not_starve_later_procedures() {
-    // The heavy procedure copies sixteen unrolled gates through a runtime
-    // loop; the light ones close a loop between themselves.
-    let gate = gate_stages(true, 16, |_| "s".to_string());
-    let heavy = format!(
-        "always_comb {{ o = 0; for _iteration in 0..n {{ {} }} }}",
-        (0..16)
-            .map(|index| format!("o[{index}] = gate(1'b1, i);"))
-            .collect::<String>()
-    );
-    let light = "always_comb { a = b; } always_comb { b = a; }";
-    let code = |procedures: &str| {
-        format!(
-            r#"
-            module Top (i: input logic, n: input u32, o: output logic<16>) {{
-                var a: logic;
-                var b: logic;
-                function gate (s: input logic, x: input logic) -> logic {{
-                    var v: logic;
-                    v = x;
-                    {gate}
-                    return v;
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        // The heavy procedure copies sixteen unrolled gates through a runtime
+        // loop; the light ones close a loop between themselves.
+        let gate = gate_stages(true, 16, |_| "s".to_string());
+        let heavy = format!(
+            "always_comb {{ o = 0; for _iteration in 0..n {{ {} }} }}",
+            (0..16)
+                .map(|index| format!("o[{index}] = gate(1'b1, i);"))
+                .collect::<String>()
+        );
+        let light = "always_comb { a = b; } always_comb { b = a; }";
+        let code = |procedures: &str| {
+            format!(
+                r#"
+                module Top (i: input logic, n: input u32, o: output logic<16>) {{
+                    var a: logic;
+                    var b: logic;
+                    function gate (s: input logic, x: input logic) -> logic {{
+                        var v: logic;
+                        v = x;
+                        {gate}
+                        return v;
+                    }}
+                    {procedures}
                 }}
-                {procedures}
-            }}
-            "#
-        )
-    };
-    // The light procedures complete on their first allowance, and the heavy
-    // one needs more than every step.
-    let limit = crate::comb_loop_detect::FIRST_ALLOWANCE * 8;
-    crate::comb_loop_detect::reset_steps_taken();
-    assert!(comb_loop_analysis_is_complete(&code(light)));
-    assert!(crate::comb_loop_detect::steps_taken() < crate::comb_loop_detect::FIRST_ALLOWANCE);
-    crate::comb_loop_detect::reset_steps_taken();
-    assert!(comb_loop_analysis_is_complete(&code(&heavy)));
-    assert!(crate::comb_loop_detect::steps_taken() > limit);
-    crate::comb_loop_detect::with_step_limit(limit, || {
-        for procedures in [format!("{heavy} {light}"), format!("{light} {heavy}")] {
-            let code = code(&procedures);
-            assert!(!comb_loop_analysis_is_complete(&code));
-            let errors = analyze(&code);
-            assert!(
-                errors
-                    .iter()
-                    .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
-                "{procedures}: {errors:?}"
-            );
-        }
-    });
+                "#
+            )
+        };
+        // The light procedures complete on their first allowance, and the heavy
+        // one needs more than every step.
+        let limit = crate::comb_loop_detect::FIRST_ALLOWANCE * 8;
+        crate::comb_loop_detect::reset_steps_taken();
+        assert!(comb_loop_analysis_is_complete(&code(light)));
+        assert!(crate::comb_loop_detect::steps_taken() < crate::comb_loop_detect::FIRST_ALLOWANCE);
+        crate::comb_loop_detect::reset_steps_taken();
+        assert!(comb_loop_analysis_is_complete(&code(&heavy)));
+        assert!(crate::comb_loop_detect::steps_taken() > limit);
+        crate::comb_loop_detect::with_step_limit(limit, || {
+            for procedures in [format!("{heavy} {light}"), format!("{light} {heavy}")] {
+                let code = code(&procedures);
+                assert!(!comb_loop_analysis_is_complete(&code));
+                let errors = analyze(&code);
+                assert!(
+                    errors
+                        .iter()
+                        .any(|error| matches!(error, AnalyzerError::CombinationalLoop { .. })),
+                    "{procedures}: {errors:?}"
+                );
+            }
+        });
+    })
 }
