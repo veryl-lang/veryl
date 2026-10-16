@@ -15,8 +15,13 @@ module async_fifo_reset_sync::<S: synchronizer> #(
 
         unsafe (cdc) {
             always_comb {
-                s_rst = is_rst & id_rst;
-                d_rst = is_rst & id_rst;
+                if is_rst == reset_hold || id_rst == reset_hold {
+                    s_rst = reset_hold;
+                    d_rst = reset_hold;
+                } else {
+                    s_rst = reset_release;
+                    d_rst = reset_release;
+                }
             }
         }
 

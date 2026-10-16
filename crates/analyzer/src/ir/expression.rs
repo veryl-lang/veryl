@@ -744,7 +744,34 @@ pub enum Factor {
     SystemFunctionCall(SystemFunctionCall),
     FunctionCall(FunctionCall),
     Anonymous(Comptime),
+    /// Reset value literal (`reset_hold` / `reset_release`) with the polarity
+    /// of its counterpart reset type. Its type is left unknown, and the value
+    /// is resolved by each backend.
+    ResetValue(ResetValueKind, ResetPolarity, Comptime),
     Unknown(Comptime),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetValueKind {
+    Hold,
+    Release,
+}
+
+impl fmt::Display for ResetValueKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResetValueKind::Hold => "reset_hold".fmt(f),
+            ResetValueKind::Release => "reset_release".fmt(f),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetPolarity {
+    High,
+    Low,
+    /// `reset` type which follows the configuration of each backend
+    Default,
 }
 
 #[derive(Clone, Debug)]
@@ -788,7 +815,9 @@ impl Factor {
         match self {
             // SystemVerilog member is interpreted as Factor::Value, but it may be assignable.
             Factor::Value(x) => x.r#type.is_systemverilog(),
-            Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) => false,
+            Factor::FunctionCall(_) | Factor::SystemFunctionCall(_) | Factor::ResetValue(..) => {
+                false
+            }
             _ => true,
         }
     }
@@ -869,6 +898,12 @@ impl Factor {
                 is_const: x.comptime.is_const,
                 is_global: x.comptime.is_global,
             },
+            Factor::ResetValue(_, _, x) => ExpressionContext {
+                width: 1,
+                signed: false,
+                is_const: x.is_const,
+                is_global: x.is_global,
+            },
             Factor::Anonymous(_) | Factor::Unknown(_) => ExpressionContext::default(),
         }
     }
@@ -909,6 +944,10 @@ impl Factor {
             Factor::Anonymous(x) => {
                 x.expr_context = expr_context;
                 x.evaluated = true
+            }
+            Factor::ResetValue(_, _, x) => {
+                x.expr_context = expr_context;
+                x.evaluated = true;
             }
             Factor::Unknown(x) => {
                 x.expr_context = expr_context;
@@ -989,6 +1028,7 @@ impl Factor {
             Factor::SystemFunctionCall(x) => x.eval_value(context),
             Factor::FunctionCall(x) => x.eval_value(context),
             Factor::Anonymous(_) => None,
+            Factor::ResetValue(..) => None,
             Factor::Unknown(_) => None,
         }
     }
@@ -1132,6 +1172,7 @@ impl Factor {
             Factor::SystemFunctionCall(x) => &x.comptime,
             Factor::FunctionCall(x) => &x.comptime,
             Factor::Anonymous(x) => x,
+            Factor::ResetValue(_, _, x) => x,
             Factor::Unknown(x) => x,
         }
     }
@@ -1144,6 +1185,7 @@ impl Factor {
             Factor::SystemFunctionCall(x) => &mut x.comptime,
             Factor::FunctionCall(x) => &mut x.comptime,
             Factor::Anonymous(x) => x,
+            Factor::ResetValue(_, _, x) => x,
             Factor::Unknown(x) => x,
         }
     }
@@ -1156,6 +1198,7 @@ impl Factor {
             Factor::SystemFunctionCall(x) => x.comptime.token,
             Factor::FunctionCall(x) => x.comptime.token,
             Factor::Anonymous(x) => x.token,
+            Factor::ResetValue(_, _, x) => x.token,
             Factor::Unknown(x) => x.token,
         }
     }
@@ -1318,6 +1361,7 @@ impl fmt::Display for Factor {
             Factor::SystemFunctionCall(x) => x.to_string(),
             Factor::FunctionCall(x) => x.to_string(),
             Factor::Anonymous(_) => String::from("_"),
+            Factor::ResetValue(x, _, _) => x.to_string(),
             Factor::Unknown(_) => String::from("unknown"),
         };
 

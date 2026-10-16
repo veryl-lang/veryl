@@ -111,6 +111,8 @@ pub enum TokenType {
     ResetAsyncLow,
     ResetSyncHigh,
     ResetSyncLow,
+    ResetHold,
+    ResetRelease,
     Return,
     Rev,
     Break,
@@ -206,6 +208,8 @@ impl TokenType {
                 | TokenType::ResetAsyncLow
                 | TokenType::ResetSyncHigh
                 | TokenType::ResetSyncLow
+                | TokenType::ResetHold
+                | TokenType::ResetRelease
                 | TokenType::Return
                 | TokenType::Rev
                 | TokenType::Break
@@ -382,6 +386,8 @@ impl From<&str> for TokenType {
             "ResetAsyncLowTerm" => TokenType::ResetAsyncLow,
             "ResetSyncHighTerm" => TokenType::ResetSyncHigh,
             "ResetSyncLowTerm" => TokenType::ResetSyncLow,
+            "ResetHoldTerm" => TokenType::ResetHold,
+            "ResetReleaseTerm" => TokenType::ResetRelease,
             "ReturnTerm" => TokenType::Return,
             "RevTerm" => TokenType::Rev,
             "BreakTerm" => TokenType::Break,
@@ -527,6 +533,8 @@ impl std::fmt::Display for TokenType {
             TokenType::ResetAsyncLow => "reset_async_low",
             TokenType::ResetSyncHigh => "reset_sync_high",
             TokenType::ResetSyncLow => "reset_sync_low",
+            TokenType::ResetHold => "reset_hold",
+            TokenType::ResetRelease => "reset_release",
             TokenType::Return => "return",
             TokenType::Rev => "rev",
             TokenType::Break => "break",

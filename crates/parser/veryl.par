@@ -165,6 +165,8 @@ ResetAsyncHighTerm    : <INITIAL, Generic                                       
 ResetAsyncLowTerm     : <INITIAL, Generic                                             >'reset_async_low'                                                                     : Token; // Keyword: Type
 ResetSyncHighTerm     : <INITIAL, Generic                                             >'reset_sync_high'                                                                     : Token; // Keyword: Type
 ResetSyncLowTerm      : <INITIAL, Generic                                             >'reset_sync_low'                                                                      : Token; // Keyword: Type
+ResetHoldTerm         : <INITIAL, Generic                                             >'reset_hold'                                                                          : Token; // Keyword: Literal
+ResetReleaseTerm      : <INITIAL, Generic                                             >'reset_release'                                                                       : Token; // Keyword: Literal
 ReturnTerm            : <INITIAL, Generic                                             >'return'                                                                              : Token; // Keyword: Statement
 RevTerm               : <INITIAL, Generic                                             >'rev'                                                                                 : Token; // Keyword: Repeat
 BreakTerm             : <INITIAL, Generic                                             >'break'                                                                               : Token; // Keyword: Statement
@@ -316,6 +318,8 @@ ResetAsyncHighToken: ResetAsyncHighTerm: Token Comments;
 ResetAsyncLowToken : ResetAsyncLowTerm : Token Comments;
 ResetSyncHighToken : ResetSyncHighTerm : Token Comments;
 ResetSyncLowToken  : ResetSyncLowTerm  : Token Comments;
+ResetHoldToken     : ResetHoldTerm     : Token Comments;
+ResetReleaseToken  : ResetReleaseTerm  : Token Comments;
 ReturnToken        : ReturnTerm        : Token Comments;
 RevToken           : RevTerm           : Token Comments;
 BreakToken         : BreakTerm         : Token Comments;
@@ -474,6 +478,8 @@ ResetAsyncHigh: ResetAsyncHighToken: VerylToken;
 ResetAsyncLow : ResetAsyncLowToken : VerylToken;
 ResetSyncHigh : ResetSyncHighToken : VerylToken;
 ResetSyncLow  : ResetSyncLowToken  : VerylToken;
+ResetHold     : ResetHoldToken     : VerylToken;
+ResetRelease  : ResetReleaseToken  : VerylToken;
 Return        : ReturnToken        : VerylToken;
 Rev           : RevToken           : VerylToken;
 Same          : SameToken          : VerylToken;
@@ -543,6 +549,7 @@ Expression02Op: UnaryOperator | Operator06 | Operator05 | Operator03 | Operator0
 
 Factor: Number
       | BooleanLiteral
+      | ResetValueLiteral
       | IdentifierFactor
       | LParen Expression RParen
       | LBrace ConcatenationList RBrace
@@ -558,6 +565,8 @@ Factor: Number
       ;
 
 BooleanLiteral: True | False;
+
+ResetValueLiteral: ResetHold | ResetRelease;
 
 IdentifierFactor: ExpressionIdentifier [ FunctionCall | StructConstructor ];
 

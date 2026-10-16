@@ -18,6 +18,7 @@ use crate::literal::Literal;
 use crate::literal_table;
 use crate::namespace::Namespace;
 use crate::reference_table::{self, ReferenceCandidate};
+use crate::reset_value_table::{self, ResetValueCandidate};
 use crate::scope;
 use crate::symbol;
 use crate::symbol_table::{self, PendingWatermark, SymbolTableFragment};
@@ -44,6 +45,7 @@ pub struct FragmentWatermark {
     definition: usize,
     pending: PendingWatermark,
     reference_candidates: usize,
+    reset_value_candidates: usize,
     type_dag_candidates: usize,
     generic_pending: usize,
 }
@@ -58,6 +60,7 @@ pub fn watermark() -> FragmentWatermark {
         definition: definition_table::peek_definition_id(),
         pending: symbol_table::pending_watermark(),
         reference_candidates: reference_table::candidates_len(),
+        reset_value_candidates: reset_value_table::candidates_len(),
         type_dag_candidates: type_dag::candidates_len(),
         generic_pending: generic_inference_table::pending_len(),
     }
@@ -75,6 +78,7 @@ struct FragmentPayload {
     unsafes: Vec<(TokenRange, Unsafe)>,
     definitions: Vec<(DefinitionId, Definition)>,
     reference_candidates: Vec<ReferenceCandidate>,
+    reset_value_candidates: Vec<ResetValueCandidate>,
     type_dag_candidates: Vec<TypeDagCandidate>,
     generic_inference_pending: Vec<PendingEntry>,
 }
@@ -170,6 +174,9 @@ pub fn capture(
         definitions: definition_table::export_in_window(watermark.definition, definition_end),
         reference_candidates: reference_table::export_candidates_since(
             watermark.reference_candidates,
+        ),
+        reset_value_candidates: reset_value_table::export_candidates_since(
+            watermark.reset_value_candidates,
         ),
         type_dag_candidates: type_dag::export_candidates_since(watermark.type_dag_candidates),
         generic_inference_pending: generic_inference_table::export_pending_since(
@@ -289,6 +296,9 @@ pub fn restore(fragment: &Fragment, prj: StrId) -> Result<(), FragmentError> {
     for candidate in payload.reference_candidates {
         reference_table::add(candidate);
     }
+    for candidate in payload.reset_value_candidates {
+        reset_value_table::add(candidate);
+    }
     for candidate in payload.type_dag_candidates {
         type_dag::add(candidate);
     }
@@ -340,6 +350,11 @@ mod tests {
         #[allow(unused_variable)]
         var unused: StructA;
 
+        #[allow(unused_variable)]
+        var rst: reset_async_low;
+
+        assign rst = reset_hold;
+
         always_ff {
             if_reset {
                 r = 0;
@@ -374,6 +389,7 @@ mod tests {
         scope_dump: String,
         type_dag_dump: String,
         file_dag_dump: String,
+        reset_value_dump: String,
         errors: usize,
         fragment: Option<Fragment>,
     }
@@ -421,6 +437,7 @@ mod tests {
                     scope_dump: scope::dump_owned_scopes(),
                     type_dag_dump: type_dag::dump(),
                     file_dag_dump: type_dag::dump_file(),
+                    reset_value_dump: reset_value_table::dump(),
                     errors: errors.len(),
                     fragment,
                 }
@@ -539,5 +556,8 @@ mod tests {
         assert_eq!(cold.scope_dump, warm.scope_dump);
         assert_eq!(cold.type_dag_dump, warm.type_dag_dump);
         assert_eq!(cold.file_dag_dump, warm.file_dag_dump);
+        // Reset value literals in the restored file are resolved again.
+        assert!(!cold.reset_value_dump.is_empty());
+        assert_eq!(cold.reset_value_dump, warm.reset_value_dump);
     }
 }
