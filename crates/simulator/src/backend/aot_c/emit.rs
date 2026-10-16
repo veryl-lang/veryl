@@ -141,7 +141,7 @@ static inline int64_t vw_scmp_asym(const uint8_t* a,const uint8_t* b,uint32_t ap
 static inline void vw_shl(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
   unsigned n=VW_NW(nb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
-  for(unsigned i=n;i-->0;){ long si=(long)i-(long)ws;
+  for(unsigned i=n;i-->0;){ int64_t si=(int64_t)i-(int64_t)ws;
     uint64_t lo = si>=0 ? VW_RD(a,(unsigned)si) : 0;
     uint64_t hi = si>0 ? VW_RD(a,(unsigned)si-1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo<<bs)|(hi>>(64-bs))); } }
@@ -2128,7 +2128,7 @@ fn emit_wide_log_chunks_in(
         out.push_str(&format!(
             "{{ unsigned char* _lb = (unsigned char*)write_log; \
                 unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
-                unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (unsigned long)_lc * {esz}ul; \
+                unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (uintptr_t)_lc * {esz}u; \
                 *(unsigned int*)(_ls + {o_off}) = (unsigned int)(({base}) + {w}u); \
                 *(unsigned char*)(_ls + {o_nb}) = (unsigned char){chunk}u; \
                 __builtin_memcpy(_ls + {o_pay}, ({src}) + {w}u, {chunk}u); \
@@ -2240,7 +2240,7 @@ fn emit_log_push_in(
     format!(
         "{mark}{{ unsigned char* _lb = (unsigned char*)write_log; \
             unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
-            unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (unsigned long)_lc * {esz}ul; \
+            unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (uintptr_t)_lc * {esz}u; \
             *(unsigned int*)(_ls + {o_off}) = (unsigned int)({off}); \
             *(unsigned short*)(_ls + {o_mask}) = 0; \
             *(unsigned short*)(_ls + {o_wc}) = (unsigned short){wc}u; \
@@ -4249,7 +4249,7 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
                unsigned int n1 = *(unsigned int*)(lb + {ncnt}), w1 = *(unsigned int*)(lb + {wcnt});
                unsigned char *ne = *(unsigned char**)(lb + {neptr});
                for (unsigned int z = n0; z < n1; z++) {{
-                 unsigned char *e = ne + (unsigned long)z * {nesz};
+                 unsigned char *e = ne + (uintptr_t)z * {nesz}u;
                  const uint8_t *cur = ff_values + *(unsigned int*)(e + {neoff});
                  unsigned long long pay = *(unsigned long long*)(e + {nepay});
                  switch (*(unsigned short*)(e + {newc})) {{
@@ -4261,7 +4261,7 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
                }}
                unsigned char *we = *(unsigned char**)(lb + {weptr});
                for (unsigned int z = w0; z < w1; z++) {{
-                 unsigned char *e = we + (unsigned long)z * {wesz};
+                 unsigned char *e = we + (uintptr_t)z * {wesz}u;
                  if (__builtin_memcmp(e + {wepay}, ff_values + *(unsigned int*)(e + {weoff}), *(unsigned char*)(e + {wenb})) != 0) return 0;
                }}
                return 1;
@@ -4559,7 +4559,7 @@ fn emit_event_function(
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-         typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+         typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
          __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
          __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
@@ -4653,7 +4653,7 @@ fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -
     let mut s = format!("{{ static const unsigned char _f[] = {{ {fbytes}0 }};");
     if n == 0 {
         s.push_str(&format!(
-            " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, {flen}ul, 0, 0, 0ul, {nl}u); }}"
+            " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, (uintptr_t){flen}u, 0, 0, (uintptr_t)0, {nl}u); }}"
         ));
         return Some(s);
     }
@@ -4677,7 +4677,7 @@ fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -
         ));
     }
     s.push_str(&format!(
-        " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, {flen}ul, _v, _w, {n}ul, {nl}u); }}"
+        " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, (uintptr_t){flen}u, _v, _w, (uintptr_t){n}u, {nl}u); }}"
     ));
     Some(s)
 }
@@ -10239,7 +10239,7 @@ pub fn emit_dataflow_function(
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-         typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+         typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
          __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
          __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
@@ -10468,7 +10468,7 @@ mod tests {
              typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
              typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
              typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-             typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+             typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
              __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
              __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
         );
