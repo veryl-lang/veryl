@@ -81,6 +81,24 @@ pub enum SimulatorError {
 
     #[diagnostic(
         severity(Error),
+        code(unsupported_string),
+        help(
+            "the simulator supports `string` in a `const`, and in a `let` or `var` written only by assignments in its own module"
+        )
+    )]
+    #[error("{subject} of type `string` is not supported by the simulator")]
+    UnsupportedString {
+        /// Carries its own quotes where it names a variable.
+        subject: String,
+        #[source_code]
+        input: MultiSources,
+        #[label("the text would not fit in the storage the simulator gives it")]
+        error_location: SourceSpan,
+        token_source: TokenSource,
+    },
+
+    #[diagnostic(
+        severity(Error),
         code(unordered_combinational_logic),
         help(
             "the simulator orders combinational logic statement by statement and found no order in which each of these reads only values already computed; splitting the `always_comb` blocks involved usually resolves it, and `veryl test --allow-multi-pass` (or `VERYL_ALLOW_MULTI_PASS=1`) evaluates them repeatedly until they settle instead"
@@ -205,6 +223,19 @@ impl SimulatorError {
             input,
             error_location: (*token).into(),
             token_source: token.beg.source,
+        }
+    }
+
+    pub fn unsupported_string(subject: &str, token: &TokenRange) -> Self {
+        let source = token.beg.source;
+        let input = MultiSources {
+            sources: vec![Source::new(source.to_string(), source.get_text())],
+        };
+        SimulatorError::UnsupportedString {
+            subject: subject.to_string(),
+            input,
+            error_location: (*token).into(),
+            token_source: source,
         }
     }
 

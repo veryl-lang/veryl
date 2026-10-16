@@ -15,7 +15,8 @@ use crate::ir::statement::{
     size_literal_rhs,
 };
 use crate::ir::variable::{
-    ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
+    ModuleVariableMeta, VarOffset, align_up_64, collect_string_widths, create_variable_meta,
+    ff_cacheline_pad_enabled,
 };
 use crate::ir::{Event, ProtoExpression, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
@@ -1594,6 +1595,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
+            &collect_string_widths(&child_module.variables, child_decls)?,
             &child_ff_table,
             &multi_rmw_set,
             &dyn_indexed,
