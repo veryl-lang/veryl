@@ -1,10 +1,31 @@
 //! Thread-local output buffer for `$display` / `$write` statements.
 //! Prevents interleaved output during parallel test execution.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 thread_local! {
     static BUFFER: RefCell<Option<String>> = const { RefCell::new(None) };
+    static MUTED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// While alive, drops `$display` / `$write` output and assertion records: a
+/// reference rerun of statements whose effects already happened once.
+pub struct Mute(bool);
+
+impl Mute {
+    pub fn begin() -> Self {
+        Mute(MUTED.replace(true))
+    }
+}
+
+impl Drop for Mute {
+    fn drop(&mut self) {
+        MUTED.set(self.0);
+    }
+}
+
+pub fn muted() -> bool {
+    MUTED.get()
 }
 
 pub fn enable() {
@@ -36,6 +57,9 @@ pub fn truncate_to(mark: usize) {
 }
 
 pub fn print(s: &str) {
+    if muted() {
+        return;
+    }
     BUFFER.with(|b| {
         let mut borrow = b.borrow_mut();
         if let Some(buf) = borrow.as_mut() {
@@ -47,6 +71,9 @@ pub fn print(s: &str) {
 }
 
 pub fn println(s: &str) {
+    if muted() {
+        return;
+    }
     BUFFER.with(|b| {
         let mut borrow = b.borrow_mut();
         if let Some(buf) = borrow.as_mut() {

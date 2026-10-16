@@ -29,6 +29,9 @@ pub fn reset() {
 }
 
 pub fn record_fatal(msg: String) {
+    if crate::output_buffer::muted() {
+        return;
+    }
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         if s.fatal.is_none() {
@@ -38,6 +41,9 @@ pub fn record_fatal(msg: String) {
 }
 
 pub fn record_continue(msg: String) {
+    if crate::output_buffer::muted() {
+        return;
+    }
     STATE.with(|s| s.borrow_mut().continues.push(msg));
 }
 

@@ -3100,7 +3100,7 @@ fn tb_dirty_filter_skips_private_writes() {
     }
 }
 
-/// How many testbench statements the settle filter proves private, or `None`
+/// How many testbench statements the tb settle filter proves private, or `None`
 /// when the design does not analyze under `config`.
 #[track_caller]
 fn tb_clean_count(code: &str, config: &Config, top: &str) -> Option<usize> {

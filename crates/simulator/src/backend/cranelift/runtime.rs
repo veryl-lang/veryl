@@ -65,6 +65,9 @@ pub struct Context {
     /// Eviction trigger; cache size ≤ capacity → no evict.  Defaults
     /// to ~physical GPR budget after ABI-reserved regs.
     pub lookahead_capacity: usize,
+    /// Event code: comb stores into these ranges mark the dataflow cells
+    /// reading them.
+    pub df_marks: Option<crate::ir::opt::dataflow::StoreMarks>,
 }
 
 pub fn get_or_create_sig(
@@ -472,23 +475,71 @@ pub fn alloc_wide_slot(builder: &mut FunctionBuilder, nb: usize) -> Value {
     builder.ins().stack_addr(I64, slot, 0)
 }
 
-/// Compile a chunk into a native function.  Returns `(func, mmap)`; the
-/// caller must keep `mmap` alive for as long as `func` is callable
-/// (typically by wrapping both in `ChunkArtifact`).
-pub fn build_binary(
+/// Compile a chunk into a native function, its comb stores marking the
+/// dataflow cells in `marks`.  Returns `(func, mmap)`; the caller must keep
+/// `mmap` alive for as long as `func` is callable (typically by wrapping both
+/// in `ChunkArtifact`).
+pub fn build_binary_marked(
     config: &Config,
     proto: Vec<ProtoStatement>,
+    no_cache: bool,
+    marks: Option<crate::ir::opt::dataflow::StoreMarks>,
 ) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
-    build_binary_inner(config, proto, HashSet::default(), false)
+    build_binary_inner(config, proto, HashSet::default(), no_cache, None, marks)
 }
 
-/// [`build_binary`] with load_cache disabled, for chunks containing
-/// CompiledBlock helpers that may mutate comb values between loads.
-pub fn build_binary_no_cache(
+/// What a dataflow cell watches: the comb ranges other cells read, and the
+/// dirty bits to set when any of them changed.
+pub struct CellWatch<'a> {
+    pub boundary: &'a [(u32, u32)],
+    pub consumers: &'a [(u32, u64)],
+    /// Mark the consumers on every run, without comparing.
+    pub always: bool,
+}
+
+/// Above this many bytes, a dataflow cell's boundary or an event's comb store
+/// marks its readers whenever it runs instead of comparing.
+pub(super) const MARK_COMPARE_MAX_BYTES: u32 = 64;
+
+/// A dataflow cell: `proto`, then its consumers' bits OR-ed into the `u64`
+/// words the fourth argument points to when a boundary range changed.
+pub fn build_cell_binary(
     config: &Config,
     proto: Vec<ProtoStatement>,
+    watch: &CellWatch,
 ) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
-    build_binary_inner(config, proto, HashSet::default(), true)
+    // The emitter does not re-check what `can_build_binary` turns away (a
+    // wide `comb_direct` write would be logged instead of stored), so such a
+    // cell is left to the interpreter like any other chunk.
+    if !proto.iter().all(|s| s.can_build_binary()) {
+        return None;
+    }
+    let no_cache = proto_contains_compiled_block(&proto);
+    build_binary_inner(
+        config,
+        proto,
+        HashSet::default(),
+        no_cache,
+        Some(watch),
+        None,
+    )
+}
+
+/// The load widths covering `[a, b)`, widest first.
+pub(super) fn load_pieces(a: u32, b: u32) -> Vec<(u32, Type)> {
+    let mut out = Vec::new();
+    let mut o = a;
+    while o < b {
+        let (n, ty) = match b - o {
+            r if r >= 8 => (8, I64),
+            r if r >= 4 => (4, I32),
+            r if r >= 2 => (2, types::I16),
+            _ => (1, types::I8),
+        };
+        out.push((o, ty));
+        o += n;
+    }
+    out
 }
 
 fn proto_contains_compiled_block(stmts: &[ProtoStatement]) -> bool {
@@ -607,6 +658,8 @@ fn build_binary_inner(
     proto: Vec<ProtoStatement>,
     store_elim: HashSet<VarOffset>,
     disable_load_cache: bool,
+    watch: Option<&CellWatch>,
+    df_marks: Option<crate::ir::opt::dataflow::StoreMarks>,
 ) -> Option<(FuncPtr, Option<memmap2::Mmap>)> {
     scratch_reset();
     let mut settings_builder = settings::builder();
@@ -648,7 +701,7 @@ fn build_binary_inner(
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (ff base)
     sig.params.push(AbiParam::new(ptr_type)); // *const u8 (comb base)
     sig.params.push(AbiParam::new(ptr_type)); // *mut u8 (write_log buffer)
-    sig.params.push(AbiParam::new(ptr_type)); // isize (ff_delta for write-log)
+    sig.params.push(AbiParam::new(ptr_type)); // isize ff_delta, or a cell's *mut u64 dirty words
 
     let mut func = Function::with_name_signature(UserFuncName::default(), sig);
     let mut func_ctx = FunctionBuilderContext::new();
@@ -661,9 +714,15 @@ fn build_binary_inner(
     let ff_values = builder.block_params(block)[0];
     let comb_values = builder.block_params(block)[1];
     let log_buf = builder.block_params(block)[2];
-    // 4th arg is the FF byte delta; reduce to I32 once (write-log offsets are u32).
+    // 4th arg: the FF byte delta, reduced to I32 once since write-log offsets
+    // are u32.  A dataflow cell gets its dirty words pointer there instead,
+    // and the comb it runs is never relocated.
     let ff_delta_raw = builder.block_params(block)[3];
-    let ff_delta = builder.ins().ireduce(I32, ff_delta_raw);
+    let ff_delta = if watch.is_some() {
+        builder.ins().iconst(I32, 0)
+    } else {
+        builder.ins().ireduce(I32, ff_delta_raw)
+    };
     let zero = builder.ins().iconst(I64, 0);
     let zero_lo = builder.ins().iconst(I64, 0);
     let zero_hi = builder.ins().iconst(I64, 0);
@@ -685,6 +744,7 @@ fn build_binary_inner(
         disable_load_cache: effective_disable_load_cache,
         future_reads: None,
         lookahead_capacity: 0,
+        df_marks,
     };
 
     // Belady-optimal load_cache eviction (opt-out via VERYL_STAGE7_LOOKAHEAD=0).
@@ -700,10 +760,28 @@ fn build_binary_inner(
             .unwrap_or(12);
     }
 
+    // The watched values before the body, loaded past the load cache so they
+    // are what memory holds.
+    let wflags = MemFlagsData::trusted();
+    let watch_bytes: u32 = watch.map_or(0, |w| w.boundary.iter().map(|&(a, b)| b - a).sum());
+    let compare = watch_bytes <= MARK_COMPARE_MAX_BYTES && !watch.is_some_and(|w| w.always);
+    let mut before: Vec<(u32, Type, Value)> = Vec::new();
+    if let Some(w) = watch
+        && compare
+    {
+        for &(a, b) in w.boundary {
+            for (o, ty) in load_pieces(a, b) {
+                let v = builder.ins().load(ty, wflags, comb_values, o as i32);
+                before.push((o, ty, v));
+            }
+        }
+    }
+
     let len = proto.len();
     for (i, x) in proto.iter().enumerate() {
-        // `is_last` lets the final statement return directly.
-        let is_last = (i + 1) == len;
+        // `is_last` lets the final statement return directly; a watched
+        // cell still has its compare to run.
+        let is_last = (i + 1) == len && watch.is_none();
         x.build_binary(&mut cranelift_context, &mut builder, is_last)?;
 
         // Belady: while over capacity, evict the entry whose next read
@@ -732,6 +810,38 @@ fn build_binary_inner(
         }
     }
 
+    if let Some(w) = watch
+        && !w.consumers.is_empty()
+    {
+        let dirty = ff_delta_raw;
+        let mark = builder.create_block();
+        let done = builder.create_block();
+        if compare {
+            let mut acc = builder.ins().iconst(I64, 0);
+            for &(o, ty, old) in &before {
+                let new = builder.ins().load(ty, wflags, comb_values, o as i32);
+                let x = builder.ins().bxor(old, new);
+                let x = if ty == I64 {
+                    x
+                } else {
+                    builder.ins().uextend(I64, x)
+                };
+                acc = builder.ins().bor(acc, x);
+            }
+            builder.ins().brif(acc, mark, &[], done, &[]);
+        } else {
+            builder.ins().jump(mark, &[]);
+        }
+        builder.switch_to_block(mark);
+        for &(word, m) in w.consumers {
+            let off = (word * 8) as i32;
+            let v = builder.ins().load(I64, wflags, dirty, off);
+            let v = builder.ins().bor_imm_u(v, m as i64);
+            builder.ins().store(wflags, v, dirty, off);
+        }
+        builder.ins().jump(done, &[]);
+        builder.switch_to_block(done);
+    }
     builder.ins().return_(&[]);
     builder.seal_all_blocks();
     builder.finalize(isa.frontend_config());

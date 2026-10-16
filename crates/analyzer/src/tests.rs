@@ -9330,6 +9330,34 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface ab_if {
+        var a: logic;
+        var b: logic;
+        modport master {
+            ..converse(slave)
+        }
+        modport slave {
+            ..same(slave_a, slave_b)
+        }
+        modport slave_a {
+            a: input,
+        }
+        modport slave_b {
+            b: input,
+        }
+    }
+    module c_module (
+        ab: modport ab_if::master,
+    ) {
+        assign ab.a = 0;
+        assign ab.b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
