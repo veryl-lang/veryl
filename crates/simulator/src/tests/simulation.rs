@@ -33200,6 +33200,48 @@ fn display_string_argument_renders_text() {
 }
 
 #[test]
+fn string_let_and_var_hold_their_text() {
+    // A `string` type's width is a nominal 1 bit, and a `let`/`var` of it was
+    // allocated that: `%s` printed the low bits of the text, and a bare
+    // `$display(a)` printed them in hex. The storage is now as wide as the
+    // longest text assigned, and a shorter text is zero-padded in it.
+    let code = r#"
+    #[test(Top)]
+    module Top {
+        let a: string = "hi";
+        var b: string;
+        var c: string;
+        var x: logic<8>;
+        initial {
+            b = "hello";
+            c = b;
+            b = "hi";
+            x = 8'hab;
+            $write("[%s][%s][%s][%5s]", a, b, c, b);
+            $write(a, x, c);
+            if b == "hi" && c != "hi" {
+                $write("[eq]");
+            }
+            c = if x == 8'hab ? "longer text" : "s";
+            $write("[%s]", c);
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        output_buffer::enable();
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::Initial);
+        let output = output_buffer::take();
+        assert_eq!(
+            output, "[hi][hi][hello][   hi]hi ab hello[eq][longer text]",
+            "config={config:?}"
+        );
+    }
+}
+
+#[test]
 fn a_runtime_indexed_write_reports_the_read_elements_between_its_endpoints() {
     use crate::ir::module::ReadOffsets;
     use crate::ir::{

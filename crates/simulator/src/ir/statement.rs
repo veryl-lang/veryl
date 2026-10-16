@@ -3626,10 +3626,12 @@ fn extract_display_args(
     let mut format_str = String::new();
     let mut exprs = Vec::new();
     let mut iter = inputs.iter();
+    let mut has_format = false;
 
     // Check if the first argument is a string literal
     if let Some(first) = iter.next() {
         if is_string_literal(&first.0) {
+            has_format = true;
             format_str = extract_string_value(&first.0)?;
         } else {
             // Not a string literal; treat as expression argument
@@ -3648,6 +3650,22 @@ fn extract_display_args(
             Conv::conv(context, &input.0).ok()?
         };
         exprs.push(proto);
+    }
+
+    // Without a format string every argument prints in its default format,
+    // which for a `string` is its text, not the hex of its bytes.
+    if !has_format && inputs.iter().any(|x| x.0.comptime().r#type.is_string()) {
+        format_str = inputs
+            .iter()
+            .map(|x| {
+                if x.0.comptime().r#type.is_string() {
+                    "%s"
+                } else {
+                    "%h"
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
     }
 
     Some((format_str, exprs))

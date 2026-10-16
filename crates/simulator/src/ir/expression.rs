@@ -2767,8 +2767,17 @@ impl Conv<&air::Expression> for ProtoExpression {
                     if index.is_range() {
                         return Err(SimulatorError::unsupported_description(&comptime.token));
                     }
-                    let width = comptime.r#type.total_width().unwrap();
-                    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+                    let mut width = comptime.r#type.total_width().unwrap();
+                    let mut expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+                    // A `string` type answers a nominal 1 bit; the text is as
+                    // wide as the storage `collect_string_widths` sized.
+                    if comptime.r#type.is_string()
+                        && let Some(meta) = context.scope().variable_meta.get(id)
+                    {
+                        width = meta.width;
+                        expr_context.width = expr_context.width.max(width);
+                    }
 
                     // A `param` is never written, so reading one whole is
                     // reading its value.  Lowering it to storage instead hides
