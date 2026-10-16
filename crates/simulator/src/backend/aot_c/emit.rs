@@ -5639,11 +5639,8 @@ fn aot_c_cache_dir() -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("VERYL_AOT_CACHE_DIR") {
         return Ok(PathBuf::from(p));
     }
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .ok_or("neither XDG_CACHE_HOME nor HOME set")?;
-    Ok(base.join("veryl").join("aot_c"))
+    let base = veryl_path::try_cache_path().ok_or("no cache directory for this platform")?;
+    Ok(base.join("aot_c"))
 }
 
 /// FNV-1a 64-bit (hex), with a 0xFF separator between parts so e.g.
