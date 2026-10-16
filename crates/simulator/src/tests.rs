@@ -597,3 +597,40 @@ mod error;
 mod hier_ref;
 mod simulation;
 mod testbench;
+
+/// Temporary: shows on Windows CI why AOT-C modules do not load.
+#[cfg(windows)]
+#[test]
+fn diag_windows_aot_c_load() {
+    use std::process::Command;
+    let run = |cmd: &str, args: &[&str]| match Command::new(cmd).args(args).output() {
+        Ok(o) => format!(
+            "status={:?} stdout={} stderr={}",
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout).trim(),
+            String::from_utf8_lossy(&o.stderr).trim()
+        ),
+        Err(e) => format!("spawn error: {e}"),
+    };
+    let mut report = String::new();
+    report.push_str(&format!("where cc: {}\n", run("where", &["cc"])));
+    report.push_str(&format!("cc --version: {}\n", run("cc", &["--version"])));
+    report.push_str(&format!(
+        "VERYL_AOT_CC: {:?}\n",
+        std::env::var("VERYL_AOT_CC")
+    ));
+    for (label, attr) in [
+        ("visibility", "__attribute__((visibility(\"default\")))"),
+        ("dllexport", "__declspec(dllexport)"),
+    ] {
+        let src = format!(
+            "#include <stdint.h>\n{attr} void veryl_aot_eval(uint8_t *ff, uint8_t *comb, uint64_t *log, intptr_t d) {{ (void)ff; (void)comb; (void)log; (void)d; }}\n"
+        );
+        let r = match crate::backend::aot_c::emit::compile_source(&src) {
+            Ok(_) => "loaded".to_string(),
+            Err(e) => format!("error: {e}"),
+        };
+        report.push_str(&format!("{label}: {r}\n"));
+    }
+    panic!("\n{report}");
+}
