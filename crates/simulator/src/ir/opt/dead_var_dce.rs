@@ -316,6 +316,11 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             ProtoTbMethodKind::RandomSeed { value } => {
                 walk_expr_reads(value, c);
             }
+            ProtoTbMethodKind::Queue { value, .. } => {
+                if let Some(v) = value {
+                    walk_expr_reads(v, c);
+                }
+            }
             ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
                 walk_expr_reads(min, c);
                 walk_expr_reads(max, c);

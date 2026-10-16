@@ -290,9 +290,13 @@ pub struct TbMethodCall {
     /// sizes the hoist temporary and is enforced against the value the
     /// component actually returns.
     pub ret_width: Option<u32>,
-    /// Signedness of the returned value. Only `$tb::random::<iN>` returns a
-    /// signed value; component/file methods leave this `false`.
+    /// Signedness of the returned value. Only `$tb::random::<iN>` and
+    /// `$tb::queue` of a signed element return a signed value; component/file
+    /// methods leave this `false`.
     pub ret_signed: bool,
+    /// Whether the returned value is 4-state (`$tb::queue` of a 4-state
+    /// element); sizes the hoist temporary as `logic` instead of `bit`.
+    pub ret_4state: bool,
 }
 
 #[derive(Clone)]
@@ -337,19 +341,109 @@ pub enum TbMethod {
         signed: bool,
     },
     RandomGetSeed,
+    /// `$tb::queue::<T, N>` methods. `width`/`signed`/`four_state` describe
+    /// the element type `T`, and `capacity` is `N` (`0` for unbounded).
+    /// `value` is the pushed value of `push_back`/`push_front`.
+    Queue {
+        op: QueueOp,
+        value: Option<Expression>,
+        width: u32,
+        signed: bool,
+        four_state: bool,
+        capacity: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum QueueOp {
+    PushBack,
+    PushFront,
+    PopFront,
+    PopBack,
+    DropFront,
+    DropBack,
+    Front,
+    Back,
+    Clear,
+    Size,
+    IsEmpty,
+    IsFull,
+}
+
+impl QueueOp {
+    pub fn from_method_name(name: &str) -> Option<Self> {
+        let op = match name {
+            "push_back" => QueueOp::PushBack,
+            "push_front" => QueueOp::PushFront,
+            "pop_front" => QueueOp::PopFront,
+            "pop_back" => QueueOp::PopBack,
+            "drop_front" => QueueOp::DropFront,
+            "drop_back" => QueueOp::DropBack,
+            "front" => QueueOp::Front,
+            "back" => QueueOp::Back,
+            "clear" => QueueOp::Clear,
+            "size" => QueueOp::Size,
+            "is_empty" => QueueOp::IsEmpty,
+            "is_full" => QueueOp::IsFull,
+            _ => return None,
+        };
+        Some(op)
+    }
+
+    pub fn has_return_value(&self) -> bool {
+        matches!(
+            self,
+            QueueOp::PopFront
+                | QueueOp::PopBack
+                | QueueOp::Front
+                | QueueOp::Back
+                | QueueOp::Size
+                | QueueOp::IsEmpty
+                | QueueOp::IsFull
+        )
+    }
+
+    /// Whether the returned value is the element type `T`.
+    pub fn returns_element(&self) -> bool {
+        matches!(
+            self,
+            QueueOp::PopFront | QueueOp::PopBack | QueueOp::Front | QueueOp::Back
+        )
+    }
+}
+
+impl fmt::Display for QueueOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            QueueOp::PushBack => "push_back",
+            QueueOp::PushFront => "push_front",
+            QueueOp::PopFront => "pop_front",
+            QueueOp::PopBack => "pop_back",
+            QueueOp::DropFront => "drop_front",
+            QueueOp::DropBack => "drop_back",
+            QueueOp::Front => "front",
+            QueueOp::Back => "back",
+            QueueOp::Clear => "clear",
+            QueueOp::Size => "size",
+            QueueOp::IsEmpty => "is_empty",
+            QueueOp::IsFull => "is_full",
+        };
+        text.fmt(f)
+    }
 }
 
 impl TbMethod {
     /// Whether the method yields a value usable in assignment/expression
     /// position. The remaining builtin `$tb` methods are statements only.
     pub fn has_return_value(&self) -> bool {
-        matches!(
-            self,
+        match self {
             TbMethod::Component { .. }
-                | TbMethod::RandomGet { .. }
-                | TbMethod::RandomGetRange { .. }
-                | TbMethod::RandomGetSeed
-        )
+            | TbMethod::RandomGet { .. }
+            | TbMethod::RandomGetRange { .. }
+            | TbMethod::RandomGetSeed => true,
+            TbMethod::Queue { op, .. } => op.has_return_value(),
+            _ => false,
+        }
     }
 }
 
@@ -589,6 +683,13 @@ impl fmt::Display for Statement {
                     write!(f, "{}.get_range({min}, {max});", x.inst)
                 }
                 TbMethod::RandomGetSeed => write!(f, "{}.get_seed();", x.inst),
+                TbMethod::Queue { op, value, .. } => {
+                    if let Some(v) = value {
+                        write!(f, "{}.{op}({v});", x.inst)
+                    } else {
+                        write!(f, "{}.{op}();", x.inst)
+                    }
+                }
             },
             Statement::For(x) => {
                 let range_op = if let ForRange::Reverse { .. } = &x.range {
