@@ -1465,6 +1465,8 @@ pub fn eval_type(
         }
     } else {
         let mut path = resolved.unwrap_or_else(|| context.resolve_path(path.clone()));
+        // Preserve the alias target's generic arguments before building its type map.
+        path.unalias(None);
         check_generic_refereence(context, &path);
 
         let map = path.to_generic_maps();
