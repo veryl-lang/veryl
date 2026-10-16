@@ -4366,7 +4366,10 @@ pub fn get_port_connects(
     let mut ret = vec![];
     let mut interface_binding = None;
 
-    if let ir::TypeKind::Modport(_, _) = &port_type.kind {
+    if matches!(
+        port_type.kind,
+        ir::TypeKind::Modport(_, _) | ir::TypeKind::AbstractInterface(_)
+    ) {
         if let Some(x) = &port.inst_port_item_opt {
             // for check_compatibility
             let _ = eval_expr(context, Some(port_type.clone()), &x.expression, false)?;
@@ -4390,6 +4393,14 @@ pub fn get_port_connects(
         };
         interface_binding = Some(VarPathSelect(dst_path.clone(), dst_select.clone(), token));
 
+        if matches!(port_type.kind, ir::TypeKind::AbstractInterface(_)) {
+            // Direction-free members use reference bindings. Their masks
+            // cannot be represented by ordinary whole-signal output ports.
+            return Ok(PortConnects {
+                connects: ret,
+                interface_binding,
+            });
+        }
         let members = port_type.expand_modport(context, &dst_path, token)?;
         for member in members {
             if member.1.is_input() | member.1.is_output() {
@@ -4420,7 +4431,7 @@ pub fn get_port_connects(
                 // append member name to port_path
                 let mut port_path = port_path.clone();
                 let mut member_name = member_path.0.clone();
-                member_name.remove(0);
+                member_name.drain(..dst_path.0.len());
                 port_path.append(&member_name);
 
                 ret.push((port_path.clone(), dst, expr));

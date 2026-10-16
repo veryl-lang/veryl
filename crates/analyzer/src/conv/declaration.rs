@@ -509,8 +509,41 @@ impl Conv<&PortDeclarationItem> for () {
                 _ => TypePosition::Variable,
             };
 
-            let r#type = x.r#type.to_ir_type(context, pos)?;
+            let mut r#type = x.r#type.to_ir_type(context, pos)?;
             let clock_domain = x.clock_domain;
+
+            // Generic interface ports acquire their member types from the
+            // actual connection. Register that signature for pass-through
+            // connections too, so each child is specialized independently.
+            if let ir::TypeKind::AbstractInterface(modport) = r#type.kind
+                && let Some(sig) = context.get_modport_signature(&value.identifier)
+            {
+                let component = get_component(context, &sig, token)?;
+                if let ir::Component::Interface(component) = component.as_ref() {
+                    context.insert_inst_signature(value.identifier.as_ref(), &sig);
+                    context.extract_interface_member(
+                        value.identifier.text(),
+                        &r#type.array,
+                        component.clone(),
+                        modport,
+                        clock_domain,
+                        variable_token,
+                    );
+                    if let Some(name) = modport {
+                        r#type.kind = ir::TypeKind::Modport(Arc::new(sig), name);
+                    } else {
+                        // Direction-free members remain references. Their
+                        // actual write masks are collected after conversion.
+                        for variable in context.variables.values_mut() {
+                            if variable.path.starts_with(&path.0)
+                                && variable.kind == VarKind::Variable
+                            {
+                                variable.kind = VarKind::Inout;
+                            }
+                        }
+                    }
+                }
+            }
 
             // Function args share the PortDeclarationItem grammar; skip here
             // so they don't shadow same-named module ports in port_types.
@@ -580,8 +613,17 @@ impl Conv<&PortDeclarationItem> for () {
                     return Ok(());
                 }
                 Direction::Interface => {
-                    if let ir::TypeKind::AbstractInterface(_) = &r#type.kind {
+                    if matches!(
+                        r#type.kind,
+                        ir::TypeKind::AbstractInterface(_) | ir::TypeKind::Modport(_, _)
+                    ) {
                         let path = VarPath::new(value.identifier.text());
+                        if matches!(r#type.kind, ir::TypeKind::AbstractInterface(None))
+                            && let Some(sig) = context.get_modport_signature(&value.identifier)
+                        {
+                            r#type.kind =
+                                ir::TypeKind::Instance(Arc::new(sig), InstanceKind::Interface);
+                        }
                         let comptime =
                             Comptime::from_type(r#type.clone(), clock_domain, variable_token);
                         context.insert_var_path(path.clone(), comptime);
@@ -1646,7 +1688,7 @@ impl Conv<&InstDeclaration> for ir::Declaration {
         context.push_override(symbol.inner_namespace(), overridden_params);
         let modport_signatures = context.collect_modport_signatures(value);
 
-        // The interfaces connected to this instance's modport ports are part of
+        // The interfaces connected to this instance's interface ports are part of
         // the instantiated body (their parameters size its members), so they
         // must distinguish the instance cache entry.
         let mut modport_signatures: Vec<_> = modport_signatures.into_iter().collect();
@@ -1690,7 +1732,16 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             };
 
                             if let Some(actual) = connects.interface_binding {
-                                for (child, child_variable) in &component.interface_members {
+                                let references =
+                                    component.variables.iter().filter(|(_, variable)| {
+                                        matches!(
+                                            dst_type.kind,
+                                            ir::TypeKind::AbstractInterface(None)
+                                        ) && variable.kind == VarKind::Inout
+                                    });
+                                for (child, child_variable) in
+                                    component.interface_members.iter().chain(references)
+                                {
                                     if !child_variable.path.starts_with(&path.0) {
                                         continue;
                                     }

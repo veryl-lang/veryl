@@ -353,10 +353,7 @@ impl<'a, 's> ModuleGraphBuilder<'a, 's> {
             function_summaries: procedure::FunctionSummaries::new(module, bit_part),
             summary_budget: ExpansionBudget::default(),
             trace_instances: false,
-            complete: !module
-                .variables
-                .values()
-                .any(|variable| matches!(variable.kind, crate::ir::VarKind::Inout)),
+            complete: !module.variables.keys().any(|id| is_inout(*id, module)),
         }
     }
 
@@ -760,7 +757,7 @@ fn add_procedure_graph(
         .destinations
         .into_iter()
         .filter_map(|(key, root)| {
-            (is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables))
+            (is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, module))
                 .then_some((key, root))
         })
         .collect::<Vec<_>>();
@@ -776,7 +773,7 @@ fn add_procedure_graph(
         bit_part,
         analysis.graph,
         internal_region,
-        |key| is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, &module.variables),
+        |key| is_module_scope_var(key.0, &module.variables) && !is_inout(key.0, module),
     );
     for (destination, root) in destinations {
         let (Some(root), Some(destination)) = (
@@ -1944,10 +1941,16 @@ fn is_module_scope_var(id: VarId, variables: &HashMap<VarId, Variable>) -> bool 
     }
 }
 
-fn is_inout(id: VarId, variables: &HashMap<VarId, Variable>) -> bool {
-    variables
-        .get(&id)
-        .is_some_and(|variable| matches!(variable.kind, crate::ir::VarKind::Inout))
+fn is_inout(id: VarId, module: &Module) -> bool {
+    // Generic interface members have concrete reference bindings, so their
+    // dependencies are known. Ordinary bidirectional ports remain opaque.
+    module.variables.get(&id).is_some_and(|v| {
+        v.kind == crate::ir::VarKind::Inout
+            && !module.port_types.iter().any(|(path, (ty, _))| {
+                matches!(ty.kind, crate::ir::TypeKind::AbstractInterface(None))
+                    && v.path.starts_with(&path.0)
+            })
+    })
 }
 
 #[cfg(test)]
