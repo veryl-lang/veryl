@@ -1,0 +1,55 @@
+module Module93 (
+    i_clk  : input  clock             ,
+    i_rst  : input  reset             ,
+    i_wen0 : input  logic<4>          ,
+    i_din0 : input  logic<4, 8>       ,
+    i_addr0: input  logic<$clog2(128)>,
+    o_dout0: output logic<4, 8>       ,
+    i_wen1 : input  logic<4>          ,
+    i_din1 : input  logic<4, 8>       ,
+    i_addr1: input  logic<$clog2(128)>,
+    o_dout1: output logic<4, 8>       ,
+) {
+    #[ifdef(GOWIN_SYNTH)]
+    {
+        for b in 0..4 :BYTE_MEMORY {
+            #[allow(multiple_assign)]
+            var memory: logic<8> [128];
+
+            always_ff {
+                if (i_wen0[b]) {
+                    memory[i_addr0] = i_din0[b];
+                }
+                o_dout0[b] = memory[i_addr0];
+            }
+            always_ff {
+                if (i_wen1[b]) {
+                    memory[i_addr1] = i_din1[b];
+                }
+                o_dout1[b] = memory[i_addr1];
+            }
+        }
+    }
+    #[else]
+    {
+        #[allow(multiple_assign)]
+        var memory: logic<4 * 8> [128];
+
+        always_ff {
+            for b in 0..4 {
+                if (i_wen0[b]) {
+                    memory[i_addr0][b * 8+:8] = i_din0[b];
+                }
+            }
+            o_dout0 = memory[i_addr0];
+        }
+        always_ff {
+            for b in 0..4 {
+                if (i_wen1[b]) {
+                    memory[i_addr1][b * 8+:8] = i_din1[b];
+                }
+            }
+            o_dout1 = memory[i_addr1];
+        }
+    }
+}
