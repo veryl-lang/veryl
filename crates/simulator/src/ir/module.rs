@@ -1565,56 +1565,42 @@ fn run_comb_pipeline(
     // set is returned so a cache hit can re-apply it to another test's events.
     let mut dead_union: HashSet<VarOffset> = HashSet::default();
     let unified_sorted = if dead_var_dce::enabled() {
-        // Multi-pass DCE default ON: iterate to fixpoint so that
-        // cascaded drops (a dst becomes dead once its only consumer
-        // was itself dropped) are caught in subsequent passes.  Opt
-        // out via `VERYL_DEAD_VAR_DCE_MULTI=0`.
+        // Cascaded drops (a dst becomes dead once its only consumer was
+        // itself dropped) are taken in the same census.  Opt out of the
+        // cascade via `VERYL_DEAD_VAR_DCE_MULTI=0`.
         let multi_pass = std::env::var("VERYL_DEAD_VAR_DCE_MULTI").ok().as_deref() != Some("0");
         let mut unified_sorted = unified_sorted;
-        let mut total_dropped = 0usize;
-        let mut pass = 0usize;
-        loop {
-            let mut slices: Vec<&[ProtoStatement]> =
-                Vec::with_capacity(1 + all_event_statements.len());
-            slices.push(unified_sorted.as_slice());
-            for stmts in all_event_statements.values() {
-                slices.push(stmts.as_slice());
-            }
-            let mut dead = dead_var_dce::collect_dead_offsets(&slices);
-            for p in protect {
-                dead.remove(p);
-            }
-            if dead.is_empty() {
-                break;
-            }
-            pass += 1;
-            let (rewritten, dropped_here) = dead_var_dce::apply_counting(unified_sorted, &dead);
+        let mut slices: Vec<&[ProtoStatement]> = Vec::with_capacity(1 + all_event_statements.len());
+        slices.push(unified_sorted.as_slice());
+        for stmts in all_event_statements.values() {
+            slices.push(stmts.as_slice());
+        }
+        let mut dead = if multi_pass {
+            dead_var_dce::collect_dead_closure(&slices, protect)
+        } else {
+            dead_var_dce::collect_dead_offsets(&slices)
+        };
+        for p in protect {
+            dead.remove(p);
+        }
+        if !dead.is_empty() {
+            let (rewritten, mut dropped) = dead_var_dce::apply_counting(unified_sorted, &dead);
             unified_sorted = rewritten;
-            let mut total_dropped_here = dropped_here;
             for stmts in all_event_statements.values_mut() {
                 let taken = std::mem::take(stmts);
                 let (new_stmts, d) = dead_var_dce::apply_counting(taken, &dead);
                 *stmts = new_stmts;
-                total_dropped_here += d;
+                dropped += d;
             }
-            let dead_len = dead.len();
-            dead_union.extend(dead);
             if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
                 eprintln!(
-                    "[DeadVarDce] module={} pass={} dead_set={} dropped_stmts={}",
-                    module_name, pass, dead_len, total_dropped_here,
+                    "[DeadVarDce] module={} dead_set={} dropped_stmts={}",
+                    module_name,
+                    dead.len(),
+                    dropped,
                 );
             }
-            total_dropped += total_dropped_here;
-            if total_dropped_here == 0 || !multi_pass {
-                break;
-            }
-        }
-        if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
-            eprintln!(
-                "[DeadVarDce] module={} total_passes={} total_dropped={}",
-                module_name, pass, total_dropped,
-            );
+            dead_union.extend(dead);
         }
         unified_sorted
     } else {
