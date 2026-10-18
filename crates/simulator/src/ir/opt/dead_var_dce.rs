@@ -109,6 +109,16 @@ struct Census {
     live: crate::HashMap<VarOffset, Liveness>,
     /// Runtime-indexed array accesses — see `ArrayRange`.
     ranges: Vec<ArrayRange>,
+    /// Every Variable read, in walk order, so a droppable write can name the
+    /// reads its own expression makes.
+    reads: Vec<VarOffset>,
+    /// Per dst, the `reads` and `ranges` spans of each full write
+    /// `apply_counting` would drop.
+    droppable: crate::HashMap<VarOffset, Vec<(u32, u32, u32, u32)>>,
+    /// Inside a `CompiledBlock`, whose writes are counted but never dropped.
+    in_compiled: bool,
+    /// Fill `reads` and `droppable`; only the closure needs them.
+    trace: bool,
 }
 
 fn walk_expr_reads(expr: &ProtoExpression, c: &mut Census) {
@@ -123,6 +133,9 @@ fn walk_expr_reads(expr: &ProtoExpression, c: &mut Census) {
         } => {
             let e = c.live.entry(*var_offset).or_default();
             e.reads = e.reads.saturating_add(1);
+            if c.trace {
+                c.reads.push(*var_offset);
+            }
             if let Some(dyn_sel) = dynamic_select {
                 walk_expr_reads(&dyn_sel.index_expr, c);
             }
@@ -193,6 +206,7 @@ fn walk_for_range(range: &ProtoForRange, c: &mut Census) {
 fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
     match stmt {
         ProtoStatement::Assign(x) => {
+            let (r0, g0) = (c.reads.len() as u32, c.ranges.len() as u32);
             walk_expr_reads(&x.expr, c);
             if let Some(dyn_sel) = &x.dynamic_select {
                 walk_expr_reads(&dyn_sel.index_expr, c);
@@ -202,6 +216,10 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
                 e.partial_writes = e.partial_writes.saturating_add(1);
             } else {
                 e.full_writes = e.full_writes.saturating_add(1);
+                if c.trace && !c.in_compiled {
+                    let span = (r0, c.reads.len() as u32, g0, c.ranges.len() as u32);
+                    c.droppable.entry(x.dst).or_default().push(span);
+                }
             }
         }
         ProtoStatement::AssignDynamic(x) => {
@@ -276,9 +294,11 @@ fn walk_stmt_liveness(stmt: &ProtoStatement, c: &mut Census) {
             ProtoSystemFunctionCall::Finish => {}
         },
         ProtoStatement::CompiledBlock(x) => {
+            let outer = std::mem::replace(&mut c.in_compiled, true);
             for s in x.original_stmts.iter() {
                 walk_stmt_liveness(s, c);
             }
+            c.in_compiled = outer;
         }
         ProtoStatement::TbMethodCall { method, .. } => match method {
             // `f.write(fmt, args...)` reads its argument signals, exactly like
@@ -413,6 +433,101 @@ pub fn collect_dead_offsets(slices: &[&[ProtoStatement]]) -> HashSet<VarOffset> 
     dead
 }
 
+/// `collect_dead_offsets` run to its fixpoint in one census: dropping a dead
+/// offset's writes takes their reads away, and every offset left unread joins
+/// the set.  `protect` never does.  Equal to repeating `collect_dead_offsets`
+/// and `apply_counting` until nothing drops.
+pub fn collect_dead_closure(
+    slices: &[&[ProtoStatement]],
+    protect: &HashSet<VarOffset>,
+) -> HashSet<VarOffset> {
+    if !enabled() {
+        return HashSet::default();
+    }
+    let mut census = Census {
+        trace: true,
+        ..Default::default()
+    };
+    for slice in slices {
+        for s in *slice {
+            walk_stmt_liveness(s, &mut census);
+        }
+    }
+    // One entry per distinct range, counting the accesses that keep it live.
+    let mut range_index: crate::HashMap<(VarOffset, usize, isize), usize> =
+        crate::HashMap::default();
+    let mut ranges: Vec<(ArrayRange, u32)> = Vec::new();
+    let mut range_of: Vec<usize> = Vec::with_capacity(census.ranges.len());
+    for r in &census.ranges {
+        let i = *range_index
+            .entry((r.base, r.num, r.stride))
+            .or_insert_with(|| {
+                ranges.push((*r, 0));
+                ranges.len() - 1
+            });
+        ranges[i].1 += 1;
+        range_of.push(i);
+    }
+    let qualifies = |off: VarOffset,
+                     live: &crate::HashMap<VarOffset, Liveness>,
+                     ranges: &[(ArrayRange, u32)]| {
+        let Some(s) = live.get(&off) else {
+            return false;
+        };
+        !off.is_ff()
+            && s.reads == 0
+            && s.partial_writes == 0
+            && s.inherited_writes == 0
+            && s.full_writes != 0
+            && !protect.contains(&off)
+            && !ranges.iter().any(|(r, n)| *n != 0 && r.contains(off))
+    };
+    let mut dead: HashSet<VarOffset> = census
+        .live
+        .keys()
+        .copied()
+        .filter(|off| qualifies(*off, &census.live, &ranges))
+        .collect();
+    let mut queue: Vec<VarOffset> = dead.iter().copied().collect();
+    while let Some(off) = queue.pop() {
+        let Some(spans) = census.droppable.get(&off) else {
+            continue;
+        };
+        for &(r0, r1, g0, g1) in spans {
+            for &read in &census.reads[r0 as usize..r1 as usize] {
+                if let Some(l) = census.live.get_mut(&read) {
+                    l.reads -= 1;
+                }
+                if !dead.contains(&read) && qualifies(read, &census.live, &ranges) {
+                    dead.insert(read);
+                    queue.push(read);
+                }
+            }
+            for &i in &range_of[g0 as usize..g1 as usize] {
+                ranges[i].1 -= 1;
+                if ranges[i].1 != 0 {
+                    continue;
+                }
+                // The range no longer shields its elements.
+                let r = ranges[i].0;
+                for k in 0..r.num as isize {
+                    let raw = r.base.raw() + k * r.stride;
+                    let elem = if r.base.is_ff() {
+                        VarOffset::Ff(raw)
+                    } else {
+                        VarOffset::Comb(raw)
+                    };
+                    if !dead.contains(&elem) && qualifies(elem, &census.live, &ranges) {
+                        dead.insert(elem);
+                        queue.push(elem);
+                    }
+                }
+            }
+        }
+    }
+    dead
+}
+
 /// The comb half of the AOT-C localize blocklist (`VERYL_AOT_C_LOCALIZE`):
 /// runtime-indexed array ranges `(base, num, stride)` the comb list carries.
 /// A pure function of the pipeline's statements, so a shared pipeline
@@ -520,4 +635,120 @@ pub fn apply_counting(
         }
     }
     (out, dropped)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::ExpressionContext;
+    use crate::ir::statement::ProtoAssignStatement;
+    use veryl_parser::token_range::TokenRange;
+
+    fn ctx() -> ExpressionContext {
+        ExpressionContext {
+            width: 8,
+            signed: false,
+        }
+    }
+
+    fn read(off: isize) -> ProtoExpression {
+        ProtoExpression::Variable {
+            var_offset: VarOffset::Comb(off),
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            var_full_width: 8,
+            expr_context: ctx(),
+        }
+    }
+
+    fn assign(dst: VarOffset, expr: ProtoExpression) -> ProtoStatement {
+        ProtoStatement::Assign(ProtoAssignStatement {
+            dst,
+            dst_width: 8,
+            select: None,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: 0,
+            comb_direct: false,
+            token: TokenRange::default(),
+        })
+    }
+
+    fn comb(dst: isize, src: isize) -> ProtoStatement {
+        assign(VarOffset::Comb(dst), read(src))
+    }
+
+    /// The fixpoint the closure stands for: one census and drop per round.
+    fn by_rounds(stmts: &[ProtoStatement], protect: &HashSet<VarOffset>) -> HashSet<VarOffset> {
+        let mut stmts = stmts.to_vec();
+        let mut union = HashSet::default();
+        loop {
+            let mut dead = collect_dead_offsets(&[stmts.as_slice()]);
+            for p in protect {
+                dead.remove(p);
+            }
+            if dead.is_empty() {
+                return union;
+            }
+            let (rest, dropped) = apply_counting(stmts, &dead);
+            stmts = rest;
+            union.extend(dead);
+            if dropped == 0 {
+                return union;
+            }
+        }
+    }
+
+    fn check(stmts: &[ProtoStatement], protect: &[isize], expected: &[isize]) {
+        let protect: HashSet<VarOffset> = protect.iter().map(|&o| VarOffset::Comb(o)).collect();
+        let closure = collect_dead_closure(&[stmts], &protect);
+        assert_eq!(closure, by_rounds(stmts, &protect));
+        let expected: HashSet<VarOffset> = expected.iter().map(|&o| VarOffset::Comb(o)).collect();
+        assert_eq!(closure, expected);
+    }
+
+    #[test]
+    fn a_dead_chain_goes_in_one_census() {
+        // 8 <- 0, 16 <- 8, 24 <- 16 is read by nothing; 40 <- 32 feeds a flop.
+        let stmts = [
+            comb(8, 0),
+            comb(16, 8),
+            comb(24, 16),
+            comb(40, 32),
+            assign(VarOffset::Ff(0), read(40)),
+        ];
+        check(&stmts, &[], &[8, 16, 24]);
+    }
+
+    #[test]
+    fn a_protected_link_keeps_its_sources() {
+        let stmts = [comb(8, 0), comb(16, 8), comb(24, 16)];
+        check(&stmts, &[16], &[24]);
+    }
+
+    #[test]
+    fn a_dropped_indexed_read_frees_the_array() {
+        // 48 reads the array {56, 64} at the runtime index 72 and is itself
+        // unread; once it goes, the elements are unread too.
+        let indexed = ProtoExpression::DynamicVariable {
+            base_offset: VarOffset::Comb(56),
+            stride: 8,
+            element_native_bytes: 1,
+            index_expr: Box::new(read(72)),
+            num_elements: 2,
+            select: None,
+            dynamic_select: None,
+            width: 8,
+            expr_context: ctx(),
+        };
+        let stmts = [
+            assign(VarOffset::Comb(48), indexed),
+            comb(56, 0),
+            comb(64, 0),
+            comb(72, 0),
+        ];
+        check(&stmts, &[], &[48, 56, 64, 72]);
+    }
 }
