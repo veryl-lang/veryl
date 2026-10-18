@@ -6714,10 +6714,11 @@ impl Conv<&air::Module> for ProtoModule {
         // identity transform.
         #[cfg(not(target_family = "wasm"))]
         let tb_private = tb_private_offsets(&variable_meta, &comb_touched_offsets);
-        let event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>> = all_event_statements
-            .iter()
-            .map(|(e, stmts)| (e.clone(), event_comb_write_offsets(stmts)))
-            .collect();
+        let mut event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>> =
+            all_event_statements
+                .iter()
+                .map(|(e, stmts)| (e.clone(), event_comb_write_offsets(stmts)))
+                .collect();
         // Collect derived clocks + input-clock offsets BEFORE
         // `variable_meta` moves into `module_variable_meta`.  We must look
         // at both the top module's own clock vars AND any clock vars
@@ -6731,8 +6732,8 @@ impl Conv<&air::Module> for ProtoModule {
             .values()
             .any(|v| v.r#type.is_clock() || v.r#type.is_reset())
             || !nested_derived_clock_candidates.is_empty();
-        let (derived_clock_vars, input_clock_offsets) = if !has_any_edge_var {
-            (Vec::new(), HashMap::default())
+        let (derived_clock_vars, input_clock_offsets, negedge_inputs) = if !has_any_edge_var {
+            (Vec::new(), HashMap::default(), crate::HashSet::default())
         } else {
             // O(V+P) port lookup via HashSet.
             let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
@@ -6819,17 +6820,22 @@ impl Conv<&air::Module> for ProtoModule {
             // storage entry — `set_input_clock_bit` only walks the
             // top-level `module_variables.variables` map.
             let mut pc_offsets: HashMap<VarOffset, VarId> = HashMap::default();
+            let mut negedge_inputs: crate::HashSet<VarId> = crate::HashSet::default();
             for (vid, var) in &src.variables {
                 if !var.r#type.is_clock() {
                     continue;
                 }
+                let negedge = matches!(var.r#type.kind, air::TypeKind::ClockNegedge);
                 if let Some(meta) = variable_meta.get(vid) {
                     for (i, elem) in meta.elements.iter().enumerate() {
                         pc_offsets.insert(elem.current, edge_id(vid, i));
+                        if negedge {
+                            negedge_inputs.insert(edge_id(vid, i));
+                        }
                     }
                 }
             }
-            (dc_vars, pc_offsets)
+            (dc_vars, pc_offsets, negedge_inputs)
         };
 
         let module_variable_meta = ModuleVariableMeta {
@@ -6870,8 +6876,23 @@ impl Conv<&air::Module> for ProtoModule {
         let derived_clock_schedule = if derived_clock_vars.is_empty() {
             DerivedClockSchedule::default()
         } else {
-            build_derived_clock_schedule(&derived_clock_vars, &pre_jit_stmts, &input_clock_offsets)
+            build_derived_clock_schedule(
+                &derived_clock_vars,
+                &pre_jit_stmts,
+                &input_clock_offsets,
+                &negedge_inputs,
+            )
         };
+        for &(copy, source) in &derived_clock_schedule.aliases {
+            if let Some(stmts) = all_event_statements.remove(&Event::clock(copy)) {
+                event_comb_writes.remove(&Event::clock(copy));
+                let merged = all_event_statements
+                    .entry(Event::clock(source))
+                    .or_default();
+                merged.extend(stmts);
+                event_comb_writes.insert(Event::clock(source), event_comb_write_offsets(merged));
+            }
+        }
 
         // Idle-subtree gates over the clock events; see `event_gate`.
         let mut event_gates: HashMap<Event, Vec<crate::ir::opt::event_gate::EventGate>> =
