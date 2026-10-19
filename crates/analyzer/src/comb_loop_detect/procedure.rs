@@ -759,7 +759,10 @@ fn collect_summary_expression_variables(
             Factor::SystemFunctionCall(call) => {
                 collect_summary_system_call_variables(module, call, ids);
             }
-            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => {}
+            Factor::Value(_)
+            | Factor::ResetValue(..)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => {}
         },
         Expression::Unary(_, expression, _) => {
             collect_summary_expression_variables(module, expression, ids);
@@ -1836,7 +1839,10 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                         self.collect_expression_write_footprint(expression, keys, visited);
                     }
                 }
-                Factor::Unknown(_) | Factor::Value(_) | Factor::Anonymous(_) => {}
+                Factor::Unknown(_)
+                | Factor::Value(_)
+                | Factor::ResetValue(..)
+                | Factor::Anonymous(_) => {}
             },
             Expression::Unary(_, expression, _) => {
                 self.collect_expression_write_footprint(expression, keys, visited);
@@ -3423,7 +3429,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                     self.repeatable = false;
                     ExpressionSources::default()
                 }
-                Factor::Value(_) => ExpressionSources::default(),
+                Factor::Value(_) | Factor::ResetValue(..) => ExpressionSources::default(),
             },
             Expression::Unary(op, operand, _) => match op {
                 Op::BitNot | Op::Add => self.eval_expr_in_context(
@@ -4350,7 +4356,7 @@ impl<'a, 's> ProcedureAnalysis<'a, 's> {
                 }
             }
             Factor::HierVariable(_) | Factor::Anonymous(_) => self.repeatable = false,
-            Factor::Value(_) => {}
+            Factor::Value(_) | Factor::ResetValue(..) => {}
         }
     }
 

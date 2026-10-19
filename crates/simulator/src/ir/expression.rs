@@ -3019,6 +3019,22 @@ impl Conv<&air::Expression> for ProtoExpression {
                         })
                     }
                 },
+                air::Factor::ResetValue(kind, polarity, comptime) => {
+                    let active_high = match polarity {
+                        air::ResetPolarity::High => true,
+                        air::ResetPolarity::Low => false,
+                        air::ResetPolarity::Default => context.config.abstract_reset_active_high,
+                    };
+                    let is_active = matches!(kind, air::ResetValueKind::Active);
+                    let value = Value::new((active_high == is_active) as u64, 1, false);
+                    let expr_context: ExpressionContext = (&comptime.expr_context).into();
+
+                    Ok(ProtoExpression::Value {
+                        value,
+                        width: 1,
+                        expr_context,
+                    })
+                }
                 air::Factor::Anonymous(comptime) | air::Factor::Unknown(comptime) => {
                     Err(SimulatorError::unsupported_description(&comptime.token))
                 }
