@@ -13,7 +13,7 @@ use tempfile::TempDir;
 use veryl_analyzer::namespace::Namespace;
 use veryl_analyzer::{symbol_table, type_dag};
 use veryl_emitter::Emitter;
-use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target};
+use veryl_metadata::{FilelistType, Metadata, SourceMapTarget, Target, sv};
 use veryl_parser::resource_table;
 use veryl_path::PathSet;
 
@@ -217,6 +217,40 @@ impl CmdBuild {
         })
     }
 
+    fn gen_sv_filelist(&self, metadata: &Metadata, sources: &sv::Sources) -> String {
+        let base_path = metadata.output_dir();
+        // Relative paths in `sources` are relative to the output directory
+        let path_str = |path: &PathBuf| match metadata.build.filelist_type {
+            FilelistType::Absolute if path.is_relative() => {
+                let path = base_path.join(path);
+                let path = path.canonicalize().unwrap_or(path);
+                path.to_string_lossy().to_string()
+            }
+            _ => path.to_string_lossy().to_string(),
+        };
+
+        let mut text = String::new();
+        for dir in &sources.include_dirs {
+            let line = match metadata.build.filelist_type {
+                FilelistType::Absolute | FilelistType::Relative => {
+                    format!("+incdir+{}\n", path_str(dir))
+                }
+                FilelistType::Flgen => format!("include_directory '{}'\n", path_str(dir)),
+            };
+            text.push_str(&line);
+        }
+        for file in &sources.files {
+            let line = match metadata.build.filelist_type {
+                FilelistType::Absolute | FilelistType::Relative => {
+                    format!("{}\n", path_str(file))
+                }
+                FilelistType::Flgen => format!("source_file '{}'\n", path_str(file)),
+            };
+            text.push_str(&line);
+        }
+        text
+    }
+
     fn gen_filelist(
         &self,
         metadata: &mut Metadata,
@@ -227,6 +261,10 @@ impl CmdBuild {
     ) -> Result<()> {
         let filelist_path = metadata.filelist_path();
         let base_path = metadata.output_dir();
+
+        // SystemVerilog files of [[sv.filesets]] precede the generated ones
+        let sv_sources = metadata.sv_sources(true)?;
+        let sv_text = self.gen_sv_filelist(metadata, &sv_sources);
 
         let mut paths = Self::sort_filelist(metadata, paths, include_tests);
         // Drop entries that were intentionally not emitted (examples/, or
@@ -274,6 +312,7 @@ impl CmdBuild {
         {
             std::fs::create_dir_all(parent).into_diagnostic()?;
         }
+        let text = format!("{sv_text}{text}");
         utils::write_file_if_changed(&filelist_path, text.as_bytes())?;
 
         info!("Output filelist ({})", filelist_path.to_string_lossy());
@@ -1522,5 +1561,271 @@ dep = {path = "../dep"}
         // The same project checked as root does analyze its examples.
         let mut dep_metadata = Metadata::load(dep_path.join("Veryl.toml")).unwrap();
         assert!(run_check(&mut dep_metadata).is_err());
+    }
+
+    fn write_sv_files(root: &Path, files: &[&str]) {
+        for file in files {
+            let path = root.join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, format!("// {file}\n")).unwrap();
+        }
+    }
+
+    fn create_sv_project(
+        root: &Path,
+        name: &str,
+        build: &str,
+        extra: &str,
+        sv_files: &[&str],
+        sv_dirs: &[&str],
+    ) -> (Metadata, PathBuf) {
+        let project_path = root.join(name);
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        fs::write(
+            project_path.join("Veryl.toml"),
+            format!(
+                r#"[project]
+name = "{name}"
+version = "0.1.0"
+
+[build]
+sources = ["src"]
+sourcemap_target = {{type = "none"}}
+exclude_std = true
+{build}
+
+{extra}
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(src_path.join("foo.veryl"), "module Foo {}\n").unwrap();
+        write_sv_files(&project_path, sv_files);
+        for dir in sv_dirs {
+            fs::create_dir_all(project_path.join(dir)).unwrap();
+        }
+
+        let metadata = Metadata::load(project_path.join("Veryl.toml")).unwrap();
+        let project_path = project_path.canonicalize().unwrap();
+        (metadata, project_path)
+    }
+
+    fn read_filelist(metadata: &Metadata) -> Vec<String> {
+        fs::read_to_string(metadata.filelist_path())
+            .unwrap()
+            .lines()
+            .map(|x| x.to_string())
+            .collect()
+    }
+
+    fn path_str(path: &Path) -> String {
+        path.to_string_lossy().to_string()
+    }
+
+    fn toml_path_str(path: &Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
+    }
+
+    const SV_TARGET_DIRECTORY: &str = r#"target = {type = "directory", path = "target"}"#;
+
+    const SV_FILESETS: &str = r#"
+[[sv.filesets]]
+root         = "ip"
+files        = ["rtl/a.sv", "rtl/b.sv"]
+include_dirs = ["include"]
+"#;
+
+    const SV_FILES: &[&str] = &["ip/rtl/a.sv", "ip/rtl/b.sv"];
+    const SV_DIRS: &[&str] = &["ip/include"];
+
+    #[test]
+    fn sv_filesets_absolute_filelist() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, prj) = create_sv_project(
+            tempdir.path(),
+            "sv_absolute",
+            &format!("{SV_TARGET_DIRECTORY}\nfilelist_type = \"absolute\""),
+            SV_FILESETS,
+            SV_FILES,
+            SV_DIRS,
+        );
+
+        run_build(&mut metadata, None);
+
+        assert_eq!(
+            read_filelist(&metadata),
+            vec![
+                format!("+incdir+{}", path_str(&prj.join("ip/include"))),
+                path_str(&prj.join("ip/rtl/a.sv")),
+                path_str(&prj.join("ip/rtl/b.sv")),
+                path_str(&prj.join("target/foo.sv")),
+            ]
+        );
+    }
+
+    #[test]
+    fn sv_filesets_relative_filelist() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _) = create_sv_project(
+            tempdir.path(),
+            "sv_relative",
+            &format!("{SV_TARGET_DIRECTORY}\nfilelist_type = \"relative\""),
+            SV_FILESETS,
+            SV_FILES,
+            SV_DIRS,
+        );
+
+        run_build(&mut metadata, None);
+
+        assert_eq!(
+            read_filelist(&metadata),
+            vec![
+                format!("+incdir+{}", path_str(&Path::new("ip").join("include"))),
+                path_str(&Path::new("ip").join("rtl").join("a.sv")),
+                path_str(&Path::new("ip").join("rtl").join("b.sv")),
+                path_str(&Path::new("target").join("foo.sv")),
+            ]
+        );
+    }
+
+    #[test]
+    fn sv_filesets_relative_filelist_keeps_absolute_path() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let vendor = tempdir.path().join("vendor");
+        write_sv_files(&vendor, &["rtl/vendor.sv"]);
+        fs::create_dir_all(vendor.join("include")).unwrap();
+        let vendor = vendor.canonicalize().unwrap();
+
+        let filesets = format!(
+            r#"
+[[sv.filesets]]
+files        = ["{}", "ip/rtl/a.sv"]
+include_dirs = ["{}"]
+"#,
+            toml_path_str(&vendor.join("rtl/vendor.sv")),
+            toml_path_str(&vendor.join("include"))
+        );
+        let (mut metadata, _) = create_sv_project(
+            tempdir.path(),
+            "sv_relative_abs",
+            &format!("{SV_TARGET_DIRECTORY}\nfilelist_type = \"relative\""),
+            &filesets,
+            SV_FILES,
+            &[],
+        );
+
+        run_build(&mut metadata, None);
+
+        assert_eq!(
+            read_filelist(&metadata),
+            vec![
+                format!("+incdir+{}", path_str(&vendor.join("include"))),
+                path_str(&vendor.join("rtl").join("vendor.sv")),
+                path_str(&Path::new("ip").join("rtl").join("a.sv")),
+                path_str(&Path::new("target").join("foo.sv")),
+            ]
+        );
+    }
+
+    #[test]
+    fn sv_filesets_relative_filelist_with_out_dir() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _) = create_sv_project(
+            tempdir.path(),
+            "sv_relative_out",
+            &format!("{SV_TARGET_DIRECTORY}\nfilelist_type = \"relative\""),
+            SV_FILESETS,
+            SV_FILES,
+            SV_DIRS,
+        );
+        let out_dir = tempdir.path().join("out");
+
+        run_build(&mut metadata, Some(out_dir));
+
+        let base = Path::new("..").join("sv_relative_out").join("ip");
+        assert_eq!(
+            read_filelist(&metadata),
+            vec![
+                format!("+incdir+{}", path_str(&base.join("include"))),
+                path_str(&base.join("rtl").join("a.sv")),
+                path_str(&base.join("rtl").join("b.sv")),
+                path_str(&Path::new("target").join("foo.sv")),
+            ]
+        );
+    }
+
+    #[test]
+    fn sv_filesets_flgen_filelist() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, _) = create_sv_project(
+            tempdir.path(),
+            "sv_flgen",
+            &format!("{SV_TARGET_DIRECTORY}\nfilelist_type = \"flgen\""),
+            SV_FILESETS,
+            SV_FILES,
+            SV_DIRS,
+        );
+
+        run_build(&mut metadata, None);
+
+        assert_eq!(
+            read_filelist(&metadata),
+            vec![
+                format!(
+                    "include_directory '{}'",
+                    path_str(&Path::new("ip").join("include"))
+                ),
+                format!(
+                    "source_file '{}'",
+                    path_str(&Path::new("ip").join("rtl").join("a.sv"))
+                ),
+                format!(
+                    "source_file '{}'",
+                    path_str(&Path::new("ip").join("rtl").join("b.sv"))
+                ),
+                format!(
+                    "source_file '{}'",
+                    path_str(&Path::new("target").join("foo.sv"))
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn sv_filesets_bundle_target() {
+        let _lock = BUILD_TEST_LOCK.lock().unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let (mut metadata, prj) = create_sv_project(
+            tempdir.path(),
+            "sv_bundle",
+            "target = {type = \"bundle\", path = \"bundled.sv\"}\nfilelist_type = \"absolute\"",
+            SV_FILESETS,
+            SV_FILES,
+            SV_DIRS,
+        );
+
+        run_build(&mut metadata, None);
+
+        assert_eq!(
+            read_filelist(&metadata),
+            vec![
+                format!("+incdir+{}", path_str(&prj.join("ip/include"))),
+                path_str(&prj.join("ip/rtl/a.sv")),
+                path_str(&prj.join("ip/rtl/b.sv")),
+                path_str(&prj.join("bundled.sv")),
+            ]
+        );
+
+        // SV files are not concatenated into the bundle
+        let bundle = fs::read_to_string(prj.join("bundled.sv")).unwrap();
+        assert!(!bundle.contains("ip/rtl/a.sv"));
+        assert!(!bundle.contains("ip/rtl/b.sv"));
     }
 }
