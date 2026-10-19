@@ -14,6 +14,7 @@ mod metadata_output;
 mod project;
 mod pubfile;
 mod publish;
+pub mod sv;
 mod synth;
 mod test;
 #[cfg(test)]

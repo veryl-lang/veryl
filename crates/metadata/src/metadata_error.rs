@@ -121,6 +121,17 @@ pub enum MetadataError {
     #[error("Version field is required in Veryl.toml to publish")]
     MissingVersion,
 
+    #[diagnostic(code(MetadataError::SvPathNotFound), help(""))]
+    #[error("SystemVerilog file or include directory \"{0}\" is not found")]
+    SvPathNotFound(PathBuf),
+
+    #[diagnostic(
+        code(MetadataError::InvalidSvPath),
+        help("paths in [[sv.filesets]] must be relative paths without \"..\"")
+    )]
+    #[error("path \"{0}\" in [[sv.filesets]] is not allowed in a published project")]
+    InvalidSvPath(PathBuf),
+
     #[diagnostic(code(MetadataError::UnknownProperty), help(""))]
     #[error("property \"{property}\" is not defined in project \"{project}\"")]
     UnknownProperty { property: String, project: String },
