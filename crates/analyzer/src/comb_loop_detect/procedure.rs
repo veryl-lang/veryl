@@ -725,6 +725,11 @@ fn collect_summary_statement_variables(
                         collect_summary_expression_variables(module, min, ids);
                         collect_summary_expression_variables(module, max, ids);
                     }
+                    TbMethod::Queue { value, .. } => {
+                        if let Some(value) = value {
+                            collect_summary_expression_variables(module, value, ids);
+                        }
+                    }
                     TbMethod::FileClose
                     | TbMethod::FileFlush
                     | TbMethod::RandomGet { .. }
