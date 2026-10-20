@@ -206,6 +206,21 @@ impl Default for Emitter {
     }
 }
 
+// Variables local to a statement block or function are updated immediately,
+// so only the other targets of an always_ff assignment need a nonblocking one.
+fn is_nba_target<T: Into<SymbolPathNamespace>>(path: T) -> bool {
+    match symbol_table::resolve(path) {
+        Ok(symbol) => match &symbol.found.kind {
+            SymbolKind::Variable(x) => !matches!(
+                x.affiliation,
+                Affiliation::StatementBlock | Affiliation::Function
+            ),
+            _ => true,
+        },
+        Err(_) => true,
+    }
+}
+
 // `elsif`/`else` continue an `ifdef`/`ifndef` block, so they must also be
 // emitted as guards, else the statement is emitted unconditionally.
 fn is_conditional_attribute(arg: &Attribute) -> bool {
@@ -4415,23 +4430,15 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ConcatenationAssignment'
     fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
-        let items: Vec<_> = arg.assign_concatenation_list.as_ref().into();
+        let list = &arg.assign_concatenation_list;
         let is_nba = self.in_always_ff
-            && items.iter().any(|item| {
-                if let Ok(lhs_symbol) =
-                    symbol_table::resolve(item.hierarchical_identifier.identifier.as_ref())
-                {
-                    match &lhs_symbol.found.kind {
-                        SymbolKind::Variable(x) => !matches!(
-                            x.affiliation,
-                            Affiliation::StatementBlock | Affiliation::Function
-                        ),
-                        _ => true,
-                    }
-                } else {
-                    true
-                }
-            });
+            && std::iter::once(&*list.assign_concatenation_item)
+                .chain(
+                    list.assign_concatenation_list_list
+                        .iter()
+                        .map(|x| &*x.assign_concatenation_item),
+                )
+                .any(|item| is_nba_target(item.hierarchical_identifier.identifier.as_ref()));
 
         self.align_start(align_kind::IDENTIFIER);
         self.l_brace(&arg.l_brace);
@@ -4452,23 +4459,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
-        let is_nba = if !self.in_always_ff {
-            false
-        } else if let Some(lhs) = &self.assignment_lefthand_side {
-            if let Ok(lhs_symbol) = symbol_table::resolve(lhs.scoped_identifier.as_ref()) {
-                match &lhs_symbol.found.kind {
-                    SymbolKind::Variable(x) => !matches!(
-                        x.affiliation,
-                        Affiliation::StatementBlock | Affiliation::Function
-                    ),
-                    _ => true,
-                }
-            } else {
-                true
-            }
-        } else {
-            true
-        };
+        let is_nba = self.in_always_ff
+            && match &self.assignment_lefthand_side {
+                Some(lhs) => is_nba_target(lhs.scoped_identifier.as_ref()),
+                None => true,
+            };
 
         self.space(1);
         if is_nba {
