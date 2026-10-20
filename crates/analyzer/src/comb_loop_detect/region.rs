@@ -225,18 +225,22 @@ pub(super) fn var_reads(
     member_select_domain: Option<MemberSelectDomain>,
     ctx: &mut Context,
 ) -> Vec<(ArraySpan, PackedSpan)> {
-    let Some(variable) = ctx.variables.get(&id).cloned() else {
+    // Only the type is needed, not the variable's values.
+    let Some(r#type) = ctx
+        .variables
+        .get(&id)
+        .map(|variable| variable.r#type.clone())
+    else {
         return Vec::new();
     };
-    let Some((high, low)) =
-        select.conservative_packed_range(ctx, &variable.r#type, member_select_domain)
+    let Some((high, low)) = select.conservative_packed_range(ctx, &r#type, member_select_domain)
     else {
         return Vec::new();
     };
     let Some(packed) = PackedSpan::from_select(high, low) else {
         return Vec::new();
     };
-    array_access_span(index, &variable.r#type, ctx)
+    array_access_span(index, &r#type, ctx)
         .map(|span| vec![(span, packed)])
         .unwrap_or_default()
 }

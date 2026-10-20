@@ -45,11 +45,12 @@ impl Backend for CraneliftBackend {
     ) -> Option<Arc<ChunkArtifact>> {
         // Disable load-cache CSE when the chunk may contain nested
         // CompiledBlock helpers that mutate comb storage.
-        let result = if ctx.contains_compiled_block {
-            runtime::build_binary_no_cache(ctx.config, stmts.to_vec())
-        } else {
-            runtime::build_binary(ctx.config, stmts.to_vec())
-        };
+        let result = runtime::build_binary_marked(
+            ctx.config,
+            stmts.to_vec(),
+            ctx.contains_compiled_block,
+            ctx.df_marks.map(|m| m.0.clone()),
+        );
         let (func, mmap) = result?;
         Some(Arc::new(ChunkArtifact {
             func,

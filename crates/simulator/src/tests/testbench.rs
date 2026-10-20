@@ -2643,6 +2643,198 @@ fn tb_random_native() {
     let _ = std::fs::remove_file(&out_path);
 }
 
+fn run_queue_tb(code: &str, top: &str, config: &Config) -> TestResult {
+    let ir = analyze_top(code, config, top).expect("analyze");
+    let module_name = ir.name.to_string();
+    run_native_testbench(ir, None, module_name).unwrap()
+}
+
+#[test]
+fn tb_queue_native() {
+    let code = r#"
+    package pkg {
+        const DEPTH: u32 = 2;
+        struct pair_t {
+            a: bit<4>,
+            b: bit<8>,
+        }
+    }
+    #[test(test_queue)]
+    module test_queue {
+        gen wide_t: type = bit<100>;
+        var q: $tb::queue::<u32>;
+        var b: $tb::queue::<u8, pkg::DEPTH>;
+        var s: $tb::queue::<i8>;
+        var w: $tb::queue::<wide_t>;
+        var p: $tb::queue::<pkg::pair_t>;
+        var x: u32;
+        var n: i8;
+        var z: wide_t;
+        var v: pkg::pair_t;
+        var a: u8;
+        initial {
+            // push/pop at both ends and peek
+            $assert(q.is_empty() == 1);
+            q.push_back(1);
+            q.push_back(2);
+            q.push_front(0);
+            $assert(q.size() == 3);
+            $assert(q.is_full() == 0);
+            $assert(q.front() == 0);
+            $assert(q.back() == 2);
+            x = q.pop_front();
+            $assert(x == 0);
+            $assert(q.pop_back() == 2);
+            q.drop_back();
+            $assert(q.is_empty() == 1);
+
+            // drop and clear
+            q.push_back(3);
+            q.push_back(4);
+            q.drop_front();
+            $assert(q.front() == 4);
+            q.clear();
+            $assert(q.size() == 0);
+
+            // reading an empty queue returns 0 for a 2-state element
+            q.push_back(5);
+            x = q.pop_front();
+            x = q.pop_front();
+            $assert(x == 0);
+            x = 6;
+            x = q.front();
+            $assert(x == 0);
+            q.drop_front();
+            q.drop_back();
+            $assert(q.size() == 0);
+
+            // a bounded queue drops the pushed value when full
+            b.push_back(1);
+            b.push_back(2);
+            $assert(b.is_full() == 1);
+            b.push_back(3);
+            b.push_front(4);
+            $assert(b.size() == 2);
+            $assert(b.pop_front() == 1);
+            $assert(b.pop_front() == 2);
+            $assert(b.is_full() == 0);
+
+            // the pushed value is evaluated in the element width
+            a = 200;
+            b.push_back(a + 100);
+            $assert(b.pop_front() == 44);
+
+            // signed, wide and struct elements
+            s.push_back(-3);
+            n = s.pop_front();
+            $assert(n == -3);
+            w.push_back(100'h8_0000_0000_0000_0000_0000_0001);
+            z = w.pop_front();
+            $assert(z == 100'h8_0000_0000_0000_0000_0000_0001);
+            v.a = 4'ha;
+            v.b = 8'hbc;
+            p.push_back(v);
+            v = 0;
+            v = p.pop_front();
+            $assert(v.a == 4'ha && v.b == 8'hbc);
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let result = run_queue_tb(code, "test_queue", &config);
+        assert_eq!(
+            result,
+            TestResult::Pass,
+            "jit={}, 4state={}",
+            config.use_jit,
+            config.use_4state
+        );
+    }
+}
+
+#[test]
+fn tb_queue_shared_by_initial_blocks() {
+    // A queue is shared by the `initial` blocks of a test module.
+    let code = r#"
+    #[test(test_queue_shared)]
+    module test_queue_shared {
+        inst clk: $tb::clock_gen;
+        var q: $tb::queue::<u32>;
+
+        initial {
+            for i in 0..4 {
+                q.push_back(i);
+                clk.next();
+            }
+        }
+
+        initial {
+            clk.next(8);
+            $assert(q.size() == 4);
+            for i in 0..4 {
+                $assert(q.pop_front() == i);
+            }
+            $finish();
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let result = run_queue_tb(code, "test_queue_shared", &config);
+        assert_eq!(
+            result,
+            TestResult::Pass,
+            "jit={}, 4state={}",
+            config.use_jit,
+            config.use_4state
+        );
+    }
+}
+
+#[test]
+fn tb_queue_four_state() {
+    // A 4-state element keeps X/Z, and reading an empty queue returns X.
+    let dir = std::env::temp_dir();
+    let out_path = dir.join("veryl_test_tb_queue_four_state.txt");
+    let out_str = out_path.to_str().unwrap().replace('\\', "\\\\");
+
+    let code = format!(
+        r#"
+    #[test(test_queue_4state)]
+    module test_queue_4state {{
+        gen l4_t: type = logic<4>;
+        var q: $tb::queue::<l4_t>;
+        var f: $tb::file;
+        var y: logic<4>;
+        initial {{
+            f.open("{0}");
+            y = q.pop_front();
+            f.write("%b\n", y);
+            q.push_back(4'b10xz);
+            y = q.front();
+            f.write("%b\n", y);
+            y = q.pop_front() | 4'b0000;
+            f.write("%b\n", y);
+            f.close();
+            $finish();
+        }}
+    }}
+    "#,
+        out_str
+    );
+
+    for config in Config::all().into_iter().filter(|c| c.use_4state) {
+        let _ = std::fs::remove_file(&out_path);
+        let result = run_queue_tb(&code, "test_queue_4state", &config);
+        assert_eq!(result, TestResult::Pass);
+        let content = std::fs::read_to_string(&out_path).unwrap();
+        assert_eq!(content, "xxxx\n10xz\n10xx\n", "jit={}", config.use_jit);
+    }
+    let _ = std::fs::remove_file(&out_path);
+}
+
 #[test]
 fn tb_file_write_without_open_is_dropped() {
     // write/flush/close on a handle that was never opened are silent no-ops
@@ -3100,11 +3292,11 @@ fn tb_dirty_filter_skips_private_writes() {
     }
 }
 
-/// How many testbench statements the settle filter proves private, or `None`
+/// How many testbench statements the tb settle filter proves private, or `None`
 /// when the design does not analyze under `config`.
 #[track_caller]
 fn tb_clean_count(code: &str, config: &Config, top: &str) -> Option<usize> {
-    let ir = analyze_top(code, config, top).ok()?;
+    let ir = analyze_top(code, config, top).expect("analyze");
     let sim = Simulator::new(ir, None);
     let event_map = build_event_map(&sim.ir.event_statements, &sim.ir.module_variables);
     let clock_periods = build_clock_periods(&sim.ir.event_statements);

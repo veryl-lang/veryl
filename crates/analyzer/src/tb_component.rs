@@ -24,8 +24,8 @@ fn builtin_type(kind: TypeKind) -> Type {
 }
 
 /// A `Type` referring to the generic parameter `T` (`base` token) of
-/// `$tb::random`. Left unresolved (`symbol: None`) so the return type is
-/// resolved through the generic map at the call site, like any `-> T`.
+/// `$tb::random`/`$tb::queue`. Left unresolved (`symbol: None`) so the return
+/// type is resolved through the generic map at the call site, like any `-> T`.
 fn generic_param_type(base: Token) -> Type {
     let range: TokenRange = base.into();
     let path = GenericSymbolPath {
@@ -324,6 +324,103 @@ fn insert_random(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
     );
 }
 
+fn insert_queue(symbol_table: &mut SymbolTable, tb_ns: &Namespace) {
+    let queue_token = Token::builtin_text("queue");
+    let mut ns = tb_ns.clone();
+    ns.push(queue_token.text);
+
+    // Element type `T` and capacity `N: u32 = 0` (`0` means unbounded).
+    let t_token = Token::builtin_text("T");
+    let t_symbol = Symbol::new(
+        &t_token,
+        SymbolKind::GenericParameter(GenericParameterProperty {
+            bound: GenericBoundKind::Type,
+            default_value: None,
+        }),
+        &ns,
+        false,
+        DocComment::default(),
+    );
+    let Some(t_id) = symbol_table.insert(&t_token, t_symbol) else {
+        return;
+    };
+
+    let n_token = Token::builtin_text("N");
+    let zero_token = Token::builtin_text("0");
+    let n_default = GenericSymbolPath {
+        paths: vec![GenericSymbol {
+            base: zero_token,
+            arguments: vec![],
+        }],
+        kind: GenericSymbolPathKind::ValueLiteral,
+        range: zero_token.into(),
+    };
+    let n_symbol = Symbol::new(
+        &n_token,
+        SymbolKind::GenericParameter(GenericParameterProperty {
+            bound: GenericBoundKind::Proto(Box::new(builtin_type(TypeKind::U32))),
+            default_value: Some(n_default),
+        }),
+        &ns,
+        false,
+        DocComment::default(),
+    );
+    let Some(n_id) = symbol_table.insert(&n_token, n_symbol) else {
+        return;
+    };
+
+    let queue_symbol = Symbol::new(
+        &queue_token,
+        SymbolKind::TbComponent(TbComponentProperty {
+            kind: TbComponentKind::Queue,
+            generic_parameters: vec![t_id, n_id],
+        }),
+        tb_ns,
+        true,
+        DocComment::default(),
+    );
+    let _ = symbol_table.insert(&queue_token, queue_symbol);
+
+    // Arguments are handled by `tb_method_call`; the ports are placeholders.
+    for name in ["push_back", "push_front"] {
+        insert_method(
+            symbol_table,
+            &ns,
+            name,
+            &[("value", Direction::Input)],
+            None,
+        );
+    }
+    for name in ["pop_front", "pop_back", "front", "back"] {
+        insert_method(
+            symbol_table,
+            &ns,
+            name,
+            &[],
+            Some(generic_param_type(t_token)),
+        );
+    }
+    for name in ["drop_front", "drop_back", "clear"] {
+        insert_method(symbol_table, &ns, name, &[], None);
+    }
+    insert_method(
+        symbol_table,
+        &ns,
+        "size",
+        &[],
+        Some(builtin_type(TypeKind::U32)),
+    );
+    for name in ["is_empty", "is_full"] {
+        insert_method(
+            symbol_table,
+            &ns,
+            name,
+            &[],
+            Some(builtin_type(TypeKind::BBool)),
+        );
+    }
+}
+
 pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
     let mut tb_ns = namespace.clone();
 
@@ -335,4 +432,5 @@ pub fn insert_symbols(symbol_table: &mut SymbolTable, namespace: &Namespace) {
     insert_reset_gen(symbol_table, &tb_ns);
     insert_file(symbol_table, &tb_ns);
     insert_random(symbol_table, &tb_ns);
+    insert_queue(symbol_table, &tb_ns);
 }

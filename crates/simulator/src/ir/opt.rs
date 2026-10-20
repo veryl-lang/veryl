@@ -6,7 +6,8 @@
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod comb_fusion;
-pub(crate) mod cone_gate;
+pub(crate) mod cone_order;
+pub(crate) mod dataflow;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod dead_var_dce;
 #[cfg(not(target_family = "wasm"))]
@@ -20,6 +21,7 @@ pub(crate) mod lane_vector;
 pub(crate) mod load_cache_lookahead;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod multi_write_analysis;
+pub(crate) mod owners;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod version_split;
 
@@ -126,6 +128,12 @@ pub(crate) mod dead_var_dce {
         0
     }
     pub fn collect_dead_offsets(_slices: &[&[ProtoStatement]]) -> HashSet<VarOffset> {
+        HashSet::default()
+    }
+    pub fn collect_dead_closure(
+        _slices: &[&[ProtoStatement]],
+        _protect: &HashSet<VarOffset>,
+    ) -> HashSet<VarOffset> {
         HashSet::default()
     }
     pub fn apply_counting(

@@ -765,15 +765,6 @@ impl Conv<&VarDeclaration> for ir::Declaration {
                 && let SymbolKind::TbComponent(c) = &ty_symbol.found.kind
             {
                 match &c.kind {
-                    TbComponentKind::File | TbComponentKind::Random => {
-                        // `file` handle and `random` generator are never assigned
-                        // (their state lives in the simulator), so suppress the
-                        // unassigned lint.
-                        attribute_table::insert(
-                            variable_token,
-                            Attribute::Allow(AllowItem::UnassignVariable),
-                        );
-                    }
                     TbComponentKind::External(component) => {
                         if !context.in_test_module {
                             context.insert_error(AnalyzerError::invalid_tb_usage(&token));
@@ -806,6 +797,15 @@ impl Conv<&VarDeclaration> for ir::Declaration {
                                 token,
                             },
                         )));
+                    }
+                    kind if kind.is_variable() => {
+                        // `file` handle, `random` generator and `queue` are never
+                        // assigned (their state lives in the simulator), so suppress
+                        // the unassigned lint.
+                        attribute_table::insert(
+                            variable_token,
+                            Attribute::Allow(AllowItem::UnassignVariable),
+                        );
                     }
                     _ => {}
                 }
@@ -1521,8 +1521,11 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                 return Ok(ir::Declaration::Null);
             }
 
-            // `$tb::file` is declared with `var`, not `inst`.
-            if matches!(tb_prop.kind, TbComponentKind::File) {
+            if let TbComponentKind::External(component) = &tb_prop.kind {
+                return conv_external_component(context, value, *component);
+            }
+
+            if tb_prop.kind.is_variable() {
                 let token: TokenRange = value
                     .component_instantiation
                     .scoped_identifier
@@ -1530,10 +1533,6 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                     .into();
                 context.insert_error(AnalyzerError::invalid_tb_usage(&token));
                 return Ok(ir::Declaration::Null);
-            }
-
-            if let TbComponentKind::External(component) = &tb_prop.kind {
-                return conv_external_component(context, value, *component);
             }
 
             // Generate clock/reset variable for $tb component instances
@@ -1548,10 +1547,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
             let type_kind = match tb_prop.kind {
                 TbComponentKind::ClockGen => ir::TypeKind::Clock,
                 TbComponentKind::ResetGen => ir::TypeKind::Reset,
-                // `file`/`random` are `var`-form; external handled above.
-                TbComponentKind::File | TbComponentKind::Random | TbComponentKind::External(_) => {
-                    unreachable!()
-                }
+                // `var`-form components are rejected above.
+                _ => unreachable!(),
             };
             let ir_type = {
                 let mut t = ir::Type::new(type_kind);
@@ -1621,12 +1618,8 @@ impl Conv<&InstDeclaration> for ir::Declaration {
                             let type_name = match tb_prop.kind {
                                 TbComponentKind::ClockGen => "$tb::clock_gen",
                                 TbComponentKind::ResetGen => "$tb::reset_gen",
-                                // `file`/`random` are `var`-form; external handled above.
-                                TbComponentKind::File
-                                | TbComponentKind::Random
-                                | TbComponentKind::External(_) => {
-                                    unreachable!()
-                                }
+                                // `var`-form components are rejected above.
+                                _ => unreachable!(),
                             };
                             context.insert_error(AnalyzerError::unknown_tb_port(
                                 type_name,

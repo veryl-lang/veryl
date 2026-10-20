@@ -1042,12 +1042,13 @@ impl<'a> Subst<'a> {
         sides
     }
 
-    /// `expr` as a constant when it reads no variable and evaluates free of
-    /// X and Z, as conversion folds an index of an unrolled loop.
+    /// `expr` as a constant when it reads nothing but parameters and
+    /// constants and evaluates free of X and Z, as conversion folds an index
+    /// of an unrolled loop.
     fn folded(&mut self, expr: &Expression) -> Option<Expression> {
-        let mut reads = false;
-        expr_reads(expr, &mut |_| reads = true);
-        if reads || matches!(expr, Expression::Term(x) if matches!(x.as_ref(), Factor::Value(_))) {
+        if !reads_only_constants(self.context, expr)
+            || matches!(expr, Expression::Term(x) if matches!(x.as_ref(), Factor::Value(_)))
+        {
             return None;
         }
         let value = expr.eval_value(self.context)?;
@@ -1181,7 +1182,10 @@ impl<'a> Subst<'a> {
             },
             Factor::FunctionCall(call) if self.analysis => self.call(call),
             Factor::FunctionCall(_) => None,
-            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => Some(()),
+            Factor::Value(_)
+            | Factor::ResetValue(..)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => Some(()),
         }
     }
 
@@ -1655,7 +1659,9 @@ fn factor_has_call(factor: &Factor) -> bool {
             // free.
             _ => !x.comptime.is_const,
         },
-        Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => false,
+        Factor::Value(_) | Factor::ResetValue(..) | Factor::Anonymous(_) | Factor::Unknown(_) => {
+            false
+        }
     }
 }
 
@@ -1907,6 +1913,44 @@ fn system_reads(call: &SystemFunctionCall, f: &mut impl FnMut(VarId)) {
     }
 }
 
+/// Whether `expr` reads nothing but whole parameters and constants. A loop
+/// iterator is a `VarKind::Const` too, but its reads are not `is_const`.
+fn reads_only_constants(context: &Context, expr: &Expression) -> bool {
+    match expr {
+        Expression::Term(x) => match x.as_ref() {
+            Factor::Variable(id, index, select, comptime) => {
+                comptime.is_const
+                    && comptime.part_select.is_none()
+                    && index.indices.is_empty()
+                    && select.is_empty()
+                    && context
+                        .variables
+                        .get(id)
+                        .is_some_and(|v| matches!(v.kind, VarKind::Param | VarKind::Const))
+            }
+            _ => {
+                let mut reads = false;
+                expr_reads(expr, &mut |_| reads = true);
+                !reads
+            }
+        },
+        Expression::Unary(_, x, _) => reads_only_constants(context, x),
+        Expression::Binary(x, _, y, _) => {
+            reads_only_constants(context, x) && reads_only_constants(context, y)
+        }
+        Expression::Ternary(x, y, z, _) => {
+            reads_only_constants(context, x)
+                && reads_only_constants(context, y)
+                && reads_only_constants(context, z)
+        }
+        _ => {
+            let mut reads = false;
+            expr_reads(expr, &mut |_| reads = true);
+            !reads
+        }
+    }
+}
+
 fn expr_reads(expr: &Expression, f: &mut impl FnMut(VarId)) {
     match expr {
         Expression::Term(x) => match x.as_ref() {
@@ -1917,7 +1961,10 @@ fn expr_reads(expr: &Expression, f: &mut impl FnMut(VarId)) {
             Factor::HierVariable(x) => selector_reads(&x.index, &x.select, f),
             Factor::FunctionCall(x) => call_reads(x, f),
             Factor::SystemFunctionCall(x) => system_reads(x, f),
-            Factor::Value(_) | Factor::Anonymous(_) | Factor::Unknown(_) => {}
+            Factor::Value(_)
+            | Factor::ResetValue(..)
+            | Factor::Anonymous(_)
+            | Factor::Unknown(_) => {}
         },
         Expression::Unary(_, x, _) => expr_reads(x, f),
         Expression::Binary(x, _, y, _) => {

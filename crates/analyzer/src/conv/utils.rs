@@ -12,9 +12,9 @@ use crate::conv::instance::InstanceHistoryError;
 use crate::conv::{Context, Conv};
 use crate::definition_table::{self, Definition, DefinitionId};
 use crate::ir::{
-    self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, Shape, ShapeRef,
-    Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex, VarKind,
-    VarPath, VarPathSelect, VarSelect, Variable,
+    self, Arguments, Comptime, FuncPath, FuncProto, IrResult, Op, PartSelectPath, QueueOp, Shape,
+    ShapeRef, Signature, SystemFunctionInput, TbMethod, TbMethodCall, ValueVariant, VarIndex,
+    VarKind, VarPath, VarPathSelect, VarSelect, Variable,
 };
 use crate::namespace::DefineContext;
 use crate::symbol::{
@@ -1697,32 +1697,23 @@ pub fn eval_type(
                         return Err(ir_error!(token));
                     }
                 }
-                SymbolKind::TbComponent(x)
-                    if matches!(
-                        x.kind,
-                        TbComponentKind::File
-                            | TbComponentKind::External(_)
-                            | TbComponentKind::Random
-                    ) =>
-                {
+                SymbolKind::TbComponent(x) if x.kind.is_variable() => {
                     if !context.in_test_module {
                         let token: TokenRange = path.paths[0].base.into();
                         context.insert_error(AnalyzerError::invalid_tb_usage(&token));
                     }
 
-                    if matches!(x.kind, TbComponentKind::Random)
+                    if x.kind.is_generic()
                         && let Some(arg) =
                             path.paths.last().and_then(|p| p.arguments.first()).cloned()
                     {
-                        // `$tb::random::<T>`'s element type is its generic argument
-                        // (already resolved through the generic maps above); its
-                        // validity is diagnosed by `check_generic_refereence`. The
-                        // file/component descriptor lives in the simulator and has
-                        // no element type, so its slot is backed by a throwaway
-                        // 32-bit width.
+                        // The first generic argument is the element type; its validity
+                        // is diagnosed by `check_generic_refereence`.
                         return eval_type(context, &arg, pos);
                     }
 
+                    // The file/component descriptor lives in the simulator, so its
+                    // slot is backed by a throwaway 32-bit width.
                     width.push(Some(32));
                     ir::TypeKind::Bit
                 }
@@ -5277,6 +5268,7 @@ pub fn tb_method_call(
 
     let mut ret_width = None;
     let mut ret_signed = false;
+    let mut ret_4state = false;
     let method = match (tb_kind, method_name) {
         (TbComponentKind::ClockGen, "next") => {
             let count = if let Some(ir::Arguments::Positional(ref positional)) = args
@@ -5381,6 +5373,32 @@ pub fn tb_method_call(
             ret_width = Some(64);
             TbMethod::RandomGetSeed
         }
+        (TbComponentKind::Queue, _) => {
+            let Some(op) = QueueOp::from_method_name(method_name) else {
+                return Err(ir_error!(token));
+            };
+            let (width, signed, four_state) = resolve_queue_elem_type(context, type_path);
+            let capacity = resolve_queue_capacity(context, type_path);
+            let value = queue_arg(context, &args, op, width, method_name, &token)?;
+            match op {
+                QueueOp::Size => ret_width = Some(32),
+                QueueOp::IsEmpty | QueueOp::IsFull => ret_width = Some(1),
+                _ if op.returns_element() => {
+                    ret_width = Some(width);
+                    ret_signed = signed;
+                    ret_4state = four_state;
+                }
+                _ => {}
+            }
+            TbMethod::Queue {
+                op,
+                value,
+                width,
+                signed,
+                four_state,
+                capacity,
+            }
+        }
         // Any method name is accepted on a user-defined component; the
         // component validates it at run time. With a manifest present the
         // name and arity are also diagnosed here.
@@ -5401,6 +5419,7 @@ pub fn tb_method_call(
         ret_strict: false,
         ret_width,
         ret_signed,
+        ret_4state,
     })))
 }
 
@@ -5434,6 +5453,83 @@ fn random_arg(
             token,
         ));
         Err(ir_error!(*token))
+    }
+}
+
+/// Captures the pushed value of a `$tb::queue` method, evaluated in the
+/// element width like an assignment RHS. Emits an arity error and fails when
+/// the argument count does not match the method.
+fn queue_arg(
+    context: &mut Context,
+    args: &Option<ir::Arguments>,
+    op: QueueOp,
+    width: u32,
+    method_name: &str,
+    token: &TokenRange,
+) -> IrResult<Option<ir::Expression>> {
+    let positional: &[_] = if let Some(ir::Arguments::Positional(positional)) = args {
+        positional
+    } else {
+        &[]
+    };
+    let arity = if matches!(op, QueueOp::PushBack | QueueOp::PushFront) {
+        1
+    } else {
+        0
+    };
+    if positional.len() != arity {
+        context.insert_error(AnalyzerError::mismatch_function_arity(
+            method_name,
+            arity,
+            positional.len(),
+            token,
+        ));
+        return Err(ir_error!(*token));
+    }
+    Ok(positional.first().map(|arg| {
+        let mut expr = arg.0.clone();
+        expr.eval_comptime(context, Some(width as usize));
+        expr
+    }))
+}
+
+/// Resolves the element type `T` of a `$tb::queue::<T, N>` variable, returning
+/// its `(width, signed, four_state)`. Falls back to a 32-bit unsigned 2-state
+/// type when resolution fails; the error is diagnosed by `check_generic_refereence`.
+fn resolve_queue_elem_type(
+    context: &mut Context,
+    type_path: &GenericSymbolPath,
+) -> (u32, bool, bool) {
+    let resolved = context.resolve_path(type_path.clone());
+    if let Some(arg) = resolved.paths.last().and_then(|p| p.arguments.first())
+        && let Ok(ty) = eval_type(context, &arg.clone(), TypePosition::Variable)
+        && let Some(width) = ty.total_width()
+    {
+        (width as u32, ty.signed, ty.is_4state())
+    } else {
+        (32, false, false)
+    }
+}
+
+/// Resolves the capacity `N` of a `$tb::queue::<T, N>` variable (`0`, i.e.
+/// unbounded, when omitted or unevaluable).
+fn resolve_queue_capacity(context: &mut Context, type_path: &GenericSymbolPath) -> u32 {
+    let resolved = context.resolve_path(type_path.clone());
+    let Some(arg) = resolved.paths.last().and_then(|p| p.arguments.get(1)) else {
+        return 0;
+    };
+    let range = arg.range;
+    let Ok(factor) = eval_factor_path(context, arg.clone(), VarPathSelect::default(), false, range)
+    else {
+        return 0;
+    };
+    let comptime = factor.comptime();
+    if comptime.is_const
+        && let ValueVariant::Numeric(v) = &comptime.value
+    {
+        v.to_u64().map(|v| v as u32).unwrap_or(0)
+    } else {
+        0
     }
 }
 
@@ -5481,7 +5577,12 @@ pub fn hoist_component_method_call(
     let name = format!("__tb_method_ret_{}", context.tb_hoist_count);
     context.tb_hoist_count += 1;
     let path = VarPath::new(resource_table::insert_str(&name));
-    let mut r#type = ir::Type::new(ir::TypeKind::Bit);
+    let kind = if method_call.ret_4state {
+        ir::TypeKind::Logic
+    } else {
+        ir::TypeKind::Bit
+    };
+    let mut r#type = ir::Type::new(kind);
     r#type.set_concrete_width(Shape::new(vec![Some(width)]));
     r#type.signed = signed;
 
