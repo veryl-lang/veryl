@@ -2,6 +2,28 @@ use super::*;
 use crate::ir::Component;
 
 #[test]
+fn package_alias_typedef_is_valid_in_global_function_types() {
+    let code = r#"
+package Words::<W: u32> {
+    type word_t = logic<W>;
+}
+alias package Five = Words::<5>;
+alias package FiveChain = Five;
+
+function f () -> Five::word_t {
+    return 1;
+}
+function identity (x: input FiveChain::word_t) -> Five::word_t {
+    var y: Five::word_t;
+    y = x as FiveChain::word_t;
+    return y;
+}
+"#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
 fn package_alias_typedef_preserves_generic_arguments_and_namespace() {
     let code = r#"
 package ProbeWords::<W: u32 = 3> {
