@@ -4415,6 +4415,24 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ConcatenationAssignment'
     fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        let items: Vec<_> = arg.assign_concatenation_list.as_ref().into();
+        let is_nba = self.in_always_ff
+            && items.iter().any(|item| {
+                if let Ok(lhs_symbol) =
+                    symbol_table::resolve(item.hierarchical_identifier.identifier.as_ref())
+                {
+                    match &lhs_symbol.found.kind {
+                        SymbolKind::Variable(x) => !matches!(
+                            x.affiliation,
+                            Affiliation::StatementBlock | Affiliation::Function
+                        ),
+                        _ => true,
+                    }
+                } else {
+                    true
+                }
+            });
+
         self.align_start(align_kind::IDENTIFIER);
         self.l_brace(&arg.l_brace);
         self.assign_concatenation_list(&arg.assign_concatenation_list);
@@ -4422,7 +4440,7 @@ impl VerylWalker for Emitter {
         self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.align_start(align_kind::ASSIGNMENT);
-        if self.in_always_ff {
+        if is_nba {
             self.str("<");
         }
         self.equ(&arg.equ);
