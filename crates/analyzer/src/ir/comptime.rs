@@ -397,7 +397,13 @@ impl ExpressionContext {
 pub struct Comptime {
     pub value: ValueVariant,
     pub r#type: Type,
+    /// Eligible for evaluation/constant folding within the current IR context.
+    /// This includes procedural loop variables while their loop is unrolled.
     pub is_const: bool,
+    /// The source expression depends on runtime values, even if optimization
+    /// has replaced it with a value. Keep this when folding or substituting IR.
+    /// Type queries do not depend on the value of their queried operand.
+    pub runtime_dependent: bool,
     pub is_global: bool,
     pub part_select: Option<PartSelectPath>,
     /// Packed base-variable domain retained from the member path and the
@@ -413,6 +419,12 @@ pub struct Comptime {
 }
 
 impl Comptime {
+    /// Whether an evaluated expression is a legal elaboration-time constant.
+    /// A concrete numeric value is not required (e.g. an external SV constant).
+    pub fn is_elaboration_const(&self) -> bool {
+        self.is_const && !self.runtime_dependent
+    }
+
     /// Rebase a struct/union member onto the whole variable's type, and report
     /// the array dimensions a select has to be split on.
     ///

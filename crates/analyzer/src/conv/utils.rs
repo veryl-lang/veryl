@@ -2298,6 +2298,8 @@ pub fn eval_function_call(
             SymbolKind::SystemVerilog => {
                 let mut x = Comptime::create_unknown(token);
                 x.is_const = true;
+                // The external function is opaque, but its arguments are not.
+                x.runtime_dependent = !args.is_elaboration_const(context);
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
             }
             _ => {
@@ -2887,6 +2889,8 @@ fn apply_symbol_select(
     let ir::Factor::Value(mut comptime) = factor else {
         return Ok(factor);
     };
+    // Selecting an external/parameter value may fold away the select itself.
+    comptime.runtime_dependent |= !select.is_elaboration_const(context);
     let values = match &comptime.value {
         ValueVariant::NumericArray(values) => values.clone(),
         ValueVariant::Numeric(value) => vec![value.clone()],

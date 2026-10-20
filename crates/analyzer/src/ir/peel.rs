@@ -1027,6 +1027,7 @@ impl<'a> Subst<'a> {
         value.set_signed(comptime.r#type.signed);
         let mut comptime = comptime.clone();
         comptime.value = ValueVariant::Numeric(value);
+        comptime.runtime_dependent |= !comptime.is_const;
         comptime.is_const = true;
         Some(Factor::Value(comptime))
     }
@@ -1057,6 +1058,7 @@ impl<'a> Subst<'a> {
         }
         let mut comptime = expr.comptime().clone();
         comptime.value = ValueVariant::Numeric(value);
+        comptime.runtime_dependent |= !expr.is_elaboration_const(self.context);
         comptime.is_const = true;
         Some(Expression::Term(Box::new(Factor::Value(comptime))))
     }

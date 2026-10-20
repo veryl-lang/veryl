@@ -7,6 +7,55 @@ use similar::{ChangeTag, TextDiff};
 use veryl_metadata::Metadata;
 use veryl_parser::{Parser, resource_table};
 
+#[test]
+fn folding_preserves_elaboration_constness() {
+    use crate::ir::{Comptime, Expression, Op};
+    use crate::value::Value;
+    use veryl_parser::token_range::TokenRange;
+
+    for runtime_dependent in [false, true] {
+        let token = TokenRange::default();
+        let mut lhs = Expression::create_value(Value::new(1, 32, false), token);
+        // A procedural induction variable can have exactly the same known
+        // value as a genvar, but only the latter is an elaboration constant.
+        lhs.comptime_mut().runtime_dependent = runtime_dependent;
+        let rhs = Expression::create_value(Value::new(2, 32, false), token);
+        let mut expression = Expression::Binary(
+            Box::new(lhs),
+            Op::Add,
+            Box::new(rhs),
+            Box::new(Comptime::create_unknown(token)),
+        );
+        let mut context = Context::default();
+        for _ in 0..2 {
+            let comptime = expression.eval_comptime(&mut context, None);
+            assert_eq!(comptime.get_value().unwrap().to_u64(), Some(3));
+            assert!(comptime.is_const);
+            assert_eq!(comptime.is_elaboration_const(), !runtime_dependent);
+            assert_eq!(
+                expression.is_elaboration_const(&context),
+                !runtime_dependent
+            );
+        }
+        assert!(matches!(expression, Expression::Term(_)));
+    }
+}
+
+#[test]
+fn elaboration_constness_does_not_require_a_known_value() {
+    use crate::ir::{Comptime, Expression, Factor};
+    use veryl_parser::token_range::TokenRange;
+
+    let mut comptime = Comptime::create_unknown(TokenRange::default());
+    // External SV constants are eligible even though Veryl has no value.
+    comptime.is_const = true;
+    let mut expression = Expression::Term(Box::new(Factor::Value(comptime)));
+    let mut context = Context::default();
+    let comptime = expression.eval_comptime(&mut context, None);
+    assert!(comptime.value.is_unknown());
+    assert!(comptime.is_elaboration_const());
+}
+
 #[track_caller]
 fn check_ir(code: &str, exp: &str) {
     check_ir_with(code, exp, false);

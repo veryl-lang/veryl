@@ -555,3 +555,89 @@ fn logical_value_of_a_partly_unknown_condition() {
         .collect();
     assert_eq!(values, [0b1100, 0b1010, 0b1100]);
 }
+
+#[test]
+fn part_select_width_uses_elaboration_constness() {
+    let code = r#"
+        module Top(i: input logic<32>, o: output logic<32>[2]) {
+            always_comb {
+                for j in 0..2 {
+                    o[j] = i[0+:$bits(j)];
+                }
+            }
+        }
+    "#;
+    assert!(analyze(code).is_empty());
+    for width in ["j + 1", "if 1 ? 32 : j"] {
+        let errors = analyze(&code.replace("$bits(j)", width));
+        assert!(
+            errors
+                .iter()
+                .any(|x| matches!(x, AnalyzerError::NonConstantSelectWidth { .. })),
+            "{width}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn part_select_width_preserves_runtime_dependencies_through_folding() {
+    for width in [
+        "j + 1",
+        "p::WIDTHS[j]",
+        "p::identity(j + 1)",
+        "$sv::external_pkg::width(j)",
+        "if 1 ? 1 : j",
+    ] {
+        let code = format!(
+            r#"
+            package p {{
+                const WIDTHS: u32[2] = '{{1, 2}};
+                function identity(x: input u32) -> u32 {{ return x; }}
+            }}
+            module Top(i: input logic<32>, o: output logic<32>[2]) {{
+                always_comb {{
+                    for j in 0..2 {{
+                        o[j] = i[0+:({width})];
+                    }}
+                }}
+            }}
+            "#
+        );
+        let errors = analyze(&code);
+        assert_eq!(
+            errors
+                .iter()
+                .filter(|x| matches!(x, AnalyzerError::NonConstantSelectWidth { .. }))
+                .count(),
+            1,
+            "{width}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn part_select_width_accepts_elaboration_constants_with_unknown_values() {
+    for width in [
+        "j + 1",
+        "p::WIDTH",
+        "p::identity(1)",
+        "$sv::external_pkg::WIDTH",
+        "$sv::external_pkg::width(1)",
+        "$bits(j)",
+    ] {
+        let code = format!(
+            r#"
+            package p {{
+                const WIDTH: u32 = $sv::external_pkg::WIDTH;
+                function identity(x: input u32) -> u32 {{ return x; }}
+            }}
+            module Top(i: input logic<32>, o: output logic<32>[2]) {{
+                for j in 0..2 :g {{
+                    assign o[j] = i[0+:({width})];
+                }}
+            }}
+            "#
+        );
+        assert!(analyze(&code).is_empty(), "{width}");
+    }
+}
