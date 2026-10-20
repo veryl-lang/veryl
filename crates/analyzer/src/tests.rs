@@ -30,6 +30,7 @@ mod constant_evaluation_tests;
 mod dynamic_packed_member_tests;
 mod instantiation_note_tests;
 mod interface_array_tests;
+mod interface_instance_select_tests;
 mod modport_connection_tests;
 mod statement_after_if_reset_tests;
 
