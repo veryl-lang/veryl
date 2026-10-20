@@ -16,9 +16,11 @@
 
 use crate::HashMap;
 use crate::HashSet;
+use crate::ir::expression::ProtoExpression;
 use crate::ir::statement::ProtoStatement;
 use crate::ir::variable::VarOffset;
 use smallvec::SmallVec;
+use veryl_analyzer::ir::Op;
 use veryl_analyzer::ir::VarId;
 
 #[derive(Clone, Debug)]
@@ -67,11 +69,22 @@ pub struct DerivedClockSchedule {
     /// that match a top-module clock-typed variable — either an input
     /// port or a testbench `$tb::clock_gen` inst output.
     pub master_input_clocks: SmallVec<[VarId; 4]>,
+    /// `(copy, source)` for a derived clock that only copies another clock:
+    /// its flops fire on the source's event, sampling the same values.
+    pub aliases: Vec<(VarId, VarId)>,
 }
 
 impl DerivedClockSchedule {
     pub fn is_empty(&self) -> bool {
         self.clocks.is_empty() && self.resets.is_empty()
+    }
+
+    /// The clock whose event fires for `clock`'s edges.
+    pub fn source_of(&self, clock: VarId) -> VarId {
+        self.aliases
+            .iter()
+            .find(|(copy, _)| *copy == clock)
+            .map_or(clock, |(_, source)| *source)
     }
 }
 
@@ -79,6 +92,7 @@ pub fn build_schedule(
     candidates: &[EdgeCandidate],
     pre_jit_stmts: &[ProtoStatement],
     input_clock_offsets: &HashMap<VarOffset, VarId>,
+    negedge_inputs: &HashSet<VarId>,
 ) -> DerivedClockSchedule {
     // FF outputs go through the event/commit path.  Every writer, not the
     // last: an offset written by sibling conditional arms has one fragment
@@ -153,6 +167,29 @@ pub fn build_schedule(
         }
     });
 
+    let clock_at: HashMap<VarOffset, (VarId, bool)> = clocks
+        .iter()
+        .map(|c| (c.current_offset, (c.var_id, c.negedge)))
+        .collect();
+    let mut aliases = Vec::new();
+    clocks.retain(|clk| {
+        if clk.negedge || clk.current_offset.is_ff() {
+            return true;
+        }
+        let source = copied_source(
+            clk.current_offset,
+            pre_jit_stmts,
+            &output_to_writer,
+            input_clock_offsets,
+            &clock_at,
+        )
+        .filter(|source| *source != clk.var_id && !negedge_inputs.contains(source));
+        if let Some(source) = source {
+            aliases.push((clk.var_id, source));
+        }
+        source.is_none()
+    });
+
     let mut master_set: HashSet<VarId> = HashSet::default();
     for clk in &mut clocks {
         if clk.current_offset.is_ff() {
@@ -182,6 +219,88 @@ pub fn build_schedule(
         clocks,
         resets,
         master_input_clocks,
+        aliases,
+    }
+}
+
+/// The master input clock the copy chain from `offset` reaches, else the
+/// clock nearest the chain's source.
+fn copied_source(
+    mut offset: VarOffset,
+    pre_jit_stmts: &[ProtoStatement],
+    output_to_writer: &HashMap<VarOffset, Writers>,
+    input_clock_offsets: &HashMap<VarOffset, VarId>,
+    clock_at: &HashMap<VarOffset, (VarId, bool)>,
+) -> Option<VarId> {
+    let mut nearest = None;
+    // A chain longer than the statement count would revisit a writer.
+    for _ in 0..=pre_jit_stmts.len() {
+        if let Some(&(clock, negedge)) = clock_at.get(&offset) {
+            if negedge {
+                return None;
+            }
+            nearest = Some(clock);
+        }
+        let Some(writers) = output_to_writer.get(&offset) else {
+            return input_clock_offsets.get(&offset).copied().or(nearest);
+        };
+        let next = match writers.as_slice() {
+            [writer] => pre_jit_stmts.get(*writer).and_then(copy_source),
+            _ => None,
+        };
+        match next {
+            Some(next) => offset = next,
+            None => return nearest,
+        }
+    }
+    None
+}
+
+/// `src` of a one-bit `dst = src`, also as the `src & 1` a logic-to-clock
+/// conversion lowers to.
+fn copy_source(stmt: &ProtoStatement) -> Option<VarOffset> {
+    let ProtoStatement::Assign(a) = stmt else {
+        return None;
+    };
+    if a.dst_width != 1
+        || a.dst.is_ff()
+        || a.select.is_some()
+        || a.dynamic_select.is_some()
+        || a.rhs_select.is_some()
+    {
+        return None;
+    }
+    let is_one = |e: &ProtoExpression| matches!(e, ProtoExpression::Value { value, width: 1, .. } if value.to_u64() == Some(1));
+    match &a.expr {
+        ProtoExpression::Binary {
+            x,
+            op: Op::BitAnd,
+            y,
+            width: 1,
+            ..
+        } if is_one(y) => one_bit_variable(x),
+        ProtoExpression::Binary {
+            x,
+            op: Op::BitAnd,
+            y,
+            width: 1,
+            ..
+        } if is_one(x) => one_bit_variable(y),
+        e => one_bit_variable(e),
+    }
+}
+
+fn one_bit_variable(e: &ProtoExpression) -> Option<VarOffset> {
+    match e {
+        ProtoExpression::Variable {
+            var_offset,
+            select: None,
+            dynamic_select: None,
+            width: 1,
+            var_full_width: 1,
+            ..
+        } if !var_offset.is_ff() => Some(*var_offset),
+        _ => None,
     }
 }
 

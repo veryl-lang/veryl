@@ -1719,3 +1719,230 @@ fn top_reset_array_port_leaves_no_unreachable_event() {
         assert_eq!(resets, vec![named], "{config:?}");
     }
 }
+
+/// A clock passed through a `logic` wire.
+#[test]
+fn copied_clock_joins_the_master_event() {
+    let code = r#"
+    module Sub (
+        i_clk: input  '_ clock  ,
+        i_d  : input     logic<8>,
+        o_q  : output    logic<8>,
+    ) {
+        always_ff (i_clk) {
+            o_q = i_d;
+        }
+    }
+
+    module Top (
+        i_clk: input  '_ clock  ,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var c    : logic;
+        assign c = i_clk;
+        let c_clk: '_ clock = c;
+        always_ff (i_clk) {
+            o_a = o_a + 1;
+        }
+        inst u: Sub (
+            i_clk: c_clk,
+            i_d  : o_a  ,
+            o_q  : o_b  ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        assert!(
+            sim.ir.derived_clock_schedule.clocks.is_empty(),
+            "the copied clock must not be monitored as a derived clock",
+        );
+        let clocks = sim
+            .ir
+            .event_statements
+            .keys()
+            .filter(|e| matches!(e, Event::Clock(..)))
+            .count();
+        assert_eq!(clocks, 1, "both flops must share the master's event");
+
+        let clk = sim.get_clock("i_clk").unwrap();
+        sim.set("o_a", Value::new(0, 8, false));
+        for _ in 0..5 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(4, 8, false),
+            "the copied-clock flop must sample o_a before the edge",
+        );
+    }
+}
+
+#[test]
+fn gated_clock_is_not_a_copy() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock  ,
+        i_en : input  '_ logic  ,
+        o_cnt: output    logic<8>,
+    ) {
+        let clk_g: '_ clock = i_clk & i_en;
+        always_ff (clk_g) {
+            o_cnt = o_cnt + 1;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let sim = Simulator::new(ir, None);
+        assert_eq!(sim.ir.derived_clock_schedule.clocks.len(), 1);
+        assert!(sim.ir.derived_clock_schedule.aliases.is_empty());
+    }
+}
+
+/// A posedge copy of a `clock_negedge` input rises when the input falls.
+#[test]
+fn copy_of_a_negedge_input_keeps_its_own_edge() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock_negedge,
+        o_a  : output    logic<8>     ,
+        o_b  : output    logic<8>     ,
+    ) {
+        var c    : logic;
+        assign c = i_clk;
+        let c_clk: '_ clock = c;
+        always_ff (i_clk) {
+            o_a = o_a + 1;
+        }
+        always_ff (c_clk) {
+            o_b = o_b + 1;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let sim = Simulator::new(ir, None);
+        assert!(sim.ir.derived_clock_schedule.aliases.is_empty());
+        assert_eq!(sim.ir.derived_clock_schedule.clocks.len(), 1);
+    }
+}
+
+/// The master's event holds only statements moved from the copy, so their
+/// comb-write classification must move with them.
+#[test]
+fn master_event_made_only_of_copied_clock_flops() {
+    let code = r#"
+    module Sub (
+        i_clk: input  '_ clock  ,
+        i_rst: input  '_ reset  ,
+        o_q  : output    logic<8>,
+    ) {
+        var r: logic<8>;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r = 0;
+            } else {
+                r = r + 3;
+            }
+        }
+        assign o_q = r ^ 8'h5a;
+    }
+
+    module Top (
+        i_clk: input  '_ clock  ,
+        i_rst: input  '_ reset  ,
+        o_b  : output    logic<8>,
+    ) {
+        var c    : logic;
+        assign c = i_clk;
+        let c_clk: '_ clock = c;
+        inst u: Sub (
+            i_clk: c_clk,
+            i_rst       ,
+            o_q  : o_b  ,
+        );
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..4 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_b").unwrap(), Value::new(12 ^ 0x5a, 8, false));
+    }
+}
+
+#[test]
+fn copy_of_a_divided_clock_joins_its_event() {
+    let code = r#"
+    module Top (
+        i_clk: input  '_ clock  ,
+        i_rst: input  '_ reset  ,
+        o_a  : output    logic<8>,
+        o_b  : output    logic<8>,
+    ) {
+        var r_div: logic;
+        always_ff (i_clk, i_rst) {
+            if_reset {
+                r_div = 0;
+            } else {
+                r_div = ~r_div;
+            }
+        }
+        let div_clk: '_ clock = r_div;
+        var c      : logic;
+        assign c = div_clk;
+        let c_clk: '_ clock = c;
+        always_ff (div_clk, i_rst) {
+            if_reset {
+                o_a = 0;
+            } else {
+                o_a = o_a + 1;
+            }
+        }
+        always_ff (c_clk, i_rst) {
+            if_reset {
+                o_b = 0;
+            } else {
+                o_b = o_a;
+            }
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        assert_eq!(sim.ir.derived_clock_schedule.clocks.len(), 1);
+        assert_eq!(sim.ir.derived_clock_schedule.aliases.len(), 1);
+        let clk = sim.get_clock("i_clk").unwrap();
+        let rst = sim.get_reset("i_rst").unwrap();
+        sim.step_reset(&clk, &rst);
+        for _ in 0..10 {
+            sim.step(&clk);
+        }
+        assert_eq!(sim.get("o_a").unwrap(), Value::new(5, 8, false));
+        assert_eq!(
+            sim.get("o_b").unwrap(),
+            Value::new(4, 8, false),
+            "the copy must sample o_a before the shared edge",
+        );
+    }
+}

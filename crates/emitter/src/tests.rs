@@ -3138,6 +3138,132 @@ endmodule
 }
 
 #[test]
+fn local_concatenation_assignment_in_always_ff() {
+    let code = r#"module ModuleA (
+    clk: input clock,
+    data: input logic<8>,
+    result: output logic<8>,
+) {
+    struct Nibbles {
+        hi: logic<4>,
+        lo: logic<4>,
+    }
+
+    var reg_hi: logic<4>;
+    var reg_lo: logic<4>;
+
+    always_ff {
+        var hi: logic<4>;
+        var lo: logic<4>;
+        var parts: logic<4>[2];
+        var nibbles: Nibbles;
+        {hi, lo} = data;
+        {parts[0], parts[1]} = data;
+        {nibbles.hi, nibbles.lo} = data;
+        {reg_hi, reg_lo} = data;
+        result = {lo, hi};
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input  var logic         clk   ,
+    input  var logic [8-1:0] data  ,
+    output var logic [8-1:0] result
+);
+    typedef struct packed {
+        logic [4-1:0] hi;
+        logic [4-1:0] lo;
+    } Nibbles;
+
+    logic [4-1:0] reg_hi;
+    logic [4-1:0] reg_lo;
+
+    always_ff @ (posedge clk) begin
+        logic   [4-1:0] hi                          ;
+        logic   [4-1:0] lo                          ;
+        logic   [4-1:0] parts                    [2];
+        Nibbles         nibbles                     ;
+        {hi, lo}                 =  data;
+        {parts[0], parts[1]}     =  data;
+        {nibbles.hi, nibbles.lo} =  data;
+        {reg_hi, reg_lo}         <= data;
+        result                   <= {lo, hi};
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn local_concatenation_assignment_in_nested_statement_block() {
+    let code = r#"module ModuleA (
+    clk: input clock,
+    data: input logic<8>,
+    result: output logic<8>,
+) {
+    var reg_hi: logic<4>;
+    var reg_lo: logic<4>;
+
+    always_ff {
+        if data[0] {
+            var hi: logic<4>;
+            var lo: logic<4>;
+            {hi, lo} = data;
+            {reg_hi, reg_lo} = {lo, hi};
+        } else {
+            for _i in 0..2 {
+                var hi: logic<4>;
+                var lo: logic<4>;
+                {hi, lo} = data;
+                result = {hi, lo};
+            }
+        }
+    }
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input  var logic         clk   ,
+    input  var logic [8-1:0] data  ,
+    output var logic [8-1:0] result
+);
+    logic [4-1:0] reg_hi;
+    logic [4-1:0] reg_lo;
+
+    always_ff @ (posedge clk) begin
+        if (data[0]) begin
+            logic [4-1:0] hi              ;
+            logic [4-1:0] lo              ;
+            {hi, lo}         =  data;
+            {reg_hi, reg_lo} <= {lo, hi};
+        end else begin
+            for (int _i = 0; _i < 2; _i++) begin
+                logic [4-1:0] hi      ;
+                logic [4-1:0] lo      ;
+                {hi, lo} =  data;
+                result   <= {hi, lo};
+            end
+        end
+    end
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    println!("ret\n{}exp\n{}", ret, expect);
+    assert_eq!(ret, expect);
+}
+
+#[test]
 fn nested_concatenation() {
     let code = r#"module ModuleA {
     let _a: u32 = {1'b1};
@@ -5502,4 +5628,189 @@ endmodule
 "#;
 
     assert_eq!(emit(&metadata, code), expect);
+}
+
+#[test]
+fn reset_value_literal_polarity() {
+    let code = r#"module ModuleA (
+    i_rst0: input reset_async_high,
+    i_rst1: input reset_async_low,
+    i_rst2: input reset_sync_high,
+    i_rst3: input reset_sync_low,
+) {}
+
+module ModuleB {
+    inst u0: ModuleA (
+        i_rst0: reset_active,
+        i_rst1: reset_active,
+        i_rst2: reset_active,
+        i_rst3: reset_active,
+    );
+    inst u1: ModuleA (
+        i_rst0: reset_inactive,
+        i_rst1: reset_inactive,
+        i_rst2: reset_inactive,
+        i_rst3: reset_inactive,
+    );
+}
+"#;
+
+    let expect = r#"module prj_ModuleA (
+    input var logic i_rst0,
+    input var logic i_rst1,
+    input var logic i_rst2,
+    input var logic i_rst3
+);
+endmodule
+
+module prj_ModuleB;
+    prj_ModuleA u0 (
+        .i_rst0 (1'b1),
+        .i_rst1 (1'b0),
+        .i_rst2 (1'b1),
+        .i_rst3 (1'b0)
+    );
+    prj_ModuleA u1 (
+        .i_rst0 (1'b0),
+        .i_rst1 (1'b1),
+        .i_rst2 (1'b0),
+        .i_rst3 (1'b1)
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
+}
+
+#[test]
+fn reset_value_literal_reset_type() {
+    let code = r#"module ModuleA (
+    i_rst0: input reset,
+    i_rst1: input reset,
+) {}
+
+module ModuleB {
+    inst u: ModuleA (
+        i_rst0: reset_active,
+        i_rst1: reset_inactive,
+    );
+}
+"#;
+
+    for (reset_type, hold, release) in [
+        (ResetType::AsyncHigh, "1'b1", "1'b0"),
+        (ResetType::AsyncLow, "1'b0", "1'b1"),
+        (ResetType::SyncHigh, "1'b1", "1'b0"),
+        (ResetType::SyncLow, "1'b0", "1'b1"),
+    ] {
+        let expect = format!(
+            r#"module prj_ModuleA (
+    input var logic i_rst0,
+    input var logic i_rst1
+);
+endmodule
+
+module prj_ModuleB;
+    prj_ModuleA u (
+        .i_rst0 ({hold}),
+        .i_rst1 ({release})
+    );
+endmodule
+//# sourceMappingURL=test.sv.map
+"#
+        );
+
+        let mut metadata = Metadata::create_default("prj").unwrap();
+        metadata.build.reset_type = reset_type;
+        let ret = emit(&metadata, code);
+
+        assert_eq!(ret, expect);
+    }
+}
+
+#[test]
+fn reset_value_literal_context() {
+    let code = r#"interface InterfaceA {
+    var rst: reset_async_low;
+    modport mp {
+        rst: output,
+    }
+}
+
+module ModuleA (
+    i_rst : input  reset_sync_low,
+    i_rsts: input  reset_async_high[2],
+    if_a  : modport InterfaceA::mp,
+    o_rst0: output reset_async_low,
+    o_rst1: output reset_sync_high,
+    o_a   : output logic<4>,
+) {
+    struct StructA {
+        rst: reset_sync_high,
+    }
+
+    let a: reset_async_high = reset_active;
+    var b: StructA;
+
+    assign b.rst    = reset_inactive;
+    assign if_a.rst = (reset_active);
+    assign o_rst0   = reset_inactive;
+
+    always_comb {
+        o_rst1 = reset_active;
+    }
+
+    assign o_a[0] = a == reset_active;
+    assign o_a[1] = reset_inactive != i_rst;
+    assign o_a[2] = i_rsts[1] == reset_inactive;
+    assign o_a[3] = b.rst != reset_active;
+}
+"#;
+
+    let expect = r#"interface prj_InterfaceA;
+    logic rst;
+    modport mp (
+        output rst
+    );
+endinterface
+
+module prj_ModuleA (
+    input var logic                 i_rst     ,
+    input var logic                 i_rsts [2],
+    prj_InterfaceA.mp         if_a      ,
+    output var logic                 o_rst0    ,
+    output var logic                 o_rst1    ,
+    output var logic         [4-1:0] o_a   
+);
+    typedef struct packed {
+        logic rst;
+    } StructA;
+
+    logic   a; always_comb a = 1'b1;
+    StructA b;
+
+    always_comb b.rst    = 1'b0;
+    always_comb if_a.rst = (1'b0);
+    always_comb o_rst0   = 1'b1;
+
+    always_comb begin
+        o_rst1 = 1'b1;
+    end
+
+    always_comb o_a[0] = a == 1'b1;
+    always_comb o_a[1] = 1'b1 != i_rst;
+    always_comb o_a[2] = i_rsts[1] == 1'b0;
+    always_comb o_a[3] = b.rst != 1'b1;
+endmodule
+//# sourceMappingURL=test.sv.map
+"#;
+
+    let metadata = Metadata::create_default("prj").unwrap();
+    let ret = emit(&metadata, code);
+
+    assert_eq!(ret, expect);
 }

@@ -32,7 +32,9 @@ pub use declaration::{
     ExternalParamValue, FfClock, FfDeclaration, FfReset, FinalDeclaration, InitialDeclaration,
     InstDeclaration, InstInput, InstInterfaceBinding, InstOutput, qualified_prefix_len,
 };
-pub use expression::{ArrayLiteralItem, Expression, Factor, HierVarRef};
+pub use expression::{
+    ArrayLiteralItem, Expression, Factor, HierVarRef, ResetPolarity, ResetValueKind,
+};
 pub use ff_table::FfTable;
 pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;
