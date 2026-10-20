@@ -247,6 +247,11 @@ pub struct OptTest {
     #[arg(long)]
     pub disable_ff_opt: bool,
 
+    /// Settle combinational logic that has no one-pass evaluation order in
+    /// several passes instead of reporting it as an error
+    #[arg(long)]
+    pub allow_multi_pass: bool,
+
     /// Run only ignored tests
     #[arg(long)]
     pub ignored: bool,

@@ -248,7 +248,7 @@ fn nontrivial_hierarchy_expansion_is_bounded_and_reports_incomplete() {
                 ));
                 previous = format!("Wrapper{level}");
             }
-            crate::comb_loop_detect::with_module_summary_limit(LIMIT, || {
+            crate::comb_loop_detect::with_step_limit(LIMIT, || {
                 reset_module_summary_work();
                 assert!(analyze(&code).is_empty(), "{code}");
                 let (input_edges, walked_edges) = module_summary_work();
@@ -268,7 +268,7 @@ fn nontrivial_hierarchy_expansion_is_bounded_and_reports_incomplete() {
 }
 
 #[test]
-fn module_summary_limit_is_shared_by_instances_and_keeps_local_cycles() {
+fn module_summary_steps_are_shared_by_instances() {
     for local_cycle in [false, true] {
         let local = if local_cycle { "~independent" } else { "0" };
         let code = format!(
@@ -286,26 +286,20 @@ fn module_summary_limit_is_shared_by_instances_and_keeps_local_cycles() {
             "#
         );
         // Each wire summary fits on its own (two nodes, two domains, one
-        // edge), but importing both children exceeds the parent's allowance.
-        crate::comb_loop_detect::with_module_summary_limit(6, || {
+        // edge), but importing both children exceeds the parent's steps. The
+        // module stops as incomplete and reports no loop through the child.
+        crate::comb_loop_detect::with_step_limit(6, || {
             assert!(!comb_loop_analysis_is_complete(&code));
             let errors = analyze(&code);
             assert!(
-                errors.iter().all(|error| matches!(
-                    error,
-                    AnalyzerError::CombinationalLoop { .. }
-                        | AnalyzerError::UnassignVariable { .. }
-                )),
+                errors.iter().all(|error| match error {
+                    AnalyzerError::CombinationalLoop { identifier, .. } =>
+                        identifier == "independent",
+                    AnalyzerError::UnassignVariable { .. } => true,
+                    _ => false,
+                }),
                 "{errors:#?}"
             );
-            let loops = errors
-                .iter()
-                .filter(|error| matches!(error, AnalyzerError::CombinationalLoop { .. }))
-                .collect::<Vec<_>>();
-            assert_eq!(loops.len(), usize::from(local_cycle), "{errors:#?}");
-            if let Some(AnalyzerError::CombinationalLoop { identifier, .. }) = loops.first() {
-                assert_eq!(identifier, "independent");
-            }
         });
         assert!(comb_loop_analysis_is_complete(&code));
         let errors = analyze(&code);

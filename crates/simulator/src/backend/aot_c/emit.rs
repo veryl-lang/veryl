@@ -141,7 +141,7 @@ static inline int64_t vw_scmp_asym(const uint8_t* a,const uint8_t* b,uint32_t ap
 static inline void vw_shl(uint8_t* d,const uint8_t* a,uint64_t amount,uint32_t nb){
   unsigned n=VW_NW(nb); unsigned ws=(unsigned)(amount/64); uint32_t bs=(uint32_t)(amount%64);
   if(ws>=n){ for(unsigned i=0;i<n;i++) VW_WR(d,i,0); return; }
-  for(unsigned i=n;i-->0;){ long si=(long)i-(long)ws;
+  for(unsigned i=n;i-->0;){ int64_t si=(int64_t)i-(int64_t)ws;
     uint64_t lo = si>=0 ? VW_RD(a,(unsigned)si) : 0;
     uint64_t hi = si>0 ? VW_RD(a,(unsigned)si-1) : 0;
     VW_WR(d,i, bs==0 ? lo : (lo<<bs)|(hi>>(64-bs))); } }
@@ -2128,7 +2128,7 @@ fn emit_wide_log_chunks_in(
         out.push_str(&format!(
             "{{ unsigned char* _lb = (unsigned char*)write_log; \
                 unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
-                unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (unsigned long)_lc * {esz}ul; \
+                unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (uintptr_t)_lc * {esz}u; \
                 *(unsigned int*)(_ls + {o_off}) = (unsigned int)(({base}) + {w}u); \
                 *(unsigned char*)(_ls + {o_nb}) = (unsigned char){chunk}u; \
                 __builtin_memcpy(_ls + {o_pay}, ({src}) + {w}u, {chunk}u); \
@@ -2240,7 +2240,7 @@ fn emit_log_push_in(
     format!(
         "{mark}{{ unsigned char* _lb = (unsigned char*)write_log; \
             unsigned int _lc = *(unsigned int*)(_lb + {cnt}); \
-            unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (unsigned long)_lc * {esz}ul; \
+            unsigned char* _ls = (*(unsigned char**)(_lb + {eptr})) + (uintptr_t)_lc * {esz}u; \
             *(unsigned int*)(_ls + {o_off}) = (unsigned int)({off}); \
             *(unsigned short*)(_ls + {o_mask}) = 0; \
             *(unsigned short*)(_ls + {o_wc}) = (unsigned short){wc}u; \
@@ -3981,6 +3981,8 @@ pub struct EmittedModule {
     /// A dataflow comb's whole-settle entry (`veryl_aot_eval_coarse`): every
     /// statement, no per-cell test.  Same ABI as `func`.
     pub coarse_func: Option<FuncPtr>,
+    /// `func` counting `[statements, calls]` through its log argument.
+    pub counted: Option<FuncPtr>,
     /// Keep-alive: dropping unloads the library and invalidates `func`.
     _lib: libloading::Library,
 }
@@ -4247,7 +4249,7 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
                unsigned int n1 = *(unsigned int*)(lb + {ncnt}), w1 = *(unsigned int*)(lb + {wcnt});
                unsigned char *ne = *(unsigned char**)(lb + {neptr});
                for (unsigned int z = n0; z < n1; z++) {{
-                 unsigned char *e = ne + (unsigned long)z * {nesz};
+                 unsigned char *e = ne + (uintptr_t)z * {nesz}u;
                  const uint8_t *cur = ff_values + *(unsigned int*)(e + {neoff});
                  unsigned long long pay = *(unsigned long long*)(e + {nepay});
                  switch (*(unsigned short*)(e + {newc})) {{
@@ -4259,7 +4261,7 @@ fn apply_event_gates(units: &mut [String], gates: &[EventGate]) -> String {
                }}
                unsigned char *we = *(unsigned char**)(lb + {weptr});
                for (unsigned int z = w0; z < w1; z++) {{
-                 unsigned char *e = we + (unsigned long)z * {wesz};
+                 unsigned char *e = we + (uintptr_t)z * {wesz}u;
                  if (__builtin_memcmp(e + {wepay}, ff_values + *(unsigned int*)(e + {weoff}), *(unsigned char*)(e + {wenb})) != 0) return 0;
                }}
                return 1;
@@ -4557,7 +4559,7 @@ fn emit_event_function(
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-         typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
+         typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
          __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
          __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
@@ -4651,7 +4653,7 @@ fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -
     let mut s = format!("{{ static const unsigned char _f[] = {{ {fbytes}0 }};");
     if n == 0 {
         s.push_str(&format!(
-            " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, {flen}ul, 0, 0, 0ul, {nl}u); }}"
+            " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, (uintptr_t){flen}u, 0, 0, (uintptr_t)0, {nl}u); }}"
         ));
         return Some(s);
     }
@@ -4675,7 +4677,7 @@ fn emit_event_print(format_str: &str, args: &[ProtoExpression], newline: bool) -
         ));
     }
     s.push_str(&format!(
-        " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, {flen}ul, _v, _w, {n}ul, {nl}u); }}"
+        " if (veryl_sysfn_cb) veryl_sysfn_cb(_f, (uintptr_t){flen}u, _v, _w, (uintptr_t){n}u, {nl}u); }}"
     ));
     Some(s)
 }
@@ -4883,13 +4885,11 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
 
     let header = &lines[..chunk_starts[0]];
     let entries = &lines[entry_start..];
-    // Only the wide-op table may cross units, and only because the split gives
-    // it one definition and the rest a declaration.  Anything else exported
-    // from the header would lose its definition in the non-entry units, so
-    // leave such a source whole.
+    // Any other exported header line would lose its definition in the
+    // non-entry units.
     if header
         .iter()
-        .any(|l| l.starts_with(ENTRY_ATTR) && !l.contains(WIDEOPS_DEF) && !l.contains(WIDEOPS_SET))
+        .any(|l| l.starts_with(ENTRY_ATTR) && !CROSS_UNIT.iter().any(|x| l.contains(x)))
     {
         return None;
     }
@@ -4958,12 +4958,11 @@ fn split_translation_units(src: &str, n: usize) -> Option<Vec<String>> {
         };
         let mut out: Vec<String> = Vec::with_capacity(header.len() + decls.len() + (hi - lo) + 16);
         for l in header {
-            // The wide-op table has one definition, in the entry unit; the
-            // others reach it through the dynamic symbol the setter publishes.
+            // Not weak per unit: PE exports no weak definition.
             if part == 0 || !l.starts_with(ENTRY_ATTR) {
                 out.push((*l).to_string());
-            } else if l.contains(WIDEOPS_DEF) {
-                out.push(format!("extern {WIDEOPS_DEF}"));
+            } else if let Some(def) = [WIDEOPS_DEF, SYSFN_DEF].into_iter().find(|x| l.contains(x)) {
+                out.push(format!("extern {def}"));
             }
         }
         out.extend(decls.iter().cloned());
@@ -4986,6 +4985,9 @@ const ENTRY_ATTR: &str = "__attribute__((visibility(\"default\")))";
 const ENTRY_SECTION_MARKER: &str = "// AOT-C entry section; keep with the entry unit.";
 const WIDEOPS_DEF: &str = "veryl_wideops_t veryl_wideops;";
 const WIDEOPS_SET: &str = "void veryl_set_wideops(";
+const SYSFN_DEF: &str = "veryl_sysfn_t veryl_sysfn_cb;";
+const SYSFN_SET: &str = "void veryl_set_sysfn_cb(";
+const CROSS_UNIT: [&str; 4] = [WIDEOPS_DEF, WIDEOPS_SET, SYSFN_DEF, SYSFN_SET];
 const CHUNK_DECL_ATTR: &str = "__attribute__((noinline,visibility(\"hidden\")))";
 const CHUNK_DEF_PREFIX: &str =
     "__attribute__((noinline,visibility(\"hidden\"))) void veryl_aot_chunk_";
@@ -5195,6 +5197,9 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     let coarse_func: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_coarse\0") }
         .ok()
         .map(|s| *s);
+    let counted: Option<FuncPtr> = unsafe { lib.get::<FuncPtr>(b"veryl_aot_eval_counted\0") }
+        .ok()
+        .map(|f| *f);
     // Publish the wide-op helper table into the .so so emitted wide-op calls
     // dispatch to the same `wide_ops::*` Rust helpers Cranelift uses.  The
     // setter is always present (decls emitted unconditionally) and copies the
@@ -5205,10 +5210,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
         let table = wideops_table();
         unsafe { setter(&table as *const WideOpsTable as *const c_void) };
     }
-    // Event modules that emitted $display/$write expose `veryl_set_sysfn_cb`;
-    // wire it to the Rust formatter so their output goes through `output_buffer`
-    // (byte-identical, correctly buffered).  Absent on comb / sysfn-free
-    // modules, where the dlsym simply fails and we skip.
+    // Routes the module's `$display`/`$write` into `output_buffer`.
     if let Ok(setter) =
         unsafe { lib.get::<unsafe extern "C" fn(*mut c_void)>(b"veryl_set_sysfn_cb\0") }
     {
@@ -5219,6 +5221,7 @@ fn compile_source_in(cache_dir: &Path, src: &str) -> Result<EmittedModule, Strin
     Ok(EmittedModule {
         func,
         coarse_func,
+        counted,
         _lib: lib,
     })
 }
@@ -5633,11 +5636,8 @@ fn aot_c_cache_dir() -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("VERYL_AOT_CACHE_DIR") {
         return Ok(PathBuf::from(p));
     }
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .ok_or("neither XDG_CACHE_HOME nor HOME set")?;
-    Ok(base.join("veryl").join("aot_c"))
+    let base = veryl_path::try_cache_path().ok_or("no cache directory for this platform")?;
+    Ok(base.join("aot_c"))
 }
 
 /// FNV-1a 64-bit (hex), with a 0xFF separator between parts so e.g.
@@ -6245,7 +6245,18 @@ fn df_ff_push_target(
     Some((slot, words))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Leaves every dataflow mark out of the event code, for tests that need
+    /// an event which misses its marks.
+    pub(crate) static DROP_DF_MARKS: Cell<bool> = const { Cell::new(false) };
+}
+
 fn df_mark_set(words: &[(u32, u64)]) -> String {
+    #[cfg(test)]
+    if DROP_DF_MARKS.with(|d| d.get()) {
+        return String::new();
+    }
     words
         .iter()
         .map(|&(w, m)| format!("_dfm[{w}] |= {m:#x}ULL; "))
@@ -6333,10 +6344,7 @@ impl DfWatch {
     }
 
     fn set(&self) -> String {
-        self.words
-            .iter()
-            .map(|&(w, m)| format!("_dfm[{w}] |= {m:#x}ULL; "))
-            .collect()
+        df_mark_set(&self.words)
     }
 
     /// Snapshot declaration `k`, before the first store.
@@ -10228,9 +10236,9 @@ pub fn emit_dataflow_function(
          typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
          typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
          typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-         typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
-         __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
-         __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+         typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
+         __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb;\n\
+         __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
     );
     body.push_str(WIDEOPS_C_DECLS);
     body.push_str(WIDEOPS_C_INLINE);
@@ -10351,23 +10359,44 @@ pub fn emit_dataflow_function(
     body.push_str("};\n");
     // A cell marks only cells after it: its own word through the return
     // value, later words in memory, read when the scan reaches them.
-    body.push_str(&format!(
-        "{ENTRY_ATTR}\n\
-         void veryl_aot_eval(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
-         \x20   (void)write_log;\n\
-         \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n\
-         \x20   for (unsigned w = 0; w < {nw}u; w++) {{\n\
-         \x20       uint64_t b = dirty[w];\n\
-         \x20       if (!b) continue;\n\
-         \x20       dirty[w] = 0;\n\
-         \x20       do {{\n\
-         \x20           unsigned k = w * 64u + (unsigned)__builtin_ctzll(b);\n\
-         \x20           b &= b - 1;\n\
-         \x20           b |= veryl_cells[k](ff_values, comb_values, dirty);\n\
-         \x20       }} while (b);\n\
-         \x20   }}\n\
-         }}\n"
-    ));
+    let entry = |name: &str, count: &str| {
+        format!(
+            "{ENTRY_ATTR}\n\
+             void {name}(uint8_t *__restrict__ ff_values, uint8_t *__restrict__ comb_values, uint64_t *__restrict__ write_log, intptr_t ff_delta) {{\n\
+             \x20   (void)write_log;\n\
+             \x20   uint64_t *dirty = (uint64_t *)ff_delta;\n\
+             \x20   for (unsigned w = 0; w < {nw}u; w++) {{\n\
+             \x20       uint64_t b = dirty[w];\n\
+             \x20       if (!b) continue;\n\
+             \x20       dirty[w] = 0;\n\
+             \x20       do {{\n\
+             \x20           unsigned k = w * 64u + (unsigned)__builtin_ctzll(b);\n\
+             {count}\
+             \x20           b &= b - 1;\n\
+             \x20           b |= veryl_cells[k](ff_values, comb_values, dirty);\n\
+             \x20       }} while (b);\n\
+             \x20   }}\n\
+             }}\n"
+        )
+    };
+    body.push_str(&entry("veryl_aot_eval", ""));
+    // A counting copy for the runtime to weigh against the whole-settle
+    // entry; only probes take it, as counting costs every call.
+    if coarse {
+        body.push_str(&format!(
+            "static const uint32_t veryl_cell_stmts[{n}] = {{{}}};\n",
+            cells
+                .iter()
+                .map(|c| c.len().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        body.push_str(&entry(
+            "veryl_aot_eval_counted",
+            "\x20           write_log[0] += veryl_cell_stmts[k];\n\
+             \x20           write_log[1]++;\n",
+        ));
+    }
     if coarse {
         body.push_str(&format!(
             "{ENTRY_ATTR}\n\
@@ -10436,9 +10465,9 @@ mod tests {
              typedef uint64_t veryl_u64_ua __attribute__((__aligned__(1)));\n\
              typedef uint32_t veryl_u32_ua __attribute__((__aligned__(1)));\n\
              typedef uint16_t veryl_u16_ua __attribute__((__aligned__(1)));\n\
-             typedef void (*veryl_sysfn_t)(const unsigned char*, unsigned long, const unsigned long long*, const unsigned int*, unsigned long, unsigned);\n\
-             __attribute__((weak, visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb = 0;\n\
-             __attribute__((weak, visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
+             typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
+             __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb;\n\
+             __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n",
         );
         src.push_str(WIDEOPS_C_DECLS);
         src.push_str(WIDEOPS_C_INLINE);
@@ -14511,6 +14540,9 @@ mod tests {
              typedef struct { int unused; } veryl_wideops_t;\n\
              __attribute__((visibility(\"default\"))) veryl_wideops_t veryl_wideops;\n\
              __attribute__((visibility(\"default\"))) void veryl_set_wideops(const void* t) { veryl_wideops = *(const veryl_wideops_t*)t; }\n\
+             typedef void (*veryl_sysfn_t)(const unsigned char*, uintptr_t, const unsigned long long*, const unsigned int*, uintptr_t, unsigned);\n\
+             __attribute__((visibility(\"default\"))) veryl_sysfn_t veryl_sysfn_cb;\n\
+             __attribute__((visibility(\"default\"))) void veryl_set_sysfn_cb(void *p) { veryl_sysfn_cb = (veryl_sysfn_t)p; }\n\
              static inline uint32_t vw_tag(uint32_t i) { return i + 1; }\n",
         );
         for i in 0..count {
@@ -14534,6 +14566,23 @@ mod tests {
         }
         s.push_str("}\n");
         s
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn split_defines_the_exported_globals_in_the_entry_unit_only() {
+        let units = split_translation_units(&chunked_stub_source(12), 4).unwrap();
+        for (k, unit) in units.iter().enumerate() {
+            for (def, set) in [(WIDEOPS_DEF, WIDEOPS_SET), (SYSFN_DEF, SYSFN_SET)] {
+                let extern_decl = format!("extern {def}");
+                let defs = unit
+                    .lines()
+                    .filter(|l| l.contains(def) && *l != extern_decl);
+                assert_eq!(defs.count(), usize::from(k == 0), "unit {k}: {def}");
+                assert_eq!(unit.contains(set), k == 0, "unit {k}: {set}");
+                assert_eq!(unit.contains(&extern_decl), k != 0, "unit {k}: {def}");
+            }
+        }
     }
 
     #[test]

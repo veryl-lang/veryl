@@ -6,7 +6,7 @@
 //! Cranelift: correct, but a different engine, and `--format json` names the
 //! *requested* backend, so a run can report `cc` while timing the fallback.  What is recorded here surfaces as its `degraded_modules`.
 //!
-//! A module large enough for the AOT path that gets no dataflow settle at all
+//! A module above the size threshold that gets no dataflow settle at all
 //! is listed as `dataflow_declined` (`VERYL_DATAFLOW_DIAG=1` prints why).
 //! One below the size threshold, or built under `VERYL_DATAFLOW=0`, is not
 //! expected to have one and is not listed.

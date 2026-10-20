@@ -9330,6 +9330,34 @@ fn unknown_member() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+
+    let code = r#"
+    interface ab_if {
+        var a: logic;
+        var b: logic;
+        modport master {
+            ..converse(slave)
+        }
+        modport slave {
+            ..same(slave_a, slave_b)
+        }
+        modport slave_a {
+            a: input,
+        }
+        modport slave_b {
+            b: input,
+        }
+    }
+    module c_module (
+        ab: modport ab_if::master,
+    ) {
+        assign ab.a = 0;
+        assign ab.b = 0;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -13081,6 +13109,484 @@ fn invalid_factor_kind() {
 
     let errors = analyze(code);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn reset_value_literal() {
+    // input port connection for each reset type
+    let code = r#"
+    module ModuleA (
+        i_rst0: input reset,
+        i_rst1: input reset_async_high,
+        i_rst2: input reset_async_low,
+        i_rst3: input reset_sync_high,
+        i_rst4: input reset_sync_low,
+    ) {}
+    module ModuleB {
+        inst u_a0: ModuleA (
+            i_rst0: reset_active,
+            i_rst1: reset_active,
+            i_rst2: reset_inactive,
+            i_rst3: reset_inactive,
+            i_rst4: (reset_active),
+        );
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // port connection of generic instance resolved through proto module
+    let code = r#"
+    proto module ProtoA (
+        i_rst: input reset_async_low,
+    );
+    module ModuleA for ProtoA (
+        i_rst: input reset_async_low,
+    ) {}
+    module ModuleB::<M: ProtoA> {
+        inst u_a: M (
+            i_rst: reset_active,
+        );
+    }
+    module ModuleC {
+        inst u_b: ModuleB::<ModuleA>;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // assignment to reset type variables
+    let code = r#"
+    module ModuleA (
+        i_rst : input  reset,
+        o_rst0: output reset,
+        o_rst1: output reset_async_low,
+        o_rst2: output reset,
+        o_rst3: output reset_sync_high,
+    ) {
+        struct StructA {
+            rst: reset,
+        }
+
+        let a: reset = reset_active;
+        var b: StructA;
+        var c: reset_sync_low[2];
+
+        assign b.rst = reset_inactive;
+        assign c[0]  = reset_active;
+
+        always_comb {
+            o_rst0 = a;
+            o_rst1 = reset_active;
+            o_rst2 = b.rst;
+        }
+
+        always_comb {
+            let d: reset_sync_low = reset_inactive;
+            c[1]   = d;
+            o_rst3 = (reset_inactive);
+        }
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // assignment in interface and to modport member
+    let code = r#"
+    interface InterfaceA {
+        var rst0: reset_async_high;
+        var rst1: reset;
+
+        assign rst0 = reset_active;
+
+        modport mp {
+            rst1: output,
+        }
+    }
+    module ModuleA (
+        if_a: modport InterfaceA::mp,
+    ) {
+        assign if_a.rst1 = reset_inactive;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+
+    // equality comparison with reset type signals
+    let code = r#"
+    interface InterfaceA {
+        var rst: reset;
+        modport mp {
+            rst: input,
+        }
+    }
+    module ModuleA (
+        i_rst : input  reset,
+        i_rsts: input  reset_async_low[2],
+        if_a  : modport InterfaceA::mp,
+        o_a   : output logic<7>,
+    ) {
+        struct StructA {
+            rst: reset_sync_low,
+        }
+
+        var s: StructA;
+
+        assign s.rst = i_rst as reset_sync_low;
+
+        assign o_a[0] = i_rst == reset_active;
+        assign o_a[1] = reset_inactive != i_rst;
+        assign o_a[2] = i_rsts[1] == reset_active;
+        assign o_a[3] = if_a.rst != (reset_inactive);
+        assign o_a[4] = s.rst == reset_active;
+        assign o_a[5] = i_rst == reset_active && s.rst != reset_inactive;
+        assign o_a[6] = reset_active == i_rst == 1'b1;
+    }
+    "#;
+
+    let errors = analyze(code);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn invalid_reset_value_literal() {
+    #[track_caller]
+    fn check_n(code: &str, expected: usize) {
+        let errors = analyze(code);
+        let n = errors
+            .iter()
+            .filter(|x| matches!(x, AnalyzerError::InvalidFactor { .. }))
+            .count();
+        assert_eq!(n, expected);
+    }
+
+    #[track_caller]
+    fn check(code: &str) {
+        check_n(code, 1);
+    }
+
+    // assignment to non reset type
+    check(
+        r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        assign o_a = reset_active;
+    }
+    "#,
+    );
+
+    // assignment to whole array and range select
+    for exp in ["assign a = reset_active;", "assign a[1:0] = reset_active;"] {
+        check(&format!(
+            r#"
+    module ModuleA {{
+        var a: reset[2];
+        {exp}
+    }}
+    "#
+        ));
+    }
+
+    // type inference is reported by another error
+    let code = r#"
+    module ModuleA (
+        o_a: output reset,
+    ) {
+        let a = reset_active;
+        assign o_a = a;
+    }
+    "#;
+
+    check_n(code, 0);
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::TypeInferenceNotSupported { .. }))
+    );
+
+    // operator assignment
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_rst: output reset,
+    ) {
+        always_comb {
+            o_rst = i_rst;
+            o_rst |= reset_active;
+        }
+    }
+    "#,
+    );
+
+    // port default value
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input reset = reset_active,
+    ) {}
+    "#,
+    );
+
+    // connection to non reset type port
+    check(
+        r#"
+    module ModuleA (
+        i_a: input logic,
+    ) {}
+    module ModuleB {
+        inst u_a: ModuleA (
+            i_a: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to output port
+    check(
+        r#"
+    module ModuleA (
+        o_rst: output reset,
+    ) {
+        assign o_rst = 0;
+    }
+    module ModuleB {
+        inst u_a: ModuleA (
+            o_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to output port of generic instance
+    check(
+        r#"
+    proto module ProtoA (
+        o_rst: output reset,
+    );
+    module ModuleB::<M: ProtoA> {
+        inst u_a: M (
+            o_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // connection to SystemVerilog port
+    check(
+        r#"
+    module ModuleA {
+        inst u: $sv::Module (
+            rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    // unresolved counterpart is reported by another error
+    let code = r#"
+    module ModuleA {
+        inst u: ModuleX (
+            rst: reset_active,
+        );
+    }
+    "#;
+
+    check_n(code, 0);
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|x| matches!(x, AnalyzerError::UndefinedIdentifier { .. }))
+    );
+
+    // function argument and return value
+    check(
+        r#"
+    module ModuleA (
+        o_a: output logic,
+    ) {
+        function f (
+            rst: input reset,
+        ) -> logic {
+            return rst;
+        }
+
+        assign o_a = f(reset_inactive);
+    }
+    "#,
+    );
+
+    check(
+        r#"
+    module ModuleA (
+        o_rst: output reset,
+    ) {
+        function f () -> reset {
+            return reset_active;
+        }
+
+        assign o_rst = f();
+    }
+    "#,
+    );
+
+    // operators other than equality comparison
+    for exp in [
+        "~reset_active",
+        "i_rst & reset_active",
+        "i_rst && reset_active",
+        "i_rst ==? reset_active",
+        "{reset_active}",
+        "reset_active as reset",
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {{
+        assign o_a = {exp};
+    }}
+    "#
+        ));
+    }
+
+    // conditional expressions
+    for exp in [
+        "if i_a ? reset_active : i_rst",
+        "case i_a { 0: reset_active, default: i_rst }",
+        "switch { i_a: reset_active, default: i_rst }",
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA (
+        i_a  : input  logic,
+        i_rst: input  reset,
+        o_rst: output reset,
+    ) {{
+        assign o_rst = {exp};
+    }}
+    "#
+        ));
+    }
+
+    // invalid counterpart of equality comparison
+    for (exp, n) in [
+        ("i_a == reset_active", 1),
+        ("reset_active == reset_inactive", 2),
+        ("(i_rst & i_rst) == reset_active", 1),
+        ("i_rst & i_rst == reset_active", 0),
+        ("i_rst == i_rst == reset_active", 1),
+        ("f() == reset_active", 1),
+    ] {
+        check_n(
+            &format!(
+                r#"
+    module ModuleA (
+        i_a  : input  logic,
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {{
+        function f () -> reset {{
+            return i_rst;
+        }}
+
+        assign o_a = {exp};
+    }}
+    "#
+            ),
+            n,
+        );
+    }
+
+    // type not declared directly by reset keyword
+    for (decl, exp) in [
+        ("var a: T;", "assign a = reset_active;"),
+        ("var a: R;", "assign a = reset_active;"),
+        ("var a: C;", "assign a = reset_active;"),
+        ("var a: S;", "assign a.rst = reset_active;"),
+        ("var a: T;", "assign o_a = a == reset_active;"),
+        ("var a: C;", "assign o_a = a == reset_active;"),
+        ("var a: S;", "assign o_a = a.rst != reset_inactive;"),
+    ] {
+        check(&format!(
+            r#"
+    module ModuleA #(
+        param T: type = reset,
+    ) (
+        o_a: output logic,
+    ) {{
+        const C: type = reset_async_low;
+        type R = reset;
+
+        struct S {{
+            rst: T,
+        }}
+
+        {decl}
+        {exp}
+    }}
+    "#
+        ));
+    }
+
+    check(
+        r#"
+    module ModuleA #(
+        param T: type = reset,
+    ) (
+        i_rst: input T,
+    ) {}
+    module ModuleB {
+        inst u_a: ModuleA (
+            i_rst: reset_active,
+        );
+    }
+    "#,
+    );
+
+    check(
+        r#"
+    proto package ProtoPkg {
+        type rst_t;
+    }
+    package PkgA for ProtoPkg {
+        type rst_t = reset_async_low;
+    }
+    module ModuleA::<P: ProtoPkg> (
+        o_rst: output P::rst_t,
+    ) {
+        assign o_rst = reset_active;
+    }
+    module ModuleB {
+        inst u_a: ModuleA::<PkgA>;
+    }
+    "#,
+    );
+
+    // case label
+    check(
+        r#"
+    module ModuleA (
+        i_rst: input  reset,
+        o_a  : output logic,
+    ) {
+        always_comb {
+            case i_rst {
+                reset_active: o_a = 1;
+                default   : o_a = 0;
+            }
+        }
+    }
+    "#,
+    );
 }
 
 #[test]

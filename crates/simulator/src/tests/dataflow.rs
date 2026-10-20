@@ -57,6 +57,58 @@ fn validated_event_keeps_the_marks_of_the_code_it_keeps() {
 }
 
 #[test]
+fn validate_reports_an_event_that_misses_its_marks() {
+    if !crate::tests::dataflow_on() || !crate::tests::aot_c_loads() {
+        return;
+    }
+    let code = r#"
+    module ValidateMissingMarks (clk: input clock, rst: input reset, o: output logic<8>) {
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; } else { r = r + 3; }
+        }
+        assign o = r ^ 8'h5a;
+    }
+    "#;
+    // With the FF optimisation `r` is stored in comb storage, so the event
+    // marks at a comb store; without it, at its log push.
+    for disable_ff_opt in [false, true] {
+        let config = Config {
+            disable_ff_opt,
+            ..aot_config(true)
+        };
+        let run = |drop_marks: bool| -> Option<String> {
+            crate::backend::aot_c::emit::DROP_DF_MARKS.with(|d| d.set(drop_marks));
+            let result = std::panic::catch_unwind(|| {
+                let ir = crate::tests::analyze_top(code, &config, "ValidateMissingMarks").unwrap();
+                assert!(ir.dataflow_ready());
+                let mut sim = Simulator::new(ir, None);
+                let clk = sim.get_clock("clk").unwrap();
+                let rst = sim.get_reset("rst").unwrap();
+                sim.step_reset(&clk, &rst);
+                for _ in 0..4 {
+                    sim.step(&clk);
+                    sim.ensure_comb_updated();
+                }
+            });
+            crate::backend::aot_c::emit::DROP_DF_MARKS.with(|d| d.set(false));
+            result.err().map(|e| {
+                e.downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| e.downcast_ref::<String>().cloned())
+                    .unwrap_or_default()
+            })
+        };
+        assert_eq!(run(false), None, "disable_ff_opt={disable_ff_opt}");
+        let panic = run(true).expect("an event without its marks is reported");
+        assert!(
+            panic.contains("unmarked"),
+            "disable_ff_opt={disable_ff_opt}: {panic}"
+        );
+    }
+}
+
+#[test]
 fn validated_wide_select_reaches_its_readers() {
     if !crate::backend::aot_c::cc_available() {
         return;
@@ -216,8 +268,12 @@ const TWO_CELLS: &str = r#"
     }
 "#;
 
-/// Settles through `c` and `q` until the runtime picks the given mode.
+/// Settles through `c` and `q` until the runtime picks the given mode; a
+/// period's probe window runs the per-cell entry.
 fn settle_until_mode(sim: &mut Simulator, coarse: bool, tick: &mut u64) {
+    if !coarse {
+        sim.ir.dataflow_mode.restart_period();
+    }
     for _ in 0..8192 {
         if sim.ir.dataflow_mode.was_coarse.get() == coarse {
             return;
@@ -494,4 +550,97 @@ fn a_flop_driven_clock_beside_a_gated_one_fires_on_the_master_step() {
             assert_eq!(cnt, step.div_ceil(2), "step {step}, {config:?}");
         }
     }
+}
+
+#[test]
+fn without_aot_c_the_cranelift_cells_settle_the_comb() {
+    if !crate::tests::dataflow_on() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        rst: input  reset   ,
+        a  : input  logic<8>,
+        o  : output logic<8>,
+        p  : output logic<8>,
+    ) {
+        var r: logic<8>;
+        always_ff (clk, rst) {
+            if_reset { r = 0; } else { r = r + 1; }
+        }
+        let x: logic<8> = a + 8'd3;
+        assign o = x ^ r;
+        assign p = a * 8'd2;
+    }
+    "#;
+    let config = Config {
+        use_jit: true,
+        ..Default::default()
+    };
+    assert!(!config.aot_c);
+    let ir = analyze(code, &config);
+    let df = ir.dataflow.as_ref().expect("no dataflow without AOT-C");
+    assert!(df.jit_only && df.jit.is_some());
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let rst = sim.get_reset("rst").unwrap();
+    sim.step_reset(&clk, &rst);
+    let v = |x: u64| Value::new(x, 8, false);
+    for (i, a) in [5u64, 5, 9, 250, 250, 0].into_iter().enumerate() {
+        sim.set("a", v(a));
+        sim.step(&clk);
+        let r = (i as u64 + 1) & 0xff;
+        assert_eq!(
+            sim.get("o").unwrap().payload_u64(),
+            ((a + 3) & 0xff) ^ r,
+            "cycle {i}"
+        );
+        assert_eq!(
+            sim.get("p").unwrap().payload_u64(),
+            (a * 2) & 0xff,
+            "cycle {i}"
+        );
+    }
+}
+
+#[test]
+fn leaving_the_chunked_settle_reruns_every_cranelift_cell() {
+    if !crate::tests::dataflow_on() {
+        return;
+    }
+    let code = r#"
+    module Top (
+        clk: input  clock   ,
+        a  : input  logic<8>,
+        c  : input  logic<8>,
+        o  : output logic<8>,
+        q  : output logic<8>,
+    ) {
+        var r: logic<8>;
+        always_ff (clk) { r = a; }
+        assign o = r + 1;
+        assign q = c + 1;
+    }
+    "#;
+    let config = Config {
+        use_jit: true,
+        ..Default::default()
+    };
+    let ir = analyze(code, &config);
+    assert!(ir.dataflow.as_ref().unwrap().jit_only);
+    let mut sim = Simulator::new(ir, None);
+    let clk = sim.get_clock("clk").unwrap();
+    let v = |x: u64| Value::new(x, 8, false);
+    sim.set("a", v(3));
+    sim.step(&clk);
+    assert_eq!(sim.get("o").unwrap(), v(4));
+    let mut tick = 0;
+    settle_until_mode(&mut sim, true, &mut tick);
+    // Under the chunked settle the commit marks nothing, so the cells see
+    // `r` move only by rerunning all of them.
+    sim.set("a", v(9));
+    sim.step(&clk);
+    sim.ir.dataflow_mode.restart_period();
+    assert_eq!(sim.get("o").unwrap(), v(10));
 }

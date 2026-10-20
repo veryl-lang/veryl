@@ -680,7 +680,7 @@ impl Ir {
         }
         if aot.is_some() {
             self.dataflow_dispatch[0].fetch_add(1, Ordering::Relaxed);
-        } else {
+        } else if !df.jit_only {
             self.dataflow_dispatch[1].fetch_add(1, Ordering::Relaxed);
             if !self
                 .dataflow_fallback_recorded
@@ -696,9 +696,12 @@ impl Ir {
             self.dataflow_live.set(false);
         }
         let coarse_fn = aot.and_then(|m| m.coarse_func);
-        let (coarse, probing) = match coarse_fn {
-            Some(_) => self.dataflow_mode.next(),
-            None => (false, false),
+        // With no `.so` coming, the whole settle is the chunked one.
+        let (coarse, probing) = if coarse_fn.is_some() || df.jit_only {
+            self.dataflow_mode
+                .next(|| df.plan.cells.iter().map(Vec::len).sum())
+        } else {
+            (false, false)
         };
         // Under the whole-settle entry no event or commit needs to mark;
         // the Cranelift events find no dirty words to mark in.
@@ -719,6 +722,9 @@ impl Ir {
         // so back on the cells every one of them runs once.
         if self.dataflow_mode.was_coarse.replace(coarse) && !coarse {
             self.dataflow_live.set(false);
+        }
+        if coarse && aot.is_none() {
+            return false;
         }
         static LANDED: std::sync::Once = std::sync::Once::new();
         LANDED.call_once(|| {
@@ -776,10 +782,13 @@ impl Ir {
         } else {
             None
         };
+        let counted = aot.and_then(|m| m.counted).filter(|_| probing);
+        let count_jit = probing && aot.is_none();
+        // Through the log argument, which the per-cell entries leave unused.
+        let mut counts = [0u64; 2];
         // SAFETY: the dataflow entry has the `FuncPtr` ABI, reading and
         // writing the same buffers; `ff_delta` carries the dirty words,
         // which it clears as it runs.
-        let t_run = probing.then(std::time::Instant::now);
         if let Some(m) = aot {
             let nw = df.plan.words();
             let always = self.dataflow_always_mask.get_or_init(|| {
@@ -800,7 +809,15 @@ impl Ir {
                     dirty[..nw].fill(0);
                 }
                 _ => unsafe {
-                    (m.func)(ff_ptr, comb_ptr, log_ptr, dirty.as_mut_ptr() as isize);
+                    match counted {
+                        Some(f) => f(
+                            ff_ptr,
+                            comb_ptr,
+                            counts.as_mut_ptr().cast(),
+                            dirty.as_mut_ptr() as isize,
+                        ),
+                        None => (m.func)(ff_ptr, comb_ptr, log_ptr, dirty.as_mut_ptr() as isize),
+                    }
                 },
             }
         } else if let Some(j) = jit {
@@ -816,6 +833,10 @@ impl Ir {
                         }
                         *bits.add(w) = b & (b - 1);
                         let k = w * 64 + b.trailing_zeros() as usize;
+                        if count_jit {
+                            counts[0] += df.plan.cells[k].len() as u64;
+                            counts[1] += 1;
+                        }
                         match j.funcs[k] {
                             Some(f) => f(ff_ptr, comb_ptr, log_ptr, bits as isize),
                             None => self.interpret_cell(df, k, bits),
@@ -824,9 +845,8 @@ impl Ir {
                 }
             }
         }
-        if let Some(t) = t_run {
-            self.dataflow_mode
-                .record(coarse, t.elapsed().as_nanos() as u64);
+        if counted.is_some() || count_jit {
+            self.dataflow_mode.record(counts[0], counts[1]);
         }
         drop(dirty);
         if let Some(t0) = t0 {
@@ -1338,6 +1358,13 @@ pub struct Config {
     pub dump_asm: bool,
     /// Force all always_ff variables to FF (disable is_ff refinement).
     pub disable_ff_opt: bool,
+    /// Settle a comb list that has no one-pass order in as many passes as it
+    /// takes, instead of rejecting it.  A synthesisable design has such an
+    /// order bit by bit; the analysis works per statement and may not find
+    /// it, and this trades the error for extra settle passes.
+    /// `VERYL_ALLOW_MULTI_PASS=1` or `=0` overrides it, including where no
+    /// flag reaches.
+    pub allow_multi_pass: bool,
     /// `cc` backend: emit the dataflow comb settle as C, compile externally,
     /// and dispatch the `.so` instead of the Cranelift loop (which still
     /// covers modules the settle declines, so keep `use_jit` true).  Default
@@ -1379,6 +1406,15 @@ pub struct Config {
 }
 
 impl Config {
+    /// Run on Cranelift alone, for a host where AOT-C modules cannot load.
+    pub fn fall_back_to_cranelift(&mut self) {
+        self.use_jit = true;
+        self.aot_c = false;
+        self.aot_c_event = false;
+        self.aot_c_async = false;
+        self.aot_c_validate = false;
+    }
+
     /// Apply environment-variable overrides on top of an existing config.
     pub fn apply_env(&mut self) {
         if env::var("VERYL_DUMP_ASM").ok().as_deref() == Some("1") {
@@ -1410,6 +1446,9 @@ impl Config {
             && let Ok(n) = n.parse::<usize>()
         {
             self.aot_c_min_stmts = n;
+        }
+        if let Some(v) = env_bool("VERYL_ALLOW_MULTI_PASS") {
+            self.allow_multi_pass = v;
         }
         // On by default for the CLI; `VERYL_DUT_REUSE=0` opts out.  Off in the
         // unit-test harness, which never calls `apply_env` (see `Config::dut_reuse`).
@@ -1510,12 +1549,12 @@ pub(crate) fn mark_readers(
     }
 }
 
-/// Chooses, settle by settle, between a dataflow comb's per-cell dispatch and
-/// its whole-settle entry by timing both: the two alternate in short probe
-/// windows at the start of each period, and the faster one runs the rest of
-/// it.  Which pays depends on how many cells a settle dirties, which only a
-/// run shows.  A choice that holds doubles the next period, so a design that
-/// keeps its character stops paying for probes.
+/// Chooses between a dataflow comb's per-cell and whole-settle entries.
+/// Which pays depends on how many cells a settle dirties, which only a run
+/// shows, so a probe window at the start of each period counts the per-cell
+/// entry's work.  Counting rather than timing keeps the choice the same on
+/// any machine.  A choice that holds doubles the next period, so a design
+/// that keeps its character stops paying for probes.
 #[derive(Default)]
 pub(crate) struct DataflowMode {
     settles: std::cell::Cell<u64>,
@@ -1524,8 +1563,7 @@ pub(crate) struct DataflowMode {
     decided: std::cell::Cell<bool>,
     coarse: std::cell::Cell<bool>,
     pub(crate) was_coarse: std::cell::Cell<bool>,
-    nanos: [std::cell::Cell<u64>; 2],
-    count: [std::cell::Cell<u64>; 2],
+    counted: [std::cell::Cell<u64>; 3],
 }
 
 impl DataflowMode {
@@ -1533,17 +1571,28 @@ impl DataflowMode {
     const MIN_PERIOD_LOG2: u32 = 18;
     const MAX_PERIOD_LOG2: u32 = 26;
 
-    /// This settle's mode, and whether it is a probe to time.
-    fn next(&self) -> (bool, bool) {
+    /// What a cell call costs beyond its statements, in statements: the
+    /// dirty-bit scan, the call and the boundary compare.  Calibrated on
+    /// forced runs of both entries: on every reference CPU core and GPU design
+    /// measured, any value from 17 to 40 picks the entry that ran fewer
+    /// instructions.
+    const CALL_COST: f64 = 24.0;
+
+    /// This settle's mode, and whether it is a probe.
+    fn next(&self, stmts: impl FnOnce() -> usize) -> (bool, bool) {
         let i = self.settles.get();
         let period = 1u64 << (Self::MIN_PERIOD_LOG2 + self.backoff.get());
         self.settles.set(if i + 1 == period { 0 } else { i + 1 });
-        if i < 4 * Self::PROBE {
-            return ((i / Self::PROBE) % 2 == 1, true);
+        // The first settle of a period may rerun every cell (back from the
+        // whole-settle entry, or as the `.so` lands), which says nothing
+        // about the design.
+        if i <= Self::PROBE {
+            return (false, i > 0);
         }
-        if i == 4 * Self::PROBE {
-            let avg = |m: usize| self.nanos[m].get() as f64 / self.count[m].get().max(1) as f64;
-            let (fine, whole) = (avg(0), avg(1));
+        if i == Self::PROBE + 1 {
+            let [s, c, n] = self.counted.each_ref().map(|x| x.get());
+            let fine = (s as f64 + Self::CALL_COST * c as f64) / n.max(1) as f64;
+            let whole = stmts() as f64;
             let held = self.decided.replace(true) && (whole < fine) == self.coarse.get();
             self.backoff.set(if held {
                 (self.backoff.get() + 1).min(Self::MAX_PERIOD_LOG2 - Self::MIN_PERIOD_LOG2)
@@ -1553,21 +1602,28 @@ impl DataflowMode {
             self.coarse.set(whole < fine);
             if crate::ir::opt::dataflow::diag() {
                 eprintln!(
-                    "[dataflow] mode: cells {fine:.0} ns, whole {whole:.0} ns -> {}",
+                    "[dataflow] mode: cells {fine:.0} ({:.0} stmts, {:.1} calls), whole {whole:.0} -> {}",
+                    s as f64 / n.max(1) as f64,
+                    c as f64 / n.max(1) as f64,
                     if whole < fine { "whole" } else { "cells" }
                 );
             }
-            for m in 0..2 {
-                self.nanos[m].set(0);
-                self.count[m].set(0);
+            for x in &self.counted {
+                x.set(0);
             }
         }
         (self.coarse.get(), false)
     }
 
-    fn record(&self, coarse: bool, nanos: u64) {
-        let m = usize::from(coarse);
-        self.nanos[m].set(self.nanos[m].get() + nanos);
-        self.count[m].set(self.count[m].get() + 1);
+    /// Start a new period, whose probe window runs the per-cell entry.
+    #[cfg(test)]
+    pub(crate) fn restart_period(&self) {
+        self.settles.set(0);
+    }
+
+    fn record(&self, stmts: u64, calls: u64) {
+        for (x, v) in self.counted.iter().zip([stmts, calls, 1]) {
+            x.set(x.get() + v);
+        }
     }
 }

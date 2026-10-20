@@ -5487,6 +5487,95 @@ fn binary_corner_case() {
 }
 
 #[test]
+fn logical_and_known_zero_controls_unknown_operand() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'h0");
+        let one = format!("{width}'h1");
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&zero, "&&", &unknown, 1, "1'b0", true);
+            binary_test(&unknown, "&&", &zero, 1, "1'b0", true);
+            binary_test(&one, "&&", &unknown, 1, "1'bx", true);
+            binary_test(&unknown, "&&", &one, 1, "1'bx", true);
+            let mixed = format!("{width}'b1{}", digit.to_string().repeat(width - 1));
+            binary_test(&mixed, "&&", &one, 1, "1'b1", true);
+            binary_test(&one, "&&", &mixed, 1, "1'b1", true);
+        }
+    }
+    binary_test("8'b1xxxxxxx", "&&", "8'bxxxxxxx1", 1, "1'b1", true);
+}
+
+#[test]
+fn logical_or_known_one_controls_unknown_operand() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'h0");
+        // Put the controlling bit above the low word for wide operands.
+        let one = format!("{width}'b1{}", "0".repeat(width - 1));
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&one, "||", &unknown, 1, "1'b1", true);
+            binary_test(&unknown, "||", &one, 1, "1'b1", true);
+            binary_test(&zero, "||", &unknown, 1, "1'bx", true);
+            binary_test(&unknown, "||", &zero, 1, "1'bx", true);
+        }
+    }
+    binary_test("8'b1xxxxxxx", "||", "8'bzzzzzzzz", 1, "1'b1", true);
+    binary_test("8'bzzzzzzzz", "||", "8'b1xxxxxxx", 1, "1'b1", true);
+}
+
+#[test]
+fn bitwise_and_known_zero_controls_unknown_bits() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'b{}", "0".repeat(width));
+        let ones = format!("{width}'b{}", "1".repeat(width));
+        let unknown_result = format!("{width}'b{}", "x".repeat(width));
+        let mixed = format!(
+            "{width}'b{}",
+            "01".repeat(width).chars().take(width).collect::<String>()
+        );
+        let mixed_result = format!(
+            "{width}'b{}",
+            "0x".repeat(width).chars().take(width).collect::<String>()
+        );
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&zero, "&", &unknown, width, &zero, true);
+            binary_test(&unknown, "&", &zero, width, &zero, true);
+            binary_test(&ones, "&", &unknown, width, &unknown_result, true);
+            binary_test(&unknown, "&", &ones, width, &unknown_result, true);
+            binary_test(&mixed, "&", &unknown, width, &mixed_result, true);
+            binary_test(&unknown, "&", &mixed, width, &mixed_result, true);
+        }
+    }
+}
+
+#[test]
+fn bitwise_or_known_one_controls_unknown_bits() {
+    for width in [1, 8, 64, 65, 128, 129] {
+        let zero = format!("{width}'b{}", "0".repeat(width));
+        let ones = format!("{width}'b{}", "1".repeat(width));
+        let unknown_result = format!("{width}'b{}", "x".repeat(width));
+        let mixed = format!(
+            "{width}'b{}",
+            "01".repeat(width).chars().take(width).collect::<String>()
+        );
+        let mixed_result = format!(
+            "{width}'b{}",
+            "x1".repeat(width).chars().take(width).collect::<String>()
+        );
+        for digit in ['x', 'z'] {
+            let unknown = format!("{width}'h{digit}");
+            binary_test(&ones, "|", &unknown, width, &ones, true);
+            binary_test(&unknown, "|", &ones, width, &ones, true);
+            binary_test(&zero, "|", &unknown, width, &unknown_result, true);
+            binary_test(&unknown, "|", &zero, width, &unknown_result, true);
+            binary_test(&mixed, "|", &unknown, width, &mixed_result, true);
+            binary_test(&unknown, "|", &mixed, width, &mixed_result, true);
+        }
+    }
+}
+
+#[test]
 fn inout_function_argument_copies_back() {
     // https://github.com/veryl-lang/veryl/issues/3308
     let code = r#"
@@ -30152,6 +30241,16 @@ fn a_handshake_closed_across_two_arms_is_split_per_arm() {
     }
 }
 
+/// `Config::all()` allowing a multi-pass settle: for designs built to reach
+/// the phase that orders what no granularity linearized.
+fn multi_pass_configs() -> Vec<Config> {
+    let mut configs = Config::all();
+    for config in &mut configs {
+        config.allow_multi_pass = true;
+    }
+    configs
+}
+
 #[test]
 fn an_arm_writing_the_selector_keeps_the_case_whole() {
     // The first arm writes the SELECTOR: one `case` picks a branch once,
@@ -30197,7 +30296,7 @@ fn an_arm_writing_the_selector_keeps_the_case_whole() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (st, hold, ready) -> (valid, en, sel)
@@ -30280,7 +30379,7 @@ fn a_dynamic_element_write_keeps_the_scope_in_source_order() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (st, sel, hold, ready, idx, a2) -> o
@@ -30472,7 +30571,7 @@ fn a_read_and_a_write_in_different_arms_are_not_a_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (s, st, a, c, d) -> (y, en, sel, eno)
@@ -30601,7 +30700,7 @@ fn two_arms_reading_each_other_back_are_not_a_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // (s, st, c, d) -> (po, qo, sel, eno)
@@ -30721,7 +30820,7 @@ fn struct_members_across_a_boundary_are_not_one_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // Elaborating at all is the regression, so it is checked under every
@@ -30807,7 +30906,7 @@ fn disjoint_halves_of_a_vector_are_not_one_loop() {
     }
     "#;
 
-    for config in Config::all() {
+    for config in multi_pass_configs() {
         dbg!(&config);
 
         // As above: elaboration under every config, values where the undriven
@@ -35353,4 +35452,1043 @@ fn dataflow_switch_from_jit_cells_to_the_so_reruns_every_cell() {
         on_jit,
         "the .so landed before the first settle; nothing was handed over"
     );
+}
+
+#[test]
+fn a_block_reading_bits_another_block_writes_waits_for_them() {
+    // Each block writes one half of `v` and of `w` and reads the half the
+    // other block writes.  As blocks they feed each other; bit by bit
+    // `v[3:0] -> v[7:4] -> w[7:4] -> w[3:0]` is a chain.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        c: input  logic<4>,
+        d: input  logic<4>,
+        v: output logic<8>,
+        w: output logic<8>,
+    ) {
+        always_comb {
+            w[3:0] = w[7:4] & d;
+            v[7:4] = v[3:0] ^ c;
+        }
+        always_comb {
+            v[3:0] = a;
+            w[7:4] = v[7:4] | b;
+        }
+    }
+    "#;
+
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (a, b, c, d) in [
+            (0x5u64, 0x2u64, 0x9u64, 0xfu64),
+            (0xa, 0x1, 0x3, 0x6),
+            (0xf, 0x0, 0xf, 0xb),
+        ] {
+            sim.set("a", Value::new(a, 4, false));
+            sim.set("b", Value::new(b, 4, false));
+            sim.set("c", Value::new(c, 4, false));
+            sim.set("d", Value::new(d, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            let v = ((a ^ c) << 4) | a;
+            let w_hi = (a ^ c) | b;
+            let w = (w_hi << 4) | (w_hi & d);
+            assert_eq!(sim.get("v").unwrap(), Value::new(v, 8, false), "{config:?}");
+            assert_eq!(sim.get("w").unwrap(), Value::new(w, 8, false), "{config:?}");
+        }
+    }
+}
+
+/// `(output, value, width)` per output a case checks.
+type Expected = Vec<(&'static str, u64, usize)>;
+
+/// `code` under every config, inputs set per case and outputs checked.
+fn check_cases(
+    code: &str,
+    inputs: &[(&str, usize)],
+    cases: &[&[u64]],
+    expect: &dyn Fn(&[u64]) -> Expected,
+) {
+    for config in Config::all() {
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for case in cases {
+            for ((name, width), value) in inputs.iter().zip(*case) {
+                sim.set(name, Value::new(*value, *width, false));
+            }
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (name, value, width) in expect(case) {
+                assert_eq!(
+                    sim.get(name).unwrap(),
+                    Value::new(value, width, false),
+                    "{name} {case:x?} {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_snapshot_across_generations_leaves_untouched_bits_unconditional() {
+    // The else arm reads `v[7:6]` after writing `v[3:0]`, so the snapshot
+    // spans bits of two generations.  `v[7:4]` is written before the `if`
+    // only; folding it under `c` would close a loop through `c = v[7]`.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        b: input  logic<4>,
+        d: input  logic<4>,
+        o: output logic<8>,
+    ) {
+        var v: logic<8>;
+        var c: logic;
+        always_comb {
+            v[7:4] = a;
+            if c {
+                v[3:0] = b;
+            } else {
+                v[3:0] = d;
+                v[1:0] = v[7:6];
+            }
+        }
+        assign c = v[7];
+        assign o = v;
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("b", 4), ("d", 4)],
+        &[&[0x8, 0x5, 0xa], &[0x4, 0x5, 0xa], &[0xc, 0x3, 0x0]],
+        &|k| {
+            let lo = if k[0] & 8 != 0 {
+                k[1]
+            } else {
+                (k[2] & 0xc) | (k[0] >> 2)
+            };
+            vec![("o", (k[0] << 4) | lo, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_read_comes_before_every_later_write_of_its_bits() {
+    // `v3[7:4] = v2[3:0]` reads the version of `v2[3:0]` written above it, and
+    // two later writes each replace half of it.  Both must wait for the read;
+    // ordering only the first leaves `v2[3:2] = ...` free to run ahead.
+    let code = r#"
+    module Top (
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+        o3: output logic<8>,
+        o4: output logic<8>,
+    ) {
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v3: logic<8>;
+        var v4: logic<8>;
+        assign o1 = v1;
+        assign o2 = v2;
+        assign o3 = v3;
+        assign o4 = v4;
+        always_comb {
+            v4[3:0] = i3[3:0];
+            v1      = i2;
+            v4[7:4] = v3[3:0];
+        }
+        always_comb {
+            v2[7:4] = i3[6:3];
+        }
+        always_comb {
+            v2[3:0] = i2[6:3];
+            v3[3:0] = v1[3:0];
+            v3[7:4] = v3[3:0];
+            v3[7:4] = v2[3:0];
+            v2[1:0] = i2[4:3];
+            v2[3:2] = v1[4:3];
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i2", 8), ("i3", 8)],
+        &[&[0xb1, 0xd0], &[0x0f, 0xa8], &[0x70, 0x2c], &[0x00, 0xff]],
+        &|k| {
+            let (i2, i3) = (k[0], k[1]);
+            let v2 = (((i3 >> 3) & 0xf) << 4) | (((i2 >> 3) & 3) << 2) | ((i2 >> 3) & 3);
+            let v3 = (((i2 >> 3) & 0xf) << 4) | (i2 & 0xf);
+            let v4 = ((i2 & 0xf) << 4) | (i3 & 0xf);
+            vec![("o1", i2, 8), ("o2", v2, 8), ("o3", v3, 8), ("o4", v4, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_read_of_settled_bits_does_not_wait_for_their_writer_to_come_after() {
+    // `y` reads `x[3:1]`, versions this block wrote, and `x[7:4]`, settled
+    // bits the assign below supplies.  Only the versions are bound to come
+    // before a later write; ordering the settled bits that way too would
+    // contradict their own edge and reject the design.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        c: input  logic<2>,
+        e: input  logic<4>,
+        o: output logic<8>,
+        q: output logic   ,
+    ) {
+        var x: logic<8>;
+        var s: logic<4>;
+        var y: logic;
+        always_comb {
+            x[3:0] = a;
+            x[1:0] = c;
+            y      = ^x[7:1];
+            s      = e;
+        }
+        assign x[7:4] = s;
+        assign o      = x;
+        assign q      = y;
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("c", 2), ("e", 4)],
+        &[&[0x8, 0x1, 0xa], &[0x4, 0x2, 0x1], &[0xc, 0x3, 0x0]],
+        &|k| {
+            let x = (k[2] << 4) | (k[0] & 0xc) | k[1];
+            vec![("o", x, 8), ("q", ((x >> 1).count_ones() & 1) as u64, 1)]
+        },
+    );
+}
+
+#[test]
+fn a_reader_of_bits_it_writes_itself_waits_for_the_rest() {
+    // `v0[5:4] = v0[6:5]` reads bit 5, which it writes itself, and bit 6,
+    // which the statement above writes.  Only bit 6 orders it, and must.
+    let code = r#"
+    module Top (
+        i1: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+    ) {
+        var v0: logic<8>;
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v3: logic<8>;
+        assign o0 = v0;
+        always_comb {
+            v0[3:0] = i3[5:2];
+            v3[3:0] = v0[3:0];
+            v0[3:0] = v3[3:0] & v1[7:4];
+        }
+        always_comb {
+            v2      = i1;
+            v0[7:4] = v2[4:1];
+            v2      = i3;
+            v1[7:4] = v2[6:3];
+            v0[7:6] = v0[1:0];
+            v0[5:4] = v0[6:5];
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i1", 8), ("i3", 8)],
+        &[&[0x63, 0xcd], &[0x34, 0x78], &[0x08, 0xfe]],
+        &|k| {
+            let (i1, i3) = (k[0], k[1]);
+            let lo = ((i3 >> 2) & 0xf) & ((i3 >> 3) & 0xf);
+            let mut v0 = (((i1 >> 1) & 0xf) << 4) | lo;
+            v0 = (v0 & 0x3f) | ((lo & 3) << 6);
+            v0 = (v0 & !0x30) | (((v0 >> 5) & 3) << 4);
+            vec![("o0", v0, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_reader_of_a_version_and_of_other_bits_waits_for_both() {
+    // `z = v[5:2]` reads `v[3:2]` from the version above and `v[5:4]` from
+    // the other block, which reads `y` back from this one.  Bit by bit the
+    // blocks only pass values forward.
+    let code = r#"
+    module Top (
+        a: input  logic<4>,
+        c: input  logic<4>,
+        v: output logic<8>,
+        y: output logic<4>,
+        z: output logic<4>,
+    ) {
+        always_comb {
+            v[3:0] = a;
+            y      = v[3:0] ^ c;
+            z      = v[5:2];
+            v[3:0] = y + 1;
+        }
+        always_comb {
+            v[7:4] = y;
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("a", 4), ("c", 4)],
+        &[&[5, 1], &[0xa, 3], &[0xf, 0], &[3, 2]],
+        &|k| {
+            let y = k[0] ^ k[1];
+            let z = ((y & 3) << 2) | (k[0] >> 2);
+            vec![
+                ("v", (y << 4) | ((y + 1) & 0xf), 8),
+                ("y", y, 4),
+                ("z", z, 4),
+            ]
+        },
+    );
+}
+
+#[test]
+fn a_childs_comb_keeps_its_one_pass_order() {
+    // Inside `Sub`, `v6[7:4]` reads `v2[3:0]` and `v2[7:4]` reads `v6[5:4]`:
+    // as blocks the two feed each other, bit by bit they are a chain.  The
+    // child's comb runs as one compiled unit, so the unit's own order has to
+    // be the one-pass one.
+    let code = r#"
+    module Sub (
+        i0: input  logic<8>,
+        i1: input  logic<8>,
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        var v1: logic<8>;
+        var v2: logic<8>;
+        var v6: logic<8>;
+        assign o0 = v1;
+        assign o1 = v2;
+        assign o2 = v6;
+        always_comb {
+            v1[7:4] = i0[7:4];
+            v1[3:0] = i1[3:0];
+        }
+        always_comb {
+            v6[3:0] = i2[3:0];
+            v6[7:4] = v2[3:0] | v1[3:0];
+        }
+        always_comb {
+            v2[3:0] = i3[3:0];
+            v2[7:4] = v2[3:0] ^ v6[5:2];
+        }
+    }
+
+    module Top (
+        i0: input  logic<8>,
+        i1: input  logic<8>,
+        i2: input  logic<8>,
+        i3: input  logic<8>,
+        o0: output logic<8>,
+        o1: output logic<8>,
+        o2: output logic<8>,
+    ) {
+        inst u: Sub (i0, i1, i2, i3, o0, o1, o2);
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i0", 8), ("i1", 8), ("i2", 8), ("i3", 8)],
+        &[
+            &[0x41, 0xbb, 0x5f, 0x68],
+            &[0x12, 0x34, 0x56, 0x78],
+            &[0xf0, 0x0f, 0xaa, 0x55],
+            &[0x5a, 0xa5, 0x3c, 0xc3],
+        ],
+        &|k| {
+            let v1 = (k[0] & 0xf0) | (k[1] & 0xf);
+            let v6 = (((k[3] | k[1]) & 0xf) << 4) | (k[2] & 0xf);
+            let v2 = (((k[3] ^ (v6 >> 2)) & 0xf) << 4) | (k[3] & 0xf);
+            vec![("o0", v1, 8), ("o1", v2, 8), ("o2", v6, 8)]
+        },
+    );
+}
+
+#[test]
+fn a_signed_read_of_the_destination_keeps_its_sign() {
+    // Each guarded write reads back bits of its own destination as signed;
+    // folding the guard into one write must not read them zero-extended.
+    let code = r#"
+    module Top (
+        i0: input  logic<8>,
+        c : input  logic   ,
+        o1: output logic<16>,
+        o2: output logic<16>,
+        o3: output logic<16>,
+        o4: output logic<3>,
+    ) {
+        var v1: logic<16>;
+        var v2: logic<16>;
+        var v3: logic<16>;
+        var t : logic<3>;
+        assign o1 = v1;
+        assign o2 = v2;
+        assign o3 = v3;
+        assign o4 = t;
+        assign v1[7:0] = i0;
+        assign v2[7:0] = i0;
+        assign v3[7:0] = i0;
+        always_comb {
+            t[0] = c;
+            if c {
+                v1[15:8] = $signed(v1[7:4]) >>> 1;
+            } else {
+                v1[15:8] = 0;
+            }
+        }
+        always_comb {
+            t[1] = c;
+            if c {
+                v2[15:8] = $signed(v2[7:4]) * $signed(v2[3:0]);
+            } else {
+                v2[15:8] = 0;
+            }
+        }
+        always_comb {
+            t[2] = c;
+            if c {
+                v3[15:8] = $signed(v3[7:4]) / 4'sd2;
+            } else {
+                v3[15:8] = 0;
+            }
+        }
+    }
+    "#;
+    check_cases(
+        code,
+        &[("i0", 8), ("c", 1)],
+        &[&[0xc9, 1], &[0x73, 1], &[0x8f, 1], &[0xc9, 0]],
+        &|k| {
+            let sext = |x: u64| ((x as i64) << 60 >> 60) as u64;
+            let (hi, lo) = ((k[0] >> 4) & 0xf, k[0] & 0xf);
+            let top = |x: u64| if k[1] == 1 { x & 0xff } else { 0 };
+            let sra = top(((sext(hi) as i64) >> 1) as u64);
+            let mul = top(sext(hi).wrapping_mul(sext(lo)));
+            let div = top(((sext(hi) as i64) / 2) as u64);
+            vec![
+                ("o1", (sra << 8) | k[0], 16),
+                ("o2", (mul << 8) | k[0], 16),
+                ("o3", (div << 8) | k[0], 16),
+            ]
+        },
+    );
+}
+
+#[test]
+fn a_copy_chain_longer_than_the_speculative_rounds_schedules() {
+    // `v[7:4]` reads `v[3:0]` through twelve copies; the cut at bit 4
+    // crosses one per round.
+    let mut code = String::from("module Top (i0: input logic<8>, o: output logic<8>) {\n");
+    for k in 0..12 {
+        code.push_str(&format!("    var b{k}: logic<8>;\n"));
+    }
+    code.push_str("    var v: logic<8>;\n    assign v[7:4] = b11[3:0] + 4'd1;\n");
+    for k in (1..12).rev() {
+        code.push_str(&format!("    assign b{k} = b{};\n", k - 1));
+    }
+    code.push_str("    assign b0 = v;\n    assign v[3:0] = i0[3:0];\n    assign o = v;\n}\n");
+    check_cases(&code, &[("i0", 8)], &[&[0x35], &[0xaf]], &|c| {
+        vec![("o", ((c[0] + 1) & 0xf) << 4 | c[0] & 0xf, 8)]
+    });
+}
+
+#[test]
+fn a_chain_of_copies_between_members_of_one_struct_schedules() {
+    // Each copy reads `s`, but not the bits it writes.
+    let n = 9;
+    let mut code =
+        String::from("module Top (i0: input logic<8>, o: output logic<8>) {\n    struct s_t {\n");
+    for k in 0..n {
+        code.push_str(&format!("        m{k}: logic<8>,\n"));
+    }
+    code.push_str("    }\n    var s: s_t;\n    var v: logic<8>;\n");
+    code.push_str(&format!("    assign v[7:4] = s.m{}[3:0] + 4'd1;\n", n - 1));
+    for k in (1..n).rev() {
+        code.push_str(&format!("    assign s.m{k} = s.m{};\n", k - 1));
+    }
+    code.push_str("    assign s.m0 = v;\n    assign v[3:0] = i0[3:0];\n    assign o = v;\n}\n");
+    check_cases(&code, &[("i0", 8)], &[&[0x35], &[0xaf]], &|c| {
+        vec![("o", ((c[0] + 1) & 0xf) << 4 | c[0] & 0xf, 8)]
+    });
+}
+
+#[test]
+fn a_concatenation_of_more_elements_than_the_speculative_bound_schedules() {
+    use num_bigint::BigUint;
+    // `w` is `v` bit by bit and `v[k]` reads `w[k-1]`: a ripple, acyclic only
+    // per element of the two 65-element concatenations.
+    let width = 65;
+    let w_elems: Vec<String> = (0..width)
+        .rev()
+        .map(|k| format!("v[{k}] ^ i0[{k}]"))
+        .collect();
+    let mut v_elems: Vec<String> = (1..width)
+        .rev()
+        .map(|k| format!("w[{}] & i1[{k}]", k - 1))
+        .collect();
+    v_elems.push("i1[0]".into());
+    let code = format!(
+        "module Top (i0: input logic<{width}>, i1: input logic<{width}>, lo: output logic<64>, hi: output logic) {{
+    var v: logic<{width}>;
+    var w: logic<{width}>;
+    assign w = {{{}}};
+    assign v = {{{}}};
+    assign lo = w[63:0];
+    assign hi = w[64];
+}}
+",
+        w_elems.join(", "),
+        v_elems.join(", ")
+    );
+    let reference = |i0: u64, i1: u64| -> (u64, u64) {
+        let bit = |x: u64, k: usize| if k == 64 { 1 } else { (x >> k) & 1 };
+        let (mut lo, mut prev_w) = (0u64, 0u64);
+        for k in 0..65 {
+            let v = if k == 0 {
+                bit(i1, 0)
+            } else {
+                prev_w & bit(i1, k)
+            };
+            prev_w = v ^ bit(i0, k);
+            if k < 64 {
+                lo |= prev_w << k;
+            }
+        }
+        (lo, prev_w)
+    };
+    for config in Config::all() {
+        let ir = analyze(&code, &config);
+        let mut sim = Simulator::new(ir, None);
+        for (i0, i1) in [
+            (0x2345_6789_abcd_ef01u64, 0xffff_0000_ffff_0000u64),
+            (0, u64::MAX),
+        ] {
+            let with_bit_64 = |x: u64| (BigUint::from(1u32) << 64u32) + BigUint::from(x);
+            sim.set("i0", Value::new_biguint(with_bit_64(i0), width, false));
+            sim.set("i1", Value::new_biguint(with_bit_64(i1), width, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            let (lo, hi) = reference(i0, i1);
+            assert_eq!(
+                sim.get("lo").unwrap(),
+                Value::new(lo, 64, false),
+                "{config:?}"
+            );
+            assert_eq!(
+                sim.get("hi").unwrap(),
+                Value::new(hi, 1, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_split_copy_keeps_a_condition_that_reads_the_written_bits() {
+    // Split per source, the upper part's condition would read the bit the
+    // lower part just wrote.
+    for arm in ["x[15:8]", "z"] {
+        let code = format!(
+            r#"
+module Top (i0: input logic<8>, i1: input logic<4>, i2: input logic<8>, o: output logic<16>, q: output logic<16>) {{
+    var b: logic<16>;
+    var x: logic<16>;
+    var y: logic<16>;
+    var z: logic<8>;
+    assign b = x;
+    always_comb {{
+        x = {{8'h00, i0}};
+        y = x;
+        z[3:0] = b[15:12] + 4'd1;
+        z[7:4] = i1;
+        x[15:8] = z;
+        x[7:0] = if x[0] ? {arm} : i2;
+    }}
+    assign o = x;
+    assign q = y;
+}}
+"#
+        );
+        check_cases(
+            &code,
+            &[("i0", 8), ("i1", 4), ("i2", 8)],
+            &[&[0x01, 0x5, 0x00], &[0x02, 0xa, 0x3c]],
+            &|c| {
+                let hi = c[1] << 4 | ((c[1] + 1) & 0xf);
+                let lo = if c[0] & 1 == 1 { hi } else { c[2] };
+                vec![("o", hi << 8 | lo, 16)]
+            },
+        );
+    }
+}
+
+#[test]
+fn a_split_concatenation_keeps_elements_that_read_the_written_bits() {
+    // Split, the second element would read the first's result.
+    let code = r#"
+module Top (i0: input logic<8>, o: output logic<8>, p: output logic<8>) {
+    var b: logic<8>;
+    var v: logic<8>;
+    var x: logic<8>;
+    var y: logic<8>;
+    assign b = v;
+    assign v[7:4] = b[3:0] + 4'd1;
+    assign v[3:0] = i0[3:0];
+    assign o = v;
+    always_comb {
+        x = i0;
+        y = x;
+        x = {x[3:0], x[7:4]};
+    }
+    assign p = x;
+}
+"#;
+    check_cases(code, &[("i0", 8)], &[&[0x35], &[0xa7]], &|c| {
+        vec![("p", (c[0] & 0xf) << 4 | c[0] >> 4, 8)]
+    });
+}
+
+#[test]
+fn a_concatenation_in_a_branch_schedules_beside_a_whole_write() {
+    // `w[k]` reads `v[k]`, which reads `w[k-1]`: acyclic only per element,
+    // and the other arm writes `w` whole.
+    for (arm, other) in [
+        ("if en {", "} else {"),
+        ("case en { 1'b1: {", "} default: {"),
+    ] {
+        for (fill, fill_value) in [("0", 0u64), ("-1", 0xff)] {
+            let close = if arm.starts_with("case") { "} }" } else { "}" };
+            let w: Vec<String> = (0..8).rev().map(|k| format!("v[{k}] ^ i0[{k}]")).collect();
+            let v: Vec<String> = (1..8)
+                .rev()
+                .map(|k| format!("w[{}] & i1[{k}]", k - 1))
+                .chain(["i1[0]".to_string()])
+                .collect();
+            let code = format!(
+                "module Top (en: input logic, i0: input logic<8>, i1: input logic<8>, o: output logic<8>) {{
+    var v: logic<8>;
+    var w: logic<8>;
+    always_comb {{
+        {arm}
+            w = {{{}}};
+        {other}
+            w = {fill};
+        {close}
+    }}
+    assign v = {{{}}};
+    assign o = w;
+}}
+",
+                w.join(", "),
+                v.join(", ")
+            );
+            check_cases(
+                &code,
+                &[("en", 1), ("i0", 8), ("i1", 8)],
+                &[&[1, 0x03, 0x05], &[1, 0xa5, 0xff], &[0, 0x03, 0x05]],
+                &|c| {
+                    if c[0] == 0 {
+                        return vec![("o", fill_value, 8)];
+                    }
+                    let (mut w, mut prev) = (0u64, 0u64);
+                    for k in 0..8 {
+                        let v = if k == 0 {
+                            c[2] & 1
+                        } else {
+                            prev & (c[2] >> k) & 1
+                        };
+                        prev = v ^ ((c[1] >> k) & 1);
+                        w |= prev << k;
+                    }
+                    vec![("o", w, 8)]
+                },
+            );
+        }
+    }
+}
+
+#[test]
+fn a_destructured_literal_beside_a_cut_branch_keeps_its_value() {
+    // The arms are cut at `p1`'s bit 0, but the destructure takes its slice of
+    // the literal only at the store, so it must stay as written.
+    let w: Vec<String> = (0..8).rev().map(|k| format!("v[{k}] ^ i0[{k}]")).collect();
+    let v: Vec<String> = (1..8)
+        .rev()
+        .map(|k| format!("w[{}] & i1[{k}]", k - 1))
+        .chain(["i1[0]".to_string()])
+        .collect();
+    let code = format!(
+        "module Top (en: input logic, i0: input logic<8>, i1: input logic<8>, q1: output logic<8>, q0: output logic<8>) {{
+    var v: logic<8>;
+    var w: logic<8>;
+    var p1: logic<8>;
+    var p0: logic<8>;
+    always_comb {{
+        p1 = 0;
+        p0 = 0;
+        if en {{
+            p1[0] = 1;
+            w = {{{}}};
+        }} else {{
+            w = 0;
+            {{p1, p0}} = 16'h12_34;
+        }}
+    }}
+    assign v = {{{}}};
+    assign q1 = p1;
+    assign q0 = p0;
+}}
+",
+        w.join(", "),
+        v.join(", ")
+    );
+    check_cases(
+        &code,
+        &[("en", 1), ("i0", 8), ("i1", 8)],
+        &[&[0, 0x03, 0x05], &[1, 0x03, 0x05]],
+        &|c| {
+            if c[0] == 0 {
+                vec![("q1", 0x12, 8), ("q0", 0x34, 8)]
+            } else {
+                vec![("q1", 0x01, 8), ("q0", 0, 8)]
+            }
+        },
+    );
+}
+
+#[test]
+fn a_read_between_cut_writes_sees_every_part() {
+    // `y = w` reads both parts of the whole write above it; a later write of
+    // one part must not run ahead of the read.
+    for (whole, later, mask) in [
+        ("x", "w[3:0] = 0", 0xf0u64),
+        ("{x[7:4], x[3:0]}", "w[7:4] = 0", 0x0f),
+    ] {
+        let code = format!(
+            "module Top (en: input logic, x: input logic<8>, c: input logic<4>, e: input logic<4>, y: output logic<8>, wo: output logic<8>) {{
+    var w: logic<8>;
+    var d: logic<4>;
+    always_comb {{
+        if en {{
+            w[7:4] = d;
+            w[3:0] = e;
+            y = {{c, c}};
+        }} else {{
+            w = {whole};
+            y = w;
+            {later};
+        }}
+    }}
+    assign d = w[3:0];
+    assign wo = w;
+}}
+"
+        );
+        for config in Config::all() {
+            let config = Config {
+                allow_multi_pass: true,
+                ..config
+            };
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            for (en, x, c, e) in [(0u64, 0xa5u64, 3u64, 6u64), (1, 0x3c, 3, 6)] {
+                sim.set("en", Value::new(en, 1, false));
+                sim.set("x", Value::new(x, 8, false));
+                sim.set("c", Value::new(c, 4, false));
+                sim.set("e", Value::new(e, 4, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                let (y, wo) = if en == 0 {
+                    (x, x & mask)
+                } else {
+                    (c << 4 | c, e << 4 | e)
+                };
+                assert_eq!(
+                    sim.get("y").unwrap(),
+                    Value::new(y, 8, false),
+                    "{whole} {config:?}"
+                );
+                assert_eq!(
+                    sim.get("wo").unwrap(),
+                    Value::new(wo, 8, false),
+                    "{whole} {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_default_then_override_in_a_branch_keeps_its_order() {
+    // `o` reads only `w[1]`; ordering it after `w[0] = 0` as well would weld
+    // it to the `w[0]` write it guards through `p`.
+    let code = r#"
+module Top (en: input logic, q0: input logic, b: input logic, o: output logic, wo: output logic<2>) {
+    var w: logic<2>;
+    var p: logic;
+    always_comb {
+        w = 0;
+        o = 0;
+        if en {
+            w[0] = 0;
+            w[1] = b;
+            o    = w[1];
+            if p {
+                w[0] = q0;
+            }
+        }
+    }
+    assign p  = ~o;
+    assign wo = w;
+}
+"#;
+    check_cases(
+        code,
+        &[("en", 1), ("q0", 1), ("b", 1)],
+        &[&[1, 1, 1], &[1, 1, 0], &[0, 1, 1]],
+        &|c| {
+            if c[0] == 0 {
+                return vec![("o", 0, 1), ("wo", 0, 2)];
+            }
+            let o = c[2];
+            let w0 = if o == 0 { c[1] } else { 0 };
+            vec![("o", o, 1), ("wo", c[2] << 1 | w0, 2)]
+        },
+    );
+}
+
+#[test]
+fn an_event_gate_keeps_state_only_its_own_statements_read() {
+    // Only its own update reads `cnt`, yet it carries a value to the next
+    // fire: a gate idle on the other registers must not skip it.
+    const N: usize = 64;
+    let (mut decls, mut resets, mut steps) = (String::new(), String::new(), String::new());
+    for i in 0..N {
+        decls.push_str(&format!("        var r{i}: logic<16>;\n"));
+        resets.push_str(&format!("                r{i} = 0;\n"));
+    }
+    steps.push_str("                    r0 = r0 + 16'd1;\n");
+    for i in 1..N {
+        steps.push_str(&format!(
+            "                    r{i} = r{p} + r{i};\n",
+            p = i - 1
+        ));
+    }
+    let code = format!(
+        r#"
+    module Idle (
+        clk: input  clock,
+        rst: input  reset,
+        en:  input  logic,
+        o:   output logic<16>,
+    ) {{
+        var cnt: logic<64>;
+{decls}
+        always_ff {{
+            if_reset {{
+                cnt = 0;
+{resets}
+            }} else {{
+                cnt = cnt + 64'd1;
+                if en {{
+{steps}
+                }}
+            }}
+        }}
+        assign o = r{last};
+    }}
+
+    module Busy (
+        clk: input  clock,
+        rst: input  reset,
+        o:   output logic<16>,
+    ) {{
+        var c: logic<16>;
+        always_ff {{
+            if_reset {{
+                c = 0;
+            }} else {{
+                c = c + 16'd1;
+            }}
+        }}
+        assign o = c;
+    }}
+
+    module Top (
+        clk:    input  clock,
+        rst:    input  reset,
+        rst2:   input  reset,
+        en:     input  logic,
+        o_idle: output logic<16>,
+        o_busy: output logic<16>,
+    ) {{
+        inst u: Idle (clk, rst, en, o: o_idle);
+        inst v: Busy (clk, rst: rst2, o: o_busy);
+    }}
+"#,
+        last = N - 1,
+    );
+    let mut any_gated = false;
+    for mut config in Config::all() {
+        config.aot_c_min_stmts = 0;
+        let ir = analyze(&code, &config);
+        let gated = !ir.event_gate_flags.is_empty();
+        any_gated |= gated;
+        let mut sim = Simulator::new(ir, None);
+        let clk = sim.get_clock("clk").unwrap();
+        let rst = sim.get_reset("rst").unwrap();
+        let rst2 = sim.get_reset("rst2").unwrap();
+        sim.set("en", Value::new(0, 1, false));
+        sim.step_reset(&clk, &rst);
+        sim.step_reset(&clk, &rst2);
+        let mut edges = sim.get_var("u.cnt").unwrap().payload_u64();
+        for en in [1u64, 0, 1, 0] {
+            sim.set("en", Value::new(en, 1, false));
+            for _ in 0..6 {
+                sim.step(&clk);
+                edges += 1;
+                assert_eq!(
+                    sim.get_var("u.cnt").unwrap().payload_u64(),
+                    edges,
+                    "gated={gated} {config:?}"
+                );
+            }
+        }
+    }
+    assert!(any_gated, "the test needs a gate");
+}
+
+#[test]
+fn reset_value_literal_polarity() {
+    let code = r#"
+    module Top (
+        o_hold0   : output reset_async_high,
+        o_hold1   : output reset_async_low,
+        o_hold2   : output reset_sync_high,
+        o_hold3   : output reset_sync_low,
+        o_release0: output reset_async_high,
+        o_release1: output reset_async_low,
+        o_release2: output reset_sync_high,
+        o_release3: output reset_sync_low,
+    ) {
+        assign o_hold0    = reset_active;
+        assign o_hold1    = reset_active;
+        assign o_hold2    = reset_active;
+        assign o_hold3    = reset_active;
+        assign o_release0 = reset_inactive;
+        assign o_release1 = reset_inactive;
+        assign o_release2 = reset_inactive;
+        assign o_release3 = reset_inactive;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+
+        for (name, exp) in [
+            ("o_hold0", 1),
+            ("o_hold1", 0),
+            ("o_hold2", 1),
+            ("o_hold3", 0),
+            ("o_release0", 0),
+            ("o_release1", 1),
+            ("o_release2", 0),
+            ("o_release3", 1),
+        ] {
+            assert_eq!(sim.get(name).unwrap(), Value::new(exp, 1, false), "{name}");
+        }
+    }
+}
+
+#[test]
+fn reset_value_literal_reset_type() {
+    let code = r#"
+    module Top (
+        o_hold   : output reset,
+        o_release: output reset,
+    ) {
+        assign o_hold    = reset_active;
+        assign o_release = reset_inactive;
+    }
+    "#;
+
+    for base in Config::all() {
+        for active_high in [false, true] {
+            let config = Config {
+                abstract_reset_active_high: active_high,
+                ..base.clone()
+            };
+            dbg!(&config);
+
+            let ir = analyze(code, &config);
+            let mut sim = Simulator::new(ir, None);
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+
+            let (hold, release) = if active_high { (1, 0) } else { (0, 1) };
+            assert_eq!(sim.get("o_hold").unwrap(), Value::new(hold, 1, false));
+            assert_eq!(sim.get("o_release").unwrap(), Value::new(release, 1, false));
+        }
+    }
+}
+
+#[test]
+fn reset_value_literal_context() {
+    let code = r#"
+    module Sub (
+        i_rst0: input  reset_async_low,
+        i_rst1: input  reset_sync_high,
+        o_rst0: output logic,
+        o_rst1: output logic,
+    ) {
+        assign o_rst0 = i_rst0;
+        assign o_rst1 = i_rst1;
+    }
+    module Top (
+        i_rst : input  reset_async_high,
+        o_rst0: output logic,
+        o_rst1: output logic,
+        o_eq  : output logic,
+        o_ne  : output logic,
+    ) {
+        inst u: Sub (
+            i_rst0: reset_active,
+            i_rst1: reset_active,
+            o_rst0,
+            o_rst1,
+        );
+
+        assign o_eq = i_rst == reset_active;
+        assign o_ne = reset_inactive != i_rst;
+    }
+    "#;
+
+    for config in Config::all() {
+        dbg!(&config);
+
+        let ir = analyze(code, &config);
+        let mut sim = Simulator::new(ir, None);
+
+        for (i_rst, exp_eq, exp_ne) in [(1, 1, 1), (0, 0, 0)] {
+            sim.set("i_rst", Value::new(i_rst, 1, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+
+            assert_eq!(sim.get("o_rst0").unwrap(), Value::new(0, 1, false));
+            assert_eq!(sim.get("o_rst1").unwrap(), Value::new(1, 1, false));
+            assert_eq!(sim.get("o_eq").unwrap(), Value::new(exp_eq, 1, false));
+            assert_eq!(sim.get("o_ne").unwrap(), Value::new(exp_ne, 1, false));
+        }
+    }
 }
