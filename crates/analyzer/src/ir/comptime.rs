@@ -393,7 +393,7 @@ impl ExpressionContext {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct Comptime {
     pub value: ValueVariant,
     pub r#type: Type,
@@ -404,6 +404,9 @@ pub struct Comptime {
     /// has replaced it with a value. Keep this when folding or substituting IR.
     /// Type queries do not depend on the value of their queried operand.
     pub runtime_dependent: bool,
+    /// Cached source classification, independent of value evaluation. Cleared
+    /// when cloning metadata, which may be reused for a different expression.
+    pub elaboration_const: Option<bool>,
     pub is_global: bool,
     pub part_select: Option<PartSelectPath>,
     /// Packed base-variable domain retained from the member path and the
@@ -416,6 +419,26 @@ pub struct Comptime {
     pub expr_context: ExpressionContext,
     pub evaluated: bool,
     pub token: TokenRange,
+}
+
+impl Clone for Comptime {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            r#type: self.r#type.clone(),
+            is_const: self.is_const,
+            runtime_dependent: self.runtime_dependent,
+            elaboration_const: None,
+            is_global: self.is_global,
+            part_select: self.part_select.clone(),
+            member_select_domain: self.member_select_domain.clone(),
+            member_signed: self.member_signed,
+            clock_domain: self.clock_domain,
+            expr_context: self.expr_context,
+            evaluated: self.evaluated,
+            token: self.token,
+        }
+    }
 }
 
 impl Comptime {

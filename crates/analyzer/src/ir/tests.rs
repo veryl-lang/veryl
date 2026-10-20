@@ -33,7 +33,7 @@ fn folding_preserves_elaboration_constness() {
             assert!(comptime.is_const);
             assert_eq!(comptime.is_elaboration_const(), !runtime_dependent);
             assert_eq!(
-                expression.is_elaboration_const(&context),
+                expression.eval_elaboration_const(&context),
                 !runtime_dependent
             );
         }
@@ -54,6 +54,116 @@ fn elaboration_constness_does_not_require_a_known_value() {
     let comptime = expression.eval_comptime(&mut context, None);
     assert!(comptime.value.is_unknown());
     assert!(comptime.is_elaboration_const());
+}
+
+fn opaque_constant_tree(depth: usize) -> super::Expression {
+    use super::{Comptime, Expression, Factor, Op};
+    use veryl_parser::token_range::TokenRange;
+
+    let token = TokenRange::default();
+    if depth == 0 {
+        let mut comptime = Comptime::create_unknown(token);
+        comptime.is_const = true;
+        Expression::Term(Box::new(Factor::Value(comptime)))
+    } else {
+        Expression::Binary(
+            Box::new(opaque_constant_tree(depth - 1)),
+            Op::Add,
+            Box::new(opaque_constant_tree(depth - 1)),
+            Box::new(Comptime::create_unknown(token)),
+        )
+    }
+}
+
+#[test]
+fn elaboration_constness_reuses_evaluated_unknown_trees() {
+    use super::expression::ELABORATION_CLASSIFICATIONS;
+
+    for depth in [4, 8] {
+        let mut expression = opaque_constant_tree(depth);
+        let mut context = Context::default();
+        expression.eval_comptime(&mut context, None);
+        assert!(expression.comptime().evaluated);
+        assert!(expression.comptime().is_elaboration_const());
+        assert!(expression.comptime().value.is_unknown());
+
+        ELABORATION_CLASSIFICATIONS.set(0);
+        for _ in 0..100 {
+            assert!(expression.eval_elaboration_const(&context));
+            assert!(
+                expression
+                    .eval_comptime(&mut context, None)
+                    .is_elaboration_const()
+            );
+        }
+        assert_eq!(ELABORATION_CLASSIFICATIONS.get(), 0);
+    }
+}
+
+#[test]
+fn elaboration_constness_reuses_unevaluated_subtrees() {
+    use super::expression::ELABORATION_CLASSIFICATIONS;
+    use super::{Comptime, Expression, Op};
+    use veryl_parser::token_range::TokenRange;
+
+    let context = Context::default();
+    let mut expression = opaque_constant_tree(0);
+    ELABORATION_CLASSIFICATIONS.set(0);
+    assert!(expression.eval_elaboration_const(&context));
+    for _ in 0..128 {
+        expression = Expression::Binary(
+            Box::new(expression),
+            Op::Add,
+            Box::new(opaque_constant_tree(0)),
+            Box::new(Comptime::create_unknown(TokenRange::default())),
+        );
+        assert!(expression.eval_elaboration_const(&context));
+    }
+    assert_eq!(ELABORATION_CLASSIFICATIONS.get(), 257);
+}
+
+#[test]
+fn elaboration_constness_cache_does_not_follow_reused_metadata() {
+    use super::{Expression, Op};
+
+    let context = Context::default();
+    let mut source = opaque_constant_tree(1);
+    assert!(source.eval_elaboration_const(&context));
+    let mut runtime = opaque_constant_tree(0);
+    runtime.comptime_mut().is_const = false;
+    let mut expression = Expression::Binary(
+        Box::new(runtime),
+        Op::Add,
+        Box::new(opaque_constant_tree(0)),
+        Box::new(source.comptime().clone()),
+    );
+    assert!(!expression.eval_elaboration_const(&context));
+    // Updating a leaf through the metadata accessor also invalidates its cache.
+    let mut leaf = opaque_constant_tree(0);
+    assert!(leaf.eval_elaboration_const(&context));
+    leaf.comptime_mut().is_const = false;
+    assert!(!leaf.eval_elaboration_const(&context));
+}
+
+#[test]
+fn elaboration_constness_if_chain_work_is_linear() {
+    use super::expression::ELABORATION_CLASSIFICATIONS;
+
+    let mut previous = None;
+    for arms in [16, 32, 64] {
+        let expression = format!("{}32'd0", "if $sv::pkg::COND ? 32'd1 : ".repeat(arms));
+        let code = format!("module Top(o: output logic<32>) {{ assign o = {expression}; }}");
+        ELABORATION_CLASSIFICATIONS.set(0);
+        analyzed_ir(&code, false);
+        let visits = ELABORATION_CLASSIFICATIONS.get();
+        if let Some(previous) = previous {
+            assert!(
+                visits <= 2 * previous + 8,
+                "{arms} arms: {visits} visits, previous: {previous}"
+            );
+        }
+        previous = Some(visits);
+    }
 }
 
 #[track_caller]

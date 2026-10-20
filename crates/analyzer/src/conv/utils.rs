@@ -2256,7 +2256,7 @@ pub fn eval_function_call(
             return Err(ir_error!(token));
         }
 
-        let args = if let Some(x) = &x.function_call.function_call_opt {
+        let mut args = if let Some(x) = &x.function_call.function_call_opt {
             argument_list(context, x.argument_list.as_ref())?
         } else {
             ir::Arguments::Null
@@ -2299,7 +2299,7 @@ pub fn eval_function_call(
                 let mut x = Comptime::create_unknown(token);
                 x.is_const = true;
                 // The external function is opaque, but its arguments are not.
-                x.runtime_dependent = !args.is_elaboration_const(context);
+                x.runtime_dependent = !args.eval_elaboration_const(context);
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
             }
             _ => {
@@ -2879,7 +2879,7 @@ fn eval_factor_path_inner(
 fn apply_symbol_select(
     context: &mut Context,
     factor: ir::Factor,
-    select: VarSelect,
+    mut select: VarSelect,
     symbol: &Symbol,
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
@@ -2890,7 +2890,7 @@ fn apply_symbol_select(
         return Ok(factor);
     };
     // Selecting an external/parameter value may fold away the select itself.
-    comptime.runtime_dependent |= !select.is_elaboration_const(context);
+    comptime.runtime_dependent |= !select.eval_elaboration_const(context);
     let values = match &comptime.value {
         ValueVariant::NumericArray(values) => values.clone(),
         ValueVariant::Numeric(value) => vec![value.clone()],

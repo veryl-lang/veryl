@@ -1046,7 +1046,7 @@ impl<'a> Subst<'a> {
     /// `expr` as a constant when it reads nothing but parameters and
     /// constants and evaluates free of X and Z, as conversion folds an index
     /// of an unrolled loop.
-    fn folded(&mut self, expr: &Expression) -> Option<Expression> {
+    fn folded(&mut self, expr: &mut Expression) -> Option<Expression> {
         if !reads_only_constants(self.context, expr)
             || matches!(expr, Expression::Term(x) if matches!(x.as_ref(), Factor::Value(_)))
         {
@@ -1058,7 +1058,7 @@ impl<'a> Subst<'a> {
         }
         let mut comptime = expr.comptime().clone();
         comptime.value = ValueVariant::Numeric(value);
-        comptime.runtime_dependent |= !expr.is_elaboration_const(self.context);
+        comptime.runtime_dependent |= !expr.eval_elaboration_const(self.context);
         comptime.is_const = true;
         Some(Expression::Term(Box::new(Factor::Value(comptime))))
     }

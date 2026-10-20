@@ -929,12 +929,12 @@ impl VarSelect {
         self.is_const() && self.1.as_ref().is_none_or(|(_, e)| e.comptime().is_const)
     }
 
-    pub fn is_elaboration_const(&self, context: &Context) -> bool {
-        self.0.iter().all(|x| x.is_elaboration_const(context))
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
+        self.0.iter_mut().all(|x| x.eval_elaboration_const(context))
             && self
                 .1
-                .as_ref()
-                .is_none_or(|(_, x)| x.is_elaboration_const(context))
+                .as_mut()
+                .is_none_or(|(_, x)| x.eval_elaboration_const(context))
     }
 
     /// Return the packed base-variable range which this access may touch.
