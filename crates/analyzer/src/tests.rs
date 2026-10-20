@@ -25,6 +25,7 @@ mod comb_loop_replication_tests;
 mod comb_loop_retained_state_tests;
 mod comb_loop_sparse_tests;
 mod comb_loop_summary_tests;
+mod comb_loop_tier_tests;
 mod constant_evaluation_tests;
 mod dynamic_packed_member_tests;
 mod instantiation_note_tests;

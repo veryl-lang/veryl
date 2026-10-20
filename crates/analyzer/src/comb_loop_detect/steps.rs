@@ -32,13 +32,30 @@ thread_local! {
 /// Run `f` with modules limited to `limit` steps.
 #[cfg(test)]
 pub(crate) fn with_step_limit<T>(limit: usize, f: impl FnOnce() -> T) -> T {
-    struct Reset(usize);
-    impl Drop for Reset {
+    with_override(&LIMIT, limit, f)
+}
+
+/// Run `f` with `key` set to `value`, and restore it afterwards, also when
+/// `f` panics.
+#[cfg(test)]
+pub(super) fn with_override<V: Copy + 'static, T>(
+    key: &'static std::thread::LocalKey<Cell<V>>,
+    value: V,
+    f: impl FnOnce() -> T,
+) -> T {
+    struct Reset<V: Copy + 'static> {
+        key: &'static std::thread::LocalKey<Cell<V>>,
+        value: V,
+    }
+    impl<V: Copy + 'static> Drop for Reset<V> {
         fn drop(&mut self) {
-            LIMIT.set(self.0);
+            self.key.set(self.value);
         }
     }
-    let _reset = Reset(LIMIT.replace(limit));
+    let _reset = Reset {
+        key,
+        value: key.replace(value),
+    };
     f()
 }
 
