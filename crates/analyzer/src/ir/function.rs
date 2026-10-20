@@ -232,14 +232,14 @@ pub(crate) fn array_arg_values(
 }
 
 impl FunctionCall {
-    pub fn is_elaboration_const(&self, context: &Context) -> bool {
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
         !self.comptime.runtime_dependent
             && context.functions.get(&self.id).is_none_or(|x| x.is_const)
             && self.outputs.is_empty()
             && self
                 .inputs
-                .values()
-                .all(|x| x.is_elaboration_const(context))
+                .values_mut()
+                .all(|x| x.eval_elaboration_const(context))
     }
 
     pub fn eval_type(&mut self, context: &mut Context) {
@@ -372,7 +372,7 @@ impl FunctionCall {
     }
 
     pub fn eval_comptime(&mut self, context: &mut Context) -> Comptime {
-        let runtime_dependent = !self.is_elaboration_const(context);
+        let runtime_dependent = !self.eval_elaboration_const(context);
         let value = self.eval_value(context);
         let value = if let Some(x) = value {
             ValueVariant::Numeric(x)
@@ -594,14 +594,14 @@ pub enum Arguments {
 }
 
 impl Arguments {
-    pub fn is_elaboration_const(&self, context: &Context) -> bool {
-        let positional = |args: &PositionalArgs| {
-            args.iter()
-                .all(|(expr, _, _)| expr.is_elaboration_const(context))
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
+        let positional = |args: &mut PositionalArgs| {
+            args.iter_mut()
+                .all(|(expr, _, _)| expr.eval_elaboration_const(context))
         };
-        let named = |args: &NamedArgs| {
-            args.iter()
-                .all(|(_, (expr, _, _))| expr.is_elaboration_const(context))
+        let named = |args: &mut NamedArgs| {
+            args.iter_mut()
+                .all(|(_, (expr, _, _))| expr.eval_elaboration_const(context))
         };
         match self {
             Self::Positional(args) => positional(args),

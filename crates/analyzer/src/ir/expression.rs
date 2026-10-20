@@ -31,6 +31,11 @@ pub enum Expression {
     StructConstructor(Box<Type>, Vec<(StrId, Expression)>, Box<Comptime>),
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static ELABORATION_CLASSIFICATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Expression {
     pub fn create_value(value: Value, token: TokenRange) -> Self {
         Self::Term(Box::new(Factor::create_value(value, token)))
@@ -39,40 +44,49 @@ impl Expression {
     /// Classify the source expression before value evaluation or folding can
     /// erase operands. This tracks elaboration constness independently of
     /// facts learned by unrolling a procedural loop.
-    pub fn is_elaboration_const(&self, context: &Context) -> bool {
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
         if self.comptime().runtime_dependent {
             return false;
         }
-        match self {
-            Self::Term(x) => x.is_elaboration_const(context),
-            Self::Unary(_, x, _) => x.is_elaboration_const(context),
+        if let Some(result) = self.comptime().elaboration_const {
+            return result;
+        }
+        #[cfg(test)]
+        ELABORATION_CLASSIFICATIONS.set(ELABORATION_CLASSIFICATIONS.get() + 1);
+        let result = match self {
+            Self::Term(x) => x.eval_elaboration_const(context),
+            Self::Unary(_, x, _) => x.eval_elaboration_const(context),
             Self::Binary(x, _, y, _) => {
-                x.is_elaboration_const(context) && y.is_elaboration_const(context)
+                x.eval_elaboration_const(context) && y.eval_elaboration_const(context)
             }
             Self::Ternary(x, y, z, _) => {
-                x.is_elaboration_const(context)
-                    && y.is_elaboration_const(context)
-                    && z.is_elaboration_const(context)
+                x.eval_elaboration_const(context)
+                    && y.eval_elaboration_const(context)
+                    && z.eval_elaboration_const(context)
             }
-            Self::Concatenation(items, _) => items.iter().all(|(expr, repeat)| {
-                expr.is_elaboration_const(context)
+            Self::Concatenation(items, _) => items.iter_mut().all(|(expr, repeat)| {
+                expr.eval_elaboration_const(context)
                     && repeat
-                        .as_ref()
-                        .is_none_or(|x| x.is_elaboration_const(context))
+                        .as_mut()
+                        .is_none_or(|x| x.eval_elaboration_const(context))
             }),
-            Self::ArrayLiteral(items, _) => items.iter().all(|item| match item {
+            Self::ArrayLiteral(items, _) => items.iter_mut().all(|item| match item {
                 ArrayLiteralItem::Value(expr, repeat) => {
-                    expr.is_elaboration_const(context)
+                    expr.eval_elaboration_const(context)
                         && repeat
-                            .as_ref()
-                            .is_none_or(|x| x.is_elaboration_const(context))
+                            .as_mut()
+                            .is_none_or(|x| x.eval_elaboration_const(context))
                 }
-                ArrayLiteralItem::Defaul(expr) => expr.is_elaboration_const(context),
+                ArrayLiteralItem::Defaul(expr) => expr.eval_elaboration_const(context),
             }),
-            Self::StructConstructor(_, items, _) => {
-                items.iter().all(|(_, x)| x.is_elaboration_const(context))
-            }
-        }
+            Self::StructConstructor(_, items, _) => items
+                .iter_mut()
+                .all(|(_, x)| x.eval_elaboration_const(context)),
+        };
+        let comptime = self.comptime_mut();
+        comptime.runtime_dependent |= !result;
+        comptime.elaboration_const = Some(result);
+        result
     }
 }
 
@@ -596,7 +610,7 @@ impl Expression {
         // Record source legality before replacing the tree with a literal.
         // This is monotonic: later evaluation must not promote a runtime
         // expression to an elaboration constant.
-        self.comptime_mut().runtime_dependent = !self.is_elaboration_const(context);
+        let elaboration_const = self.eval_elaboration_const(context);
         if !self.comptime().evaluated {
             let mut expr_context = self.gather_context(context);
             expr_context.width = expr_context.width.max(context_width.unwrap_or(0));
@@ -633,6 +647,7 @@ impl Expression {
             }
         }
 
+        self.comptime_mut().elaboration_const = Some(elaboration_const);
         self.comptime()
     }
 
@@ -754,7 +769,7 @@ impl Expression {
     }
 
     pub fn comptime_mut(&mut self) -> &mut Comptime {
-        match self {
+        let comptime = match self {
             Expression::Term(x) => x.comptime_mut(),
             Expression::Unary(_, _, x) => x,
             Expression::Binary(_, _, _, x) => x,
@@ -762,7 +777,9 @@ impl Expression {
             Expression::Concatenation(_, x) => x,
             Expression::ArrayLiteral(_, x) => x,
             Expression::StructConstructor(_, _, x) => x,
-        }
+        };
+        comptime.elaboration_const = None;
+        comptime
     }
 
     pub fn token_range(&self) -> TokenRange {
@@ -832,19 +849,21 @@ pub struct HierVarRef {
 }
 
 impl Factor {
-    fn is_elaboration_const(&self, context: &Context) -> bool {
+    fn eval_elaboration_const(&mut self, context: &Context) -> bool {
         match self {
             Self::Variable(_, index, select, comptime) => {
                 comptime.is_elaboration_const()
-                    && index.expressions().all(|x| x.is_elaboration_const(context))
-                    && select.is_elaboration_const(context)
+                    && index
+                        .expressions_mut()
+                        .all(|x| x.eval_elaboration_const(context))
+                    && select.eval_elaboration_const(context)
             }
             Self::Value(x) | Self::ResetValue(_, _, x) | Self::Anonymous(x) => {
                 x.is_elaboration_const()
             }
-            Self::FunctionCall(x) => x.is_elaboration_const(context),
+            Self::FunctionCall(x) => x.eval_elaboration_const(context),
             Self::SystemFunctionCall(x) => {
-                !x.comptime.runtime_dependent && x.kind.is_elaboration_const(context)
+                !x.comptime.runtime_dependent && x.kind.eval_elaboration_const(context)
             }
             Self::HierVariable(_) | Self::Unknown(_) => false,
         }
@@ -1241,7 +1260,7 @@ impl Factor {
     }
 
     pub fn comptime_mut(&mut self) -> &mut Comptime {
-        match self {
+        let comptime = match self {
             Factor::Variable(_, _, _, x) => x,
             Factor::HierVariable(x) => &mut x.comptime,
             Factor::Value(x) => x,
@@ -1250,7 +1269,9 @@ impl Factor {
             Factor::Anonymous(x) => x,
             Factor::ResetValue(_, _, x) => x,
             Factor::Unknown(x) => x,
-        }
+        };
+        comptime.elaboration_const = None;
+        comptime
     }
 
     pub fn token_range(&self) -> TokenRange {
