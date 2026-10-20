@@ -428,7 +428,7 @@ impl<'a> Builder<'a> {
                 }
                 None => self.status.incomplete = true,
             },
-            Factor::Value(_) | Factor::Anonymous(_) => {}
+            Factor::Value(_) | Factor::ResetValue(..) | Factor::Anonymous(_) => {}
         }
     }
 

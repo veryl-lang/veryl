@@ -44,6 +44,56 @@ fn heavy_module(name: &str) -> String {
 const HEAVY_LIMIT: usize = FIRST_ALLOWANCE * 8;
 
 #[test]
+fn reset_value_literals_are_complete_without_the_precise_tier() {
+    for reset_type in [
+        "reset",
+        "reset_async_high",
+        "reset_async_low",
+        "reset_sync_high",
+        "reset_sync_low",
+    ] {
+        let code = format!(
+            r#"
+            module Top (active: output {reset_type}, inactive: output {reset_type}) {{
+                assign active = reset_active;
+                always_comb {{ inactive = reset_inactive; }}
+            }}
+            "#
+        );
+        with_both_tiers(|| {
+            reset_steps_taken();
+            assert!(comb_loop_analysis_is_complete(&code), "{reset_type}");
+            assert_eq!(steps_taken(), 0, "{reset_type}");
+            assert!(analyze(&code).is_empty(), "{reset_type}");
+        });
+        with_precise_tier_only(|| {
+            assert!(comb_loop_analysis_is_complete(&code), "{reset_type}");
+            assert!(analyze(&code).is_empty(), "{reset_type}");
+        });
+    }
+}
+
+#[test]
+fn reset_value_comparisons_preserve_feedback() {
+    let code = r#"
+        module Top (rst: output reset_async_low) {
+            always_comb {
+                if rst == reset_active { rst = reset_inactive; }
+                else { rst = reset_active; }
+            }
+        }
+    "#;
+    with_both_tiers(|| {
+        assert!(comb_loop_analysis_is_complete(code));
+        assert!(!reported_loops(&analyze(code)).is_empty());
+    });
+    with_precise_tier_only(|| {
+        assert!(comb_loop_analysis_is_complete(code));
+        assert!(!reported_loops(&analyze(code)).is_empty());
+    });
+}
+
+#[test]
 fn acyclic_modules_skip_the_precise_tier() {
     with_both_tiers(|| {
         let code = r#"
