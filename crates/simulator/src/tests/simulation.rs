@@ -18924,7 +18924,7 @@ fn unfolded_selects(code: &str, module: &str) -> usize {
     context.functions = module.functions.clone();
     let peeled = crate::ir::module::peeled_declarations(module, &mut context);
     let (declarations, _) =
-        crate::ir::module::simulated_declarations(module, &mut context, false, peeled);
+        crate::ir::module::simulated_declarations(module, &mut context, false, peeled, &[]);
     declarations
         .iter()
         .map(|d| match d {
