@@ -431,7 +431,7 @@ impl Clone for Comptime {
             elaboration_const: None,
             is_global: self.is_global,
             part_select: self.part_select.clone(),
-            member_select_domain: self.member_select_domain.clone(),
+            member_select_domain: self.member_select_domain,
             member_signed: self.member_signed,
             clock_domain: self.clock_domain,
             expr_context: self.expr_context,
