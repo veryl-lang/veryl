@@ -83,3 +83,45 @@ module Top (
         assert_eq!(variable.total_width(), Some(width), "{name}");
     }
 }
+
+#[test]
+fn package_alias_members_are_valid_in_global_function_expressions() {
+    let code = r#"
+package Words::<W: u32> {
+    const WIDTH: u32 = W;
+    type word_t = logic<W>;
+}
+alias package Five = Words::<5>;
+alias package FiveChain = Five;
+
+function f () -> u32 {
+    return Five::WIDTH + FiveChain::WIDTH + $bits(Five::word_t);
+}
+"#;
+    let errors = analyze(code);
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
+fn cast_to_alias_reports_use_site() {
+    let code = r#"
+module M {}
+alias module AM = M;
+module Top {
+    var a: logic<4>;
+    var b: logic<4>;
+    assign a = 1;
+    assign b = a as AM;
+}
+"#;
+    let errors = analyze(code);
+    let use_site = code.find("as AM").unwrap() + "as ".len();
+    let location = errors
+        .iter()
+        .find_map(|error| match error {
+            AnalyzerError::MismatchType { error_location, .. } => Some(error_location.offset()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(location, use_site, "{errors:#?}");
+}
