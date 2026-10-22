@@ -648,6 +648,44 @@ impl ProtoExpression {
                 width: out_width,
                 expr_context: ctx(expr_context.signed),
             }),
+            // Each element overlapping the window gives its own window; one
+            // element alone needs no concatenation around it.
+            ProtoExpression::Concatenation {
+                elements,
+                expr_context,
+                ..
+            } => {
+                let total: usize = elements.iter().map(|(_, r, w)| r * w).sum();
+                if total != width {
+                    return None;
+                }
+                let mut parts: Vec<(Box<ProtoExpression>, usize, usize)> = Vec::new();
+                // Elements are most-significant first.
+                let mut top = width;
+                for (expr, repeat, w) in elements {
+                    for _ in 0..*repeat {
+                        let bottom = top - w;
+                        if expr.width() != *w {
+                            return None;
+                        }
+                        if bottom <= hi && lo < top {
+                            let (ehi, elo) = (hi.min(top - 1), lo.max(bottom));
+                            let part = expr.bit_parallel_window(ehi - bottom, elo - bottom)?;
+                            parts.push((Box::new(part), 1, ehi - elo + 1));
+                        }
+                        top = bottom;
+                    }
+                }
+                if parts.len() == 1 {
+                    Some(*parts.pop().unwrap().0)
+                } else {
+                    Some(ProtoExpression::Concatenation {
+                        elements: parts,
+                        width: out_width,
+                        expr_context: ctx(expr_context.signed),
+                    })
+                }
+            }
             // A select is scalar, so it picks the same arm for every bit: each
             // window keeps the whole condition and narrows only the arms.  The
             // condition is then evaluated once per window -- `max_parts` at the
