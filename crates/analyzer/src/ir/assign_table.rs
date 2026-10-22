@@ -369,8 +369,13 @@ impl AssignTable {
                         // conflicts with anything the other process writes in
                         // the same range, which is invalid in SV.
                         let multi_process = val.process_write[i] && x.process_write[i];
-                        let dynamic_overlap = &x.dynamic_mask[i] & &val.mask[i] != 0u32.into()
-                            || &val.dynamic_mask[i] & &x.mask[i] != 0u32.into();
+                        // Unknown-direction SV connections may only read.
+                        // Even when the entry also contains a definite write,
+                        // those maybe-only bits do not belong to its driver.
+                        let x_driven = &x.definite_mask[i] | &x.dynamic_mask[i];
+                        let val_driven = &val.definite_mask[i] | &val.dynamic_mask[i];
+                        let dynamic_overlap = &x.dynamic_mask[i] & &val_driven != 0u32.into()
+                            || &val.dynamic_mask[i] & &x_driven != 0u32.into();
                         let definite_overlap =
                             &x.definite_mask[i] & &val.definite_mask[i] != 0u32.into();
                         if (multi_process && dynamic_overlap || definite_overlap)

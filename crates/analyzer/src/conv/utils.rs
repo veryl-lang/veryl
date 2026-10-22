@@ -1465,10 +1465,10 @@ pub fn eval_type(
         }
     } else {
         let mut path = resolved.unwrap_or_else(|| context.resolve_path(path.clone()));
+        // Before unaliasing: a declared alias is not a generic reference here.
         check_generic_refereence(context, &path);
 
-        // Check the reference at its use site before expanding a previously
-        // declared alias, then preserve the target's arguments in the type map.
+        let use_site_range = path.range;
         path.unalias(None);
         let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
@@ -1479,7 +1479,7 @@ pub fn eval_type(
                         expected: "enum, union, struct, typedef or integer constant".to_string(),
                         actual: symbol.found.kind.to_kind_name(),
                     },
-                    &path.range,
+                    &use_site_range,
                 ));
             }
 
@@ -2250,7 +2250,7 @@ pub fn eval_function_call(
             return Err(ir_error!(token));
         }
 
-        let args = if let Some(x) = &x.function_call.function_call_opt {
+        let mut args = if let Some(x) = &x.function_call.function_call_opt {
             argument_list(context, x.argument_list.as_ref())?
         } else {
             ir::Arguments::Null
@@ -2292,6 +2292,8 @@ pub fn eval_function_call(
             SymbolKind::SystemVerilog => {
                 let mut x = Comptime::create_unknown(token);
                 x.is_const = true;
+                // The external function is opaque, but its arguments are not.
+                x.runtime_dependent = !args.eval_elaboration_const(context);
                 Ok(ir::Expression::Term(Box::new(ir::Factor::Value(x))))
             }
             _ => {
@@ -2644,8 +2646,9 @@ fn eval_factor_path_inner(
     let (path, select, _) = var_path.into();
 
     let mut generic_path = context.resolve_path(symbol_path);
-    generic_path.unalias(None);
+    // Before unaliasing: a declared alias is not a generic reference here.
     check_generic_refereence(context, &generic_path);
+    generic_path.unalias(None);
 
     // An anonymous loop variable is also registered as `_`.
     if generic_path.is_anonymous() {
@@ -2871,7 +2874,7 @@ fn eval_factor_path_inner(
 fn apply_symbol_select(
     context: &mut Context,
     factor: ir::Factor,
-    select: VarSelect,
+    mut select: VarSelect,
     symbol: &Symbol,
     token: TokenRange,
 ) -> IrResult<ir::Factor> {
@@ -2881,6 +2884,8 @@ fn apply_symbol_select(
     let ir::Factor::Value(mut comptime) = factor else {
         return Ok(factor);
     };
+    // Selecting an external/parameter value may fold away the select itself.
+    comptime.runtime_dependent |= !select.eval_elaboration_const(context);
     let values = match &comptime.value {
         ValueVariant::NumericArray(values) => values.clone(),
         ValueVariant::Numeric(value) => vec![value.clone()],
@@ -4360,7 +4365,10 @@ pub fn get_port_connects(
     let mut ret = vec![];
     let mut interface_binding = None;
 
-    if let ir::TypeKind::Modport(_, _) = &port_type.kind {
+    if matches!(
+        port_type.kind,
+        ir::TypeKind::Modport(_, _) | ir::TypeKind::AbstractInterface(_)
+    ) {
         if let Some(x) = &port.inst_port_item_opt {
             // for check_compatibility
             let _ = eval_expr(context, Some(port_type.clone()), &x.expression, false)?;
@@ -4384,6 +4392,14 @@ pub fn get_port_connects(
         };
         interface_binding = Some(VarPathSelect(dst_path.clone(), dst_select.clone(), token));
 
+        if matches!(port_type.kind, ir::TypeKind::AbstractInterface(_)) {
+            // Direction-free members use reference bindings. Their masks
+            // cannot be represented by ordinary whole-signal output ports.
+            return Ok(PortConnects {
+                connects: ret,
+                interface_binding,
+            });
+        }
         let members = port_type.expand_modport(context, &dst_path, token)?;
         for member in members {
             if member.1.is_input() | member.1.is_output() {
@@ -4414,7 +4430,7 @@ pub fn get_port_connects(
                 // append member name to port_path
                 let mut port_path = port_path.clone();
                 let mut member_name = member_path.0.clone();
-                member_name.remove(0);
+                member_name.drain(..dst_path.0.len());
                 port_path.append(&member_name);
 
                 ret.push((port_path.clone(), dst, expr));

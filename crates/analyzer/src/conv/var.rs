@@ -11,7 +11,6 @@ use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
 use veryl_parser::veryl_grammar_trait::*;
 use veryl_parser::veryl_token::Token;
-use veryl_parser::veryl_walker::VerylWalker;
 
 impl Conv<&Identifier> for VarPath {
     fn conv(_context: &mut Context, value: &Identifier) -> IrResult<Self> {
@@ -71,18 +70,10 @@ fn check_select_type(context: &mut Context, expr: &mut ir::Expression, value: &E
 fn check_part_select_width(
     context: &mut Context,
     op: &VarSelectOp,
-    base: (&ir::Expression, &Expression),
-    bound: (&ir::Expression, &Expression),
+    base: &ir::Expression,
+    bound: &ir::Expression,
 ) {
-    let (base, base_ast) = base;
-    let (bound, bound_ast) = bound;
-    // `references_loop_var` only when the IR is const, so a runtime-for
-    // body (loop var non-const) reports once, not twice.
-    let bound_const = if bound.comptime().is_const {
-        !references_loop_var(bound_ast)
-    } else {
-        false
-    };
+    let bound_const = bound.comptime().is_elaboration_const();
     if !bound_const
         && matches!(
             op,
@@ -97,43 +88,12 @@ fn check_part_select_width(
         ));
     }
     // A `[msb:lsb]` range also needs a constant base index (the msb).
-    let base_const = if base.comptime().is_const {
-        !references_loop_var(base_ast)
-    } else {
-        false
-    };
+    let base_const = base.comptime().is_elaboration_const();
     if matches!(op, VarSelectOp::Colon) && !base_const {
         context.insert_error(AnalyzerError::non_constant_select_width(
             &base.token_range(),
         ));
     }
-}
-
-/// Detects a reference to a statement-level for-loop induction variable:
-/// const while the IR unrolls but runtime in the emitted SV `for`, so it
-/// can't size a part-select or bound a `[msb:lsb]`. Genvars stay allowed
-/// (elaboration constants); scans the source AST, before the IR is folded.
-#[derive(Default)]
-struct LoopVarFinder {
-    found: bool,
-}
-
-impl VerylWalker for LoopVarFinder {
-    fn scoped_identifier(&mut self, arg: &ScopedIdentifier) {
-        if !self.found
-            && let Ok(symbol) = crate::symbol_table::resolve(arg)
-            && let crate::symbol::SymbolKind::Variable(x) = &symbol.found.kind
-            && x.loop_variable
-        {
-            self.found = true;
-        }
-    }
-}
-
-fn references_loop_var(expr: &Expression) -> bool {
-    let mut finder = LoopVarFinder::default();
-    finder.expression(expr);
-    finder.found
 }
 
 impl Conv<&ScopedIdentifier> for VarPathSelect {
@@ -280,7 +240,7 @@ fn conv_expression_identifier(
             let op = Conv::conv(context, x.select_operator.as_ref())?;
             let mut bound = Conv::conv(context, x.expression.as_ref())?;
             check_select_type(context, &mut bound, &x.expression);
-            check_part_select_width(context, &op, (&base, base_value), (&bound, &x.expression));
+            check_part_select_width(context, &op, &base, &bound);
             end = Some((op, bound));
         }
         select.push(base);
@@ -362,7 +322,7 @@ fn conv_expression_identifier(
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
                 let mut bound = Conv::conv(context, x.expression.as_ref())?;
                 check_select_type(context, &mut bound, &x.expression);
-                check_part_select_width(context, &op, (&base, base_value), (&bound, &x.expression));
+                check_part_select_width(context, &op, &base, &bound);
                 end = Some((op, bound));
             }
             select.push(base);
@@ -435,7 +395,7 @@ fn conv_hierarchical_identifier(
             let op = Conv::conv(context, x.select_operator.as_ref())?;
             let mut bound = Conv::conv(context, x.expression.as_ref())?;
             check_select_type(context, &mut bound, &x.expression);
-            check_part_select_width(context, &op, (&base, base_value), (&bound, &x.expression));
+            check_part_select_width(context, &op, &base, &bound);
             end = Some((op, bound));
         }
         select.push(base);
@@ -488,7 +448,7 @@ fn conv_hierarchical_identifier(
                 let op = Conv::conv(context, x.select_operator.as_ref())?;
                 let mut bound = Conv::conv(context, x.expression.as_ref())?;
                 check_select_type(context, &mut bound, &x.expression);
-                check_part_select_width(context, &op, (&base, base_value), (&bound, &x.expression));
+                check_part_select_width(context, &op, &base, &bound);
                 end = Some((op, bound));
             }
             select.push(base);

@@ -848,21 +848,36 @@ impl Emitter {
     }
 
     fn is_simple_case_statement(arg: &CaseStatement) -> bool {
+        let conditions = arg.case_statement_list.iter().filter_map(|x| {
+            if let CaseItemGroup::CaseCondition(x) = x.case_item.case_item_group.as_ref() {
+                Some(x.case_condition.as_ref())
+            } else {
+                None
+            }
+        });
+        Self::is_simple_case_conditions(conditions)
+    }
+
+    fn is_simple_case_expression(arg: &CaseExpression) -> bool {
+        let conditions = std::iter::once(arg.case_condition.as_ref()).chain(
+            arg.case_expression_list
+                .iter()
+                .map(|x| x.case_condition.as_ref()),
+        );
+        Self::is_simple_case_conditions(conditions)
+    }
+
+    fn is_simple_case_conditions<'a>(conditions: impl Iterator<Item = &'a CaseCondition>) -> bool {
         let mut context = Context::default();
 
-        for statement in &arg.case_statement_list {
-            if let CaseItemGroup::CaseCondition(case_item) =
-                statement.case_item.case_item_group.as_ref()
-            {
-                let condition = &case_item.case_condition;
-                if !Self::is_simple_case_condition(condition.range_item.as_ref(), &mut context) {
-                    return false;
-                }
+        for condition in conditions {
+            if !Self::is_simple_case_condition(condition.range_item.as_ref(), &mut context) {
+                return false;
+            }
 
-                for x in &condition.case_condition_list {
-                    if !Self::is_simple_case_condition(x.range_item.as_ref(), &mut context) {
-                        return false;
-                    }
+            for x in &condition.case_condition_list {
+                if !Self::is_simple_case_condition(x.range_item.as_ref(), &mut context) {
+                    return false;
                 }
             }
         }
@@ -987,13 +1002,19 @@ impl Emitter {
         }
     }
 
-    fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem) {
+    fn case_expression_condition(&mut self, lhs: &Expression, rhs: &RangeItem, simple: bool) {
         if rhs.range.range_opt.is_some() && !self.build_opt.expand_inside_operation {
             self.str("(");
             self.expression(lhs);
             self.str(") inside {");
             self.range(&rhs.range);
             self.str("}");
+        } else if simple {
+            self.str("(");
+            self.expression(lhs);
+            self.str(") == (");
+            self.expression(&rhs.range.expression);
+            self.str(")");
         } else {
             self.inside_element_operation(lhs, rhs);
         }
@@ -4124,8 +4145,9 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'CaseExpression'
     fn case_expression(&mut self, arg: &CaseExpression) {
+        let simple = Self::is_simple_case_expression(arg);
         self.token(&arg.case.case_token.replace("(("));
-        self.case_expression_condition(&arg.expression, &arg.case_condition.range_item);
+        self.case_expression_condition(&arg.expression, &arg.case_condition.range_item, simple);
         self.str(") ? (");
         self.newline_push();
         self.expression(&arg.expression0);
@@ -4134,7 +4156,7 @@ impl VerylWalker for Emitter {
             self.token(&x.comma.comma_token.replace(")"));
             self.space(1);
             self.str(": (");
-            self.case_expression_condition(&arg.expression, &x.range_item);
+            self.case_expression_condition(&arg.expression, &x.range_item, simple);
             self.str(") ? (");
             self.newline_push();
             self.expression(&arg.expression0);
@@ -4144,7 +4166,7 @@ impl VerylWalker for Emitter {
         self.space(1);
         for x in &arg.case_expression_list {
             self.str(": (");
-            self.case_expression_condition(&arg.expression, &x.case_condition.range_item);
+            self.case_expression_condition(&arg.expression, &x.case_condition.range_item, simple);
             self.str(") ? (");
             self.newline_push();
             self.expression(&x.expression);
@@ -4153,7 +4175,7 @@ impl VerylWalker for Emitter {
                 self.token(&y.comma.comma_token.replace(")"));
                 self.space(1);
                 self.str(": (");
-                self.case_expression_condition(&arg.expression, &y.range_item);
+                self.case_expression_condition(&arg.expression, &y.range_item, simple);
                 self.str(") ? (");
                 self.newline_push();
                 self.expression(&x.expression);

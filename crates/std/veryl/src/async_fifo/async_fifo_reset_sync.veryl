@@ -10,13 +10,36 @@ module async_fifo_reset_sync::<S: synchronizer> #(
     od_rst: output 'd reset,
 ) {
     if MERGE_RESET :g_reset {
-        var s_rst: 's reset;
-        var d_rst: 'd reset;
+        var s_rst     : 's reset;
+        var s_rst_sync: 's logic;
+        var d_rst     : 'd reset;
+        var d_rst_sync: 'd logic;
+
+        always_comb {
+            if s_rst_sync {
+                os_rst = reset_inactive;
+            } else {
+                os_rst = reset_active;
+            }
+        }
+
+        always_comb {
+            if d_rst_sync {
+                od_rst = reset_inactive;
+            } else {
+                od_rst = reset_active;
+            }
+        }
 
         unsafe (cdc) {
             always_comb {
-                s_rst = is_rst & id_rst;
-                d_rst = is_rst & id_rst;
+                if is_rst == reset_active || id_rst == reset_active {
+                    s_rst = reset_active;
+                    d_rst = reset_active;
+                } else {
+                    s_rst = reset_inactive;
+                    d_rst = reset_inactive;
+                }
             }
         }
 
@@ -24,20 +47,20 @@ module async_fifo_reset_sync::<S: synchronizer> #(
             WIDTH : 1                ,
             STAGES: RESET_SYNC_STAGES,
         ) (
-            i_clk: is_clk,
-            i_rst: s_rst ,
-            i_d  : '1    ,
-            o_d  : os_rst,
+            i_clk: is_clk    ,
+            i_rst: s_rst     ,
+            i_d  : '1        ,
+            o_d  : s_rst_sync,
         );
 
         inst u_drst_sync: S #(
             WIDTH : 1                ,
             STAGES: RESET_SYNC_STAGES,
         ) (
-            i_clk: id_clk,
-            i_rst: d_rst ,
-            i_d  : '1    ,
-            o_d  : od_rst,
+            i_clk: id_clk    ,
+            i_rst: d_rst     ,
+            i_d  : '1        ,
+            o_d  : d_rst_sync,
         );
     } else {
         always_comb {
