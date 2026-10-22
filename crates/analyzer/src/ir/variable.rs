@@ -929,6 +929,14 @@ impl VarSelect {
         self.is_const() && self.1.as_ref().is_none_or(|(_, e)| e.comptime().is_const)
     }
 
+    pub fn eval_elaboration_const(&mut self, context: &Context) -> bool {
+        self.0.iter_mut().all(|x| x.eval_elaboration_const(context))
+            && self
+                .1
+                .as_mut()
+                .is_none_or(|(_, x)| x.eval_elaboration_const(context))
+    }
+
     /// Return the packed base-variable range which this access may touch.
     ///
     /// Constant accesses retain their exact range. A dynamic coordinate keeps

@@ -413,6 +413,11 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                     }
                 }
                 K::RandomSeed { value } => census_expr(value, c, poison),
+                K::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        census_expr(v, c, poison);
+                    }
+                }
                 K::RandomGetRange { min, max, .. } => {
                     census_expr(min, c, poison);
                     census_expr(max, c, poison);

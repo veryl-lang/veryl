@@ -530,10 +530,7 @@ pub(super) struct ProcedureContext {
 
 impl ProcedureContext {
     pub(super) fn new(module: &Module) -> Self {
-        let mut ctx = Context::default();
-        ctx.variables = module.variables.clone();
-        ctx.variables.extend(module.interface_members.clone());
-        ctx.functions = module.functions.clone();
+        let ctx = super::module_context(module);
         let module_scope_ids = ctx
             .variables
             .iter()
@@ -727,6 +724,11 @@ fn collect_summary_statement_variables(
                     TbMethod::RandomGetRange { min, max, .. } => {
                         collect_summary_expression_variables(module, min, ids);
                         collect_summary_expression_variables(module, max, ids);
+                    }
+                    TbMethod::Queue { value, .. } => {
+                        if let Some(value) = value {
+                            collect_summary_expression_variables(module, value, ids);
+                        }
                     }
                     TbMethod::FileClose
                     | TbMethod::FileFlush

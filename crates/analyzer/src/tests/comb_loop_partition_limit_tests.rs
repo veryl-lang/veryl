@@ -100,50 +100,53 @@ fn generated_write_matrix_is_complete_without_a_storage_partition() {
 
 #[test]
 fn partition_limit_default_bounds_byte_enabled_memory_next_state() {
-    // 32,768 512-bit words are a 2 MiB memory. A common per-element default
-    // copy followed by byte-enabled writes once created a word-by-byte
-    // partition. Writes now record their regions instead, so the analysis
-    // stays linear in the writes.
-    for whole_copy in [false, true] {
-        let initialization = if whole_copy {
-            "next_data = data;"
-        } else {
-            "for row in 0..32768 { next_data[row] = data[row]; }"
-        };
-        let code = format!(
-            r#"module ByteWrite (
-    data: input logic<512>[32768],
-    address: input logic<15>,
-    write_data: input logic<512>,
-    byte_enable: input logic<64>,
-    next_data: output logic<512>[32768],
-) {{
-    always_comb {{
-        {initialization}
-        for lane in 0..64 {{
-            if byte_enable[lane] {{
-                next_data[address][lane * 8 +: 8] = write_data[lane * 8 +: 8];
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        // 32,768 512-bit words are a 2 MiB memory. A common per-element default
+        // copy followed by byte-enabled writes once created a word-by-byte
+        // partition. Writes now record their regions instead, so the analysis
+        // stays linear in the writes.
+        for whole_copy in [false, true] {
+            let initialization = if whole_copy {
+                "next_data = data;"
+            } else {
+                "for row in 0..32768 { next_data[row] = data[row]; }"
+            };
+            let code = format!(
+                r#"module ByteWrite (
+        data: input logic<512>[32768],
+        address: input logic<15>,
+        write_data: input logic<512>,
+        byte_enable: input logic<64>,
+        next_data: output logic<512>[32768],
+    ) {{
+        always_comb {{
+            {initialization}
+            for lane in 0..64 {{
+                if byte_enable[lane] {{
+                    next_data[address][lane * 8 +: 8] = write_data[lane * 8 +: 8];
+                }}
             }}
         }}
     }}
-}}
-"#
-        );
-        reset_analysis_size();
-        let errors = analyze(&code);
-        assert!(errors.is_empty(), "whole_copy={whole_copy}: {errors:#?}");
-        // Each variable is one storage node, so neither the rows nor the
-        // byte lanes cut the storage. The per-row copy writes one region per
-        // enumerated row; the whole-array copy writes one.
-        let (atoms, nodes, edges) = analysis_size();
-        assert_eq!(atoms, 5, "whole_copy={whole_copy}");
-        let rows = if whole_copy { 0 } else { 32768 };
-        assert!(
-            nodes <= rows + 512 && edges <= 2 * rows + 512,
-            "whole_copy={whole_copy}: {nodes} nodes, {edges} edges"
-        );
-        assert!(comb_loop_analysis_is_complete(&code));
-    }
+    "#
+            );
+            reset_analysis_size();
+            let errors = analyze(&code);
+            assert!(errors.is_empty(), "whole_copy={whole_copy}: {errors:#?}");
+            // Each variable is one storage node, so neither the rows nor the
+            // byte lanes cut the storage. The per-row copy writes one region per
+            // enumerated row; the whole-array copy writes one.
+            let (atoms, nodes, edges) = analysis_size();
+            assert_eq!(atoms, 5, "whole_copy={whole_copy}");
+            let rows = if whole_copy { 0 } else { 32768 };
+            assert!(
+                nodes <= rows + 512 && edges <= 2 * rows + 512,
+                "whole_copy={whole_copy}: {nodes} nodes, {edges} edges"
+            );
+            assert!(comb_loop_analysis_is_complete(&code));
+        }
+    })
 }
 
 #[test]

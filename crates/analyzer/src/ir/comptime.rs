@@ -393,11 +393,20 @@ impl ExpressionContext {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct Comptime {
     pub value: ValueVariant,
     pub r#type: Type,
+    /// Eligible for evaluation/constant folding within the current IR context.
+    /// This includes procedural loop variables while their loop is unrolled.
     pub is_const: bool,
+    /// The source expression depends on runtime values, even if optimization
+    /// has replaced it with a value. Keep this when folding or substituting IR.
+    /// Type queries do not depend on the value of their queried operand.
+    pub runtime_dependent: bool,
+    /// Cached source classification, independent of value evaluation. Cleared
+    /// when cloning metadata, which may be reused for a different expression.
+    pub elaboration_const: Option<bool>,
     pub is_global: bool,
     pub part_select: Option<PartSelectPath>,
     /// Packed base-variable domain retained from the member path and the
@@ -412,7 +421,33 @@ pub struct Comptime {
     pub token: TokenRange,
 }
 
+impl Clone for Comptime {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            r#type: self.r#type.clone(),
+            is_const: self.is_const,
+            runtime_dependent: self.runtime_dependent,
+            elaboration_const: None,
+            is_global: self.is_global,
+            part_select: self.part_select.clone(),
+            member_select_domain: self.member_select_domain,
+            member_signed: self.member_signed,
+            clock_domain: self.clock_domain,
+            expr_context: self.expr_context,
+            evaluated: self.evaluated,
+            token: self.token,
+        }
+    }
+}
+
 impl Comptime {
+    /// Whether an evaluated expression is a legal elaboration-time constant.
+    /// A concrete numeric value is not required (e.g. an external SV constant).
+    pub fn is_elaboration_const(&self) -> bool {
+        self.is_const && !self.runtime_dependent
+    }
+
     /// Rebase a struct/union member onto the whole variable's type, and report
     /// the array dimensions a select has to be split on.
     ///

@@ -52,9 +52,12 @@ impl Conv<&IfExpression> for ir::Expression {
     fn conv(context: &mut Context, value: &IfExpression) -> IrResult<Self> {
         let mut ret: ir::Expression = Conv::conv(context, value.expression01.as_ref())?;
         for x in value.if_expression_list.iter().rev() {
-            let (y_comptime, y): (Comptime, ir::Expression) =
+            let (y_comptime, mut y): (Comptime, ir::Expression) =
                 eval_expr(context, None, x.expression.as_ref(), false)?;
-            let z: ir::Expression = Conv::conv(context, x.expression0.as_ref())?;
+            let mut z: ir::Expression = Conv::conv(context, x.expression0.as_ref())?;
+            let runtime_dependent = !y.eval_elaboration_const(context)
+                || !z.eval_elaboration_const(context)
+                || !ret.eval_elaboration_const(context);
 
             if is_if_expression(&x.expression) {
                 let token: TokenRange = x.expression.as_ref().into();
@@ -96,6 +99,9 @@ impl Conv<&IfExpression> for ir::Expression {
             } else {
                 ir::Expression::Ternary(Box::new(y), Box::new(z), Box::new(ret), comptime)
             };
+            let comptime = ret.comptime_mut();
+            comptime.runtime_dependent |= runtime_dependent;
+            comptime.elaboration_const = Some(!comptime.runtime_dependent);
         }
         Ok(ret)
     }
