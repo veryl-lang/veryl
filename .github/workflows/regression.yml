@@ -53,7 +53,7 @@ jobs:
       # changes every crate's fingerprint. Master saves; PRs restore read-only.
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ matrix.target }}-sccache
+          shared-key: ${{ matrix.target }}-sccache-o1
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: mozilla-actions/sccache-action@v0.0.10
         with:
@@ -66,8 +66,18 @@ jobs:
           path: ${{ github.workspace }}/.sccache
           key: sccache-${{ matrix.target }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.target }}-
+      # The heavy analyzer and simulator tests are compute bound; opt-level 1
+      # cuts their run time far more than it adds to the build. The simulator's
+      # hot paths sit in dependencies, so those are raised too.
       - name: Run tests
-        run: cargo test --locked --target ${{ matrix.target }}
+        # bash keeps the quoted `"*"` intact on Windows too
+        shell: bash
+        run: >-
+          cargo test --locked --target ${{ matrix.target }}
+          --config 'profile.dev.package."*".opt-level=1'
+          --config 'profile.dev.package.veryl-parser.opt-level=1'
+          --config 'profile.dev.package.veryl-analyzer.opt-level=1'
+          --config 'profile.dev.package.veryl-simulator.opt-level=1'
       - name: sccache stats
         if: always()
         run: sccache --show-stats
