@@ -647,3 +647,100 @@ fn comb_logic_without_a_one_pass_order_is_rejected() {
         assert!(analyze_top(code, &allowed, "Top").is_ok(), "{config:?}");
     }
 }
+
+#[test]
+fn string_storage_the_simulator_cannot_size() {
+    // A `string` variable is sized from the assignments in its own module.
+    // Text that reaches it any other way would be cut to the nominal 1-bit
+    // width of the `string` type, so these are rejected instead.
+    let cases = [
+        (
+            "input port",
+            r#"
+            module Sub (s: input string) {
+                initial {
+                    $display("%s", s);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub (s: "hello");
+            }
+            "#,
+        ),
+        (
+            "function output argument",
+            r#"
+            function set (o: output string) {
+                o = "hello";
+            }
+            #[test(Top)]
+            module Top {
+                var s: string;
+                initial {
+                    set(s);
+                }
+            }
+            "#,
+        ),
+        (
+            "hierarchical read",
+            r#"
+            module Sub {
+                let m: string = "hello";
+                initial {
+                    $display("%s", m);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub;
+                initial {
+                    $display("%s", u.m);
+                }
+            }
+            "#,
+        ),
+        (
+            "hierarchical write",
+            r#"
+            module Sub {
+                var m: string;
+                assign m = "init";
+                initial {
+                    $display("%s", m);
+                }
+            }
+            #[test(Top)]
+            module Top {
+                inst u: Sub;
+                initial {
+                    u.m = "hello";
+                }
+            }
+            "#,
+        ),
+        (
+            "concatenation destination",
+            r#"
+            #[test(Top)]
+            module Top {
+                var s: string;
+                var x: logic<8>;
+                initial {
+                    {s, x} = {"hi", 8'h01};
+                }
+            }
+            "#,
+        ),
+    ];
+
+    for (name, code) in cases {
+        let result = analyze_top(code, &Config::default(), "Top");
+        assert!(
+            matches!(result, Err(SimulatorError::UnsupportedString { .. })),
+            "{name}: expected UnsupportedString, got {:?}",
+            result.err()
+        );
+    }
+}

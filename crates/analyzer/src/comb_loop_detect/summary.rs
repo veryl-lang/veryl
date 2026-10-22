@@ -285,6 +285,7 @@ fn node_kind(module: &Module, node: &super::graph::GraphNode) -> SummaryNodeKind
     match module.variables.get(&key.0).map(|variable| variable.kind) {
         Some(VarKind::Input) => SummaryNodeKind::Input,
         Some(VarKind::Output) => SummaryNodeKind::Output,
+        Some(VarKind::Inout) => SummaryNodeKind::Interface,
         _ => SummaryNodeKind::Internal,
     }
 }
