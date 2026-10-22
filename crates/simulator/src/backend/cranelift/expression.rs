@@ -2199,7 +2199,24 @@ impl ProtoExpression {
                             // payload is always I64 for LogicAnd/LogicOr (result is 1-bit)
                             let is_one = builder.ins().icmp_imm_s(IntCC::NotEqual, payload, 0);
                             let not_one = builder.ins().bnot(is_one);
-                            let has_x = builder.ins().band(not_one, is_xz);
+                            let mut has_x = builder.ins().band(not_one, is_xz);
+                            if *op == Op::LogicAnd {
+                                let x_bits = match x_mask_xz {
+                                    Some(mask) => builder.ins().bor(x_payload, mask),
+                                    None => x_payload,
+                                };
+                                let y_bits = match y_mask_xz {
+                                    Some(mask) => builder.ins().bor(y_payload, mask),
+                                    None => y_payload,
+                                };
+                                let x_zero =
+                                    icmp_const(builder, IntCC::Equal, x_bits, 0, needs_wide);
+                                let y_zero =
+                                    icmp_const(builder, IntCC::Equal, y_bits, 0, needs_wide);
+                                let is_zero = builder.ins().bor(x_zero, y_zero);
+                                let not_zero = builder.ins().bnot(is_zero);
+                                has_x = builder.ins().band(has_x, not_zero);
+                            }
                             let one = builder.ins().iconst(I64, 1);
                             let mask_xz = builder.ins().select(has_x, one, context.zero);
                             Some((payload, Some(mask_xz)))
@@ -3015,20 +3032,47 @@ impl ProtoExpression {
                     }
                 }
                 Op::LogicAnd | Op::LogicOr => {
+                    let [x_known, y_known] = [
+                        (x_ptr, x_mask_xz, x, x_width),
+                        (y_ptr, y_mask_xz, y, y_width),
+                    ]
+                    .map(|(ptr, mask, operand, operand_width)| {
+                        if let Some(mask) = mask {
+                            let mask_ptr = marshal_wide_operand(
+                                context,
+                                builder,
+                                returns_wide_pointer(operand),
+                                mask,
+                                operand_width,
+                                op_nb,
+                                signed,
+                            );
+                            emit_wide_binary_op(
+                                context,
+                                builder,
+                                wide_fn_addrs::band_not(),
+                                ptr,
+                                mask_ptr,
+                                op_nb,
+                            )
+                        } else {
+                            ptr
+                        }
+                    });
                     let nb_val2 = builder.ins().iconst(I32, op_nb as i64);
                     let x_nz = call_helper_ret(
                         context,
                         builder,
                         HelperSig::Reduce,
                         wide_fn_addrs::is_nonzero(),
-                        &[x_ptr, nb_val],
+                        &[x_known, nb_val],
                     );
                     let y_nz = call_helper_ret(
                         context,
                         builder,
                         HelperSig::Reduce,
                         wide_fn_addrs::is_nonzero(),
-                        &[y_ptr, nb_val2],
+                        &[y_known, nb_val2],
                     );
                     if matches!(op, Op::LogicAnd) {
                         builder.ins().band(x_nz, y_nz)
@@ -3039,7 +3083,7 @@ impl ProtoExpression {
                 _ => unreachable!(),
             };
 
-            // 4-state for comparisons: if any mask is nonzero, result is X
+            // Logical results can be known despite X/Z in either operand.
             let mask_xz = wide_any_xz(
                 context,
                 builder,
@@ -3050,7 +3094,41 @@ impl ProtoExpression {
                 x_width,
                 y_width,
             );
-            if let Some(is_xz) = mask_xz {
+            if let Some(mut is_xz) = mask_xz {
+                if matches!(op, Op::LogicAnd | Op::LogicOr) {
+                    let not_one = builder.ins().icmp_imm_s(IntCC::Equal, payload, 0);
+                    is_xz = builder.ins().band(is_xz, not_one);
+                }
+                if *op == Op::LogicAnd {
+                    let mut x_nonzero = emit_wide_is_nonzero(context, builder, x_ptr, op_nb);
+                    let mut y_nonzero = emit_wide_is_nonzero(context, builder, y_ptr, op_nb);
+                    if let Some(mask) = wide_any_xz(
+                        context,
+                        builder,
+                        x_mask_xz,
+                        None,
+                        returns_wide_pointer(x),
+                        false,
+                        x_width,
+                        0,
+                    ) {
+                        x_nonzero = builder.ins().bor(x_nonzero, mask);
+                    }
+                    if let Some(mask) = wide_any_xz(
+                        context,
+                        builder,
+                        y_mask_xz,
+                        None,
+                        returns_wide_pointer(y),
+                        false,
+                        y_width,
+                        0,
+                    ) {
+                        y_nonzero = builder.ins().bor(y_nonzero, mask);
+                    }
+                    let neither_known_zero = builder.ins().band(x_nonzero, y_nonzero);
+                    is_xz = builder.ins().band(is_xz, neither_known_zero);
+                }
                 let one = builder.ins().iconst(I64, 1);
                 let payload = builder.ins().select(is_xz, context.zero, payload);
                 let mask_xz = builder.ins().select(is_xz, one, context.zero);
@@ -3208,6 +3286,21 @@ impl ProtoExpression {
                 signed,
             },
         );
+        let payload = if matches!(op, Op::BitAnd | Op::BitOr)
+            && let Some(mask) = mask_xz
+        {
+            // Bitwise unknown results are X (payload=0), never input Z (payload=1).
+            emit_wide_binary_op(
+                context,
+                builder,
+                wide_fn_addrs::band_not(),
+                payload,
+                mask,
+                op_nb,
+            )
+        } else {
+            payload
+        };
 
         // A ≤128-bit node computed in the wide-ptr domain (a narrowing
         // `as` cast keeps its operand in the source domain): the caller
@@ -3884,7 +3977,7 @@ impl ProtoExpression {
 
 #[cfg(test)]
 mod tests {
-    use super::super::runtime::{LAST_FRAME_SLOTS, build_binary_no_cache};
+    use super::super::runtime::{LAST_FRAME_SLOTS, build_binary_marked};
     use crate::ir::variable::VarOffset;
     use crate::ir::{
         Config, ExpressionContext, Op, ProtoAssignStatement, ProtoExpression, ProtoStatement, Value,
@@ -3966,7 +4059,7 @@ mod tests {
         });
 
         assert!(
-            build_binary_no_cache(&Config::default(), vec![stmt]).is_some(),
+            build_binary_marked(&Config::default(), vec![stmt], true, None).is_some(),
             "the concat must compile"
         );
     }
@@ -3998,7 +4091,7 @@ mod tests {
                 })
                 .collect();
             assert!(
-                build_binary_no_cache(&Config::default(), stmts).is_some(),
+                build_binary_marked(&Config::default(), stmts, true, None).is_some(),
                 "the wide chunk must compile"
             );
             LAST_FRAME_SLOTS.with(|c| c.get().0)
@@ -4034,7 +4127,7 @@ mod tests {
                 token: TokenRange::default(),
             });
             assert!(
-                build_binary_no_cache(&Config::default(), vec![stmt]).is_some(),
+                build_binary_marked(&Config::default(), vec![stmt], true, None).is_some(),
                 "the wide bit-select store must compile"
             );
             LAST_FRAME_SLOTS.with(|c| c.get())
@@ -4112,7 +4205,7 @@ mod tests {
                 comb_direct: false,
                 token: TokenRange::default(),
             });
-            let (func, _mmap) = build_binary_no_cache(&Config::default(), vec![stmt])
+            let (func, _mmap) = build_binary_marked(&Config::default(), vec![stmt], true, None)
                 .unwrap_or_else(|| panic!("{name}: the wide bit-select store must compile"));
 
             // Dense, word-distinct patterns so a misplaced word shows up.

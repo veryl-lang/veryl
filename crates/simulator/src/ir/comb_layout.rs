@@ -40,15 +40,14 @@ use crate::ir::variable::{ModuleVariableMeta, VarOffset, VariableMeta, value_siz
 use veryl_analyzer::ir::VarId;
 
 /// Old-offset → new-offset translation for the comb space, as a sorted set of
-/// relocated intervals.  Anything outside every interval stays in place.
+/// placed intervals.  Anything outside every interval stays in place.
 #[derive(Debug, Default)]
 pub struct CombLayoutSchedule {
-    /// `(old_start, old_end, new_start)`, sorted by `old_start`, pairwise
-    /// disjoint.  A unit keeps its internal layout: `x` in `[old_start,
-    /// old_end)` lands at `new_start + (x - old_start)`.
+    /// `(old_start, old_end, new_start)` of every placed unit, moved or not,
+    /// sorted by `old_start`, pairwise disjoint.  A unit keeps its internal
+    /// layout: `x` in `[old_start, old_end)` lands at `new_start + (x -
+    /// old_start)`.
     units: Vec<(isize, isize, isize)>,
-    /// Sorted `(new_start, new_end)` of every unit.
-    dest: Vec<(isize, isize)>,
     /// One past the highest byte any placed unit occupies.  The comb buffer
     /// must be at least this large (it never exceeds the old total by more
     /// than alignment padding, and usually undercuts it).
@@ -71,78 +70,28 @@ impl CombLayoutSchedule {
         }
     }
 
-    /// Translate a byte RANGE through the schedule, piecewise: a unit moves
-    /// as a whole (intra-unit deltas preserved) but adjacent units may land
-    /// apart, so one input range can map to several output ranges.
-    pub fn translate_range(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
-        let mut out: Vec<(isize, isize)> = Vec::new();
-        let mut x = start;
-        while x < end {
-            let i = self.units.partition_point(|&(s, _, _)| s <= x);
-            let (seg_end, nx) = match i.checked_sub(1) {
-                Some(i) => {
-                    let (s, e, n) = self.units[i];
-                    if x < e {
-                        (e.min(end), n + (x - s))
-                    } else {
-                        let next = self.units.get(i + 1).map(|u| u.0).unwrap_or(isize::MAX);
-                        (next.min(end), x)
-                    }
-                }
-                None => {
-                    let next = self.units.first().map(|u| u.0).unwrap_or(isize::MAX);
-                    (next.min(end), x)
-                }
-            };
-            out.push((nx, nx + (seg_end - x)));
-            x = seg_end;
+    #[cfg(test)]
+    pub(crate) fn from_units(units: Vec<(isize, isize, isize)>, buffer_end: usize) -> Self {
+        Self {
+            total_units: units.len(),
+            units,
+            buffer_end,
+            hot_units: 0,
         }
-        out
     }
 
-    fn dest_covered(&self, x: isize) -> bool {
-        let i = self.dest.partition_point(|&(s, _)| s <= x);
-        i.checked_sub(1).is_some_and(|i| x < self.dest[i].1)
-    }
-
-    /// `translate_range` minus the bytes another unit now lives on.  A byte
-    /// outside every unit keeps its offset (a rename temp the layout never
-    /// saw), but where a placed unit landed the old byte belongs to someone
-    /// else, so that piece is dropped.
-    pub fn translate_range_live(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
+    /// The parts of a byte range that some unit places, translated.  Unplaced
+    /// bytes are dead: `translate` leaves them at their old offsets, where
+    /// the packed layout may have put another unit.
+    pub fn placed_range(&self, start: isize, end: isize) -> Vec<(isize, isize)> {
         let mut out: Vec<(isize, isize)> = Vec::new();
-        let mut x = start;
-        while x < end {
-            let i = self.units.partition_point(|&(s, _, _)| s <= x);
-            match i.checked_sub(1) {
-                Some(k) if x < self.units[k].1 => {
-                    let (s, e, n) = self.units[k];
-                    let seg_end = e.min(end);
-                    out.push((n + (x - s), n + (seg_end - s)));
-                    x = seg_end;
-                }
-                _ => {
-                    let next = self
-                        .units
-                        .get(i)
-                        .map(|u| u.0)
-                        .unwrap_or(isize::MAX)
-                        .min(end);
-                    let mut y = x;
-                    while y < next {
-                        let dead = self.dest_covered(y);
-                        let mut z = y + 1;
-                        while z < next && self.dest_covered(z) == dead {
-                            z += 1;
-                        }
-                        if !dead {
-                            out.push((y, z));
-                        }
-                        y = z;
-                    }
-                    x = next;
-                }
+        let first = self.units.partition_point(|&(_, e, _)| e <= start);
+        for &(s, e, n) in &self.units[first..] {
+            if s >= end {
+                break;
             }
+            let (a, b) = (s.max(start), e.min(end));
+            out.push((n + (a - s), n + (b - s)));
         }
         out
     }
@@ -164,16 +113,8 @@ pub struct LayoutInputs {
     pub extra_offsets: Vec<VarOffset>,
 }
 
-/// Rank the comb units by the gated segment that compares them, ahead of
-/// first use: a guard re-reads its compare set on every settle it visits.
-/// Default-on; `VERYL_COMB_LAYOUT_CONE=0` opts out.
-pub fn cone_layout() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("VERYL_COMB_LAYOUT_CONE").as_deref() != Ok("0"))
-}
-
 /// Default-on for 2-state storage; `VERYL_COMB_LAYOUT=0` opts out.  Off on
-/// wasm, which has no whole-comb backend to profit from the reordering.
+/// wasm, which has no AOT-C backend to profit from the reordering.
 pub fn enabled(use_4state: bool) -> bool {
     if cfg!(target_family = "wasm") {
         return false;
@@ -344,15 +285,11 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
                 index_expr,
                 ..
             } => {
-                if let VarOffset::Comb(o) = base_offset {
-                    let span = stride.unsigned_abs() * num_elements.saturating_sub(1)
-                        + element_native_bytes;
-                    let base = if *stride < 0 {
-                        *o + *stride * (num_elements.saturating_sub(1) as isize)
-                    } else {
-                        *o
-                    };
-                    out.push((base, base + span as isize));
+                if let VarOffset::Comb(o) = base_offset
+                    && let Some(span) =
+                        crate::ir::strided_span(*o, *stride, *num_elements, *element_native_bytes)
+                {
+                    out.push(span);
                 }
                 expr(index_expr, out);
             }
@@ -406,15 +343,15 @@ fn collect_dynamic_spans(stmts: &[ProtoStatement], out: &mut Vec<(isize, isize)>
                 expr(&a.expr, out);
             }
             ProtoStatement::AssignDynamic(a) => {
-                if let VarOffset::Comb(o) = a.dst_base {
-                    let span = a.dst_stride.unsigned_abs() * a.dst_num_elements.saturating_sub(1)
-                        + crate::ir::native_bytes(a.dst_width).max(1);
-                    let base = if a.dst_stride < 0 {
-                        o + a.dst_stride * (a.dst_num_elements.saturating_sub(1) as isize)
-                    } else {
-                        o
-                    };
-                    out.push((base, base + span as isize));
+                if let VarOffset::Comb(o) = a.dst_base
+                    && let Some(span) = crate::ir::strided_span(
+                        o,
+                        a.dst_stride,
+                        a.dst_num_elements,
+                        crate::ir::native_bytes(a.dst_width).max(1),
+                    )
+                {
+                    out.push(span);
                 }
                 expr(&a.dst_index_expr, out);
                 expr(&a.expr, out);
@@ -485,7 +422,6 @@ pub fn build_schedule(
     events: &HashMap<Event, Vec<ProtoStatement>>,
     extra_offsets: &[VarOffset],
     comb_total: usize,
-    cone_reads: &[Vec<(u32, u32)>],
 ) -> Option<CombLayoutSchedule> {
     if comb_total == 0 {
         return None;
@@ -612,29 +548,9 @@ pub fn build_schedule(
         );
     }
 
-    // Consumer rank (see `cone_layout`), one segment at a time so each compare
-    // set packs into one run.
-    let mut idx = 0usize;
-    for ranges in cone_reads {
-        for &(a, b) in ranges {
-            let (a, b) = (a as isize, b as isize);
-            let mut i = match units.binary_search_by(|u| u.start.cmp(&a)) {
-                Ok(i) => i,
-                Err(0) => 0,
-                Err(i) => i - 1,
-            };
-            while i < units.len() && units[i].start < b {
-                if units[i].end > a && units[i].rank == usize::MAX {
-                    units[i].rank = idx;
-                    idx += 1;
-                }
-                i += 1;
-            }
-        }
-    }
-
     // -- 4. second sweep: first-use rank over the settle order, then the
     //    events in their deterministic order.
+    let mut idx = 0usize;
     {
         let mut ins: Vec<VarOffset> = Vec::new();
         let mut outs: Vec<VarOffset> = Vec::new();
@@ -688,26 +604,23 @@ pub fn build_schedule(
     };
     let mut pos: isize = 0;
     let mut placed: Vec<(isize, isize, isize)> = Vec::with_capacity(order.len());
+    let mut moved = 0usize;
     for i in order {
         let u = &units[i];
         let a = align_of(u.start, u.end - u.start);
         pos = (pos + a - 1) & !(a - 1);
-        if pos != u.start {
-            placed.push((u.start, u.end, pos));
-        }
+        moved += usize::from(pos != u.start);
+        placed.push((u.start, u.end, pos));
         pos += u.end - u.start;
     }
     let buffer_end = pos as usize;
     placed.sort_by_key(|&(s, _, _)| s);
 
-    if placed.is_empty() {
+    if moved == 0 {
         return None;
     }
-    let mut dest: Vec<(isize, isize)> = placed.iter().map(|&(s, e, n)| (n, n + (e - s))).collect();
-    dest.sort_unstable();
     let sched = CombLayoutSchedule {
         units: placed,
-        dest,
         buffer_end,
         hot_units,
         total_units,
@@ -715,12 +628,7 @@ pub fn build_schedule(
     if diag() {
         eprintln!(
             "[comb_layout] units={} hot={} moved={} orphans={} comb_total={} buffer_end={}",
-            sched.total_units,
-            sched.hot_units,
-            sched.units.len(),
-            orphan_count,
-            comb_total,
-            sched.buffer_end,
+            sched.total_units, sched.hot_units, moved, orphan_count, comb_total, sched.buffer_end,
         );
     }
     Some(sched)
@@ -836,12 +744,8 @@ mod tests {
     use super::*;
 
     fn sched(units: Vec<(isize, isize, isize)>, end: usize) -> CombLayoutSchedule {
-        let mut dest: Vec<(isize, isize)> =
-            units.iter().map(|&(s, e, n)| (n, n + (e - s))).collect();
-        dest.sort_unstable();
         CombLayoutSchedule {
             units,
-            dest,
             buffer_end: end,
             hot_units: 0,
             total_units: 0,
@@ -861,20 +765,12 @@ mod tests {
     }
 
     #[test]
-    fn live_translation_drops_what_another_unit_landed_on() {
-        // [16, 32) moves down to 0, onto old storage nothing owns any more;
-        // [64, 72) moves to 144.
-        let s = sched(vec![(16, 32, 0), (64, 72, 144)], 160);
-        // Old [0, 8) is dead: the first unit's destination covers it.
-        assert!(s.translate_range_live(0, 8).is_empty());
-        // Old [8, 40): the dead prefix goes, the unit moves, the untouched
-        // tail stays where it is.
-        assert_eq!(s.translate_range_live(8, 40), vec![(0, 16), (32, 40)]);
-        // Storage no unit touched or landed on keeps its offset.
-        assert_eq!(s.translate_range_live(40, 60), vec![(40, 60)]);
-        assert_eq!(s.translate_range_live(60, 70), vec![(60, 64), (144, 150)]);
-        // The plain translation keeps the dead prefix at its old offset.
-        assert_eq!(s.translate_range(0, 8), vec![(0, 8)]);
+    fn a_placed_range_drops_the_bytes_no_unit_places() {
+        // [16, 24) is placed where it was; [24, 32) belongs to no unit.
+        let s = sched(vec![(0, 8, 8), (8, 16, 0), (16, 24, 16), (32, 40, 24)], 32);
+        assert_eq!(s.placed_range(20, 36), vec![(20, 24), (24, 28)]);
+        assert_eq!(s.placed_range(4, 12), vec![(12, 16), (0, 4)]);
+        assert_eq!(s.placed_range(24, 32), vec![]);
     }
 
     #[test]
@@ -925,23 +821,11 @@ mod tests {
         // settle order touches offset 8 first, then 0; 4 is cold.
         let unified = vec![assign(8, 8), assign(0, 8)];
         let events = HashMap::default();
-        let sched = build_schedule(&meta_units, &unified, &events, &[], 12, &[]).unwrap();
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 12).unwrap();
         assert_eq!(sched.translate(8), 0); // first used -> packed first
         assert_eq!(sched.translate(0), 4); // second
         assert_eq!(sched.translate(4), 8); // cold -> last
         assert_eq!(sched.buffer_end, 12);
-    }
-
-    #[test]
-    fn packs_compared_units_first() {
-        let meta_units = vec![(0, 4), (4, 8), (8, 12)];
-        let unified = vec![assign(8, 8), assign(0, 8)];
-        let events = HashMap::default();
-        let cone_reads = vec![vec![(4, 8)]];
-        let sched = build_schedule(&meta_units, &unified, &events, &[], 12, &cone_reads).unwrap();
-        assert_eq!(sched.translate(4), 0);
-        assert_eq!(sched.translate(8), 4);
-        assert_eq!(sched.translate(0), 8);
     }
 
     #[test]
@@ -951,10 +835,10 @@ mod tests {
         if let ProtoStatement::Assign(a) = &mut wide {
             a.dst_width = 64;
         }
-        let unified = vec![wide];
+        // First use alone would rank 8, then 4, then 0.
+        let unified = vec![assign(8, 8), assign(4, 8), wide];
         let events = HashMap::default();
-        let cone_reads = vec![vec![(8, 12)], vec![(4, 8)]];
-        let sched = build_schedule(&meta_units, &unified, &events, &[], 12, &cone_reads).unwrap();
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 12).unwrap();
         assert_eq!(sched.translate(8), 0);
         assert_eq!(sched.translate(4), sched.translate(0) + 4);
     }
@@ -1005,7 +889,7 @@ mod tests {
             dyn_read,
         ];
         let events = HashMap::default();
-        let sched = build_schedule(&[(0x20, 0x24)], &unified, &events, &[], 0xa0, &[]).unwrap();
+        let sched = build_schedule(&[(0x20, 0x24)], &unified, &events, &[], 0xa0).unwrap();
         let base = sched.translate(0x40);
         assert_eq!(sched.translate(0x44), base + 4);
         assert_eq!(sched.translate(0x48), base + 8);
@@ -1032,7 +916,7 @@ mod tests {
         });
         let unified = vec![assign(0, 0), for_stmt];
         let events = HashMap::default();
-        let sched = build_schedule(&[(0, 4)], &unified, &events, &[], 0x48, &[]).unwrap();
+        let sched = build_schedule(&[(0, 4)], &unified, &events, &[], 0x48).unwrap();
         // The counter's unit is cold (no gather form ranks it) and packs
         // after the hot var, 8-aligned — inside the packed region, not at
         // its old identity address.
@@ -1048,7 +932,7 @@ mod tests {
         // offset 8 belongs to no meta unit; 4..8 is ghost padding.
         let unified = vec![assign(0, 8)];
         let events = HashMap::default();
-        let sched = build_schedule(&meta_units, &unified, &events, &[], 16, &[]).unwrap();
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 16).unwrap();
         // The promoted unit [8,16) packs first (first use), [0,4) follows.
         assert_eq!(sched.translate(8), 0);
         assert_eq!(sched.translate(0), 8);
@@ -1063,7 +947,7 @@ mod tests {
         let meta_units = vec![(0, 4), (64, 68)];
         let unified = vec![assign(64, 0)];
         let events = HashMap::default();
-        let sched = build_schedule(&meta_units, &unified, &events, &[], 128, &[]).unwrap();
+        let sched = build_schedule(&meta_units, &unified, &events, &[], 128).unwrap();
         assert_eq!(sched.buffer_end, 8);
         assert_eq!(sched.translate(0), 0);
         assert_eq!(sched.translate(64), 4);

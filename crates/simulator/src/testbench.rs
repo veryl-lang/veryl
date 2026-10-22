@@ -9,7 +9,7 @@ use crate::simulator::Simulator;
 use crate::simulator_error::SimulatorError;
 use crate::wave_dumper::WaveDumper;
 use smallvec::SmallVec;
-use veryl_analyzer::ir::{AssertKind, ControlFlow};
+use veryl_analyzer::ir::{AssertKind, ControlFlow, QueueOp};
 use veryl_analyzer::value::MaskCache;
 use veryl_parser::resource_table::StrId;
 
@@ -85,6 +85,15 @@ pub enum TestbenchStatement {
     /// `x = r.get_seed()`.
     RandomGetSeed {
         handle: StrId,
+        ret: Option<(VarId, crate::ir::RetWidthCheck)>,
+    },
+    /// `$tb::queue` method — `handle` is the queue variable's name.
+    Queue {
+        handle: StrId,
+        op: QueueOp,
+        value: Option<Expression>,
+        elem: crate::queue_table::Element,
+        capacity: u32,
         ret: Option<(VarId, crate::ir::RetWidthCheck)>,
     },
     /// if-else (may contain next inside)
@@ -187,7 +196,8 @@ fn collect_tb_insts(
                 | TbMethodKind::RandomSeed { .. }
                 | TbMethodKind::RandomGet { .. }
                 | TbMethodKind::RandomGetRange { .. }
-                | TbMethodKind::RandomGetSeed { .. } => {}
+                | TbMethodKind::RandomGetSeed { .. }
+                | TbMethodKind::Queue { .. } => {}
             },
             Statement::For(for_stmt) => {
                 collect_tb_insts(&for_stmt.body, clock_insts, reset_insts);
@@ -390,6 +400,26 @@ fn convert_stmt(
                 handle: *inst,
                 ret: *ret,
             },
+            TbMethodKind::Queue {
+                op,
+                value,
+                width,
+                signed,
+                four_state,
+                capacity,
+                ret,
+            } => TestbenchStatement::Queue {
+                handle: *inst,
+                op: *op,
+                value: value.clone(),
+                elem: crate::queue_table::Element {
+                    width: *width,
+                    signed: *signed,
+                    four_state: *four_state,
+                },
+                capacity: *capacity,
+                ret: *ret,
+            },
         },
         Statement::SystemFunctionCall(SystemFunctionCall::Assert {
             kind,
@@ -492,6 +522,7 @@ pub fn run_testbench_blocks(sim: &mut Simulator, blocks: &[&[TestbenchStatement]
     assert_buffer::reset();
     crate::file_table::reset();
     crate::random_table::reset(sim.ir.seed);
+    crate::queue_table::reset();
     let result: TestResult = run_processes(sim, blocks).into();
     // End-of-test component hooks may still record failures.
     sim.finish_components();
@@ -591,8 +622,8 @@ pub fn run_native_testbench_timed(
 ) -> Result<(TestResult, std::time::Duration), SimulatorError> {
     // `Instant::now` panics on wasm, where the playground runs the testbench.
     // The span opens before `Simulator::new` because construction builds the
-    // settle filter's span table, which `derive_testbench` builds instead when
-    // the filter is off.
+    // dataflow settle's span table, which `derive_testbench` builds instead
+    // when the dataflow settle is off.
     #[cfg(not(target_family = "wasm"))]
     let t_build = std::time::Instant::now();
     // The dump attaches after `init_components` so component trace
@@ -996,7 +1027,7 @@ struct TbClock<'a> {
 
 /// A `rst.assert` in progress: the level is held while its process waits
 /// for the clock, and the first of those edges carries the assertion.
-struct ResetHold<'a> {
+struct ResetActive<'a> {
     reset: &'a Event,
     assertion_pending: bool,
 }
@@ -1010,7 +1041,7 @@ enum TaskState<'a> {
     Waiting {
         clock: usize,
         remaining: u64,
-        reset: Option<ResetHold<'a>>,
+        reset: Option<ResetActive<'a>>,
     },
     Done,
 }
@@ -1302,7 +1333,7 @@ fn run_task<'a>(
                 task.state = TaskState::Waiting {
                     clock: clock_index(clocks, clock, high_time, low_time),
                     remaining: duration,
-                    reset: Some(ResetHold {
+                    reset: Some(ResetActive {
                         reset,
                         assertion_pending: true,
                     }),
@@ -1584,6 +1615,26 @@ fn exec_simple(sim: &mut Simulator, stmt: &TestbenchStatement) -> ExecResult {
             let seed = crate::random_table::get_seed_handle(*handle);
             if let Some((ret, _)) = ret {
                 sim.set_var_by_id(ret, Value::new(seed, 64, false));
+            }
+            ExecResult::Continue
+        }
+        TestbenchStatement::Queue {
+            handle,
+            op,
+            value,
+            elem,
+            capacity,
+            ret,
+        } => {
+            let value = value.as_ref().map(|v| {
+                sim.ensure_comb_updated();
+                v.eval(&mut sim.mask_cache)
+            });
+            let result = crate::queue_table::exec(*handle, *op, value, *elem, *capacity);
+            if let Some((ret, _)) = ret
+                && let Some(result) = result
+            {
+                sim.set_var_by_id(ret, result);
             }
             ExecResult::Continue
         }

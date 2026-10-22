@@ -9,6 +9,7 @@ use crate::ir::{Ir, IrResult};
 use crate::msb_table;
 use crate::namespace::Namespace;
 use crate::reference_table;
+use crate::reset_value_table;
 use crate::resolved_type_table;
 use crate::scope;
 use crate::symbol::{DocComment, ProjectPropertyValueProperty, Symbol, SymbolKind};
@@ -201,6 +202,7 @@ impl Analyzer {
         generic_inference_table::resolve_pending();
         ret.append(&mut reference_table::apply());
         ret.append(&mut type_dag::apply());
+        ret.append(&mut reset_value_table::apply());
 
         ret
     }
@@ -306,6 +308,7 @@ impl Analyzer {
         type_dag::clear();
         resolved_type_table::clear();
         generic_inference_table::clear();
+        reset_value_table::clear();
         doc_comment_table::clear();
     }
 }

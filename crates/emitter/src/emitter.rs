@@ -18,6 +18,7 @@ use veryl_analyzer::ir::{self, IrResult};
 use veryl_analyzer::literal::{Literal, TypeLiteral};
 use veryl_analyzer::msb_table;
 use veryl_analyzer::namespace::{DefineContext, Namespace};
+use veryl_analyzer::reset_value_table;
 use veryl_analyzer::resolved_type_table;
 use veryl_analyzer::scope;
 use veryl_analyzer::symbol::Direction as SymDirection;
@@ -202,6 +203,21 @@ impl Default for Emitter {
             modport_connections_tables: Vec::new(),
             modport_ports_table: None,
         }
+    }
+}
+
+// Variables local to a statement block or function are updated immediately,
+// so only the other targets of an always_ff assignment need a nonblocking one.
+fn is_nba_target<T: Into<SymbolPathNamespace>>(path: T) -> bool {
+    match symbol_table::resolve(path) {
+        Ok(symbol) => match &symbol.found.kind {
+            SymbolKind::Variable(x) => !matches!(
+                x.affiliation,
+                Affiliation::StatementBlock | Affiliation::Function
+            ),
+            _ => true,
+        },
+        Err(_) => true,
     }
 }
 
@@ -1131,6 +1147,24 @@ impl Emitter {
             }
         } else {
             false
+        }
+    }
+
+    /// Value of a reset value literal according to the polarity of its counterpart
+    fn reset_value_text(&self, token: &VerylToken, is_active: bool) -> &'static str {
+        let reset_type = match reset_value_table::get(token.token.id).unwrap() {
+            TypeKind::ResetAsyncHigh => ResetType::AsyncHigh,
+            TypeKind::ResetAsyncLow => ResetType::AsyncLow,
+            TypeKind::ResetSyncHigh => ResetType::SyncHigh,
+            TypeKind::ResetSyncLow => ResetType::SyncLow,
+            TypeKind::Reset => self.build_opt.reset_type,
+            _ => unreachable!(),
+        };
+        let active_high = matches!(reset_type, ResetType::AsyncHigh | ResetType::SyncHigh);
+        if active_high == is_active {
+            "1'b1"
+        } else {
+            "1'b0"
         }
     }
 
@@ -3320,6 +3354,20 @@ impl VerylWalker for Emitter {
         self.token(&arg.msb_token.replace(&text));
     }
 
+    /// Semantic action for non-terminal 'ResetActive'
+    fn reset_active(&mut self, arg: &ResetActive) {
+        let token = &arg.reset_active_token;
+        let text = self.reset_value_text(token, true);
+        self.veryl_token(&token.replace(text));
+    }
+
+    /// Semantic action for non-terminal 'ResetInactive'
+    fn reset_inactive(&mut self, arg: &ResetInactive) {
+        let token = &arg.reset_inactive_token;
+        let text = self.reset_value_text(token, false);
+        self.veryl_token(&token.replace(text));
+    }
+
     /// Semantic action for non-terminal 'Param'
     fn param(&mut self, arg: &Param) {
         self.veryl_token(&arg.param_token.replace("parameter"));
@@ -3848,6 +3896,7 @@ impl VerylWalker for Emitter {
         match arg {
             Factor::Number(x) => self.number(&x.number),
             Factor::BooleanLiteral(x) => self.boolean_literal(&x.boolean_literal),
+            Factor::ResetValueLiteral(x) => self.reset_value_literal(&x.reset_value_literal),
             Factor::IdentifierFactor(x) => self.identifier_factor(&x.identifier_factor),
             Factor::LParenExpressionRParen(x) => {
                 self.l_paren(&x.l_paren);
@@ -4381,6 +4430,16 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'ConcatenationAssignment'
     fn concatenation_assignment(&mut self, arg: &ConcatenationAssignment) {
+        let list = &arg.assign_concatenation_list;
+        let is_nba = self.in_always_ff
+            && std::iter::once(&*list.assign_concatenation_item)
+                .chain(
+                    list.assign_concatenation_list_list
+                        .iter()
+                        .map(|x| &*x.assign_concatenation_item),
+                )
+                .any(|item| is_nba_target(item.hierarchical_identifier.identifier.as_ref()));
+
         self.align_start(align_kind::IDENTIFIER);
         self.l_brace(&arg.l_brace);
         self.assign_concatenation_list(&arg.assign_concatenation_list);
@@ -4388,7 +4447,7 @@ impl VerylWalker for Emitter {
         self.align_finish(align_kind::IDENTIFIER);
         self.space(1);
         self.align_start(align_kind::ASSIGNMENT);
-        if self.in_always_ff {
+        if is_nba {
             self.str("<");
         }
         self.equ(&arg.equ);
@@ -4400,23 +4459,11 @@ impl VerylWalker for Emitter {
 
     /// Semantic action for non-terminal 'Assignment'
     fn assignment(&mut self, arg: &Assignment) {
-        let is_nba = if !self.in_always_ff {
-            false
-        } else if let Some(lhs) = &self.assignment_lefthand_side {
-            if let Ok(lhs_symbol) = symbol_table::resolve(lhs.scoped_identifier.as_ref()) {
-                match &lhs_symbol.found.kind {
-                    SymbolKind::Variable(x) => !matches!(
-                        x.affiliation,
-                        Affiliation::StatementBlock | Affiliation::Function
-                    ),
-                    _ => true,
-                }
-            } else {
-                true
-            }
-        } else {
-            true
-        };
+        let is_nba = self.in_always_ff
+            && match &self.assignment_lefthand_side {
+                Some(lhs) => is_nba_target(lhs.scoped_identifier.as_ref()),
+                None => true,
+            };
 
         self.space(1);
         if is_nba {

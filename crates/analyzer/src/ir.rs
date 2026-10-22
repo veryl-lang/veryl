@@ -32,7 +32,9 @@ pub use declaration::{
     ExternalParamValue, FfClock, FfDeclaration, FfReset, FinalDeclaration, InitialDeclaration,
     InstDeclaration, InstInput, InstInterfaceBinding, InstOutput, qualified_prefix_len,
 };
-pub use expression::{ArrayLiteralItem, Expression, Factor, HierVarRef};
+pub use expression::{
+    ArrayLiteralItem, Expression, Factor, HierVarRef, ResetPolarity, ResetValueKind,
+};
 pub use ff_table::FfTable;
 pub use function::{Arguments, FuncArg, FuncPath, FuncProto, Function, FunctionBody, FunctionCall};
 pub use interface::Interface;
@@ -43,8 +45,8 @@ pub use shape::{Shape, ShapeRef};
 pub use signature::Signature;
 pub use statement::{
     AssignDestination, AssignStatement, CaseArm, CasePattern, CaseStatement, ControlFlow, ForBound,
-    ForRange, ForStatement, HierAssignDestination, IfResetStatement, IfStatement, Statement,
-    StatementBlock, TbMethod, TbMethodCall,
+    ForRange, ForStatement, HierAssignDestination, IfResetStatement, IfStatement, QueueOp,
+    Statement, StatementBlock, TbMethod, TbMethodCall,
 };
 pub use system_function::{
     AssertKind, Input as SystemFunctionInput, Output as SystemFunctionOutput, SystemFunctionCall,

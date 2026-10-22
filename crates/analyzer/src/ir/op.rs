@@ -1390,7 +1390,9 @@ impl Op {
                 let (is_one, is_x) = match (x.as_ref(), y.as_ref()) {
                     (Value::U64(x), Value::U64(y)) => {
                         let is_one = (x.payload & !x.mask_xz != 0) && (y.payload & !y.mask_xz != 0);
-                        let is_x = x.mask_xz != 0 || y.mask_xz != 0;
+                        let is_zero = (x.payload == 0 && x.mask_xz == 0)
+                            || (y.payload == 0 && y.mask_xz == 0);
+                        let is_x = !is_zero && (x.mask_xz != 0 || y.mask_xz != 0);
 
                         (is_one, is_x)
                     }
@@ -1399,7 +1401,9 @@ impl Op {
                         let y_mask = mask_cache.get(y.width as usize);
                         let is_one = (x.payload() & (x.mask_xz() ^ x_mask) != b0())
                             && (y.payload() & (y.mask_xz() ^ y_mask) != b0());
-                        let is_x = x.mask_xz() != &b0() || y.mask_xz() != &b0();
+                        let is_zero = (x.payload() == &b0() && x.mask_xz() == &b0())
+                            || (y.payload() == &b0() && y.mask_xz() == &b0());
+                        let is_x = !is_zero && (x.mask_xz() != &b0() || y.mask_xz() != &b0());
 
                         (is_one, is_x)
                     }

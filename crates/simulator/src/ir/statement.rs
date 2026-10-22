@@ -8,6 +8,7 @@ use crate::ir::expression::{
     DynamicBitSelect, ExpressionContext, ProtoDynamicBitSelect, build_dynamic_bit_select,
     build_linear_index_expr, inline_function_call,
 };
+use crate::ir::module::BitRange;
 use crate::ir::partial_index::partial_index_base;
 use crate::ir::variable::{
     VarOffset, clip_select_to_width, native_bytes as calc_native_bytes, read_native_value,
@@ -26,7 +27,7 @@ use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::{
     AssertKind, SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant,
 };
-use veryl_analyzer::ir::{ControlFlow, FunctionCall, VarId};
+use veryl_analyzer::ir::{ControlFlow, FunctionCall, QueueOp, VarId};
 use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue, byte_value_to_string_lossy};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -306,6 +307,17 @@ pub enum ProtoTbMethodKind {
     RandomGetSeed {
         ret: Option<(VarId, RetWidthCheck)>,
     },
+    /// `$tb::queue::<T, N>` methods. `width`/`signed`/`four_state` describe
+    /// the element type, `capacity` is `N` (`0` for unbounded).
+    Queue {
+        op: QueueOp,
+        value: Option<ProtoExpression>,
+        width: u32,
+        signed: bool,
+        four_state: bool,
+        capacity: u32,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
 }
 
 /// How a component method's returned width is validated before it lands
@@ -369,6 +381,15 @@ pub enum TbMethodKind {
         ret: Option<(VarId, RetWidthCheck)>,
     },
     RandomGetSeed {
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    Queue {
+        op: QueueOp,
+        value: Option<Expression>,
+        width: u32,
+        signed: bool,
+        four_state: bool,
+        capacity: u32,
         ret: Option<(VarId, RetWidthCheck)>,
     },
 }
@@ -1126,7 +1147,7 @@ pub struct CompiledBlockStatement {
 // derived deterministically from the compiled statements, and `artifact`'s
 // `content_fp` (a fingerprint of exactly those statements — see
 // `try_compile_chunk`) already identifies them. Excluding them keeps the
-// `Hash`-derived chunk / whole-comb fingerprints from redundantly deep-walking
+// `Hash`-derived chunk / comb-list fingerprints from redundantly deep-walking
 // the pre-JIT originals nested in every block, which dominated the per-test key
 // cost. Sound because a matching `content_fp` implies matching `original_stmts`.
 // The exhaustive destructure in each impl makes adding a codegen-affecting field
@@ -1540,6 +1561,11 @@ impl ProtoStatement {
                 ProtoTbMethodKind::RandomSeed { value } => {
                     value.adjust_offsets(ff_delta, comb_delta);
                 }
+                ProtoTbMethodKind::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        v.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
                 ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
                     min.adjust_offsets(ff_delta, comb_delta);
                     max.adjust_offsets(ff_delta, comb_delta);
@@ -1735,6 +1761,11 @@ impl ProtoStatement {
                 ProtoTbMethodKind::RandomSeed { value } => {
                     value.remap_offsets_with(f);
                 }
+                ProtoTbMethodKind::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        v.remap_offsets_with(f);
+                    }
+                }
                 ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
                     min.remap_offsets_with(f);
                     max.remap_offsets_with(f);
@@ -1891,12 +1922,30 @@ impl ProtoStatement {
                 for s in body {
                     s.gather_variable_offsets(&mut all_ins, &mut all_outs);
                 }
-                let input_set: HashSet<VarOffset> = all_ins.iter().cloned().collect();
                 let output_set: HashSet<VarOffset> = all_outs.iter().cloned().collect();
-                let internal: HashSet<VarOffset> =
-                    input_set.intersection(&output_set).cloned().collect();
+                let shared: HashSet<VarOffset> = all_ins
+                    .iter()
+                    .filter(|off| output_set.contains(off))
+                    .copied()
+                    .collect();
+                let mut external: HashSet<VarOffset> = HashSet::default();
+                if !shared.is_empty() {
+                    let writes = BlockWrites::of(body);
+                    let mut reads = vec![];
+                    for s in body {
+                        s.gather_reads_with_ranges(&mut reads);
+                    }
+                    external.extend(
+                        reads
+                            .iter()
+                            .filter(|(off, range)| {
+                                shared.contains(off) && !writes.covers(*off, *range)
+                            })
+                            .map(|(off, _)| *off),
+                    );
+                }
                 for off in all_ins {
-                    if !internal.contains(&off) {
+                    if !output_set.contains(&off) || external.contains(&off) {
                         inputs.push(off);
                     }
                 }
@@ -1997,15 +2046,12 @@ impl ProtoStatement {
             }
             ProtoStatement::SequentialBlock(body) => {
                 let mut all_reads = vec![];
-                let mut all_outs = vec![];
                 for s in body {
                     s.gather_reads_with_ranges(&mut all_reads);
-                    let mut ins = vec![];
-                    s.gather_variable_offsets(&mut ins, &mut all_outs);
                 }
-                let output_set: HashSet<VarOffset> = all_outs.into_iter().collect();
+                let writes = BlockWrites::of(body);
                 for (off, range) in all_reads {
-                    if !output_set.contains(&off) {
+                    if !writes.covers(off, range) {
                         out.push((off, range));
                     }
                 }
@@ -2909,6 +2955,31 @@ impl ProtoStatement {
                         ProtoTbMethodKind::RandomGetSeed { ret } => {
                             TbMethodKind::RandomGetSeed { ret: *ret }
                         }
+                        ProtoTbMethodKind::Queue {
+                            op,
+                            value,
+                            width,
+                            signed,
+                            four_state,
+                            capacity,
+                            ret,
+                        } => TbMethodKind::Queue {
+                            op: *op,
+                            value: value.as_ref().map(|v| {
+                                v.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            }),
+                            width: *width,
+                            signed: *signed,
+                            four_state: *four_state,
+                            capacity: *capacity,
+                            ret: *ret,
+                        },
                     };
                     Statement::TbMethodCall {
                         inst: *inst,
@@ -3215,7 +3286,7 @@ pub struct ProtoAssignStatement {
 
 // `token` is a per-test source position (differs even between otherwise
 // identical assigns), so it is excluded from both `Debug` and `Hash`. That makes
-// the `Hash`-derived chunk / whole-comb fingerprints token-agnostic: two
+// the `Hash`-derived chunk / comb-list fingerprints token-agnostic: two
 // structurally identical assigns from different source locations hash the same,
 // which is sound because `token` never affects codegen (it feeds diagnostics
 // only). The exhaustive destructure in each impl makes adding a field a compile
@@ -3966,6 +4037,28 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     }
                     air::TbMethod::RandomGetSeed => {
                         ProtoTbMethodKind::RandomGetSeed { ret: tb_ret }
+                    }
+                    air::TbMethod::Queue {
+                        op,
+                        value,
+                        width,
+                        signed,
+                        four_state,
+                        capacity,
+                    } => {
+                        let value: Option<ProtoExpression> = match value {
+                            Some(v) => Some(Conv::conv(context, v)?),
+                            None => None,
+                        };
+                        ProtoTbMethodKind::Queue {
+                            op: *op,
+                            value,
+                            width: *width,
+                            signed: *signed,
+                            four_state: *four_state,
+                            capacity: *capacity,
+                            ret: tb_ret,
+                        }
                     }
                 };
                 vec![ProtoStatement::TbMethodCall {
@@ -5602,6 +5695,59 @@ fn for_each_hex_item(bytes: &[u8], width: usize, mut sink: impl FnMut(HexItem) -
                 return;
             }
         }
+    }
+}
+
+/// The bits a sequential block writes, per offset.  A read of bits the block
+/// writes itself stays internal; a read of any bit only other statements
+/// write makes the variable an input, so the block is ordered after them.
+/// Coverage ignores order within the block.
+///
+/// Per offset: `None` when some write covers the whole variable, otherwise
+/// the written bits as sorted, merged, disjoint `(lo, hi)` spans.
+struct BlockWrites(crate::HashMap<VarOffset, Option<Vec<(usize, usize)>>>);
+
+impl BlockWrites {
+    fn of(body: &[ProtoStatement]) -> Self {
+        let mut outs = vec![];
+        for s in body {
+            crate::ir::module::gather_bit_aware_outputs(s, &mut outs);
+        }
+        let mut map: crate::HashMap<VarOffset, Option<Vec<(usize, usize)>>> =
+            crate::HashMap::default();
+        for (off, range) in outs {
+            let e = map.entry(off).or_insert_with(|| Some(Vec::new()));
+            match (e.as_mut(), range) {
+                (Some(v), Some((h, l))) => v.push((l, h)),
+                _ => *e = None,
+            }
+        }
+        for spans in map.values_mut().flatten() {
+            spans.sort_unstable();
+            let mut merged: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+            for &(l, h) in spans.iter() {
+                match merged.last_mut() {
+                    Some(last) if l <= last.1.saturating_add(1) => last.1 = last.1.max(h),
+                    _ => merged.push((l, h)),
+                }
+            }
+            *spans = merged;
+        }
+        BlockWrites(map)
+    }
+
+    fn covers(&self, off: VarOffset, read: BitRange) -> bool {
+        let Some(writes) = self.0.get(&off) else {
+            return false;
+        };
+        let Some(spans) = writes else {
+            return true;
+        };
+        let Some((hi, lo)) = read else {
+            return false;
+        };
+        let i = spans.partition_point(|&(l, _)| l <= lo);
+        i > 0 && spans[i - 1].1 >= hi
     }
 }
 

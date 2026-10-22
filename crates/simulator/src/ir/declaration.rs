@@ -121,29 +121,6 @@ fn reset_is_async(context: &mut Context, id: air::VarId) -> bool {
     }
 }
 
-/// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
-///
-/// Dependency edges come in two classes:
-///
-/// - SEMANTIC edges the final order must respect for sequential
-///   correctness: single-writer RAW, (same-block) prior-writer binding,
-///   WAR, and WAW.
-/// - BEST-EFFORT edges that only improve settle locality: a reader with no
-///   same-block prior writer (split-driver nets, cross-block reads) is
-///   placed after every overlapping writer so it sees settled values in
-///   one pass.
-///
-/// Offset- and statement-granularity conflation (whole `if` statements,
-/// dynamic indices, shared inlined-function scratch) can fabricate a cycle
-/// out of edges no wire of the circuit closes.  The sort does NOT answer
-/// one by dropping edges: a synthesisable design has an order that needs a
-/// single settle pass, so a cycle here means the statements are tracked
-/// more coarsely than the circuit, and the cure is to split them.  The
-/// cycle is reported to the caller, which splits and asks again.
-pub(crate) fn stable_topo_sort(statements: Vec<ProtoStatement>) -> Vec<ProtoStatement> {
-    stable_topo_sort_impl(statements, None, None).0
-}
-
 /// Which branch a piece kept (1-based; `0` = not a branch of a conditional).
 /// Two pieces of one group with DIFFERENT nonzero tags never both run; the
 /// SAME tag does not imply that -- one branch can yield several pieces.
@@ -163,8 +140,8 @@ pub(crate) fn branch_tag(stmt: &ProtoStatement) -> usize {
 
 /// Result of the block-aware sort: the schedule, an exact required-pass
 /// hint (`Some(1)` when one settle pass provably suffices), and whether
-/// the sort fell back to source order (the caller then runs its
-/// combinational-loop diagnostic).
+/// the sort fell back to source order (callers split and ask again, or
+/// decline to use the order).
 pub(crate) type SortOutcome = (Vec<ProtoStatement>, Option<usize>, bool);
 
 /// Block-aware variant: `blocks[i]` is the source block (always_comb /
@@ -177,7 +154,17 @@ pub(crate) fn stable_topo_sort_with_blocks(
     statements: Vec<ProtoStatement>,
     blocks: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks), None)
+    stable_topo_sort_impl(statements, Some(blocks), None, None)
+}
+
+/// As [`stable_topo_sort_with_blocks`]; on a cycle, `on_cycle[i]` also says
+/// whether statement `i` sits in a nontrivial strongly connected component.
+pub(crate) fn stable_topo_sort_with_blocks_on_cycle(
+    statements: Vec<ProtoStatement>,
+    blocks: &[usize],
+    on_cycle: &mut Vec<bool>,
+) -> SortOutcome {
+    stable_topo_sort_impl(statements, Some(blocks), None, Some(on_cycle))
 }
 
 /// As [`stable_topo_sort_with_blocks`], plus the conditional each statement is
@@ -187,7 +174,7 @@ pub(crate) fn stable_topo_sort_with_pieces(
     blocks: &[usize],
     groups: &[usize],
 ) -> SortOutcome {
-    stable_topo_sort_impl(statements, Some(blocks), Some(groups))
+    stable_topo_sort_impl(statements, Some(blocks), Some(groups), None)
 }
 
 /// First token anywhere in a statement tree.  Only `Assign` carries one, so a
@@ -282,10 +269,31 @@ fn where_branch(stmt: &ProtoStatement) -> String {
     }
 }
 
+/// Stable topological sort of comb statements using Kahn's algorithm (BFS/FIFO).
+///
+/// Dependency edges come in two classes:
+///
+/// - SEMANTIC edges the final order must respect for sequential
+///   correctness: single-writer RAW, (same-block) prior-writer binding,
+///   WAR, and WAW.
+/// - SETTLED-READ edges: a reader with no same-block prior writer
+///   (split-driver nets, cross-block reads) is placed after every
+///   overlapping writer so it sees settled values; without them the order
+///   needs extra settle passes.
+///
+/// Offset- and statement-granularity conflation (whole `if` statements,
+/// dynamic indices, shared inlined-function scratch) can fabricate a cycle
+/// out of edges no wire of the circuit closes.  The sort does NOT answer
+/// one by dropping edges: a synthesisable design has an order that needs a
+/// single settle pass, so a cycle here means the statements are tracked
+/// more coarsely than the circuit, and the cure is to split them.  The
+/// cycle is reported to the caller, which splits and asks again, or declines
+/// to use the order.
 fn stable_topo_sort_impl(
     statements: Vec<ProtoStatement>,
     blocks: Option<&[usize]>,
     groups: Option<&[usize]>,
+    on_cycle: Option<&mut Vec<bool>>,
 ) -> SortOutcome {
     let n = statements.len();
     if n <= 1 {
@@ -554,8 +562,81 @@ fn stable_topo_sort_impl(
     // RAW, range-filtered: a read of `x[A]` does not depend on a writer
     // of `x[B]` (packed per-bit drivers, pipeline-phase vectors).
     let mut relevant: Vec<usize> = Vec::new();
+    let mut split_reads: Vec<(VarOffset, BitRange)> = Vec::new();
+    // `[lo, hi]` minus `spans`, and its part inside them, as `(hi, lo)`.
+    let carve = |lo: usize, hi: usize, spans: &[BitRange]| -> (Vec<BitRange>, Vec<BitRange>) {
+        let mut sorted: Vec<(usize, usize)> =
+            spans.iter().flatten().map(|&(h, l)| (l, h)).collect();
+        sorted.sort_unstable();
+        let (mut outside, mut inside) = (Vec::new(), Vec::new());
+        let mut next = lo;
+        for (l, h) in sorted {
+            if next > hi {
+                break;
+            }
+            if h < next {
+                continue;
+            }
+            if l > next {
+                outside.push(Some(((l - 1).min(hi), next)));
+            }
+            let start = l.max(next);
+            if start <= hi {
+                inside.push(Some((h.min(hi), start)));
+            }
+            next = h + 1;
+        }
+        if next <= hi {
+            outside.push(Some((hi, next)));
+        }
+        (outside, inside)
+    };
     for (reader_idx, reads) in stmt_reads.iter().enumerate() {
+        // Bits the reader writes itself are produced inside it; of the rest,
+        // the bits an earlier statement of its block writes bind to that
+        // statement, and the others are settled values of other writers.
+        // Each part takes its own edges.
+        split_reads.clear();
         for (key, rr) in reads {
+            let ranges_where = |keep: &dyn Fn(usize) -> bool| -> Vec<BitRange> {
+                writer_ranges
+                    .get(key)
+                    .into_iter()
+                    .flatten()
+                    .filter(|(p, _)| keep(*p))
+                    .map(|(_, wr)| *wr)
+                    .collect()
+            };
+            let Some((hi, lo)) = *rr else {
+                split_reads.push((*key, *rr));
+                continue;
+            };
+            let bound_here = writer_ranges.get(key).is_some_and(|ws| {
+                ws.iter().any(|(p, _)| {
+                    *p == reader_idx || (*p < reader_idx && same_block(*p, reader_idx))
+                })
+            });
+            if !bound_here {
+                split_reads.push((*key, *rr));
+                continue;
+            }
+            let own = ranges_where(&|p| p == reader_idx);
+            if own.iter().any(|w| w.is_none()) {
+                continue;
+            }
+            let prior = ranges_where(&|p| p < reader_idx && same_block(p, reader_idx));
+            if prior.iter().any(|w| w.is_none()) {
+                let (outside, _) = carve(lo, hi, &own);
+                split_reads.extend(outside.into_iter().map(|r| (*key, r)));
+                continue;
+            }
+            let (outside, _) = carve(lo, hi, &own);
+            for piece in outside.into_iter().flatten() {
+                let (unbound, bound) = carve(piece.1, piece.0, &prior);
+                split_reads.extend(unbound.into_iter().chain(bound).map(|r| (*key, r)));
+            }
+        }
+        for (key, rr) in &split_reads {
             let Some(wranges) = writer_ranges.get(key) else {
                 continue;
             };
@@ -581,18 +662,15 @@ fn stable_topo_sort_impl(
                     cause!(writer_idx, reader_idx, "raw");
                 } else {
                     // Sole overlapping writer comes later: a settled-value
-                    // read, so the edge is best-effort rather than semantic.
+                    // read, so the edge is a settled-read edge, not semantic.
                     adj_opt[writer_idx].insert(reader_idx);
                     cause!(writer_idx, reader_idx, "raw-settled");
                 }
             } else if relevant.binary_search(&reader_idx).is_ok() {
-                // The reader itself writes overlapping bits (shared inlined
-                // scratch, carry chains): the value is produced
-                // intra-statement, so it stays in source order.  KNOWN
-                // LIMITATION: a read its own write does not cover also
-                // depends on the other writers, but edges here close
-                // sem/opt cycles across shared-scratch statement clusters
-                // and collapse real designs to source order.
+                // A read of unknown range from a statement that also writes
+                // the variable: produced intra-statement, so it stays in
+                // source order.  It gets no edges from the other writers, so
+                // a dependency on them is not ordered.
             } else if let Some(&writer_idx) = (!split_driver.contains(key))
                 .then(|| {
                     relevant
@@ -685,11 +763,52 @@ fn stable_topo_sort_impl(
             if !has_prior {
                 continue;
             }
-            if let Some(&(next_writer, _)) = wranges.iter().find(|(p, wr)| {
-                *p > reader_idx && ranges_overlap(*wr, *rr) && !exclusive_pieces(reader_idx, *p)
-            }) {
-                adj_sem[reader_idx].insert(next_writer);
-                cause!(reader_idx, next_writer, "war");
+            // Every bit read must be read before the first later write of it,
+            // and that is not one writer when the later ones are partial.
+            // Only bits a prior same-block writer produces are read as a
+            // version; the rest are settled values a later writer supplies.
+            let (r_lo, r_hi) = match rr {
+                Some((hi, lo)) => (*lo, *hi),
+                None => (0, usize::MAX),
+            };
+            let mut unclobbered: Vec<(usize, usize)> = merge_spans(
+                wranges
+                    .iter()
+                    .filter(|(p, _)| *p < reader_idx && same_block(*p, reader_idx))
+                    .filter_map(|(_, wr)| {
+                        let (lo, hi) = match wr {
+                            Some((hi, lo)) => (*lo, *hi),
+                            None => (0, usize::MAX),
+                        };
+                        let (lo, hi) = (lo.max(r_lo), hi.min(r_hi));
+                        (lo <= hi).then_some((lo, hi))
+                    })
+                    .collect(),
+            );
+            for (p, wr) in wranges.iter() {
+                if unclobbered.is_empty() {
+                    break;
+                }
+                if *p <= reader_idx || exclusive_pieces(reader_idx, *p) {
+                    continue;
+                }
+                let (w_lo, w_hi) = match wr {
+                    Some((hi, lo)) => (*lo, *hi),
+                    None => (0, usize::MAX),
+                };
+                if !unclobbered.iter().any(|&(lo, hi)| lo <= w_hi && w_lo <= hi) {
+                    continue;
+                }
+                adj_sem[reader_idx].insert(*p);
+                cause!(reader_idx, *p, "war");
+                unclobbered = unclobbered
+                    .into_iter()
+                    .flat_map(|(lo, hi)| {
+                        let below = (lo < w_lo).then(|| (lo, (w_lo - 1).min(hi)));
+                        let above = (hi > w_hi).then(|| ((w_hi + 1).max(lo), hi));
+                        below.into_iter().chain(above)
+                    })
+                    .collect();
             }
         }
     }
@@ -923,7 +1042,8 @@ fn stable_topo_sort_impl(
     mark("kahn", &mut t);
 
     let Some(sorted_indices) = order else {
-        if std::env::var("VERYL_PASS_DIAG").is_ok() {
+        let diag = std::env::var("VERYL_PASS_DIAG").is_ok();
+        if diag || on_cycle.is_some() {
             use daggy::petgraph::Graph;
             use daggy::petgraph::algo::tarjan_scc;
             let mut g: Graph<(), ()> = Graph::new();
@@ -948,11 +1068,16 @@ fn stable_topo_sort_impl(
                     }
                 }
             }
-            log::info!(
-                "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
-                 reporting it for the caller to split",
-            );
-            trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+            if let Some(on_cycle) = on_cycle {
+                *on_cycle = scc_id.iter().map(|&id| id != usize::MAX).collect();
+            }
+            if diag {
+                log::info!(
+                    "pass_diag: stable_topo_sort n={n}: cycle in {nontrivial} SCC(s); \
+                     reporting it for the caller to split",
+                );
+                trace_sort_cycles(&statements, &adj_sem, &adj_opt, &scc_id, &edge_cause);
+            }
         }
         return (statements, None, true);
     };
@@ -1200,8 +1325,8 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
                     // allocator as function locals; instance-reuse records
                     // the post-conv size, so cache replay stays consistent.
                     // A temp has no `VariableMeta`; recording it as a
-                    // relocation of the variable it serves lets the cone-gate
-                    // owner table adopt it (see `Context::comb_reloc`).
+                    // relocation of the variable it serves lets the owner
+                    // tables adopt it (see `Context::comb_reloc`).
                     let use_4state = context.config.use_4state;
                     let comb_total = &mut context.comb_total_bytes;
                     let comb_reloc = &mut context.comb_reloc;
@@ -1434,6 +1559,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut child_analyzer_context = veryl_analyzer::conv::Context::default();
         child_analyzer_context.variables = child_module.variables.clone();
         child_analyzer_context.functions = child_module.functions.clone();
+        crate::ir::module::lower_function_loops(child_module, &mut child_analyzer_context);
         let peeled = context
             .peel_cache
             .entry(Arc::as_ptr(&src.component))

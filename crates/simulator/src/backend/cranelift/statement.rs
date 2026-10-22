@@ -3,8 +3,8 @@
 
 use super::helpers::*;
 use super::runtime::{
-    Context as CraneliftContext, emit_inline_write_log_push, emit_inline_write_log_push_wide,
-    scratch_mark, scratch_release,
+    Context as CraneliftContext, MARK_COMPARE_MAX_BYTES, emit_inline_write_log_push,
+    emit_inline_write_log_push_wide, load_pieces, scratch_mark, scratch_release,
 };
 use crate::backend::eq_chain::{EqChain, case_as_eq_chain, collect_eq_chain};
 use crate::ir::variable::native_bytes as calc_native_bytes;
@@ -58,6 +58,9 @@ fn emit_ff_log_push(
     span: Option<(usize, usize)>,
 ) {
     let nb_i32 = nb as i32;
+    let off = builder.ins().iconst(I32, log_current_offset as i64);
+    let elem = ff_static_span(log_current_offset, nb);
+    emit_ff_push_mark(context, builder, off, nb, PushedBytes::Value(payload), elem);
     if nb > 8
         && let Some((start, w)) = span.and_then(|(hi, lo)| log_window_for_span(lo / 8, hi / 8, nb))
         && w < nb
@@ -398,11 +401,25 @@ impl ProtoAssignDynamicStatement {
             }
         };
 
+        let array_span = dyn_ff_span(
+            self.dst_ff_current_base_offset,
+            self.dst_stride,
+            self.dst_num_elements,
+            nb,
+        );
         let emit_log_push = |context: &mut CraneliftContext,
                              builder: &mut FunctionBuilder,
                              payload: cranelift::prelude::Value,
                              mask: Option<cranelift::prelude::Value>| {
             if let Some(offset_val) = log_offset_i32 {
+                emit_ff_push_mark(
+                    context,
+                    builder,
+                    offset_val,
+                    nb,
+                    PushedBytes::Value(payload),
+                    array_span,
+                );
                 let width_class_val = builder.ins().iconst(I32, nb as i64);
                 emit_inline_write_log_push(context, builder, offset_val, payload, width_class_val);
                 if context.use_4state
@@ -815,6 +832,13 @@ impl ProtoAssignDynamicStatement {
                 let log_base = builder.ins().iadd(cur_base, byte_offset);
                 let log_base = builder.ins().ireduce(I32, log_base);
                 let log = builder.ins().iadd(log_base, context.ff_delta);
+                let span = dyn_ff_span(
+                    self.dst_ff_current_base_offset,
+                    self.dst_stride,
+                    self.dst_num_elements,
+                    nb,
+                );
+                emit_ff_mark_readers(context, builder, span);
                 emit_wide_window_store(
                     context,
                     builder,
@@ -898,6 +922,20 @@ impl ProtoAssignDynamicStatement {
             .iconst(I64, self.dst_ff_current_base_offset as i64);
         let log_base = builder.ins().iadd(cur_base, byte_offset);
         let log_base_i32 = builder.ins().ireduce(I32, log_base);
+        let span = dyn_ff_span(
+            self.dst_ff_current_base_offset,
+            self.dst_stride,
+            self.dst_num_elements,
+            nb,
+        );
+        emit_ff_push_mark(
+            context,
+            builder,
+            log_base_i32,
+            nb,
+            PushedBytes::Ptr(src_ptr),
+            span,
+        );
         emit_wide_log_chunks_dyn(context, builder, src_ptr, log_base_i32, nb);
 
         Some(())
@@ -1003,6 +1041,13 @@ impl ProtoForStatement {
             start_v
         };
         let init_i = self.wrap_counter(builder, init_i);
+
+        // The counter is stored straight into FF storage, with no log push to
+        // mark at.
+        if self.var_offset.is_ff() {
+            let span = ff_static_span(var_mem_offset, nb);
+            emit_ff_mark_readers(context, builder, span);
+        }
 
         // Carry the counter in a block param (a register), mirroring the
         // interpreter's local `i`: `var_mem` is written only at the top of the
@@ -1225,9 +1270,61 @@ impl ProtoStatement {
         // only after their bodies, so an arm can never recycle its
         // condition's slots.
         let mark = scratch_mark();
-        let result = self.build_binary_body(context, builder, is_last);
+        let result = match self.df_store_hits(context) {
+            Some(hits) => self.build_binary_store_marked(context, builder, is_last, hits),
+            None => self.build_binary_body(context, builder, is_last),
+        };
         scratch_release(mark);
         result
+    }
+
+    /// The dataflow marks this comb store must set when it changes what
+    /// readers see; `None` outside event code or when no reader is hit.
+    fn df_store_hits(
+        &self,
+        context: &CraneliftContext,
+    ) -> Option<crate::ir::opt::dataflow::MarkSpan> {
+        let marks = context.df_marks.as_ref()?;
+        let (lo, hi) = crate::ir::opt::dataflow::store_span(self)?;
+        crate::ir::opt::dataflow::store_hits(marks, lo, hi)
+    }
+
+    /// The store, then the readers' bits set when the hit ranges changed.
+    fn build_binary_store_marked(
+        &self,
+        context: &mut CraneliftContext,
+        builder: &mut FunctionBuilder,
+        is_last: bool,
+        (a, b, words): crate::ir::opt::dataflow::MarkSpan,
+    ) -> Option<()> {
+        let flags = MemFlagsData::trusted();
+        let compare = b - a <= MARK_COMPARE_MAX_BYTES;
+        let pieces = if compare {
+            load_pieces(a, b)
+        } else {
+            Vec::new()
+        };
+        let before: Vec<CraneliftValue> = pieces
+            .iter()
+            .map(|&(o, ty)| builder.ins().load(ty, flags, context.comb_values, o as i32))
+            .collect();
+        self.build_binary_body(context, builder, is_last)?;
+        let changed = compare.then(|| {
+            let mut acc = builder.ins().iconst(I64, 0);
+            for (&(o, ty), &old) in pieces.iter().zip(&before) {
+                let new = builder.ins().load(ty, flags, context.comb_values, o as i32);
+                let x = builder.ins().bxor(old, new);
+                let x = if ty == I64 {
+                    x
+                } else {
+                    builder.ins().uextend(I64, x)
+                };
+                acc = builder.ins().bor(acc, x);
+            }
+            builder.ins().icmp_imm_u(IntCC::NotEqual, acc, 0)
+        });
+        emit_set_dirty(context, builder, changed, &words);
+        Some(())
     }
 
     fn build_binary_body(
@@ -2090,6 +2187,10 @@ impl ProtoAssignStatement {
                 None
             };
             if let Some(src_ptr) = src {
+                if is_ff {
+                    let span = ff_static_span(log_current_offset, nb);
+                    emit_ff_mark_readers(context, builder, span);
+                }
                 let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
                 let log = is_ff.then(|| {
                     let base = builder.ins().iconst(I32, log_current_offset as i64);
@@ -2229,6 +2330,10 @@ impl ProtoAssignStatement {
             && mask_xz.is_none()
             && let Some((amount, width)) = window
         {
+            if is_ff {
+                let span = ff_static_span(log_current_offset, nb);
+                emit_ff_mark_readers(context, builder, span);
+            }
             let old_ptr = builder.ins().iadd_imm_s(base_addr, dst_offset as i64);
             let log = is_ff.then(|| {
                 let base = builder.ins().iconst(I32, log_current_offset as i64);
@@ -2617,6 +2722,9 @@ fn emit_wide_log_chunks(
         builder.ins().iadd_imm_s(src_ptr, skip as i64)
     };
     let base_offset = base_offset + skip as i32;
+    let off = builder.ins().iconst(I32, base_offset as i64);
+    let elem = ff_static_span(base_offset, nb);
+    emit_ff_push_mark(context, builder, off, nb, PushedBytes::Ptr(src_ptr), elem);
     let mut written: usize = 0;
     while written < nb {
         let chunk = std::cmp::min(WRITE_LOG_WIDE_ENTRY_PAYLOAD_BYTES, nb - written);
@@ -2843,6 +2951,144 @@ fn cold_if_true_enabled() -> bool {
     *V.get_or_init(|| std::env::var("VERYL_COLD_IF_TRUE").ok().as_deref() != Some("0"))
 }
 
+/// Sets the dirty bits of the dataflow cells reading FF bytes `span` without
+/// comparing: a window store merges inside its helper call, so the new value
+/// is never in hand to compare against.
+fn emit_ff_mark_readers(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    span: Option<(u32, u32)>,
+) {
+    if context.use_4state {
+        return;
+    }
+    let Some(words) = ff_reader_words(context, span) else {
+        return;
+    };
+    emit_set_dirty(context, builder, None, &words);
+}
+
+/// The dirty words of the cells reading FF bytes `span`.  An unknown span
+/// takes every FF reader: the event still counts as marking its pushes, so
+/// nothing compares them at commit.
+fn ff_reader_words(
+    context: &CraneliftContext,
+    span: Option<(u32, u32)>,
+) -> Option<Vec<(u32, u64)>> {
+    let marks = context.df_marks.as_ref()?;
+    let (lo, hi) = span.unwrap_or((0, u32::MAX));
+    crate::ir::opt::dataflow::ff_push_hits(marks, lo, hi).map(|(_, _, words)| words)
+}
+
+/// The FF bytes a push of `nb` bytes at a constant `offset` writes.
+fn ff_static_span(offset: i32, nb: usize) -> Option<(u32, u32)> {
+    let lo = u32::try_from(offset).ok()?;
+    Some((lo, lo.checked_add(u32::try_from(nb).ok()?)?))
+}
+
+/// ORs `words` into the dirty words the write log header points at when
+/// `cond` holds.  A null pointer (no dataflow settle at run time) skips them.
+fn emit_set_dirty(
+    context: &CraneliftContext,
+    builder: &mut FunctionBuilder,
+    cond: Option<CraneliftValue>,
+    words: &[(u32, u64)],
+) {
+    use crate::ir::write_log::WRITE_LOG_OFFSET_DF_DIRTY;
+    let flags = MemFlagsData::trusted();
+    let dirty = builder
+        .ins()
+        .load(I64, flags, context.log_buf, WRITE_LOG_OFFSET_DF_DIRTY);
+    let live = builder.ins().icmp_imm_u(IntCC::NotEqual, dirty, 0);
+    let take = match cond {
+        Some(c) => builder.ins().band(c, live),
+        None => live,
+    };
+    let mark = builder.create_block();
+    let done = builder.create_block();
+    builder.ins().brif(take, mark, &[], done, &[]);
+    builder.switch_to_block(mark);
+    for &(w, m) in words {
+        let woff = (w * 8) as i32;
+        let v = builder.ins().load(I64, flags, dirty, woff);
+        let v = builder.ins().bor_imm_u(v, m as i64);
+        builder.ins().store(flags, v, dirty, woff);
+    }
+    builder.ins().jump(done, &[]);
+    builder.switch_to_block(done);
+}
+
+/// The bytes an FF log push carries: an integer, low byte first, or memory.
+enum PushedBytes {
+    Value(CraneliftValue),
+    Ptr(CraneliftValue),
+}
+
+/// Before an FF log push of `nb` bytes at current-slot `offset`: when they
+/// differ from what the slot holds, set the dirty bits of the dataflow cells
+/// reading FF bytes `span` (the element, or the whole array for a runtime
+/// index).
+fn emit_ff_push_mark(
+    context: &mut CraneliftContext,
+    builder: &mut FunctionBuilder,
+    offset: CraneliftValue,
+    nb: usize,
+    bytes: PushedBytes,
+    span: Option<(u32, u32)>,
+) {
+    // The compare sees values, not 4-state masks; such events stay unmarked.
+    if context.use_4state {
+        return;
+    }
+    let Some(words) = ff_reader_words(context, span) else {
+        return;
+    };
+    let flags = MemFlagsData::trusted();
+    let off = builder.ins().iadd(offset, context.ff_delta);
+    let off = builder.ins().uextend(I64, off);
+    let addr = builder.ins().iadd(context.ff_values, off);
+    let mut acc = builder.ins().iconst(I64, 0);
+    for (o, ty) in load_pieces(0, nb as u32) {
+        let cur = builder.ins().load(ty, flags, addr, o as i32);
+        let new = match bytes {
+            PushedBytes::Value(v) => {
+                let v = if o == 0 {
+                    v
+                } else {
+                    builder.ins().ushr_imm_u(v, (o * 8) as i64)
+                };
+                if builder.func.dfg.value_type(v) == ty {
+                    v
+                } else {
+                    builder.ins().ireduce(ty, v)
+                }
+            }
+            PushedBytes::Ptr(p) => builder.ins().load(ty, flags, p, o as i32),
+        };
+        let x = builder.ins().bxor(cur, new);
+        let x = if ty == I64 {
+            x
+        } else {
+            builder.ins().uextend(I64, x)
+        };
+        acc = builder.ins().bor(acc, x);
+    }
+    let changed = builder.ins().icmp_imm_u(IntCC::NotEqual, acc, 0);
+    emit_set_dirty(context, builder, Some(changed), &words);
+}
+
+/// The FF bytes every element of a runtime-indexed array covers, from its
+/// current base `cur_base` with `nb`-byte elements.
+fn dyn_ff_span(
+    cur_base: isize,
+    stride: isize,
+    num_elements: usize,
+    nb: usize,
+) -> Option<(u32, u32)> {
+    let (lo, hi) = crate::ir::strided_span(cur_base, stride, num_elements, nb)?;
+    Some((u32::try_from(lo).ok()?, u32::try_from(hi).ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::log_window_for_span;
@@ -2882,6 +3128,151 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    mod dataflow_marks {
+        use crate::backend::cranelift::runtime::{
+            CellWatch, build_binary_marked, build_cell_binary,
+        };
+        use crate::ir::opt::dataflow::{EventMarks, MarkTable, StoreMarks};
+        use crate::ir::variable::VarOffset;
+        use crate::ir::write_log::WriteLogBuffer;
+        use crate::ir::{
+            Config, ExpressionContext, ProtoAssignStatement, ProtoExpression, ProtoStatement,
+        };
+        use veryl_parser::token_range::TokenRange;
+
+        fn cvar(off: isize) -> ProtoExpression {
+            ProtoExpression::Variable {
+                var_offset: VarOffset::Comb(off),
+                select: None,
+                dynamic_select: None,
+                width: 8,
+                var_full_width: 8,
+                expr_context: ExpressionContext {
+                    width: 8,
+                    signed: false,
+                },
+            }
+        }
+
+        fn assign(dst: VarOffset, src: isize) -> ProtoStatement {
+            ProtoStatement::Assign(ProtoAssignStatement {
+                dst,
+                dst_width: 8,
+                select: None,
+                dynamic_select: None,
+                rhs_select: None,
+                expr: cvar(src),
+                dst_ff_current_offset: dst.raw(),
+                comb_direct: false,
+                token: TokenRange::default(),
+            })
+        }
+
+        /// A cell copying comb byte 0 to byte 8 marks its consumers exactly
+        /// when byte 8 changed, or on every run when told to.
+        #[test]
+        fn a_cell_marks_its_consumers_only_when_its_boundary_moved() {
+            let consumers = [(0u32, 0b100u64), (1, 0b1)];
+            let run = |always: bool, src: u8, old: u8| -> [u64; 2] {
+                let watch = CellWatch {
+                    boundary: &[(8, 9)],
+                    consumers: &consumers,
+                    always,
+                };
+                let stmt = assign(VarOffset::Comb(8), 0);
+                let (f, _keep) = build_cell_binary(&Config::default(), vec![stmt], &watch)
+                    .expect("the cell must compile");
+                let mut comb = [0u8; 16];
+                comb[0] = src;
+                comb[8] = old;
+                let ff = [0u8; 8];
+                let mut log = WriteLogBuffer::with_capacity(4, 4);
+                let mut dirty = [0u64; 2];
+                unsafe {
+                    f(
+                        ff.as_ptr(),
+                        comb.as_mut_ptr(),
+                        &mut log as *mut _ as *mut u8,
+                        dirty.as_mut_ptr() as isize,
+                    )
+                };
+                assert_eq!(comb[8], src);
+                dirty
+            };
+            assert_eq!(run(false, 5, 0), [0b100, 0b1], "a change must mark");
+            assert_eq!(run(false, 5, 5), [0, 0], "no change marks nothing");
+            assert_eq!(run(true, 5, 5), [0b100, 0b1], "`always` marks every run");
+        }
+
+        fn event_marks(comb: MarkTable, ff: MarkTable) -> StoreMarks {
+            std::sync::Arc::new(EventMarks { comb, ff })
+        }
+
+        /// Runs `stmt` as marked event code, `dirty` wired through the write
+        /// log header unless `live` is false.
+        fn run_event(
+            stmt: ProtoStatement,
+            marks: StoreMarks,
+            comb: &mut [u8],
+            ff: &mut [u8],
+            live: bool,
+        ) -> ([u64; 2], WriteLogBuffer) {
+            let (f, _keep) =
+                build_binary_marked(&Config::default(), vec![stmt], false, Some(marks))
+                    .expect("the event chunk must compile");
+            let mut log = WriteLogBuffer::with_capacity(4, 4);
+            let mut dirty = [0u64; 2];
+            if live {
+                log.df_dirty = dirty.as_mut_ptr();
+            }
+            unsafe {
+                f(
+                    ff.as_ptr(),
+                    comb.as_mut_ptr(),
+                    &mut log as *mut _ as *mut u8,
+                    0,
+                )
+            };
+            (dirty, log)
+        }
+
+        /// An event store into the middle of a watched comb span marks the
+        /// span's readers when the byte changed, and only then.
+        #[test]
+        fn an_event_comb_store_marks_readers_when_it_changes_a_byte() {
+            let marks = || event_marks(vec![(8, 16, vec![(1, 0b10)])], Vec::new());
+            let stmt = || assign(VarOffset::Comb(12), 0);
+            let mut ff = [0u8; 8];
+            let mut comb = [0u8; 16];
+            comb[0] = 7;
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!((comb[12], dirty), (7, [0, 0b10]), "a change must mark");
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0, 0], "rewriting the same value marks nothing");
+            comb[0] = 9;
+            let (dirty, _) = run_event(stmt(), marks(), &mut comb, &mut ff, false);
+            assert_eq!((comb[12], dirty), (9, [0, 0]), "no dirty words, no marks");
+        }
+
+        /// A logged FF write marks the FF readers when the pushed value
+        /// differs from the current slot, and still pushes either way.
+        #[test]
+        fn an_event_ff_push_marks_readers_when_the_value_differs() {
+            let marks = || event_marks(Vec::new(), vec![(0, 1, vec![(0, 0b1000)])]);
+            let stmt = || assign(VarOffset::Ff(0), 0);
+            let mut ff = [3u8; 8];
+            let mut comb = [0u8; 16];
+            comb[0] = 4;
+            let (dirty, log) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0b1000, 0], "a differing push must mark");
+            assert_eq!(log.narrow_count, 1);
+            comb[0] = 3;
+            let (dirty, log) = run_event(stmt(), marks(), &mut comb, &mut ff, true);
+            assert_eq!(dirty, [0, 0], "pushing the current value marks nothing");
+            assert_eq!(log.narrow_count, 1);
         }
     }
 }

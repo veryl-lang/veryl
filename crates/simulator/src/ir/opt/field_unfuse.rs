@@ -16,7 +16,7 @@
 //! statements are the testbench.  The retired packed word keeps its meta and
 //! its (stale) storage; external byte-level machinery is either conservative
 //! about unknown bytes (`tb_dirty`) or fed the field spans through
-//! `Context::comb_reloc` (cone gating).
+//! `Context::comb_reloc` (the owner tables).
 //!
 //! Reads that span several fields — or bits no field covers, which under
 //! zero-initial two-state storage are constant zero — are rebuilt as a
@@ -413,6 +413,11 @@ fn census_stmt(s: &ProtoStatement, c: &mut Census, poison: bool) {
                     }
                 }
                 K::RandomSeed { value } => census_expr(value, c, poison),
+                K::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        census_expr(v, c, poison);
+                    }
+                }
                 K::RandomGetRange { min, max, .. } => {
                     census_expr(min, c, poison);
                     census_expr(max, c, poison);

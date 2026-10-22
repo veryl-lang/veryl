@@ -45,6 +45,17 @@ impl VarOffset {
     }
 }
 
+/// The bytes `[lo, hi)` that `n` elements of `nb` bytes cover, element `k`
+/// at `base + stride * k`.  A negative stride puts element 0 at the top.
+pub fn strided_span(base: isize, stride: isize, n: usize, nb: usize) -> Option<(isize, isize)> {
+    let reach = stride.checked_mul(isize::try_from(n.saturating_sub(1)).ok()?)?;
+    let lo = base.checked_add(reach.min(0))?;
+    let hi = base
+        .checked_add(reach.max(0))?
+        .checked_add(isize::try_from(nb).ok()?)?;
+    Some((lo, hi))
+}
+
 /// The load/store, write-log and payload paths handle exactly these sizes.
 /// Slots are packed with no alignment.
 pub fn native_bytes(width: usize) -> usize {
