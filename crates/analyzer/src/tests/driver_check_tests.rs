@@ -262,3 +262,83 @@ fn procedural_loop_writes_cover_their_static_prefix() {
     let errors = analyze(code);
     assert!(multiple_assignments(&errors).is_empty(), "{errors:?}");
 }
+
+#[test]
+fn function_output_inside_expression_drives() {
+    let code = r#"
+    module ModuleA (
+        r: output logic,
+    ) {
+        var a: logic;
+
+        function FuncA(o: output logic) -> logic {
+            o = 0;
+            return 0;
+        }
+
+        always_comb {
+            r = FuncA(a);
+        }
+        always_comb {
+            a = 1;
+        }
+    }
+    "#;
+    let errors = analyze(code);
+    assert_eq!(multiple_assignments(&errors).len(), 1, "{errors:?}");
+}
+
+#[test]
+fn readmemh_drives_its_destination() {
+    let code = r#"
+    module ModuleA {
+        ATTR
+        var rom: logic<32> [4];
+
+        initial {
+            $readmemh("rom.hex", rom);
+        }
+        always_comb {
+            rom[0] = 0;
+        }
+    }
+    "#;
+    let errors = analyze(&code.replace("ATTR", ""));
+    assert_eq!(multiple_assignments(&errors).len(), 1, "{errors:?}");
+
+    let errors = analyze(&code.replace("ATTR", "#[allow(initial_assign)]"));
+    assert!(multiple_assignments(&errors).is_empty(), "{errors:?}");
+}
+
+#[test]
+fn specializations_with_different_first_sites_are_merged() {
+    // `sub::<0>` conflicts on the first two assignments, `sub::<1>` on the
+    // last two: one diagnostic for `o` with all three sites.
+    let code = r#"
+    module sub::<P: u32> (
+        o: output logic<2>,
+    ) {
+        assign o[0] = 0;
+        assign o[P] = 1;
+        assign o[1] = 0;
+    }
+
+    module top (
+        a: output logic<2>,
+        b: output logic<2>,
+    ) {
+        inst u0: sub::<0> (o: a);
+        inst u1: sub::<1> (o: b);
+    }
+    "#;
+    let errors = analyze(code);
+    let found = multiple_assignments(&errors);
+    assert_eq!(found.len(), 1, "{errors:?}");
+    let AnalyzerError::MultipleAssignment {
+        error_locations, ..
+    } = found[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!(error_locations.len(), 3, "{errors:?}");
+}

@@ -15,8 +15,8 @@ use crate::conv::Context;
 use crate::conv::checker::portability::allow_initial_assign;
 use crate::ir::span::{ArraySpan, PackedSpan, dst_writes};
 use crate::ir::{
-    AssignDestination, Component, Declaration, InstDeclaration, InstInterfaceBinding, Statement,
-    VarId,
+    AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
+    InstInterfaceBinding, Statement, SystemFunctionCall, SystemFunctionKind, VarId,
 };
 use veryl_parser::token_range::TokenRange;
 
@@ -104,11 +104,13 @@ impl ProcessWrites {
         for statement in statements {
             match statement {
                 Statement::Assign(x) => {
+                    self.add_expression(context, &x.expr, driving);
                     for dst in &x.dst {
                         self.add(context, dst, driving);
                     }
                 }
                 Statement::If(x) => {
+                    self.add_expression(context, &x.cond, driving);
                     // An untaken constant branch is dead code.
                     if x.cond.comptime().is_const
                         && let Some(value) = x.cond.eval_value(context)
@@ -129,6 +131,7 @@ impl ProcessWrites {
                     self.add_statements(context, &x.false_side, driving);
                 }
                 Statement::Case(x) => {
+                    self.add_expression(context, &x.case_target, driving);
                     for arm in &x.arms {
                         self.add_statements(context, &arm.body, driving);
                     }
@@ -140,20 +143,81 @@ impl ProcessWrites {
                     // selects, as in the longest static prefix rule.
                     self.add_statements(context, &x.body, driving);
                 }
-                Statement::FunctionCall(x) => {
-                    for dst in x.outputs.values().flatten() {
-                        self.add(context, dst, driving);
-                    }
-                }
+                Statement::FunctionCall(x) => self.add_function_call(context, x, driving),
                 Statement::TbMethodCall(x) => {
                     if let Some(dst) = &x.ret {
                         self.add(context, dst, driving);
                     }
                 }
-                Statement::SystemFunctionCall(_)
-                | Statement::Break
-                | Statement::Unsupported(_)
-                | Statement::Null => {}
+                Statement::SystemFunctionCall(x) => {
+                    self.add_system_function_call(context, x, driving);
+                }
+                Statement::Break | Statement::Unsupported(_) | Statement::Null => {}
+            }
+        }
+    }
+
+    /// Output arguments of function calls and `$readmemh` inside an expression.
+    fn add_expression(&mut self, context: &mut Context, expr: &Expression, driving: bool) {
+        match expr {
+            Expression::Term(x) => match x.as_ref() {
+                Factor::Variable(_, index, _, _) => {
+                    for x in index.expressions() {
+                        self.add_expression(context, x, driving);
+                    }
+                }
+                Factor::FunctionCall(x) => self.add_function_call(context, x, driving),
+                Factor::SystemFunctionCall(x) => {
+                    self.add_system_function_call(context, x, driving);
+                }
+                _ => {}
+            },
+            Expression::Unary(_, x, _) => self.add_expression(context, x, driving),
+            Expression::Binary(x, _, y, _) => {
+                self.add_expression(context, x, driving);
+                self.add_expression(context, y, driving);
+            }
+            Expression::Ternary(x, y, z, _) => {
+                self.add_expression(context, x, driving);
+                self.add_expression(context, y, driving);
+                self.add_expression(context, z, driving);
+            }
+            Expression::Concatenation(x, _) => {
+                for (x, y) in x {
+                    self.add_expression(context, x, driving);
+                    if let Some(y) = y {
+                        self.add_expression(context, y, driving);
+                    }
+                }
+            }
+            Expression::StructConstructor(_, exprs, _) => {
+                for (_, x) in exprs {
+                    self.add_expression(context, x, driving);
+                }
+            }
+            // Expanded during conversion.
+            Expression::ArrayLiteral(_, _) => {}
+        }
+    }
+
+    fn add_function_call(&mut self, context: &mut Context, call: &FunctionCall, driving: bool) {
+        for x in call.inputs.values() {
+            self.add_expression(context, x, driving);
+        }
+        for dst in call.outputs.values().flatten() {
+            self.add(context, dst, driving);
+        }
+    }
+
+    fn add_system_function_call(
+        &mut self,
+        context: &mut Context,
+        call: &SystemFunctionCall,
+        driving: bool,
+    ) {
+        if let SystemFunctionKind::Readmemh(_, x) = &call.kind {
+            for dst in x.local() {
+                self.add(context, dst, driving);
             }
         }
     }

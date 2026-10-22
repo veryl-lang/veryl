@@ -2,7 +2,7 @@ use crate::analyzer_error::AnalyzerError;
 use crate::attribute::{AllowItem, Attribute};
 use crate::attribute_table;
 use crate::conv::Context;
-use crate::ir::{Expression, FfReset, TypeKind, VarId, VarPath, VarPathSelect};
+use crate::ir::{Expression, FfReset, TypeKind, VarId, VarPath, VarPathSelect, Variable};
 use crate::namespace::DefineContext;
 use crate::symbol::{Direction, Symbol, SymbolKind};
 use veryl_parser::token_range::TokenRange;
@@ -110,11 +110,9 @@ pub fn allow_initial_assign(context: &Context, id: VarId) -> bool {
     })
 }
 
-pub fn allow_multiple_assign(context: &Context, id: VarId) -> bool {
-    context.variables.get(&id).is_some_and(|variable| {
-        attribute_table::contains(
-            &variable.token.beg,
-            Attribute::Allow(AllowItem::MultipleAssign),
-        )
-    })
+pub fn allow_multiple_assign(variable: &Variable) -> bool {
+    attribute_table::contains(
+        &variable.token.beg,
+        Attribute::Allow(AllowItem::MultipleAssign),
+    )
 }

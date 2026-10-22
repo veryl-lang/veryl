@@ -24,17 +24,18 @@ pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
     reports.into_errors()
 }
 
-/// Conflicts at the same source location found in several specializations
+/// Conflicts on the same declared variable found in several specializations
 /// are one diagnostic.
 #[derive(Default)]
 struct Reports {
-    order: Vec<(String, TokenRange)>,
-    sites: HashMap<(String, TokenRange), Vec<TokenRange>>,
+    /// `(declaration, identifier)`
+    order: Vec<(TokenRange, String)>,
+    sites: HashMap<(TokenRange, String), Vec<TokenRange>>,
 }
 
 impl Reports {
-    fn insert(&mut self, identifier: String, sites: Vec<TokenRange>) {
-        let key = (identifier, sites[0]);
+    fn insert(&mut self, declaration: TokenRange, identifier: String, sites: Vec<TokenRange>) {
+        let key = (declaration, identifier);
         if let Some(existing) = self.sites.get_mut(&key) {
             existing.extend(sites);
             existing.sort();
@@ -50,7 +51,7 @@ impl Reports {
             .into_iter()
             .map(|key| {
                 let sites = self.sites.remove(&key).unwrap();
-                AnalyzerError::multiple_assignment(&key.0, &key.1, &sites)
+                AnalyzerError::multiple_assignment(&key.1, &sites[0], &sites)
             })
             .collect()
     }
@@ -80,13 +81,16 @@ fn check_module(module: &Module, reports: &mut Reports) {
         }
     }
 
-    let mut context = crate::conv::Context::default();
-    context.variables = module.variables.clone();
-    context.variables.extend(module.interface_members.clone());
-
     let mut found = Vec::new();
     for (id, regions) in driven {
-        if allow_multiple_assign(&context, id) {
+        let Some(variable) = module
+            .variables
+            .get(&id)
+            .or_else(|| module.interface_members.get(&id))
+        else {
+            continue;
+        };
+        if allow_multiple_assign(variable) {
             continue;
         }
         let mut writes: Vec<_> = regions
@@ -99,15 +103,13 @@ fn check_module(module: &Module, reports: &mut Reports) {
             })
             .collect();
         let sites = conflicting_sites(&mut writes);
-        if let Some(variable) = context.variables.get(&id)
-            && !sites.is_empty()
-        {
-            found.push((variable.path.to_string(), sites));
+        if !sites.is_empty() {
+            found.push((variable.token, variable.path.to_string(), sites));
         }
     }
-    found.sort_by(|a, b| a.1[0].cmp(&b.1[0]));
-    for (identifier, sites) in found {
-        reports.insert(identifier, sites);
+    found.sort_by(|a, b| (a.2[0], &a.1).cmp(&(b.2[0], &b.1)));
+    for (declaration, identifier, sites) in found {
+        reports.insert(declaration, identifier, sites);
     }
 }
 
