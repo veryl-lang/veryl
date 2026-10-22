@@ -27,7 +27,7 @@ use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::{
     AssertKind, SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant,
 };
-use veryl_analyzer::ir::{ControlFlow, FunctionCall, VarId};
+use veryl_analyzer::ir::{ControlFlow, FunctionCall, QueueOp, VarId};
 use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue, byte_value_to_string_lossy};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -307,6 +307,17 @@ pub enum ProtoTbMethodKind {
     RandomGetSeed {
         ret: Option<(VarId, RetWidthCheck)>,
     },
+    /// `$tb::queue::<T, N>` methods. `width`/`signed`/`four_state` describe
+    /// the element type, `capacity` is `N` (`0` for unbounded).
+    Queue {
+        op: QueueOp,
+        value: Option<ProtoExpression>,
+        width: u32,
+        signed: bool,
+        four_state: bool,
+        capacity: u32,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
 }
 
 /// How a component method's returned width is validated before it lands
@@ -370,6 +381,15 @@ pub enum TbMethodKind {
         ret: Option<(VarId, RetWidthCheck)>,
     },
     RandomGetSeed {
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    Queue {
+        op: QueueOp,
+        value: Option<Expression>,
+        width: u32,
+        signed: bool,
+        four_state: bool,
+        capacity: u32,
         ret: Option<(VarId, RetWidthCheck)>,
     },
 }
@@ -1541,6 +1561,11 @@ impl ProtoStatement {
                 ProtoTbMethodKind::RandomSeed { value } => {
                     value.adjust_offsets(ff_delta, comb_delta);
                 }
+                ProtoTbMethodKind::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        v.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
                 ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
                     min.adjust_offsets(ff_delta, comb_delta);
                     max.adjust_offsets(ff_delta, comb_delta);
@@ -1735,6 +1760,11 @@ impl ProtoStatement {
                 }
                 ProtoTbMethodKind::RandomSeed { value } => {
                     value.remap_offsets_with(f);
+                }
+                ProtoTbMethodKind::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        v.remap_offsets_with(f);
+                    }
                 }
                 ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
                     min.remap_offsets_with(f);
@@ -2925,6 +2955,31 @@ impl ProtoStatement {
                         ProtoTbMethodKind::RandomGetSeed { ret } => {
                             TbMethodKind::RandomGetSeed { ret: *ret }
                         }
+                        ProtoTbMethodKind::Queue {
+                            op,
+                            value,
+                            width,
+                            signed,
+                            four_state,
+                            capacity,
+                            ret,
+                        } => TbMethodKind::Queue {
+                            op: *op,
+                            value: value.as_ref().map(|v| {
+                                v.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            }),
+                            width: *width,
+                            signed: *signed,
+                            four_state: *four_state,
+                            capacity: *capacity,
+                            ret: *ret,
+                        },
                     };
                     Statement::TbMethodCall {
                         inst: *inst,
@@ -3996,6 +4051,28 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     }
                     air::TbMethod::RandomGetSeed => {
                         ProtoTbMethodKind::RandomGetSeed { ret: tb_ret }
+                    }
+                    air::TbMethod::Queue {
+                        op,
+                        value,
+                        width,
+                        signed,
+                        four_state,
+                        capacity,
+                    } => {
+                        let value: Option<ProtoExpression> = match value {
+                            Some(v) => Some(Conv::conv(context, v)?),
+                            None => None,
+                        };
+                        ProtoTbMethodKind::Queue {
+                            op: *op,
+                            value,
+                            width: *width,
+                            signed: *signed,
+                            four_state: *four_state,
+                            capacity: *capacity,
+                            ret: tb_ret,
+                        }
                     }
                 };
                 vec![ProtoStatement::TbMethodCall {

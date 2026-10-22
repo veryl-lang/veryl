@@ -1416,47 +1416,50 @@ fn comb_loop_wide_function_output_retains_matching_endpoint_feedback() {
 
 #[test]
 fn comb_loop_split_observation_reuses_one_function_evaluation() {
-    const WIDTH: usize = 256;
-    let observed_bits = (0..WIDTH)
-        .map(|bit| format!("assign observed[{bit}] = result[{bit}];"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    crate::comb_loop_detect::reset_function_evaluation_count();
-    let errors = analyze(&format!(
-        r#"
-        module Top (
-            i       : input  logic<{WIDTH}>,
-            observed: output logic<{WIDTH}>,
-        ) {{
-            function identity (
-                x: input logic<{WIDTH}>,
-            ) -> logic<{WIDTH}> {{
-                return x;
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        const WIDTH: usize = 256;
+        let observed_bits = (0..WIDTH)
+            .map(|bit| format!("assign observed[{bit}] = result[{bit}];"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        crate::comb_loop_detect::reset_function_evaluation_count();
+        let errors = analyze(&format!(
+            r#"
+            module Top (
+                i       : input  logic<{WIDTH}>,
+                observed: output logic<{WIDTH}>,
+            ) {{
+                function identity (
+                    x: input logic<{WIDTH}>,
+                ) -> logic<{WIDTH}> {{
+                    return x;
+                }}
+                var result: logic<{WIDTH}>;
+                assign result = identity(i);
+                {observed_bits}
             }}
-            var result: logic<{WIDTH}>;
-            assign result = identity(i);
-            {observed_bits}
-        }}
-        "#
-    ));
-    assert!(
-        errors.is_empty(),
-        "split observation of one function result is acyclic: {errors:#?}"
-    );
-    assert_eq!(
-        crate::comb_loop_detect::function_evaluation_count(),
-        1,
-        "splitting the destination must not reevaluate the same function call"
-    );
-    assert_eq!(
-        crate::comb_loop_detect::function_result_version_count(),
-        2,
-        "sample the RHS once and request its whole destination once; observations do not split storage"
-    );
-    assert!(
-        crate::comb_loop_detect::function_result_region_probe_count() <= WIDTH * 12,
-        "return-region lookup must be logarithmic rather than scanning all regions per bit"
-    );
+            "#
+        ));
+        assert!(
+            errors.is_empty(),
+            "split observation of one function result is acyclic: {errors:#?}"
+        );
+        assert_eq!(
+            crate::comb_loop_detect::function_evaluation_count(),
+            1,
+            "splitting the destination must not reevaluate the same function call"
+        );
+        assert_eq!(
+            crate::comb_loop_detect::function_result_version_count(),
+            2,
+            "sample the RHS once and request its whole destination once; observations do not split storage"
+        );
+        assert!(
+            crate::comb_loop_detect::function_result_region_probe_count() <= WIDTH * 12,
+            "return-region lookup must be logarithmic rather than scanning all regions per bit"
+        );
+    })
 }
 
 #[test]
@@ -1785,30 +1788,33 @@ fn function_summary_guard_sharing_separates_static_iterations() {
 
 #[test]
 fn function_summary_distinct_guarded_expansion_is_bounded_and_incomplete() {
-    const DEPTH: usize = 24;
-    let mut functions = String::from(
-        "function f0(x: input logic, sel: input logic) -> logic { return if sel ? x : 0; }\n",
-    );
-    for level in 1..=DEPTH {
-        let previous = level - 1;
-        functions.push_str(&format!("function f{level}(x: input logic, sel: input logic) -> logic {{ return f{previous}(x, sel) | f{previous}(x, !sel); }}\n"));
-    }
-    let code = format!(
-        "module Top(x: input logic, sel: input logic, o: output logic) {{ {functions} assign o = f{DEPTH}(x, sel); }}"
-    );
-    crate::comb_loop_detect::reset_function_evaluation_count();
-    let errors = analyze(&code);
-    assert!(
-        errors.is_empty(),
-        "exhaustion must not invent feedback: {errors:#?}"
-    );
-    let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
-    eprintln!("distinct guarded fanout depth={DEPTH} nodes={nodes}");
-    // Each level calls the previous one with opposite selectors, so calls
-    // cannot share guards. The summaries take the module's steps, so their
-    // growth stops at the step limit.
-    assert!(nodes < 1 << 23, "{nodes} summary nodes");
-    assert!(!comb_loop_analysis_is_complete(&code));
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        const DEPTH: usize = 24;
+        let mut functions = String::from(
+            "function f0(x: input logic, sel: input logic) -> logic { return if sel ? x : 0; }\n",
+        );
+        for level in 1..=DEPTH {
+            let previous = level - 1;
+            functions.push_str(&format!("function f{level}(x: input logic, sel: input logic) -> logic {{ return f{previous}(x, sel) | f{previous}(x, !sel); }}\n"));
+        }
+        let code = format!(
+            "module Top(x: input logic, sel: input logic, o: output logic) {{ {functions} assign o = f{DEPTH}(x, sel); }}"
+        );
+        crate::comb_loop_detect::reset_function_evaluation_count();
+        let errors = analyze(&code);
+        assert!(
+            errors.is_empty(),
+            "exhaustion must not invent feedback: {errors:#?}"
+        );
+        let nodes = crate::comb_loop_detect::function_summary_graph_node_count();
+        eprintln!("distinct guarded fanout depth={DEPTH} nodes={nodes}");
+        // Each level calls the previous one with opposite selectors, so calls
+        // cannot share guards. The summaries take the module's steps, so their
+        // growth stops at the step limit.
+        assert!(nodes < 1 << 23, "{nodes} summary nodes");
+        assert!(!comb_loop_analysis_is_complete(&code));
+    })
 }
 
 #[test]
@@ -3110,47 +3116,50 @@ fn comb_loop_runtime_function_return_excludes_unrelated_captured_write() {
 
 #[test]
 fn comb_loop_function_summary_fanout_is_memoized() {
-    // Why this case exists: each function calls the previous specialization
-    // twice, so per-call recursive analysis grows as 2^N. The source contains
-    // only N unique function bodies and must be analyzed in O(N) summaries.
-    let mut functions = String::from(
-        r#"
-        function f0 (
-            x: input logic,
-        ) -> logic {
-            return x;
-        }
-        "#,
-    );
-    for depth in 1..=14 {
-        functions.push_str(&format!(
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        // Why this case exists: each function calls the previous specialization
+        // twice, so per-call recursive analysis grows as 2^N. The source contains
+        // only N unique function bodies and must be analyzed in O(N) summaries.
+        let mut functions = String::from(
             r#"
-            function f{depth} (
+            function f0 (
                 x: input logic,
-            ) -> logic {{
-                return f{previous}(x) ^ f{previous}(x);
-            }}
+            ) -> logic {
+                return x;
+            }
             "#,
-            previous = depth - 1,
+        );
+        for depth in 1..=14 {
+            functions.push_str(&format!(
+                r#"
+                function f{depth} (
+                    x: input logic,
+                ) -> logic {{
+                    return f{previous}(x) ^ f{previous}(x);
+                }}
+                "#,
+                previous = depth - 1,
+            ));
+        }
+        crate::comb_loop_detect::reset_function_evaluation_count();
+        let errors = analyze(&format!(
+            r#"
+            module Top (
+                i: input  logic,
+                o: output logic,
+            ) {{
+                {functions}
+                assign o = f14(i);
+            }}
+            "#
         ));
-    }
-    crate::comb_loop_detect::reset_function_evaluation_count();
-    let errors = analyze(&format!(
-        r#"
-        module Top (
-            i: input  logic,
-            o: output logic,
-        ) {{
-            {functions}
-            assign o = f14(i);
-        }}
-        "#
-    ));
-    assert!(
-        errors.is_empty(),
-        "acyclic function fanout is valid: {errors:#?}"
-    );
-    assert_eq!(crate::comb_loop_detect::function_evaluation_count(), 29);
+        assert!(
+            errors.is_empty(),
+            "acyclic function fanout is valid: {errors:#?}"
+        );
+        assert_eq!(crate::comb_loop_detect::function_evaluation_count(), 29);
+    })
 }
 
 #[test]
@@ -4198,33 +4207,36 @@ fn comb_loop_function_branches_that_all_overwrite_drop_the_caller_value() {
 
 #[test]
 fn function_scattered_writes_summarize_in_near_linear_steps() {
-    // A function writes every other bit in scattered order, so its written and
-    // kept positions are both fragmented. Matching them must not compare
-    // every pair.
-    let steps = |count: usize| {
-        let writes = (0..count)
-            .map(|index| format!("x[{}] = 1'b0;", 2 * ((index * 2731) % count)))
-            .collect::<String>();
-        let width = 2 * count;
-        let code = format!(
-            r#"
-            module Top (a: input logic<{width}>, o: output logic<{width}>) {{
-                var x: logic<{width}>;
-                function f () {{ {writes} }}
-                always_comb {{
-                    x = a;
-                    f();
+    // Measures the precise tier, which the coarse tier would skip.
+    crate::comb_loop_detect::with_precise_tier_only(|| {
+        // A function writes every other bit in scattered order, so its written and
+        // kept positions are both fragmented. Matching them must not compare
+        // every pair.
+        let steps = |count: usize| {
+            let writes = (0..count)
+                .map(|index| format!("x[{}] = 1'b0;", 2 * ((index * 2731) % count)))
+                .collect::<String>();
+            let width = 2 * count;
+            let code = format!(
+                r#"
+                module Top (a: input logic<{width}>, o: output logic<{width}>) {{
+                    var x: logic<{width}>;
+                    function f () {{ {writes} }}
+                    always_comb {{
+                        x = a;
+                        f();
+                    }}
+                    assign o = x;
                 }}
-                assign o = x;
-            }}
-            "#
-        );
-        crate::comb_loop_detect::reset_steps_taken();
-        assert!(comb_loop_analysis_is_complete(&code), "{count} writes");
-        crate::comb_loop_detect::steps_taken()
-    };
-    let (small, large) = (steps(1024), steps(4096));
-    assert!(large < 8 * small, "{small} -> {large} steps");
+                "#
+            );
+            crate::comb_loop_detect::reset_steps_taken();
+            assert!(comb_loop_analysis_is_complete(&code), "{count} writes");
+            crate::comb_loop_detect::steps_taken()
+        };
+        let (small, large) = (steps(1024), steps(4096));
+        assert!(large < 8 * small, "{small} -> {large} steps");
+    })
 }
 
 #[test]

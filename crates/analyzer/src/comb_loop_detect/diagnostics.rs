@@ -64,6 +64,17 @@ pub(super) enum TraceKind {
     Sources,
 }
 
+#[cfg(test)]
+thread_local! {
+    static FOUND_CYCLES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Cyclic components found so far, before reports are deduplicated.
+#[cfg(test)]
+pub(super) fn found_cycles() -> usize {
+    FOUND_CYCLES.get()
+}
+
 pub(super) type DiagnosticReplayCache = HashMap<(Signature, TraceKind), Rc<DependencyGraph>>;
 
 #[allow(clippy::too_many_arguments)]
@@ -96,6 +107,8 @@ pub(super) fn check_graph(
             None => complete = false,
         }
     }
+    #[cfg(test)]
+    FOUND_CYCLES.set(FOUND_CYCLES.get() + cyclic.len());
     if cyclic.is_empty() {
         return complete;
     }

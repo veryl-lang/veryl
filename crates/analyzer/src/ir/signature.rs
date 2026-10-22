@@ -17,8 +17,8 @@ pub struct Signature {
     pub parameters: Vec<(StrId, ValueVariant)>,
     pub generic_parameters: Vec<(StrId, GenericSymbolPath)>,
     /// Signatures of the interface instances connected to this instance's
-    /// modport ports (port name -> interface signature). A module body is
-    /// monomorphized by the parameters of the interfaces behind its modport
+    /// generic interface or modport ports (port name -> interface signature).
+    /// A module body is monomorphized by the parameters of its interface
     /// ports, so they must participate in the instance cache key; otherwise
     /// a module connected to `some_if #(W: 128)` reuses the body built for
     /// `some_if` at its default parameters (or vice versa).

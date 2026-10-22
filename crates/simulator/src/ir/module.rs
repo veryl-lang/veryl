@@ -1277,6 +1277,7 @@ fn collect_event_written_comb(
                     | ProtoTbMethodKind::RandomGet { ret: Some(_), .. }
                     | ProtoTbMethodKind::RandomGetRange { ret: Some(_), .. }
                     | ProtoTbMethodKind::RandomGetSeed { ret: Some(_) }
+                    | ProtoTbMethodKind::Queue { ret: Some(_), .. }
             ),
             // No comb writes.
             ProtoStatement::Break => true,
@@ -1367,7 +1368,8 @@ fn event_comb_write_offsets(stmts: &[ProtoStatement]) -> Option<Vec<(isize, isiz
                     K::Component { ret, .. }
                     | K::RandomGet { ret, .. }
                     | K::RandomGetRange { ret, .. }
-                    | K::RandomGetSeed { ret } => ret.is_none(),
+                    | K::RandomGetSeed { ret }
+                    | K::Queue { ret, .. } => ret.is_none(),
                     K::ClockNext { .. }
                     | K::ResetAssert { .. }
                     | K::FileOpen { .. }
@@ -1566,56 +1568,42 @@ fn run_comb_pipeline(
     // set is returned so a cache hit can re-apply it to another test's events.
     let mut dead_union: HashSet<VarOffset> = HashSet::default();
     let unified_sorted = if dead_var_dce::enabled() {
-        // Multi-pass DCE default ON: iterate to fixpoint so that
-        // cascaded drops (a dst becomes dead once its only consumer
-        // was itself dropped) are caught in subsequent passes.  Opt
-        // out via `VERYL_DEAD_VAR_DCE_MULTI=0`.
+        // Cascaded drops (a dst becomes dead once its only consumer was
+        // itself dropped) are taken in the same census.  Opt out of the
+        // cascade via `VERYL_DEAD_VAR_DCE_MULTI=0`.
         let multi_pass = std::env::var("VERYL_DEAD_VAR_DCE_MULTI").ok().as_deref() != Some("0");
         let mut unified_sorted = unified_sorted;
-        let mut total_dropped = 0usize;
-        let mut pass = 0usize;
-        loop {
-            let mut slices: Vec<&[ProtoStatement]> =
-                Vec::with_capacity(1 + all_event_statements.len());
-            slices.push(unified_sorted.as_slice());
-            for stmts in all_event_statements.values() {
-                slices.push(stmts.as_slice());
-            }
-            let mut dead = dead_var_dce::collect_dead_offsets(&slices);
-            for p in protect {
-                dead.remove(p);
-            }
-            if dead.is_empty() {
-                break;
-            }
-            pass += 1;
-            let (rewritten, dropped_here) = dead_var_dce::apply_counting(unified_sorted, &dead);
+        let mut slices: Vec<&[ProtoStatement]> = Vec::with_capacity(1 + all_event_statements.len());
+        slices.push(unified_sorted.as_slice());
+        for stmts in all_event_statements.values() {
+            slices.push(stmts.as_slice());
+        }
+        let mut dead = if multi_pass {
+            dead_var_dce::collect_dead_closure(&slices, protect)
+        } else {
+            dead_var_dce::collect_dead_offsets(&slices)
+        };
+        for p in protect {
+            dead.remove(p);
+        }
+        if !dead.is_empty() {
+            let (rewritten, mut dropped) = dead_var_dce::apply_counting(unified_sorted, &dead);
             unified_sorted = rewritten;
-            let mut total_dropped_here = dropped_here;
             for stmts in all_event_statements.values_mut() {
                 let taken = std::mem::take(stmts);
                 let (new_stmts, d) = dead_var_dce::apply_counting(taken, &dead);
                 *stmts = new_stmts;
-                total_dropped_here += d;
+                dropped += d;
             }
-            let dead_len = dead.len();
-            dead_union.extend(dead);
             if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
                 eprintln!(
-                    "[DeadVarDce] module={} pass={} dead_set={} dropped_stmts={}",
-                    module_name, pass, dead_len, total_dropped_here,
+                    "[DeadVarDce] module={} dead_set={} dropped_stmts={}",
+                    module_name,
+                    dead.len(),
+                    dropped,
                 );
             }
-            total_dropped += total_dropped_here;
-            if total_dropped_here == 0 || !multi_pass {
-                break;
-            }
-        }
-        if std::env::var("VERYL_DEAD_VAR_DCE_DIAG").ok().as_deref() == Some("1") {
-            eprintln!(
-                "[DeadVarDce] module={} total_passes={} total_dropped={}",
-                module_name, pass, total_dropped,
-            );
+            dead_union.extend(dead);
         }
         unified_sorted
     } else {
@@ -5775,13 +5763,27 @@ pub(crate) fn simulated_declarations(
     analyzer_context: &mut veryl_analyzer::conv::Context,
     disable_ff_opt: bool,
     peeled: Option<Vec<air::Declaration>>,
+    aliases: &[Vec<(VarId, usize)>],
 ) -> (Vec<air::Declaration>, air::FfTable) {
+    let retain_aliases = |table: &mut air::FfTable| {
+        for group in aliases {
+            if group
+                .iter()
+                .any(|(id, index)| table.writers(*id, *index).0.is_some())
+            {
+                for (id, index) in group {
+                    table.force_ff(*id, *index);
+                }
+            }
+        }
+    };
     let gather = |decls: &[air::Declaration], context: &mut veryl_analyzer::conv::Context| {
         let mut table = air::FfTable::default();
         for (i, x) in decls.iter().enumerate() {
             x.gather_ff(context, &mut table, i);
         }
         table.update_is_ff(decls, context);
+        retain_aliases(&mut table);
         if disable_ff_opt {
             table.force_all_ff();
         }
@@ -5795,6 +5797,7 @@ pub(crate) fn simulated_declarations(
         }
         None => {
             let mut table = src.ff_table.clone();
+            retain_aliases(&mut table);
             if disable_ff_opt {
                 table.force_all_ff();
             }
@@ -5822,6 +5825,7 @@ impl Conv<&air::Module> for ProtoModule {
             &mut analyzer_context,
             context.config.disable_ff_opt,
             peeled,
+            &[],
         );
         let declarations: &[air::Declaration] = &hoisted_declarations;
 
@@ -5897,6 +5901,12 @@ impl Conv<&air::Module> for ProtoModule {
             context,
             &mut all_event_statements,
             &all_child_modules,
+        )?;
+        super::declaration::propagate_interface_initialization(
+            src,
+            &variable_meta,
+            &all_child_modules,
+            &mut all_event_statements,
         )?;
 
         // Component input connections may also reference DUT internals.
@@ -6716,10 +6726,11 @@ impl Conv<&air::Module> for ProtoModule {
         // identity transform.
         #[cfg(not(target_family = "wasm"))]
         let tb_private = tb_private_offsets(&variable_meta, &comb_touched_offsets);
-        let event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>> = all_event_statements
-            .iter()
-            .map(|(e, stmts)| (e.clone(), event_comb_write_offsets(stmts)))
-            .collect();
+        let mut event_comb_writes: HashMap<Event, Option<Vec<(isize, isize)>>> =
+            all_event_statements
+                .iter()
+                .map(|(e, stmts)| (e.clone(), event_comb_write_offsets(stmts)))
+                .collect();
         // Collect derived clocks + input-clock offsets BEFORE
         // `variable_meta` moves into `module_variable_meta`.  We must look
         // at both the top module's own clock vars AND any clock vars
@@ -6733,8 +6744,8 @@ impl Conv<&air::Module> for ProtoModule {
             .values()
             .any(|v| v.r#type.is_clock() || v.r#type.is_reset())
             || !nested_derived_clock_candidates.is_empty();
-        let (derived_clock_vars, input_clock_offsets) = if !has_any_edge_var {
-            (Vec::new(), HashMap::default())
+        let (derived_clock_vars, input_clock_offsets, negedge_inputs) = if !has_any_edge_var {
+            (Vec::new(), HashMap::default(), crate::HashSet::default())
         } else {
             // O(V+P) port lookup via HashSet.
             let port_var_set: crate::HashSet<VarId> = src.ports.values().copied().collect();
@@ -6821,17 +6832,22 @@ impl Conv<&air::Module> for ProtoModule {
             // storage entry — `set_input_clock_bit` only walks the
             // top-level `module_variables.variables` map.
             let mut pc_offsets: HashMap<VarOffset, VarId> = HashMap::default();
+            let mut negedge_inputs: crate::HashSet<VarId> = crate::HashSet::default();
             for (vid, var) in &src.variables {
                 if !var.r#type.is_clock() {
                     continue;
                 }
+                let negedge = matches!(var.r#type.kind, air::TypeKind::ClockNegedge);
                 if let Some(meta) = variable_meta.get(vid) {
                     for (i, elem) in meta.elements.iter().enumerate() {
                         pc_offsets.insert(elem.current, edge_id(vid, i));
+                        if negedge {
+                            negedge_inputs.insert(edge_id(vid, i));
+                        }
                     }
                 }
             }
-            (dc_vars, pc_offsets)
+            (dc_vars, pc_offsets, negedge_inputs)
         };
 
         let module_variable_meta = ModuleVariableMeta {
@@ -6872,8 +6888,23 @@ impl Conv<&air::Module> for ProtoModule {
         let derived_clock_schedule = if derived_clock_vars.is_empty() {
             DerivedClockSchedule::default()
         } else {
-            build_derived_clock_schedule(&derived_clock_vars, &pre_jit_stmts, &input_clock_offsets)
+            build_derived_clock_schedule(
+                &derived_clock_vars,
+                &pre_jit_stmts,
+                &input_clock_offsets,
+                &negedge_inputs,
+            )
         };
+        for &(copy, source) in &derived_clock_schedule.aliases {
+            if let Some(stmts) = all_event_statements.remove(&Event::clock(copy)) {
+                event_comb_writes.remove(&Event::clock(copy));
+                let merged = all_event_statements
+                    .entry(Event::clock(source))
+                    .or_default();
+                merged.extend(stmts);
+                event_comb_writes.insert(Event::clock(source), event_comb_write_offsets(merged));
+            }
+        }
 
         // Idle-subtree gates over the clock events; see `event_gate`.
         let mut event_gates: HashMap<Event, Vec<crate::ir::opt::event_gate::EventGate>> =

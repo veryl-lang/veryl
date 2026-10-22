@@ -42,6 +42,14 @@ pub(super) fn module_postorder(ir: &Ir) -> Vec<&Module> {
     order
 }
 
+/// The modules `module` instantiates directly.
+pub(super) fn child_modules(module: &Module) -> impl Iterator<Item = &Module> {
+    walk_insts(module).filter_map(|inst| match inst.component.as_ref() {
+        Component::Module(child) => Some(child),
+        _ => None,
+    })
+}
+
 pub(super) fn walk_insts(module: &Module) -> impl Iterator<Item = &InstDeclaration> {
     module
         .declarations
