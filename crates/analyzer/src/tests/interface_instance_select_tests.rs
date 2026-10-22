@@ -41,6 +41,24 @@ fn interface_instance_select_read_write_and_call() {
 }
 
 #[test]
+fn interface_instance_select_initial_write() {
+    let code = r#"
+        interface Bus { var data: logic<8>; }
+        module Child (clk: input clock, bus: interface) {
+            always_ff { bus.data = bus.data + 8'd1; }
+        }
+        module Top (clk: input clock, index: input logic, a: output logic<8>, c: output logic<8>) {
+            #[allow(initial_assign)]
+            inst bus: Bus [3];
+            inst u: Child (clk, bus: bus[2]);
+            initial { bus[2].data = '0; bus[index].data = 8'h3c; }
+            assign a = bus[0].data; assign c = bus[2].data;
+        }
+    "#;
+    assert_select_errors(code, &["index"]);
+}
+
+#[test]
 fn interface_instance_select_modport() {
     for statement in [
         "assign o = bus[i].get();",

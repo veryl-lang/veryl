@@ -7436,16 +7436,16 @@ fn generic_interface_port_complete_initial_writes() {
     // Element two is referenced by the child but unreachable by a one-bit
     // index; truncating its index must not redirect an initialization of zero.
     let code = r#"
-        interface Bus { var data: logic<8>; }
+        interface Bus { var data: logic<8> [3]; }
         module Child (clk: input clock, bus: interface) {
-            always_ff { bus.data = bus.data + 8'd1; }
+            always_ff { bus.data[2] = bus.data[2] + 8'd1; }
         }
         module Top (clk: input clock, index: input logic, a: output logic<8>, c: output logic<8>) {
             #[allow(initial_assign)]
-            inst bus: Bus [3];
-            inst u: Child (clk, bus: bus[2]);
-            initial { bus[2].data = '0; bus[index].data = 8'h3c; }
-            assign a = bus[0].data; assign c = bus[2].data;
+            inst bus: Bus;
+            inst u: Child (clk, bus);
+            initial { bus.data[2] = '0; bus.data[index] = 8'h3c; }
+            assign a = bus.data[0]; assign c = bus.data[2];
         }
     "#;
     for config in Config::all() {
