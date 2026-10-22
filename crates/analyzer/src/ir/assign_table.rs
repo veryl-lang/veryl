@@ -1,6 +1,5 @@
 use crate::HashSet;
 use crate::conv::Context;
-use crate::conv::checker::portability::allow_initial_assign;
 use crate::ir::{Shape, ShapeRef, VarId, VarPath, Variable, VariableInfo};
 use crate::symbol::Affiliation;
 use crate::{AnalyzerError, BigUint, HashMap};
@@ -297,7 +296,11 @@ impl AssignTable {
     pub fn exempt_initial_writes(&mut self, context: &Context) {
         let zero = BigUint::from(0u32);
         for (id, entry) in self.table.iter_mut() {
-            if !allow_initial_assign(context, *id) {
+            if !context
+                .variables
+                .get(id)
+                .is_some_and(Variable::allow_initial_assign)
+            {
                 continue;
             }
             for x in entry.definite_mask.iter_mut() {

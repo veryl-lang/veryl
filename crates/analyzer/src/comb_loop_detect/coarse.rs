@@ -23,10 +23,10 @@
 //! they leave the precise tier. Positions beyond the precise tier's range
 //! leave the module undecided instead: the precise tier reports them.
 
-use super::region::{ArraySpan, PackedSpan, dst_writes, var_reads};
 use crate::HashMap;
 use crate::HashSet;
 use crate::conv::Context;
+use crate::ir::span::{ArraySpan, PackedSpan, dst_writes, var_reads};
 use crate::ir::{
     ArrayLiteralItem, AssignDestination, CaseArm, CasePattern, Component, Declaration, Expression,
     Factor, ForBound, ForRange, FunctionCall, InstDeclaration, MemberSelectDomain, Module, Op,

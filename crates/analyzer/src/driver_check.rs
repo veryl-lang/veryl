@@ -9,8 +9,6 @@
 //! [`WriteSummary`]: crate::ir::WriteSummary
 
 use crate::analyzer_error::AnalyzerError;
-use crate::comb_loop_detect::hierarchy::module_postorder;
-use crate::conv::checker::portability::allow_multiple_assign;
 use crate::ir::span::{ArraySpan, PackedSpan};
 use crate::ir::{Ir, Module, VarId};
 use crate::{HashMap, HashSet};
@@ -18,7 +16,7 @@ use veryl_parser::token_range::TokenRange;
 
 pub fn check(ir: &Ir) -> Vec<AnalyzerError> {
     let mut reports = Reports::default();
-    for module in module_postorder(ir) {
+    for module in ir.module_postorder() {
         check_module(module, &mut reports);
     }
     reports.into_errors()
@@ -90,7 +88,7 @@ fn check_module(module: &Module, reports: &mut Reports) {
         else {
             continue;
         };
-        if allow_multiple_assign(variable) {
+        if variable.allow_multiple_assign() {
             continue;
         }
         let mut writes: Vec<_> = regions

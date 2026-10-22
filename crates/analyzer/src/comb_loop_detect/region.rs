@@ -1,6 +1,6 @@
 use crate::HashMap;
 use crate::ir::VarId;
-pub(super) use crate::ir::span::{ArraySpan, PackedSpan, dst_writes, var_reads};
+use crate::ir::span::{ArraySpan, PackedSpan};
 
 pub(super) fn signed_difference(destination: usize, source: usize) -> Option<isize> {
     isize::try_from(destination)

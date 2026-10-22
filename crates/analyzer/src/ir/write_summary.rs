@@ -12,11 +12,10 @@
 //! bit widths.
 
 use crate::conv::Context;
-use crate::conv::checker::portability::allow_initial_assign;
 use crate::ir::span::{ArraySpan, PackedSpan, dst_writes};
 use crate::ir::{
     AssignDestination, Component, Declaration, Expression, Factor, FunctionCall, InstDeclaration,
-    InstInterfaceBinding, Statement, SystemFunctionCall, SystemFunctionKind, VarId,
+    InstInterfaceBinding, Statement, SystemFunctionCall, SystemFunctionKind, VarId, Variable,
 };
 use veryl_parser::token_range::TokenRange;
 
@@ -60,7 +59,10 @@ impl WriteSummary {
                 Declaration::Initial(x) => {
                     let mut process = ProcessWrites::of_statements(context, &x.statements, true);
                     for write in &mut process.writes {
-                        write.driving = !allow_initial_assign(context, write.id);
+                        write.driving = !context
+                            .variables
+                            .get(&write.id)
+                            .is_some_and(Variable::allow_initial_assign);
                     }
                     processes.push(process);
                 }

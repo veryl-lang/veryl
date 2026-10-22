@@ -1,4 +1,6 @@
 use crate::analyzer_error::{AnalyzerError, InvalidSelectKind};
+use crate::attribute::{AllowItem, Attribute};
+use crate::attribute_table;
 use crate::conv::Context;
 use crate::conv::checker::clock_domain::check_clock_domain;
 use crate::conv::checker::portability::check_initial_assign;
@@ -1333,6 +1335,16 @@ pub struct Variable {
 }
 
 impl Variable {
+    /// Writes in `initial` are not drivers (`#[allow(initial_assign)]`).
+    pub fn allow_initial_assign(&self) -> bool {
+        attribute_table::contains(&self.token.beg, Attribute::Allow(AllowItem::InitialAssign))
+    }
+
+    /// Several drivers are accepted (`#[allow(multiple_assign)]`).
+    pub fn allow_multiple_assign(&self) -> bool {
+        attribute_table::contains(&self.token.beg, Attribute::Allow(AllowItem::MultipleAssign))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: VarId,

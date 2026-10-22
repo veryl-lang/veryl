@@ -5,6 +5,7 @@ mod declaration;
 mod expression;
 mod ff_table;
 mod function;
+mod hierarchy;
 pub mod peel;
 pub(crate) use function::FunctionValueCache;
 #[cfg(test)]

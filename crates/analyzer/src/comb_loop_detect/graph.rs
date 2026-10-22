@@ -845,11 +845,11 @@ pub(super) fn split_at_cuts(
                     .expect("cells between distinct cuts of a domain are non-empty domains");
                 let region = if original.diagnostic.is_some() {
                     SummaryRegion {
-                        array: super::region::ArraySpan {
+                        array: crate::ir::span::ArraySpan {
                             start: domain.array_start,
                             length: domain.array_length,
                         },
-                        packed: super::region::PackedSpan::new(
+                        packed: crate::ir::span::PackedSpan::new(
                             domain.packed_start,
                             domain.packed_length,
                         )
@@ -1374,9 +1374,9 @@ fn dependency_is_identity(dependency: BitDependency) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::region::{ArraySpan, PackedSpan};
     use super::super::ssa::BranchId;
     use super::*;
+    use crate::ir::span::{ArraySpan, PackedSpan};
 
     fn test_node(id: u32, region: ArraySpan) -> GraphNode {
         let id = VarId::from_raw(id);

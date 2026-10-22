@@ -24,7 +24,6 @@
 mod coarse;
 mod diagnostics;
 mod graph;
-pub(crate) mod hierarchy;
 mod model;
 mod procedure;
 mod region;
@@ -42,6 +41,7 @@ pub(crate) use procedure::{
     traced_procedure_evaluation_count, visible_source_probes, write_footprint_statement_visits,
 };
 
+use crate::ir::span::{ArraySpan, PackedSpan, dst_writes, var_reads};
 use diagnostics::{DiagnosticReplayCache, TraceKind, check_graph};
 #[cfg(test)]
 pub(crate) use diagnostics::{
@@ -57,12 +57,8 @@ use graph::{
 pub(crate) use graph::{
     cycle_decision_work, cycle_search_work, reset_cycle_decision_work, reset_cycle_search_work,
 };
-use hierarchy::module_postorder;
 use model::{BitDependency, ModuleCombSummary, SummaryNodeKind, SummaryRegion};
-use region::{
-    ArraySpan, BitPartition, IdxKey, NodeKey, PackedSpan, dst_writes, signed_difference,
-    translate_position, var_reads,
-};
+use region::{BitPartition, IdxKey, NodeKey, signed_difference, translate_position};
 use ssa::{BranchId, DependencyDagNode, PathCondition, PositionDomain};
 #[cfg(test)]
 pub(crate) use ssa::{
@@ -174,7 +170,8 @@ struct ModuleMissCheck {
 impl CoarseMissCheck {
     fn enter(&mut self, module: &Module, verdict: &coarse::CoarseVerdict) -> ModuleMissCheck {
         let acyclic = verdict.proves_acyclic()
-            && hierarchy::child_modules(module)
+            && module
+                .child_modules()
                 .all(|child| self.acyclic_below.contains(&child.signature));
         if acyclic {
             self.acyclic_below.insert(module.signature.clone());
@@ -210,7 +207,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
 
     let mut diagnostic_replays = DiagnosticReplayCache::default();
     let mut reported = HashSet::default();
-    for module in module_postorder(ir) {
+    for module in ir.module_postorder() {
         let (verdict, coarse_summary) = coarse::analyze(module, &coarse_summaries);
         #[cfg(test)]
         let miss_check = misses.enter(module, &verdict);
@@ -220,7 +217,7 @@ fn check_inner(ir: &Ir) -> (Vec<AnalyzerError>, bool) {
             cleared.insert(module.signature.clone());
             continue;
         }
-        for child in hierarchy::child_modules(module) {
+        for child in module.child_modules() {
             complete &= summarize_precisely(child, &mut cleared, &mut summaries, &mut errors);
         }
 
@@ -273,7 +270,7 @@ fn summarize_precisely(
         if !children_done {
             if cleared.remove(&module.signature) {
                 work.push((module, true));
-                work.extend(hierarchy::child_modules(module).map(|child| (child, false)));
+                work.extend(module.child_modules().map(|child| (child, false)));
             }
             continue;
         }
