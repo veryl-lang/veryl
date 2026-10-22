@@ -1465,10 +1465,10 @@ pub fn eval_type(
         }
     } else {
         let mut path = resolved.unwrap_or_else(|| context.resolve_path(path.clone()));
+        // Before unaliasing: a declared alias is not a generic reference here.
         check_generic_refereence(context, &path);
 
-        // Check the reference at its use site before expanding a previously
-        // declared alias, then preserve the target's arguments in the type map.
+        let use_site_range = path.range;
         path.unalias(None);
         let map = path.to_generic_maps();
         if let Ok(symbol) = symbol_table::resolve(&path) {
@@ -1479,7 +1479,7 @@ pub fn eval_type(
                         expected: "enum, union, struct, typedef or integer constant".to_string(),
                         actual: symbol.found.kind.to_kind_name(),
                     },
-                    &path.range,
+                    &use_site_range,
                 ));
             }
 
@@ -2646,8 +2646,9 @@ fn eval_factor_path_inner(
     let (path, select, _) = var_path.into();
 
     let mut generic_path = context.resolve_path(symbol_path);
-    generic_path.unalias(None);
+    // Before unaliasing: a declared alias is not a generic reference here.
     check_generic_refereence(context, &generic_path);
+    generic_path.unalias(None);
 
     // An anonymous loop variable is also registered as `_`.
     if generic_path.is_anonymous() {
