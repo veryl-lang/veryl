@@ -354,9 +354,8 @@ pub struct InstDeclaration {
     pub hierarchy: Vec<StrId>,
     pub inputs: Vec<InstInput>,
     pub outputs: Vec<InstOutput>,
-    /// Bindings for interface members captured by imported modport functions.
-    /// These members do not appear in `inputs` or `outputs` because the
-    /// modport exposes the function rather than the underlying signal.
+    /// Reference bindings for direction-free interface members and members
+    /// captured by imported modport functions.
     pub interface_bindings: Vec<InstInterfaceBinding>,
     /// `Arc`-shared: without it, repeated instantiations of the same generic
     /// module each deep-clone the `Component`, blowing pass2 memory.
@@ -366,17 +365,93 @@ pub struct InstDeclaration {
 
 impl InstDeclaration {
     pub fn eval_assign(&self, context: &mut Context, assign_table: &mut AssignTable) {
+        for mut process in self.assignment_processes(context) {
+            assign_table.merge_by_or_from(context, &mut process, true, true);
+        }
+    }
+
+    pub(crate) fn assignment_processes(&self, context: &mut Context) -> Vec<AssignTable> {
+        let mut assign_table = AssignTable::new(context);
         for x in &self.outputs {
             for dst in &x.dst {
-                dst.eval_assign(context, assign_table, AssignContext::Ff);
+                dst.eval_assign(context, &mut assign_table, AssignContext::Ff);
             }
         }
-
         if let Component::SystemVerilog(x) = self.component.as_ref() {
             for dst in &x.connects {
-                dst.eval_assign(context, assign_table, AssignContext::SystemVerilog);
+                dst.eval_assign(context, &mut assign_table, AssignContext::SystemVerilog);
             }
         }
+        let mut processes = vec![assign_table];
+
+        if let Component::Module(module) = self.component.as_ref() {
+            for process in &module.interface_assignment_processes {
+                let mut assign_table = AssignTable::new(context);
+                for binding in &self.interface_bindings {
+                    let Some(writes) = process.get(&binding.child) else {
+                        continue;
+                    };
+                    let Some(parent) = context.get_variable_info(binding.parent) else {
+                        continue;
+                    };
+                    let dynamic_index = !binding.index.is_const();
+                    let selection = if dynamic_index {
+                        None
+                    } else {
+                        binding.index.eval_selection(context, &parent.r#type.array)
+                    };
+                    let range = binding.index.read_range(context, &parent.r#type.array);
+                    let Some((start, end)) = range else {
+                        continue;
+                    };
+                    let Some((_, shift)) =
+                        binding.select.eval_value(context, &parent.r#type, false)
+                    else {
+                        continue;
+                    };
+                    for (element, mask) in writes.mask.iter().enumerate() {
+                        let targets = if let Some(selection) = &selection {
+                            if element < selection.result_start
+                                || element - selection.result_start >= selection.length
+                            {
+                                continue;
+                            }
+                            let index = selection.source_start + element - selection.result_start;
+                            index..=index
+                        } else {
+                            start..=end
+                        };
+                        let definite = &writes.definite_mask[element];
+                        let dynamic = &writes.dynamic_mask[element];
+                        let unknown = mask ^ (definite | dynamic);
+                        for target in targets {
+                            let index = VarIndex::from_index(target, &parent.r#type.array);
+                            let Some(index) = index.eval_value(context) else {
+                                continue;
+                            };
+                            for (mask, maybe, dynamic) in [
+                                (definite, dynamic_index, dynamic_index),
+                                (dynamic, true, true),
+                                (&unknown, true, false),
+                            ] {
+                                if *mask != 0u32.into() {
+                                    let _ = assign_table.insert_assign(
+                                        &parent,
+                                        index.clone(),
+                                        mask << shift,
+                                        maybe,
+                                        dynamic,
+                                        self.token,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                processes.push(assign_table);
+            }
+        }
+        processes
     }
 
     /// Register the variables read by each instance input expression so
@@ -387,6 +462,31 @@ impl InstDeclaration {
     pub fn gather_ff(&self, context: &mut Context, table: &mut FfTable, decl: usize) {
         for input in &self.inputs {
             input.expr.gather_ff(context, table, decl, None, false);
+        }
+        if let Component::Module(module) = self.component.as_ref() {
+            for binding in &self.interface_bindings {
+                if !module
+                    .variables
+                    .get(&binding.child)
+                    .is_some_and(|v| v.kind == crate::ir::VarKind::Inout)
+                {
+                    continue;
+                }
+                if let Some(parent) = context.get_variable_info(binding.parent) {
+                    let comptime = Comptime::from_type(
+                        parent.r#type,
+                        crate::symbol::ClockDomain::None,
+                        self.token,
+                    );
+                    let expr = Expression::Term(Box::new(crate::ir::Factor::Variable(
+                        binding.parent,
+                        binding.index.clone(),
+                        binding.select.clone(),
+                        comptime,
+                    )));
+                    expr.gather_ff(context, table, decl, None, false);
+                }
+            }
         }
     }
 }

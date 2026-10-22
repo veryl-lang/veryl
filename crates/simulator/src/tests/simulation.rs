@@ -7158,6 +7158,802 @@ fn interface_modport() {
 }
 
 #[test]
+fn generic_interface_port() {
+    // Issue #3527: generic ports must bind to the connected interface, both
+    // for direct member access and when forwarding to a typed modport port.
+    let code = r#"
+    interface Link {
+        var req: logic<8>;
+        var resp: logic<8>;
+        modport client { req: output, resp: input, }
+        modport server { ..converse(client) }
+    }
+    module Client (bus: modport Link::client, x: input logic<8>, resp: output logic<8>) {
+        assign bus.req = x;
+        assign resp = bus.resp;
+    }
+    module ClientPass (bus: interface::client, x: input logic<8>, resp: output logic<8>) {
+        inst u: Client (bus, x, resp);
+    }
+    module ClientDirect (bus: interface::client, x: input logic<8>, resp: output logic<8>) {
+        assign bus.req = x;
+        assign resp = bus.resp;
+    }
+    module Server (bus: modport Link::server) {
+        assign bus.resp = ~bus.req;
+    }
+    module ServerPass (bus: interface) {
+        inst u: Server (bus);
+    }
+    module ServerDirect (bus: interface) {
+        assign bus.resp = ~bus.req;
+    }
+    module Top (x: input logic<8>, direct: output logic<8>, forwarded: output logic<8>) {
+        inst l_direct: Link;
+        inst l_forwarded: Link;
+        inst c_direct: ClientDirect (bus: l_direct, x, resp: direct);
+        inst s_direct: ServerDirect (bus: l_direct);
+        inst c_forwarded: ClientPass (bus: l_forwarded, x, resp: forwarded);
+        inst s_forwarded: ServerPass (bus: l_forwarded);
+    }
+    #[test(test_generic_port)]
+    module test_generic_port {
+        inst clk: $tb::clock_gen;
+        var x: logic<8>;
+        var direct: logic<8>;
+        var forwarded: logic<8>;
+        inst dut: Top (x, direct, forwarded);
+        initial {
+            x = 8'h0f;
+            clk.next();
+            $assert(direct == 8'hf0);
+            $assert(forwarded == 8'hf0);
+            x = 8'h81;
+            clk.next();
+            $assert(direct == 8'h7e);
+            $assert(forwarded == 8'h7e);
+            $finish();
+        }
+    }
+    "#;
+
+    for client in ["interface", "interface::client"] {
+        for server in ["interface", "interface::server"] {
+            let code = code
+                .replace("bus: interface::client", &format!("bus: {client}"))
+                .replace("(bus: interface)", &format!("(bus: {server})"));
+            for config in Config::all() {
+                let ir = analyze(&code, &config);
+                let mut sim = Simulator::new(ir, None);
+                for x in [0x0f, 0x81] {
+                    sim.set("x", Value::new(x, 8, false));
+                    sim.step(&Event::clock(VarId::SYNTHETIC));
+                    for output in ["direct", "forwarded"] {
+                        assert_eq!(sim.get(output).unwrap(), Value::new(x ^ 0xff, 8, false));
+                    }
+                }
+                let ir = analyze_top(&code, &config, "test_generic_port").unwrap();
+                assert_eq!(
+                    run_native_testbench(ir, None, "test_generic_port".into()).unwrap(),
+                    TestResult::Pass
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_partial_writes() {
+    let code = r#"
+    interface Bus {
+        var word: logic<8>;
+        var elems: logic<8> [2];
+    }
+    module Child (bus: interface, low: input logic<4>, data: output logic<8>) {
+        assign bus.word[3:0] = low;
+        assign bus.elems[0] = {low, low};
+        assign data = bus.word ^ bus.elems[1];
+    }
+    module Pass (bus: interface, low: input logic<4>, data: output logic<8>) {
+        inst u: Child (bus, low, data);
+    }
+    module Top (
+        low: input logic<4>, high: input logic<4>,
+        data: output logic<8>, word: output logic<8>, elems: output logic<8>,
+    ) {
+        inst bus: Bus [2];
+        // Connecting element 1 also checks the translation of member-array
+        // masks through an indexed interface and a second module boundary.
+        inst u: Pass (bus: bus[1], low, data);
+        assign bus[0].word = '0;
+        assign bus[0].elems = '{default: '0};
+        assign bus[1].word[7:4] = high;
+        assign bus[1].elems[1] = {high, high};
+        assign word = bus[1].word;
+        assign elems = bus[1].elems[0];
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for (low, high) in [(0x5, 0xa), (0x3, 0xc)] {
+            sim.set("low", Value::new(low, 4, false));
+            sim.set("high", Value::new(high, 4, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            assert_eq!(
+                sim.get("word").unwrap(),
+                Value::new((high << 4) | low, 8, false)
+            );
+            assert_eq!(sim.get("elems").unwrap(), Value::new(low * 0x11, 8, false));
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(((high << 4) | low) ^ (high * 0x11), 8, false)
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_alias_nba_reads() {
+    for view in ["interface", "interface::reader"] {
+        let code = format!(
+            r#"
+            interface Bus {{ var data: logic<8>; modport reader {{ data: input, }} }}
+            module Child (clk: input clock, a: interface, b: {view}, x: input logic<8>, data: output logic<8>) {{
+                always_ff {{ a.data = x; data = b.data; }}
+            }}
+            module Pass (clk: input clock, a: interface, b: {view}, x: input logic<8>, data: output logic<8>) {{
+                inst u: Child (clk, a, b, x, data);
+            }}
+            module Top (clk: input clock, x: input logic<8>, data: output logic<8>, word: output logic<8>) {{
+                inst bus: Bus;
+                inst u: Pass (clk, a: bus, b: bus, x, data);
+                assign word = bus.data;
+            }}
+        "#
+        );
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.set("x", Value::new(0, 8, false));
+            sim.step(&clk);
+            sim.step(&clk);
+            for x in [1, 2, 3] {
+                sim.set("x", Value::new(x, 8, false));
+                sim.step(&clk);
+                assert_eq!(
+                    sim.get("data").unwrap(),
+                    Value::new(x - 1, 8, false),
+                    "{view}: {config:?}"
+                );
+                assert_eq!(
+                    sim.get("word").unwrap(),
+                    Value::new(x, 8, false),
+                    "{view}: {config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_modport_blocking_alias() {
+    for (view, body) in [
+        ("reader", "a.data = x; data = b.data; a.data = ~x;"),
+        ("writer", "b.data = x; data = a.data; b.data = ~x;"),
+    ] {
+        let code = format!(
+            r#"
+        interface Bus {{ var data: logic<8>; modport reader {{ data: input, }} modport writer {{ data: output, }} }}
+        module Child (a: interface, b: interface::{view}, x: input logic<8>, data: output logic<8>) {{
+            always_comb {{ {body} }}
+        }}
+        module Top (x: input logic<8>, data: output logic<8>, word: output logic<8>) {{
+            inst bus: Bus;
+            inst u: Child (a: bus, b: bus, x, data);
+            assign word = bus.data;
+        }}
+    "#
+        );
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            for x in [0x12, 0x7f, 0xff] {
+                sim.set("x", Value::new(x, 8, false));
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("data").unwrap(),
+                    Value::new(x, 8, false),
+                    "{config:?}"
+                );
+                assert_eq!(
+                    sim.get("word").unwrap(),
+                    Value::new(x ^ 0xff, 8, false),
+                    "{config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_complete_initial_writes() {
+    let path =
+        std::env::temp_dir().join(format!("veryl_generic_initial_{}.hex", std::process::id()));
+    std::fs::write(&path, "00 3c 00\n").unwrap();
+    let path_str = path.to_str().unwrap().replace('\\', "\\\\");
+    for initial in [
+        format!("$readmemh(\"{path_str}\", bus.data);"),
+        "bus.data[index] = 8'h3c;".into(),
+    ] {
+        let code = format!(
+            r#"
+            interface Bus {{ var data: logic<8> [3]; }}
+            module Child (clk: input clock, bus: interface) {{
+                always_ff {{ for i in 0..3 {{ bus.data[i] = bus.data[i] + 8'd1; }} }}
+            }}
+            module Pass (clk: input clock, bus: interface) {{ inst u: Child (clk, bus); }}
+            module Top (clk: input clock, index: input u32, a: output logic<8>, b: output logic<8>, c: output logic<8>) {{
+                #[allow(initial_assign)]
+                inst bus: Bus;
+                inst u: Pass (clk, bus);
+                initial {{ bus.data = '{{default: '0}}; {initial} }}
+                assign a = bus.data[0]; assign b = bus.data[1]; assign c = bus.data[2];
+            }}
+        "#
+        );
+        let indices = if initial.starts_with("$readmemh") {
+            vec![1]
+        } else {
+            vec![0, 1, 2]
+        };
+        for config in Config::all() {
+            for index in &indices {
+                let mut sim = Simulator::new(analyze(&code, &config), None);
+                let clk = sim.get_clock("clk").unwrap();
+                sim.set("index", Value::new(*index as u64, 32, false));
+                sim.step(&Event::Initial);
+                for (element, port) in ["a", "b", "c"].into_iter().enumerate() {
+                    let expected = if element == *index { 0x3c } else { 0 };
+                    assert_eq!(
+                        sim.get(port).unwrap(),
+                        Value::new(expected, 8, false),
+                        "{initial}: {config:?}"
+                    );
+                }
+                sim.step(&clk);
+                for (element, port) in ["a", "b", "c"].into_iter().enumerate() {
+                    let expected = if element == *index { 0x3d } else { 1 };
+                    assert_eq!(
+                        sim.get(port).unwrap(),
+                        Value::new(expected, 8, false),
+                        "{initial}: {config:?}"
+                    );
+                }
+            }
+        }
+    }
+    std::fs::remove_file(path).unwrap();
+
+    // Element two is referenced by the child but unreachable by a one-bit
+    // index; truncating its index must not redirect an initialization of zero.
+    let code = r#"
+        interface Bus { var data: logic<8>; }
+        module Child (clk: input clock, bus: interface) {
+            always_ff { bus.data = bus.data + 8'd1; }
+        }
+        module Top (clk: input clock, index: input logic, a: output logic<8>, c: output logic<8>) {
+            #[allow(initial_assign)]
+            inst bus: Bus [3];
+            inst u: Child (clk, bus: bus[2]);
+            initial { bus[2].data = '0; bus[index].data = 8'h3c; }
+            assign a = bus[0].data; assign c = bus[2].data;
+        }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("index", Value::new(0, 1, false));
+        sim.step(&Event::Initial);
+        assert_eq!(sim.get("a").unwrap(), Value::new(0x3c, 8, false));
+        assert_eq!(sim.get("c").unwrap(), Value::new(0, 8, false));
+        sim.step(&clk);
+        assert_eq!(sim.get("c").unwrap(), Value::new(1, 8, false));
+    }
+}
+
+#[test]
+fn generic_interface_port_shared_alias_storage() {
+    for (body, delta) in [
+        ("a.data = x; b.data = a.data + 8'd1; observed = b.data;", 1),
+        ("b.data = x; a.data = b.data + 8'd1; observed = a.data;", 1),
+        ("b.data = x; observed = a.data;", 0),
+    ] {
+        for forwarded in [false, true] {
+            let child = if forwarded { "Pass" } else { "Child" };
+            let code = format!(
+                r#"
+                interface Bus {{ var data: logic<8>; }}
+                module Child (a: interface, b: interface, x: input logic<8>, observed: output logic<8>) {{
+                    always_comb {{ {body} }}
+                }}
+                module Pass (a: interface, b: interface, x: input logic<8>, observed: output logic<8>) {{
+                    inst u: Child (a, b, x, observed);
+                }}
+                module Top (x: input logic<8>, data: output logic<8>, observed: output logic<8>) {{
+                    inst bus: Bus [2];
+                    assign bus[0].data = '0;
+                    inst u: {child} (a: bus[1], b: bus[1], x, observed);
+                    assign data = bus[1].data;
+                }}
+            "#
+            );
+            for config in Config::all() {
+                let mut sim = Simulator::new(analyze(&code, &config), None);
+                for x in [0x12, 0x7f, 0xff] {
+                    sim.set("x", Value::new(x, 8, false));
+                    sim.step(&Event::clock(VarId::SYNTHETIC));
+                    for port in ["data", "observed"] {
+                        assert_eq!(
+                            sim.get(port).unwrap(),
+                            Value::new((x + delta) & 0xff, 8, false),
+                            "{body}, forwarded={forwarded}: {config:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_child_initialization_before_clock() {
+    let code = r#"
+        interface Bus { #[allow(unused_variable)] var data: logic<8>; }
+        #[test(initialize)]
+        module Initialize (#[allow(initial_assign)] bus: interface) {
+            inst clk: $tb::clock_gen;
+            initial {
+                bus.data = 8'h3c;
+                clk.next();
+                $assert(bus.data == 8'h3c, "initialized child: %h", bus.data);
+                $finish();
+            }
+        }
+        module Pass (bus: interface) { inst u: Initialize (bus); }
+        #[test(child_initialization)]
+        module child_initialization {
+            inst bus: Bus;
+            inst u: Pass (bus);
+        }
+    "#;
+    for config in Config::all() {
+        let ir = analyze_top(code, &config, "child_initialization").unwrap();
+        assert_eq!(
+            run_native_testbench(ir, None, "child_initialization".into()).unwrap(),
+            TestResult::Pass,
+            "{config:?}"
+        );
+    }
+}
+
+#[test]
+fn generic_interface_port_aliased_ff_partial_writes() {
+    let code = r#"
+        interface Bus { var data: logic<8>; }
+        module Child (clk: input clock, a: interface, b: interface, x: input logic<8>) {
+            always_ff {
+                a.data[3:0] = x[3:0];
+                b.data[7:4] = a.data[3:0];
+            }
+        }
+        module Pass (clk: input clock, a: interface, b: interface, x: input logic<8>) {
+            inst u: Child (clk, a, b, x);
+        }
+        module Top (clk: input clock, x: input logic<8>, data: output logic<8>) {
+            inst bus: Bus;
+            inst u: Pass (clk, a: bus, b: bus, x);
+            assign data = bus.data;
+        }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.set("x", Value::new(0, 8, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        for (x, expected) in [(1, 0x01), (2, 0x12), (3, 0x23)] {
+            sim.set("x", Value::new(x, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(expected, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_clocked_partial_writes() {
+    let code = r#"
+    interface Bus {
+        var clk: clock;
+        var word: logic<8>;
+    }
+    module Child (bus: interface, low: input logic<4>) {
+        always_ff (bus.clk) { bus.word[3:0] = low; }
+    }
+    module Pass (bus: interface, low: input logic<4>) {
+        inst u: Child (bus, low);
+    }
+    module Top (
+        clk: input clock, low: input logic<4>, high: input logic<4>, word: output logic<8>,
+    ) {
+        inst bus: Bus;
+        assign bus.clk = clk;
+        assign bus.word[7:4] = high;
+        inst u: Pass (bus, low);
+        assign word = bus.word;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        for (low, high) in [(0x5, 0xa), (0x3, 0xc)] {
+            sim.set("low", Value::new(low, 4, false));
+            sim.set("high", Value::new(high, 4, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("word").unwrap(),
+                Value::new((high << 4) | low, 8, false)
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_disjoint_ff_writes() {
+    // A partial FF update must preserve the bits copied from the other side
+    // of an interface, including in dual-slot 4-state interpreter storage.
+    let code = r#"
+    interface Bus { var data: logic<8>; }
+    module Child (clk: input clock, bus: interface, x: input logic<8>) {
+        // Two writes force dual-slot storage for the lower-half producer.
+        always_ff {
+            bus.data[3:2] = x[3:2];
+            bus.data[1:0] = x[1:0];
+        }
+    }
+    module Top (clk: input clock, x: input logic<8>, data: output logic<8>) {
+        inst bus: Bus;
+        inst u: Child (clk, bus, x);
+        // The upper half samples the previous edge's lower half. Splitting
+        // the write exercises the parent's dual-slot read-modify-write too.
+        always_ff {
+            bus.data[7:6] = bus.data[3:2];
+            bus.data[5:4] = bus.data[1:0];
+        }
+        assign data = bus.data;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        // Warm up both halves so assertions do not depend on the initial Xs.
+        sim.set("x", Value::new(0, 8, false));
+        sim.step(&clk);
+        sim.step(&clk);
+        for (x, expected) in [(1, 0x01), (2, 0x12), (3, 0x23)] {
+            sim.set("x", Value::new(x, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(expected, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_array_slices() {
+    for (slice, base) in [("1:2", 1), ("1+:2", 1), ("2-:2", 1), ("1 step 2", 2)] {
+        let independent = (0..4)
+            .filter(|i| *i < base || *i >= base + 2)
+            .map(|i| format!("assign bus[{i}].data = 8'ha5;"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for clocked in [false, true] {
+            let clock_member = if clocked { "var clk: clock;" } else { "" };
+            let clocks = if clocked {
+                "for i in 0..4 :g { assign bus[i].clk = clk; }"
+            } else {
+                ""
+            };
+            let writes = if clocked {
+                "always_ff (bus[0].clk) { bus[0].data = x; }
+             always_ff (bus[1].clk) { bus[1].data = ~x; }"
+            } else {
+                "assign bus[0].data = x; assign bus[1].data = ~x;"
+            };
+            let code = format!(
+                r#"
+        interface Bus {{ var data: logic<8>; {clock_member} }}
+        module Child (bus: interface [2], x: input logic<8>) {{
+            {writes}
+        }}
+        module Pass (bus: interface [2], x: input logic<8>) {{ inst u: Child (bus, x); }}
+        module Top (clk: input clock, x: input logic<8>, a: output logic<8>, b: output logic<8>, c: output logic<8>, d: output logic<8>) {{
+            inst bus: Bus [4];
+            inst u: Pass (bus: bus[{slice}], x);
+            {independent}
+            {clocks}
+            assign a = bus[0].data;
+            assign b = bus[1].data;
+            assign c = bus[2].data;
+            assign d = bus[3].data;
+        }}
+        "#
+            );
+            for config in Config::all() {
+                let mut sim = Simulator::new(analyze(&code, &config), None);
+                let clk = sim.get_clock("clk").unwrap();
+                for x in [0x0f, 0x81] {
+                    sim.set("x", Value::new(x, 8, false));
+                    sim.step(&clk);
+                    for (element, port) in ["a", "b", "c", "d"].into_iter().enumerate() {
+                        let expected = if element == base {
+                            x
+                        } else if element == base + 1 {
+                            x ^ 0xff
+                        } else {
+                            0xa5
+                        };
+                        assert_eq!(
+                            sim.get(port).unwrap(),
+                            Value::new(expected, 8, false),
+                            "{slice}, clocked={clocked}: {config:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_initialization() {
+    let code = r#"
+    interface Bus { var data: logic<8>; }
+    module Child (#[allow(initial_assign)] bus: interface) {
+        initial { bus.data = 8'h3c; }
+    }
+    module Pass (bus: interface) { inst u: Child (bus); }
+    module Top (clk: input clock, x: input logic<8>, data: output logic<8>) {
+        inst bus: Bus;
+        inst u: Pass (bus);
+        always_ff {
+            bus.data[7:4] = x[7:4];
+            bus.data[3:0] = x[3:0];
+        }
+        assign data = bus.data;
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        let clk = sim.get_clock("clk").unwrap();
+        sim.step(&Event::Initial);
+        assert_eq!(
+            sim.get("data").unwrap(),
+            Value::new(0x3c, 8, false),
+            "{config:?}"
+        );
+        for x in [0x12, 0x34] {
+            sim.set("x", Value::new(x, 8, false));
+            sim.step(&clk);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(x, 8, false),
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_parent_initialization() {
+    let code = r#"
+    interface Bus {
+        #[allow(initial_assign)]
+        var data: logic<8>;
+    }
+    module Child (clk: input clock, bus: interface) {
+        always_ff { bus.data = bus.data + 8'd1; }
+    }
+    module Pass (clk: input clock, bus: interface) { inst u: Child (clk, bus); }
+    module Top (clk: input clock, data: output logic<8>) {
+        #[allow(initial_assign)]
+        inst bus: Bus;
+        inst u: Pass (clk, bus);
+        initial { bus.data = 8'h3c; }
+        assign data = bus.data;
+    }
+    #[test(parent_initialization)]
+    module parent_initialization {
+        inst clk: $tb::clock_gen;
+        #[allow(initial_assign)]
+        inst bus: Bus;
+        inst u: Pass (clk, bus);
+        initial {
+            bus.data = 8'h3c;
+            clk.next();
+            $assert(bus.data == 8'h3d, "first edge: %h", bus.data);
+            bus.data[3:0] = 4'hf;
+            clk.next();
+            $assert(bus.data == 8'h40, "partial initialization: %h", bus.data);
+            $finish();
+        }
+    }
+    "#;
+    for update in [
+        "bus.data = bus.data + 8'd1;",
+        "let next: logic<8> = bus.data + 8'd1;
+         bus.data[7:4] = next[7:4];
+         bus.data[3:0] = next[3:0];",
+    ] {
+        let code = code.replace("bus.data = bus.data + 8'd1;", update);
+        for config in Config::all() {
+            let mut sim = Simulator::new(analyze(&code, &config), None);
+            let clk = sim.get_clock("clk").unwrap();
+            sim.step(&Event::Initial);
+            assert_eq!(
+                sim.get("data").unwrap(),
+                Value::new(0x3c, 8, false),
+                "{config:?}"
+            );
+            for expected in [0x3d, 0x3e] {
+                sim.step(&clk);
+                assert_eq!(
+                    sim.get("data").unwrap(),
+                    Value::new(expected, 8, false),
+                    "{config:?}"
+                );
+            }
+            let ir = analyze_top(&code, &config, "parent_initialization").unwrap();
+            assert_eq!(
+                run_native_testbench(ir, None, "parent_initialization".into()).unwrap(),
+                TestResult::Pass,
+                "{config:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_array_analysis_limit() {
+    for size in [128, 129] {
+        let code = format!(
+            r#"
+            interface Bus {{ var data: logic<8> [{size}]; }}
+            module Child (bus: interface) {{ assign bus.data[0] = 8'h3c; }}
+            module Pass (bus: interface) {{ inst u: Child (bus); }}
+            module Top (data: output logic<8>) {{
+                inst bus: Bus;
+                inst u: Pass (bus);
+                for i in 1..{size} :g {{ assign bus.data[i] = '0; }}
+                assign data = bus.data[0];
+            }}
+        "#
+        );
+        for config in Config::all() {
+            let result = analyze_top(&code, &config, "Top");
+            if size == 129 {
+                assert!(
+                    matches!(result, Err(SimulatorError::UnsupportedDescription { .. })),
+                    "{config:?}"
+                );
+            } else {
+                let mut sim = Simulator::new(result.unwrap(), None);
+                sim.step(&Event::clock(VarId::SYNTHETIC));
+                assert_eq!(
+                    sim.get("data").unwrap(),
+                    Value::new(0x3c, 8, false),
+                    "{config:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_specialization() {
+    // The same generic module must use the actual interface's type and
+    // parameter values at every level of pass-through instantiation.
+    let code = r#"
+    interface Bus #(param W: u32 = 8) {
+        var data: logic<W>;
+        modport writer { data: output, }
+    }
+    interface OtherBus {
+        var data: logic<32>;
+        modport writer { data: output, }
+    }
+    module Writer (bus: interface::writer, data: input logic<32>) {
+        assign bus.data = data;
+    }
+    module Reader (bus: interface, data: output logic<32>) {
+        assign data = bus.data;
+    }
+    module WritePass (bus: interface::writer, data: input logic<32>) {
+        inst u: Writer (bus, data);
+    }
+    module ReadPass (bus: interface, data: output logic<32>) {
+        inst u: Reader (bus, data);
+    }
+    module Top (
+        data: input logic<32>,
+        out8: output logic<32>,
+        out16: output logic<32>,
+        out32: output logic<32>,
+    ) {
+        inst bus8: Bus;
+        inst bus16: Bus #(W: 16);
+        inst bus32: OtherBus;
+        inst w8: WritePass (bus: bus8, data);
+        inst r8: ReadPass (bus: bus8, data: out8);
+        inst w16: WritePass (bus: bus16, data);
+        inst r16: ReadPass (bus: bus16, data: out16);
+        inst w32: WritePass (bus: bus32, data);
+        inst r32: ReadPass (bus: bus32, data: out32);
+    }
+    "#;
+
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        for data in [0x12345678, 0xabcdef01] {
+            sim.set("data", Value::new(data, 32, false));
+            sim.step(&Event::clock(VarId::SYNTHETIC));
+            for (output, mask) in [("out8", 0xff), ("out16", 0xffff), ("out32", 0xffffffff)] {
+                assert_eq!(sim.get(output).unwrap(), Value::new(data & mask, 32, false));
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_interface_port_array_element() {
+    let code = r#"
+    interface Bus {
+        var data: logic<8>;
+        modport reader { data: input, }
+    }
+    module Reader (bus: interface::reader, data: output logic<8>) {
+        assign data = bus.data;
+    }
+    module Pass (bus: interface, data: output logic<8>) {
+        inst u: Reader (bus, data);
+    }
+    module Top (
+        a: input logic<8>, b: input logic<8>,
+        out0: output logic<8>, out1: output logic<8>,
+    ) {
+        inst bus: Bus [2];
+        assign bus[0].data = a;
+        assign bus[1].data = b;
+        inst r0: Pass (bus: bus[0], data: out0);
+        inst r1: Pass (bus: bus[1], data: out1);
+    }
+    "#;
+    for config in Config::all() {
+        let mut sim = Simulator::new(analyze(code, &config), None);
+        sim.set("a", Value::new(0x12, 8, false));
+        sim.set("b", Value::new(0x34, 8, false));
+        sim.step(&Event::clock(VarId::SYNTHETIC));
+        assert_eq!(sim.get("out0").unwrap(), Value::new(0x12, 8, false));
+        assert_eq!(sim.get("out1").unwrap(), Value::new(0x34, 8, false));
+    }
+}
+
+#[test]
 fn interface_array_modport_index() {
     // `inst u: Child(port: s_port[i])` where `s_port` is a modport array.
     // Earlier, `get_port_connects` dropped the `[i]` from the input member
@@ -17938,7 +18734,7 @@ fn runtime_loops(code: &str, module: &str) -> usize {
     context.functions = module.functions.clone();
     let peeled = crate::ir::module::peeled_declarations(module, &mut context);
     let (declarations, _) =
-        crate::ir::module::simulated_declarations(module, &mut context, false, peeled);
+        crate::ir::module::simulated_declarations(module, &mut context, false, peeled, &[]);
     declarations
         .iter()
         .map(|d| match d {
@@ -18128,7 +18924,7 @@ fn unfolded_selects(code: &str, module: &str) -> usize {
     context.functions = module.functions.clone();
     let peeled = crate::ir::module::peeled_declarations(module, &mut context);
     let (declarations, _) =
-        crate::ir::module::simulated_declarations(module, &mut context, false, peeled);
+        crate::ir::module::simulated_declarations(module, &mut context, false, peeled, &[]);
     declarations
         .iter()
         .map(|d| match d {

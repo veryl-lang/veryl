@@ -5762,13 +5762,27 @@ pub(crate) fn simulated_declarations(
     analyzer_context: &mut veryl_analyzer::conv::Context,
     disable_ff_opt: bool,
     peeled: Option<Vec<air::Declaration>>,
+    aliases: &[Vec<(VarId, usize)>],
 ) -> (Vec<air::Declaration>, air::FfTable) {
+    let retain_aliases = |table: &mut air::FfTable| {
+        for group in aliases {
+            if group
+                .iter()
+                .any(|(id, index)| table.writers(*id, *index).0.is_some())
+            {
+                for (id, index) in group {
+                    table.force_ff(*id, *index);
+                }
+            }
+        }
+    };
     let gather = |decls: &[air::Declaration], context: &mut veryl_analyzer::conv::Context| {
         let mut table = air::FfTable::default();
         for (i, x) in decls.iter().enumerate() {
             x.gather_ff(context, &mut table, i);
         }
         table.update_is_ff(decls, context);
+        retain_aliases(&mut table);
         if disable_ff_opt {
             table.force_all_ff();
         }
@@ -5782,6 +5796,7 @@ pub(crate) fn simulated_declarations(
         }
         None => {
             let mut table = src.ff_table.clone();
+            retain_aliases(&mut table);
             if disable_ff_opt {
                 table.force_all_ff();
             }
@@ -5809,6 +5824,7 @@ impl Conv<&air::Module> for ProtoModule {
             &mut analyzer_context,
             context.config.disable_ff_opt,
             peeled,
+            &[],
         );
         let declarations: &[air::Declaration] = &hoisted_declarations;
 
@@ -5883,6 +5899,12 @@ impl Conv<&air::Module> for ProtoModule {
             context,
             &mut all_event_statements,
             &all_child_modules,
+        )?;
+        super::declaration::propagate_interface_initialization(
+            src,
+            &variable_meta,
+            &all_child_modules,
+            &mut all_event_statements,
         )?;
 
         // Component input connections may also reference DUT internals.
