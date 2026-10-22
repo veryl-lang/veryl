@@ -27,7 +27,8 @@ use crate::ir::statement::CompiledBlockStatement;
 use crate::ir::statement::ProtoAssignStatement;
 use crate::ir::variable::{
     ModuleVariableMeta, ModuleVariables, VarOffset, Variable, VariableMeta, align_up_64,
-    create_variable_meta, ff_cacheline_pad_enabled, native_bytes, value_size, write_native_value,
+    collect_string_widths, create_variable_meta, ff_cacheline_pad_enabled, native_bytes,
+    value_size, write_native_value,
 };
 use crate::ir::{
     CompiledBatchStmt, Event, Op, ProtoCaseArm, ProtoCaseStatement, ProtoDeclaration,
@@ -5850,6 +5851,7 @@ impl Conv<&air::Module> for ProtoModule {
 
         let (mut variable_meta, ff_bytes, comb_bytes) = create_variable_meta(
             &src.variables,
+            &collect_string_widths(&src.variables, declarations)?,
             &ff_table,
             &multi_rmw_set,
             &dyn_indexed,

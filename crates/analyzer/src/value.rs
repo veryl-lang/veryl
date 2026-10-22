@@ -124,9 +124,13 @@ pub fn byte_value_to_string(value: &Value) -> Option<String> {
 /// Text for a `%s` argument. Unlike `byte_value_to_string` this always
 /// renders characters: a width that is not a whole number of bytes is
 /// zero-extended to one, and bytes that are not valid UTF-8 are replaced.
+/// Leading NUL bytes are the zero padding of text shorter than its storage
+/// (a `string` variable sized for its longest value), so they are skipped.
 pub fn byte_value_to_string_lossy(value: &Value) -> String {
     let num_bytes = value.width().div_ceil(8);
-    String::from_utf8_lossy(&byte_value_bytes(value, num_bytes)).into_owned()
+    let bytes = byte_value_bytes(value, num_bytes);
+    let start = bytes.iter().position(|x| *x != 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
 }
 
 /// The low 64 bits of a BigUint; `to_u64` is `None` once a higher bit is set.
