@@ -16,12 +16,14 @@ mod module;
 mod op;
 mod shape;
 mod signature;
+pub mod span;
 mod statement;
 mod system_function;
 mod utils;
 mod variable;
 mod width_expr;
 mod write_count;
+mod write_summary;
 pub(crate) use assign_table::AssignTable;
 pub use assign_table::{AssignTableEntry, ReferencedEntry};
 pub use comptime::{
@@ -59,6 +61,7 @@ pub use variable::{
     VariableInfo,
 };
 pub use width_expr::{WidthExpr, WidthOp};
+pub use write_summary::{ProcessWrites, RegionWrite, WriteSummary};
 
 #[cfg(test)]
 mod tests;

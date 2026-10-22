@@ -24,7 +24,7 @@
 mod coarse;
 mod diagnostics;
 mod graph;
-mod hierarchy;
+pub(crate) mod hierarchy;
 mod model;
 mod procedure;
 mod region;
