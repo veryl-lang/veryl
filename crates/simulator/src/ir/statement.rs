@@ -27,7 +27,7 @@ use veryl_analyzer::ir as air;
 use veryl_analyzer::ir::{
     AssertKind, SystemFunctionInput, SystemFunctionKind, TypeKind, ValueVariant,
 };
-use veryl_analyzer::ir::{ControlFlow, FunctionCall, VarId};
+use veryl_analyzer::ir::{ControlFlow, FunctionCall, QueueOp, VarId};
 use veryl_analyzer::value::{MaskCache, Value as AnalyzerValue, byte_value_to_string_lossy};
 use veryl_parser::resource_table::StrId;
 use veryl_parser::token_range::TokenRange;
@@ -307,6 +307,17 @@ pub enum ProtoTbMethodKind {
     RandomGetSeed {
         ret: Option<(VarId, RetWidthCheck)>,
     },
+    /// `$tb::queue::<T, N>` methods. `width`/`signed`/`four_state` describe
+    /// the element type, `capacity` is `N` (`0` for unbounded).
+    Queue {
+        op: QueueOp,
+        value: Option<ProtoExpression>,
+        width: u32,
+        signed: bool,
+        four_state: bool,
+        capacity: u32,
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
 }
 
 /// How a component method's returned width is validated before it lands
@@ -370,6 +381,15 @@ pub enum TbMethodKind {
         ret: Option<(VarId, RetWidthCheck)>,
     },
     RandomGetSeed {
+        ret: Option<(VarId, RetWidthCheck)>,
+    },
+    Queue {
+        op: QueueOp,
+        value: Option<Expression>,
+        width: u32,
+        signed: bool,
+        four_state: bool,
+        capacity: u32,
         ret: Option<(VarId, RetWidthCheck)>,
     },
 }
@@ -1541,6 +1561,11 @@ impl ProtoStatement {
                 ProtoTbMethodKind::RandomSeed { value } => {
                     value.adjust_offsets(ff_delta, comb_delta);
                 }
+                ProtoTbMethodKind::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        v.adjust_offsets(ff_delta, comb_delta);
+                    }
+                }
                 ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
                     min.adjust_offsets(ff_delta, comb_delta);
                     max.adjust_offsets(ff_delta, comb_delta);
@@ -1735,6 +1760,11 @@ impl ProtoStatement {
                 }
                 ProtoTbMethodKind::RandomSeed { value } => {
                     value.remap_offsets_with(f);
+                }
+                ProtoTbMethodKind::Queue { value, .. } => {
+                    if let Some(v) = value {
+                        v.remap_offsets_with(f);
+                    }
                 }
                 ProtoTbMethodKind::RandomGetRange { min, max, .. } => {
                     min.remap_offsets_with(f);
@@ -2925,6 +2955,31 @@ impl ProtoStatement {
                         ProtoTbMethodKind::RandomGetSeed { ret } => {
                             TbMethodKind::RandomGetSeed { ret: *ret }
                         }
+                        ProtoTbMethodKind::Queue {
+                            op,
+                            value,
+                            width,
+                            signed,
+                            four_state,
+                            capacity,
+                            ret,
+                        } => TbMethodKind::Queue {
+                            op: *op,
+                            value: value.as_ref().map(|v| {
+                                v.apply_values_ptr(
+                                    ff_values_ptr,
+                                    ff_len,
+                                    comb_values_ptr,
+                                    comb_len,
+                                    use_4state,
+                                )
+                            }),
+                            width: *width,
+                            signed: *signed,
+                            four_state: *four_state,
+                            capacity: *capacity,
+                            ret: *ret,
+                        },
                     };
                     Statement::TbMethodCall {
                         inst: *inst,
@@ -3622,18 +3677,21 @@ impl ProtoCaseStatement {
 fn extract_display_args(
     context: &mut Context,
     inputs: &[SystemFunctionInput],
-) -> Option<(String, Vec<ProtoExpression>)> {
+) -> Result<(String, Vec<ProtoExpression>), SimulatorError> {
     let mut format_str = String::new();
     let mut exprs = Vec::new();
     let mut iter = inputs.iter();
+    let mut has_format = false;
 
     // Check if the first argument is a string literal
     if let Some(first) = iter.next() {
         if is_string_literal(&first.0) {
-            format_str = extract_string_value(&first.0)?;
+            has_format = true;
+            format_str = extract_string_value(&first.0)
+                .ok_or_else(|| SimulatorError::unsupported_description(&first.0.token_range()))?;
         } else {
             // Not a string literal; treat as expression argument
-            let proto: ProtoExpression = Conv::conv(context, &first.0).ok()?;
+            let proto: ProtoExpression = Conv::conv(context, &first.0)?;
             exprs.push(proto);
         }
     }
@@ -3645,12 +3703,28 @@ fn extract_display_args(
         let proto = if let Some(x) = string_arg_expression(&input.0) {
             x
         } else {
-            Conv::conv(context, &input.0).ok()?
+            Conv::conv(context, &input.0)?
         };
         exprs.push(proto);
     }
 
-    Some((format_str, exprs))
+    // Without a format string every argument prints in its default format,
+    // which for a `string` is its text, not the hex of its bytes.
+    if !has_format && inputs.iter().any(|x| x.0.comptime().r#type.is_string()) {
+        format_str = inputs
+            .iter()
+            .map(|x| {
+                if x.0.comptime().r#type.is_string() {
+                    "%s"
+                } else {
+                    "%h"
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
+
+    Ok((format_str, exprs))
 }
 
 /// A constant `string` argument, as the byte value `%s` renders.
@@ -3783,7 +3857,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
             }
             air::Statement::SystemFunctionCall(x) => match &x.kind {
                 SystemFunctionKind::Display(inputs) => {
-                    let (format_str, exprs) = extract_display_args(context, inputs).unwrap();
+                    let (format_str, exprs) = extract_display_args(context, inputs)?;
                     vec![ProtoStatement::SystemFunctionCall(
                         ProtoSystemFunctionCall::Display {
                             format_str,
@@ -3792,7 +3866,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     )]
                 }
                 SystemFunctionKind::Write(inputs) => {
-                    let (format_str, exprs) = extract_display_args(context, inputs).unwrap();
+                    let (format_str, exprs) = extract_display_args(context, inputs)?;
                     vec![ProtoStatement::SystemFunctionCall(
                         ProtoSystemFunctionCall::Write {
                             format_str,
@@ -3839,7 +3913,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                 }
                 SystemFunctionKind::Assert { kind, cond, args } => {
                     let condition: ProtoExpression = Conv::conv(context, &cond.0)?;
-                    let (format_str, exprs) = extract_display_args(context, args).unwrap();
+                    let (format_str, exprs) = extract_display_args(context, args)?;
                     vec![ProtoStatement::SystemFunctionCall(
                         ProtoSystemFunctionCall::Assert {
                             kind: *kind,
@@ -3922,12 +3996,7 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                         }
                     }
                     air::TbMethod::FileWrite { args } => {
-                        let (format_str, exprs) =
-                            extract_display_args(context, args).ok_or_else(|| {
-                                let token =
-                                    args.first().map(|a| a.0.token_range()).unwrap_or_default();
-                                SimulatorError::unsupported_description(&token)
-                            })?;
+                        let (format_str, exprs) = extract_display_args(context, args)?;
                         ProtoTbMethodKind::FileWrite {
                             format_str,
                             args: exprs,
@@ -3982,6 +4051,28 @@ impl Conv<&air::Statement> for Vec<ProtoStatement> {
                     }
                     air::TbMethod::RandomGetSeed => {
                         ProtoTbMethodKind::RandomGetSeed { ret: tb_ret }
+                    }
+                    air::TbMethod::Queue {
+                        op,
+                        value,
+                        width,
+                        signed,
+                        four_state,
+                        capacity,
+                    } => {
+                        let value: Option<ProtoExpression> = match value {
+                            Some(v) => Some(Conv::conv(context, v)?),
+                            None => None,
+                        };
+                        ProtoTbMethodKind::Queue {
+                            op: *op,
+                            value,
+                            width: *width,
+                            signed: *signed,
+                            four_state: *four_state,
+                            capacity: *capacity,
+                            ret: tb_ret,
+                        }
                     }
                 };
                 vec![ProtoStatement::TbMethodCall {
@@ -4375,6 +4466,15 @@ fn conv_assign_statements(
                 append_ff_next_copies(&mut result);
             }
             return Ok(result);
+        }
+
+        // Each destination takes a window of its type's width, which for a
+        // `string` is the nominal 1 bit, not the text.
+        if let Some(dst) = src.dst.iter().find(|x| x.comptime.r#type.is_string()) {
+            return Err(SimulatorError::unsupported_string(
+                "a concatenation destination",
+                &dst.token,
+            ));
         }
 
         let mut expr: ProtoExpression = Conv::conv(context, &src.expr)?;
@@ -4808,6 +4908,12 @@ impl Conv<&air::AssignStatement> for ProtoStatement {
         // A child-instance destination has no offset yet — the instance tree is
         // not assembled at conv time — so it travels as a path.
         if let Some(hier) = &src.hier_dst {
+            if hier.comptime.r#type.is_string() {
+                return Err(SimulatorError::unsupported_string(
+                    "a hierarchical reference",
+                    &hier.token,
+                ));
+            }
             // An array literal is lowered per element against the destination's
             // shape, which a hierarchical path does not carry at conv time.
             if matches!(src.expr, air::Expression::ArrayLiteral(..)) {

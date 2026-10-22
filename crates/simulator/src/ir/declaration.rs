@@ -15,7 +15,8 @@ use crate::ir::statement::{
     size_literal_rhs,
 };
 use crate::ir::variable::{
-    ModuleVariableMeta, VarOffset, align_up_64, create_variable_meta, ff_cacheline_pad_enabled,
+    ModuleVariableMeta, VarOffset, align_up_64, collect_string_widths, create_variable_meta,
+    ff_cacheline_pad_enabled,
 };
 use crate::ir::{Event, ProtoExpression, ProtoStatement, Value};
 use crate::simulator_error::SimulatorError;
@@ -1548,6 +1549,641 @@ impl Conv<&air::Declaration> for ProtoDeclaration {
     }
 }
 
+fn reference_copies(
+    mask: &num_bigint::BigUint,
+    from: &super::variable::VariableElement,
+    to: &super::variable::VariableElement,
+    full_width: usize,
+    token: TokenRange,
+    initial: bool,
+) -> Vec<ProtoStatement> {
+    let mut statements = vec![];
+    let mut bit = 0;
+    while bit < full_width {
+        if !mask.bit(bit as u64) {
+            bit += 1;
+            continue;
+        }
+        let lsb = bit;
+        while bit + 1 < full_width && mask.bit((bit + 1) as u64) {
+            bit += 1;
+        }
+        let msb = bit;
+        let width = msb - lsb + 1;
+        let select = (width != full_width).then_some((msb, lsb));
+        let expr = ProtoExpression::Variable {
+            var_offset: from.current,
+            select,
+            dynamic_select: None,
+            width,
+            var_full_width: full_width,
+            expr_context: ExpressionContext {
+                width,
+                signed: false,
+            },
+        };
+        let assign = ProtoAssignStatement {
+            dst: to.current,
+            dst_width: full_width,
+            select,
+            dynamic_select: None,
+            rhs_select: None,
+            expr,
+            dst_ff_current_offset: to.current_offset(),
+            comb_direct: to.is_ff() && !initial,
+            token,
+        };
+        // A dual-slot FF read-modify-write preserves other bits
+        // from its next slot. Keep copied bits there too, matching
+        // ordinary combinational assignment lowering.
+        if to.is_ff() && to.next_offset != to.current_offset() {
+            statements.push(ProtoStatement::Assign(ProtoAssignStatement {
+                dst: VarOffset::Ff(to.next_offset),
+                ..assign.clone()
+            }));
+        }
+        statements.push(ProtoStatement::Assign(assign));
+        bit += 1;
+    }
+    statements
+}
+
+/// Port names may denote the same actual interface element. Resolve this
+/// before lowering the child so procedural reads and writes use one slot.
+fn interface_reference_bindings(
+    analyzer: &mut veryl_analyzer::conv::Context,
+    metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+    inst: &air::InstDeclaration,
+    module: &air::Module,
+) -> Result<Vec<air::InstInterfaceBinding>, SimulatorError> {
+    fn targets(
+        analyzer: &mut veryl_analyzer::conv::Context,
+        metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+        module: &air::Module,
+        binding: &air::InstInterfaceBinding,
+    ) -> Option<Vec<VarOffset>> {
+        let child = module.variables.get(&binding.child)?;
+        let parent = metas.get(&binding.parent)?;
+        if !binding.index.is_const()
+            || !binding.select.is_empty()
+            || child.r#type.total_width() != Some(parent.width)
+        {
+            return None;
+        }
+        let selection = binding
+            .index
+            .eval_selection(analyzer, &parent.r#type.array)?;
+        if selection.result_start != 0 || child.r#type.total_array() != Some(selection.length) {
+            return None;
+        }
+        Some(
+            parent.elements[selection.source_start..selection.source_start + selection.length]
+                .iter()
+                .map(|e| e.current)
+                .collect(),
+        )
+    }
+    let mut bindings = vec![];
+    let mut actuals = HashSet::default();
+    for binding in &inst.interface_bindings {
+        if !module
+            .variables
+            .get(&binding.child)
+            .is_some_and(|v| v.kind == air::VarKind::Inout)
+        {
+            continue;
+        }
+        if matches!(module.interface_assignments.get(&binding.child), Some(None)) {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        actuals.extend(
+            targets(analyzer, metas, module, binding)
+                .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?,
+        );
+        bindings.push(binding.clone());
+    }
+    if bindings.is_empty() {
+        return Ok(bindings);
+    }
+    let is_modport = |id: &air::VarId| {
+        module.variables.get(id).is_some_and(|v| {
+            module.port_types.iter().any(|(path, (ty, _))| {
+                matches!(ty.kind, air::TypeKind::Modport(..)) && v.path.starts_with(&path.0)
+            })
+        })
+    };
+    let mut candidates = vec![];
+    for input in &inst.inputs {
+        if is_modport(&input.id)
+            && let air::Expression::Term(factor) = &input.expr
+            && let air::Factor::Variable(parent, index, select, _) = factor.as_ref()
+        {
+            candidates.push(air::InstInterfaceBinding {
+                child: input.id,
+                parent: *parent,
+                index: index.clone(),
+                select: select.clone(),
+            });
+        }
+    }
+    for output in &inst.outputs {
+        if is_modport(&output.id)
+            && let [dst] = output.dst.as_slice()
+        {
+            candidates.push(air::InstInterfaceBinding {
+                child: output.id,
+                parent: dst.id,
+                index: dst.index.clone(),
+                select: dst.select.clone(),
+            });
+        }
+    }
+    for binding in candidates {
+        if let Some(selected) = targets(analyzer, metas, module, &binding)
+            && selected.iter().any(|offset| actuals.contains(offset))
+        {
+            bindings.push(binding);
+        }
+    }
+    Ok(bindings)
+}
+
+fn interface_reference_aliases(
+    context: &mut Context,
+    inst: &air::InstDeclaration,
+    module: &air::Module,
+    bindings: &[air::InstInterfaceBinding],
+) -> Result<Vec<Vec<(air::VarId, usize)>>, SimulatorError> {
+    let mut groups: HashMap<VarOffset, Vec<(air::VarId, usize)>> = HashMap::default();
+    for binding in bindings {
+        let Some(child) = module.variables.get(&binding.child) else {
+            continue;
+        };
+        let scope = context.scope();
+        let parent = scope
+            .variable_meta
+            .get(&binding.parent)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if !binding.index.is_const()
+            || !binding.select.is_empty()
+            || child.r#type.total_width() != Some(parent.width)
+            || matches!(module.interface_assignments.get(&binding.child), Some(None))
+        {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        let selection = binding
+            .index
+            .eval_selection(&mut scope.analyzer_context, &parent.r#type.array)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if selection.result_start != 0 || child.r#type.total_array() != Some(selection.length) {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        for element in 0..selection.length {
+            let group = groups
+                .entry(parent.elements[selection.source_start + element].current)
+                .or_default();
+            let member = (binding.child, element);
+            if !group.contains(&member) {
+                group.push(member);
+            }
+        }
+    }
+    Ok(groups.into_values().filter(|g| g.len() > 1).collect())
+}
+
+fn coalesce_interface_references(
+    groups: &[Vec<(air::VarId, usize)>],
+    metas: &mut HashMap<air::VarId, super::variable::VariableMeta>,
+) {
+    if groups.is_empty() {
+        return;
+    }
+    for group in groups {
+        // An FF writer needs FF storage. Combinational writes to that shared
+        // slot use the existing direct-store and shadow-mirroring lowering.
+        let uniform_ff = group
+            .iter()
+            .find(|(id, _)| metas[id].elements.iter().all(|e| e.is_ff()));
+        let shared = uniform_ff
+            .map(|(id, element)| &metas[id].elements[*element])
+            .or_else(|| {
+                group
+                    .iter()
+                    .map(|(id, element)| &metas[id].elements[*element])
+                    .find(|e| e.is_ff())
+            })
+            .unwrap_or(&metas[&group[0].0].elements[group[0].1])
+            .clone();
+        for (id, element) in group {
+            metas.get_mut(id).unwrap().elements[*element] = shared.clone();
+        }
+    }
+    for meta in metas.values_mut() {
+        if meta.elements.len() < 2 {
+            continue;
+        }
+        let first = &meta.elements[0];
+        let stride = meta.elements[1].current_offset() - first.current_offset();
+        meta.uniform_buffer = meta.elements.iter().enumerate().all(|(i, element)| {
+            element.is_ff() == first.is_ff()
+                && element.current_offset() == first.current_offset() + stride * i as isize
+                && (!first.is_ff()
+                    || element.next_offset == first.next_offset + stride * i as isize)
+        });
+    }
+}
+
+fn connect_interface_references(
+    context: &mut Context,
+    inst: &air::InstDeclaration,
+    module: &air::Module,
+    child_metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+    bindings: &[air::InstInterfaceBinding],
+) -> Result<Vec<ProtoStatement>, SimulatorError> {
+    let mut statements = vec![];
+    let mut output_masks: HashMap<VarOffset, num_bigint::BigUint> = HashMap::default();
+    for binding in bindings {
+        if let Some(child) = child_metas.get(&binding.child) {
+            for (element, meta) in child.elements.iter().enumerate() {
+                let mask =
+                    if let Some(Some(writes)) = module.interface_assignments.get(&binding.child) {
+                        &writes.definite_mask[element] | &writes.dynamic_mask[element]
+                    } else if inst.outputs.iter().any(|o| o.id == binding.child) {
+                        (num_bigint::BigUint::from(1u32) << child.width) - 1u32
+                    } else {
+                        num_bigint::BigUint::default()
+                    };
+                *output_masks.entry(meta.current).or_default() |= mask;
+            }
+        }
+    }
+    let mut connected = HashSet::default();
+    for binding in bindings {
+        let child = child_metas
+            .get(&binding.child)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        let scope = context.scope();
+        let parent = scope
+            .variable_meta
+            .get(&binding.parent)
+            .cloned()
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if !binding.index.is_const() {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        let selection = binding
+            .index
+            .eval_selection(&mut scope.analyzer_context, &parent.r#type.array)
+            .ok_or_else(|| SimulatorError::unsupported_description(&inst.token))?;
+        if !binding.select.is_empty()
+            || parent.width != child.width
+            || selection.result_start != 0
+            || selection.length != child.elements.len()
+        {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        if matches!(module.interface_assignments.get(&binding.child), Some(None)) {
+            return Err(SimulatorError::unsupported_description(&inst.token));
+        }
+        let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
+        for (element, child_element) in child.elements.iter().enumerate() {
+            let parent_element = &parent.elements[selection.source_start + element];
+            if !connected.insert((parent_element.current, child_element.current)) {
+                continue;
+            }
+            let output_mask = output_masks
+                .get(&child_element.current)
+                .cloned()
+                .unwrap_or_default()
+                & &full;
+            let input_mask = &full ^ &output_mask;
+            for (mask, from, to) in [
+                (&input_mask, parent_element, child_element),
+                (&output_mask, child_element, parent_element),
+            ] {
+                statements.extend(reference_copies(
+                    mask,
+                    from,
+                    to,
+                    child.width,
+                    inst.token,
+                    false,
+                ));
+            }
+        }
+    }
+    Ok(statements)
+}
+
+/// Initial stores operate on the referenced net even when its runtime writer
+/// lives in a child. Recover the binding tree from metas so cached subtrees
+/// receive the same initialization as freshly lowered instances.
+pub(crate) fn propagate_interface_initialization(
+    module: &air::Module,
+    metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+    children: &[ModuleVariableMeta],
+    events: &mut HashMap<Event, Vec<ProtoStatement>>,
+) -> Result<(), SimulatorError> {
+    if !events.keys().any(Event::is_initial) {
+        return Ok(());
+    }
+    struct Binding {
+        from: super::variable::VariableElement,
+        to: super::variable::VariableElement,
+        mask: num_bigint::BigUint,
+        width: usize,
+        token: TokenRange,
+    }
+    fn collect(
+        module: &air::Module,
+        metas: &HashMap<air::VarId, super::variable::VariableMeta>,
+        children: &[ModuleVariableMeta],
+        bindings: &mut Vec<Binding>,
+    ) -> Result<(), SimulatorError> {
+        let mut analyzer = None;
+        for decl in &module.declarations {
+            let air::Declaration::Inst(inst) = decl else {
+                continue;
+            };
+            let air::Component::Module(child_module) = inst.component.as_ref() else {
+                continue;
+            };
+            let Some(child_meta) = children
+                .iter()
+                .find(|m| m.name == inst.name && m.hierarchy == inst.hierarchy)
+            else {
+                continue;
+            };
+            let references = if inst.interface_bindings.iter().any(|b| {
+                child_module
+                    .variables
+                    .get(&b.child)
+                    .is_some_and(|v| v.kind == air::VarKind::Inout)
+            }) {
+                let analyzer = analyzer.get_or_insert_with(|| {
+                    let mut analyzer = veryl_analyzer::conv::Context::default();
+                    analyzer.variables = module.variables.clone();
+                    analyzer.functions = module.functions.clone();
+                    analyzer
+                });
+                interface_reference_bindings(analyzer, metas, inst, child_module)?
+            } else {
+                vec![]
+            };
+            for binding in &references {
+                let writes = child_module
+                    .interface_assignments
+                    .get(&binding.child)
+                    .and_then(Option::as_ref);
+                let (Some(parent), Some(child)) = (
+                    metas.get(&binding.parent),
+                    child_meta.variable_meta.get(&binding.child),
+                ) else {
+                    continue;
+                };
+                let analyzer = analyzer.get_or_insert_with(|| {
+                    let mut analyzer = veryl_analyzer::conv::Context::default();
+                    analyzer.variables = module.variables.clone();
+                    analyzer.functions = module.functions.clone();
+                    analyzer
+                });
+                let Some(selection) = binding.index.eval_selection(analyzer, &parent.r#type.array)
+                else {
+                    continue;
+                };
+                for (element, child_element) in child.elements.iter().enumerate() {
+                    let full = (num_bigint::BigUint::from(1u32) << child.width) - 1u32;
+                    let mask = if let Some(writes) = writes {
+                        &writes.definite_mask[element] | &writes.dynamic_mask[element]
+                    } else if inst.outputs.iter().any(|o| o.id == binding.child) {
+                        full.clone()
+                    } else {
+                        num_bigint::BigUint::default()
+                    };
+                    if mask != 0u32.into() {
+                        bindings.push(Binding {
+                            from: parent.elements[selection.source_start + element].clone(),
+                            to: child_element.clone(),
+                            mask,
+                            width: child.width,
+                            token: inst.token,
+                        });
+                    }
+                    // Any initial store in the child reaches the same net,
+                    // including bits with a runtime writer in the child.
+                    let mask = writes.map(|w| w.mask[element].clone()).unwrap_or(full);
+                    if mask != 0u32.into() {
+                        bindings.push(Binding {
+                            from: child_element.clone(),
+                            to: parent.elements[selection.source_start + element].clone(),
+                            mask,
+                            width: child.width,
+                            token: inst.token,
+                        });
+                    }
+                }
+            }
+            collect(
+                child_module,
+                &child_meta.variable_meta,
+                &child_meta.children,
+                bindings,
+            )?;
+        }
+        Ok(())
+    }
+    let mut bindings = vec![];
+    collect(module, metas, children, &mut bindings)?;
+    if bindings.is_empty() {
+        return Ok(());
+    }
+    fn rewrite(statements: &mut Vec<ProtoStatement>, bindings: &HashMap<VarOffset, Vec<&Binding>>) {
+        let mut result = vec![];
+        for mut statement in std::mem::take(statements) {
+            match &mut statement {
+                ProtoStatement::If(x) => {
+                    rewrite(&mut x.true_side, bindings);
+                    rewrite(&mut x.false_side, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::Case(x) => {
+                    for arm in &mut x.arms {
+                        rewrite(&mut arm.body, bindings);
+                    }
+                    rewrite(&mut x.default, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::For(x) => {
+                    rewrite(&mut x.body, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::SequentialBlock(body) => {
+                    rewrite(body, bindings);
+                    result.push(statement);
+                    continue;
+                }
+                ProtoStatement::CompiledBlock(x) if !x.original_stmts.is_empty() => {
+                    let mut body = x.original_stmts.as_ref().clone();
+                    rewrite(&mut body, bindings);
+                    result.extend(body);
+                    continue;
+                }
+                _ => {}
+            }
+            if let ProtoStatement::AssignDynamic(x) = &statement {
+                // Match only referenced elements, keeping unconnected storage
+                // on the original path. Test the index before executing the
+                // store so an RHS/LHS update cannot change which alias receives it.
+                let mut indices: Vec<_> = bindings
+                    .keys()
+                    .filter_map(|offset| {
+                        if offset.is_ff() != x.dst_base.is_ff() {
+                            return None;
+                        }
+                        let delta = offset.raw() - x.dst_base.raw();
+                        if x.dst_stride == 0 || delta % x.dst_stride != 0 {
+                            return None;
+                        }
+                        let index = delta / x.dst_stride;
+                        (index >= 0 && (index as usize) < x.dst_num_elements)
+                            .then_some(index as usize)
+                    })
+                    .collect();
+                if x.dst_stride == 0 && bindings.contains_key(&x.dst_base) {
+                    indices.extend(0..x.dst_num_elements);
+                }
+                // A narrow index cannot address every element. Avoid
+                // truncating an unreachable element into a matching index.
+                let index_bits = x
+                    .dst_index_expr
+                    .width()
+                    .saturating_sub(usize::from(x.dst_index_expr.expr_context().signed));
+                indices.retain(|index| {
+                    index_bits >= usize::BITS as usize || (*index >> index_bits) == 0
+                });
+                indices.sort_unstable();
+                indices.dedup();
+                if !indices.is_empty() {
+                    let mut fallback = vec![statement.clone()];
+                    for index in indices.into_iter().rev() {
+                        let slot = x.dst_base.raw() + x.dst_stride * index as isize;
+                        let mut body = vec![ProtoStatement::Assign(ProtoAssignStatement {
+                            dst: VarOffset::new(x.dst_base.is_ff(), slot),
+                            dst_width: x.dst_width,
+                            select: x.select,
+                            dynamic_select: x.dynamic_select.clone(),
+                            rhs_select: x.rhs_select,
+                            expr: x.expr.clone(),
+                            dst_ff_current_offset: x.dst_ff_current_base_offset
+                                + x.dst_stride * index as isize,
+                            comb_direct: x.comb_direct,
+                            token: TokenRange::default(),
+                        })];
+                        rewrite(&mut body, bindings);
+                        let width = x.dst_index_expr.width();
+                        let operand_context = x.dst_index_expr.expr_context();
+                        let cond = ProtoExpression::Binary {
+                            x: Box::new(x.dst_index_expr.clone()),
+                            op: air::Op::Eq,
+                            y: Box::new(ProtoExpression::Value {
+                                value: Value::new(index as u64, width, operand_context.signed),
+                                width,
+                                expr_context: *operand_context,
+                            }),
+                            width: 1,
+                            expr_context: ExpressionContext {
+                                width: 1,
+                                signed: false,
+                            },
+                        };
+                        fallback = vec![ProtoStatement::If(super::statement::ProtoIfStatement {
+                            cond: Some(cond),
+                            true_side: body,
+                            false_side: fallback,
+                        })];
+                    }
+                    result.extend(fallback);
+                    continue;
+                }
+            }
+            let mut written = vec![];
+            match &statement {
+                ProtoStatement::Assign(x) => written.push((x.dst, x.select)),
+                ProtoStatement::SystemFunctionCall(
+                    super::statement::ProtoSystemFunctionCall::Readmemh { elements, .. },
+                ) => {
+                    written.extend(elements.iter().map(|e| (e.current, None)));
+                }
+                _ => {}
+            }
+            let mut stores = vec![statement];
+            let coverage = |range: BitRange, width: usize| match range {
+                Some((msb, lsb)) => {
+                    ((num_bigint::BigUint::from(1u32) << (msb - lsb + 1)) - 1u32) << lsb
+                }
+                None => (num_bigint::BigUint::from(1u32) << width) - 1u32,
+            };
+            let mut seen: HashMap<VarOffset, num_bigint::BigUint> = HashMap::default();
+            for (offset, range) in &written {
+                if let Some(edges) = bindings.get(offset) {
+                    *seen.entry(*offset).or_default() |= coverage(*range, edges[0].width);
+                }
+            }
+            let mut pending: VecDeque<_> = written.into();
+            while let Some((offset, range)) = pending.pop_front() {
+                let Some(edges) = bindings.get(&offset) else {
+                    continue;
+                };
+                for binding in edges {
+                    let mask = coverage(range, binding.width) & &binding.mask;
+                    let previous = seen.entry(binding.to.current).or_default();
+                    let mask = &mask ^ (&mask & &*previous);
+                    if mask == 0u32.into() {
+                        continue;
+                    }
+                    *previous |= &mask;
+                    let copies = reference_copies(
+                        &mask,
+                        &binding.from,
+                        &binding.to,
+                        binding.width,
+                        binding.token,
+                        true,
+                    );
+                    let mut outputs = vec![];
+                    for copy in &copies {
+                        gather_bit_aware_outputs(copy, &mut outputs);
+                    }
+                    pending.extend(outputs);
+                    stores.extend(copies);
+                }
+            }
+            // A testbench settles comb logic between statements. Keep the
+            // original store and reference updates atomic, or the runtime
+            // output copy can overwrite the new parent value first.
+            if stores.len() > 1 {
+                result.push(ProtoStatement::SequentialBlock(stores));
+            } else {
+                result.extend(stores);
+            }
+        }
+        *statements = result;
+    }
+    let mut edges: HashMap<VarOffset, Vec<&Binding>> = HashMap::default();
+    for binding in &bindings {
+        edges.entry(binding.from.current).or_default().push(binding);
+    }
+    for (event, statements) in events {
+        if event.is_initial() {
+            rewrite(statements, &edges);
+        }
+    }
+    Ok(())
+}
+
 impl Conv<&air::InstDeclaration> for ProtoDeclaration {
     fn conv(context: &mut Context, src: &air::InstDeclaration) -> Result<Self, SimulatorError> {
         let air::Component::Module(child_module) = src.component.as_ref() else {
@@ -1567,11 +2203,22 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 crate::ir::module::peeled_declarations(child_module, &mut child_analyzer_context)
             })
             .clone();
+        let scope = context.scope();
+        let reference_bindings = interface_reference_bindings(
+            &mut scope.analyzer_context,
+            &scope.variable_meta,
+            src,
+            child_module,
+        )?;
+        let reference_aliases =
+            interface_reference_aliases(context, src, child_module, &reference_bindings)?;
+        let reference_ids: HashSet<_> = reference_bindings.iter().map(|b| b.child).collect();
         let (hoisted_child_decls, child_ff_table) = crate::ir::module::simulated_declarations(
             child_module,
             &mut child_analyzer_context,
             context.config.disable_ff_opt,
             peeled,
+            &reference_aliases,
         );
         let child_decls: &[air::Declaration] = &hoisted_child_decls;
 
@@ -1585,15 +2232,22 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         // Analyzer-IR pre-pass to identify multi-RMW FFs.  Same as
         // ProtoModule::conv but for child module.
-        let multi_rmw_set = analyze_multi_write(
+        let mut multi_rmw_set = analyze_multi_write(
             child_decls,
             &mut child_analyzer_context,
             context.config.disable_ff_opt,
         );
         let dyn_indexed = collect_dyn_indexed_vars(child_decls);
+        let has_reference_aliases = !reference_aliases.is_empty();
+        // Writes through different port names can be partial writes to one
+        // FF. Give their common slot a shadow for ordered read-modify-writes.
+        for group in &reference_aliases {
+            multi_rmw_set.extend(group.iter().copied());
+        }
 
         let (mut child_variable_meta, child_ff_count, child_comb_count) = create_variable_meta(
             &child_module.variables,
+            &collect_string_widths(&child_module.variables, child_decls)?,
             &child_ff_table,
             &multi_rmw_set,
             &dyn_indexed,
@@ -1604,6 +2258,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
 
         context.ff_total_bytes += child_ff_count;
         context.comb_total_bytes += child_comb_count;
+        coalesce_interface_references(&reference_aliases, &mut child_variable_meta);
 
         // Alias child input/output port storage to the parent slot it's wired
         // to, eliminating the inter-module copy at settle_comb.  De-aliased only
@@ -1614,11 +2269,14 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             child_ff_count,
             child_comb_count,
             context.in_reuse_dut,
-            context.config.dut_reuse,
+            context.config.dut_reuse && !has_reference_aliases,
         );
         let mut aliased_input_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for input in &src.inputs {
+                if reference_ids.contains(&input.id) {
+                    continue;
+                }
                 let air::Expression::Term(factor) = &input.expr else {
                     continue;
                 };
@@ -1669,6 +2327,9 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         let mut already_aliased_parent_ids: HashSet<air::VarId> = HashSet::default();
         if alias_enabled {
             for output in &src.outputs {
+                if reference_ids.contains(&output.id) {
+                    continue;
+                }
                 // A concat destructure (multiple dsts) maps each parent var
                 // to a slice of the child port — no whole-var alias exists.
                 let [parent_dst] = output.dst.as_slice() else {
@@ -1732,7 +2393,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             alias_enabled,
             ff_start,
             comb_start,
-            context.config.dut_reuse,
+            context.config.dut_reuse && !has_reference_aliases,
         ) {
             ReuseOutcome::Hit(r) => (Some(r), None),
             ReuseOutcome::Compute(g) => (None, Some(g)),
@@ -1833,15 +2494,17 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             context.in_reuse_dut = prev_in_reuse_dut;
             context.scope_contexts.pop();
 
-            try_compile_inst_chunks(
-                context,
-                src,
-                ff_start,
-                comb_start,
-                alias_enabled,
-                &mut all_event_statements,
-                &mut all_comb_statements,
-            );
+            if !has_reference_aliases {
+                try_compile_inst_chunks(
+                    context,
+                    src,
+                    ff_start,
+                    comb_start,
+                    alias_enabled,
+                    &mut all_event_statements,
+                    &mut all_comb_statements,
+                );
+            }
 
             // Publish this component's whole internal subtree (statements +
             // child-module metas + nested derived-clock candidates) for later
@@ -1868,9 +2531,19 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
             }
         }
 
+        // Direction-free interface references exchange only the bits written
+        // on each side. Whole-member copies would overwrite disjoint drivers.
+        all_comb_statements.extend(connect_interface_references(
+            context,
+            src,
+            child_module,
+            &child_variable_meta,
+            &reference_bindings,
+        )?);
+
         // Input ports: parent expr → child port var
         for input in &src.inputs {
-            if aliased_input_ids.contains(&input.id) {
+            if aliased_input_ids.contains(&input.id) || reference_ids.contains(&input.id) {
                 continue;
             }
             let child_meta = child_variable_meta.get(&input.id).unwrap();
@@ -2024,7 +2697,7 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
         // (`o: {a, b}`) slices the port value MSB-first within the concat's
         // TOTAL width — truncated / zero-extended like `assign {a, b} = o`.
         for output in &src.outputs {
-            if aliased_output_ids.contains(&output.id) {
+            if aliased_output_ids.contains(&output.id) || reference_ids.contains(&output.id) {
                 continue;
             }
             let child_meta = child_variable_meta.get(&output.id).unwrap();
@@ -2261,6 +2934,28 @@ impl Conv<&air::InstDeclaration> for ProtoDeclaration {
                 if let Some(base) = base {
                     child_to_parent_var.insert(input.id, (*parent_var_id, base as u32));
                 }
+            }
+        }
+
+        for binding in &src.interface_bindings {
+            if !child_module
+                .variables
+                .get(&binding.child)
+                .is_some_and(|v| v.kind == air::VarKind::Inout)
+            {
+                continue;
+            }
+            let scope = context.scope();
+            if binding.index.is_const()
+                && let Some(meta) = scope.variable_meta.get(&binding.parent)
+                && let Some(selection) = binding
+                    .index
+                    .eval_selection(&mut scope.analyzer_context, &meta.r#type.array)
+            {
+                child_to_parent_var.insert(
+                    binding.child,
+                    (binding.parent, selection.source_start as u32),
+                );
             }
         }
 

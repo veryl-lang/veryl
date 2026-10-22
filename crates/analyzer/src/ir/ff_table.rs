@@ -227,6 +227,11 @@ impl FfTable {
         }
     }
 
+    /// Retain storage for a signal whose writer/readers use aliased names.
+    pub fn force_ff(&mut self, id: VarId, index: usize) {
+        self.entry(id, index).is_ff = true;
+    }
+
     pub fn is_ff(&self, id: VarId, index: usize) -> bool {
         if let Some(x) = self.table.get(&(id, index)) {
             x.is_ff

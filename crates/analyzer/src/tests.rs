@@ -28,9 +28,11 @@ mod comb_loop_summary_tests;
 mod comb_loop_tier_tests;
 mod constant_evaluation_tests;
 mod dynamic_packed_member_tests;
+mod generic_interface_port_tests;
 mod instantiation_note_tests;
 mod interface_array_tests;
 mod modport_connection_tests;
+mod package_alias_type_tests;
 mod statement_after_if_reset_tests;
 
 #[track_caller]
@@ -21352,6 +21354,165 @@ fn tb_random_analyze() {
     assert!(
         errors.is_empty(),
         "expected no analyzer errors, got: {errors:?}"
+    );
+}
+
+#[test]
+fn tb_queue_element_type() {
+    // `$tb::queue::<T, N>` accepts any fixed-width packed type as T and rejects
+    // the others with a MismatchType error.
+    let build = |ty: &str| {
+        format!(
+            r#"
+    package pkg {{
+        type arr_t = u32[2];
+        struct pair_t {{
+            a: logic<4>,
+            b: logic<8>,
+        }}
+    }}
+    #[test(t)]
+    module t {{
+        gen wide_t: type = bit<100>;
+        var q: $tb::queue::<{ty}>;
+        initial {{
+            q.clear();
+            $finish();
+        }}
+    }}
+    "#
+        )
+    };
+    let has_mismatch = |ty: &str| {
+        analyze(&build(ty))
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::MismatchType { .. }))
+    };
+
+    for ty in [
+        "u32",
+        "i8",
+        "bbool",
+        "lbool",
+        "f64",
+        "wide_t",
+        "pkg::pair_t",
+    ] {
+        assert!(!has_mismatch(ty), "`$tb::queue::<{ty}>` should be accepted");
+    }
+    for ty in ["pkg::arr_t", "string"] {
+        assert!(has_mismatch(ty), "`$tb::queue::<{ty}>` should be rejected");
+    }
+}
+
+#[test]
+fn tb_queue_analyze() {
+    // Valid `$tb::queue` usage, with and without the capacity, and its methods
+    // in statement, assignment and expression positions.
+    let code = r#"
+    package pkg {
+        const DEPTH: u32 = 4;
+    }
+    #[test(test_queue)]
+    module test_queue {
+        var q: $tb::queue::<u32>;
+        var b: $tb::queue::<i16, 2>;
+        var c: $tb::queue::<u8, pkg::DEPTH>;
+        var x: u32;
+        var y: i16;
+        var n: u32;
+        initial {
+            q.push_back(1);
+            q.push_front(2);
+            x = q.pop_front();
+            x = q.pop_back();
+            x = q.front();
+            x = q.back();
+            q.drop_front();
+            q.drop_back();
+            q.clear();
+            n = q.size();
+            $assert(q.is_empty() == 1);
+            $assert(b.is_full() == 0);
+            b.push_back(-1);
+            y = b.pop_front();
+            c.push_back(x as u8);
+            let z: u32 = q.pop_front() + 1;
+            $finish();
+        }
+    }
+    "#;
+    let errors: Vec<_> = analyze(code)
+        .into_iter()
+        .filter(|e| !matches!(e, AnalyzerError::UnusedVariable { .. }))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "expected no analyzer errors, got: {errors:?}"
+    );
+}
+
+#[test]
+fn tb_queue_arity() {
+    // `push_back`/`push_front` take one argument and the other methods none.
+    let code = r#"
+    #[test(test_queue)]
+    module test_queue {
+        var q: $tb::queue::<u32>;
+        var n: u32;
+        initial {
+            q.push_back();
+            q.push_front(1, 2);
+            n = q.size(1);
+            $finish();
+        }
+    }
+    "#;
+    let count = analyze(code)
+        .iter()
+        .filter(|e| matches!(e, AnalyzerError::MismatchFunctionArity { .. }))
+        .count();
+    assert_eq!(count, 3);
+}
+
+#[test]
+fn tb_var_component_as_inst() {
+    // `var`-form `$tb` components are rejected when declared with `inst`.
+    for ty in ["$tb::file", "$tb::random::<u32>", "$tb::queue::<u32>"] {
+        let code = format!(
+            r#"
+    #[test(t)]
+    module t {{
+        inst x: {ty};
+        initial {{
+            $finish();
+        }}
+    }}
+    "#
+        );
+        let errors = analyze(&code);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+            "`inst x: {ty}` should be rejected, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn tb_queue_outside_test_module() {
+    let code = r#"
+    module ModuleA {
+        var _q: $tb::queue::<u32>;
+    }
+    "#;
+    let errors = analyze(code);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, AnalyzerError::InvalidTbUsage { .. })),
+        "{errors:?}"
     );
 }
 
