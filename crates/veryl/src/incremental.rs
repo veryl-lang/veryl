@@ -45,6 +45,12 @@ pub struct Incremental {
     /// needs an external simulator. The caller must re-check that against the
     /// symbol table: a file re-analyzed this run may have introduced one.
     pub predicted_no_emit: bool,
+    /// When this run started, which precedes everything it emits.
+    started_at: SystemTime,
+    /// Files restored from a fragment this build.
+    restored_paths: HashSet<PathBuf>,
+    /// Per-file generic instances hash, computed after post_pass1.
+    generic_instance_hashes: Option<HashMap<PathBuf, String>>,
 }
 
 /// What a run will do with the emitted SystemVerilog, which decides whether a
@@ -72,12 +78,16 @@ impl Incremental {
     /// `selected_tests`: `None` for a plain build, `Some(filter)` when the
     /// caller simulates the matching tests (`None` filter = all). Files with
     /// a selected test are forced to miss so their pass2 IR is available.
+    ///
+    /// `forced_miss`: files that must miss regardless of the store, e.g. the
+    /// ones whose generic instances changed in a previous attempt.
     pub fn open(
         metadata: &Metadata,
         paths: &[PathSet],
         defines: &[String],
         selected_tests: Option<Option<&str>>,
         intent: OutputIntent,
+        forced_miss: &HashSet<PathBuf>,
     ) -> Option<Incremental> {
         if !metadata.build.incremental {
             return None;
@@ -103,6 +113,7 @@ impl Incremental {
             OutputIntent::SkipIfNativeOnly => !predicted_no_emit,
         };
 
+        let started_at = SystemTime::now();
         let mut miss = HashSet::new();
         let mut inputs = HashMap::new();
         let mut hashes = HashMap::new();
@@ -125,9 +136,12 @@ impl Incremental {
 
             // examples/ files are never emitted, so output staleness does not
             // apply to them.
-            let hit = entry.is_some_and(|x| x.hash == hash && x.fragment.is_some())
-                && (!consider_output || path.example || !Self::dst_is_stale(metadata, path))
-                && !has_selected_test;
+            let hit = entry.is_some_and(|x| x.file_hash == hash && x.fragment.is_some())
+                && (!consider_output
+                    || path.example
+                    || !Self::dst_is_stale(metadata, path, entry.and_then(|x| x.updated_time)))
+                && !has_selected_test
+                && !forced_miss.contains(&path.src);
             if !hit {
                 miss.insert(path.src.clone());
             }
@@ -161,12 +175,17 @@ impl Incremental {
             restored: 0,
             restored_diagnostics: Vec::new(),
             predicted_no_emit,
+            started_at,
+            restored_paths: HashSet::new(),
+            generic_instance_hashes: None,
         })
     }
 
     /// Checked only when emitting and on a key-matched store, so
     /// `generated_files` is always from the same build environment.
-    fn dst_is_stale(metadata: &Metadata, path: &PathSet) -> bool {
+    /// `updated_time` is when something the output depends on but the source
+    /// does not (its generic instances) last changed.
+    fn dst_is_stale(metadata: &Metadata, path: &PathSet, updated_time: Option<SystemTime>) -> bool {
         let Some(generated) = metadata.build_info.generated_files.get(&path.dst) else {
             return true;
         };
@@ -176,7 +195,7 @@ impl Incremental {
         let modified = fs::metadata(&path.src)
             .and_then(|x| x.modified())
             .unwrap_or(SystemTime::now());
-        modified > *generated
+        modified.max(updated_time.unwrap_or(modified)) > *generated
     }
 
     /// Takes the already-read source contents for a file.
@@ -218,6 +237,7 @@ impl Incremental {
             Ok(()) => {
                 self.store.keep(&src);
                 self.restored += 1;
+                self.restored_paths.insert(path.src.clone());
                 self.inputs.remove(&path.src);
                 if let Some(diag_bytes) = diag_bytes {
                     match fragment_cache::restore_diagnostics(&diag_bytes) {
@@ -272,6 +292,33 @@ impl Incremental {
         std::mem::take(&mut self.restored_diagnostics)
     }
 
+    /// Returns the restored files whose generic instances differ from the last
+    /// analysis. Call after post_pass1, which registers the instances.
+    ///
+    /// The instances of a declaration are registered by the referencing
+    /// files, so a restored file may need analyzing (and emitting) for them
+    /// even though neither it nor anything it depends on changed. A run that
+    /// doesn't emit records the change in `updated_time` for `dst_is_stale`,
+    /// so the next run doesn't analyze it again but the next build emits it.
+    pub fn generic_instance_changes(&mut self) -> HashSet<PathBuf> {
+        let current = self
+            .generic_instance_hashes
+            .get_or_insert_with(generic_instance_hashes);
+        let empty = veryl_cache::content_hash(&[]);
+        self.restored_paths
+            .iter()
+            .filter(|path| {
+                let previous = self
+                    .store
+                    .entry(&path.to_string_lossy())
+                    .map(|x| x.generic_instance_hash.as_str());
+                let current = current.get(*path).unwrap_or(&empty);
+                previous != Some(current.as_str())
+            })
+            .cloned()
+            .collect()
+    }
+
     /// Persists the manifest (dependents + per-file tests); call only after a
     /// successful build. `diagnosed` maps each warning file (errors abort
     /// earlier) to its diagnostics, cached so a warm run re-reports them.
@@ -288,6 +335,22 @@ impl Incremental {
                 .collect();
             self.store
                 .set_dependents(&src.to_string_lossy(), dependents);
+        }
+
+        let generic_instances = self
+            .generic_instance_hashes
+            .take()
+            .unwrap_or_else(generic_instance_hashes);
+        let empty = veryl_cache::content_hash(&[]);
+        for path in self.hashes.keys() {
+            let src = path.to_string_lossy();
+            let hash = generic_instances.get(path).unwrap_or(&empty).clone();
+            let updated_time = match self.store.entry(&src) {
+                Some(x) if x.generic_instance_hash == hash => x.updated_time,
+                _ => Some(self.started_at),
+            };
+            self.store.set_generic_instance_hash(&src, hash);
+            self.store.set_updated_time(&src, updated_time);
         }
 
         // Only the root project's tests are ever simulated.
@@ -315,6 +378,35 @@ impl Incremental {
 
         self.store.save();
     }
+}
+
+/// Hashes, per file, the mangled names of the generic instances of the
+/// declarations in it.
+fn generic_instance_hashes() -> HashMap<PathBuf, String> {
+    let mut names: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    for symbol in symbol_table::get_generic_instance_owners() {
+        let Some(path) = symbol
+            .token
+            .source
+            .get_path()
+            .and_then(resource_table::get_path_value)
+        else {
+            continue;
+        };
+        let entry = names.entry(path).or_default();
+        for map in symbol.generic_maps() {
+            entry.push(map.name(true, true));
+        }
+    }
+
+    names
+        .into_iter()
+        .map(|(path, mut names)| {
+            names.sort();
+            let hash = veryl_cache::content_hash(names.join("\n").as_bytes());
+            (path, hash)
+        })
+        .collect()
 }
 
 /// Builds the global invalidation key from everything that influences

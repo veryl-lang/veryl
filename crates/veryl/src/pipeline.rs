@@ -237,6 +237,7 @@ fn pass1_phase(
     opts: &AnalyzeOptions<'_>,
     selected_tests: Option<Option<&str>>,
     intent: OutputIntent,
+    forced_miss: &HashSet<PathBuf>,
 ) -> Result<Pass1Phase> {
     let mut check_error = CheckError::new(metadata.build.error_count_limit);
     let mut contexts = Vec::new();
@@ -244,7 +245,16 @@ fn pass1_phase(
 
     let mut incremental = opts
         .incremental
-        .then(|| Incremental::open(metadata, paths, opts.defines, selected_tests, intent))
+        .then(|| {
+            Incremental::open(
+                metadata,
+                paths,
+                opts.defines,
+                selected_tests,
+                intent,
+                forced_miss,
+            )
+        })
         .flatten();
 
     let analyzer = Analyzer::new(metadata);
@@ -328,12 +338,13 @@ pub fn analyze(
     let selected_tests = ir_requested.then_some(test_filter);
 
     let mut intent = opts.output_intent;
+    let mut forced_miss = HashSet::new();
     let Pass1Phase {
         mut contexts,
         incremental,
         mut check_error,
     } = loop {
-        let phase = pass1_phase(metadata, paths, &opts, selected_tests, intent)?;
+        let mut phase = pass1_phase(metadata, paths, &opts, selected_tests, intent, &forced_miss)?;
         // The guess came from the store, and files were restored on it. If a
         // file re-analyzed this run introduced a test needing an external
         // simulator, those restored files could never be emitted — so start
@@ -348,6 +359,20 @@ pub fn analyze(
             Analyzer::new(metadata).clear();
             intent = OutputIntent::Emit;
             continue;
+        }
+        // A restored file whose generic instances changed (a referencing file
+        // added, changed or dropped an argument) must be analyzed (and
+        // emitted) again, but it has no AST — so start over with it forced to
+        // miss. Forced files
+        // are never restored again, so this terminates.
+        if let Some(x) = phase.incremental.as_mut() {
+            let changed = x.generic_instance_changes();
+            if !changed.is_empty() {
+                debug!("Generic instances changed: re-analyzing {changed:?}");
+                Analyzer::new(metadata).clear();
+                forced_miss.extend(changed);
+                continue;
+            }
         }
         break phase;
     };
