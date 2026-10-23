@@ -594,6 +594,7 @@ mod dataflow;
 mod derived_clock;
 mod dut_reuse;
 mod error;
+mod guarded_cover;
 mod hier_ref;
 mod simulation;
 mod testbench;
