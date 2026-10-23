@@ -18395,6 +18395,63 @@ fn hazard_block_phantom_cycle_not_a_loop() {
     }
 }
 
+// Regression (#3543): a bitwise operator keeps each result bit tied to the
+// same bit of its operands, so `v[4] = m[8]` with `m = f(v)` reads only
+// `v[8]` and closes no loop.  Inside a child instance `v` is split into the
+// parts it is written by, and `f` then sees their concatenation.
+#[test]
+fn bitwise_operator_is_not_a_comb_loop_at_bit_level() {
+    type Model = fn(u64) -> u64;
+    let cases: [(&str, Model); 4] = [
+        ("16'h0110 & v", |v| 0x0110 & v),
+        ("16'h0000 | v", |v| v),
+        ("v ^ 16'h00ff", |v| v ^ 0x00ff),
+        ("~v", |v| !v & 0xffff),
+    ];
+
+    for (expr, f) in cases {
+        let code = format!(
+            r#"
+    module Core (
+        a: input  logic<16>,
+        o: output logic<16>,
+    ) {{
+        var v: logic<16>;
+        var m: logic<16>;
+
+        assign m       = {expr};
+        assign v[4]    = m[8];
+        assign v[15:5] = a[15:5];
+        assign v[3:0]  = a[3:0];
+
+        assign o = m;
+    }}
+
+    module Top (
+        a: input  logic<16>,
+        o: output logic<16>,
+    ) {{
+        inst u: Core ( a, o );
+    }}
+    "#
+        );
+
+        for top in ["Core", "Top"] {
+            for config in Config::all() {
+                dbg!(expr, top, &config);
+                let ir = analyze_top(&code, &config, top).unwrap();
+                let mut sim = Simulator::new(ir, None);
+                for a in [0x0000, 0x0100, 0xfeff, 0xffff, 0x1234] {
+                    let v = (a & !0x0010) | (((f(a) >> 8) & 1) << 4);
+                    sim.set("a", Value::new(a, 16, false));
+                    sim.step(&Event::clock(VarId::SYNTHETIC));
+                    assert_eq!(sim.get("o").unwrap(), Value::new(f(v), 16, false));
+                }
+            }
+        }
+    }
+}
+
 // Regression: sequential reassignment must survive analyze_dependency's
 // Phase-2 flatten AND reorder_by_level's leveling. Two always_comb blocks
 // cross-reference m/z so Phase-1 sees a phantom cycle and drops into Phase 2,
