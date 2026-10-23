@@ -1615,10 +1615,11 @@ impl Simulator {
         if dataflow && !ff_covered && !unmarked && wrote {
             self.df_unmarked_push = true;
         }
+        if dataflow && wrote {
+            self.ir.dataflow_any.set(true);
+        }
         if unmarked {
-            if wrote {
-                self.ir.dataflow_any.set(true);
-            }
+            // Nothing reads the cells' bits.
         } else if df_marked && !whole_ran && !jit_marked {
             // The marked function did not run and nothing was snapshotted.
             self.ir.dataflow_mark_all();
@@ -1688,6 +1689,8 @@ impl Simulator {
         #[cfg(feature = "profile")]
         let ff_start = Instant::now();
 
+        self.ir.dataflow_any.set(true);
+
         if let Some(dump) = self.dump.as_mut() {
             // Every changed byte is reported so the dump's gate hears about it.
             ff_commit_from_log_marking(
@@ -1698,7 +1701,6 @@ impl Simulator {
             self.ir.dataflow_mark_all();
         } else if self.ir.dataflow.is_some() && self.ir.dataflow_unmarked.get() {
             ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
-            self.ir.dataflow_any.set(true);
         } else if self.ir.dataflow.is_some() && !std::mem::take(&mut self.df_unmarked_push) {
             // Every push since the last commit marked its own readers.
             ff_commit_from_log(&mut self.ir.ff_values, &self.ir.write_log_buffer);
