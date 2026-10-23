@@ -4,6 +4,7 @@ use log::{error, info, warn};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::fs;
 use std::process::Stdio;
 use tokio::process::Child;
 use tokio::runtime::Runtime;
@@ -100,6 +101,20 @@ impl Default for Vivado {
     }
 }
 
+/// Converts a filelist into the form accepted by xvlog, which specifies
+/// include directories by `-i` instead of `+incdir+`.
+fn xsim_filelist(text: &str) -> String {
+    let mut ret = String::new();
+    for line in text.lines() {
+        if let Some(dir) = line.strip_prefix("+incdir+") {
+            ret.push_str(&format!("-i {dir}\n"));
+        } else {
+            ret.push_str(&format!("{line}\n"));
+        }
+    }
+    ret
+}
+
 impl Runner for Vivado {
     fn run(
         &mut self,
@@ -134,6 +149,10 @@ impl Runner for Vivado {
             }
         }
 
+        let filelist = fs::read_to_string(metadata.filelist_path()).into_diagnostic()?;
+        let filelist_path = temp_dir.path().join("xsim.f");
+        fs::write(&filelist_path, xsim_filelist(&filelist)).into_diagnostic()?;
+
         info!("Compiling test ({test})");
 
         let mut defines = vec![
@@ -164,7 +183,7 @@ impl Runner for Vivado {
             let compile = new_cmd("xvlog")
                 .arg("--sv")
                 .arg("-f")
-                .arg(metadata.filelist_path())
+                .arg(&filelist_path)
                 .args(&defines)
                 .args(&metadata.test.vivado.compile_args)
                 .current_dir(temp_dir.path())
@@ -250,5 +269,25 @@ impl Runner for Vivado {
 
     fn failure(&mut self) {
         self.success = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xsim_filelist_uses_include_option() {
+        let text = "+incdir+/prj/ip/include\n/prj/ip/a.sv\n/prj/target/foo.sv\n";
+        assert_eq!(
+            xsim_filelist(text),
+            "-i /prj/ip/include\n/prj/ip/a.sv\n/prj/target/foo.sv\n"
+        );
+    }
+
+    #[test]
+    fn xsim_filelist_without_include_dirs() {
+        let text = "/prj/target/foo.sv\n";
+        assert_eq!(xsim_filelist(text), "/prj/target/foo.sv\n");
     }
 }

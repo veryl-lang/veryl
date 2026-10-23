@@ -2,6 +2,7 @@ use crate::git::Git;
 use crate::metadata::{Dependency, Metadata, UrlPath};
 use crate::metadata_error::MetadataError;
 use crate::pubfile::{Pubfile, Release};
+use crate::sv;
 use crate::{ProjectProperty, lockfile_compat};
 use log::info;
 use pathdiff::diff_paths;
@@ -336,6 +337,46 @@ impl Lockfile {
                         example: false,
                     });
                 }
+            }
+        }
+
+        Ok(ret)
+    }
+
+    /// Resolves SystemVerilog files and include directories of active
+    /// `[[sv.filesets]]` declared by dependencies. Those of git dependencies
+    /// are copied into `base_dst`, and those of path dependencies (including
+    /// git dependencies overridden by `path`) are referred at their location.
+    pub fn sv_sources(
+        &self,
+        base_dst: &Path,
+        out_base: &Path,
+        copied: &mut Vec<PathBuf>,
+    ) -> Result<sv::Sources, MetadataError> {
+        let mut ret = sv::Sources::default();
+
+        for locks in self.lock_table.values() {
+            for lock in locks {
+                let metadata = self.get_metadata(&lock.source)?;
+                if metadata.sv.filesets.is_empty() {
+                    continue;
+                }
+
+                let copy_to = match &lock.source {
+                    LockSource::Repository(x) if x.r#override.is_none() => {
+                        Some(base_dst.join(&lock.name))
+                    }
+                    _ => None,
+                };
+                let sources = metadata.sv.resolve(
+                    &metadata.project_path(),
+                    out_base,
+                    &lock.properties,
+                    &metadata.project.name,
+                    copy_to.as_deref(),
+                    copied,
+                )?;
+                ret.append(sources);
             }
         }
 
